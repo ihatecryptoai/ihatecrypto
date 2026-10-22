@@ -26,7 +26,8 @@ actor SignerLink {
 
     private func start() throws -> (pid: UInt32, process: Int, input: Int, output: Int) {
         if let child { return child }
-        let path = Array(Self.executable.path.utf8)
+        // The system's own form of the path («C:\\Program Files\\…»): URL.path can read «/C:/…» on Windows.
+        let path = Self.executable.withUnsafeFileSystemRepresentation { $0.map { Array(String(cString: $0).utf8) } } ?? Array(Self.executable.path.utf8)
         var pid: UInt32 = 0
         var process = 0, input = 0, output = 0
         guard winsec_spawn_signer(path, path.count, &pid, &process, &input, &output) == WINSEC_OK else {
