@@ -88,6 +88,10 @@ touches an installed ihatecrypto.app or its wallets.
 release's DMG file by file, apart from code signatures; the **Verify release** workflow does the same on GitHub for
 every release. See [SECURITY.md](SECURITY.md#how-it-is-built).
 
+**Windows** (a preview on the `windows` branch): the same core under a Tauri window, with keys sealed by Windows Hello
+in a separate, hardened signing process. How it works, how to build it and what it doesn't do yet:
+[docs/windows.md](docs/windows.md).
+
 <details>
 <summary>Details for contributors</summary>
 
