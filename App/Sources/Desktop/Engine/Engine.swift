@@ -59,6 +59,7 @@ final class Engine {
     var portfolio = PortfolioView()
     var positions: [HyperliquidAccount.Position] = []
     var refreshing = false
+    var refreshingEveryMinute = false
 
     // Chat
     var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
@@ -222,7 +223,16 @@ final class Engine {
         switch r.op {
         case "hello":
             await startSigner()
-            Task { await refresh() }
+            if !refreshingEveryMinute {
+                // The balances follow the chain while the window is open, as on the Mac (there every 30 s).
+                refreshingEveryMinute = true
+                Task {
+                    while true {
+                        await refresh()
+                        try? await Task.sleep(for: .seconds(60))
+                    }
+                }
+            }
             return [:]
         case "send": await send(r.text ?? "")
         case "confirm": await confirm()
