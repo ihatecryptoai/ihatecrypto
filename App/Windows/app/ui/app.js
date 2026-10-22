@@ -420,6 +420,23 @@ function settings() {
     h("div", { class: "card" }, h("select", { onchange: (e) => act("language", { language: e.target.value }) },
       [["auto", t("As I write", "Как я пишу")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: s.language === v }, l)))),
 
+    h("h2", {}, t("Skills", "Навыки")),
+    h("div", { class: "card" },
+      h("p", { class: "muted small" }, t("The assistant sees each switched-on skill's name and what it's for, and reads its whole text when your message is that work. A skill changes how it works with you, never the risk rules, the checks or your Confirm.",
+        "Ассистент видит имя каждого включённого навыка и для чего он, а весь текст читает, когда сообщение про эту работу. Навык меняет то, как он работает с тобой, но не риск-правила, проверки и «Подтвердить».")),
+      s.skills.map((k) => h("div", { class: "row" },
+        h("label", { class: "check-row" }, h("input", { type: "checkbox", id: "skill-" + k.id, checked: k.on, onchange: (e) => act("skillOn", { wallet: k.id, test: e.target.checked }) }),
+          h("span", {}, h("b", {}, k.name), k.builtIn ? h("span", { class: "muted small" }, t(" · built in", " · встроенный")) : null, h("div", { class: "muted small" }, k.about))),
+        k.builtIn ? null : h("button", { class: "btn danger", onclick: () => act("removeSkill", { wallet: k.id }) }, t("Remove", "Удалить")))),
+      h("label", { class: "btn", for: "skill-file" }, t("Add a skill (.md or .txt)…", "Добавить навык (.md или .txt)…")),
+      h("input", { id: "skill-file", type: "file", accept: ".md,.txt,text/plain,text/markdown", hidden: true, onchange: async (e) => {
+        for (const f of e.target.files) { await act("addSkill", { text: await f.text(), name: f.name }); }
+        e.target.value = "";
+      } })),
+
+    s.memory.length ? [h("h2", {}, t("What the chat remembers", "Что помнит чат")), h("div", { class: "card" }, s.memory.map((m) =>
+      h("div", { class: "row" }, h("span", {}, m), h("button", { class: "btn", onclick: () => act("forget", { text: m }) }, t("Forget", "Забыть")))))] : null,
+
     h("h2", {}, t("Second check", "Вторая проверка")),
     h("div", { class: "card" },
       h("label", { class: "check-row" }, h("input", { type: "checkbox", id: "second-check", checked: s.secondCheck, onchange: (e) => act("secondCheck", { test: e.target.checked }) }),

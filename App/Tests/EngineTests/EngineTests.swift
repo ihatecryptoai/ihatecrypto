@@ -141,6 +141,17 @@ import Testing
         #expect(Self.chat(held.state).last?.contains("nothing to count") == true, "\(Self.chat(held.state).last ?? "")")
     }
 
+    @Test func theChatRemembersOnlyTheUsersOwnWords() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let kept = try engine.call("send", ["text": "remember: I trade only BTC and ETH"])
+        #expect((kept.state?["memory"] as? [String]) == ["I trade only BTC and ETH"], "\(Self.chat(kept.state).last ?? "")")
+        let skills = try #require(kept.state?["skills"] as? [[String: Any]])
+        #expect(skills.contains { $0["builtIn"] as? Bool == true })
+        let added = try engine.call("addSkill", ["text": "---\nname: Short replies\ndescription: answer in one line\n---\nAlways answer in one line.", "name": "short.md"])
+        #expect((added.state?["skills"] as? [[String: Any]])?.count == skills.count + 1)
+    }
+
     @Test func aScheduledTaskIsKeptAndCancelled() throws {
         let engine = try Engine()
         try engine.call("hello")

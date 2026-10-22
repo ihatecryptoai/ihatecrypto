@@ -81,6 +81,7 @@ extension Engine {
 
     /// No model connected: the local parsers read the message as typed.
     private func readWithoutModel(_ text: String) async {
+        if let command = MemoryCommand.parse(text) { memoryCommand(command, note: nil); return }
         if ScheduledTask.cancelsAll(text) { cancelTasks(note: nil); return }
         if let task = ScheduledTask.parse(text) { schedule(task, note: nil); return }
         if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
@@ -192,6 +193,9 @@ extension Engine {
     /// The model's English command through the parsers, as typed. False when it isn't a command they know here.
     func runCanonical(_ canonical: String, userText text: String) async -> Bool {
         let note = "understood as “\(canonical)” · \(model)"
+        if let command = MemoryCommand.parse(canonical) { memoryCommand(command, note: note); return true }
+        if let entry = JournalCommand.parse(canonical) { await journalCommand(entry, note: note); return true }
+        if let study = StudyNote.parse(canonical) { studyNote(study, note: note); return true }
         if ScheduledTask.cancelsAll(canonical) { cancelTasks(note: note); return true }
         if let task = ScheduledTask.parse(canonical) { schedule(task, note: note); return true }
         if let merged = ChatRouter.planChange(canonical, markets: Set(markets.keys)) { return await runCanonical(merged, userText: text) }
@@ -291,7 +295,8 @@ extension Engine {
         // Only what this app runs: a card for P/L or the dApp browser would end in «not on Windows yet».
         func runs(_ c: String) -> Bool {
             runnable(c) || ChartCommand.parse(c, markets: names) != nil || AddressBookCommand.parse(c) != nil
-                || ScheduledTask.parse(c) != nil || PnLCommand.parse(c, markets: names) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
+                || ScheduledTask.parse(c) != nil || PnLCommand.parse(c, markets: names) != nil || MemoryCommand.parse(c) != nil
+                || JournalCommand.parse(c) != nil || StudyNote.parse(c) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
         }
         options = list.filter { o in
             o.command.isEmpty || ChatRouter.parses(o.command, markets: names) && runs(o.command)
@@ -323,6 +328,9 @@ extension Engine {
         c.capital = Fmt.usd(portfolio.total)
         c.replyLanguage = replyLanguage
         c.off = Modules.current.offSummary
+        c.memory = memory
+        c.skills = skillsOn.map { "\($0.id) — \($0.name): \($0.about)" }
+        c.loadedSkills = skillsOn.filter { loadedSkills.contains($0.id) }
         c.offered = options.map { "\($0.title) → \($0.command.isEmpty ? "(an answer to your question)" : $0.command)\($0.recommended ? " (recommended)" : "")" }
         return c
     }
@@ -355,10 +363,13 @@ extension Engine {
             }
             found = line
         case "token": found = await TokenResearch.report(l.arg)
+        // A skill is instructions the user added themselves: not screened, as on the Mac.
+        case "skill": return await skillLookup(l)
+        case "trades", "journal", "study": found = await skillLookup(l)
         case let tool where AgentReads.tools.contains(tool):
             found = await AgentReads.answer(tool, l.arg, me: .init(evm: evmAddress, solana: solanaAddress))
         default:
-            return "The Windows app has no «\(l.tool)» lookup yet. Lookups here: portfolio, market <ASSET>, token <ADDRESS or NAME>, call, rpc, hl, fetch."
+            return "The Windows app has no «\(l.tool)» lookup yet. Lookups here: portfolio, market <ASSET>, token <ADDRESS or NAME>, skill <ID>, trades <ADDRESS|me>, journal, study, call, rpc, hl, fetch."
         }
         let outside = ["token"].contains(l.tool) || AgentReads.tools.contains(l.tool)
         let classifier: (any TextClassifier)? = outside ? jevKey.map { JevClassifier(apiKey: $0) } : nil

@@ -100,6 +100,11 @@ final class Engine {
         didSet { Store.save(seenCosts, "seen.json") }
     }
     var costsLoading = false
+    /// Skills the user added, the ones switched off, the ones loaded in this chat, and what they asked it to remember.
+    var addedSkills: [Skill] = Store.load([Skill].self, "skills.json") ?? [] { didSet { Store.save(addedSkills, "skills.json") } }
+    var skillsOff: Set<String> = Set(Store.load([String].self, "skills-off.json") ?? []) { didSet { Store.save(skillsOff.sorted(), "skills-off.json") } }
+    var loadedSkills: [String] = []
+    var memory: [String] = Store.load([String].self, "memory.json") ?? [] { didSet { Store.save(memory, "memory.json") } }
 
     // Chat
     var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
@@ -186,6 +191,7 @@ final class Engine {
         }
         struct Option: Encodable { var title: String; var comment: String; var recommended: Bool }
         struct Alert: Encodable { var id: String; var text: String }
+        struct SkillView: Encodable { var id: String; var name: String; var about: String; var text: String; var builtIn: Bool; var on: Bool }
         struct Running: Encodable { var title: String; var lines: [String] }
         struct Position: Encodable {
             var coin: String
@@ -219,6 +225,8 @@ final class Engine {
         var history: [HistoryLine]
         var alerts: [Alert]
         var tasks: [Alert]
+        var skills: [SkillView]
+        var memory: [String]
     }
 
     func snapshot() -> Snapshot {
@@ -241,7 +249,9 @@ final class Engine {
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
-            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) })
+            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) },
+            skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
+            memory: memory)
     }
 
     // MARK: Requests from the window
@@ -317,6 +327,11 @@ final class Engine {
         case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
+        case "addSkill": try addSkill(r.text ?? "", fileName: r.name ?? "skill.md")
+        case "removeSkill": addedSkills.removeAll { $0.id == r.wallet }; skillsOff.remove(r.wallet ?? "")
+        case "skillOn":
+            if r.test == true { skillsOff.remove(r.wallet ?? "") } else { skillsOff.insert(r.wallet ?? "") }
+        case "forget": memory.removeAll { $0 == r.text }
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")
@@ -326,6 +341,7 @@ final class Engine {
         case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
         case "clearChat":
             messages = []
+            loadedSkills = []
             cancelPending()
             intent = TradeIntent()
             saveChat()
