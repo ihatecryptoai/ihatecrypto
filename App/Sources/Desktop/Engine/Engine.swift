@@ -38,6 +38,8 @@ enum Pending {
     case address(SignerAddress)
     /// «withdraw 5 USDC to Solana then deposit 5 USDC to kamino»: one Confirm, the steps in order, the first failure stops them.
     case chain([ChainStep])
+    /// The first buy of a recurring one: the schedule exists only once this buy is confirmed and goes through.
+    case recurring(WalletCommand, days: Int)
 }
 
 enum ChainStep {
@@ -99,6 +101,8 @@ final class Engine {
     var options: [ChatRouter.Option] = []
     var running: (title: String, lines: [String])?
     var awaitingAmount: WalletCommand?
+    /// A move the loss cap stopped (CostlyMove): offered again with that loss accepted («Send anyway»), never by itself.
+    var costly: (pending: Pending, title: String, lost: Decimal)?
     /// The trade plan the chat is building: a perp on Hyperliquid.
     var intent = TradeIntent()
     /// Price alerts, checked against Hyperliquid's marks at every refresh while the app is open.
@@ -284,6 +288,8 @@ final class Engine {
             guard let i = r.index, options.indices.contains(i) else { return [:] }
             let o = options[i]
             options = []
+            if o.command == Self.sendAnyway { await sendAnyway(); return [:] }
+            if o.command == Self.leaveCostly { costly = nil; reply(say("Left as it was: nothing was signed.", "Оставил как есть: ничего не подписано.")); return [:] }
             await send(o.command.isEmpty ? o.title : o.command, shown: o.title)
         case "refresh": await refresh()
         case "createWallet": try await createWallet(test: r.test == true)

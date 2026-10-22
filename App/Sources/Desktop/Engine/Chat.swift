@@ -100,7 +100,8 @@ extension Engine {
 
     /// The model's reading of the message: the only reading while one is connected. A wrong guess about money is worse
     /// than a question, so when the model can't be reached nothing is done.
-    func routeWithModel(_ text: String, client: any LLMClient) async {
+    /// `said`: the user's own words, where the command's addresses must come from; `text` itself when nil.
+    func routeWithModel(_ text: String, client: any LLMClient, said: String? = nil) async {
         let context = routerContext()
         let lookup: @Sendable (ChatRouter.Lookup) async -> String = { [weak self] l in await self?.screenedLookup(l) ?? "" }
         let names = markets.isEmpty ? nil : Set(markets.keys)
@@ -119,7 +120,7 @@ extension Engine {
                       "Не достучался до \(model) (\(failure.prefix(140))), поэтому ничего не сделал — ничего не ушло. Отправь ещё раз или выбери другую модель в настройках."), note: model)
             return
         }
-        defer { offer(reading.options, userText: text, found: reading.found) }
+        defer { offer(reading.options, userText: said ?? text, found: reading.found) }
         // The chart the answer points to opens with it.
         if let show = reading.show, let command = ChartCommand.parse(show, markets: Set(markets.keys)) { await chart(command, note: model) }
         switch reading.route {
@@ -135,12 +136,12 @@ extension Engine {
         case .plan: await editPlan(text, client: client)
         case .chat(let r), .clarify(let r): reply(r, note: model)
         case .command(let canonical):
-            guard ChatRouter.addressesAllowed(canonical, userText: text, known: [], found: reading.found, displays: { _ in false }, markets: Set(markets.keys)) else {
+            guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: [], found: reading.found, displays: { _ in false }, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address isn’t in your message, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет в твоём сообщении, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
             }
-            if await !runCanonical(canonical, userText: text) {
+            if await !runCanonical(canonical, userText: said ?? text) {
                 reply(say("I read that as “\(canonical)”, but the Windows app can’t do that yet — nothing moved.",
                           "Я понял это как «\(canonical)», но в Windows-версии так пока нельзя — ничего не ушло."), note: model)
             }
