@@ -86,7 +86,7 @@ extension Executor {
         }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: live.recipient, refundTo: live.refund,
                                          origin: live.origin.asset, destination: live.destination.asset, amount: live.units)
-        guard binding.ok else { throw ExecutionError("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         let gets = Decimal(string: live.quote.amountOutFormatted) ?? 0
         report("NEAR Intents: \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) → ≈ \(Fmt.num(gets, maxFraction: 6)) \(live.destination.symbol) on \(WalletCommand.placeName(to)).")
         // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.

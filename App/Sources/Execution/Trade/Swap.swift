@@ -574,7 +574,7 @@ extension Executor {
                                           originCurrency: from, destinationCurrency: to, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                          expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")
-        guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         guard let proxy = try await Relay.approvalProxy(chainId: net.relayChain)?.lowercased(),
               let call = quote.evm.last, call.to.lowercased() == proxy, call.chainId == net.relayChain, call.value == "0" || call.value == "<null>",
               quote.evm.dropLast().allSatisfy({ $0.to.lowercased() == from.lowercased() && $0.data.prefix(4).hex == "095ea7b3"
@@ -649,7 +649,13 @@ extension Executor {
                                              what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what,
                                              note: "Swap \(what) for \(p.tokenOut.symbol)")
                 if p.coinOut {
-                    let got = try await balance(weth, on: rpc) - wethBefore
+                    // A node can answer from before the swap's block: it said 0, the unwrap was skipped and the WETH stayed
+                    // in the wallet (2026-10-22, after an EIP-7702 batch on Base). So it's asked again while nothing shows.
+                    var got = try await balance(weth, on: rpc) - wethBefore
+                    for _ in 0..<10 where got <= 0 {
+                        try await Task.sleep(for: .seconds(1))
+                        got = try await balance(weth, on: rpc) - wethBefore
+                    }
                     received = got
                     if got > 0 {
                         last = try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(got)), note: "Unwrap \(Fmt.num(got / 1e18, maxFraction: 8)) \(wrappedName) into \(net.gasCoin)")
@@ -681,7 +687,7 @@ extension Executor {
                                           originCurrency: token.address, destinationCurrency: Relay.Currency.solanaUSDC, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],
                                          expected: ["sender": me, "recipient": wallet.solana], subject: "Relay quote")
-        guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         guard let proxy = try await Relay.approvalProxy(chainId: net.relayChain)?.lowercased(),
               let call = quote.evm.last, call.to.lowercased() == proxy, call.chainId == net.relayChain, call.value == "0" || call.value == "<null>",
               quote.evm.dropLast().allSatisfy({ $0.to.lowercased() == token.address && $0.data.prefix(4).hex == "095ea7b3"

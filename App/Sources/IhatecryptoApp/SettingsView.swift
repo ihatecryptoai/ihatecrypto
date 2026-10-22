@@ -95,9 +95,11 @@ struct SettingsView: View {
             .padding(.horizontal, 6).padding(.bottom, 18)
             ForEach(Tab.allCases.filter { $0 != .debugging }, id: \.self) { tabButton($0) }
             Spacer()
+            #if DEBUG_API
             Divider().padding(.vertical, 8)
             Text("DEVELOPER").font(.ui(10, .semibold)).tracking(1).foregroundStyle(.tertiary).padding(.leading, 10)
             tabButton(.debugging)
+            #endif
         }
         .padding(.horizontal, 10).padding(.vertical, 20).frame(width: 190).background(Brand.card)
     }
@@ -124,7 +126,11 @@ struct SettingsView: View {
         case .signIns: SettingsPage(title: "AI model", line: "What reads your chat: a subscription, an API key, or a free model on this Mac.") { ModelSection() }
         case .wallet: SettingsPage(title: "Wallet", line: "Your wallets, the key that signs and \(Presence.name).") { wallet }
         case .skills: SettingsPage(title: "Skills", line: "Instructions the assistant follows for one kind of work. Switch them on and off, or add your own from a file.") { SkillsSettings() }
+        #if DEBUG_API
         case .debugging: SettingsPage(title: "Debugging", line: "Developer tools on this Mac.") { debugging }
+        #else
+        case .debugging: EmptyView()
+        #endif
         }
     }
 
@@ -328,6 +334,7 @@ struct SettingsView: View {
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4).help(help).accessibilityLabel(help)
     }
 
+    #if DEBUG_API
     private var debugging: some View {
         SettingsSection(icon: "terminal", title: "Local debug API", line: "For Claude Code and local developer tools.") {
             SettingsGroup {
@@ -347,6 +354,7 @@ struct SettingsView: View {
             }
         }
     }
+    #endif
 
     @ViewBuilder private var wallet: some View {
         signer

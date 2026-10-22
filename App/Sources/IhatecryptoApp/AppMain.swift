@@ -353,7 +353,9 @@ struct ContentView: View {
             AppTheme.apply()
             StatusItem.shared.openWindow = openWindow
             StatusItem.shared.install(ws)
+            #if DEBUG_API
             if UserDefaults.standard.bool(forKey: "debugAPI") { DebugAPI.shared.start(ws) }
+            #endif
             // The development copy says so in the Dock, beside the working one's same icon.
             if Flavor.dev { NSApp.dockTile.badgeLabel = Flavor.tag }
             // Started hidden by Keep running (`open -g -j`, at login or after a crash): it stays in the menu bar, its

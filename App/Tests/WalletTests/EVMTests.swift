@@ -516,14 +516,22 @@ import WalletCore
     // router (ADDRESS_THIS), then unwrapWETH9 to the wallet.
     let interface = multicall([try exactInputSingle(to: routerStandIn), try unwrap(to: me)], deadline: true)
     #expect(interface.hex == "5ae401dc000000000000000000000000000000000000000000000000000000006b49d200000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000e404e45aaf000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000001f4000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004449404b7c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000002df1c51e09aecf9cacb7bc98cb1742757f163df700000000000000000000000000000000000000000000000000000000")
-    #expect(EVMCall.decode(interface) == .swap(recipient: me) && EVMCall.decode(interface).refusal(sender: me) == nil)
-    // The same, unwrapped to someone else: refused.
-    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn), try unwrap(to: thief)], deadline: true)).refusal(sender: me) != nil)
-    // Output left in the router with nothing paying it out: anyone could sweep it, so it's refused too.
-    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn)])) == .swap(recipient: routerStandIn))
-    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn)])).refusal(sender: me) != nil)
+    // Output held in the router isn't read as a swap paying this wallet (the 2026-10-22 review): which token a later
+    // payout takes isn't matched, so a decoy (refundETH, an unwrap of nothing) or a bare pull would leave it for anyone to
+    // sweep. Such a multicall stays a plain contract call: the honest «call the contract» prompt, asked about once.
+    #expect(EVMCall.decode(interface) == .contract(selector: "0x5ae401dc"))
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn)])) == .contract(selector: "0xac9650d8"))
+    let refundETH = Data(hex: "12210e8a")!, pull = call("f2d5d56b", [try ABI.address(usdc), ABI.uint(5_000_000)])
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn), refundETH])) == .contract(selector: "0xac9650d8"))
+    #expect(EVMCall.decode(multicall([pull])) == .contract(selector: "0xac9650d8"))
+    // Paid straight to the wallet, with an ETH refund after: a swap paying this wallet; to someone else: refused.
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: me), refundETH])) == .swap(recipient: me))
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: thief), refundETH])).refusal(sender: me) != nil)
     // MSG_SENDER is the caller.
     #expect(EVMCall.decode(multicall([try exactInputSingle(to: callerStandIn)])).refusal(sender: me) == nil)
+    // …on SwapRouter02 only: the first SwapRouter and v2's Router02 read 0x…01 as address 1, where the output is lost.
+    let v1Single = call("414bf389", [try ABI.address(usdc), try ABI.address(weth), ABI.uint(500), try ABI.address(callerStandIn), ABI.uint(1_800_000_000), ABI.uint(5_000_000), ABI.uint(1), ABI.uint(0)])
+    #expect(EVMCall.decode(v1Single) == .contract(selector: "0x414bf389"))
     // A call the decoder doesn't know (selfPermit) keeps the whole multicall a plain contract call.
     let selfPermit = call("f3995c67", [try ABI.address(usdc), ABI.uint(1), ABI.uint(1), ABI.uint(27), Data(count: 32), Data(count: 32)])
     #expect(EVMCall.decode(multicall([selfPermit, try exactInputSingle(to: callerStandIn)])) == .contract(selector: "0xac9650d8"))
@@ -537,4 +545,9 @@ import WalletCore
     let path = try UniswapV3.path([usdc, weth], fees: [500])
     let exactOutput = call("09b81346", [ABI.uint(32), ABI.uint(128), try ABI.address(thief), ABI.uint(1), ABI.uint(5), ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
     #expect(EVMCall.decode(exactOutput) == .swap(recipient: thief) && EVMCall.decode(exactOutput).refusal(sender: me) != nil)
+    // The tuple's offset pointed past word 2 (the review's case): Solidity reads the recipient there, so word 2 naming this
+    // wallet proves nothing. Only the app's own 0x20 is read.
+    let lying = call("b858183f", [ABI.uint(96), ABI.uint(0), try ABI.address(me), ABI.uint(160), try ABI.address(thief), ABI.uint(5_000_000), ABI.uint(1),
+                                  ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
+    #expect(EVMCall.decode(lying) == .contract(selector: "0xb858183f"))
 }

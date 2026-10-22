@@ -41,25 +41,25 @@ nonisolated struct XPCTradeSigner: TradeSigner {
 
     func signSolana(_ wire: Data, accounts: [String], recipients: [String], tokenOwners: [String: String]) async throws -> Data {
         let reply = try await Self.signing { try await send(.signSolana(wire: wire, accounts: accounts, recipients: recipients, tokenOwners: tokenOwners)) }
-        guard reply.ok, let signed = reply.signedWire else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let signed = reply.signedWire else { throw GuardStop(Self.reason(reply)) }
         return signed
     }
 
     func signHyperliquid(_ action: MsgPack, nonce: UInt64) async throws -> EVMSignature {
         let reply = try await Self.signing { try await send(.signHyperliquidL1(action: action, nonce: nonce, mainnet: true)) }
-        guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }
         return signature
     }
 
     func signHyperliquidUser(_ action: MsgPack, recipients: [String]) async throws -> EVMSignature {
         let reply = try await Self.signing { try await send(.signHyperliquidUser(action: action, mainnet: true, recipients: recipients)) }
-        guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }
         return signature
     }
 
     func signRelayMapping(wallet: String, depositor: String, id: Data, nonce: UInt64) async throws -> EVMSignature {
         let reply = try await Self.signing { try await send(.signRelayNonceMapping(wallet: wallet, depositor: depositor, id: id, nonce: nonce)) }
-        guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }
         return signature
     }
 
@@ -67,7 +67,7 @@ nonisolated struct XPCTradeSigner: TradeSigner {
                  to: String, data: Data, recipients: [String]) async throws -> Data {
         let reply = try await Self.signing { try await send(.signEVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee,
                                                                       gasLimit: gasLimit, to: to, value: 0, data: data, recipients: recipients)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
@@ -78,7 +78,7 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         let reply = try await Self.signing { try await send(.signEVMBatch(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee,
                                                                 gasLimit: gasLimit, calls: calls.map { SignerCall(to: $0.to, data: $0.data) },
                                                                 recipients: recipients)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
@@ -86,7 +86,7 @@ nonisolated struct XPCTradeSigner: TradeSigner {
                         to: String, value: UInt64, data: Data, recipients: [String]) async throws -> Data {
         let reply = try await Self.signing { try await send(.signEVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee,
                                                                       gasLimit: gasLimit, to: to, value: value, data: data, recipients: recipients)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
@@ -94,32 +94,32 @@ nonisolated struct XPCTradeSigner: TradeSigner {
                          to: String, value: UInt64, recipients: [String]) async throws -> Data {
         let reply = try await Self.signing { try await send(.signEVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee,
                                                                       gasLimit: gasLimit, to: to, value: value, data: Data(), recipients: recipients)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
     func signNearIntentDeposit(amount: UInt128, depositAddress: String, nonce: UInt64, blockHash: Data) async throws -> Data {
         let reply = try await Self.signing { try await send(.signNearIntentDeposit(amount: "\(amount)", depositAddress: depositAddress, nonce: nonce, blockHash: blockHash)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
     func signNearTransfer(amount: UInt128, receiver: String, recipients: [String], nonce: UInt64, blockHash: Data) async throws -> Data {
         let reply = try await Self.signing { try await send(.signNearTransfer(amount: "\(amount)", receiver: receiver, recipients: recipients, nonce: nonce, blockHash: blockHash)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
     func signNearDeleteAccount(beneficiary: String, recipients: [String], nonce: UInt64, blockHash: Data) async throws -> Data {
         let reply = try await Self.signing { try await send(.signNearDeleteAccount(beneficiary: beneficiary, recipients: recipients, nonce: nonce, blockHash: blockHash)) }
-        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
         return raw
     }
 
     func signSafeMove(_ move: Safe.Move, recipients: [String]) async throws -> EVMSignature {
         let reply = try await Self.signing { try await send(.signSafeMove(chainId: move.chainId, safe: move.safe, to: move.to, value: move.value,
                                                                          data: move.data, nonce: move.nonce, recipients: recipients)) }
-        guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
+        guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }
         return signature
     }
 
@@ -290,6 +290,8 @@ extension Workspace {
         } catch {
             prepared = nil
             executionError = error.localizedDescription
+            noteFailure("Prepare the \(intent.side == .long ? "long" : "short") \(IntentParser.pretty(intent.asset))", error)
+            await explainFailure()
         }
     }
 
@@ -325,6 +327,7 @@ extension Workspace {
             reply("Done: \(opened.asset) \(Fmt.num(opened.size, maxFraction: 6)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))\(opened.take.map { ", take-profit \(Fmt.price($0))" } ?? "").")
         } catch {
             reply("Execution stopped: \(error.localizedDescription)")
+            noteFailure("\(p.intent.side == .long ? "Long" : "Short") \(IntentParser.pretty(p.market.name))", error)
         }
         await refresh()
         // Only now, with the new position loaded: flipped before, the plan left the canvas and the position's board
@@ -335,7 +338,8 @@ extension Workspace {
     /// After execution «take closer» or «stop 2%» are about the open position: its orders move on the exchange
     /// instead of a new plan starting. Only stop and take may change; anything else is a new plan.
     /// `confirm`: a model read the message, so the new orders wait on a card for Confirm, like any other model reading
-    /// that touches a position; the user's own typed «stop 2%» moves them at once, as before.
+    /// that touches a position. Every chat message goes through the model, so a typed «stop 2%» waits too; only the
+    /// no-model path (`confirm: false`) moves them at once.
     func editExecuted(from before: TradeIntent, to next: TradeIntent, confirm: Bool = false) async -> Bool {
         guard let p = positions.first(where: { $0.coin == before.asset }) else { return false }
         var same = next
@@ -644,16 +648,15 @@ extension Workspace {
                 guard days > 0 else { reply(say("A recurring buy needs at least a day between buys.", "Между регулярными покупками нужен хотя бы день.")); return }
                 // The per-purchase rule applies to each run; a schedule adds up, so it is shown per month too.
                 // The first buy is a card like any other and waits for Confirm: a schedule set up from the chat never signs
-                // at once by itself. The schedule's own runs start one period later.
-                schedules.removeAll { $0.symbol == asset.symbol }
+                // at once by itself. Only that Confirm turns the schedule on (firstBuyOf); its own runs start one period later.
                 var schedule = Schedule(symbol: asset.symbol, usdc: usdc, days: days, next: Date())
                 schedule.advance()
-                schedules.append(schedule)
                 let monthly = usdc * Decimal(30) / Decimal(days)
                 let every = days == 1 ? say("daily", "каждый день") : days == 7 ? say("weekly", "каждую неделю") : say("every \(days) days", "раз в \(days) дн.")
-                reply(say("Scheduled purchases: \(asset.symbol) for \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) a month. The first one is on the canvas: press Confirm to buy now. The next ones start \(Fmt.date(schedule.next)) and run while ihatecrypto is open; each goes through the same checks and signing.",
-                          "Регулярные покупки: \(asset.symbol) на \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) в месяц. Первая — карточкой на холсте: нажми Confirm, чтобы купить сейчас. Следующие пойдут с \(Fmt.date(schedule.next)), пока ihatecrypto открыт; каждая проходит те же проверки и подпись."))
+                reply(say("Scheduled purchases: \(asset.symbol) for \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) a month. The first one is on the canvas: its Confirm buys now and turns the schedule on, Cancel leaves none. The next ones start \(Fmt.date(schedule.next)) and run while ihatecrypto is open; each goes through the same checks and signing.",
+                          "Регулярные покупки: \(asset.symbol) на \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) в месяц. Первая — карточкой на холсте: Confirm купит сейчас и включит расписание, Cancel не оставит его. Следующие пойдут с \(Fmt.date(schedule.next)), пока ihatecrypto открыт; каждая проходит те же проверки и подпись."))
                 await handleWallet(.buy(asset, usdc: usdc), quiet: true)
+                if case .wallet(.buy(let a, _))? = pendingAction, a.symbol == asset.symbol { firstBuyOf = schedule }
                 return
             case .stopSchedules:
                 let n = schedules.count
@@ -695,6 +698,7 @@ extension Workspace {
                 ])
             } else if sent.isEmpty {
                 reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
+                if ownsBoard { noteFailure(confirmedRoute?.title ?? readable(Self.canvasTitle(command)), error) }
             } else {
                 reply(say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + error.localizedDescription + " "
                       + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.joined(separator: " · "))
@@ -870,7 +874,11 @@ extension Workspace {
         }
         if let shown { runningAction = (shown.title, shown.steps, [], Date()) }
         var ok = true
-        do { _ = try await executor(wallet).manage(command, asset: coin, policy: policy, equity: equity) } catch { ok = false; reply(say("Failed: ", "Не вышло: ") + error.localizedDescription) }
+        do { _ = try await executor(wallet).manage(command, asset: coin, policy: policy, equity: equity) } catch {
+            ok = false
+            reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
+            noteFailure(shown?.title ?? "\(command) on \(IntentParser.pretty(coin))", error)
+        }
         if let shown {
             runningAction = nil
             finishedAction = (shown.title, CanvasOutcome(at: Date(), ok: ok), shown.steps)
@@ -933,7 +941,7 @@ extension Workspace {
         do {
             let answer = try await SignerClient().send(.enableAgent)
             guard answer.ok, let action = answer.action, let signature = answer.signature, let nonce = answer.nonce, let agent = answer.agentAddress else {
-                throw ExecutionError(XPCTradeSigner.reason(answer))
+                throw GuardStop(XPCTradeSigner.reason(answer))
             }
             let result = HLReply.parse(try await HLExchange.send(action: action, nonce: nonce, signature: signature, mainnet: true))
             guard !result.isError else { throw ExecutionError("Hyperliquid rejected the agent: \(result).") }
@@ -1132,7 +1140,10 @@ extension Workspace {
         guard let wallet = signerWallet, let coin = position?.coin ?? pendingEntry?.coin else { return }
         executing = true
         defer { executing = false }
-        do { _ = try await executor(wallet).close(asset: coin) } catch { reply("Couldn't close: \(error.localizedDescription)") }
+        do { _ = try await executor(wallet).close(asset: coin) } catch {
+            reply("Couldn't close: \(error.localizedDescription)")
+            noteFailure("Close \(IntentParser.pretty(coin))", error)
+        }
         await refresh()
     }
 }

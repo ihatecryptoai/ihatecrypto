@@ -62,7 +62,7 @@ extension Workspace {
         if agentActive {
             agent = { @Sendable action, nonce in
                 let r = try await SignerClient().send(.signLedgerAgentL1(owner: owner, action: action, nonce: nonce))
-                guard r.ok, let signature = r.signature else { throw ExecutionError(XPCTradeSigner.reason(r)) }
+                guard r.ok, let signature = r.signature else { throw GuardStop(XPCTradeSigner.reason(r)) }
                 return signature
             }
         }
@@ -88,7 +88,7 @@ extension Workspace {
         defer { executing = false }
         do {
             let made = try await SignerClient().send(.ledgerAgent(owner: wallet.evm, create: true))
-            guard made.ok, let agent = made.agentAddress else { throw ExecutionError(XPCTradeSigner.reason(made)) }
+            guard made.ok, let agent = made.agentAddress else { throw GuardStop(XPCTradeSigner.reason(made)) }
             if made.agentActive == true {
                 reply("Your Ledger's trading key is already on: \(agent.prefix(6))…\(agent.suffix(4)).")
                 return
@@ -100,7 +100,7 @@ extension Workspace {
             let result = HLReply.parse(try await HLExchange.send(action: action, nonce: nonce, signature: signature, mainnet: true))
             guard !result.isError else { throw ExecutionError("Hyperliquid rejected the key: \(result). Its account needs a deposit first.") }
             let on = try await SignerClient().send(.setLedgerAgentActive(owner: wallet.evm, active: true))
-            guard on.ok else { throw ExecutionError(XPCTradeSigner.reason(on)) }
+            guard on.ok else { throw GuardStop(XPCTradeSigner.reason(on)) }
             await loadSigner()
             ledgerConnect?.status = "Trading key on: orders go without the Ledger's buttons."
             reply("Trading key on for your Ledger: \(agent.prefix(10))…. Orders, stops, trailing and closes now go without the device; withdrawals and transfers are still signed on the Ledger. “lock” pauses it.")

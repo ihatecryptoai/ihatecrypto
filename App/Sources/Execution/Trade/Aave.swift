@@ -278,11 +278,11 @@ extension Executor {
                                           amount: amount, topupGasUSD: topup, units: "\(net.raw(amount))")
         let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": toSolana ? quote.recipient : quote.recipient.lowercased()],
                                          expected: ["sender": me.lowercased(), "recipient": toSolana ? recipient : recipient.lowercased()], subject: "Relay quote")
-        guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         guard let depository = try await Relay.depository(chainId: chain)?.lowercased(),
               let deposit = quote.evm.first(where: { $0.id == "deposit" }), deposit.to.lowercased() == depository, deposit.chainId == chain,
               deposit.value == "0" || deposit.value == "<null>" else {
-            throw ExecutionError("Relay's deposit isn't to its published depository on \(net.name). Nothing was signed.")
+            throw GuardStop("Relay's deposit isn't to its published depository on \(net.name). Nothing was signed.")
         }
         // depositErc20(address depositor, address token, uint256 amount, bytes32 id)
         let args = Data(deposit.data.dropFirst(4))
@@ -290,7 +290,7 @@ extension Executor {
               ABI.address(in: args, word: 0)?.lowercased() == me.lowercased(),
               ABI.address(in: args, word: 1)?.lowercased() == usdc,
               ABI.decimal(in: args, word: 2) == net.raw(amount) else {
-            throw ExecutionError("Relay's deposit asks for something else than \(show(amount)) USDC from this wallet. Nothing was signed.")
+            throw GuardStop("Relay's deposit asks for something else than \(show(amount)) USDC from this wallet. Nothing was signed.")
         }
         let arriving = Decimal(string: quote.amountOutFormatted) ?? 0
         let spend = Decimal(amount) / 1_000_000
@@ -456,7 +456,7 @@ extension Executor {
                 guard fee <= (try await rpc.balance(wallet.evm)) else { throw ExecutionError("Not enough \(net.gasCoin) on \(net.name) for gas even after a top-up: \(note).") }
             }
         }
-        let nonce = try await rpc.nonce(wallet.evm)
+        let nonce = try await nextNonce(rpc)
         let raw = if let batch {
             try await signer.signEVMBatch(chainId: rpc.chainId, nonce: nonce, maxPriorityFee: tip, maxFee: maxFee, gasLimit: gasLimit, calls: batch,
                                           recipients: recipients)
@@ -475,8 +475,24 @@ extension Executor {
             throw ExecutionError("\(note) failed on \(net.name): \(net.explorer)/tx/\(hash)")
         }
         try journal.append(.init(chain: net.key, id: hash, kind: .confirmed))
+        // A batch's own authorization takes the next nonce too (Batch7702.sign).
+        confirmed(nonce + (batch == nil ? 1 : 2), rpc)
         report("\(note): done. \(net.explorer)/tx/\(hash)")
         return hash
+    }
+
+    /// The nonce for this wallet's next transaction. A node can answer behind right after our own: after an EIP-7702 batch
+    /// at nonce 0 one said 1 (the batch's authorization had taken it), and the unwrap that came next was refused as «nonce
+    /// too low». So it's never below what follows our last confirmed transaction there.
+    func nextNonce(_ rpc: EVMRPC) async throws -> UInt64 {
+        let node = try await rpc.nonce(wallet.evm), key = "\(rpc.chainId):\(wallet.evm.lowercased())"
+        return Self.evmNonces.withLock { max(node, $0[key] ?? 0) }
+    }
+
+    /// Only after a receipt: a transaction that never landed would leave a gap no later one could get past.
+    func confirmed(_ next: UInt64, _ rpc: EVMRPC) {
+        let key = "\(rpc.chainId):\(wallet.evm.lowercased())"
+        Self.evmNonces.withLock { $0[key] = max($0[key] ?? 0, next) }
     }
 
     /// Set while a gas top-up runs: its own transactions don't start another.
@@ -525,7 +541,7 @@ extension Executor {
                                               destinationCurrency: "0x0000000000000000000000000000000000000000", amount: units, units: "\(net.raw(units))")
             let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                              expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")
-            guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+            guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
             guard let call = quote.evm.last, call.to.lowercased() == proxy, call.chainId == chain, call.value == "0" || call.value == "<null>",
                   quote.evm.dropLast().allSatisfy({ step in
                       let args = Data(step.data.dropFirst(4))

@@ -177,7 +177,9 @@ public enum Plan {
         if risk <= 0 { e.problem = "Risk must be above zero."; return e }
         if stop <= 0 || stop >= 100 { e.problem = "Stop must be above 0% and below 100%."; return e }
         if let t = i.takePct, t <= 0 || (i.side == .short && t >= 100) { e.problem = "Take-profit is out of range."; return e }
-        if lev < 1 || lev > Decimal(m.maxLeverage) { e.problem = "Leverage for \(m.name): 1× to \(m.maxLeverage)×."; return e }
+        // The signer refuses more than 20× whatever the market allows (HLGuard.maxLeverage): said here, before money moves.
+        let maxLev = min(m.maxLeverage, 20)
+        if lev < 1 || lev > Decimal(maxLev) { e.problem = "Leverage for \(m.name): 1× to \(maxLev)×."; return e }
         if lev != lev.rounded(0, .down) { e.problem = "Leverage on Hyperliquid is a whole number: \(Fmt.num(lev.rounded(0, .down)))× or \(Fmt.num(lev.rounded(0, .up)))×."; return e }
 
         if let px = i.entryPx, i.side == .long ? px >= m.markPx : px <= m.markPx {

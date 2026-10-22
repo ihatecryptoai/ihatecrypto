@@ -207,10 +207,11 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     // platform fee (none), event authority, program.
     let keys = [me, SPL.tokenProgram, source, out, jup, wsol, event, theirs]
     let (m, accounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
-    // The output account is this wallet's own for the mint: derived here, no claim needed. The prompt names the least.
+    // The output account is this wallet's own for the mint: derived here, no claim needed. No amount on the prompt: the
+    // program ignores bytes after its arguments, so a site could append a made-up quote (the 2026-10-22 review).
     let ok = SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [:])
     #expect(ok.ok)
-    #expect(ok.checks.contains("Jupiter swap → your account, at least 0.009339574 SOL."))
+    #expect(ok.checks.contains("Jupiter swap → your account (SOL). The balance simulation checks the amount."))
     // The output sent to someone else's account, as the user destination or through the optional destination: refused.
     let (other, otherAccounts) = try message(keys, [(4, [1, 0, 2, 7, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
     #expect(!SolanaGuard.check(other, accounts: otherAccounts, policy: policy, tokenOwners: [:]).ok)
@@ -222,7 +223,7 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     let sharedKeys = [me, SPL.tokenProgram, deposit, source, theirs, out, usdcMint, wsol, jup, event]
     let (s, sAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 5, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507, fee: 20))])
     let sharedOK = SolanaGuard.check(s, accounts: sAccounts, policy: policy, tokenOwners: [:])
-    #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap → your account, at least 0.009339574 SOL; the site's fee 20 bp."))
+    #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap → your account (SOL). The balance simulation checks the amount."))
     let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 4, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507))])
     #expect(!SolanaGuard.check(sTheirs, accounts: sTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
     // Another of Jupiter's forms is left to the balance simulation, as before.

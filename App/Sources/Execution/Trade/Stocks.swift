@@ -181,7 +181,7 @@ extension Executor {
                                               originCurrency: tokenIn, destinationCurrency: tokenOut, amount: 0, units: "\(units)")
             let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                              expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")
-            guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+            guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
             guard let call = quote.evm.last, call.to.lowercased() == proxy, call.chainId == chain, call.value == "0" || call.value == "<null>",
                   quote.evm.dropLast().allSatisfy({ exactApprove($0, token: tokenIn.lowercased(), spender: proxy, units: units) }) else {
                 throw ExecutionError("Relay's transactions don't go to the approval proxy it publishes for Robinhood Chain, for exactly this amount. Nothing was signed.")

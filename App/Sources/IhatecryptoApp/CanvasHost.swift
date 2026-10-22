@@ -74,7 +74,9 @@ struct CanvasScroller<Content: View>: View {
             ZoomPercent(place: place)
             Button { place.zoom = CanvasPlace.zoomRange.clamped(place.zoom + 0.1) } label: { zoomGlyph("plus") }.help("Zoom in · or pinch")
             Button("Fit") { place.scroller?.fit() }
+            #if DEBUG_API
             DebugBadge()
+            #endif
         }
         .buttonStyle(.borderless)
         .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 4)

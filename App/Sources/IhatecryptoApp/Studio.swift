@@ -1639,7 +1639,9 @@ struct CanvasViewport<Content: View>: View {
             Text("\(Int((scale * 100).rounded()))%").font(.ui(12, .semibold)).monospacedDigit().frame(width: 44)
             Button { zoom = Self.zoomRange.clamped(zoom + 0.1) } label: { zoomGlyph("plus") }.help("Zoom in · or pinch")
             Button("Fit") { zoom = 1; pan = .zero }
+            #if DEBUG_API
             DebugBadge()
+            #endif
         }
         .buttonStyle(.borderless)
         .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 4)

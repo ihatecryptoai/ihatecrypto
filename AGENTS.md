@@ -53,6 +53,7 @@ Build, test and run only the Dev copy. Never replace, quit or drive an installed
 
 ## Debug API and UI tests
 
+Only the copies `build-app.sh` makes (and `swift run`) have it: a release is built without it (`DEBUG_API`, project.yml).
 The user turns it on in Settings › Debugging › Local debug API. It listens on 127.0.0.1, and the token is in
 `debug-token` in the copy's data folder. Endpoints are listed at the top of `App/Sources/IhatecryptoApp/DebugAPI.swift`
 (`/state`, `/send`, `/screenshot`, `/reset`, `/cancel`, `/pick`, `/restore`). It never signs.

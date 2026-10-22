@@ -1564,9 +1564,13 @@ extension Workspace {
     func transferRoute(_ entry: SavedAddress, _ amount: Decimal) -> MoveRoute {
         let net = entry.network, ends = AddressCheck.ends(entry.address), fill = RouteFill(rawValue: net.rawValue) ?? .check
         let free = usdc(on: net.rawValue)
-        // Solana comes up only when the money there is short: a plain transfer is a plain transfer.
-        let line = net == .hyperliquid ? "perp balance · no bridge, no gas"
-            : free.map { $0 < amount && net != .solana ? "\(Fmt.num(amount - $0)) USDC short: it comes from Solana first" : "free: \(Fmt.num($0)) USDC" } ?? ""
+        // Solana comes up only when the money there is short: a plain transfer is a plain transfer. Hyperliquid too: the
+        // card said «no bridge» over $3.96 for a 150 send, and the move failed at the signature (2026-10-22).
+        let line = free.map { $0 < amount && net != .solana ? "\(Fmt.num(amount - $0)) USDC short: it comes from Solana first"
+            : net == .hyperliquid ? "perp balance · no bridge, no gas" : "free: \(Fmt.num($0)) USDC" } ?? ""
+        // What Solana gives for it, the bridge fee on top.
+        let short = max(0, amount - (free ?? amount))
+        let bridged = net != .solana && short > 0 && (solana?.usdc ?? 0) >= short ? moneyMove("USDC", on: "solana", by: -short, approx: true) : []
         let saved = addressBook.first { $0.id == entry.id }
         let warnings = [
             saved.flatMap { $0.network != net ? "Saved for \($0.network.title), sent on \(net.title) to the same address. Your own wallet has it there too; an exchange's deposit address may not — check that it takes \(net.title)." : nil },
@@ -1578,7 +1582,7 @@ extension Workspace {
                             + (net == .ethereum ? " Ethereum mainnet: the fee is in ETH and can be dollars; it's bought for you if the wallet has none there." : "")
                             + " Press Confirm.",
                          steps: [
-            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(amount)) USDC", line, fill, money: moneyMove("USDC", on: net.rawValue, by: -amount)),
+            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(amount)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -amount)),
             step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", fill),
         ], warning: warnings.isEmpty ? nil : warnings.joined(separator: " "))
     }
@@ -3136,7 +3140,11 @@ extension Workspace {
         if case .schedule = command { dcaChoice = nil }
         // It reads the active wallet's balances: a task on the automation wallet leaves the check to the move itself.
         if TaskRun.automation == nil { await freshenSource(command) }
-        if TaskRun.automation == nil, let why = refusalBeforeCard(command, inChain: quiet) { reply(why, note: note); return }
+        if TaskRun.automation == nil, let why = refusalBeforeCard(command, inChain: quiet) {
+            reply(why, note: note)
+            if !quiet { noteFailure(command.summary, ExecutionError(why)) }
+            return
+        }
         switch command {
         case .yields, .allocate, .rebalance, .schedule, .stopSchedules, .jupiterDCAOrders:
             // Read-only, or with a board and a step of their own.

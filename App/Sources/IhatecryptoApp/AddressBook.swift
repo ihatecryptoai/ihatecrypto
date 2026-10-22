@@ -1120,7 +1120,8 @@ extension Workspace {
     /// that can receive on the network named comes first; a 0x address on one EVM network is the same on another.
     func savedEntry(_ name: String, network: String?) -> SavedAddress? {
         let key = name.lowercased()
-        let evm: Set<String> = ["base", "arbitrum", "ethereum", "polygon", "robinhood", "tempo", "hyperevm", "optimism", "bnb"]
+        // Hyperliquid too: «… to Automation on hyperliquid», saved on Solana and Base, took the Solana entry and was refused.
+        let evm: Set<String> = ["base", "arbitrum", "ethereum", "polygon", "robinhood", "tempo", "hyperevm", "optimism", "bnb", "hyperliquid"]
         func fits(_ e: SavedAddress) -> Bool {
             guard let network else { return true }
             return e.network.rawValue == network || (evm.contains(network) && (evm.contains(e.network.rawValue) || e.network == .hyperliquid))
@@ -1166,6 +1167,12 @@ extension Workspace {
             return
         }
         if let off = transferRefusal(entry) { reply(off, note: note); return }
+        // Not inside a chain: a step before it may have just brought the money.
+        if !quiet, let short = transferShortfall(entry.network.rawValue, amount) {
+            reply(short, note: note)
+            noteFailure("send \(Fmt.num(amount)) USDC to \(entry.name) on \(entry.network.rawValue)", ExecutionError(short))
+            return
+        }
         pendingAction = .transfer(entry, amount)
         pendingText = "send \(Fmt.num(amount)) USDC to \(entry.name)"
         let ends = AddressCheck.ends(entry.address)
@@ -1174,6 +1181,19 @@ extension Workspace {
                   "Перевод на холсте: \(Fmt.num(amount)) USDC на «\(entry.name)» в \(entry.network.title), \(ends.start) … \(ends.end). Подпиши",
                   "La transferencia está en el lienzo: \(Fmt.num(amount)) USDC a «\(entry.name)» en \(entry.network.title), \(ends.start) … \(ends.end). Fírmala")
               + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar.")), note: note)
+    }
+
+    /// A send no balance can cover is said at once, not a card whose Confirm could only fail («send 100 USDC to Automation
+    /// on hyperliquid» with $77 in all, 2026-10-22). It pays from its network, what that lacks from Solana or another EVM
+    /// network (Executor.sendUSDC); one on Solana only from Solana. A balance not read yet leaves it to the move.
+    func transferShortfall(_ net: String, _ asked: Decimal) -> String? {
+        guard let have = usdc(on: net) else { return nil }
+        let others = net == "solana" ? [] : [solana?.usdc] + EVMNetwork.searched.filter { $0.key != net }.map { usdc(on: $0.key) }
+        guard !others.contains(where: { $0 == nil }) else { return nil }
+        let all = others.compactMap { $0 }.reduce(have, +)
+        guard asked > all else { return nil }
+        return say("All the USDC this send can draw on is \(Fmt.num(all)), less than \(Fmt.num(asked)) — nothing was prepared. Say up to that, or top up first.",
+                   "Всего USDC, из которых может пойти этот перевод, — \(Fmt.num(all)), меньше \(Fmt.num(asked)). Ничего не готовлю: назови сумму не больше или сначала пополни.")
     }
 
     func transfer(_ amount: Decimal, to entry: SavedAddress) async {
@@ -1215,6 +1235,7 @@ extension Workspace {
             runningAction = nil
             finishedAction = (title, CanvasOutcome(at: Date(), ok: false), steps)
             reply("Failed: \(error.localizedDescription)")
+            noteFailure(title, error)
         }
         // The outcome board comes from the saved canvas: now, not after the refresh (a repeated reply doesn't save).
         saveCanvas()

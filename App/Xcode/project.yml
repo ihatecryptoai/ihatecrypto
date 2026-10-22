@@ -31,6 +31,8 @@ settings:
     # and Keep running agent of its own (`Flavor`), so a build from this tree never touches the working one's.
     APP_NAME: ihatecrypto
     APP_ID: app.ihatecrypto.mac
+    # The local debug API (DebugAPI.swift): build-app.sh sets DEBUG_API for the copies it makes; a release has none.
+    DEBUG_API_CONDITION: ""
     # Written into Info.plist by Tools/build-release.sh, so verify-release.sh knows which XcodeGen made a release.
     XCODEGEN_VERSION: ""
     # The script below edits the built Info.plist, which a sandboxed script phase may not do.
@@ -59,6 +61,7 @@ targets:
         # The module keeps its name whatever the copy is called.
         PRODUCT_MODULE_NAME: ihatecrypto
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) $(DEBUG_API_CONDITION)
         # Sparkle's keys, merged into the generated plist. The feed is empty in a local build (no update checks);
         # release.sh passes the site's appcast.
         INFOPLIST_FILE: ihatecrypto-Info.plist

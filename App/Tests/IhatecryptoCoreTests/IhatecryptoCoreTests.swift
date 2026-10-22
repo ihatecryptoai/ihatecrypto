@@ -102,12 +102,13 @@ private func intent(risk: String = "10", stop: String = "3", lev: String? = nil)
 }
 
 @Test func leverageAboveMarketMaxIsBlocked() {
-    #expect(Plan.evaluate(intent(lev: "50"), market: eth).problem?.contains("25×") == true)
+    // ETH allows 25×; the signer takes at most 20× (HLGuard), so the plan says 20×.
+    #expect(Plan.evaluate(intent(lev: "50"), market: eth).problem?.contains("20×") == true)
 }
 
 @Test func liquidationBeforeStopIsBlocked() {
-    // 25× on a 3% stop: liquidation (~2% away) comes first.
-    #expect(Plan.evaluate(intent(lev: "25"), market: eth).problem?.contains("Liquidation") == true)
+    // 20× on a 4% stop: liquidation (~3% away) comes first.
+    #expect(Plan.evaluate(intent(stop: "4", lev: "20"), market: eth).problem?.contains("Liquidation") == true)
 }
 
 @Test func tinyNotionalIsBlocked() {

@@ -5,6 +5,7 @@ import HyperliquidSigning
 import IhatecryptoCore
 import RelayBridge
 import SolanaChain
+import Synchronization
 import TxGuard
 import WalletCore
 
@@ -87,6 +88,14 @@ public struct ExecutionError: LocalizedError {
     public var errorDescription: String? { message }
 }
 
+/// The guard, the signer or a scam check stopped a move: something in it is not what it should be. Nothing is offered
+/// around it (Workspace.explainFailure), unlike a move that only lacked money or a route.
+public struct GuardStop: LocalizedError {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
+}
+
 /// A move that would lose more than ihatecrypto lets one lose by itself — 3% of it, 15¢ on a small one, $1 at most (5%
 /// for gas): stopped before anything is signed, with the numbers, so the user can take it anyway («Send anyway»).
 public struct CostlyMove: LocalizedError, Sendable {
@@ -117,6 +126,8 @@ public actor Executor {
     /// the P/L knows what a Relay buy cost: its money and its tokens are two transactions the chain can't pair.
     let traded: (@Sendable (String, Decimal, Decimal) -> Void)?
     private var lastNonce: UInt64 = 0
+    /// «chainId:address» → the nonce after that wallet's last confirmed transaction there, across moves (nextNonce).
+    static let evmNonces = Mutex<[String: UInt64]>([:])
 
     /// Worst price accepted for a market entry or exit, from the mark.
     /// Smallest bridge worth its fee (Relay ≈ $0.02 flat).
@@ -760,7 +771,7 @@ public actor Executor {
                                           destinationCurrency: currency, amount: units, exactOutput: exactOutput, topupGasUSD: topupGasUSD)
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],
                                          expected: ["sender": wallet.solana, "recipient": wallet.evm], subject: "Relay quote")
-        guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         guard let spendUnits = UInt64(quote.amountIn), spendUnits > 0 else { throw ExecutionError("Relay didn't give the amount to send.") }
         let spend = Decimal(spendUnits) / 1_000_000
         let arriving = Decimal(string: quote.amountOutFormatted) ?? 0
@@ -795,7 +806,7 @@ public actor Executor {
             .init(label: "USDC", before: Int64(have), after: Int64(usdcAfter), atLeast: -Int64(spendUnits)),
             .init(label: "lamports", before: Int64(solBefore), after: Int64(solAfter), atLeast: -5_000_000),
         ]))
-        guard verdict.ok else { throw ExecutionError("The guard stopped the bridge: " + verdict.problems.joined(separator: " ")) }
+        guard verdict.ok else { throw GuardStop("The guard stopped the bridge: " + verdict.problems.joined(separator: " ")) }
         func usdc(_ u: UInt64) -> String { Fmt.num(Decimal(u) / 1_000_000, maxFraction: 6) }
         func sol(_ l: UInt64) -> String { Fmt.num(Decimal(l) / 1_000_000_000, maxFraction: 6) }
         var changes = [
@@ -815,7 +826,7 @@ public actor Executor {
     func sendBridge(_ b: BridgeStep) async throws -> String {
         let signed = try await signer.signSolana(b.unsigned, accounts: b.accounts, recipients: [], tokenOwners: b.tokenOwners)
         guard signed.count == b.unsigned.count, signed.subdata(in: 65..<signed.count) == b.unsigned.subdata(in: 65..<b.unsigned.count) else {
-            throw ExecutionError("What was signed isn't what was checked.")
+            throw GuardStop("What was signed isn't what was checked.")
         }
         let signature = Base58.encode(signed.subdata(in: 1..<65))
         let toHyperliquid = b.chain == Relay.Chain.hyperliquid

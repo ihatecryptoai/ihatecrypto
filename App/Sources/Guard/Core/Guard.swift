@@ -175,11 +175,12 @@ public enum SolanaGuard {
                 }
             case jupiterSwap:
                 // route: the output to account 3, or to account 4 when it's set (the program's own id when not), mint 5;
-                // shared_accounts_route: to account 6, mint 8. Both end in in_amount, quoted_out_amount (u64),
-                // slippage_bps (u16), platform_fee_bps (u8). Its other forms are left to the simulation, as before.
+                // shared_accounts_route: to account 6, mint 8. Its other forms are left to the simulation, as before.
+                // The amounts aren't read: they end the data, and the program ignores bytes after them, so a site could
+                // append a made-up quote and slippage (the 2026-10-22 review). The simulation checks what arrives.
                 let kind = ix.data.prefix(8)
                 let layout: (to: Int, instead: Int?, mint: Int)? = kind == jupiterRoute ? (3, 4, 5) : kind == jupiterSharedRoute ? (6, nil, 8) : nil
-                guard let layout, ix.data.count >= 8 + 19, var to = account(layout.to), let mint = account(layout.mint) else {
+                guard let layout, var to = account(layout.to), let mint = account(layout.mint) else {
                     v.checks.append("Calls Jupiter Swap. The balance simulation checks the result.")
                     continue
                 }
@@ -190,14 +191,7 @@ public enum SolanaGuard {
                     v.problems.append("The Jupiter swap pays \(to), not your wallet.")
                     continue
                 }
-                let tail = ix.data.count - 19
-                let quoted = le64(ix.data, tail + 8), slippage = UInt64(le16(ix.data, tail + 16)), fee = ix.data[ix.data.startIndex + tail + 18]
-                guard slippage <= 10_000 else { v.problems.append("The Jupiter swap allows a slippage over 100%."); continue }
-                // At least the quote less the slippage: what the program itself makes sure of.
-                let least = Decimal(quoted) * Decimal(10_000 - slippage) / 10_000
-                func down(_ x: Decimal, _ scale: Int) -> String { var x = x, r = Decimal(); NSDecimalRound(&r, &x, scale, .down); return NSDecimalNumber(decimal: r).stringValue }
-                let what = mintNames[mint].map { "\(down(least / pow(10, $0.decimals), $0.decimals)) \($0.symbol)" } ?? "\(down(least, 0)) units of \(mint.prefix(6))…"
-                v.checks.append("Jupiter swap → your account, at least \(what)\(fee > 0 ? "; the site's fee \(fee) bp" : "").")
+                v.checks.append("Jupiter swap → your account (\(mintNames[mint]?.symbol ?? "\(mint.prefix(6))…")). The balance simulation checks the amount.")
             default:
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
             }

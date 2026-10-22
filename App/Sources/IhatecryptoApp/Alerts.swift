@@ -90,6 +90,8 @@ extension Workspace {
                                   "\(IntentParser.pretty(a.coin)) \(a.above ? "выше" : "ниже") \(Fmt.price(a.price))")
                 var task = ScheduledTask(steps: steps, next: Date(), every: nil, because: because)
                 task.untrusted = a.untrusted
+                // As the alert promised: its moves come to the user to confirm, never off the automation wallet by themselves.
+                task.fromActive = true
                 tasks.append(task)
                 continue
             }

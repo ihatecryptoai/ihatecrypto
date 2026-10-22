@@ -42,7 +42,12 @@ final class SignerPrefs: @unchecked Sendable {
         guard status == errSecItemNotFound else { return nil }
         // Taken once as it is. What a change made to it earlier could skip is checked where it's used: «our address»
         // against the key at every signature (Signer.vouch), a test wallet by its seed opening without a prompt.
-        let old = UserDefaults.standard.dictionaryRepresentation().filter { Self.carried($0.key) }
+        // Its own domain only: `dictionaryRepresentation()` merges in the global one, which any process of the user can
+        // write (`defaults write -g evm …`) without touching the signer's container.
+        let global = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain) ?? [:]
+        let own = Bundle.main.bundleIdentifier.flatMap { UserDefaults.standard.persistentDomain(forName: $0) }
+            ?? UserDefaults.standard.dictionaryRepresentation().filter { global[$0.key] == nil }
+        let old = own.filter { Self.carried($0.key) }
         save(old)
         return old
     }

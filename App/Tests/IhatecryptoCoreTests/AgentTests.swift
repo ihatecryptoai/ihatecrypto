@@ -419,6 +419,16 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(both.autoRules == nil && Plan.resolve(both, market: m, equity: 29, policy: RiskPolicy()).intent.leverage == RiskPolicy().maxLeverage)
 }
 
+@Test func leverageAboveWhatTheSignerTakesIsRefusedInThePlan() throws {
+    // BTC allows 40×, the signer refuses over 20× (HLGuard): a 25× plan says so before any money moves to Hyperliquid.
+    let m = Market(name: "BTC", markPx: 84000, szDecimals: 5, maxLeverage: 40)
+    var i = TradeIntent()
+    (i.asset, i.riskUSD, i.stopPct, i.leverage) = ("BTC", 1, 1, 25)
+    #expect(Plan.evaluate(i, market: m).problem == "Leverage for BTC: 1× to 20×.")
+    i.leverage = 20
+    #expect(Plan.evaluate(i, market: m).problem?.hasPrefix("Leverage") != true)
+}
+
 @Test func theMinimumOrderNeverSpendsMoreThanNamed() throws {
     // «нефть лонг на 4 доллара x2» is an $8 position: under the $10 minimum, said so, not quietly $5 of margin.
     var m = Market(name: "xyz:CL", markPx: 91, szDecimals: 3, maxLeverage: 20)

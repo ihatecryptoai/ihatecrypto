@@ -160,7 +160,13 @@ final class Workspace {
     }
     var preparing = false
     var executing = false {
-        didSet { if oldValue, !executing { lastOwnMove = Date(); endSigningSession(); continueTask(); Task { await continueAgent() } } }
+        didSet {
+            // A new move: a failure before it that wasn't reasoned about is old news.
+            if executing, !oldValue { failure = nil }
+            guard oldValue, !executing else { return }
+            lastOwnMove = Date(); endSigningSession(); continueTask()
+            Task { await afterMove() }
+        }
     }
 
     /// One Touch ID covers one move: once it's done the next signature asks again, unless the user chose 5–30 minutes.
@@ -169,6 +175,8 @@ final class Workspace {
         Task { _ = try? await SignerClient().send(.endSession) }
     }
     var executionError: String?
+    /// The last money move or trade that didn't go through, until the model has reasoned about it (explainFailure).
+    @ObservationIgnored var failure: (what: String, why: String, at: Date)?
     /// A confirmed money move while it runs: its route stays on the canvas with the latest step, until the outcome.
     var runningAction: (title: String, steps: [ActivityBubble], lines: [String], started: Date)? {
         didSet { if moveRunning != (runningAction != nil) { moveRunning = runningAction != nil } }
@@ -200,7 +208,16 @@ final class Workspace {
             if pendingAction != nil, oldValue == nil { remindToConfirm() }
             // A way picked on a route's step belongs to that trade: another move waiting for Confirm drops it.
             if case .wallet(let command)? = pendingAction { routeWays = routeWays.filter { $0.key == command.wayKey } }
+            if let p = pendingAction, !isFirstBuy(p) { firstBuyOf = nil }
         }
+    }
+    /// The recurring buy whose first buy is the card waiting for Confirm: it's kept only when that card is confirmed
+    /// (carryOut), so a Cancel or another card in its place leaves no schedule behind.
+    var firstBuyOf: Schedule?
+
+    func isFirstBuy(_ p: PendingAction) -> Bool {
+        guard let s = firstBuyOf, case .wallet(.buy(let asset, _)) = p else { return false }
+        return asset.symbol == s.symbol
     }
 
     /// A card waits for Confirm while the window isn't in front (the model took a few seconds and the user looked
@@ -978,6 +995,8 @@ final class Workspace {
     func send(_ raw: String, shown: String? = nil, about: [StepContext]? = nil) async {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy else { return }
+        // A move the message asked for that was refused before its card: reasoned about once the message is through.
+        defer { Task { await explainFailure() } }
         // Anything they write takes over from what the model was carrying out; the Confirm button carries it on.
         if !Self.pressed { agentGoal = nil }
         if SeedGuard.containsMnemonic(text) {
@@ -1089,6 +1108,7 @@ final class Workspace {
             pendingAction = nil
             pendingText = nil
             if declines {
+                firstBuyOf = nil
                 reply(say("Cancelled — nothing moved.", "Отменено — ничего не ушло.", "Cancelado: no se movió nada."))
                 return
             }
@@ -1299,7 +1319,13 @@ final class Workspace {
     /// A move the user confirmed, carried out.
     func carryOut(_ pending: PendingAction) async {
         switch pending {
-        case .wallet(let command): await move(command)
+        case .wallet(let command):
+            if let s = firstBuyOf, isFirstBuy(pending) {
+                schedules.removeAll { $0.symbol == s.symbol }
+                schedules.append(s)
+            }
+            firstBuyOf = nil
+            await move(command)
         case .position(let command, let coin): await manage(command, coin: coin)
         case .orders(let commands, let coin, let next):
             for command in commands { await manage(command, coin: coin) }
@@ -1538,7 +1564,7 @@ final class Workspace {
     /// («Why?» on its card), the move keeps waiting as before.
     private func dropWaiting(keepAction: Bool = false) {
         if pendingAllocation != nil { pendingAllocation = nil; allocationPreview = nil; rebalancePlan = nil }
-        if !keepAction { pendingAction = nil; pendingText = nil }
+        if !keepAction { pendingAction = nil; pendingText = nil; firstBuyOf = nil }
         taskQueue = nil
     }
 

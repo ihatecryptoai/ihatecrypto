@@ -18,9 +18,13 @@ final class AppLock {
     /// Minutes away before it locks.
     static let choices = [1, 5, 15, 60]
 
+    /// The development copy never locks (the owner, 2026-10-22: «на дев режиме не должно быть кода»): it is driven and
+    /// checked through the debug API with nobody at the Mac, and the signer still asks Touch ID for every wallet but the
+    /// test one.
+    static let never = Flavor.dev
     /// A passcode is set: the signer's word, kept in defaults so a launch is locked before the signer answers.
     private(set) var codeSet = UserDefaults.standard.bool(forKey: codeSetKey)
-    private(set) var locked = UserDefaults.standard.bool(forKey: codeSetKey) || UserDefaults.standard.bool(forKey: codeOffKey)
+    private(set) var locked = !never && (UserDefaults.standard.bool(forKey: codeSetKey) || UserDefaults.standard.bool(forKey: codeOffKey))
     /// Why the last code didn't open it («Wrong code · 3 tries left»).
     var problem: String?
     /// Five wrong codes turned the code off: only the Mac password opens the app — after a relaunch too.
@@ -85,7 +89,7 @@ final class AppLock {
         }
         if set {
             codeOff = false
-            if !heardSigner { locked = true }
+            if !heardSigner, !Self.never { locked = true }
         } else if locked {
             // No code any more while the window is locked (five wrong codes, or the signer couldn't read it): only the
             // Mac password opens it. A status reply never does.
@@ -96,7 +100,7 @@ final class AppLock {
 
     /// Hides the window, ends the signing session and closes the browser and import windows.
     func lock() {
-        guard codeSet else { return }
+        guard codeSet, !Self.never else { return }
         locked = true
         problem = nil
         CodePrompt.shared.reply(nil)

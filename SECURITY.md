@@ -63,9 +63,10 @@ local rules before any model reads them. An optional second check (TypeSafe Jev 
 can stop a text but can never approve one. An address found by a lookup never becomes a recipient. A typed «yes» never
 signs: only the Confirm button does.
 
-**Local debug API.** Off by default (Settings › Debugging). It listens on 127.0.0.1 only, needs a bearer token that
-changes on every start and sits in an owner-only file, and refuses requests a browser sends. It never signs: while it
-drives the app, only status requests reach the signer.
+**Local debug API.** Not in a release: only development builds (`build-app.sh`, `swift run`) have it. There it is off
+by default (Settings › Debugging), listens on 127.0.0.1 only, needs a bearer token that changes on every start and
+sits in an owner-only file, and refuses requests a browser sends. It never signs: while it drives the app, only status
+requests reach the signer.
 
 **Updates.** Releases are signed with the team's Developer ID and notarized. Sparkle checks each update against the
 EdDSA public key in the app. The app only says a new version is out: nothing downloads or installs until you press

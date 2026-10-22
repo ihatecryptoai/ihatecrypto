@@ -241,7 +241,7 @@ extension Workspace {
         guard let me = signerWallet?.evm else { throw ExecutionError("No EVM key in secure storage.") }
         let now = try await Self.simulator(r.net).simulate(from: me, calls: r.calls)
         if let why = ContractCallGuard.drift(card: r.simulation, now: now) ?? ContractCallGuard.grantProblem(now.grants, contract: r.call.contract) {
-            throw ExecutionError("Nothing was signed: since the card, \(why). Ask for it again to see the new card.")
+            throw GuardStop("Nothing was signed: since the card, \(why). Ask for it again to see the new card.")
         }
         let done = try await e.contractCall(r.net, to: r.call.contract, data: r.data, value: r.value, approve: r.approve.map { ($0.token, $0.units) },
                                             approveNote: "Approve exactly \(Fmt.num(r.approve?.amount ?? 0, maxFraction: 6)) \(r.approve?.symbol ?? "") to \(r.contractName)",

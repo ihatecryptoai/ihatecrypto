@@ -77,7 +77,7 @@ extension Executor {
                                           originCurrency: origin.currency, destinationCurrency: destination.currency, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],
                                          expected: ["sender": me, "recipient": recipient], subject: "Relay quote")
-        guard binding.ok else { throw ExecutionError(binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         let worthIn = Decimal(string: quote.amountInUSD) ?? 0, worthOut = Decimal(string: quote.amountOutUSD) ?? 0
         guard worthOut > 0 else { throw ExecutionError("Relay doesn't quote \(origin.symbol) for \(destination.symbol) now. Nothing was signed.") }
         if capped { try Self.checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap") }
@@ -154,7 +154,7 @@ extension Executor {
         let owners = account.map { [$0: wallet.solana] } ?? [:]
         var verdict = SolanaGuard.check(message, accounts: message.staticKeys, policy: SolanaPolicy(owner: wallet.solana), tokenOwners: owners)
         guard verdict.ok else {
-            throw ExecutionError("Relay routes \(origin.symbol) through programs ihatecrypto doesn't sign for (" + verdict.problems.joined(separator: " ")
+            throw GuardStop("Relay routes \(origin.symbol) through programs ihatecrypto doesn't sign for (" + verdict.problems.joined(separator: " ")
                                  + "). Sell it for USDC or SOL on Solana first, then swap that. Nothing was signed.")
         }
         let lamports = try await rpc.balance(wallet.solana)
@@ -168,7 +168,7 @@ extension Executor {
             checks.append(.init(label: origin.symbol, before: Int64(tokens), after: Int64(simulation.after[account]?.token ?? 0), atLeast: -spend))
         }
         verdict.merge(SolanaGuard.balances(checks))
-        guard verdict.ok else { throw ExecutionError("The guard stopped the swap: " + verdict.problems.joined(separator: " ")) }
+        guard verdict.ok else { throw GuardStop("The guard stopped the swap: " + verdict.problems.joined(separator: " ")) }
         var step = BridgeStep(requestId: quote.requestId, unsigned: unsigned, accounts: message.staticKeys, tokenOwners: owners, lastValid: lastValid,
                               spend: 0, arriving: 0, feesUSD: quote.feesUSD, chain: chain)
         step.note = what

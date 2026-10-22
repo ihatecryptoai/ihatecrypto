@@ -40,7 +40,7 @@ extension Executor {
         guard problems.isEmpty else { throw ExecutionError("1Click's price moved past the one compared: " + problems.joined(separator: " ") + " Nothing was sent.") }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: recipient, refundTo: refundTo,
                                          origin: origin, destination: destination, amount: "\(units)")
-        guard binding.ok else { throw ExecutionError("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         let tx: String
         if let from, let net = EVMNetwork.named(from) {
             try await ensureEVM(net, usdc: units)
@@ -108,7 +108,7 @@ extension Executor {
         }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: recipient, refundTo: refundTo,
                                          origin: origin, destination: asset, amount: "\(units)")
-        guard binding.ok else { throw ExecutionError("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         let from = src?.name ?? "Solana", what = "\(Fmt.num(amount, maxFraction: 9)) \(symbol.uppercased())"
         report("NEAR Intents: \(Fmt.num(cost)) USDC from \(from) → \(what) to «\(label)»; what isn't used comes back.")
         let tx: String
@@ -145,7 +145,7 @@ extension Executor {
         guard let deposit = quote.depositAddress else { throw ExecutionError("1Click gave no deposit address.") }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: wallet.solana, refundTo: nearAccount,
                                          origin: asset.id, destination: OneClick.Asset.solanaUSDC, amount: "\(units)")
-        guard binding.ok else { throw ExecutionError("The guard refused 1Click's address: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard refused 1Click's address: " + binding.problems.joined(separator: " ")) }
         try journal.append(.init(chain: "1click", id: deposit, kind: .signed,
                                  note: "Receive: \(AddressCheck.Network(rawValue: network)?.title ?? network) \(asset.symbol)→Solana USDC \(Fmt.num(amount))"))
         let minimum = (Decimal(string: quote.minAmountIn ?? "") ?? units) / Decimal(sign: .plus, exponent: asset.decimals, significand: 1)

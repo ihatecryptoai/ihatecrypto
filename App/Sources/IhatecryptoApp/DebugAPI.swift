@@ -6,6 +6,9 @@ import Network
 import SignerAPI
 import SwiftUI
 
+// Only in the copies build-app.sh makes (DEBUG_API, project.yml): a release has no debug API, no Settings tab for
+// it and no badge.
+#if DEBUG_API
 /// Shown next to the zoom while the local debug API is on, so it is never left on unnoticed.
 struct DebugBadge: View {
     @AppStorage("debugAPI") private var on = false
@@ -441,7 +444,13 @@ final class DebugAPI {
         view.cacheDisplay(in: view.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
+}
+#else
+/// The Top up page still reads its requests with DebugAPI.Request.
+enum DebugAPI {}
+#endif
 
+extension DebugAPI {
     /// One HTTP/1.1 request, once its headers and body have all arrived; nil while they haven't.
     struct Request: Sendable {
         let method: String

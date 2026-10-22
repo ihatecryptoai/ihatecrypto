@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2026-10-22",
+    "stories": [
+      {
+        "title": "Sends that find the money",
+        "text": "A send to a saved address on Hyperliquid brings what Hyperliquid lacks from Solana first — or straight from the network that holds it — in the same Confirm, and its card says how much comes over. A send no balance can cover is said at once, before any card.",
+        "symbol": "arrow.triangle.branch",
+        "color": "FF7A2F"
+      },
+      {
+        "title": "When something fails, a way that works",
+        "text": "If a move, a trade or a close doesn't go through, or can't be prepared, the assistant says why in plain words and offers what would work as cards — nothing runs until you press one and Confirm. A stop by the guard, the signer or a scam check is never routed around.",
+        "symbol": "lightbulb.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Nothing moves without your click",
+        "text": "The first recurring buy is a card to confirm, scheduled buys ask you to approve again, a stop or take the assistant suggests on an open trade waits for Confirm, an alert's moves wait for Confirm, and tasks that move money from the automation wallet start paused.",
+        "symbol": "hand.raised.fill",
+        "color": "FF7A2F"
+      },
+      {
+        "title": "Updates wait for you",
+        "text": "A new version shows a small window — Install Update, Remind Me Later or Skip This Version. Nothing downloads or installs until you press Install.",
+        "symbol": "arrow.down.circle.fill",
+        "color": "5856D6"
+      },
+      {
+        "title": "Open source, rebuilt byte for byte",
+        "text": "ihatecrypto's code is public under GPL-3.0, and every release rebuilds from its tag byte for byte apart from the signatures, so anyone can check the app is that code. The signer now proves each of your own addresses with the key at every signature, checks what Uniswap and Jupiter pay out, and caps leverage.",
+        "symbol": "checkmark.seal.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Swaps to ETH finish unwrapping",
+        "text": "After a one-signature approve and swap on an EVM network, the next transaction no longer gets «nonce too low», and a swap to ETH waits for its WETH before unwrapping it, so none is left behind.",
+        "symbol": "wrench.and.screwdriver.fill",
+        "color": "5856D6"
+      }
+    ]
+  },
+  {
     "version": "0.6.9",
     "date": "2026-10-20",
     "stories": [

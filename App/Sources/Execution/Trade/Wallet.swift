@@ -46,7 +46,7 @@ extension Executor {
         if Decimal(string: hl.amount) != usdc { verdict.problems.append("sendAsset amount \(hl.amount) instead of \(usdc).") }
         let arriving = Decimal(string: quote.amountOutFormatted) ?? 0
         if usdc - arriving > min(usdc * Decimal(string: "0.03")!, 1) { verdict.problems.append("Relay charges \(Fmt.num(usdc - arriving)) USDC: more than allowed.") }
-        guard verdict.ok else { throw ExecutionError("The guard stopped the withdrawal: " + verdict.problems.joined(separator: " ")) }
+        guard verdict.ok else { throw GuardStop("The guard stopped the withdrawal: " + verdict.problems.joined(separator: " ")) }
         report("Relay withdrawal: \(Fmt.num(usdc)) USDC from Hyperliquid → \(Fmt.num(arriving)) USDC on Solana, fee \(Decimal(string: quote.feesUSD).map { Fmt.usd($0) } ?? quote.feesUSD).")
 
         guard let id = Data(hex: hl.mappingId) else { throw ExecutionError("Invalid Relay mapping id.") }
@@ -369,7 +369,7 @@ extension Executor {
         let accounts = try await rpc.resolveAccounts(message)
         var verdict = SolanaGuard.check(message, accounts: accounts, policy: SolanaPolicy(owner: wallet.solana), tokenOwners: owners)
         // A program or an account the guard refuses stops it before the simulation: that answer needs no balances.
-        guard verdict.ok else { throw ExecutionError("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
+        guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         let watch = rules.map(\.0) + [wallet.solana]
         var before: [String: Int64] = [:]
         for (account, _, token, _) in rules {
@@ -390,7 +390,7 @@ extension Executor {
         checks.append(.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0),
                             atLeast: lamportsAtLeast))
         verdict.merge(SolanaGuard.balances(checks))
-        guard verdict.ok else { throw ExecutionError("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
+        guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         var changes = rules.map { account, label, token, _ in
             let after = Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0)
             return "\(label): \(after - (before[account] ?? 0)) (raw units)"
@@ -400,7 +400,7 @@ extension Executor {
         if dryRun { return changes }
         let signed = try await signer.signSolana(unsigned, accounts: accounts, recipients: [], tokenOwners: owners)
         guard signed.count == unsigned.count, signed.subdata(in: 65..<signed.count) == unsigned.subdata(in: 65..<unsigned.count) else {
-            throw ExecutionError("What was signed isn't what was checked.")
+            throw GuardStop("What was signed isn't what was checked.")
         }
         let signature = Base58.encode(signed.subdata(in: 1..<65))
         try journal.append(.init(chain: "solana", id: signature, kind: .signed, note: "\(note); valid until block \(lastValid)"))
@@ -450,7 +450,7 @@ extension Executor {
         guard problems.isEmpty else { throw ExecutionError("The price moved past what was approved: " + problems.joined(separator: " ")) }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: account, refundTo: refundTo,
                                          origin: origin, destination: OneClick.Asset.near, amount: "\(units)")
-        guard binding.ok else { throw ExecutionError("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         let from = src?.name ?? "Solana"
         report("NEAR Intents: \(Fmt.num(usdc)) USDC from \(from) → ≈ \(Fmt.num(Decimal(string: quote.amountOutFormatted) ?? 0, maxFraction: 4)) NEAR to your NEAR account.")
         let tx: String
@@ -543,7 +543,7 @@ extension Executor {
         guard problems.isEmpty else { throw ExecutionError("The price moved past what was approved: " + problems.joined(separator: " ")) }
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: recipient, refundTo: account,
                                          origin: OneClick.Asset.near, destination: destination, amount: units)
-        guard binding.ok else { throw ExecutionError("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         report("NEAR Intents: \(Fmt.num(near, maxFraction: 6)) NEAR → ≈ \(Fmt.num(Decimal(string: quote.amountOutFormatted) ?? 0)) USDC to \(place).")
         let signed = try await signer.signNearIntentDeposit(amount: yocto, depositAddress: deposit, nonce: context.nonce, blockHash: context.blockHash)
         try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "NEAR→USDC \(Fmt.num(near, maxFraction: 6)) to \(recipient)\(net.map { " on \($0.name)" } ?? "")"))

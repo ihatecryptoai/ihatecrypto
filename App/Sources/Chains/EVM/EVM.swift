@@ -664,6 +664,12 @@ public enum EVMCall: Equatable, Sendable {
         let args = data.dropFirst(4)
         func word(_ i: Int) -> Data? { args.count >= (i + 1) * 32 ? Data(args.dropFirst(i * 32).prefix(32)) : nil }
         func address(_ i: Int) -> String? { word(i).map { "0x" + $0.suffix(20).hex } }
+        // A swap paying word i's address. `literal`: a router that reads 0x…01 as address 1, not as the caller (only
+        // SwapRouter02 does): the output would be lost, so it isn't read as a swap paying this wallet.
+        func payee(_ i: Int, literal: Bool = false) -> EVMCall? {
+            guard let r = address(i), !literal || r.lowercased() != Self.msgSender else { return nil }
+            return .swap(recipient: r)
+        }
         switch selector {
         case "095ea7b3": if let s = address(0), let a = word(1) { return .approve(spender: s, amount: a) }
         case "39509351": if let s = address(0), let a = word(1) { return .increaseAllowance(spender: s, amount: a) }
@@ -674,16 +680,20 @@ public enum EVMCall: Equatable, Sendable {
         case "d505accf", "8fcbaf0c": return .permit
         // Uniswap v3's exactInputSingle and exactOutputSingle, SwapRouter02's and the first SwapRouter's (with a deadline):
         // a tuple of plain fields, the recipient fourth.
-        case "04e45aaf", "5023b4df", "414bf389", "db3e2198": if let r = address(3) { return .swap(recipient: r) }
-        // exactInput and exactOutput((bytes path, address recipient, …)), both routers: the tuple sits behind an offset.
-        case "b858183f", "09b81346", "c04b8d59", "f28c0498": if let r = address(2) { return .swap(recipient: r) }
+        case "04e45aaf", "5023b4df": if let swap = payee(3) { return swap }
+        case "414bf389", "db3e2198": if let swap = payee(3, literal: true) { return swap }
+        // exactInput and exactOutput((bytes path, address recipient, …)), both routers: the tuple sits behind an offset,
+        // read only where the app's own encoder puts it (0x20). A site could point it elsewhere: the router would pay the
+        // recipient there while word 2 named this wallet.
+        case "b858183f", "09b81346": if ABI.uint(in: Data(args), word: 0) == 32, let swap = payee(2) { return swap }
+        case "c04b8d59", "f28c0498": if ABI.uint(in: Data(args), word: 0) == 32, let swap = payee(2, literal: true) { return swap }
         // Uniswap v2's Router02: swapExactTokensForTokens, …ForETH, swapTokensForExactTokens, …ForExactETH and the
         // fee-on-transfer forms, all (amount, amount, path, to, deadline); SwapRouter02's v2 swaps, (amount, amount, path,
         // to): `to` gets what comes out.
-        case "38ed1739", "5c11d795", "18cbafe5", "791ac947", "8803dbee", "4a25d94a", "472b43f3", "42712a67":
-            if let r = address(3) { return .swap(recipient: r) }
+        case "38ed1739", "5c11d795", "18cbafe5", "791ac947", "8803dbee", "4a25d94a": if let swap = payee(3, literal: true) { return swap }
+        case "472b43f3", "42712a67": if let swap = payee(3) { return swap }
         // The ETH-in forms, (amount, path, to, deadline): swapExactETHForTokens, swapETHForExactTokens, the fee-on-transfer one.
-        case "7ff36ab5", "fb3bdb41", "b6f9de95": if let r = address(2) { return .swap(recipient: r) }
+        case "7ff36ab5", "fb3bdb41", "b6f9de95": if let swap = payee(2, literal: true) { return swap }
         // SwapRouter02's multicall(bytes[]), with a deadline or a previous block hash: read only when every call in it is
         // a swap or a payout this decoder knows; then it is the swap paying whoever its calls pay.
         case "ac9650d8", "5ae401dc", "1f0464d1":
@@ -718,12 +728,12 @@ public enum EVMCall: Equatable, Sendable {
     public static let msgSender = "0x0000000000000000000000000000000000000001", addressThis = "0x0000000000000000000000000000000000000002"
 
     /// Whom a SwapRouter02 multicall pays: the first payee that isn't the caller (so the swap check refuses it), else the
-    /// caller. nil when a call in it is one this decoder doesn't know: it stays a plain contract call. Output left in the
-    /// router with no call to pay it out comes back as ADDRESS_THIS, which is refused too.
+    /// caller. nil when a call in it is one this decoder doesn't know, or when anything is left in the router (a swap to
+    /// ADDRESS_THIS, wrapETH, pull): whether a later payout takes that same token isn't read here, and a decoy payout
+    /// (refundETH, an unwrap of nothing) would leave it for anyone to sweep. It stays a plain contract call then.
     static func multicallRecipient(_ args: Data, arrayWord: Int) -> String? {
         guard let calls = ABI.bytesArray(args, at: arrayWord * 32), !calls.isEmpty else { return nil }
         var payees: [String] = []
-        var held = false
         for call in calls {
             guard call.count >= 4 else { return nil }
             let inner = call.dropFirst(4)
@@ -735,14 +745,13 @@ public enum EVMCall: Equatable, Sendable {
             // unwrapWETH9(min), sweepToken(token, min), refundETH(): to the caller.
             case "49616997", "e90a182f", "12210e8a": payees.append(msgSender)
             // wrapETH(value), pull(token, value): into the router, from the caller.
-            case "1c58db4f", "f2d5d56b": break
+            case "1c58db4f", "f2d5d56b": return nil
             default:
-                guard case .swap(let r) = decode(Data(call)) else { return nil }
-                if r.lowercased() == addressThis { held = true } else { payees.append(r) }
+                guard case .swap(let r) = decode(Data(call)), r.lowercased() != addressThis else { return nil }
+                payees.append(r)
             }
         }
-        if let other = payees.first(where: { $0.lowercased() != msgSender }) { return other }
-        return payees.isEmpty && held ? addressThis : msgSender
+        return payees.first { $0.lowercased() != msgSender } ?? msgSender
     }
 
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:

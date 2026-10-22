@@ -36,7 +36,13 @@ extension Workspace {
         if let same = tasks.first(where: { $0.steps == task.steps && $0.every == task.every && abs($0.next.timeIntervalSince(task.next)) < 60 }) {
             scheduleItem = "task:\(same.id)"
             showSchedule = true
-            // A paused one is out of sight on the Schedule: asked for again, it's switched back on, not made twice.
+            // A paused one is out of sight on the Schedule: asked for again, it's switched back on, not made twice — unless
+            // only the switch may start it (waitsForSwitch).
+            if same.paused == true, waitsForSwitch(same) {
+                reply(say("That’s scheduled and paused: \(what) — \(same.when). It starts only when you switch it on in the Schedule.",
+                          "Это уже запланировано и стоит на паузе: \(what) — \(same.when). Задача начнёт работать, только когда ты включишь её в Schedule."), note: note)
+                return
+            }
             if same.paused == true {
                 setPaused("task:\(same.id)", false)
                 reply(say("That was scheduled and paused: \(what) — \(same.when). It’s on again.", "Это уже было запланировано и стояло на паузе: \(what) — \(same.when). Снова включено."), note: note)
@@ -47,6 +53,8 @@ extension Workspace {
         }
         var task = task
         if SignerClient.untrusted { task.untrusted = true }
+        let paused = waitsForSwitch(task)
+        if paused { task.paused = true }
         tasks.append(task)
         // The Schedule canvas shows it in detail: the chat keeps one line.
         scheduleItem = "task:\(task.id)"
@@ -64,7 +72,15 @@ extension Workspace {
                                                     " С ней на неделю покупок не хватает \(Fmt.num($0)) USDC: пополнить можно в Schedule.") } ?? "")
             : say(" Its moves will wait for your Confirm; to run them by themselves, say «create an automation wallet».",
                   " Движения будут ждать твоего Confirm; чтобы шли сами, скажи «создай кошелёк автоматизации».")
-        reply(say("Scheduled: \(what) — \(task.when). It’s on the canvas.", "Запланировано: \(what) — \(task.when). Это на канвасе.") + how, note: note)
+        reply(paused ? say("Scheduled and paused: \(what) — \(task.when). It’s on the canvas.", "Запланировано, на паузе: \(what) — \(task.when). Это на канвасе.") + how
+                        + say(" It starts only when you switch it on in the Schedule.", " Задача начнёт работать, только когда ты включишь её в Schedule.")
+                     : say("Scheduled: \(what) — \(task.when). It’s on the canvas.", "Запланировано: \(what) — \(task.when). Это на канвасе.") + how, note: note)
+    }
+
+    /// Its moves would go from the automation wallet with no one at the window: a new one starts paused, and only the
+    /// switch on the Schedule — a click in the window, never a chat message or the debug API — turns it on.
+    func waitsForSwitch(_ task: ScheduledTask) -> Bool {
+        usesAutomation(task) && (task.movesMoney || task.steps.contains { PositionCommand.parse($0) != nil })
     }
 
     func cancelTasks(note: String? = nil) {
@@ -119,7 +135,10 @@ extension Workspace {
         let automation = usesAutomation(task) ? automationWallet : nil
         if let automation { reply(say("From the automation wallet «\(automation.label)», no \(Presence.short).", "С кошелька автоматизации «\(automation.label)», без \(Presence.ruGen).")) }
         checkQuiet = false
-        await TaskRun.$automation.withValue(automation) { await runSteps(task.steps, confirmed: automation != nil) }
+        // One made through the debug API runs as if it came through it again: nothing in it signs or sets up a recurring buy.
+        await SignerClient.$untrusted.withValue(task.untrusted == true) {
+            await TaskRun.$automation.withValue(automation) { await runSteps(task.steps, confirmed: automation != nil) }
+        }
         let failed = finishedAction?.outcome.ok == false
         // Short of SOL, it fails the same way every run: said with what to do, and the way to do it as a card.
         if let automation, failed, let address = automation.solana, let sol = try? await Solana.balance(owner: address).sol, sol < TaskRun.solFloor {
@@ -274,6 +293,7 @@ extension Workspace {
             if k == 0, !confirmed, TaskRun.automation == nil, let c = WalletCommand.parse(step) { await freshenSource(c) }
             if k == 0, !confirmed, TaskRun.automation == nil, let c = WalletCommand.parse(step), let why = refusalBeforeCard(c) {
                 reply(why)
+                noteFailure(steps.joined(separator: " then "), ExecutionError(why))
                 break
             }
             // After a move, a step spends what the move brought, Relay's cents taken off.
@@ -334,7 +354,7 @@ extension Workspace {
         saveCanvas()
         taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived)
         // A confirmed chain is through (or stopped): the model goes on with the request it was a step of.
-        if confirmed { await continueAgent() }
+        if confirmed { await afterMove() }
     }
 
     /// A step that spends money on a network, run after a move landed there: when the move's fee left it a little short

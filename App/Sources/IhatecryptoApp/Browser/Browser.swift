@@ -165,7 +165,7 @@ final class Browser {
             guard connected.contains(origin), let b64 = params["transaction"] as? String, let wire = Data(base64Encoded: b64) else { throw SiteError("Connect the site first.") }
             let send = method == "signAndSendTransaction"
             var review = try await review(wire, owner: owner)
-            if let ws = workspace, ws.jevScreening, let key = ws.openRouterKey {
+            if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
                 review.jev = try? await JevReviewer.site(host: host.isEmpty ? origin : host, title: title, programs: review.programNames, changes: review.changes, apiKey: key)
                 if review.jev == nil { review.jevNote = "The second check didn't answer — the code checks decide." }
             } else {
@@ -254,7 +254,7 @@ final class Browser {
             guard let url = Self.evmRPC[chain].flatMap(URL.init(string:)) else { throw SiteError("4901|No RPC for chain \(chain).") }
             let rpc = EVMRPC(url: url, chainId: chain)
             var review = await evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
-            if let ws = workspace, ws.jevScreening, let key = ws.openRouterKey {
+            if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
                 review.jev = try? await JevReviewer.site(host: host(origin), title: title, programs: ["EVM \(chain): \(to)"], changes: review.lines + review.changes, apiKey: key)
             }
             guard await ask(.evmTransaction(review), origin: origin, site: site), review.problems.isEmpty else {

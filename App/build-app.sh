@@ -19,7 +19,7 @@ EXTRA=${IHATECRYPTO_PROFILE:+CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES}
 xcodegen generate --quiet
 log=$(mktemp -t ihatecrypto-build)
 if ! xcodebuild -project ihatecrypto.xcodeproj -scheme ihatecrypto -configuration "${1:-Release}" -derivedDataPath ../.build/xcode \
-     -allowProvisioningUpdates -skipPackagePluginValidation APP_NAME="$name" APP_ID=$id ${TEAM:+DEVELOPMENT_TEAM=$TEAM} $EXTRA \
+     -allowProvisioningUpdates -skipPackagePluginValidation APP_NAME="$name" APP_ID=$id DEBUG_API_CONDITION=DEBUG_API ${TEAM:+DEVELOPMENT_TEAM=$TEAM} $EXTRA \
      build > "$log" 2>&1; then
   grep -E "error:|DESERIALIZATION|Command .* failed|BUILD FAILED" "$log" | cut -c1-300 | head -20
   echo "full log: $log"

@@ -86,7 +86,8 @@ let package = Package(
                            .product(name: "Sparkle", package: "Sparkle")],
             // Logos, sounds and the stories are bundled by the Xcode project; `swift run` shows lettered circles instead.
             exclude: ["Logos", "Sounds", "WhatsNew"],
-            swiftSettings: [.defaultIsolation(MainActor.self)]
+            // The local debug API (DebugAPI.swift) is in `swift run` and the copies build-app.sh makes, never in a release.
+            swiftSettings: [.defaultIsolation(MainActor.self), .define("DEBUG_API")]
         ),
 
         .testTarget(name: "IhatecryptoCoreTests", dependencies: ["IhatecryptoCore", "LLMCore"]),

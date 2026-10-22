@@ -629,13 +629,13 @@ enum Signer {
             try vouch(chain, secret, of: wallet)
             return try body(secret)
         }
+        try vouch(seed: secret, of: wallet)
         var key = switch chain {
         case "solana": try Derivation.ed25519(seed: secret, path: WalletPath.solana(0))
         case "evm": try Derivation.secp256k1(seed: secret, path: WalletPath.evm(0))
         default: try Derivation.ed25519(seed: secret, path: WalletPath.near(0))
         }
         defer { SeedStore.wipe(&key) }
-        try vouch(chain, key, of: wallet)
         return try body(key)
     }
 
@@ -649,6 +649,24 @@ enum Signer {
             throw WalletError("This wallet's saved \(chain) address isn't the one its key signs for: nothing was signed.")
         }
         if wallet.solana != publicTestSolana { OwnStore.add([a]) }
+    }
+
+    /// A phrase wallet's every saved address, not only the one this signature is for: the app pays to the others too (a
+    /// NEAR account or a Solana address in a bridge quote, Receive), so one changed in the settings is caught at the first
+    /// signature of any kind. Its seed derives them all: the mirrors and the wallet list must name those.
+    private static func vouch(seed: Data, of wallet: SignerWallet) throws {
+        for chain in ["solana", "evm", "near"] {
+            var key = try chain == "evm" ? Derivation.secp256k1(seed: seed, path: WalletPath.evm(0))
+                : Derivation.ed25519(seed: seed, path: chain == "solana" ? WalletPath.solana(0) : WalletPath.near(0))
+            defer { SeedStore.wipe(&key) }
+            let own = try chain == "solana" ? SolanaAccount.address(privateKey: key)
+                : chain == "evm" ? EVMAccount.address(privateKey: key) : NearAccount.implicit(privateKey: key)
+            let saved = [try? address(chain), chain == "solana" ? wallet.solana : chain == "evm" ? wallet.evm : wallet.near].compactMap { $0 }
+            if saved.contains(where: { RecipientStore.key($0) != RecipientStore.key(own) }) {
+                throw WalletError("This wallet's saved \(chain) address isn't the one its key signs for: nothing was signed.")
+            }
+            if chain != "near", wallet.solana != publicTestSolana { OwnStore.add([own]) }
+        }
     }
 
     static let publicTestSolana = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
@@ -685,7 +703,8 @@ enum Signer {
         // The Test wallet signs without Touch ID by design (a few dollars for checks): asking it about a new address
         // only stops the check. Its approvals are its own (RecipientStore is per wallet), so no other wallet skips one.
         if holdsPublicTestWallet { return }
-        if let wallet = Wallets.active, wallet.isTest, signsWithoutPrompt(wallet) { return }
+        // Never the automation wallet: its seed opens without a prompt too, so a test flag on it would pass any address.
+        if let wallet = Wallets.active, wallet.isTest, !wallet.isAutomation, Wallets.signing == nil, signsWithoutPrompt(wallet) { return }
         let own = Set([try? address("solana"), (try? address("evm"))?.lowercased()].compactMap { $0 })
         // An address saved in the book was confirmed in person, whole, when it was saved; another wallet of this Mac's
         // is the user's own.
