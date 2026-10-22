@@ -9,6 +9,8 @@ nonisolated struct PortfolioView: Encodable, Equatable {
     struct Row: Encodable, Equatable {
         var symbol: String
         var amount: String
+        /// The amount as a number, for the «money arrived» check.
+        var value: Decimal
         var usd: Decimal?
         var icon: String?
     }
@@ -52,9 +54,34 @@ extension Engine {
         // Solana, then Hyperliquid, then the rest by their money, as on the Mac.
         let order = ["solana": 0, "hyperliquid": 1]
         networks.sort { (order[$0.key] ?? 2, -$0.usd) < (order[$1.key] ?? 2, -$1.usd) }
-        portfolio = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
+        let next = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
+        // Another wallet since the last read: its balances aren't money that arrived.
+        if portfolio.updatedAt != nil, portfolioOwner == me.solana { announceIncoming(from: portfolio, to: next) }
+        portfolio = next
+        portfolioOwner = me.solana
         positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
         changed()
+    }
+
+    /// Dollars and SOL that came in since the last read, said in the chat, as the Mac does. Not after a move of the
+    /// user's own (two minutes), whose change the chat already told.
+    func announceIncoming(from old: PortfolioView, to new: PortfolioView) {
+        guard running == nil, Date().timeIntervalSince(lastOwnMove) > 120 else { return }
+        func amounts(_ p: PortfolioView) -> [String: Decimal] {
+            Dictionary(p.networks.flatMap { n in n.rows.filter { ["USDC", "USDG", "SOL"].contains($0.symbol) }.map { ("\(n.name)|\($0.symbol)", $0.value) } },
+                       uniquingKeysWith: +)
+        }
+        let before = amounts(old), after = amounts(new)
+        let lines = after.sorted { $0.key < $1.key }.compactMap { key, now -> String? in
+            let was = before[key] ?? 0, parts = key.split(separator: "|")
+            let least = parts[1] == "SOL" ? Decimal(string: "0.0005")! : Decimal(string: "0.01")!
+            guard now - was >= least, old.networks.contains(where: { $0.name == parts[0] }) || was == 0 else { return nil }
+            return "+\(Fmt.num(now - was, maxFraction: parts[1] == "SOL" ? 4 : 2)) \(parts[1]) " + say("on", "на") + " \(parts[0])"
+        }
+        guard !lines.isEmpty else { return }
+        let text = say("💸 Received ", "💸 Пришло ") + lines.joined(separator: ", ") + "."
+        out.event("notify", ["title": say("Money arrived", "Пришли деньги"), "body": text])
+        reply(text, note: "incoming")
     }
 
     /// Coins with no price of their own take Hyperliquid's mark for the same coin (SOL, ETH, HYPE…).
@@ -62,9 +89,7 @@ extension Engine {
         var n = n
         n.rows = n.rows.map { r in
             var r = r
-            if r.usd == nil, let mark = markets[r.symbol]?.markPx, let amount = Decimal(string: r.amount.replacingOccurrences(of: ",", with: "")) {
-                r.usd = mark * amount
-            }
+            if r.usd == nil, let mark = markets[r.symbol]?.markPx { r.usd = mark * r.value }
             return r
         }
         n.usd = n.rows.reduce(0) { $0 + ($1.usd ?? 0) }
@@ -77,7 +102,7 @@ extension Engine {
     }
 
     nonisolated static func row(_ symbol: String, _ amount: Decimal, usd: Decimal? = nil, icon: URL? = nil) -> PortfolioView.Row {
-        .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), usd: usd, icon: icon?.absoluteString)
+        .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), value: amount, usd: usd, icon: icon?.absoluteString)
     }
 
     nonisolated static func solana(_ owner: String) async -> Read {

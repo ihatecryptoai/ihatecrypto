@@ -44,6 +44,8 @@ tauri.event.listen("engine", (e) => {
   } else if (msg.event === "openURL") {
     // A sign-in page the engine asks for (ChatGPT, OpenRouter): https only, in the default browser.
     invoke("open_link", { url: msg.data.url }).catch((x) => toast(String(x)));
+  } else if (msg.event === "notify") {
+    toast(msg.data.body);
   } else if (msg.event === "engineStopped") {
     toast(t("The engine stopped. Restart ihatecrypto.", "Движок остановился. Перезапусти ihatecrypto."));
   } else if (typeof msg.id === "number" && waiting.has(msg.id)) {

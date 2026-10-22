@@ -353,7 +353,7 @@ extension Engine {
         card = nil
         running = (title, [])
         changed()
-        defer { running = nil; changed(); Task { await refresh() } }
+        defer { running = nil; lastOwnMove = Date(); changed(); Task { await refresh() } }
         let started = Date()
         do {
             switch waiting {

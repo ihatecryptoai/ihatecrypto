@@ -74,6 +74,10 @@ final class Engine {
     var positions: [HyperliquidAccount.Position] = []
     var refreshing = false
     var refreshingEveryMinute = false
+    /// When the user's last move ran: the balance change it made isn't announced as money arriving.
+    var lastOwnMove = Date.distantPast
+    /// The wallet the balances on screen were read for.
+    var portfolioOwner: String?
 
     // Chat
     var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
