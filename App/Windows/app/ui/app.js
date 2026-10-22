@@ -41,6 +41,9 @@ tauri.event.listen("engine", (e) => {
   if (msg.event === "state") {
     state = msg.data;
     render();
+  } else if (msg.event === "openURL") {
+    // A sign-in page the engine asks for (ChatGPT, OpenRouter): https only, in the default browser.
+    invoke("open_link", { url: msg.data.url }).catch((x) => toast(String(x)));
   } else if (msg.event === "engineStopped") {
     toast(t("The engine stopped. Restart ihatecrypto.", "Движок остановился. Перезапусти ihatecrypto."));
   } else if (typeof msg.id === "number" && waiting.has(msg.id)) {
@@ -353,6 +356,12 @@ function settings() {
           const r = await act("connectModel", { provider: choice.provider, key: choice.key || undefined, model: choice.model || undefined });
           if (r !== null) toast(t("Connected.", "Подключено."));
         } }, t("Connect", "Подключить")),
+        h("button", { class: "btn", onclick: async () => {
+          const p = chosen();
+          if (!p || !p.signIn) { toast(t("This provider connects with a key.", "Этот провайдер подключается ключом.")); return; }
+          toast(t("Finish the sign-in in the browser.", "Закончи вход в браузере."));
+          if (await act("signIn", { provider: p.id }) !== null) toast(t("Signed in.", "Вход выполнен."));
+        } }, t("Sign in with the browser", "Войти через браузер")),
         s.model.connected ? h("button", { class: "btn", onclick: () => act("disconnectModel", { provider: s.model.provider }) }, t("Disconnect", "Отключить")) : null)),
 
     h("h2", {}, t("Language", "Язык")),

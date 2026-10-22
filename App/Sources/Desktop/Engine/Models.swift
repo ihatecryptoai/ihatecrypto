@@ -17,6 +17,8 @@ nonisolated struct ProviderView: Encodable {
     var kind: String
     var takesKey: Bool
     var existingLogin: String?
+    /// «Sign in with ChatGPT»: a browser sign-in, caught on 127.0.0.1.
+    var signIn: String?
     var note: String
     var unavailable: String?
     var connected: Bool
@@ -49,7 +51,7 @@ extension Engine {
         let saved = Store.credentials()
         return LLMCatalog.all.filter { $0.info.id != "apple" }.map { p in
             ProviderView(id: p.info.id, name: p.info.name, kind: "\(p.info.kind)", takesKey: p.info.takesKey,
-                         existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, note: p.info.note,
+                         existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, signIn: p.info.signInLabel, note: p.info.note,
                          unavailable: p.info.unavailable, connected: saved[p.info.id] != nil || p.info.kind == .local)
         }
     }
@@ -75,6 +77,17 @@ extension Engine {
         if let credential { Store.setCredential(credential, for: id) }
         settings.provider = id
         settings.model = chosen
+    }
+
+    /// The provider's browser sign-in: the window opens the page (the «openURL» event), the redirect comes back to
+    /// 127.0.0.1, and the tokens are kept like a key.
+    func signIn(provider id: String) async throws {
+        guard let p = provider(id), p.info.signInLabel != nil else { throw WalletError("«\(id)» has no browser sign-in: paste its key.") }
+        let out = out
+        let credential = try await p.signIn(open: { url in out.event("openURL", ["url": url.absoluteString]) })
+        Store.setCredential(credential, for: id)
+        settings.provider = id
+        settings.model = p.info.defaultModel
     }
 
     func disconnect(provider id: String) {

@@ -256,6 +256,7 @@ final class Engine {
             try await saveAddress(SignerAddress(name: r.name ?? "", network: r.network ?? "", address: r.address ?? "", memo: r.memo ?? ""))
         case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
+        case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")
         case "setModel": settings.model = r.model
         case "language": settings.language = r.language == "auto" ? nil : r.language
