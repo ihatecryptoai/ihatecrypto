@@ -118,6 +118,15 @@ import Testing
         #expect(r.state?["card"] == nil)
     }
 
+    @Test func aPriceAlertIsKeptAndCleared() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let set = try engine.call("send", ["text": "alert me when BTC is above 100000000"])
+        #expect((set.state?["alerts"] as? [[String: Any]])?.count == 1, "\(Self.chat(set.state).last ?? "")")
+        let cleared = try engine.call("send", ["text": "clear my alerts"])
+        #expect((cleared.state?["alerts"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {
         let engine = try Engine()
         try engine.call("hello")

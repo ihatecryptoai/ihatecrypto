@@ -90,6 +90,10 @@ final class Engine {
     var awaitingAmount: WalletCommand?
     /// The trade plan the chat is building: a perp on Hyperliquid.
     var intent = TradeIntent()
+    /// Price alerts, checked against Hyperliquid's marks at every refresh while the app is open.
+    var alerts: [PriceAlert] = Store.load([PriceAlert].self, "alerts.json") ?? [] {
+        didSet { Store.save(alerts, "alerts.json") }
+    }
 
     init(out: Outbox) { self.out = out }
 
@@ -153,6 +157,7 @@ final class Engine {
             var sessionLength: Int?
         }
         struct Option: Encodable { var title: String; var comment: String; var recommended: Bool }
+        struct Alert: Encodable { var id: String; var text: String }
         struct Running: Encodable { var title: String; var lines: [String] }
         struct Position: Encodable {
             var coin: String
@@ -182,6 +187,7 @@ final class Engine {
         var russian: Bool
         var book: [SignerAddress]
         var history: [HistoryLine]
+        var alerts: [Alert]
     }
 
     func snapshot() -> Snapshot {
@@ -202,7 +208,8 @@ final class Engine {
             running: running.map { .init(title: $0.title, lines: $0.lines) },
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews,
-            language: settings.language ?? "auto", russian: russian, book: book, history: history())
+            language: settings.language ?? "auto", russian: russian, book: book, history: history(),
+            alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) })
     }
 
     // MARK: Requests from the window
@@ -273,6 +280,7 @@ final class Engine {
         case "saveAddress":
             try await saveAddress(SignerAddress(name: r.name ?? "", network: r.network ?? "", address: r.address ?? "", memo: r.memo ?? ""))
         case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
+        case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")

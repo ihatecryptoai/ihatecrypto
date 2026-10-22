@@ -60,6 +60,7 @@ extension Engine {
         portfolio = next
         portfolioOwner = me.solana
         positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
+        await checkAlerts()
         changed()
     }
 

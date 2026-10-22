@@ -98,10 +98,11 @@ Receive, the address book, the portfolio on Solana, Hyperliquid, every EVM netwo
 (an API key, a browser sign-in to ChatGPT or OpenRouter caught on 127.0.0.1, a local model, or a login another app
 has) or plain commands without one, every money command the Mac's
 chat runs through the Executor (transfers, swaps, bridges, lending, Hyperliquid spot), Hyperliquid trades by the risk
-rules with every signature on the card, managing open positions, several moves in one message under one Confirm, history from the journal, lock and the session
+rules with every signature on the card, managing open positions, several moves in one message under one Confirm,
+price alerts (checked every minute while the app is open; their moves come as cards), history from the journal, lock and the session
 length, signed updates.
 
-Not yet: the canvas and its boards, scheduled tasks and the automation wallet, price alerts, the dApp browser,
+Not yet: the canvas and its boards, scheduled tasks and the automation wallet, the dApp browser,
 multisig, Ledger, charts and P/L, favorites, skills, the second check (Jev), paid requests (MPP), voice, notifications.
 
 ## Checking on a Windows machine

@@ -79,6 +79,7 @@ extension Engine {
     private func readWithoutModel(_ text: String) async {
         if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
         if let command = AddressBookCommand.parse(text) { await addressBook(command, userText: text); return }
+        if let command = AlertCommand.parse(text, markets: Set(markets.keys)) { await alert(command, note: nil); return }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
         if let command = WalletCommand.parse(text) { await handleWallet(command); return }
         if !positions.isEmpty, let command = PositionCommand.parse(text) {
@@ -157,6 +158,10 @@ extension Engine {
             reply(say("The plan is cleared.", "План очищен."), note: note)
             return true
         default: break
+        }
+        if let command = AlertCommand.parse(canonical, markets: Set(markets.keys)) {
+            await alert(command, note: note)
+            return true
         }
         if let command = AddressBookCommand.parse(canonical) {
             // The model only rewords: an address it wrote must be in the user's own message, character for character.
@@ -248,6 +253,7 @@ extension Engine {
         c.recent = recentChat()
         c.plan = intent == TradeIntent() ? nil : intent.command
         if let card { c.canvas.append("waiting for Confirm: " + card.title) }
+        c.canvas += alerts.map { "price alert: " + alertText($0) }
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }
         c.addressBook = book.map { "\($0.name) (\(AddressCheck.Network(rawValue: $0.network)?.title ?? $0.network))" }
         c.balances = portfolioFacts()
