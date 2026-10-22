@@ -54,4 +54,15 @@ int32_t winsec_ledger_write(void *device, const uint8_t *packet, int32_t len);
 int32_t winsec_ledger_read(void *device, uint8_t *out, int32_t cap, int32_t timeout_ms);
 void winsec_ledger_close(void *device);
 
+/// A Ledger over Bluetooth LE (Nano X, Stax, Flex, Apex), linked within `timeout_ms`: an opaque handle, or NULL with
+/// the reason in `why` (UTF-8, `why_len` bytes). Frames are Ledger's without the HID channel, at most `mtu` bytes.
+void *winsec_ble_open(int32_t timeout_ms, uint8_t *why, int32_t why_cap, int32_t *why_len);
+/// The model's name into `model` (its length) and the most one write carries into `mtu`.
+int32_t winsec_ble_info(void *link, uint8_t *model, int32_t cap, int32_t *mtu);
+int32_t winsec_ble_write(void *link, const uint8_t *frame, int32_t len);
+/// One notification into `out`, waiting at most `timeout_ms`: its length, 0 when none came, -1 once the link is gone.
+int32_t winsec_ble_read(void *link, uint8_t *out, int32_t cap, int32_t timeout_ms);
+void winsec_ble_drain(void *link);
+void winsec_ble_close(void *link);
+
 #endif

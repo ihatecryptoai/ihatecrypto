@@ -5,6 +5,7 @@
 #![cfg(windows)]
 #![allow(clippy::missing_safety_doc)]
 
+mod ble;
 mod ledger;
 
 use std::ffi::c_void;

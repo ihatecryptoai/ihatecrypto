@@ -55,6 +55,93 @@ nonisolated struct WinLedgerHID: LedgerTransport {
     }
 }
 
+/// A Ledger over Bluetooth LE through winsec.dll's WinRT GATT calls, as the Mac's LedgerBLE: one link for the app's
+/// life (linking takes seconds), Ledger's framing without the HID channel, in pieces as large as the link allows.
+nonisolated final class WinLedgerBLE: LedgerTransport, @unchecked Sendable {
+    static let shared = WinLedgerBLE()
+    private let lock = NSLock()
+    private var link: UnsafeMutableRawPointer?
+    private var mtu = 20
+    private(set) var model: String?
+
+    /// Links a Ledger within `timeout`: its model, or nil with the reason.
+    func connect(timeout: TimeInterval) async -> (model: String?, why: String?) {
+        await Task.detached { [self] in
+            lock.withLock {
+                do { try linkUp(timeout) } catch { return (nil, error.localizedDescription) }
+                return (model, nil)
+            }
+        }.value
+    }
+
+    func exchange(_ apdu: Data, timeout: TimeInterval) async throws -> Data {
+        try await Task.detached { [self] in
+            try lock.withLock {
+                // The first link may wait for Windows' pairing prompt.
+                try linkUp(45)
+                do { return try exchangeSync(apdu, timeout: timeout) } catch {
+                    // A link that went away is made again next time.
+                    winsec_ble_close(link)
+                    link = nil
+                    throw error
+                }
+            }
+        }.value
+    }
+
+    private func linkUp(_ timeout: TimeInterval) throws {
+        guard link == nil else { return }
+        var why = [UInt8](repeating: 0, count: 256), whyLength: Int32 = 0
+        guard let l = winsec_ble_open(Int32(timeout * 1000), &why, Int32(why.count), &whyLength) else {
+            throw LedgerError(String(decoding: why.prefix(Int(whyLength)), as: UTF8.self))
+        }
+        var name = [UInt8](repeating: 0, count: 32), size: Int32 = 20
+        let n = winsec_ble_info(l, &name, Int32(name.count), &size)
+        model = n > 0 ? String(decoding: name.prefix(Int(n)), as: UTF8.self) : "Ledger"
+        link = l
+        // Ledger's own client confirms notifications (0x0001), then asks the device's MTU (0x08).
+        _ = try? request(Data([0x00, 0x01]), timeout: 2)
+        if let reply = try? request(Data([0x08, 0, 0, 0, 0]), timeout: 3), reply.count > 5, reply[reply.startIndex] == 0x08 {
+            mtu = max(20, min(Int(reply[reply.startIndex + 5]), Int(size)))
+        } else {
+            mtu = max(20, Int(size))
+        }
+    }
+
+    private func write(_ frame: Data) throws {
+        let sent = frame.withUnsafeBytes { winsec_ble_write(link, $0.bindMemory(to: UInt8.self).baseAddress, Int32(frame.count)) }
+        guard sent == 0 else { throw LedgerError("The Ledger went away over Bluetooth: unlock it and keep it close.") }
+    }
+
+    private func read(_ timeout: TimeInterval) throws -> Data? {
+        var buffer = [UInt8](repeating: 0, count: 512)
+        let n = winsec_ble_read(link, &buffer, Int32(buffer.count), Int32(timeout * 1000))
+        guard n >= 0 else { throw LedgerError("The Ledger went away over Bluetooth: unlock it and keep it close.") }
+        return n > 0 ? Data(buffer.prefix(Int(n))) : nil
+    }
+
+    /// One handshake frame and the first notification back.
+    private func request(_ frame: Data, timeout: TimeInterval) throws -> Data {
+        winsec_ble_drain(link)
+        try write(frame)
+        guard let reply = try read(timeout) else { throw LedgerError("No answer over Bluetooth.") }
+        return reply
+    }
+
+    private func exchangeSync(_ apdu: Data, timeout: TimeInterval) throws -> Data {
+        winsec_ble_drain(link)
+        for frame in LedgerFraming.packets(apdu, size: mtu, hid: false) { try write(frame) }
+        var packets: [Data] = []
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            if let reply = try LedgerFraming.reply(packets, hid: false) { return reply }
+            let left = deadline.timeIntervalSinceNow
+            guard left > 0 else { throw LedgerError("The Ledger didn't answer in time: check its screen and try again.") }
+            if let p = try read(min(left, 1)) { packets.append(p) }
+        }
+    }
+}
+
 /// The Ledger's addresses as a wallet in the list: nothing of it is on this computer but what it shows.
 nonisolated struct LedgerAccount: Codable, Equatable {
     static let id = "ledger"
@@ -66,6 +153,10 @@ nonisolated struct LedgerAccount: Codable, Equatable {
     var solanaPath = LedgerDevice.solanaPath
     /// It signs now instead of the signer's wallet.
     var active: Bool?
+    /// Found over Bluetooth rather than USB.
+    var bluetooth: Bool?
+
+    var transport: any LedgerTransport { bluetooth == true ? WinLedgerBLE.shared : WinLedgerHID() }
 
     var wallet: SignerWallet { SignerWallet(id: Self.id, label: label, kind: "ledger", solana: solana, evm: evm, near: nil) }
 }
@@ -89,7 +180,7 @@ extension Engine {
     /// device shows it and waits for its buttons. What the device waits for shows on the running move.
     func ledgerSigner(_ wallet: TradeWallet) -> LedgerSigner {
         let account = ledger ?? LedgerAccount()
-        return LedgerSigner(device: LedgerDevice(WinLedgerHID()), wallet: wallet, evmPath: account.evmPath, solanaPath: account.solanaPath, model: account.model,
+        return LedgerSigner(device: LedgerDevice(account.transport), wallet: wallet, evmPath: account.evmPath, solanaPath: account.solanaPath, model: account.model,
                             prompt: { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
@@ -106,24 +197,34 @@ extension Engine {
         ledgerConnect = LedgerConnect(status: say("Looking for a Ledger on USB…", "Ищу Ledger на USB…"))
         pin(Board(kind: "ledger", title: "ledger"))
         reply(say("Connecting your Ledger — follow its block on the canvas.", "Подключаю Ledger — следи за блоком на холсте."))
+        // USB when it's plugged in; otherwise Bluetooth (Nano X, Stax, Flex, Apex), looked for in short rounds.
         var found = WinLedgerHID.connected()
-        for _ in 0..<30 where found == nil {
-            ledgerConnect?.status = say("Plug your Ledger in over USB and unlock it.", "Подключи Ledger по USB и разблокируй его.")
+        var bluetooth = false
+        var why: String?
+        for _ in 0..<12 where found == nil {
+            ledgerConnect?.status = say("Plug your Ledger in over USB and unlock it — or, on a Nano X, Stax or Flex, unlock it with Bluetooth on and keep it close.",
+                                        "Подключи Ledger по USB и разблокируй — или, если это Nano X, Stax или Flex, разблокируй с включённым Bluetooth и держи рядом.")
             changed()
-            try? await Task.sleep(for: .seconds(2))
+            let ble = await WinLedgerBLE.shared.connect(timeout: 4)
+            if let model = ble.model { found = model; bluetooth = true; break }
+            why = ble.why
+            try? await Task.sleep(for: .seconds(1))
             guard ledgerConnect != nil else { return }
             found = WinLedgerHID.connected()
         }
         guard let model = found else {
-            ledgerConnect?.problem = say("No Ledger answered over USB in a minute. Plug it in, unlock it and press Try again.", "За минуту Ledger не ответил по USB. Подключи, разблокируй и нажми «Ещё раз».")
+            ledgerConnect?.problem = say("No Ledger answered over USB or Bluetooth in a minute. Plug it in or turn its Bluetooth on, unlock it and press Connect again.",
+                                         "За минуту Ledger не ответил ни по USB, ни по Bluetooth. Подключи его или включи Bluetooth, разблокируй и нажми «Подключить снова».")
+                + (why.map { " (" + $0 + ")" } ?? "")
             ledgerConnect?.busy = false
             changed()
             return
         }
-        ledgerConnect?.model = model
+        ledgerConnect?.model = model + (bluetooth ? " · Bluetooth" : " · USB")
         var account = ledger ?? LedgerAccount()
         account.model = model
-        let device = LedgerDevice(WinLedgerHID())
+        account.bluetooth = bluetooth
+        let device = LedgerDevice(account.transport)
         do {
             ledgerConnect?.status = say("Open the Ethereum app on your Ledger — or allow it when the Ledger asks.", "Открой приложение Ethereum на Ledger — или разреши, когда он спросит.")
             changed()
@@ -160,7 +261,7 @@ extension Engine {
     /// One of its addresses on its own screen, to compare with the one here: what the device says is the truth.
     func showOnLedger(solana: Bool) async {
         guard let account = ledger else { return }
-        let device = LedgerDevice(WinLedgerHID())
+        let device = LedgerDevice(account.transport)
         if ledgerConnect == nil { ledgerConnect = LedgerConnect(model: account.model, evm: account.evm, solana: account.solana, busy: false) }
         pin(Board(kind: "ledger", title: "ledger"))
         ledgerConnect?.problem = nil

@@ -134,4 +134,18 @@ int32_t winsec_ledger_product(uint8_t *out, int32_t cap) { (void)out; (void)cap;
 int32_t winsec_ledger_write(void *device, const uint8_t *packet, int32_t len) { (void)device; (void)packet; (void)len; return -1; }
 int32_t winsec_ledger_read(void *device, uint8_t *out, int32_t cap, int32_t timeout_ms) { (void)device; (void)out; (void)cap; (void)timeout_ms; return -1; }
 void winsec_ledger_close(void *device) { (void)device; }
+
+void *winsec_ble_open(int32_t timeout_ms, uint8_t *why, int32_t why_cap, int32_t *why_len) {
+    (void)timeout_ms;
+    static const char text[] = "Bluetooth to a Ledger works on Windows.";
+    int32_t n = (int32_t)sizeof(text) - 1 < why_cap ? (int32_t)sizeof(text) - 1 : why_cap;
+    memcpy(why, text, (size_t)n);
+    *why_len = n;
+    return NULL;
+}
+int32_t winsec_ble_info(void *link, uint8_t *model, int32_t cap, int32_t *mtu) { (void)link; (void)model; (void)cap; (void)mtu; return -1; }
+int32_t winsec_ble_write(void *link, const uint8_t *frame, int32_t len) { (void)link; (void)frame; (void)len; return -1; }
+int32_t winsec_ble_read(void *link, uint8_t *out, int32_t cap, int32_t timeout_ms) { (void)link; (void)out; (void)cap; (void)timeout_ms; return -1; }
+void winsec_ble_drain(void *link) { (void)link; }
+void winsec_ble_close(void *link) { (void)link; }
 #endif

@@ -12,7 +12,11 @@ crate-type = ["cdylib"]
 [target.'cfg(windows)'.dependencies]
 zeroize = "1.9.1"
 windows = { version = "0.62.2", features = [
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Advertisement",
+    "Devices_Bluetooth_GenericAttributeProfile",
     "Foundation",
+    "Foundation_Collections",
     "Security_Credentials",
     "Security_Cryptography",
     "Storage_Streams",
