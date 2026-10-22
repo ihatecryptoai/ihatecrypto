@@ -25,6 +25,20 @@ enum Pending {
     case position(PositionCommand, coin: String)
     case trade(Executor.Prepared)
     case address(SignerAddress)
+    /// «withdraw 5 USDC to Solana then deposit 5 USDC to kamino»: one Confirm, the steps in order, the first failure stops them.
+    case chain([ChainStep])
+}
+
+enum ChainStep {
+    case wallet(WalletCommand)
+    case transfer(SignerAddress, Decimal)
+
+    var title: String {
+        switch self {
+        case .wallet(let c): c.summary
+        case .transfer(let e, let amount): "send \(Fmt.num(amount)) USDC to \(e.name)"
+        }
+    }
 }
 
 /// The card the window draws for what's pending: what will happen, in lines, and what to look at first.

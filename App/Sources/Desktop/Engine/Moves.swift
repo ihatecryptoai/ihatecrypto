@@ -314,6 +314,36 @@ extension Engine {
         }
     }
 
+    /// Several moves read from one message: each must be a money command this app runs, with its amount, to a saved
+    /// name; then one card lists them all.
+    func chain(_ steps: [String], note: String?) async -> Bool {
+        var parsed: [ChainStep] = []
+        for step in steps {
+            guard let command = WalletCommand.parse(step) else { return false }
+            if let missing = missingKey(command) { reply(missing, note: note); return true }
+            if let off = Modules.current.refusal(command, ru: russian) { reply(off, note: note); return true }
+            if command.amountQuestion != nil {
+                reply(say("Each step needs its amount: “\(step)” has none.", "У каждого шага должна быть сумма: в «\(step)» её нет."), note: note)
+                return true
+            }
+            if case .sendTo(let name, let amount, let network) = command {
+                guard let e = entry(name, network: network), e.network != "near", OneClick.Asset.across[e.network] == nil, e.memo.isEmpty || e.network != "solana" else {
+                    reply(say("“\(name)” can't take a USDC transfer in a chain: send it on its own.", "«\(name)» не может получить USDC в цепочке: отправь отдельно."), note: note)
+                    return true
+                }
+                parsed.append(.transfer(e, amount))
+            } else {
+                parsed.append(.wallet(command))
+            }
+        }
+        show(.chain(parsed), title: say("\(parsed.count) steps, one Confirm", "\(parsed.count) шага, одно подтверждение"),
+             lines: parsed.enumerated().map { "\($0.offset + 1). \($0.element.title)" }
+                + [say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
+                       "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
+        reply(say("In steps: ", "По шагам: ") + parsed.map(\.title).joined(separator: " → ") + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена»."), note: note)
+        return true
+    }
+
     // MARK: Confirm
 
     /// The Confirm button: the one way a move starts.
@@ -341,6 +371,17 @@ extension Engine {
                 reply(say("Opened: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))",
                           "Открыто: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) по \(Fmt.price(opened.entry)), стоп \(Fmt.price(opened.stop))")
                       + (opened.take.map { say(", take \(Fmt.price($0)).", ", тейк \(Fmt.price($0)).") } ?? "."), note: "Hyperliquid")
+            case .chain(let steps):
+                for (i, step) in steps.enumerated() {
+                    running?.lines.append(say("Step \(i + 1): ", "Шаг \(i + 1): ") + step.title)
+                    changed()
+                    switch step {
+                    case .wallet(let command): try await move(command)
+                    case .transfer(let entry, let amount): reply(try await transfer(amount, to: entry), note: "transfer")
+                    }
+                    // The next step reads balances after this one landed.
+                    await refresh()
+                }
             case .address(let entry):
                 try await saveAddress(entry)
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))

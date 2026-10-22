@@ -139,5 +139,10 @@ import Testing
 
         let cancelled = try engine.call("cancel")
         #expect(cancelled.state?["card"] == nil)
+
+        // Two moves in one message: one card with both, waiting for the one Confirm.
+        let chain = try engine.call("send", ["text": "send 1 USDC to mom then send 2 USDC to mom"])
+        let steps = try #require(chain.state?["card"] as? [String: Any])
+        #expect((steps["lines"] as? [String])?.prefix(2) == ["1. send 1 USDC to mom", "2. send 2 USDC to mom"])
     }
 }

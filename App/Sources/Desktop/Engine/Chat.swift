@@ -77,6 +77,7 @@ extension Engine {
 
     /// No model connected: the local parsers read the message as typed.
     private func readWithoutModel(_ text: String) async {
+        if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
         if let command = AddressBookCommand.parse(text) { await addressBook(command, userText: text); return }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
         if let command = WalletCommand.parse(text) { await handleWallet(command); return }
@@ -144,11 +145,7 @@ extension Engine {
     func runCanonical(_ canonical: String, userText text: String) async -> Bool {
         let note = "understood as “\(canonical)” · \(model)"
         if let merged = ChatRouter.planChange(canonical, markets: Set(markets.keys)) { return await runCanonical(merged, userText: text) }
-        if ChatRouter.steps(canonical) != nil {
-            reply(say("That's several moves in one. On Windows they go one at a time for now: tell me the first.",
-                      "Это несколько действий сразу. В Windows-версии пока по одному: скажи первое."), note: note)
-            return true
-        }
+        if let steps = ChatRouter.steps(canonical) { return await chain(steps, note: note) }
         switch canonical.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".! ")) {
         case "lock":
             try? await signerCall(.lock)
