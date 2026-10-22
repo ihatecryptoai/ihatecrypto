@@ -495,9 +495,12 @@ extension Engine {
             updateBoard(runningBoard) { b in
                 if b.state == "running" { b.state = "done" }
                 if let outcome { b.lines.append(String(outcome.prefix(400))) }
+                lastMove = (Date(), b.state ?? "done")
             }
             runningBoard = nil
             running = nil; lastOwnMove = Date(); changed(); Task { await refresh() }
+            // The request this move was a step of goes on, with how it went.
+            if agentGoal != nil { Task { await continueAgent() } }
         }
         let started = Date()
         do {
@@ -559,7 +562,8 @@ extension Engine {
             } else if sent.isEmpty {
                 reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
                 // A stop by the guard, the signer or a scam check is never routed around; anything else gets a way that works.
-                if !(error is GuardStop) { await explainFailure(title, why: error.localizedDescription) }
+                // With a request the model carries on with, it hears the failure there instead.
+                if !(error is GuardStop), agentGoal == nil { await explainFailure(title, why: error.localizedDescription) }
             } else {
                 reply(say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + error.localizedDescription + " "
                       + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.map { "\($0.chain) \($0.id)" }.joined(separator: " · "))

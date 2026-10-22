@@ -125,7 +125,9 @@ cost: the chain's history priced on the day, the app's own buys, or when first s
 ENS and SNS names saved as the address they point at, contract calls («call base 0x… f(…) … approving N USDC»: the
 contract checked on the explorer and for its reputation, the exact approve and the call simulated together before the
 card, simulated again before signing, never inside a chain), favorite tokens and token cards (DexScreener), paid requests to services (MPP: the price on a card, paid in USDC
-on Tempo after Confirm, the services the model can look up), skills (the built-in Trading study with its journal and notes, and the user's own .md or .txt), «remember: …»,
+on Tempo after Confirm, the services the model can look up), skills (the built-in Trading study with its journal and notes, and the user's own .md or .txt), «remember: …», requests of several steps (the model hears how each step went, after its Confirm when it moves money,
+and takes the next, five steps at most; «Next, once this is through: …» under it), «check: …» tasks on the schedule
+(the model looks itself and speaks, with a notification, only when the condition is met),
 the second check (on by default, as on the
 Mac: the model reads every command and trade plan again, Jev through OpenRouter when allowed, and code checks that a
 plan holds no more money or risk than named), history from the journal, lock and the session

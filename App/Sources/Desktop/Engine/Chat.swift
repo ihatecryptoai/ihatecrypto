@@ -26,6 +26,8 @@ extension Engine {
         var said = Message(fromUser: true, text: shown ?? text)
         said.context = attached.map(blockFacts)
         messages.append(said)
+        // The user wrote: a request the model was carrying on with is theirs to steer now.
+        agentGoal = nil
         nameCanvas(from: shown ?? text)
         saveChat()
         options = []
@@ -115,7 +117,7 @@ extension Engine {
     /// The model's reading of the message: the only reading while one is connected. A wrong guess about money is worse
     /// than a question, so when the model can't be reached nothing is done.
     /// `said`: the user's own words, where the command's addresses must come from; `text` itself when nil.
-    func routeWithModel(_ text: String, client: any LLMClient, said: String? = nil) async {
+    func routeWithModel(_ text: String, client: any LLMClient, said: String? = nil, round: Int = 0) async {
         let context = routerContext()
         let lookup: @Sendable (ChatRouter.Lookup) async -> String = { [weak self] l in await self?.screenedLookup(l) ?? "" }
         let names = markets.isEmpty ? nil : Set(markets.keys)
@@ -184,16 +186,25 @@ extension Engine {
             reply(waited ? say("Cancelled — nothing moved.", "Отменено — ничего не ушло.") : say("OK — nothing was waiting, nothing moved.", "Хорошо — ничего не ждало подтверждения, ничего не ушло."), note: model)
         case .question: await answer(text, client: client)
         case .plan: await editPlan(text, client: client)
-        case .chat(let r), .clarify(let r): reply(r, note: model)
+        case .chat(let r), .clarify(let r):
+            // A scheduled check with nothing to tell stays quiet.
+            if reading.quiet, r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { quietCheck = true; return }
+            reply(r, note: model)
         case .command(let canonical):
             guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.displays, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address isn’t in your message, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет в твоём сообщении, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
             }
+            let mark = messages.count
             if await !runCanonical(canonical, userText: said ?? text) {
                 reply(say("I read that as “\(canonical)”, but the Windows app can’t do that yet — nothing moved.",
                           "Я понял это как «\(canonical)», но в Windows-версии так пока нельзя — ничего не ушло."), note: model)
+            } else if reading.continues {
+                // Their request goes on after this step: the model hears how it went now, or after the Confirm when it moves money.
+                agentGoal = AgentGoal(request: said ?? text, command: canonical, mark: mark, round: round)
+                if let next = reading.next { reply(say("Next, once this is through: ", "Дальше, когда это пройдёт: ") + next, note: model) }
+                Task { await continueAgent() }
             }
         }
     }
@@ -210,6 +221,8 @@ extension Engine {
         if let task = ScheduledTask.parse(canonical) { schedule(task, note: note); return true }
         if let merged = ChatRouter.planChange(canonical, markets: Set(markets.keys)) { return await runCanonical(merged, userText: text) }
         if let steps = ChatRouter.steps(canonical) { return await chain(steps, note: note) }
+        // «check: …»: the model reads what it needs and speaks only when the condition is met.
+        if let check = AgentCheck.parse(canonical) { await runCheck(check, note: note); return true }
         switch canonical.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".! ")) {
         case "lock":
             try? await signerCall(.lock)
@@ -351,7 +364,7 @@ extension Engine {
         c.plan = intent == TradeIntent() ? nil : intent.command
         if let card { c.canvas.append("waiting for Confirm: " + card.title) }
         if let attached { c.canvas.append("the user points at this block on the canvas: " + blockFacts(attached)) }
-        c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block «\($0.title)»: " + $0.lines.prefix(6).joined(separator: "; ") }
+        c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block " + blockFacts($0) }
         c.canvas += alerts.map { "price alert: " + alertText($0) }
         c.canvas.append("schedule: " + (tasks.isEmpty ? "nothing scheduled" : tasks.map(taskText).joined(separator: "; ")))
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }

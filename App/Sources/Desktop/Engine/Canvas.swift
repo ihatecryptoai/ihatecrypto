@@ -192,8 +192,14 @@ extension Engine {
         default: []
         }
         let steps = (b.steps ?? []).map { s in "\(s.label): \(s.title)" + (s.money.map { " (\($0.place) \($0.was) → \($0.after) \($0.symbol))" } ?? "") }
+        // A chart: its range in numbers, and the live price now when Hyperliquid has the market.
+        let chart = b.chart.map { c -> [String] in
+            let coin = String(c.title.split(separator: " ").first ?? "")
+            let live = markets[coin].map { ", live price now \(Fmt.price($0.markPx))" } ?? ""
+            return ["low \(c.low), high \(c.high), \(c.change) over the range\(live)"]
+        } ?? []
         return "«\(b.kind == "move" || b.kind == "result" || b.kind == "chart" ? b.title : b.kind)»" + (b.state.map { " [\($0)]" } ?? "") + ": "
-            + (steps + b.lines + live).prefix(14).joined(separator: "; ")
+            + (steps + chart + b.lines + live).prefix(14).joined(separator: "; ")
     }
 
     // MARK: A move's route

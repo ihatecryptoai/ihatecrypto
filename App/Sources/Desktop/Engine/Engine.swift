@@ -139,6 +139,11 @@ final class Engine {
     var multisigs: [Multisig] = Store.load([Multisig].self, "multisigs.json") ?? []
     var multisigDraft: MultisigDraft?
     var multisigPayment: MultisigPayment?
+    /// A request the model carries on with after its step, and whether the last check found nothing to tell.
+    var agentGoal: AgentGoal?
+    var quietCheck = false
+    /// How the last move ended («done», «failed»), for the request it was a step of.
+    var lastMove: (at: Date, state: String)?
     /// A contract call checked and simulated, waiting for Confirm.
     var callReview: CallReview?
     /// The Ledger's addresses, its connect card, and what it waits for on its screen now.

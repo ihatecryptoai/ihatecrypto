@@ -13,6 +13,7 @@ extension Engine {
     /// The steps must be what this app runs.
     func runnable(_ step: String) -> Bool {
         WalletCommand.parse(step) != nil || PositionCommand.parse(step) != nil || AlertCommand.parse(step, markets: Set(markets.keys)) != nil
+            || AgentCheck.parse(step) != nil
             || IntentParser.apply(step, to: TradeIntent(), markets: Set(markets.keys)) != nil
     }
 
@@ -55,6 +56,16 @@ extension Engine {
         guard var task = tasks.first(where: { $0.paused != true && $0.next <= Date() }) else { return }
         tasks.removeAll { $0.id == task.id }
         if task.advance() { tasks.append(task) }
+        // A check says something only when its condition is met: then that is the notification.
+        if task.steps.allSatisfy({ AgentCheck.parse($0) != nil }) {
+            let mark = messages.count
+            quietCheck = false
+            for step in task.steps { _ = await runCanonical(step, userText: step) }
+            if !quietCheck, let said = messages.dropFirst(mark).last(where: { !$0.fromUser }) {
+                out.event("notify", ["title": say("Check", "Проверка"), "body": String(said.text.prefix(200))])
+            }
+            return
+        }
         let text = "⏰ " + task.steps.joined(separator: " then ")
         out.event("notify", ["title": say("Scheduled", "По расписанию"), "body": text])
         reply(text, note: "schedule")
