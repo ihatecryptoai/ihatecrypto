@@ -152,6 +152,17 @@ import Testing
         #expect((added.state?["skills"] as? [[String: Any]])?.count == skills.count + 1)
     }
 
+    @Test func aTokenIsStarredAndUnstarred() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        // AERO on Base.
+        let added = try engine.call("send", ["text": "add 0x940181a94A35A4569E4529A3CDfB74e38FD98631 to favorites"])
+        let favorites = try #require(added.state?["favorites"] as? [[String: Any]], "\(Self.chat(added.state).last ?? "")")
+        #expect(favorites.first?["symbol"] as? String == "AERO")
+        let removed = try engine.call("send", ["text": "remove token AERO from favorites"])
+        #expect((removed.state?["favorites"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test func aScheduledTaskIsKeptAndCancelled() throws {
         let engine = try Engine()
         try engine.call("hello")

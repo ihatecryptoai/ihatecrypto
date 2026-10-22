@@ -1,3 +1,4 @@
+import EVMChain
 import Foundation
 import GuardJev
 import IhatecryptoCore
@@ -85,6 +86,7 @@ extension Engine {
         if ScheduledTask.cancelsAll(text) { cancelTasks(note: nil); return }
         if let task = ScheduledTask.parse(text) { schedule(task, note: nil); return }
         if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
+        if let command = TokenCommand.parse(text) { await tokenCommand(command, note: nil); return }
         if let command = AddressBookCommand.parse(text) { await addressBook(command, userText: text); return }
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) { await alert(command, note: nil); return }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
@@ -178,7 +180,7 @@ extension Engine {
         case .plan: await editPlan(text, client: client)
         case .chat(let r), .clarify(let r): reply(r, note: model)
         case .command(let canonical):
-            guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: [], found: reading.found, displays: { _ in false }, markets: Set(markets.keys)) else {
+            guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.displays, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address isn’t in your message, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет в твоём сообщении, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
@@ -214,6 +216,10 @@ extension Engine {
         }
         if let command = AlertCommand.parse(canonical, markets: Set(markets.keys)) {
             await alert(command, note: note)
+            return true
+        }
+        if let command = TokenCommand.parse(canonical) {
+            await tokenCommand(command, note: note)
             return true
         }
         if let command = ChartCommand.parse(canonical, markets: Set(markets.keys)) {
@@ -296,13 +302,26 @@ extension Engine {
         func runs(_ c: String) -> Bool {
             runnable(c) || ChartCommand.parse(c, markets: names) != nil || AddressBookCommand.parse(c) != nil
                 || ScheduledTask.parse(c) != nil || PnLCommand.parse(c, markets: names) != nil || MemoryCommand.parse(c) != nil
-                || JournalCommand.parse(c) != nil || StudyNote.parse(c) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
+                || JournalCommand.parse(c) != nil || StudyNote.parse(c) != nil || TokenCommand.parse(c) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
         }
         options = list.filter { o in
             o.command.isEmpty || ChatRouter.parses(o.command, markets: names) && runs(o.command)
-                && ChatRouter.addressesAllowed(o.command, userText: userText, known: [], found: found, displays: { _ in false }, markets: names)
+                && ChatRouter.addressesAllowed(o.command, userText: userText, known: knownContracts, found: found, displays: Self.displays, markets: names)
         }
         changed()
+    }
+
+    /// Contracts a command may name without the user writing them: their favorites and each network's dollars — tokens,
+    /// never recipients (money goes to an address-book name or this wallet).
+    var knownContracts: [String] {
+        favorites.map(\.address) + EVMNetwork.all.flatMap { net in [net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address } }
+    }
+
+    /// A command that only shows something (a token's card, a chart, P/L): it may use an address a lookup found.
+    nonisolated static func displays(_ command: String) -> Bool {
+        if case .show? = TokenCommand.parse(command) { return true }
+        if case .favorite? = TokenCommand.parse(command) { return true }
+        return ChartCommand.parse(command) != nil || PnLCommand.parse(command) != nil
     }
 
     // MARK: What the model may read
@@ -329,6 +348,7 @@ extension Engine {
         c.replyLanguage = replyLanguage
         c.off = Modules.current.offSummary
         c.memory = memory
+        c.favorites = favorites.map { "\($0.name) (\($0.symbol)) = \($0.address) on \($0.chain)" + ($0.price.map { ", \(Fmt.price($0))" } ?? "") }
         c.skills = skillsOn.map { "\($0.id) — \($0.name): \($0.about)" }
         c.loadedSkills = skillsOn.filter { loadedSkills.contains($0.id) }
         c.offered = options.map { "\($0.title) → \($0.command.isEmpty ? "(an answer to your question)" : $0.command)\($0.recommended ? " (recommended)" : "")" }

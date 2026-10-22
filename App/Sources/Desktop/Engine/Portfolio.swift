@@ -68,6 +68,7 @@ extension Engine {
         Task { await loadCosts() }
         if errors.isEmpty { recordEquity(next.total, wallet: me.solana) }
         positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
+        await refreshFavorites()
         await checkAlerts()
         changed()
     }

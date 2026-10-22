@@ -298,6 +298,12 @@ function portfolio() {
       " · ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); act("refresh"); } }, t("Refresh", "Обновить"))),
     state.positions.length ? [h("h2", {}, t("Open positions", "Открытые позиции")), h("div", { class: "card" }, state.positions.map((x) =>
       h("div", { class: "row" }, h("span", { class: "sym" }, `${x.side} ${x.coin}`), h("span", { class: "num" }, `${x.size} @ ${x.entry} · ${x.pnl}`))))] : null,
+    state.favorites.length ? [h("h2", {}, t("Favorites", "Избранное")), h("div", { class: "card" }, state.favorites.map((f) =>
+      h("div", { class: "row" },
+        h("span", { class: "sym" }, f.image ? h("img", { src: f.image, alt: "" }) : null, f.symbol, h("span", { class: "muted small" }, " " + f.chain)),
+        h("span", { class: "num" }, f.price !== undefined && f.price !== null ? "$" + Number(f.price).toPrecision(4) : "—",
+          f.change24h !== undefined && f.change24h !== null ? h("span", { class: "small " + (f.change24h < 0 ? "loss" : "gain") }, `  ${f.change24h >= 0 ? "+" : ""}${Number(f.change24h).toFixed(1)}%`) : null,
+          h("button", { class: "btn", style: "margin-left:10px", onclick: () => act("removeFavorite", { wallet: f.chain + ":" + f.address.toLowerCase() }) }, t("Remove", "Убрать"))))))] : null,
     state.alerts.length ? [h("h2", {}, t("Price alerts", "Ценовые оповещения")), h("div", { class: "card" }, state.alerts.map((a) =>
       h("div", { class: "row" }, h("span", {}, a.text), h("button", { class: "btn", onclick: () => act("removeAlert", { wallet: a.id }) }, t("Remove", "Убрать")))))] : null,
     state.tasks.length ? [h("h2", {}, t("Scheduled", "По расписанию")), h("div", { class: "card" }, state.tasks.map((a) =>

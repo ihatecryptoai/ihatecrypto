@@ -105,6 +105,7 @@ final class Engine {
     var skillsOff: Set<String> = Set(Store.load([String].self, "skills-off.json") ?? []) { didSet { Store.save(skillsOff.sorted(), "skills-off.json") } }
     var loadedSkills: [String] = []
     var memory: [String] = Store.load([String].self, "memory.json") ?? [] { didSet { Store.save(memory, "memory.json") } }
+    var favorites: [FavoriteToken] = Store.load([FavoriteToken].self, "favorites.json") ?? [] { didSet { Store.save(favorites, "favorites.json"); changed() } }
 
     // Chat
     var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
@@ -227,6 +228,7 @@ final class Engine {
         var tasks: [Alert]
         var skills: [SkillView]
         var memory: [String]
+        var favorites: [FavoriteToken]
     }
 
     func snapshot() -> Snapshot {
@@ -251,7 +253,7 @@ final class Engine {
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) },
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
-            memory: memory)
+            memory: memory, favorites: favorites)
     }
 
     // MARK: Requests from the window
@@ -332,6 +334,7 @@ final class Engine {
         case "skillOn":
             if r.test == true { skillsOff.remove(r.wallet ?? "") } else { skillsOff.insert(r.wallet ?? "") }
         case "forget": memory.removeAll { $0 == r.text }
+        case "removeFavorite": favorites.removeAll { $0.id == r.wallet }
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")
