@@ -188,12 +188,34 @@ final class Engine {
         if ledgerActive, let l = ledger { return l.wallet }
         return status?.wallets?.first { $0.id == status?.activeWallet } ?? status?.wallets?.first
     }
-    var solanaAddress: String? { ledgerActive ? ledger?.solana : status?.solanaAddress }
-    var evmAddress: String? { ledgerActive ? ledger?.evm : status?.evmAddress }
+    /// No wallet here, only addresses watched for their balances: they're read, and nothing signs for them.
+    var watching: Bool { !ledgerActive && status?.hasWallet != true && (settings.watchSolana != nil || settings.watchEVM != nil) }
+    var solanaAddress: String? { ledgerActive ? ledger?.solana : watching ? settings.watchSolana : status?.solanaAddress }
+    var evmAddress: String? { ledgerActive ? ledger?.evm : watching ? settings.watchEVM : status?.evmAddress }
     var nearAddress: String? { ledgerActive ? nil : status?.nearAddress }
     var tradeWallet: TradeWallet? {
         guard let s = solanaAddress, let e = evmAddress else { return nil }
         return TradeWallet(solana: s, evm: e)
+    }
+    /// The addresses balances are read for: a chain without one ("") isn't read.
+    var readWallet: TradeWallet? {
+        solanaAddress == nil && evmAddress == nil ? nil : TradeWallet(solana: solanaAddress ?? "", evm: evmAddress ?? "")
+    }
+    var watchOnly: String {
+        say("These addresses are only watched: moving money or signing needs a wallet here (Settings › Wallets).",
+            "Эти адреса только для просмотра: чтобы переводить или подписывать, добавь кошелёк (Настройки › Кошельки).")
+    }
+
+    /// «Addresses for balances»: each checked as an address of its chain; an empty one stops watching it.
+    func watch(solana: String?, evm: String?) throws {
+        let s = solana?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "", e = evm?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !s.isEmpty, let problem = AddressCheck.problem(s, network: .solana) { throw WalletError(problem) }
+        if !e.isEmpty, let problem = AddressCheck.problem(e, network: .base) { throw WalletError(problem) }
+        settings.watchSolana = s.isEmpty ? nil : s
+        settings.watchEVM = e.isEmpty ? nil : e
+        portfolio = PortfolioView()
+        positions = []
+        Task { await refresh() }
     }
 
     var russian: Bool {
@@ -284,6 +306,8 @@ final class Engine {
         var candidates: [Multisig.Key]
         var ledgerConnect: LedgerConnect?
         var starred: [String]
+        var watching: Bool
+        var watched: [String: String]
     }
 
     func snapshot() -> Snapshot {
@@ -313,7 +337,8 @@ final class Engine {
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
             canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
-            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted())
+            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted(),
+            watching: watching, watched: ["solana": settings.watchSolana, "evm": settings.watchEVM].compactMapValues { $0 })
     }
 
     // MARK: Requests from the window
@@ -338,6 +363,8 @@ final class Engine {
         var seconds: Int?
         var board: String?
         var threshold: Int?
+        var solana: String?
+        var evm: String?
     }
 
     func handle(_ r: Request) async {
@@ -416,6 +443,7 @@ final class Engine {
         case "language": settings.language = r.language == "auto" ? nil : r.language
         case "secondCheck": settings.secondCheck = r.test ?? true
         case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
+        case "watch": try watch(solana: r.solana, evm: r.evm)
         case "dapp":
             // From the window's browser, which read the origin from the webview itself.
             return ["json": try await dapp(r.name ?? "", params: r.text ?? "{}", origin: r.address ?? "")]

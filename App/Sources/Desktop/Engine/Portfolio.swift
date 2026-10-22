@@ -35,14 +35,15 @@ nonisolated struct PortfolioView: Encodable, Equatable {
 extension Engine {
     /// Every network read at once, then drawn together. A network that didn't answer keeps its last card.
     func refresh() async {
-        guard !refreshing, let me = tradeWallet else { return }
+        guard !refreshing, let me = readWallet else { return }
         refreshing = true
         defer { refreshing = false }
         let near = nearAddress
         async let marketsRead = try? Hyperliquid.markets()
-        async let solanaRead = Self.solana(me.solana)
-        async let hlRead = Self.hyperliquid(me.evm)
-        async let evmRead = Self.evm(me.evm)
+        // A wallet of one chain (a key, a watched address) has nothing to read on the other.
+        async let solanaRead = me.solana.isEmpty ? .success(nil) : Self.solana(me.solana)
+        async let hlRead = me.evm.isEmpty ? .success(nil) : Self.hyperliquid(me.evm)
+        async let evmRead = me.evm.isEmpty ? [] : Self.evm(me.evm)
         async let nearRead = Self.near(near)
         if let m = await marketsRead { markets = m }
         let parts = [await solanaRead, await hlRead] + (await evmRead) + [await nearRead]
@@ -62,12 +63,13 @@ extension Engine {
         networks.sort { (order[$0.key] ?? 2, -$0.usd) < (order[$1.key] ?? 2, -$1.usd) }
         let next = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
         // Another wallet since the last read: its balances aren't money that arrived.
-        if portfolio.updatedAt != nil, portfolioOwner == me.solana { announceIncoming(from: portfolio, to: next) }
+        let owner = me.solana + me.evm
+        if portfolio.updatedAt != nil, portfolioOwner == owner { announceIncoming(from: portfolio, to: next) }
         portfolio = withProfit(next)
-        portfolioOwner = me.solana
+        portfolioOwner = owner
         Task { await loadCosts() }
-        if errors.isEmpty { recordEquity(next.total, wallet: me.solana) }
-        positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
+        if errors.isEmpty { recordEquity(next.total, wallet: me.solana.isEmpty ? me.evm : me.solana) }
+        if !me.evm.isEmpty { positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions }
         await refreshFavorites()
         await checkAlerts()
         changed()

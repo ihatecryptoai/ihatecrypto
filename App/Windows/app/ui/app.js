@@ -205,7 +205,7 @@ function render() {
     return;
   }
   setProtect(false);
-  if (!state.wallets.length) {
+  if (!state.wallets.length && !state.watching) {
     app.style.gridTemplateColumns = "1fr";
     app.append(welcome());
     return;
@@ -249,7 +249,7 @@ function rail() {
     h("button", { class: "nav", onclick: browserDialog }, icon("globe"), h("span", { class: "label" }, t("Browser", "Браузер"))),
     h("button", { class: "wallet-chip", onclick: walletMenu },
       h("span", { class: "dot" + (activeWallet?.test || activeWallet?.automation ? " test" : "") }),
-      h("span", { class: "name" }, activeWallet ? activeWallet.label : t("No wallet", "Нет кошелька"))),
+      h("span", { class: "name" }, activeWallet ? activeWallet.label : state.watching ? t("Watching", "Только просмотр") : t("No wallet", "Нет кошелька"))),
     h("button", { class: "nav" + (view === "settings" ? " on" : ""), onclick: () => { view = view === "settings" ? "canvas" : "settings"; render(); } },
       icon("settings"), h("span", { class: "label" }, t("Settings", "Настройки"))),
   );
@@ -945,6 +945,8 @@ function settings() {
           sessions.map(([v, l]) => h("option", { value: v, selected: s.signer.sessionLength === v }, l)))),
       h("button", { class: "btn", onclick: () => act("lock") }, t("Ask Windows Hello again now (and pause the trading key)", "Снова спрашивать Windows Hello (и поставить торговый ключ на паузу)"))),
 
+    s.wallets.length ? null : [h("h2", {}, t("Addresses for balances", "Адреса для балансов")), watchCard()],
+
     h("h2", {}, t("Wallets", "Кошельки")),
     h("div", { class: "card" },
       s.wallets.map((w) => h("div", { class: "row" },
@@ -995,8 +997,42 @@ function welcome() {
     h("div", { class: "btns" },
       h("button", { class: "btn primary", onclick: () => act("createWallet", { test: false }) }, t("Create a wallet", "Создать кошелёк")),
       h("button", { class: "btn", onclick: showImport }, t("I have a recovery phrase", "У меня есть фраза восстановления")),
-      h("button", { class: "btn", onclick: showImportKey }, t("Import a private key", "Импортировать приватный ключ"))),
+      h("button", { class: "btn", onclick: showImportKey }, t("Import a private key", "Импортировать приватный ключ")),
+      h("button", { class: "btn", onclick: showWatch }, t("Only watch an address", "Только смотреть адрес"))),
   ));
+}
+
+/** Read-only addresses, as the Mac's «Addresses for balances»: their balances show, and nothing signs for them. */
+const watchForm = { solana: null, evm: null };
+
+function watchCard(back) {
+  // Kept across the states the engine sends while the person types; read again from the engine after a save.
+  const form = watchForm;
+  if (form.solana === null) form.solana = state.watched.solana || "";
+  if (form.evm === null) form.evm = state.watched.evm || "";
+  const field = (key, label, hint) => h("div", { class: "field" }, h("label", {}, label),
+    h("input", { id: "watch-" + key, class: "address", value: form[key], placeholder: hint, autocomplete: "off", spellcheck: "false", oninput: (e) => (form[key] = e.target.value.trim()) }));
+  return h("div", { class: "card", style: back ? "max-width:560px;width:100%" : "" },
+    back ? h("h1", { style: "font-size:20px" }, t("Watch an address", "Смотреть адрес")) : null,
+    h("p", { class: "muted small" }, t("Read-only: the balances show, nothing can be sent or signed. Never paste a recovery phrase or key here.",
+      "Только просмотр: балансы видны, отправить или подписать ничего нельзя. Никогда не вставляй сюда фразу восстановления или ключ.")),
+    field("solana", "Solana", t("Solana address", "Адрес Solana")),
+    field("evm", "EVM · Hyperliquid", "0x…"),
+    h("div", { class: "btns", style: "margin-top:12px" },
+      h("button", { class: "btn primary", onclick: async () => {
+        if (!form.solana && !form.evm) { toast(t("Paste at least one address.", "Вставь хотя бы один адрес.")); return; }
+        if (await act("watch", { solana: form.solana, evm: form.evm }) === null) return;
+        form.solana = form.evm = null;
+        if (back) { overlay = null; view = "canvas"; }
+        render();
+      } }, t("Watch", "Смотреть")),
+      back ? h("button", { class: "btn", onclick: back }, t("Back", "Назад"))
+        : state.watching ? h("button", { class: "btn", onclick: async () => { form.solana = form.evm = null; await act("watch", { solana: "", evm: "" }); } }, t("Stop watching", "Перестать смотреть")) : null));
+}
+
+function showWatch() {
+  overlay = h("div", { class: "center" }, watchCard(() => { overlay = null; render(); }));
+  render();
 }
 
 function showImport() { importDialog(t("Recovery phrase", "Фраза восстановления"), t("12 or 24 words, in order", "12 или 24 слова по порядку"), "importPhrase", "phrase"); }

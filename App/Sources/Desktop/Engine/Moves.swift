@@ -28,6 +28,7 @@ extension Engine {
     }
 
     func executor() throws -> Executor {
+        guard !watching else { throw ExecutionError(watchOnly) }
         guard var wallet = tradeWallet else { throw ExecutionError(say("Add a wallet first.", "Сначала добавь кошелёк.")) }
         // A scheduled task on the automation wallet: its addresses, the signer told which wallet signs, and what it buys
         // owed to the wallet that's on.
@@ -480,6 +481,17 @@ extension Engine {
             ask.answer(true)
             changed()
             return
+        }
+        // Only watched addresses: nothing here signs for them (a saved address needs no key).
+        if watching {
+            if case .address = waiting {} else {
+                updateBoard(card?.id) { $0.state = "cancelled" }
+                pending = nil
+                card = nil
+                reply(watchOnly)
+                changed()
+                return
+            }
         }
         // The card's block turns into the running move in the same step: nothing leaves the canvas meanwhile.
         runningBoard = card?.id

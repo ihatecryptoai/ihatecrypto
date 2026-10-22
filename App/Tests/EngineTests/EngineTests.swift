@@ -191,6 +191,33 @@ import Testing
         #expect((back.state?["boards"] as? [[String: Any]])?.count == 1)
     }
 
+    /// «Addresses for balances»: a watched address is read as the wallet's, a wrong one is refused, and Confirm never
+    /// runs a move for it.
+    @Test(.enabled(if: winsec_is_stub() == 1)) func aWatchedAddressShowsBalancesAndNothingSignsForIt() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let wrong = try engine.call("watch", ["solana": "abandon abandon abandon", "evm": ""])
+        #expect(wrong.answer["ok"] as? Bool == false)
+        #expect(wrong.state?["watching"] as? Bool == false)
+        let evm = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        let watched = try engine.call("watch", ["solana": "7cVfgArCheMR6Cs4t6vz5rfnqd56vZq4ndaBrY5xkxXy", "evm": evm])
+        #expect(watched.answer["ok"] as? Bool == true, "\(watched.answer)")
+        #expect(watched.state?["watching"] as? Bool == true)
+        #expect((watched.state?["addresses"] as? [String: String])?["evm"] == evm)
+
+        let saved = try engine.call("saveAddress", ["name": "mom", "network": "solana", "address": "7cVfgArCheMR6Cs4t6vz5rfnqd56vZq4ndaBrY5xkxXy"])
+        #expect(saved.answer["ok"] as? Bool == true, "\(saved.answer)")
+        let card = try engine.call("send", ["text": "send 5 USDC to mom"])
+        #expect(card.state?["card"] != nil)
+        let confirmed = try engine.call("confirm")
+        #expect(confirmed.state?["card"] == nil)
+        #expect(Self.chat(confirmed.state).last?.contains("only watched") == true, "\(Self.chat(confirmed.state).last ?? "")")
+
+        let stopped = try engine.call("watch", ["solana": "", "evm": ""])
+        #expect(stopped.state?["watching"] as? Bool == false)
+        #expect((stopped.state?["addresses"] as? [String: String])?.isEmpty == true)
+    }
+
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {
         let engine = try Engine()
         try engine.call("hello")

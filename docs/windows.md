@@ -107,7 +107,7 @@ the EVM call decoded and simulated, the site checked against MetaMask's phishing
 is signed before Confirm; a site's page may call only the wallet command, never the engine, links or events, and its
 origin is read from the window, not from the page), a Safe
 multisig (made from a card where its keys, how many sign and its networks change before Confirm; paid out of when this
-computer's key is enough), wallets (create with the phrase shown once, import a phrase or a key, switch, rename, remove, a test wallet),
+computer's key is enough), wallets (create with the phrase shown once, import a phrase or a key, switch, rename, remove, a test wallet; or, with none, addresses only watched for their balances, as the Mac's «Addresses for balances»: nothing signs or connects for them),
 Receive, the address book, the portfolio on Solana, Hyperliquid, every EVM network and NEAR, the chat with a model
 (an API key, a browser sign-in to ChatGPT or OpenRouter caught on 127.0.0.1, a local model, or a login another app
 has) or plain commands without one, every money command the Mac's

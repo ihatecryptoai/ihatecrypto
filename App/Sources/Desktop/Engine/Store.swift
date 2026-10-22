@@ -80,4 +80,7 @@ nonisolated struct Settings: Codable, Equatable {
     var jevOpenRouter: Bool?
     /// The canvas open last.
     var canvas: String?
+    /// «Addresses for balances», as on the Mac: read-only addresses whose balances show while no wallet is here.
+    var watchSolana: String?
+    var watchEVM: String?
 }
