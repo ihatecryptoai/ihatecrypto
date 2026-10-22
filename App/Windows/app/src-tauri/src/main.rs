@@ -194,6 +194,36 @@ async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     app.restart()
 }
 
+fn show(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Closing the window keeps ihatecrypto in the tray, as the Mac's goes to the menu bar: price alerts and the balances
+/// go on. Quit from the tray ends it, the engine and the signer with it.
+fn tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let open = MenuItem::with_id(app, "open", "Open ihatecrypto", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit ihatecrypto", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let mut builder = TrayIconBuilder::new().tooltip("ihatecrypto").menu(&menu).show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => show(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event { show(tray.app_handle()) }
+        });
+    if let Some(icon) = app.default_window_icon() { builder = builder.icon(icon.clone()); }
+    builder.build(app)?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
@@ -203,7 +233,14 @@ fn main() {
             app.manage(engine);
             #[cfg(debug_assertions)]
             ui_eval(app.handle());
+            tray(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install])
         .build(tauri::generate_context!())
