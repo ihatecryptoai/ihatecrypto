@@ -140,12 +140,18 @@ let winsec: [LinkerSetting] = []
 #endif
 if desktop {
     package.targets.removeAll { ["IhatecryptoApp", "IhatecryptoSigner", "IhatecryptoAppTests"].contains($0.name) }
-    package.products += [.executable(name: "ihatecrypto-signer", targets: ["WinSigner"])]
+    package.products += [.executable(name: "ihatecrypto-signer", targets: ["WinSigner"]),
+                         .executable(name: "ihatecrypto-engine", targets: ["DesktopEngine"])]
     package.targets += [
         .target(name: "CWinSec", path: "Sources/Native/WinSec", linkerSettings: winsec),
         .target(name: "SignerCore", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain", "CWinSec"] + desktopCrypto,
                 path: "Sources/Signer", exclude: ["Windows/Main"], sources: ["Core", "Windows"]),
         .executableTarget(name: "WinSigner", dependencies: ["SignerCore", "CWinSec"], path: "Sources/Signer/Windows/Main"),
         .testTarget(name: "SignerTests", dependencies: ["SignerCore", "SignerAPI", "WalletCore", "CWinSec"] + desktopCrypto),
+        // What the window talks to: the chat, the cards and the balances over the same core as the Mac's window.
+        .executableTarget(name: "DesktopEngine",
+                          dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "SignerAPI", "HyperliquidSigning",
+                                         "SolanaChain", "EVMChain", "TradeExecution", "ExecutionCore", "OneClickKit", "CWinSec"],
+                          path: "Sources/Desktop/Engine", swiftSettings: [.defaultIsolation(MainActor.self)]),
     ]
 }
