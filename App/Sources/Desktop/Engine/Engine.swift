@@ -42,6 +42,8 @@ enum Pending {
     case chain([ChainStep])
     /// The first buy of a recurring one: the schedule exists only once this buy is confirmed and goes through.
     case recurring(WalletCommand, days: Int)
+    /// A site in the browser asks for the wallet or a signature: Confirm lets that one request through.
+    case site(SiteAsk)
 }
 
 enum ChainStep {
@@ -130,6 +132,8 @@ final class Engine {
     var runningBoard: String?
     /// The block the message being read is about.
     var attached: Board?
+    /// Sites the browser connected in this run.
+    var sites = ConnectedSites()
     /// Multisigs made here, the set-up card's choices, and a payment out of one waiting for Confirm.
     var multisigs: [Multisig] = Store.load([Multisig].self, "multisigs.json") ?? []
     var multisigDraft: MultisigDraft?
@@ -378,6 +382,9 @@ final class Engine {
         case "language": settings.language = r.language == "auto" ? nil : r.language
         case "secondCheck": settings.secondCheck = r.test ?? true
         case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
+        case "dapp":
+            // From the window's browser, which read the origin from the webview itself.
+            return ["json": try await dapp(r.name ?? "", params: r.text ?? "{}", origin: r.address ?? "")]
         case "newCanvas": try newCanvas()
         case "openCanvas": try openCanvas(r.wallet ?? "")
         case "renameCanvas": renameCanvas(r.wallet ?? "", r.label ?? "")

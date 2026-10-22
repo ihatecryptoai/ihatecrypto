@@ -163,11 +163,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .add-block { border-radius: 12px; height: 38px; }
 
 /* A move: route cards */
-.route { background: var(--surface); border: 1.5px solid var(--accent); border-radius: 16px; padding: 12px 14px; cursor: default; max-width: 1240px; }
+.route { background: var(--surface); border: 1.5px solid var(--accent); border-radius: 16px; padding: 12px 14px; cursor: default; max-width: 760px; }
 .route.running { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { border-color: var(--accent); } 50% { border-color: var(--line); } }
 .route-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.route-head > b { font-size: 15px; }
+.route-head > b { font-size: 15px; flex: 0 1 auto; min-width: 0; }
 .chip { display: inline-flex; align-items: center; height: 21px; padding: 0 9px; border-radius: 11px; font-size: 11px; font-weight: 650; background: var(--accent-soft); color: var(--text); white-space: nowrap; }
 .chip.done { background: #e2f6ec; color: #146b48; }
 .chip.failed { background: #fde5e2; color: #a12b20; }

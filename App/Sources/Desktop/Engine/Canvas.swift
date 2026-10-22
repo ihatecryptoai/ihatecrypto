@@ -216,6 +216,7 @@ extension Engine {
         case .position: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
         case .trade: return [Board.Step(label: say("TRADE · Hyperliquid", "СДЕЛКА · Hyperliquid"), title: title, lines: lines)]
         case .address(let e): return [Board.Step(label: say("SAVE · ", "СОХРАНИТЬ · ") + networkName(e.network), title: title, lines: lines)]
+        case .site: return [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)]
         }
     }
 

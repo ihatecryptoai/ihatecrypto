@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-engine-send"
+description = "Enables the engine_send command without any pre-configured scope."
+commands.allow = ["engine_send"]
+
+[[permission]]
+identifier = "deny-engine-send"
+description = "Denies the engine_send command without any pre-configured scope."
+commands.deny = ["engine_send"]

@@ -6,14 +6,22 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc;
 
 use tauri::{Emitter, Manager};
 
 struct Engine {
     input: Mutex<ChildStdin>,
     child: Mutex<Child>,
+    /// The browser's calls waiting for the engine's answer, by request id (from DAPP_IDS up, so the page's own never meet them).
+    dapp: Mutex<HashMap<i64, mpsc::Sender<String>>>,
+    next: AtomicI64,
 }
+
+const DAPP_IDS: i64 = 1_000_000_000;
 
 /// The engine installed next to the app (resources/bin). A development build may take another one from
 /// IHATECRYPTO_ENGINE; a release never does, so nothing set in the user's environment can stand in for it.
@@ -42,6 +50,17 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
+            // An answer to the browser's call goes back to it, never to the main window's page.
+            if !line.starts_with("{\"event\"") {
+                if let Some(id) = serde_json::from_str::<serde_json::Value>(&line).ok().and_then(|v| v["id"].as_i64()).filter(|id| *id >= DAPP_IDS) {
+                    if let Some(engine) = handle.try_state::<Engine>() {
+                        if let Some(waiter) = engine.dapp.lock().ok().and_then(|mut m| m.remove(&id)) { let _ = waiter.send(line); }
+                    }
+                    continue;
+                }
+            }
+            // A site's request is on the canvas: the main window comes forward to show it.
+            if line.contains("\"event\":\"showMain\"") { show(&handle); }
             // The signer is about to ask Windows Hello: only the window in front may let it come forward.
             if line.starts_with("{\"event\":\"signerForeground\"") || line.contains("\"event\":\"signerForeground\"") {
                 if let Some(pid) = serde_json::from_str::<serde_json::Value>(&line).ok()
@@ -58,11 +77,12 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                     let _ = handle.notification().builder().title(title).body(body).show();
                 }
             }
-            let _ = handle.emit("engine", line);
+            // Only to the main window: a page in the browser never hears the engine.
+            let _ = handle.emit_to("main", "engine", line);
         }
-        let _ = handle.emit("engine", "{\"event\":\"engineStopped\",\"data\":{}}");
+        let _ = handle.emit_to("main", "engine", "{\"event\":\"engineStopped\",\"data\":{}}");
     });
-    Ok(Engine { input: Mutex::new(input), child: Mutex::new(child) })
+    Ok(Engine { input: Mutex::new(input), child: Mutex::new(child), dapp: Mutex::new(HashMap::new()), next: AtomicI64::new(DAPP_IDS) })
 }
 
 #[cfg(windows)]
@@ -88,6 +108,59 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
     if line.contains('\n') { return Err("one line at a time".into()) }
     let mut input = state.input.lock().map_err(|_| "the engine is gone")?;
     writeln!(input, "{line}").and_then(|_| input.flush()).map_err(|e| format!("the engine stopped: {e}"))
+}
+
+/// ihatecrypto's browser: a window of its own for https sites, with the wallet provider in every page. It shares nothing
+/// with the main window's page; its only way to the wallet is `dapp_call`.
+#[tauri::command]
+fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let url = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+    if url.scheme() != "https" { return Err("only https sites".into()) }
+    if let Some(window) = app.get_webview_window("browser") {
+        // The same page again only comes forward; another one opens in it.
+        if window.url().map(|u| u != url).unwrap_or(true) { window.navigate(url).map_err(|e| e.to_string())?; }
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "browser", tauri::WebviewUrl::External(url))
+        .title("ihatecrypto · browser")
+        .inner_size(1180.0, 800.0)
+        .initialization_script(include_str!("provider.js"))
+        // Pages stay on https; anything else (a file, a custom scheme) isn't opened here.
+        .on_navigation(|u| u.scheme() == "https" || u.as_str() == "about:blank")
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// A page's call to the wallet. The origin is the browser window's own address, read here, never what the page says;
+/// the engine puts the request on the canvas and answers once the person pressed Confirm or Cancel.
+#[tauri::command]
+async fn dapp_call(webview: tauri::Webview, state: tauri::State<'_, Engine>, method: String, params: serde_json::Value) -> Result<String, String> {
+    if webview.label() != "browser" { return Err("only the browser's pages".into()) }
+    const METHODS: [&str; 6] = ["connect", "disconnect", "signMessage", "signTransaction", "signAndSendTransaction", "eth"];
+    if !METHODS.contains(&method.as_str()) { return Err(format!("ihatecrypto doesn't support {method}.")) }
+    let url = webview.url().map_err(|e| e.to_string())?;
+    let (Some(host), "https") = (url.host_str(), url.scheme()) else { return Err("only https sites get the wallet".into()) };
+    let origin = format!("https://{host}{}", url.port().map(|p| format!(":{p}")).unwrap_or_default());
+    let id = state.next.fetch_add(1, Ordering::SeqCst);
+    let (tx, rx) = mpsc::channel();
+    state.dapp.lock().map_err(|_| "the engine is gone")?.insert(id, tx);
+    let line = serde_json::json!({ "id": id, "op": "dapp", "name": method, "text": params.to_string(), "address": origin }).to_string();
+    {
+        let mut input = state.input.lock().map_err(|_| "the engine is gone")?;
+        writeln!(input, "{line}").and_then(|_| input.flush()).map_err(|e| format!("the engine stopped: {e}"))?;
+    }
+    // The person may take a while to read the card.
+    let answer = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(900)))
+        .await.map_err(|e| e.to_string())?.map_err(|_| "No answer: the request timed out.".to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+    if v["ok"].as_bool() == Some(true) {
+        Ok(v["result"]["json"].as_str().unwrap_or("null").to_string())
+    } else {
+        Err(v["error"].as_str().unwrap_or("Declined.").to_string())
+    }
 }
 
 /// While the recovery phrase is on screen the window is left out of screenshots and screen sharing.
@@ -187,7 +260,14 @@ fn ui_eval(app: &tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
             for line in text.lines().skip(done) {
-                if let Some(window) = handle.get_webview_window("main") { let _ = window.eval(line); }
+                // «browser:» lines go to the browser's page instead; «show:<label>» brings that window forward.
+                if let Some(label) = line.strip_prefix("show:") {
+                    if let Some(window) = handle.get_webview_window(label) { let _ = window.show(); let _ = window.set_focus(); }
+                    done += 1;
+                    continue;
+                }
+                let (label, js) = line.strip_prefix("browser:").map(|js| ("browser", js)).unwrap_or(("main", line));
+                if let Some(window) = handle.get_webview_window(label) { let _ = window.eval(js); }
                 done += 1;
             }
         }
@@ -255,12 +335,15 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // The main window closes to the tray; the browser closes for real.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
-        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen])
+        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen, open_browser, dapp_call])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {

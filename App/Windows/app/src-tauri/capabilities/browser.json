@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "browser",
+  "description": "Sites in ihatecrypto's browser: only the wallet provider's one command, which the app answers after the person's Confirm. No events, no other command.",
+  "windows": [
+    "browser"
+  ],
+  "remote": {
+    "urls": [
+      "https://*"
+    ]
+  },
+  "permissions": [
+    "allow-dapp-call"
+  ]
+}

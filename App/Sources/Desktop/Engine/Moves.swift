@@ -64,6 +64,8 @@ extension Engine {
     // MARK: Cards
 
     func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = []) {
+        // A site's request that waited is declined: a new card takes its place.
+        if case .site(let ask)? = self.pending { ask.answer(false) }
         // A card waiting before this one stays on the canvas, marked: nothing of it was signed.
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Replaced by the next card: nothing was signed.", "Заменена следующей карточкой: ничего не подписано.")) }
         self.pending = pending
@@ -75,6 +77,7 @@ extension Engine {
     }
 
     func cancelPending() {
+        if case .site(let ask)? = pending { ask.answer(false) }
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Cancelled: nothing was signed.", "Отменено: ничего не подписано.")) }
         if case .wallet(.multisigCreate)? = pending { multisigDraft = nil }
         pending = nil
@@ -434,6 +437,15 @@ extension Engine {
     /// The Confirm button: the one way a move starts.
     func confirm() async {
         guard let waiting = pending, let title = card?.title else { return }
+        // A site's request: Confirm lets it through; the browser's handler signs it, with the signer's own checks.
+        if case .site(let ask) = waiting {
+            updateBoard(card?.id) { $0.state = "done" }
+            pending = nil
+            card = nil
+            ask.answer(true)
+            changed()
+            return
+        }
         // The card's block turns into the running move in the same step: nothing leaves the canvas meanwhile.
         runningBoard = card?.id
         updateBoard(runningBoard) { $0.state = "running" }
@@ -494,6 +506,7 @@ extension Engine {
             case .address(let entry):
                 try await saveAddress(entry)
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))
+            case .site(let ask): ask.answer(true) // answered above; kept for the switch
             }
         } catch {
             updateBoard(runningBoard) { $0.state = "failed" }

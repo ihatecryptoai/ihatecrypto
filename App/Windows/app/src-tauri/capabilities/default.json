@@ -8,6 +8,14 @@
   "permissions": [
     "core:event:default",
     "core:window:default",
-    "updater:default"
+    "updater:default",
+    "allow-engine-send",
+    "allow-protect",
+    "allow-open-link",
+    "allow-copy-secret",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-listen",
+    "allow-open-browser"
   ]
 }

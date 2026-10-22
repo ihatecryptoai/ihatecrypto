@@ -106,6 +106,7 @@ function icon(name) {
     check: "M5 12l4 4 10-10",
     more: "M6 12h.01M12 12h.01M18 12h.01",
     back: "M15 6l-6 6 6 6",
+    globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z",
     mic: "M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3",
   };
   const s = svg("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round" },
@@ -245,6 +246,7 @@ function rail() {
       oncontextmenu: (e) => { e.preventDefault(); canvasMenu(e, c); },
     }, icon("canvas"), h("span", { class: "label" }, h("span", { class: "canvas-title" }, c.title), h("span", { class: "canvas-at" }, when(c.at)))))),
     h("div", { class: "spacer" }),
+    h("button", { class: "nav", onclick: browserDialog }, icon("globe"), h("span", { class: "label" }, t("Browser", "Браузер"))),
     h("button", { class: "wallet-chip", onclick: walletMenu },
       h("span", { class: "dot" + (activeWallet?.test || activeWallet?.automation ? " test" : "") }),
       h("span", { class: "name" }, activeWallet ? activeWallet.label : t("No wallet", "Нет кошелька"))),
@@ -285,6 +287,29 @@ function renameDialog(c) {
       h("button", { class: "btn", onclick: done }, t("Back", "Назад")))));
   render();
   setTimeout(() => document.getElementById("rename")?.focus(), 0);
+}
+
+/** ihatecrypto's browser: a site opens in a window of its own with the wallet in it; what it asks for comes here as a card. */
+function browserDialog() {
+  let value = "";
+  const sites = ["jup.ag", "kamino.com", "raydium.io", "app.aave.com", "app.uniswap.org", "app.hyperliquid.xyz"];
+  const open = async (text) => {
+    const url = /^https:\/\//.test(text) ? text : "https://" + text.replace(/^\w+:\/\//, "");
+    try { await invoke("open_browser", { url }); overlay = null; render(); } catch (e) { toast(String(e)); }
+  };
+  const done = () => { overlay = null; render(); };
+  overlay = h("div", { class: "center" }, h("div", { class: "card", style: "max-width:520px;width:100%" },
+    h("h1", { style: "font-size:18px" }, t("Open a site with your wallet", "Открыть сайт со своим кошельком")),
+    h("p", { class: "muted small" }, t("The site sees your address only after you connect it, and every signature it asks for comes to the canvas as a card: nothing is signed without Confirm and Windows Hello. Sites on MetaMask's phishing list get no wallet.",
+      "Сайт увидит адрес, только когда ты его подключишь, а каждая подпись, которую он просит, приходит на холст карточкой: без «Подтвердить» и Windows Hello ничего не подписывается. Сайты из списка фишинга MetaMask кошелёк не получают.")),
+    h("input", { id: "site-url", style: "width:100%", placeholder: "jup.ag", oninput: (e) => (value = e.target.value.trim()),
+      onkeydown: (e) => { if (e.key === "Enter" && value) open(value); } }),
+    h("div", { class: "btns", style: "margin-top:10px" }, sites.map((s) => h("button", { class: "btn", onclick: () => open(s) }, s))),
+    h("div", { class: "btns", style: "margin-top:12px" },
+      h("button", { class: "btn primary", onclick: () => value && open(value) }, t("Open", "Открыть")),
+      h("button", { class: "btn", onclick: done }, t("Back", "Назад")))));
+  render();
+  setTimeout(() => document.getElementById("site-url")?.focus(), 0);
 }
 
 function walletMenu(e) {

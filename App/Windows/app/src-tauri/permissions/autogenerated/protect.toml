@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-protect"
+description = "Enables the protect command without any pre-configured scope."
+commands.allow = ["protect"]
+
+[[permission]]
+identifier = "deny-protect"
+description = "Denies the protect command without any pre-configured scope."
+commands.deny = ["protect"]
