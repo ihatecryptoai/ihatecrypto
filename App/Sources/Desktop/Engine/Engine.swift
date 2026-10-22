@@ -138,6 +138,12 @@ final class Engine {
     var multisigs: [Multisig] = Store.load([Multisig].self, "multisigs.json") ?? []
     var multisigDraft: MultisigDraft?
     var multisigPayment: MultisigPayment?
+    /// The Ledger's addresses, its connect card, and what it waits for on its screen now.
+    var ledger: LedgerAccount? = Store.load(LedgerAccount.self, "ledger.json") {
+        didSet { Store.save(ledger, "ledger.json"); changed() }
+    }
+    var ledgerConnect: LedgerConnect?
+    var ledgerPrompt: String?
     var awaitingAmount: WalletCommand?
     /// A move the loss cap stopped (CostlyMove): offered again with that loss accepted («Send anyway»), never by itself.
     var costly: (pending: Pending, title: String, lost: Decimal)?
@@ -169,10 +175,14 @@ final class Engine {
         }
     }
 
-    var activeWallet: SignerWallet? { status?.wallets?.first { $0.id == status?.activeWallet } ?? status?.wallets?.first }
-    var solanaAddress: String? { status?.solanaAddress }
-    var evmAddress: String? { status?.evmAddress }
-    var nearAddress: String? { status?.nearAddress }
+    /// The wallet that signs now: the connected Ledger when it's on, else the signer's.
+    var activeWallet: SignerWallet? {
+        if ledgerActive, let l = ledger { return l.wallet }
+        return status?.wallets?.first { $0.id == status?.activeWallet } ?? status?.wallets?.first
+    }
+    var solanaAddress: String? { ledgerActive ? ledger?.solana : status?.solanaAddress }
+    var evmAddress: String? { ledgerActive ? ledger?.evm : status?.evmAddress }
+    var nearAddress: String? { ledgerActive ? nil : status?.nearAddress }
     var tradeWallet: TradeWallet? {
         guard let s = solanaAddress, let e = evmAddress else { return nil }
         return TradeWallet(solana: s, evm: e)
@@ -212,6 +222,8 @@ final class Engine {
             var notes: [String]
             var waiting: Bool
             var sessionLength: Int?
+            /// What the Ledger waits for on its screen.
+            var ledger: String?
         }
         struct Option: Encodable { var title: String; var comment: String; var recommended: Bool }
         struct Alert: Encodable { var id: String; var text: String }
@@ -262,6 +274,7 @@ final class Engine {
         var multisigs: [Multisig]
         var multisigDraft: MultisigDraft?
         var candidates: [Multisig.Key]
+        var ledgerConnect: LedgerConnect?
     }
 
     func snapshot() -> Snapshot {
@@ -270,8 +283,10 @@ final class Engine {
         if let e = evmAddress { addresses["evm"] = e; addresses["hyperliquid"] = e }
         if let n = nearAddress { addresses["near"] = n }
         return Snapshot(
-            signer: .init(ready: status != nil, error: signerError, notes: status?.checks ?? [], waiting: signing > 0, sessionLength: status?.sessionLength),
-            wallets: status?.wallets ?? [], active: status?.activeWallet, addresses: addresses, phrase: phrase,
+            signer: .init(ready: status != nil, error: signerError, notes: status?.checks ?? [], waiting: signing > 0 || ledgerPrompt != nil,
+                          sessionLength: status?.sessionLength, ledger: ledgerPrompt),
+            wallets: (status?.wallets ?? []) + (ledger?.evm != nil ? [ledger!.wallet] : []), active: ledgerActive ? LedgerAccount.id : status?.activeWallet,
+            addresses: addresses, phrase: phrase,
             portfolio: portfolio,
             positions: positions.map { p in
                 .init(coin: IntentParser.pretty(p.coin), side: p.size > 0 ? "long" : "short", size: Fmt.num(abs(p.size), maxFraction: 6),
@@ -289,7 +304,7 @@ final class Engine {
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
             canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
-            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates)
+            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect)
     }
 
     // MARK: Requests from the window
@@ -357,9 +372,16 @@ final class Engine {
         case "phraseSaved": phrase = nil
         case "importPhrase": try await importPhrase(r.phrase ?? "")
         case "importKey": try await importKey(r.key ?? "")
-        case "switchWallet": try await signerCall(.setActiveWallet(id: r.wallet ?? ""))
+        case "switchWallet":
+            if r.wallet == LedgerAccount.id { useLedger(true) } else {
+                useLedger(false)
+                try await signerCall(.setActiveWallet(id: r.wallet ?? ""))
+            }
+        case "connectLedger": Task { await connectLedger() }
+        case "showOnLedger": await showOnLedger(solana: r.test == true)
         case "renameWallet": try await signerCall(.renameWallet(id: r.wallet ?? "", label: r.label ?? ""))
-        case "removeWallet": try await signerCall(.removeWallet(id: r.wallet ?? ""))
+        case "removeWallet":
+            if r.wallet == LedgerAccount.id { forgetLedger() } else { try await signerCall(.removeWallet(id: r.wallet ?? "")) }
         case "lock": try await signerCall(.lock)
         case "sessionLength": try await signerCall(.setSessionLength(seconds: r.seconds ?? SignerSession.standard))
         case "saveAddress":

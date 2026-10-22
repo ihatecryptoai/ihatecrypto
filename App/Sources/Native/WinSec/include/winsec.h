@@ -43,4 +43,15 @@ int32_t winsec_write(intptr_t handle, const uint8_t *buf, size_t len);
 void winsec_close(intptr_t handle);
 int32_t winsec_allow_foreground(uint32_t pid);
 
+/// A Ledger over USB HID (vendor 0x2c97, usage page 0xffa0), for one exchange: an opaque handle, NULL when none is
+/// plugged in or another program holds it. The packets are Ledger's 64-byte HID frames (LedgerFraming).
+void *winsec_ledger_open(void);
+/// The model of the first Ledger plugged in («Nano S Plus»…) as UTF-8: its length, 0 when none is.
+int32_t winsec_ledger_product(uint8_t *out, int32_t cap);
+/// 0 when the packet was written.
+int32_t winsec_ledger_write(void *device, const uint8_t *packet, int32_t len);
+/// One packet into `out`, waiting at most `timeout_ms`: its length, 0 when none came, -1 on an error.
+int32_t winsec_ledger_read(void *device, uint8_t *out, int32_t cap, int32_t timeout_ms);
+void winsec_ledger_close(void *device);
+
 #endif

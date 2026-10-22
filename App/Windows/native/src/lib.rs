@@ -5,6 +5,8 @@
 #![cfg(windows)]
 #![allow(clippy::missing_safety_doc)]
 
+mod ledger;
+
 use std::ffi::c_void;
 use std::sync::Once;
 use std::time::{Duration, Instant};

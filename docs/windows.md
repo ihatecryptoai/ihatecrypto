@@ -97,7 +97,10 @@ Has: canvases as on the Mac (each with its own chat and blocks: the portfolio fr
 cards with the balance it spends now → after, results the chat makes — a chart, the rates, approvals, P/L, a token, a
 service's answer — and blocks added by hand, the newest on top; nothing leaves a canvas unless the person closes it;
 right-click a block to ask about it in the chat), the chat floating over the canvas with Confirm in its field and a mic (Windows' own speech recognizer in the
-keyboard layout's language; the words go into the field, never sent by themselves), the dApp browser
+keyboard layout's language; the words go into the field, never sent by themselves), a Ledger over USB (winsec.dll's HID
+calls under the Mac's Ledger module: «connect my Ledger» reads one address from its Ethereum app and one from its Solana
+app, «use my Ledger» makes it sign every move on its screen with the same guard first, «show on the Ledger» to compare
+an address, and it can be a key of a multisig), the dApp browser
 (a window of its own for https sites with ihatecrypto as a Solana Wallet Standard wallet and an EIP-1193/EIP-6963
 provider; each connect, message, typed data or transaction is a card on the canvas — the Solana guard and simulation,
 the EVM call decoded and simulated, the site checked against MetaMask's phishing list and for lookalikes — and nothing
@@ -125,7 +128,7 @@ Mac: the model reads every command and trade plan again, Jev through OpenRouter 
 plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
-Not yet: Ledger, watched wallets, contract calls.
+Not yet: watched wallets, contract calls, a Ledger over Bluetooth.
 
 ## Checking on a Windows machine
 

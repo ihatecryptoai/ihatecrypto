@@ -49,7 +49,7 @@ nonisolated struct CanvasDoc: Codable, Equatable, Identifiable {
 }
 
 extension Engine {
-    static let liveBoards = ["portfolio", "receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig"]
+    static let liveBoards = ["portfolio", "receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig", "ledger"]
 
     /// Canvases from canvases.json; the chat of a build before canvases becomes the first one.
     static func loadCanvases() -> [CanvasDoc] {

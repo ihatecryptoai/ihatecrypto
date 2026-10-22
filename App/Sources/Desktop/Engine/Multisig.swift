@@ -58,7 +58,10 @@ extension Engine {
     func saveMultisigs() { Store.save(multisigs, "multisigs.json") }
 
     /// The signer's own EVM key, whichever wallet is shown: one computer is one key of a multisig.
-    var pcKey: String? { evmAddress.map { $0.lowercased() } }
+    var pcKey: String? { status?.evmAddress.map { $0.lowercased() } }
+
+    /// The connected Ledger as a key: its own device, signed with its buttons.
+    var ledgerKey: Multisig.Key? { ledger?.evm.map { Multisig.Key(name: ledger?.label ?? "Ledger", address: $0.lowercased(), kind: "ledger") } }
 
     /// The other EVM keys on this computer (the test or automation wallet, another phrase): they make one key, not several.
     var keysOnThisPC: Set<String> { Set((status?.wallets ?? []).compactMap { $0.evm?.lowercased() }) }
@@ -71,7 +74,7 @@ extension Engine {
     var multisigCandidates: [Multisig.Key] {
         guard multisigDraft != nil else { return [] }
         let have = Set(multisigDraft?.keys.map(\.address) ?? []).union(keysOnThisPC)
-        var out: [Multisig.Key] = []
+        var out: [Multisig.Key] = ledgerKey.map { have.contains($0.address) ? [] : [$0] } ?? []
         for e in book where (Self.evmPlaces.contains(e.network) || e.network == "hyperliquid") && isEVM(e.address)
             && !multisigs.contains(where: { $0.address == e.address.lowercased() }) && !have.contains(e.address.lowercased()) {
             if !out.contains(where: { $0.address == e.address.lowercased() }) { out.append(.init(name: e.name, address: e.address.lowercased(), kind: "address")) }
@@ -97,7 +100,11 @@ extension Engine {
             return
         }
         var keys = [Multisig.Key(name: say("This PC", "Этот ПК"), address: pc, kind: "pc")]
-        for name in names {
+        // The connected Ledger: when named, when no count was said, or when the count needs it beside the names.
+        func isLedger(_ name: String) -> Bool { name.lowercased() == ledgerKey?.name.lowercased() || name.lowercased().contains(/^(?:my\s+|the\s+)?(?:ledger|л[еэ]дж[еэ]р\w*)$/) }
+        let others = names.filter { !isLedger($0) }
+        if let l = ledgerKey, l.address != pc, names.contains(where: isLedger) || of == nil || (of ?? 0) > others.count + 1 { keys.append(l) }
+        for name in others {
             guard let entry = entry(name, network: "base"), isEVM(entry.address) else {
                 reply(say("There's no EVM address «\(name)» in Addresses. Save it first («save 0x… as \(name) on base»), then make the multisig.",
                           "В адресной книге нет EVM-адреса «\(name)». Сначала сохрани его («сохрани 0x… как \(name) на base»), потом делай мультисиг."), note: note)
@@ -238,7 +245,7 @@ extension Engine {
         }
         guard !coin || units <= Decimal(UInt64.max) else { reply(say("That's more \(net.gasCoin) than one move sends.", "Это больше \(net.gasCoin), чем уходит за раз."), note: note); return }
         let keys = Set(owners.map { $0.lowercased() })
-        let here = m.keys.filter { keys.contains($0.address) && $0.address == pcKey }
+        let here = m.keys.filter { keys.contains($0.address) && ($0.address == pcKey || $0.address == ledgerKey?.address) }.sorted { a, _ in a.kind == "pc" }
         guard here.count >= Int(threshold) else {
             let elsewhere = m.keys.filter { !here.contains($0) }.map(\.name).joined(separator: ", ")
             reply(say("The multisig needs \(threshold) signatures and only \(here.count) of its keys sign here. The others (\(elsewhere)) sign in Safe's own app: app.safe.global.",
@@ -261,7 +268,10 @@ extension Engine {
         }
         multisigPayment = nil
         let e = try executor()
-        let cosigners: [any TradeSigner] = p.signers.map { _ in tradeSigner() }
+        let cosigners: [any TradeSigner] = p.signers.map { k in
+            guard k.kind == "ledger", let l = ledger, let evm = l.evm else { return tradeSigner() }
+            return ledgerSigner(TradeWallet(solana: l.solana ?? "", evm: evm))
+        }
         let amount = "\(Fmt.num(p.amount, maxFraction: 6)) \(p.symbol)"
         let data = try p.token.map { _ in try ERC20.transfer(to: p.to.address, units: p.units) } ?? Data()
         let hash = try await e.multisigPay(net, safe: p.multisig.address, to: p.token ?? p.to.address,

@@ -71,6 +71,10 @@ extension Engine {
         let params = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         let eth = method == "eth"
         guard let wallet = activeWallet, wallet.automation != true else { throw SiteError((eth ? "4100|" : "") + say("Add a wallet first.", "Сначала добавь кошелёк.")) }
+        guard !ledgerActive else {
+            throw SiteError((eth ? "4100|" : "") + say("The browser signs with ihatecrypto's own wallets for now: switch from the Ledger to use a site.",
+                                                       "Браузер пока подписывает только кошельками ihatecrypto: переключись с Ledger, чтобы пользоваться сайтом."))
+        }
         guard !(await PhishingList.shared.contains(host)) else {
             throw SiteError((eth ? "4100|" : "") + "\(host) is on MetaMask's list of phishing sites: ihatecrypto gives it no wallet.")
         }

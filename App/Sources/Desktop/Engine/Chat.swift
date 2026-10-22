@@ -78,6 +78,7 @@ extension Engine {
             catch { reply(error.localizedDescription) }
             return
         }
+        if await ledgerCommand(text) { return }
         if let client = llmClient() {
             await routeWithModel(text, client: client)
             return

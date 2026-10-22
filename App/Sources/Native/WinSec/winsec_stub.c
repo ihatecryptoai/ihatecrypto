@@ -127,4 +127,11 @@ int32_t winsec_write(intptr_t handle, const uint8_t *buf, size_t len) {
 
 void winsec_close(intptr_t handle) { close((int)handle); }
 int32_t winsec_allow_foreground(uint32_t pid) { (void)pid; return WINSEC_OK; }
+
+// No Ledger off Windows: the Mac's app has its own USB transport (IOKit).
+void *winsec_ledger_open(void) { return NULL; }
+int32_t winsec_ledger_product(uint8_t *out, int32_t cap) { (void)out; (void)cap; return 0; }
+int32_t winsec_ledger_write(void *device, const uint8_t *packet, int32_t len) { (void)device; (void)packet; (void)len; return -1; }
+int32_t winsec_ledger_read(void *device, uint8_t *out, int32_t cap, int32_t timeout_ms) { (void)device; (void)out; (void)cap; (void)timeout_ms; return -1; }
+void winsec_ledger_close(void *device) { (void)device; }
 #endif

@@ -33,7 +33,9 @@ extension Engine {
         let automation = TaskRun.automation
         if let a = automation { wallet = TradeWallet(solana: a.solana ?? wallet.solana, evm: a.evm ?? wallet.evm) }
         let owes = automation != nil
-        return Executor(wallet: wallet, signer: tradeSigner(asWallet: automation?.id), journal: journal) { [weak self] text in
+        // The Ledger signs while it's on (never a task's run on the automation wallet).
+        let signer: any TradeSigner = automation == nil && ledgerActive ? ledgerSigner(wallet) : tradeSigner(asWallet: automation?.id)
+        return Executor(wallet: wallet, signer: signer, journal: journal) { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
                 self.running?.lines.append(text)

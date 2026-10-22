@@ -123,6 +123,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .lines li { margin: 3px 0; overflow-wrap: anywhere; user-select: text; }
 .lines.warn { color: var(--danger); }
 .empty { color: var(--muted); padding: 10px 0; }
+.warn-text { color: var(--danger); }
 .check { color: var(--ok); font-weight: 700; }
 
 /* The canvas */

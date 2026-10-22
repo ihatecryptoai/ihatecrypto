@@ -415,6 +415,7 @@ function blockLibrary(e) {
     ["schedule", t("Schedule", "Расписание")],
     ["positions", t("Open positions", "Открытые позиции")],
     ["multisig", t("Multisig", "Мультисиг")],
+    ["ledger", "Ledger"],
   ];
   const r = e.currentTarget.getBoundingClientRect();
   popup({ clientX: r.right - 260, clientY: r.bottom + 6 }, blocks.map(([kind, label]) => [label, () => act("addBoard", { name: kind })]));
@@ -474,7 +475,7 @@ function board(b) {
 }
 let seenReady = false;
 function drawBoard(b) {
-  const live = ["receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig"];
+  const live = ["receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig", "ledger"];
   if (b.kind === "move") return moveBoard(b);
   const body = live.includes(b.kind) ? liveBoard(b.kind) : b.kind === "chart" ? chartBody(b) : resultBody(b);
   return frameBoard(b, live.includes(b.kind) ? liveTitle(b.kind) : b.title, body);
@@ -500,7 +501,7 @@ function liveTitle(kind) {
   return {
     receive: t("Receive", "Получить"), addresses: t("Address book", "Адресная книга"), history: t("History", "История"),
     favorites: t("Favorites", "Избранное"), alerts: t("Price alerts", "Ценовые оповещения"), schedule: t("Schedule", "Расписание"),
-    positions: t("Open positions", "Открытые позиции"), multisig: t("Multisig", "Мультисиг"),
+    positions: t("Open positions", "Открытые позиции"), multisig: t("Multisig", "Мультисиг"), ledger: "Ledger",
   }[kind];
 }
 
@@ -568,7 +569,8 @@ function moveBoard(b) {
     waitingHere && state.multisigDraft ? multisigSetup(state.multisigDraft) : null,
     waitingHere && state.card.warnings.length ? h("ul", { class: "lines warn" }, state.card.warnings.map((w) => h("li", {}, w))) : null,
     b.lines.filter((l) => !l.startsWith("⚠ ")).length ? h("ul", { class: "lines" }, b.lines.filter((l) => !l.startsWith("⚠ ")).map((l) => h("li", {}, l))) : null,
-    runningHere && state.signer.waiting ? h("div", { class: "muted" }, t("Windows Hello is asking for you…", "Windows Hello спрашивает тебя…")) : null);
+    runningHere && state.signer.ledger ? h("div", { class: "muted" }, "Ledger: " + state.signer.ledger)
+      : runningHere && state.signer.waiting ? h("div", { class: "muted" }, t("Windows Hello is asking for you…", "Windows Hello спрашивает тебя…")) : null);
 }
 
 function stepCard(s, b, i) {
@@ -597,7 +599,7 @@ function multisigSetup(d) {
   return h("div", { class: "msig" },
     h("div", { class: "eyebrow" }, t(`Keys · one on each device · ${n}`, `Ключи · по одному на устройство · ${n}`)),
     d.keys.map((k, i) => h("div", { class: "row" },
-      h("span", {}, h("b", {}, k.name), h("span", { class: "muted small" }, " · " + (k.kind === "pc" ? "Windows Hello" : t("signs in Safe's app", "подписывает в приложении Safe"))),
+      h("span", {}, h("b", {}, k.name), h("span", { class: "muted small" }, " · " + (k.kind === "pc" ? "Windows Hello" : k.kind === "ledger" ? t("the Ledger's buttons", "кнопки Ledger") : t("signs in Safe's app", "подписывает в приложении Safe"))),
         h("div", { class: "address small" }, k.address)),
       h("span", { class: "btns" }, h("span", { class: "chip " + (i < m ? "done" : "") }, i < m ? t("signs", "подписывает") : t("spare", "запасной")),
         k.kind === "pc" || n <= 1 ? null : h("button", { class: "icon-btn", title: t("Remove this key", "Убрать ключ"), onclick: () => act("multisigKey", { wallet: k.address }) }, icon("close"))))),
@@ -639,6 +641,7 @@ function liveBoard(kind) {
         h("button", { class: "icon-btn", title: t("Remove", "Убрать"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("close")))))
         : h("div", { class: "empty" }, t("No alerts: “tell me when BTC is above 120000”.", "Оповещений нет: «скажи, когда BTC выше 120000»."));
     case "schedule": return scheduleBody();
+    case "ledger": return ledgerBody();
     case "positions":
       return state.positions.length ? h("div", {}, state.positions.map((x) => h("div", { class: "row" },
         h("span", { class: "sym " + (x.side === "long" ? "gain" : "loss") }, `${x.side} ${x.coin}`), h("span", { class: "num" }, `${x.size} @ ${x.entry} · ${x.pnl}`))))
@@ -656,6 +659,29 @@ function liveBoard(kind) {
           h("button", { class: "btn", onclick: () => suggest("make a multisig 2 of 2 with Phone on base") }, t("Make a multisig", "Сделать мультисиг")));
     default: return null;
   }
+}
+
+/** The Ledger: its connect steps, its addresses (whole, with Copy and «show on the Ledger»), and the switch to it. */
+function ledgerBody() {
+  const c = state.ledgerConnect;
+  const w = state.wallets.find((x) => x.kind === "ledger");
+  const on = state.active === "ledger";
+  return h("div", {},
+    c ? [h("div", { class: "eyebrow" }, (c.model || "Ledger") + (c.busy ? t(" · connecting", " · подключаю") : "")),
+      h("p", {}, c.status), c.problem ? h("p", { class: "warn-text" }, c.problem) : null,
+      c.notes.map((n) => h("p", { class: "muted small" }, n))] : null,
+    w ? [
+      w.evm ? [h("div", { class: "small" }, "EVM"), h("div", { class: "address" }, w.evm),
+        h("div", { class: "btns" }, copyButton(w.evm), h("button", { class: "btn small-btn", onclick: () => act("showOnLedger", { test: false }) }, t("Show on the Ledger", "Показать на Ledger")))] : null,
+      w.solana ? [h("div", { class: "small", style: "margin-top:8px" }, "Solana"), h("div", { class: "address" }, w.solana),
+        h("div", { class: "btns" }, copyButton(w.solana), h("button", { class: "btn small-btn", onclick: () => act("showOnLedger", { test: true }) }, t("Show on the Ledger", "Показать на Ledger")))] : null,
+      h("div", { class: "btns", style: "margin-top:10px" },
+        on ? h("span", { class: "check" }, "✓ " + t("It signs every move now", "Подписывает каждое движение"))
+          : h("button", { class: "btn primary", onclick: () => act("switchWallet", { wallet: "ledger" }) }, t("Switch to it", "Переключиться на него")),
+        h("button", { class: "btn", onclick: () => act("removeWallet", { wallet: "ledger" }) }, t("Forget it", "Забыть его")))]
+      : c ? null : h("p", { class: "muted small" }, t("Plug it in over USB and unlock it. ihatecrypto reads one address from its Ethereum app and one from its Solana app; every move is then shown on its screen and approved with its buttons.",
+        "Подключи его по USB и разблокируй. ihatecrypto прочитает по адресу из приложений Ethereum и Solana; дальше каждое движение показывается на его экране и подтверждается его кнопками.")),
+    !c || !c.busy ? h("button", { class: "btn", style: "margin-top:8px", onclick: () => act("connectLedger") }, w ? t("Connect again", "Подключить снова") : t("Connect a Ledger", "Подключить Ledger")) : null);
 }
 
 /** The tasks with their switches, and the automation wallet they spend from. */
@@ -902,7 +928,8 @@ function settings() {
         h("button", { class: "btn", onclick: () => act("createWallet", { test: false }) }, t("New wallet", "Новый кошелёк")),
         h("button", { class: "btn", onclick: showImport }, t("Import a phrase", "Импортировать фразу")),
         h("button", { class: "btn", onclick: () => act("createWallet", { test: true }) }, t("New test wallet", "Новый тестовый")),
-        s.automation ? null : h("button", { class: "btn", onclick: () => act("createAutomationWallet") }, t("New automation wallet", "Кошелёк автоматизации")))),
+        s.automation ? null : h("button", { class: "btn", onclick: () => act("createAutomationWallet") }, t("New automation wallet", "Кошелёк автоматизации")),
+        h("button", { class: "btn", onclick: () => { view = "canvas"; act("addBoard", { name: "ledger" }); } }, t("Connect a Ledger", "Подключить Ledger")))),
 
     h("h2", {}, t("Updates", "Обновления")),
     h("div", { class: "card" },
