@@ -148,6 +148,8 @@ if desktop {
                 path: "Sources/Signer", exclude: ["Windows/Main"], sources: ["Core", "Windows"]),
         .executableTarget(name: "WinSigner", dependencies: ["SignerCore", "CWinSec"], path: "Sources/Signer/Windows/Main"),
         .testTarget(name: "SignerTests", dependencies: ["SignerCore", "SignerAPI", "WalletCore", "CWinSec"] + desktopCrypto),
+        // The engine and the signer as programs, driven over their pipes as the window drives them.
+        .testTarget(name: "EngineTests", dependencies: ["DesktopEngine", "WinSigner", "CWinSec"]),
         // What the window talks to: the chat, the cards and the balances over the same core as the Mac's window.
         .executableTarget(name: "DesktopEngine",
                           dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "SignerAPI", "HyperliquidSigning",

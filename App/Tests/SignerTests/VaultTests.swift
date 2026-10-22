@@ -89,6 +89,34 @@ func setEnv(_ name: String, _ value: String) {
         #expect(throws: Trusted.tampered) { try send(.signPersonal(message: Data("hello".utf8))) }
     }
 
+    @Test(.enabled(if: fakeHello)) func aFileChangedAndChangedBackBeforeTheCheckStillStops() throws {
+        _ = try importWallet()
+        SeedStore.endSession()
+        let original = try #require(Vault.read("state.json"))
+        var file = try JSONDecoder().decode(Trusted.File.self, from: original)
+        var state = try JSONDecoder().decode(Trusted.State.self, from: file.body)
+        state.recipients[SignerWallet.firstID] = ["0x000000000000000000000000000000000000dead"]
+        file.body = try JSONEncoder().encode(state)
+        try Vault.write("state.json", JSONEncoder().encode(file))
+        Trusted.reload()
+        // The signer reads the planted address as approved…
+        #expect(RecipientStore.all().contains("0x000000000000000000000000000000000000dead"))
+        // …the file is put back before Windows Hello opens the key, and the check still refuses.
+        try Vault.write("state.json", original)
+        #expect(throws: Trusted.tampered) { try send(.signPersonal(message: Data("hello".utf8))) }
+    }
+
+    @Test(.enabled(if: fakeHello)) func aSessionChecksTheSettingsAgain() throws {
+        _ = try importWallet()
+        _ = try send(.signPersonal(message: Data("hello".utf8)))   // opens a session
+        var file = try JSONDecoder().decode(Trusted.File.self, from: try #require(Vault.read("state.json")))
+        var state = try JSONDecoder().decode(Trusted.State.self, from: file.body)
+        state.recipients[SignerWallet.firstID] = ["0x000000000000000000000000000000000000dead"]
+        file.body = try JSONEncoder().encode(state)
+        try Vault.write("state.json", JSONEncoder().encode(file))
+        #expect(throws: Trusted.tampered) { try send(.signPersonal(message: Data("again".utf8))) }
+    }
+
     @Test(.enabled(if: fakeHello)) func aRenameWaitsForTheNextPromptAndOnlyTakesTrustAway() throws {
         let imported = try importWallet()
         SeedStore.endSession()

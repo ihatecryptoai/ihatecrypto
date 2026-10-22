@@ -90,6 +90,9 @@ enum Trusted {
     /// needs Windows Hello, which would have made the key).
     static func verify(with key: SymmetricKey, fresh: Bool) throws {
         try lock.withLock {
+            // What this process has decided by so far (an address «already approved»): it must be what the seal holds,
+            // or a file changed and changed back between the decision and this check would pass.
+            let used = loaded?.effective
             loaded = nil
             if fresh {
                 var state = decode("state.json")?.1 ?? State()
@@ -111,9 +114,12 @@ enum Trusted {
                 return
             }
             guard let mac = file.mac, seal(file.body, key) == mac else { throw tampered }
+            var effective = sealed
+            if let (_, pending) = decode("pending.json"), pending != sealed, takesTrustAway(from: sealed, to: pending) { effective = pending }
+            if let used, used != effective { throw tampered }
             // What was changed with no key in hand is sealed now, as far as it only takes trust away.
-            if let (_, pending) = decode("pending.json"), pending != sealed {
-                try write(takesTrustAway(from: sealed, to: pending) ? pending : sealed, key: key)
+            if effective != sealed || Vault.exists("pending.json") {
+                try write(effective, key: key)
             } else {
                 loaded = (sealed, sealed)
             }

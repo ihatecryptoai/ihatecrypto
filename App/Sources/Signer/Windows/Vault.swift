@@ -173,6 +173,8 @@ enum Vault {
     /// against it before it is handed out: a key never serves settings changed outside the signer.
     static func key(reason: String, session useSession: Bool = true) throws -> SymmetricKey {
         if useSession, let key = currentKey {
+            // The file may have changed since the session opened: checked again before the key serves.
+            try Trusted.verify(with: key, fresh: false)
             scope?.key = key
             return key
         }
