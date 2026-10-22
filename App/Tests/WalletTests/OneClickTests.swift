@@ -183,14 +183,16 @@ func tempoExchangeQuotes() async throws {
 /// leg that failed throws when its place is needed.
 @Test(.timeLimit(.minutes(1))) func landingsAreWaitedForByPlace() async throws {
     let landings = Landings()
-    let started = ContinuousClock.now
-    landings.add("arbitrum") { try await Task.sleep(for: .milliseconds(400)); return "one" }
-    landings.add("arbitrum") { try await Task.sleep(for: .milliseconds(400)); return "two" }
+    let spans = Spans()
+    landings.add("arbitrum") { await spans.start("one"); try await Task.sleep(for: .milliseconds(400)); await spans.end("one"); return "one" }
+    landings.add("arbitrum") { await spans.start("two"); try await Task.sleep(for: .milliseconds(400)); await spans.end("two"); return "two" }
     landings.add("solana") { throw ExecutionError("Relay returned refund.") }
     #expect(landings.count(at: "arbitrum") == 2 && landings.count(at: nil) == 3)
     #expect(try await landings.wait(for: "arbitrum") == ["one", "two"])
-    // Two 0.4 s landings at once, not one after the other.
-    #expect(ContinuousClock.now - started < .milliseconds(750))
+    // The two landings ran at once, not one after the other: each started before the other ended. Read from when they
+    // ran, not from a deadline, so a loaded machine (a Linux container running every suite at once) can't fail it.
+    let one = try #require(await spans.all["one"]), two = try #require(await spans.all["two"])
+    #expect(two.start < one.end && one.start < two.end)
     #expect(landings.count(at: "arbitrum") == 0 && landings.count(at: "solana") == 1)
     await #expect(throws: ExecutionError.self) { try await landings.wait(for: "solana") }
     #expect(landings.count(at: nil) == 0)
@@ -211,4 +213,11 @@ func tempoExchangeQuotes() async throws {
     #expect(OneClick.Settled(status(near, OneClick.Asset.solanaUSDC, recipient: "AULW53", refundTo: me))?.near(for: me)?.amount == -1000)
     #expect(buy?.near(for: "d523049b8db090f8b47bdbfc027ba4c42df08782835303be44ea61d9f1955dfb") == nil)
     #expect(OneClick.Settled(status(OneClick.Asset.solanaUSDC, near, recipient: me, refundTo: "AULW53", state: "REFUNDED")) == nil)
+}
+
+/// When each landing in a test started and ended.
+private actor Spans {
+    var all: [String: (start: ContinuousClock.Instant, end: ContinuousClock.Instant)] = [:]
+    func start(_ name: String) { all[name] = (ContinuousClock.now, .now) }
+    func end(_ name: String) { all[name]?.end = ContinuousClock.now }
 }

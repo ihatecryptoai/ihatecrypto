@@ -137,7 +137,7 @@ Everything the Mac's window does is in the Windows app; what only a Windows mach
 
 ## Checking on a Windows machine
 
-A runner has no Windows Hello, so the prompt itself is checked by hand on Windows 11 with a PIN set:
+A runner has no Windows Hello, microphone, Ledger or person at it, so these are checked by hand on Windows 11 with a PIN set:
 
 1. Install from the workflow's installer; Windows asks for an administrator (Program Files).
 2. Settings › Signing says «Windows Hello is ready; its key is in the TPM» and no hardening notes.
@@ -148,3 +148,11 @@ A runner has no Windows Hello, so the prompt itself is checked by hand on Window
 6. Edit `%LOCALAPPDATA%\ihatecrypto\signer\state.json` by hand: the next signature refuses with the «changed outside
    it» message.
 7. Process Explorer as the same user can't read the signer's memory (access denied).
+8. The mic in the chat field: Windows asks for the microphone once; Russian words with the Russian layout on, English
+   with the English one; with Settings › Privacy & security › Speech › Online speech recognition off it says so.
+9. The browser: open jup.ag, connect, and a swap's card comes to the canvas with its simulated balances; on a site's
+   page, `__TAURI_INTERNALS__.invoke('engine_send', …)` in DevTools is refused.
+10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
+    or Flex over Bluetooth the same way (Windows may ask to pair it first).
+11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
+    bought arrives on the main wallet.
