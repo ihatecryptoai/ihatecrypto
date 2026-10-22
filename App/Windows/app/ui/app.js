@@ -959,6 +959,7 @@ function settings() {
       h("div", { class: "btns", style: "margin-top:12px" },
         h("button", { class: "btn", onclick: () => act("createWallet", { test: false }) }, t("New wallet", "Новый кошелёк")),
         h("button", { class: "btn", onclick: showImport }, t("Import a phrase", "Импортировать фразу")),
+        h("button", { class: "btn", onclick: showImportKey }, t("Import a key", "Импортировать ключ")),
         h("button", { class: "btn", onclick: () => act("createWallet", { test: true }) }, t("New test wallet", "Новый тестовый")),
         s.automation ? null : h("button", { class: "btn", onclick: () => act("createAutomationWallet") }, t("New automation wallet", "Кошелёк автоматизации")),
         h("button", { class: "btn", onclick: () => { view = "canvas"; act("addBoard", { name: "ledger" }); } }, t("Connect a Ledger", "Подключить Ledger")))),
