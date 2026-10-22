@@ -1,5 +1,6 @@
 import Foundation
 import IhatecryptoCore
+import SignerAPI
 
 /// «show token 0x…», «add 0x… to favorites», «remove token AERO from favorites»: the shared TokenCommand and
 /// DexScreener's TokenLookup, as on the Mac; the favorites' prices refresh with the balances.
@@ -16,6 +17,14 @@ nonisolated struct FavoriteToken: Codable, Equatable {
 }
 
 extension Engine {
+    static func starKey(_ e: SignerAddress) -> String { e.network + ":" + e.address.lowercased() }
+
+    /// A saved address starred in Favorites › Wallets (kept here: the address book itself is the signer's).
+    func star(_ e: SignerAddress, _ on: Bool) {
+        if on { starred.insert(Self.starKey(e)) } else { starred.remove(Self.starKey(e)) }
+        pin(Board(kind: "favorites", title: "favorites"))
+    }
+
     func tokenCommand(_ command: TokenCommand, note: String?) async {
         switch command {
         case .show(let address, let chain):

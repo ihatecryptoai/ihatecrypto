@@ -202,6 +202,9 @@ import Testing
 
         let saved = try engine.call("saveAddress", ["name": "mom", "network": "solana", "address": "7cVfgArCheMR6Cs4t6vz5rfnqd56vZq4ndaBrY5xkxXy"])
         #expect(saved.answer["ok"] as? Bool == true, "\(saved.answer)")
+        // A saved address as a favorite (Favorites › Wallets).
+        let starred = try engine.call("send", ["text": "add mom to favorites"])
+        #expect((starred.state?["starred"] as? [String]) == ["solana:7cvfgarchemr6cs4t6vz5rfnqd56vzq4ndabry5xkxxy"], "\(Self.chat(starred.state).last ?? "")")
         let card = try engine.call("send", ["text": "send 5 USDC to mom"])
         let shown = try #require(card.state?["card"] as? [String: Any])
         #expect((shown["lines"] as? [String])?.first?.contains("7cVfgArCheMR6Cs4t6vz5rfnqd56vZq4ndaBrY5xkxXy") == true)

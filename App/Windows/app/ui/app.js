@@ -629,7 +629,8 @@ function liveBoard(kind) {
     case "receive": return receiveBody();
     case "addresses": return addressesBody();
     case "history": return historyBody();
-    case "favorites":
+    case "favorites": return favoritesBody();
+    case "favorites-tokens":
       return state.favorites.length ? h("div", {}, state.favorites.map((f) => h("div", { class: "row" },
         h("span", { class: "sym" }, f.image ? h("img", { src: f.image, alt: "" }) : null, f.symbol, h("span", { class: "muted small" }, " " + f.chain)),
         h("span", { class: "num" }, f.price !== undefined && f.price !== null ? "$" + Number(f.price).toPrecision(4) : "—",
@@ -659,6 +660,35 @@ function liveBoard(kind) {
           h("button", { class: "btn", onclick: () => suggest("make a multisig 2 of 2 with Phone on base") }, t("Make a multisig", "Сделать мультисиг")));
     default: return null;
   }
+}
+
+/** Favorites in two tabs, as on the Mac: the watched tokens, and the wallets — yours and the saved addresses, starred first. */
+let favTab = store("favTab") || "tokens";
+function favoritesBody() {
+  const tab = (id, label) => h("button", { class: "btn small-btn" + (favTab === id ? " on" : ""), onclick: () => { favTab = id; store("favTab", id); render(); } }, label);
+  return h("div", {},
+    h("div", { class: "btns" }, tab("tokens", t("Tokens", "Токены")), tab("wallets", t("Wallets", "Кошельки"))),
+    favTab === "wallets" ? walletsTab() : liveBoard("favorites-tokens"));
+}
+
+function walletsTab() {
+  const a = state.addresses;
+  const key = (e) => e.network + ":" + e.address.toLowerCase();
+  const starred = new Set(state.starred);
+  const saved = [...state.book].sort((x, y) => (starred.has(key(y)) - starred.has(key(x))) || x.name.localeCompare(y.name));
+  return h("div", {},
+    h("div", { class: "eyebrow" }, t("Your wallets · send money here to top up", "Твои кошельки · сюда отправлять пополнение")),
+    a.solana ? h("div", { class: "addr-block" }, h("b", {}, "Solana"), h("div", { class: "address" }, a.solana), copyButton(a.solana)) : null,
+    a.evm ? h("div", { class: "addr-block" }, h("b", {}, t("Base and every EVM network (the same 0x as Hyperliquid)", "Base и все EVM-сети (тот же 0x, что у Hyperliquid)")), h("div", { class: "address" }, a.evm), copyButton(a.evm)) : null,
+    h("div", { class: "eyebrow" }, t("Saved addresses", "Сохранённые адреса")),
+    saved.length ? saved.map((e) => h("div", { class: "addr-block" },
+      h("div", { class: "row-head" },
+        h("span", {}, h("b", {}, (starred.has(key(e)) ? "⭐ " : "") + e.name), h("span", { class: "muted small" }, "  " + e.network)),
+        h("span", { class: "btns" },
+          h("button", { class: "btn small-btn", onclick: () => act("star", { name: e.name, network: e.network, test: !starred.has(key(e)) }) }, starred.has(key(e)) ? t("Unstar", "Убрать звезду") : t("Star", "В избранное")),
+          h("button", { class: "btn small-btn", onclick: () => suggest(`send 10 USDC to ${e.name}`) }, t("Send", "Отправить")))),
+      h("div", { class: "address" }, e.address), copyButton(e.address)))
+      : h("div", { class: "empty" }, t("No saved addresses: “save <address> as Bybit on base”, or the Address book block.", "Сохранённых адресов нет: «сохрани <адрес> как Bybit на base» или блок «Адресная книга».")));
 }
 
 /** The Ledger: its connect steps, its addresses (whole, with Copy and «show on the Ledger»), and the switch to it. */

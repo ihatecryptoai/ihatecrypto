@@ -5,6 +5,7 @@ import GuardJev
 import IhatecryptoCore
 import OneClickKit
 import SignerAPI
+import SolanaChain
 import TradeExecution
 import TxGuard
 import WalletCore
@@ -180,10 +181,7 @@ extension Engine {
         case .multisigCreate: await prepareMultisig(command, note: note); return
         case .multisigSend: await prepareMultisigSend(command, note: note); return
         case .multisigShow: showMultisig(note: note); return
-        case .contractCall:
-            reply(say("“\(command.summary)” isn't in the Windows app yet: for now it does it on a Mac. Nothing moved.",
-                      "«\(command.summary)» в Windows-версии пока нет — это умеет версия для Mac. Ничего не ушло."), note: note)
-            return
+        case .contractCall: await prepareContractCall(command, note: note); return
         default: break
         }
         if let question = command.amountQuestion {
@@ -336,7 +334,19 @@ extension Engine {
 
     func addressBook(_ command: AddressBookCommand, userText: String) async {
         switch command {
-        case .save(let address, let name, let network):
+        case .save(var address, let name, var network):
+            // A name (vitalik.eth, toly.sol) is read on its own chain now, and the address it points at is what's saved:
+            // the name changing hands later moves nothing.
+            if ENS.isName(address) || SNS.isName(address) {
+                let domain = address
+                do {
+                    address = ENS.isName(domain) ? try await ENS.resolve(domain) : try await SNS.resolve(domain)
+                    network = network ?? (domain.hasSuffix(".sol") ? "solana" : "ethereum")
+                } catch {
+                    reply(say("Couldn't read \(domain): \(error.localizedDescription) Nothing was saved.", "Не получилось прочитать \(domain): \(error.localizedDescription) Ничего не сохранено."))
+                    return
+                }
+            }
             let net = network ?? (address.hasPrefix("0x") ? nil : "solana")
             guard let net, let kind = AddressCheck.Network(rawValue: net) else {
                 reply(say("Which network is \(address) on? Say “save \(address) as \(name) on base” (or arbitrum, ethereum…).",
@@ -348,8 +358,17 @@ extension Engine {
             show(.address(entry), title: say("Save “\(name)” to Addresses", "Сохранить «\(name)» в адреса"), lines: ["\(kind.title): \(address)"])
             reply(say("Press Confirm to save it: Windows Hello shows the whole address, check every character.",
                       "Нажми «Подтвердить», чтобы сохранить: Windows Hello покажет весь адрес — сверь каждый символ."))
-        case .favorite:
-            reply(say("Favorites aren't in the Windows app yet.", "Избранного в Windows-версии пока нет."))
+        case .favorite(let name, let on):
+            // A saved address as a favorite (Favorites › Wallets); an address not saved is a token if a pool trades it.
+            let key = name.lowercased(), written = AddressBookCommand.address(in: name)
+            guard let e = book.first(where: { $0.name.lowercased() == key }) ?? book.first(where: { $0.name.lowercased().contains(key) })
+                    ?? written.flatMap({ a in book.first { $0.address.lowercased() == a.lowercased() } }) else {
+                if on, let written { await tokenCommand(.favorite(address: written, chain: nil), note: nil); return }
+                reply(say("There’s no “\(name)” in Addresses. Save it first, e.g. “save <address> as \(name) on Base”.", "В адресах нет «\(name)». Сначала сохрани его, например «сохрани <адрес> как \(name) на Base»."))
+                return
+            }
+            star(e, on)
+            reply(on ? say("⭐ “\(e.name)” is in your favorites.", "⭐ «\(e.name)» в избранном.") : say("“\(e.name)” is no longer a favorite.", "«\(e.name)» больше не в избранном."))
         }
     }
 
@@ -409,6 +428,11 @@ extension Engine {
             if let off = Modules.current.refusal(command, ru: russian) { reply(off, note: note); return true }
             if command.amountQuestion != nil {
                 reply(say("Each step needs its amount: “\(step)” has none.", "У каждого шага должна быть сумма: в «\(step)» её нет."), note: note)
+                return true
+            }
+            // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm.
+            if case .contractCall = command, steps.count > 1 {
+                reply(say("A contract call goes on its own card: ask for “\(step)” by itself.", "Вызов контракта идёт своей карточкой: попроси «\(step)» отдельно."), note: note)
                 return true
             }
             if case .sendTo(let name, let amount, let network) = command {
@@ -678,6 +702,7 @@ extension Engine {
             reply(try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: true).text, note: "DeFi")
         case .rebalance(let share): reply(try await e.rebalance(maxShare: share ?? 50, execute: true).text, note: "DeFi")
         case .claimRewards: reply(try await e.claimRewards(), note: "Merkl")
+        case .contractCall: reply(try await runContractCall(command, e), note: "contract call")
         case .multisigCreate: reply(try await runMultisigCreate(), note: "Safe · multisig")
         case .multisigSend: reply(try await runMultisigSend(command), note: "Safe · multisig")
         case .sweepRewards(let min, let into): reply(try await e.sweepRewards(minUSD: min, into: into), note: "Merkl · Uniswap")

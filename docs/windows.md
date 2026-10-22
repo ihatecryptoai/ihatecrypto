@@ -121,14 +121,17 @@ Windows Hello, only to their own wallets and confirmed addresses, and what it bu
 and a recurring buy wait for Confirm on the wallet that's on; without it a task's moves come as cards), the tray (closing the window keeps it running, as the Mac's menu bar
 does), price charts and the day's movers in the chat, P/L (Hyperliquid's trading after fees and
 funding, open positions, the portfolio's change without money moved in or out, and each coin's P/L against what it
-cost: the chain's history priced on the day, the app's own buys, or when first seen), favorite tokens and token cards (DexScreener), paid requests to services (MPP: the price on a card, paid in USDC
+cost: the chain's history priced on the day, the app's own buys, or when first seen), favorites in two tabs (tokens with their prices; your wallets and the saved addresses, starred first, with Send),
+ENS and SNS names saved as the address they point at, contract calls («call base 0x… f(…) … approving N USDC»: the
+contract checked on the explorer and for its reputation, the exact approve and the call simulated together before the
+card, simulated again before signing, never inside a chain), favorite tokens and token cards (DexScreener), paid requests to services (MPP: the price on a card, paid in USDC
 on Tempo after Confirm, the services the model can look up), skills (the built-in Trading study with its journal and notes, and the user's own .md or .txt), «remember: …»,
 the second check (on by default, as on the
 Mac: the model reads every command and trade plan again, Jev through OpenRouter when allowed, and code checks that a
 plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
-Not yet: watched wallets, contract calls, a Ledger over Bluetooth.
+Not yet: a Ledger over Bluetooth.
 
 ## Checking on a Windows machine
 

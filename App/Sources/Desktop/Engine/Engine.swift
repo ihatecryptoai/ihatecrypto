@@ -112,6 +112,7 @@ final class Engine {
     var loadedSkills: [String] = []
     var memory: [String] = Store.load([String].self, "memory.json") ?? [] { didSet { Store.save(memory, "memory.json") } }
     var favorites: [FavoriteToken] = Store.load([FavoriteToken].self, "favorites.json") ?? [] { didSet { Store.save(favorites, "favorites.json"); changed() } }
+    var starred: Set<String> = Set(Store.load([String].self, "starred.json") ?? []) { didSet { Store.save(starred.sorted(), "starred.json"); changed() } }
 
     // Canvases: each has its own chat and blocks.
     lazy var canvases: [CanvasDoc] = Self.loadCanvases()
@@ -138,6 +139,8 @@ final class Engine {
     var multisigs: [Multisig] = Store.load([Multisig].self, "multisigs.json") ?? []
     var multisigDraft: MultisigDraft?
     var multisigPayment: MultisigPayment?
+    /// A contract call checked and simulated, waiting for Confirm.
+    var callReview: CallReview?
     /// The Ledger's addresses, its connect card, and what it waits for on its screen now.
     var ledger: LedgerAccount? = Store.load(LedgerAccount.self, "ledger.json") {
         didSet { Store.save(ledger, "ledger.json"); changed() }
@@ -275,6 +278,7 @@ final class Engine {
         var multisigDraft: MultisigDraft?
         var candidates: [Multisig.Key]
         var ledgerConnect: LedgerConnect?
+        var starred: [String]
     }
 
     func snapshot() -> Snapshot {
@@ -304,7 +308,7 @@ final class Engine {
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
             canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
-            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect)
+            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted())
     }
 
     // MARK: Requests from the window
@@ -397,6 +401,9 @@ final class Engine {
             if r.test == true { skillsOff.remove(r.wallet ?? "") } else { skillsOff.insert(r.wallet ?? "") }
         case "forget": memory.removeAll { $0 == r.text }
         case "removeFavorite": favorites.removeAll { $0.id == r.wallet }
+        case "star":
+            guard let e = book.first(where: { $0.name == r.name && $0.network == r.network }) else { return [:] }
+            star(e, r.test == true)
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")
