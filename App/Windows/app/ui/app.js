@@ -129,11 +129,23 @@ function link(url, text) {
 const app = document.getElementById("app");
 let composerText = "";
 
+let protectedOn = false;
+function setProtect(on) {
+  if (on === protectedOn) return;
+  protectedOn = on;
+  invoke("protect", { on }).catch(() => {});
+}
+
 function render() {
   if (!state) return;
-  const scroller = document.querySelector(".chat");
+  // What the person is in the middle of survives a new state: the field they type in, where the caret is, the scroll.
+  const scroller = document.querySelector(".chat, .page");
   const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
-  const focused = document.activeElement?.id;
+  const scrollTop = scroller ? scroller.scrollTop : 0;
+  const active = document.activeElement;
+  const focused = active?.id;
+  const selection = focused && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+  const before = view;
   app.replaceChildren();
   if (overlay) {
     app.style.gridTemplateColumns = "1fr";
@@ -145,7 +157,7 @@ function render() {
     app.append(phraseScreen());
     return;
   }
-  invoke("protect", { on: false }).catch(() => {});
+  setProtect(false);
   if (!state.wallets.length) {
     app.style.gridTemplateColumns = "1fr";
     app.append(welcome());
@@ -153,10 +165,15 @@ function render() {
   }
   app.style.gridTemplateColumns = "";
   app.append(rail(), h("div", { class: "main" }, page()));
-  if (view === "chat") {
-    const chat = document.querySelector(".chat");
-    if (chat && atBottom) chat.scrollTop = chat.scrollHeight;
-    if (focused === "composer") document.getElementById("composer")?.focus();
+  const now = document.querySelector(".chat, .page");
+  if (now && before === view) now.scrollTop = view === "chat" && atBottom ? now.scrollHeight : scrollTop;
+  else if (now && view === "chat") now.scrollTop = now.scrollHeight;
+  if (focused) {
+    const el = document.getElementById(focused);
+    if (el) {
+      el.focus();
+      if (selection && "setSelectionRange" in el) { try { el.setSelectionRange(selection[0], selection[1]); } catch {} }
+    }
   }
 }
 
@@ -297,8 +314,10 @@ function receive() {
 const networks = ["solana", "base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperliquid", "hyperevm", "robinhood", "tempo", "near",
   "bitcoin", "tron", "xrp", "dogecoin", "zcash", "sui"];
 
+const addressForm = { name: "", network: "solana", address: "", memo: "" };
+
 function addresses() {
-  const form = { name: "", network: "solana", address: "", memo: "" };
+  const form = addressForm;
   return h("div", { class: "page" }, h("div", { class: "narrow" },
     h("h1", {}, t("Addresses", "Адреса")),
     h("p", { class: "muted" }, t("Money goes only to saved addresses. Saving one asks Windows Hello with the whole address on its window: check every character.",
@@ -309,13 +328,17 @@ function addresses() {
       : h("div", { class: "empty" }, t("No saved addresses yet.", "Сохранённых адресов пока нет.")),
     h("h2", {}, t("Add an address", "Добавить адрес")),
     h("div", { class: "card" },
-      h("div", { class: "field" }, h("label", {}, t("Name", "Имя")), h("input", { oninput: (e) => (form.name = e.target.value), placeholder: "Bybit" })),
+      h("div", { class: "field" }, h("label", {}, t("Name", "Имя")), h("input", { id: "book-name", value: form.name, oninput: (e) => (form.name = e.target.value), placeholder: "Bybit" })),
       h("div", { class: "field" }, h("label", {}, t("Network", "Сеть")),
-        h("select", { onchange: (e) => (form.network = e.target.value) }, networks.map((n) => h("option", { value: n }, n)))),
-      h("div", { class: "field" }, h("label", {}, t("Address", "Адрес")), h("input", { class: "address", oninput: (e) => (form.address = e.target.value.trim()) })),
-      h("div", { class: "field" }, h("label", {}, t("Memo / tag (exchanges)", "Memo / тег (для бирж)")), h("input", { oninput: (e) => (form.memo = e.target.value.trim()) })),
+        h("select", { id: "book-network", onchange: (e) => (form.network = e.target.value) }, networks.map((n) => h("option", { value: n, selected: n === form.network }, n)))),
+      h("div", { class: "field" }, h("label", {}, t("Address", "Адрес")), h("input", { id: "book-address", class: "address", value: form.address, oninput: (e) => (form.address = e.target.value.trim()) })),
+      h("div", { class: "field" }, h("label", {}, t("Memo / tag (exchanges)", "Memo / тег (для бирж)")), h("input", { id: "book-memo", value: form.memo, oninput: (e) => (form.memo = e.target.value.trim()) })),
       h("button", { class: "btn primary", onclick: async () => {
-        if (await act("saveAddress", form) !== null) toast(t("Saved.", "Сохранено."));
+        if (await act("saveAddress", { ...form }) !== null) {
+          Object.assign(addressForm, { name: "", address: "", memo: "" });
+          toast(t("Saved.", "Сохранено."));
+          render();
+        }
       } }, t("Save with Windows Hello", "Сохранить через Windows Hello"))),
   ));
 }
@@ -333,9 +356,13 @@ function history() {
 
 // MARK: Settings
 
+const modelForm = { provider: null, key: "", model: null };
+
 function settings() {
   const s = state;
-  const choice = { provider: s.model.provider || "anthropic", key: "", model: s.model.model || "" };
+  const choice = modelForm;
+  if (choice.provider === null) choice.provider = s.model.provider || "anthropic";
+  if (choice.model === null) choice.model = s.model.model || "";
   const providers = s.providers.filter((p) => !p.unavailable);
   const chosen = () => s.providers.find((p) => p.id === choice.provider);
   const sessions = [[60, t("One move (1 min)", "Один перевод (1 мин)")], [300, "5 min"], [900, "15 min"], [1800, "30 min"]];
@@ -347,16 +374,18 @@ function settings() {
       h("p", { class: "muted small" }, t("The chat's model reads what you write. It never signs: a move is a card, and only Confirm runs it.",
         "Модель чата читает, что ты пишешь. Она никогда не подписывает: действие — это карточка, и запускает её только «Подтвердить».")),
       h("div", { class: "field" }, h("label", {}, t("Provider", "Провайдер")),
-        h("select", { onchange: (e) => { choice.provider = e.target.value; } }, providers.map((p) =>
+        h("select", { id: "model-provider", onchange: (e) => { choice.provider = e.target.value; } }, providers.map((p) =>
           h("option", { value: p.id, selected: p.id === choice.provider }, p.name + (p.connected ? " ✓" : ""))))),
       h("div", { class: "field" }, h("label", {}, t("API key (empty: a login another app already has, or a local model)", "API-ключ (пусто — вход, который уже есть у другой программы, или локальная модель)")),
-        h("input", { type: "password", autocomplete: "off", oninput: (e) => (choice.key = e.target.value) })),
+        h("input", { id: "model-key", type: "password", autocomplete: "off", value: choice.key, oninput: (e) => (choice.key = e.target.value) })),
       h("div", { class: "field" }, h("label", {}, t("Model id (empty: the provider's default)", "Модель (пусто — по умолчанию у провайдера)")),
-        h("input", { value: choice.model, oninput: (e) => (choice.model = e.target.value.trim()) })),
+        h("input", { id: "model-id", value: choice.model, oninput: (e) => (choice.model = e.target.value.trim()) })),
       h("div", { class: "btns" },
         h("button", { class: "btn primary", onclick: async () => {
           const r = await act("connectModel", { provider: choice.provider, key: choice.key || undefined, model: choice.model || undefined });
+          choice.key = "";
           if (r !== null) toast(t("Connected.", "Подключено."));
+          render();
         } }, t("Connect", "Подключить")),
         h("button", { class: "btn", onclick: async () => {
           const p = chosen();
@@ -450,7 +479,7 @@ function importDialog(title, hint, op, field) {
 let phraseCopied = false;
 
 function phraseScreen() {
-  invoke("protect", { on: true }).catch(() => {});
+  setProtect(true);
   const words = state.phrase;
   return h("div", { class: "center" }, h("div", { class: "card", style: "max-width:560px;width:100%" },
     h("h1", { style: "font-size:20px" }, t("Your recovery phrase", "Твоя фраза восстановления")),
@@ -466,7 +495,7 @@ function phraseScreen() {
         try { await invoke("copy_secret", { text: words.join(" ") }); toast(t("Copied once; the clipboard clears in 60 s.", "Скопировано один раз; буфер очистится через 60 с.")); }
         catch { await copy(words.join(" ")); }
       } }, t("Copy all 12 words", "Скопировать все 12 слов")),
-      h("button", { class: "btn primary", onclick: async () => { phraseCopied = false; await act("phraseSaved"); invoke("protect", { on: false }).catch(() => {}); } },
+      h("button", { class: "btn primary", onclick: async () => { phraseCopied = false; await act("phraseSaved"); setProtect(false); } },
         t("I wrote them down", "Я записал")))));
 }
 
