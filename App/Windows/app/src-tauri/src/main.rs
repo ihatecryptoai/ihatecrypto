@@ -177,8 +177,27 @@ fn ui_eval(app: &tauri::AppHandle) {
     });
 }
 
+/// The newer version the update feed offers, if any; its archive is checked against the updater key before install.
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| u.version))
+}
+
+/// Downloads the update, checks its signature, runs its installer and restarts.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(()) };
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart()
+}
+
 fn main() {
     tauri::Builder::default()
+        // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let engine = start_engine(app.handle())?;
             app.manage(engine);
@@ -186,7 +205,7 @@ fn main() {
             ui_eval(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret])
+        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {

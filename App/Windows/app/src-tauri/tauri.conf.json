@@ -25,9 +25,19 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico", "icons/icon.png"],
-    "resources": ["bin/*"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": [
+      "bin/*"
+    ],
     "publisher": "ihatecrypto",
     "copyright": "GPL-3.0",
     "category": "Finance",
@@ -36,7 +46,21 @@
       "nsis": {
         "installMode": "perMachine",
         "displayLanguageSelector": false,
-        "languages": ["English", "Russian"]
+        "languages": [
+          "English",
+          "Russian"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE3QThEM0EzMjg5MjkzMzgKUldRNGs1SW9vOU9vRjJjK1pOOGZDNWJHNU1xby8wZFN6aFpUQnpzSitGVy9BWVVkZi9lYytzKzEK",
+      "endpoints": [
+        "https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

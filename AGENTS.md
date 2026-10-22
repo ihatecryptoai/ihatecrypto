@@ -19,7 +19,8 @@ dependencies point inward: chains and protocols know nothing about the window or
 | `Chains/*`, `Protocols/*`, `DeFi/*` | Solana and EVM; Hyperliquid, Jupiter, Relay, 1Click; Jupiter Lend, Kamino, yields |
 | `Execution`, `Execution/Trade` | The write-before-send journal; running an approved plan |
 | `Guard/Core`, `Guard/Jev` | The transaction guard and injection screening; the optional Jev classifier |
-| `Signer/API`, `Signer/Service` | The XPC protocol and the signing process |
+| `Signer/API`, `Signer/Core`, `Signer/Service` | The signer's protocol, what it decides, and the Mac's signing process |
+| `Signer/Windows`, `Desktop/Engine`, `Native/WinSec` | The Windows signer, the Windows app's engine, winsec.dll's interface ([docs/windows.md](docs/windows.md)) |
 
 Tests are in `App/Tests/<Target>Tests`. Tools are in `App/Tools`. `App/Xcode/project.yml` (XcodeGen) packages the app
 and `Signer.xpc`; the SwiftPM package stays the source of the modules.
@@ -36,6 +37,8 @@ TEAM=<team id> ./build-app.sh        # «ihatecrypto Dev.app»; add Debug for a 
 ./verify-release.sh <version>        # rebuild a release from its tag and compare it with the DMG (~5 min)
 swift run WalletCheck <command>      # live checks on ~/.ihatecrypto/test-wallet.txt; nothing sent without --yes
 swift run LLMCheck <provider> "text" # one model provider; on a subscription it spends the user's limits
+IHATECRYPTO_DESKTOP=1 swift build --scratch-path .build/desktop   # the Windows engine and signer on a Mac (stand-in Windows Hello)
+pwsh Windows/build.ps1               # on Windows: the installer (docs/windows.md)
 open -W --stdout /dev/stdout ".build/xcode/Build/Products/Debug/ihatecrypto Dev.app" --args -signerSelfTest YES
 ```
 

@@ -381,9 +381,25 @@ function settings() {
         h("button", { class: "btn", onclick: showImport }, t("Import a phrase", "Импортировать фразу")),
         h("button", { class: "btn", onclick: () => act("createWallet", { test: true }) }, t("New test wallet", "Новый тестовый")))),
 
+    h("h2", {}, t("Updates", "Обновления")),
+    h("div", { class: "card" },
+      h("p", { class: "muted small" }, t("An update is installed only when its signature matches ihatecrypto's key.", "Обновление ставится, только если его подпись совпадает с ключом ihatecrypto.")),
+      h("button", { class: "btn", onclick: checkUpdate }, t("Check for updates", "Проверить обновления"))),
+
     h("h2", {}, t("Chat", "Чат")),
     h("div", { class: "card" }, h("button", { class: "btn", onclick: () => act("clearChat") }, t("Clear the chat", "Очистить чат"))),
   ));
+}
+
+async function checkUpdate() {
+  try {
+    const version = await invoke("update_check");
+    if (!version) { toast(t("ihatecrypto is up to date.", "Установлена последняя версия.")); return; }
+    toast(t(`Installing ${version}: ihatecrypto restarts by itself.`, `Ставлю ${version}: ihatecrypto перезапустится сам.`));
+    await invoke("update_install");
+  } catch (e) {
+    toast(t("Couldn't check for updates: ", "Не удалось проверить обновления: ") + e);
+  }
 }
 
 // MARK: First run and the phrase
