@@ -67,7 +67,10 @@ public struct TypedData: Sendable {
     /// can't draw a line of its own (breaks, controls and bidi marks dropped) and doesn't run on.
     public var prompt: String {
         func plain(_ s: String, _ n: Int) -> String { String(String(s.unicodeScalars.filter { !AddressCheck.hidden($0) }).prefix(n)) }
-        return (["sign \(plain(primaryType, 60)) for «\(plain(domainName, 60))»"] + fields.prefix(8).map { "\(plain($0.name, 30)): \(plain($0.value, 70))" })
+        // What passed `refusal` is still a kind ihatecrypto can't read: the site's own word for it is all there is.
+        return (["sign \(plain(primaryType, 60)) for «\(plain(domainName, 60))»",
+                 "ihatecrypto can't tell what this signature allows. Sign only if you trust this site."]
+                + fields.prefix(8).map { "\(plain($0.name, 30)): \(plain($0.value, 70))" })
             .joined(separator: "\n")
     }
 

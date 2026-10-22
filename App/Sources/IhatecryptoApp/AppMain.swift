@@ -121,7 +121,6 @@ struct AppMain: App {
             }
             // Only in the copy from the site: a local build has no feed.
             CommandGroup(after: .appInfo) {
-                if let version = workspace.updateReady { Button("Restart to Update to \(version)") { Updater.shared.restartToUpdate() } }
                 if Updater.shared.available { Button("Check for Updates…") { Updater.shared.check() } }
             }
         }
@@ -303,14 +302,6 @@ struct MenuBarContent: View {
                 Label("\(IntentParser.pretty(a.coin)) \(a.above ? "above" : "below") \(Fmt.price(a.price))", systemImage: "bell").font(.ui(10))
             }
             Divider()
-            // A new version downloaded: one click installs it and opens the app again.
-            if let version = ws.updateReady {
-                Button { Updater.shared.restartToUpdate() } label: {
-                    Label("ihatecrypto \(version) is ready · Restart to update", systemImage: "arrow.down.circle.fill")
-                        .font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk)
-                }
-                .buttonStyle(.plain).pointerStyle(.link)
-            }
             HStack {
                 Button { StatusItem.shared.openMain() } label: {
                     Text("Open ihatecrypto").font(.ui(13, .semibold)).foregroundStyle(Brand.onAccent).lineLimit(1).fixedSize()

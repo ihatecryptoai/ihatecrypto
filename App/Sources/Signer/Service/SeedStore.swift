@@ -178,6 +178,14 @@ enum SeedStore {
         return seed
     }
 
+    /// A wallet's seed opened with no prompt, or nil: only one sealed without Touch ID (a test or the automation wallet)
+    /// opens so. What the settings say about a wallet is held to this wherever it would skip a prompt.
+    static func withoutPrompt(id: String) -> Data? {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return try? openSeed(id: id, context: context)
+    }
+
     /// A sealed secret opened with its Enclave key, wherever that key's group is.
     private static func open(_ sealed: (data: Data, tag: Data), context: LAContext) throws -> Data {
         var q = keyQuery(sealed.tag)
@@ -504,7 +512,7 @@ enum RecipientStore {
 
 /// The addresses of the wallets whose keys this signer holds, each written when its key was derived here: money between
 /// them stays the user's, so none is a new address for another (what a task bought goes from Automation to Main by
-/// itself). Not the wallet list in defaults: anything on the Mac can write that.
+/// itself). Kept apart from the wallet list (SignerPrefs) so a wallet is «ours» only once its key was derived here.
 enum OwnStore {
     static let service = "app.ihatecrypto.own"
     static var query: [String: Any] {

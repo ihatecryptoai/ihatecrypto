@@ -43,7 +43,7 @@
     {"@type": "Question", "name": "Which networks does it work with?", "acceptedAnswer": {"@type": "Answer", "text": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR and Tempo, through Jupiter, Kamino, Aave, Morpho, Relay, Uniswap and NEAR Intents."}},
     {"@type": "Question", "name": "Which AI does it use?", "acceptedAnswer": {"@type": "Answer", "text": "Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac."}},
     {"@type": "Question", "name": "What does it cost?", "acceptedAnswer": {"@type": "Answer", "text": "The app is a free download. You pay the networks' fees and your own AI plan."}},
-    {"@type": "Question", "name": "What do I need?", "acceptedAnswer": {"@type": "Answer", "text": "A Mac with macOS 26 or later, Apple silicon or Intel. Updates install themselves."}}
+    {"@type": "Question", "name": "What do I need?", "acceptedAnswer": {"@type": "Answer", "text": "A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to."}}
   ]}
 ]}
 </script>
@@ -295,12 +295,23 @@
 
   /* Why it's safe. */
   .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
-  .tile { padding: 24px 24px 26px; border-radius: 20px; background: #FFFFFF; border: 1.5px solid var(--line); }
+  /* dark, so the tiles don't sink into the page (the owner: «сделай чтобы бэкграунд не был такого же цвета») */
+  .tile { padding: 24px 24px 26px; border-radius: 20px; background: #141518; color: #FFFFFF; }
+  .tile .ic { background: rgba(255,122,47,.16); color: #FF8A47; }
+  .tile p a { color: #FF9A5C; }
   .ic { width: 46px; height: 46px; border-radius: 13px; background: #FFF1E8; color: var(--accent-ink); display: flex; align-items: center; justify-content: center; }
   .tile h3 { font: 700 18px Onest, sans-serif; margin-top: 18px; }
-  .tile p { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  .tile p { color: #A3A6AD; font-size: 15px; margin-top: 8px; }
   .fine { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 22px; color: var(--muted); font-size: 14px; text-align: center; }
   .fine svg { flex: none; }
+  .oss { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 56px 24px 52px; }
+  .oss > svg { width: 84px; height: 84px; margin-bottom: 14px; }
+  .oss .h { margin-top: 10px; }
+  .oss .row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 28px; }
+  .ci { flex: none; width: 22px; height: 22px; background: currentColor; -webkit-mask: url(/mf/claude.png) center / contain no-repeat; mask: url(/mf/claude.png) center / contain no-repeat; }
+  .btn.ghost { background: #FFFFFF; box-shadow: inset 0 0 0 1.5px var(--line); }
+  .btn.ghost:hover { box-shadow: inset 0 0 0 1.5px var(--line), 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
+  @media (max-width: 760px) { .oss { padding: 44px 16px 40px; } .oss .row { flex-direction: column; align-self: stretch; } .oss .btn { padding: 0 18px; } }
 
   /* The canvas: the app's window, drawn at 1088 × 600 and scaled to the page; tilted with its blocks lifted while --t is 1. */
   .appwrap { margin-top: 40px; height: calc(600px * var(--ak, 1)); }
@@ -492,7 +503,7 @@
 <header class="top">
   <div class="bar glass">
     <a class="logo" href="#top" aria-label="ihatecrypto"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span>ihatecrypto</span></a>
-    <nav class="nav"><a href="/manifesto/" data-t="n_mf">Manifesto</a></nav>
+    <nav class="nav"><a href="/manifesto/" data-t="n_mf">Manifesto</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
     <div class="lang">
       <button type="button" class="lang-btn" aria-haspopup="menu" aria-expanded="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg><span class="sr">Language: </span><b>EN</b><svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="lang-menu" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-l="en"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg><span>English</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><button type="button" role="menuitemradio" aria-checked="false" data-l="es"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-es"/></svg><span>Español</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><button type="button" role="menuitemradio" aria-checked="false" data-l="ru"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-ru"/></svg><span>Русский</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div>
@@ -500,6 +511,7 @@
     <button type="button" class="menu-btn" aria-haspopup="menu" aria-expanded="false" data-ta="menu" aria-label="Menu"><svg class="bars" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><svg class="x" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     <div class="menu" hidden>
       <a href="/manifesto/" data-t="n_mf">Manifesto</a>
+      <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a>
       <div class="mlangs"><button type="button" data-l="en" aria-pressed="true"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg>EN</button><button type="button" data-l="es" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-es"/></svg>ES</button><button type="button" data-l="ru" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-ru"/></svg>RU</button></div>
     </div>
     <button type="button" class="btn sendto away-only"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send_s">Send to Mac</span></button>
@@ -659,7 +671,21 @@
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span>
       <h3 data-t="sf5t">Checked before it's sent</h3><p data-t="sf5p">Contracts are checked for age, verified code and scam reports; lookalike sites are blocked.</p></article>
   </div>
-  <p class="fine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span data-t="safe_fine">Signed and notarized by Apple. Updates are signed too and install themselves.</span></p>
+  <p class="fine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span data-t="safe_fine">Signed and notarized by Apple. Updates are signed too and install only when you choose to.</span></p>
+</section>
+
+<section class="sec" id="open">
+  <div class="card oss">
+    <svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-think"/></svg>
+    <p class="kicker" data-t="oss_k">Open source · GPL-3.0</p>
+    <h2 class="h" data-t="oss_h">Non-custodial and fully open source</h2>
+    <p class="sub" data-t="oss_p">Only you hold the keys: neither we nor anyone else can get to your money. All of the app&#39;s code is on GitHub, so you don&#39;t have to take our word for it: check it yourself or ask Claude to.</p>
+    <div class="row">
+      <a class="btn" id="claude" href="https://claude.ai/new?q=Review%20the%20source%20code%20of%20ihatecrypto%2C%20a%20crypto%20wallet%20for%20the%20Mac%3A%20https%3A%2F%2Fgithub.com%2Fihatecryptoai%2Fihatecrypto.%20Is%20it%20really%20non-custodial%3A%20are%20the%20keys%20made%20and%20kept%20only%20on%20the%20user%27s%20Mac%3F%20Can%20the%20developers%2C%20a%20server%20or%20the%20AI%20model%20move%20the%20user%27s%20money%20on%20their%20own%3F%20Look%20at%20App%2FSources%2FSigner%2C%20App%2FSources%2FGuard%20and%20App%2FSources%2FWallet%2FCore.%20Also%20list%20what%20the%20app%20sends%20over%20the%20network%20and%20to%20whom.%20Cite%20files%20and%20lines%2C%20and%20say%20plainly%20if%20anything%20looks%20risky." target="_blank" rel="noopener"><span class="ci" aria-hidden="true"></span><span data-t="oss_c">Check with Claude</span></a>
+      <a class="btn ghost" id="github" href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener"><svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span data-t="oss_g">Code on GitHub</span></a>
+    </div>
+    <span data-t="oss_q" hidden>Review the source code of ihatecrypto, a crypto wallet for the Mac: https://github.com/ihatecryptoai/ihatecrypto. Is it really non-custodial: are the keys made and kept only on the user&#39;s Mac? Can the developers, a server or the AI model move the user&#39;s money on their own? Look at App/Sources/Signer, App/Sources/Guard and App/Sources/Wallet/Core. Also list what the app sends over the network and to whom. Cite files and lines, and say plainly if anything looks risky.</span>
+  </div>
 </section>
 
 <section class="sec" id="ask">
@@ -684,7 +710,7 @@
     <details><summary><span data-t="f1q">Which networks does it work with?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f1a">Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR and Tempo, through Jupiter, Kamino, Aave, Morpho, Relay, Uniswap and NEAR Intents.</p></details>
     <details><summary><span data-t="f2q">Which AI does it use?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f2a">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac.</p></details>
     <details><summary><span data-t="f3q">What does it cost?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f3a">The app is a free download. You pay the networks' fees and your own AI plan.</p></details>
-    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. Updates install themselves.</p></details>
+    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to.</p></details>
   </div>
 </section>
 
@@ -699,7 +725,7 @@
   </div>
 </section>
 </main>
-<footer>ihatecrypto · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
+<footer>ihatecrypto · <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a> · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
 
 <!-- The words in Spanish and Russian (English is the page itself); build.py renders /es/ and /ru/ from them. -->
 <script type="application/json" id="i18n">
@@ -764,7 +790,13 @@
 "sf4p": "La app no firma lo que suele vaciar billeteras: aprobaciones ilimitadas, permits y transacciones cuyo contenido no se puede ver. La firma ocurre en un proceso aparte sin internet, y los contratos desconocidos tienen un límite de importe.",
 "sf5t": "Revisado antes de enviar",
 "sf5p": "Los contratos se revisan por antigüedad, código verificado y reportes de estafa; los sitios imitadores se bloquean.",
-"safe_fine": "Firmada y notarizada por Apple. Las actualizaciones también van firmadas y se instalan solas.",
+"safe_fine": "Firmada y notarizada por Apple. Las actualizaciones también van firmadas y se instalan solo cuando tú lo decides.",
+"oss_k": "Código abierto · GPL-3.0",
+"oss_h": "Billetera no custodial y de código totalmente abierto",
+"oss_p": "Las claves solo las tienes tú: ni nosotros ni nadie más puede tocar tu dinero. Todo el código de la app está en GitHub, así que no tienes que creernos: compruébalo tú mismo o pídeselo a Claude.",
+"oss_c": "Revisar con Claude",
+"oss_g": "Código en GitHub",
+"oss_q": "Revisa el código fuente de ihatecrypto, una billetera cripto para Mac: https://github.com/ihatecryptoai/ihatecrypto. ¿De verdad es no custodial: las claves se crean y se guardan solo en el Mac del usuario? ¿Pueden los desarrolladores, un servidor o el modelo de IA mover el dinero del usuario por su cuenta? Mira App/Sources/Signer, App/Sources/Guard y App/Sources/Wallet/Core. Enumera también qué envía la app por la red y a quién. Cita archivos y líneas, y di claramente si algo parece arriesgado.",
 "u_h": "Qué puedes pedir",
 "also": "Y más, por ejemplo:",
 "cv_h": "Un lienzo como Figma. Un chat como ChatGPT.",
@@ -805,7 +837,7 @@
 "f3q": "¿Cuánto cuesta?",
 "f3a": "La app se descarga gratis. Pagas las comisiones de las redes y tu propio plan de IA.",
 "f4q": "¿Qué necesito?",
-"f4a": "Un Mac con macOS 26 o posterior, Apple silicon o Intel. Las actualizaciones se instalan solas.",
+"f4a": "Un Mac con macOS 26 o posterior, Apple silicon o Intel. Una versión nueva se instala solo cuando tú lo decides.",
 "slogan": "Hasta la cripto odia la cripto.",
 "end_p": "Así que cierra las pestañas. Solo di lo que quieres y la app hará el resto.",
 "meta_title": "ihatecrypto — una app para Mac que se encarga de tus criptos",
@@ -867,7 +899,13 @@
 "sf4p": "Приложение не подписывает то, чем обычно опустошают кошельки: безлимитные апрувы, permit и транзакции, смысл которых не виден. Подпись идёт в отдельном процессе без интернета, а на незнакомые контракты стоит лимит суммы.",
 "sf5t": "Проверка перед отправкой",
 "sf5p": "У контрактов проверяются возраст, верифицированный код и жалобы на скам; сайты-двойники блокируются.",
-"safe_fine": "Приложение подписано и заверено Apple. Обновления тоже подписаны и ставятся сами.",
+"safe_fine": "Приложение подписано и заверено Apple. Обновления тоже подписаны и ставятся, только когда вы сами решите.",
+"oss_k": "Открытый код · GPL-3.0",
+"oss_h": "Некастодиальный кошелёк с полностью открытым кодом",
+"oss_p": "Ключи есть только у вас: ни у нас, ни у кого-то ещё нет доступа к вашим деньгам. Весь код приложения открыт на GitHub, так что верить нам на слово не нужно: проверьте сами или попросите Claude.",
+"oss_c": "Проверить через Claude",
+"oss_g": "Код на GitHub",
+"oss_q": "Проверь исходный код ihatecrypto, криптокошелька для Mac: https://github.com/ihatecryptoai/ihatecrypto. Он правда некастодиальный: ключи создаются и хранятся только на Mac пользователя? Могут ли разработчики, сервер или ИИ-модель сами распорядиться деньгами пользователя? Посмотри App/Sources/Signer, App/Sources/Guard и App/Sources/Wallet/Core. Ещё перечисли, что приложение отправляет в сеть и кому. Ссылайся на файлы и строки и прямо скажи, если что-то выглядит рискованно.",
 "u_h": "Что можно попросить",
 "also": "А ещё, например:",
 "cv_h": "Холст как в Figma. Чат как в ChatGPT.",
@@ -908,7 +946,7 @@
 "f3q": "Сколько стоит?",
 "f3a": "Приложение бесплатное. Платите только комиссии сетей и за свою подписку на ИИ.",
 "f4q": "Что нужно для работы?",
-"f4a": "Mac с macOS 26 или новее, Apple silicon или Intel. Обновления ставятся сами.",
+"f4a": "Mac с macOS 26 или новее, Apple silicon или Intel. Новая версия ставится, только когда вы сами решите.",
 "slogan": "Даже крипта ненавидит крипту.",
 "end_p": "Так что закрывайте вкладки. Просто скажите, что нужно, — остальное сделает приложение.",
 "meta_title": "ihatecrypto — приложение для Mac, которое берёт крипту на себя",
@@ -1157,6 +1195,7 @@ function setLang(l) {
   });
   $$('[data-ta]').forEach((el) => { el.setAttribute('aria-label', T[l][el.dataset.ta] ?? T.en[el.dataset.ta]); });
   shares();
+  $('#claude').href = 'https://claude.ai/new?q=' + encodeURIComponent(T[l].oss_q ?? T.en.oss_q);
   $$('.eyebrow span, .askb').forEach(hug);
   $$('.askb').forEach((el, k) => { el.textContent = ASK[k].cmds[l]; });
   $$('a[data-t=n_mf]').forEach((a) => { a.href = (l === 'en' ? '' : '/' + l) + '/manifesto/'; });
@@ -1201,7 +1240,8 @@ document.fonts.ready.then(() => $$('.eyebrow span, .askb').forEach(hug));
 // How far people get: each section once.
 // (a section counts once its top passes 60% of the screen: some are taller than four screens on a phone)
 const seenObs = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && track('seen_' + e.target.id)), { rootMargin: '0px 0px -40% 0px' });
-['canvas', 'how', 'safe', 'ask', 'faq'].forEach((id) => seenObs.observe(document.getElementById(id)));
+['canvas', 'how', 'safe', 'open', 'ask', 'faq'].forEach((id) => seenObs.observe(document.getElementById(id)));
+$$('.oss .btn').forEach((a) => a.addEventListener('click', () => track(a.id, false)));
 $$('.faq details').forEach((d) => d.addEventListener('toggle', () => d.open && track('faq_open', false)));
 
 // The canvas's window is drawn at 1088 wide and scaled to the page.

@@ -162,7 +162,7 @@ struct TokenIcon: View {
     }
 }
 
-/// The watched tokens as one table (the owner's pick, 2026-10-16, «A04 · Таблица»): a row per token — its price, 24 h,
+/// The watched tokens as one table: a row per token — its price, 24 h,
 /// liquidity and what you hold — sorted by any column. A click opens the token's board above (chart, Buy, Sell, Ask in
 /// chat); the right-click menu has the same, plus Copy contract and Remove.
 struct FavoriteTokensTable: View {

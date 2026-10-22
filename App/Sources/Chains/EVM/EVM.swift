@@ -248,6 +248,25 @@ public enum ABI {
         return data.count >= (i + 1) * 32 ? "0x" + data.subdata(in: (i * 32 + 12)..<((i + 1) * 32)).hex : nil
     }
 
+    /// A `bytes[]` argument whose offset sits at byte `at` of the arguments; nil when any part runs out of the data.
+    public static func bytesArray(_ args: Data, at: Int) -> [Data]? {
+        let data = Data(args)   // a slice keeps its parent's indices
+        func number(_ offset: Int) -> Int? {
+            guard offset >= 0, offset % 32 == 0, let n = uint(in: data, word: offset / 32), n < UInt64(data.count) else { return nil }
+            return Int(n)
+        }
+        // Offsets inside a bytes[] are 32-byte aligned; a misaligned or oversized one is someone's crafted data.
+        guard let base = number(at), let count = number(base), count <= 64 else { return nil }
+        var out: [Data] = []
+        for i in 0..<count {
+            guard let relative = number(base + 32 + i * 32), let length = number(base + 32 + relative) else { return nil }
+            let start = base + 64 + relative
+            guard start + length <= data.count else { return nil }
+            out.append(data.subdata(in: start..<(start + length)))
+        }
+        return out
+    }
+
     /// Word `i` as a number, nil when it doesn't fit 64 bits.
     public static func uint(in data: Data, word i: Int) -> UInt64? {
         let data = Data(data)   // a slice keeps its parent's indices
@@ -653,12 +672,22 @@ public enum EVMCall: Equatable, Sendable {
         case "23b872dd": if let f = address(0), let t = address(1), let a = word(2) { return .transferFrom(from: f, to: t, amount: a) }
         case "a22cb465": if let o = address(0), let b = word(1) { return .setApprovalForAll(operator: o, approved: b.last == 1) }
         case "d505accf", "8fcbaf0c": return .permit
-        case "04e45aaf": if let r = address(3) { return .swap(recipient: r) }
-        // SwapRouter02.exactInput((bytes path, address recipient, uint256, uint256)): the tuple sits behind an offset.
-        case "b858183f": if let r = address(2) { return .swap(recipient: r) }
-        // Uniswap v2's Router02: swapExactTokensForTokens, …ForETH and their fee-on-transfer forms, all (amountIn,
-        // amountOutMin, path, to, deadline): `to` gets what comes out.
-        case "38ed1739", "5c11d795", "18cbafe5", "791ac947": if let r = address(3) { return .swap(recipient: r) }
+        // Uniswap v3's exactInputSingle and exactOutputSingle, SwapRouter02's and the first SwapRouter's (with a deadline):
+        // a tuple of plain fields, the recipient fourth.
+        case "04e45aaf", "5023b4df", "414bf389", "db3e2198": if let r = address(3) { return .swap(recipient: r) }
+        // exactInput and exactOutput((bytes path, address recipient, …)), both routers: the tuple sits behind an offset.
+        case "b858183f", "09b81346", "c04b8d59", "f28c0498": if let r = address(2) { return .swap(recipient: r) }
+        // Uniswap v2's Router02: swapExactTokensForTokens, …ForETH, swapTokensForExactTokens, …ForExactETH and the
+        // fee-on-transfer forms, all (amount, amount, path, to, deadline); SwapRouter02's v2 swaps, (amount, amount, path,
+        // to): `to` gets what comes out.
+        case "38ed1739", "5c11d795", "18cbafe5", "791ac947", "8803dbee", "4a25d94a", "472b43f3", "42712a67":
+            if let r = address(3) { return .swap(recipient: r) }
+        // The ETH-in forms, (amount, path, to, deadline): swapExactETHForTokens, swapETHForExactTokens, the fee-on-transfer one.
+        case "7ff36ab5", "fb3bdb41", "b6f9de95": if let r = address(2) { return .swap(recipient: r) }
+        // SwapRouter02's multicall(bytes[]), with a deadline or a previous block hash: read only when every call in it is
+        // a swap or a payout this decoder knows; then it is the swap paying whoever its calls pay.
+        case "ac9650d8", "5ae401dc", "1f0464d1":
+            if let r = Self.multicallRecipient(Data(args), arrayWord: selector == "ac9650d8" ? 0 : 1) { return .swap(recipient: r) }
         case "6e553f65": if let r = address(1) { return .vault(receiver: r, owner: nil) }
         case "b460af94", "ba087652": if let r = address(1), let o = address(2) { return .vault(receiver: r, owner: o) }
         // Aave: supply/deposit(asset, amount, onBehalfOf, referral) and withdraw(asset, amount, to): the third word.
@@ -682,6 +711,38 @@ public enum EVMCall: Equatable, Sendable {
         default: break
         }
         return .contract(selector: "0x" + selector)
+    }
+
+    /// SwapRouter02's stand-ins for a recipient: MSG_SENDER is the caller, ADDRESS_THIS the router itself, which holds
+    /// the output for a later call of the same multicall to pay out.
+    public static let msgSender = "0x0000000000000000000000000000000000000001", addressThis = "0x0000000000000000000000000000000000000002"
+
+    /// Whom a SwapRouter02 multicall pays: the first payee that isn't the caller (so the swap check refuses it), else the
+    /// caller. nil when a call in it is one this decoder doesn't know: it stays a plain contract call. Output left in the
+    /// router with no call to pay it out comes back as ADDRESS_THIS, which is refused too.
+    static func multicallRecipient(_ args: Data, arrayWord: Int) -> String? {
+        guard let calls = ABI.bytesArray(args, at: arrayWord * 32), !calls.isEmpty else { return nil }
+        var payees: [String] = []
+        var held = false
+        for call in calls {
+            guard call.count >= 4 else { return nil }
+            let inner = call.dropFirst(4)
+            func address(_ i: Int) -> String? { inner.count >= (i + 1) * 32 ? "0x" + Data(inner.dropFirst(i * 32).prefix(32)).suffix(20).hex : nil }
+            switch call.prefix(4).hex {
+            // unwrapWETH9(min, recipient), sweepToken(token, min, recipient): pay out what the router holds.
+            case "49404b7c": guard let r = address(1) else { return nil }; payees.append(r)
+            case "df2ab5bb": guard let r = address(2) else { return nil }; payees.append(r)
+            // unwrapWETH9(min), sweepToken(token, min), refundETH(): to the caller.
+            case "49616997", "e90a182f", "12210e8a": payees.append(msgSender)
+            // wrapETH(value), pull(token, value): into the router, from the caller.
+            case "1c58db4f", "f2d5d56b": break
+            default:
+                guard case .swap(let r) = decode(Data(call)) else { return nil }
+                if r.lowercased() == addressThis { held = true } else { payees.append(r) }
+            }
+        }
+        if let other = payees.first(where: { $0.lowercased() != msgSender }) { return other }
+        return payees.isEmpty && held ? addressThis : msgSender
     }
 
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:
@@ -797,7 +858,8 @@ public enum EVMCall: Equatable, Sendable {
     /// Why this must not be signed, or nil. `sender` is the user's own address; `chainId` the network, which lets a v4 swap
     /// run a hook Uniswap's registry vouches for there (UniswapV4.allowsHooks): without it, no hook at all.
     public func refusal(sender: String, chainId: UInt64? = nil) -> String? {
-        if case .swap(let recipient) = self, recipient.lowercased() != sender.lowercased() {
+        // MSG_SENDER pays the caller on SwapRouter02; on another contract it is address 1, where the output is lost to everyone.
+        if case .swap(let recipient) = self, recipient.lowercased() != sender.lowercased(), recipient.lowercased() != Self.msgSender {
             return "The swap would pay \(recipient), not this wallet."
         }
         if case .lending(let beneficiary) = self, beneficiary.lowercased() != sender.lowercased() {

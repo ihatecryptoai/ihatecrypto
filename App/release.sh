@@ -13,34 +13,29 @@
 #     Developer ID signature, and Sparkle takes an update that changes the EdDSA key as long as that signature stays the
 #     team's — a new key (generate_keys) and its SUPublicEDKey in the next release. Never change both at once.
 # Team and bundle id stay N78L833HCS / app.ihatecrypto.mac, or the signer loses its Keychain items.
-# The build number is the commit count, so every release is newer than the last. Built from the working tree:
-# commit first, the script refuses uncommitted changes to Sources.
+# Built from the committed tree (HEAD) by Tools/build-release.sh, the same build verify-release.sh makes, so anyone can
+# check a release against the code: commit first, the script refuses uncommitted changes to Sources.
 set -e
 version=$1; site=${2%/}
 [[ -n $version && ( -z $site || $site == https://* ) ]] || { echo "usage: ./release.sh <version> [<https://site/path>]"; exit 1; }
 cd "$(dirname "$0")"
 git diff --quiet HEAD -- Sources Xcode || { echo "Sources or Xcode have uncommitted changes: commit them first."; exit 1; }
 python3 Tools/release-notes.py "$version" > /dev/null || { echo "Sources/IhatecryptoApp/WhatsNew/whatsnew.json has no entry for $version."; exit 1; }
-build=$(git rev-list --count HEAD)
-out=dist; derived=.build/release
-sparkle=$derived/SourcePackages/artifacts/sparkle/Sparkle/bin
+# The build number counts commits, so every release is newer than the last. Opening the code (2026-10-21) took 32
+# commits out of the history: 0.6.9 was build 580 at what is now commit 548.
+build=$(( $(git rev-list --count HEAD) + 32 ))
+out=dist; root=/private/tmp/ihatecrypto-release
+sparkle=$root/build/SourcePackages/artifacts/sparkle/Sparkle/bin
 mkdir -p $out
-(cd Xcode && xcodegen generate --quiet)
-# Private Cloud Compute is Apple's for Development, Ad hoc and App Store profiles only: the Developer ID copy goes without
-# it (its Apple models stay the one on the Mac). The file is put back however the script ends.
-cp Xcode/ihatecrypto.entitlements $out/ihatecrypto.entitlements.keep
-trap 'cp $out/ihatecrypto.entitlements.keep Xcode/ihatecrypto.entitlements; rm -f $out/ihatecrypto.entitlements.keep' EXIT
-# Absent until the capability is on the App ID app.ihatecrypto.mac (developer portal): then the file isn't touched.
-pcc=":com.apple.developer.private-cloud-compute"
-/usr/libexec/PlistBuddy -c "Print $pcc" Xcode/ihatecrypto.entitlements > /dev/null 2>&1 && /usr/libexec/PlistBuddy -c "Delete $pcc" Xcode/ihatecrypto.entitlements
 log=$(mktemp -t ihatecrypto-release)
 step() { echo "· $1"; }
 fail() { grep -E "error:|Command .* failed|FAILED" "$log" | cut -c1-300 | head -20; echo "full log: $log"; exit 1; }
 
 step "archive $version ($build)"
-xcodebuild -project Xcode/ihatecrypto.xcodeproj -scheme ihatecrypto -configuration Release -derivedDataPath $derived \
-  -archivePath $out/ihatecrypto.xcarchive -allowProvisioningUpdates -skipPackagePluginValidation \
-  MARKETING_VERSION=$version CURRENT_PROJECT_VERSION=$build SPARKLE_FEED_URL=${site:+$site/appcast.xml} archive > "$log" 2>&1 || fail
+pgrep -qf "derivedDataPath $root/build" && { echo "another release build is using $root"; exit 1; }
+rm -rf $root; mkdir -p $root/src
+(cd .. && git archive HEAD) | tar -x -C $root/src
+$root/src/App/Tools/build-release.sh $version $build "${site:+$site/appcast.xml}" $PWD/$out/ihatecrypto.xcarchive
 
 step "sign with Developer ID"
 cat > $out/export.plist <<EOF
@@ -96,7 +91,7 @@ xcrun notarytool submit $dmg --keychain-profile notary --wait
 xcrun stapler staple $dmg
 rm -rf $out/dmg
 if [[ -z $site ]]; then
-  rm -rf $out/export $out/ihatecrypto.xcarchive $out/export.plist
+  rm -rf $out/export $out/ihatecrypto.xcarchive $out/export.plist $root
   echo "done: $out/ihatecrypto-$version.dmg — hand over this file only"
   exit 0
 fi
@@ -119,5 +114,5 @@ python3 Tools/site/build.py "$version" $out/site >/dev/null
 cp Tools/site/{_headers,icon.png,favicon.png,og.png,llms.txt,robots.txt,sitemap.xml,three.min.js} $out/site/
 cp -R Tools/site/{fonts,mf} $out/site/
 cp $dmg $out/site/ihatecrypto.dmg
-rm -f "$log"
+rm -rf "$log" $root
 echo "done: publish $out/site/ to $site/ (updates.ihatecrypto.ai and the landing ihatecrypto.ai: npx wrangler deploy -c Tools/updates/wrangler.jsonc); $out/ihatecrypto-$version.dmg is the first install (the landing's download, or a friend)"

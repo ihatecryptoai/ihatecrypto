@@ -7,10 +7,21 @@ import SignerAPI
 final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
     static let app = Bundle.main.bundleIdentifier.flatMap { $0.hasSuffix(".signer") ? String($0.dropLast(7)) : nil } ?? "app.ihatecrypto.mac"
 
+    /// The Apple team that signed this signer, read from its own signature; nil when it's unsigned or signed ad hoc.
+    static let team: String? = {
+        var me: SecCode?, onDisk: SecStaticCode?, info: CFDictionary?
+        guard SecCodeCopySelf([], &me) == errSecSuccess, let me, SecCodeCopyStaticCode(me, [], &onDisk) == errSecSuccess, let onDisk,
+              SecCodeCopySigningInformation(onDisk, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess
+        else { return nil }
+        return (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String
+    }()
+
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        // Only the app this signer is built into, signed by our team, may talk to it: app.ihatecrypto.mac for
-        // app.ihatecrypto.mac.signer; the development copy's signer (….dev.signer) takes only the development copy.
-        connection.setCodeSigningRequirement("identifier \"\(Self.app)\" and anchor apple generic and certificate leaf[subject.OU] = \"N78L833HCS\"")
+        // Only the app this signer is built into, signed by the same team as the signer, may talk to it:
+        // app.ihatecrypto.mac for app.ihatecrypto.mac.signer; the development copy's signer (….dev.signer) takes only
+        // the development copy. A signer without a team (unsigned, ad hoc) takes nobody.
+        guard let team = Self.team else { return false }
+        connection.setCodeSigningRequirement("identifier \"\(Self.app)\" and anchor apple generic and certificate leaf[subject.OU] = \"\(team)\"")
         connection.exportedInterface = NSXPCInterface(with: SignerXPC.self)
         connection.exportedObject = SignerService()
         connection.resume()

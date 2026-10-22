@@ -181,10 +181,10 @@ struct SettingsView: View {
 
     private var about: some View {
         let info = Bundle.main.infoDictionary
-        return SettingsSection(icon: "info.circle", title: "About", line: "Updates come by themselves once a day.") {
+        return SettingsSection(icon: "info.circle", title: "About", line: "Checks for a new version once a day. It installs only when you press Install.") {
             SettingsGroup {
                 SettingsRow("ihatecrypto \(info?["CFBundleShortVersionString"] as? String ?? "")", icon: "app.badge",
-                            info: "Build \(info?["CFBundleVersion"] as? String ?? "?"). A new version downloads in the background and goes in at «Restart to update»; the wallet, settings and canvases stay.") {
+                            info: "Build \(info?["CFBundleVersion"] as? String ?? "?"). A new version waits for you to press Install, and What's new shows what changed; the wallet, settings and canvases stay.") {
                     if Updater.shared.available { Button("Check for updates") { Updater.shared.check() } }
                 }
             }
@@ -800,7 +800,7 @@ struct ModelSection: View {
             SettingsSection(icon: "lock.shield", title: "Safety", line: "A model reads your words. It cannot approve a move.") {
                 SettingsGroup {
                     SettingsRow("Money moves only after Confirm + \(Presence.short)", icon: Presence.icon, info: "You approve money moves in the app. One \(Presence.short) can cover one move or a session, as set in Wallet. A separately approved Hyperliquid trading key can place orders without a new \(Presence.touchID ? "touch" : "password"); it cannot withdraw money.") { EmptyView() }
-                    SettingsRow("Keys, addresses and balances stay private", icon: "eye.slash", info: "The chat model receives your message text and the plan's parameters. The app does not attach wallet keys, addresses or balances to the model's request.") { EmptyView() }
+                    SettingsRow("Keys stay on this Mac", icon: "eye.slash", info: "The chat model receives your messages, your balances and open positions, the plan and what it looks up. It never receives keys or the recovery phrase, and your own addresses reach it as «me».") { EmptyView() }
                 }
             }
         }
@@ -811,14 +811,21 @@ struct ModelSection: View {
     private var secondCheck: some View {
         SettingsSection(icon: "checkmark.shield", title: "Second check", line: "A second reader. It can only stop, never approve.") {
             SettingsGroup {
-                SettingsRow("Check commands and plans twice", icon: "checkmark.shield", info: ws.openRouterKey == nil
-                            ? "OpenRouter adds a separate model; the chat keeps its own. Without OpenRouter, the chat's model reads each command and plan a second time. Local rules also check incoming text. This check can stop a move, never approve a signature."
-                            : "The chat's model and a separate model on OpenRouter check your commands and plans against your words. Pasted text is checked for instructions aimed at the assistant. The texts go to OpenRouter. This check can stop a move, never approve a signature.") {
+                SettingsRow("Check commands and plans twice", icon: "checkmark.shield", info: ws.jevKey == nil
+                            ? "The chat's model reads each command and plan a second time. Local rules also check incoming text. OpenRouter can add a separate model; the chat keeps its own. This check can stop a move, never approve a signature."
+                            : "The chat's model and a separate model on OpenRouter check your commands and plans against your words. OpenRouter receives your messages, pasted text, lookup results and each plan with its balance changes before you sign. This check can stop a move, never approve a signature.") {
                     Toggle("Second check", isOn: Binding(get: { ws.jevScreening }, set: { ws.jevScreening = $0 })).toggleStyle(AccentSwitch())
                 }
                 SettingsRow("OpenRouter", icon: "network", logo: "llm-openrouter") {
-                    SettingsPill(text: ws.openRouterKey == nil ? "Not connected" : "Connected", good: ws.openRouterKey != nil)
-                    if ws.openRouterKey == nil { Button("Connect") { Task { await ws.signInJev() } } }
+                    if ws.openRouterKey == nil {
+                        SettingsPill(text: "Not connected", good: false)
+                        Button("Connect") { Task { await ws.signInJev() } }
+                    } else if ws.providerID == "openrouter" {
+                        SettingsPill(text: "Your chat runs here", good: true)
+                    } else {
+                        // Connected for an earlier chat: texts go there only when the user turns this on.
+                        Toggle("Use OpenRouter", isOn: Binding(get: { ws.jevOpenRouter }, set: { ws.jevOpenRouter = $0 })).toggleStyle(AccentSwitch())
+                    }
                 }
                 if let status = ws.jevStatus { SettingsRow(status, icon: "info.circle") { EmptyView() } }
             }

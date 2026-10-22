@@ -302,8 +302,11 @@ final class Browser {
         let call = EVMCall.decode(data)
         var problems = call.refusal(sender: from, chainId: rpc.chainId).map { [$0] } ?? []
         var lines: [String] = []
-        // The same payees the signer checks: each foreign one needs the tick here and Touch ID there.
-        let recipients = Array(Set(call.payees(to: to, value: value, chainId: rpc.chainId).map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
+        // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
+        // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.
+        var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
+        if case .contract = call, !EVMCall.knownSpenders(chainId: rpc.chainId).contains(to.lowercased()) { payees.append(to) }
+        let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
         func token(_ to: String) async -> (symbol: String, decimals: Int) {
             let symbol = (try? await rpc.call("eth_call", [["to": to, "data": "0x95d89b41"], "latest"]) as? String).flatMap { hex -> String? in
@@ -662,6 +665,10 @@ struct ApprovalSheet: View {
                 secondCheck(r.jev, nil)
                 if !r.problems.isEmpty {
                     refused(r.problems)
+                } else if r.recipients == [r.to.lowercased()], case .contract = EVMCall.decode(r.data) {
+                    ask("ihatecrypto can't read what this contract does",
+                        "\(r.to.prefix(10))…\(r.to.suffix(6)) — check it on the site. The signer asks for \(Presence.name) once for a contract it hasn't seen.",
+                        toggle: "Allow this contract", isOn: $allowUnknown)
                 } else if !r.recipients.isEmpty {
                     ask("Money, or the right to spend it, goes to an address that isn't yours",
                         r.recipients.map { "\($0.prefix(10))…\($0.suffix(6))" }.joined(separator: ", ") + " — check it on the site. The signer asks for \(Presence.name) for a new one.",

@@ -4,7 +4,7 @@
 //   POST /e {n, l}: the page says what was pressed or reached; GET /ihatecrypto.dmg counts as a download.
 // Counts are added up by day, language and kind of device in D1 (schema.sql). No IP, no cookie, no id is kept.
 const EVENTS = new Set(['send', 'share_tg', 'share_wa', 'share_mail', 'share_x', 'share_copy', 'story_1', 'story_2', 'story_end',
-  'seen_canvas', 'seen_how', 'seen_safe', 'seen_ask', 'seen_faq', 'faq_open', 'menu', 'lang']);
+  'seen_canvas', 'seen_how', 'seen_safe', 'seen_open', 'seen_ask', 'seen_faq', 'faq_open', 'menu', 'lang', 'claude', 'github']);
 const LANGS = new Set(['en', 'es', 'ru']);
 const SITE = new Set(['ihatecrypto.ai', 'www.ihatecrypto.ai']);
 

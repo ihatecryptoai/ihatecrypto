@@ -1,12 +1,12 @@
 import Foundation
 import SignerAPI
 
-/// The wallets the signer holds, public parts only, in its sandbox defaults; the secrets are SeedStore's, one sealed
+/// The wallets the signer holds, public parts only, in SignerPrefs; the secrets are SeedStore's, one sealed
 /// item each. Which wallet signs is the signer's own state: the app can ask to switch, and that takes Touch ID.
 /// The active wallet's addresses are mirrored under the keys a single wallet used («solana», «evm», «near»), so every
 /// check that reads «our address» reads the active wallet's.
 enum Wallets {
-    static var defaults: UserDefaults { Signer.defaults }
+    static var defaults: SignerPrefs { Signer.defaults }
 
     /// The registry, migrated from the single seed on first read (wallet «1», «Main», active).
     static var all: [SignerWallet] {

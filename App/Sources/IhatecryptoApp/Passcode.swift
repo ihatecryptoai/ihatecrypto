@@ -6,7 +6,7 @@ import WalletCore
 
 // MARK: - The lock
 
-/// The app's lock (the owner's pick, variant A on the lock-screen canvas the design canvas):
+/// The app's lock:
 /// with a passcode set, the window shows only the lock screen at launch, after `lockAfter` minutes away from the Mac, on
 /// sleep or a locked screen, on «lock» and ⌘L. The signer checks the code (`.enterCode`) and turns it off after five
 /// wrong ones; Touch ID and the Mac password open the lock too. Only the window is hidden: the schedule, stops and alerts

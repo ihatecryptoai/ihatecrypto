@@ -25,4 +25,4 @@ Check/       `swift run LLMCheck <id> "text"` — checks one provider from the t
 
 - Keys and tokens live only in the app's Keychain; for other apps' logins (Codex CLI, Claude Code), only the path.
 - The app does not refresh Codex CLI tokens: the refresh token is single-use, and Codex CLI would be logged out afterwards.
-- The model gets the plan's parameters and the message text. Addresses, balances, the seed phrase and signing never reach it.
+- The model gets the message text, the plan's parameters and the balances it needs to answer. The user's own addresses reach it only as `me`; the seed phrase and signing never do.

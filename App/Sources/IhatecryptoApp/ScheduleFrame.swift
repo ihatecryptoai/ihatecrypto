@@ -995,7 +995,7 @@ struct TopUpBalances: View {
     }
 }
 
-/// A scheduled item on its own canvas (variant 01 of the design canvas): the task or the
+/// A scheduled item on its own canvas: the task or the
 /// buy with its switch and Run now, its next run as a date, where it pays from, where what it gets ends up and who
 /// signs, then its runs one line each, a click opening one in full. A perp keeps its own board.
 struct ScheduleItemBoard: View {

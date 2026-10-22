@@ -362,6 +362,8 @@ final class DebugAPI {
             out["pending"] = ["kind": "position", "command": String(describing: command), "coin": coin, "confirm": true] as [String: Any]
         case .transfer(let entry, let amount)?:
             out["pending"] = ["kind": "transfer", "to": entry.name, "amount": NSDecimalNumber(decimal: amount).stringValue, "confirm": true] as [String: Any]
+        case .orders(let commands, let coin, _)?:
+            out["pending"] = ["kind": "orders", "commands": commands.map { String(describing: $0) }, "coin": coin, "confirm": true] as [String: Any]
         case .address(let entry)?:
             out["pending"] = ["kind": "address", "name": entry.name, "confirm": true] as [String: Any]
         case nil: break

@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Xcode 27: the app reaches macOS 27 APIs (Private Cloud Compute) behind #available, so it needs that SDK.
+    runs-on: xcode-27
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --skip-build
+      - name: Lint
+        run: ./lint.sh

@@ -458,7 +458,7 @@ struct AssetStats: View {
     }
 }
 
-/// What's held, and how it went: the P/L first (the owner's pick of five, 2026-10-15, «01 · P/L first»): since it was
+/// What's held, and how it went, the P/L first: since it was
 /// bought, in dollars and percent, beside what it's worth now; under it what was paid, at what price, and what that is
 /// worth now. Bought anywhere: the cost comes from the app's own buys or the chain (`Workspace.cost`). One with no
 /// cost to count from (it came in by a transfer) shows its worth and today's move.

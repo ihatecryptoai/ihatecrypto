@@ -67,6 +67,16 @@ public enum SolanaGuard {
     /// Anchor discriminators: sha256("global:deposit_token")[0..<8], sha256("global:deposit_native")[0..<8].
     static let relayDepositToken = Data([0x0b, 0x9c, 0x60, 0xda, 0x27, 0xa3, 0xb4, 0x13])
     static let relayDepositNative = Data([0x0d, 0x9e, 0x0d, 0xdf, 0x5f, 0xd5, 0x1c, 0x06])
+    /// Jupiter's route and shared_accounts_route, the two its swap API builds for an exact-in swap (read 2026-10-21 from
+    /// lite-api's /swap): sha256("global:route")[0..<8], sha256("global:shared_accounts_route")[0..<8].
+    static let jupiterRoute = Data([0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a])
+    static let jupiterSharedRoute = Data([0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81])
+    /// What the Touch ID prompt names a swap's output in; another mint shows its raw units.
+    static let mintNames: [String: (symbol: String, decimals: Int)] = [
+        "So11111111111111111111111111111111111111112": ("SOL", 9),
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": ("USDC", 6),
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": ("USDT", 6),
+    ]
 
     /// `accounts`: the message's full account list (static keys plus lookup tables).
     /// `tokenOwners`: token account → its owner wallet, for the owner's and the allowed recipients' accounts.
@@ -163,6 +173,31 @@ public enum SolanaGuard {
                 } else {
                     v.problems.append("Relay deposit is not from your wallet.")
                 }
+            case jupiterSwap:
+                // route: the output to account 3, or to account 4 when it's set (the program's own id when not), mint 5;
+                // shared_accounts_route: to account 6, mint 8. Both end in in_amount, quoted_out_amount (u64),
+                // slippage_bps (u16), platform_fee_bps (u8). Its other forms are left to the simulation, as before.
+                let kind = ix.data.prefix(8)
+                let layout: (to: Int, instead: Int?, mint: Int)? = kind == jupiterRoute ? (3, 4, 5) : kind == jupiterSharedRoute ? (6, nil, 8) : nil
+                guard let layout, ix.data.count >= 8 + 19, var to = account(layout.to), let mint = account(layout.mint) else {
+                    v.checks.append("Calls Jupiter Swap. The balance simulation checks the result.")
+                    continue
+                }
+                if let instead = layout.instead.flatMap(account), instead != jupiterSwap { to = instead }
+                // This wallet's own token account for the mint, by the claim the signer proved or derived here.
+                let ours = mine(to) || [SPL.tokenProgram, SPL.token2022Program].contains { (try? SPL.associatedAccount(owner: policy.owner, mint: mint, program: $0)) == to }
+                guard ours, policy.trustLookupTables || staticKeys.contains(to) else {
+                    v.problems.append("The Jupiter swap pays \(to), not your wallet.")
+                    continue
+                }
+                let tail = ix.data.count - 19
+                let quoted = le64(ix.data, tail + 8), slippage = UInt64(le16(ix.data, tail + 16)), fee = ix.data[ix.data.startIndex + tail + 18]
+                guard slippage <= 10_000 else { v.problems.append("The Jupiter swap allows a slippage over 100%."); continue }
+                // At least the quote less the slippage: what the program itself makes sure of.
+                let least = Decimal(quoted) * Decimal(10_000 - slippage) / 10_000
+                func down(_ x: Decimal, _ scale: Int) -> String { var x = x, r = Decimal(); NSDecimalRound(&r, &x, scale, .down); return NSDecimalNumber(decimal: r).stringValue }
+                let what = mintNames[mint].map { "\(down(least / pow(10, $0.decimals), $0.decimals)) \($0.symbol)" } ?? "\(down(least, 0)) units of \(mint.prefix(6))…"
+                v.checks.append("Jupiter swap → your account, at least \(what)\(fee > 0 ? "; the site's fee \(fee) bp" : "").")
             default:
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
             }
@@ -200,6 +235,7 @@ public enum SolanaGuard {
         return v
     }
 
+    static func le16(_ d: Data, _ at: Int) -> UInt16 { UInt16(d[d.startIndex + at]) | UInt16(d[d.startIndex + at + 1]) << 8 }
     static func le32(_ d: Data, _ at: Int) -> UInt32 { (0..<4).reduce(0) { $0 | UInt32(d[d.startIndex + at + $1]) << (8 * $1) } }
     static func le64(_ d: Data, _ at: Int) -> UInt64 { (0..<8).reduce(0) { $0 | UInt64(d[d.startIndex + at + $1]) << (8 * $1) } }
 }
@@ -209,6 +245,8 @@ public enum SolanaGuard {
 public enum HLGuard {
     /// Hyperliquid's own market-making vault; the only vault money may go to without the user naming it.
     public static let hlpVault = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
+    /// The top of Settings › Trading's leverage stepper (SettingsView, `p.maxLeverage < 20`).
+    public static let maxLeverage: UInt64 = 20
 
     /// Orders and cancels trade inside the account. Anything that moves money must go to an approved address.
     public static func check(_ action: MsgPack, owner: String, recipients: Set<String>, agent: String? = nil) -> Verdict {
@@ -220,7 +258,14 @@ public enum HLGuard {
         }
         let allowed = Set(recipients.map { $0.lowercased() } + [owner.lowercased()])
         switch text("type") {
-        case "order", "cancel", "updateLeverage":
+        case "updateLeverage":
+            // The trading key signs this without Touch ID: the signer holds it to the most the risk rules can be set to.
+            guard case .uint(let leverage)? = pairs.first(where: { $0.0 == "leverage" })?.1, leverage >= 1, leverage <= maxLeverage else {
+                v.problems.append("Leverage above \(maxLeverage)×: the most ihatecrypto's risk rules allow.")
+                return v
+            }
+            v.checks.append("Leverage \(leverage)× inside your account.")
+        case "order", "cancel":
             v.checks.append("Trading action inside your account.")
         case "usdClassTransfer":
             v.checks.append("Transfer between your spot and perp balances.")

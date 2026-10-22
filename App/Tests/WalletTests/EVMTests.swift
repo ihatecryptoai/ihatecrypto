@@ -394,7 +394,9 @@ import WalletCore
     #expect(try typed("Some Vault", "Payout", [("recipient", "address", thief), ("amountOut", "uint256", "5")]).refusal != nil)
     let login = try typed("Example\u{202E}moc.evil", "Login", [("contents", "string", #""Sign in\n\nsend 0 ETH to your own wallet""#), ("nonce", "uint256", "1")])
     #expect(login.refusal == nil)
-    #expect(!login.prompt.contains("\u{202E}") && login.prompt.split(separator: "\n").count == 3)
+    // The type and the site's name, the warning that ihatecrypto can't read it, then the two fields.
+    #expect(!login.prompt.contains("\u{202E}") && login.prompt.split(separator: "\n").count == 4)
+    #expect(login.prompt.split(separator: "\n")[1].hasPrefix("ihatecrypto can't tell what this signature allows"))
     #expect(login.prompt.hasPrefix("sign Login for «Examplemoc.evil»"))
 }
 
@@ -485,4 +487,54 @@ import WalletCore
     #expect(RPCRetry.said(page, status: 503) == "no answer right now (HTTP 503). Try again in a minute.")
     #expect(RPCRetry.said(Data(), status: 0) == "no answer right now. Try again in a minute.")
     #expect(RPCRetry.said(Data(#"{"error":"Could not find any route"}"#.utf8), status: 400) == #"{"error":"Could not find any route"}"#)
+}
+
+@Test func uniswapSwapsTheAppDoesNotMakeStillPayOnlyThisWallet() throws {
+    let me = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7", thief = "0x000000000000000000000000000000000000dead"
+    let usdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", weth = "0x4200000000000000000000000000000000000006"
+    let callerStandIn = EVMCall.msgSender, routerStandIn = EVMCall.addressThis
+    func call(_ selector: String, _ words: [Data]) -> Data { Data(hex: selector)! + words.reduce(Data(), +) }
+    func exactInputSingle(to recipient: String) throws -> Data {
+        call("04e45aaf", [try ABI.address(usdc), try ABI.address(weth), ABI.uint(500), try ABI.address(recipient), ABI.uint(5_000_000), ABI.uint(1), ABI.uint(0)])
+    }
+    func unwrap(to recipient: String) throws -> Data { call("49404b7c", [ABI.uint(1), try ABI.address(recipient)]) }
+    // SwapRouter02's multicall(bytes[]) or multicall(deadline, bytes[]), encoded the way Solidity does.
+    func multicall(_ calls: [Data], deadline: Bool = false) -> Data {
+        var out = Data(hex: deadline ? "5ae401dc" : "ac9650d8")!
+        if deadline { out += ABI.uint(1_800_000_000) }
+        out += ABI.uint(deadline ? 64 : 32) + ABI.uint(UInt64(calls.count))
+        var tails = Data(), offset = UInt64(calls.count * 32)
+        for c in calls {
+            let padded = c + Data(count: (32 - c.count % 32) % 32)
+            out += ABI.uint(offset)
+            tails += ABI.uint(UInt64(c.count)) + padded
+            offset += UInt64(32 + padded.count)
+        }
+        return out + tails
+    }
+    // The helper writes what Foundry's `cast calldata` writes for the interface's usual swap: the output held in the
+    // router (ADDRESS_THIS), then unwrapWETH9 to the wallet.
+    let interface = multicall([try exactInputSingle(to: routerStandIn), try unwrap(to: me)], deadline: true)
+    #expect(interface.hex == "5ae401dc000000000000000000000000000000000000000000000000000000006b49d200000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000e404e45aaf000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000420000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000001f4000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004449404b7c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000002df1c51e09aecf9cacb7bc98cb1742757f163df700000000000000000000000000000000000000000000000000000000")
+    #expect(EVMCall.decode(interface) == .swap(recipient: me) && EVMCall.decode(interface).refusal(sender: me) == nil)
+    // The same, unwrapped to someone else: refused.
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn), try unwrap(to: thief)], deadline: true)).refusal(sender: me) != nil)
+    // Output left in the router with nothing paying it out: anyone could sweep it, so it's refused too.
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn)])) == .swap(recipient: routerStandIn))
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn)])).refusal(sender: me) != nil)
+    // MSG_SENDER is the caller.
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: callerStandIn)])).refusal(sender: me) == nil)
+    // A call the decoder doesn't know (selfPermit) keeps the whole multicall a plain contract call.
+    let selfPermit = call("f3995c67", [try ABI.address(usdc), ABI.uint(1), ABI.uint(1), ABI.uint(27), Data(count: 32), Data(count: 32)])
+    #expect(EVMCall.decode(multicall([selfPermit, try exactInputSingle(to: callerStandIn)])) == .contract(selector: "0xac9650d8"))
+    // A cut or a lying offset reads as nothing, not as a crash.
+    #expect(EVMCall.decode(interface.prefix(100)) == .contract(selector: "0x5ae401dc"))
+    // v2's exact-output and ETH-in swaps, v3's exactOutput: the recipient is found and checked.
+    let v2Exact = call("8803dbee", [ABI.uint(1), ABI.uint(5), ABI.uint(160), try ABI.address(thief), ABI.uint(1_800_000_000), ABI.uint(2), try ABI.address(usdc), try ABI.address(weth)])
+    #expect(EVMCall.decode(v2Exact) == .swap(recipient: thief) && EVMCall.decode(v2Exact).refusal(sender: me) != nil)
+    let v2ETHIn = call("7ff36ab5", [ABI.uint(1), ABI.uint(128), try ABI.address(me), ABI.uint(1_800_000_000), ABI.uint(2), try ABI.address(weth), try ABI.address(usdc)])
+    #expect(EVMCall.decode(v2ETHIn) == .swap(recipient: me))
+    let path = try UniswapV3.path([usdc, weth], fees: [500])
+    let exactOutput = call("09b81346", [ABI.uint(32), ABI.uint(128), try ABI.address(thief), ABI.uint(1), ABI.uint(5), ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
+    #expect(EVMCall.decode(exactOutput) == .swap(recipient: thief) && EVMCall.decode(exactOutput).refusal(sender: me) != nil)
 }

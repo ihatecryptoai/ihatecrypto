@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Builds «ihatecrypto Dev.app» — the development copy — with the embedded signing process, signed by the AIVAX team
-# (N78L833HCS). It runs beside the working ihatecrypto.app (the release: release.sh makes it, Sparkle updates it) and
+# Builds «ihatecrypto Dev.app» — the development copy — with the embedded signing process, signed by the project's team
+# (project.yml) or yours: TEAM=<your Apple team id> ./build-app.sh. It runs beside the working ihatecrypto.app (the release: release.sh makes it, Sparkle updates it) and
 # shares nothing with it: the bundle id app.ihatecrypto.mac.dev gives it its own signer Keychain group (so its own
 # wallets), settings, model logins, data (Application Support/ihatecrypto-dev), debug API port (51790) and Keep running
 # agent. Nothing here touches ~/Applications/ihatecrypto.app or what it keeps.
@@ -19,7 +19,7 @@ EXTRA=${IHATECRYPTO_PROFILE:+CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES}
 xcodegen generate --quiet
 log=$(mktemp -t ihatecrypto-build)
 if ! xcodebuild -project ihatecrypto.xcodeproj -scheme ihatecrypto -configuration "${1:-Release}" -derivedDataPath ../.build/xcode \
-     -allowProvisioningUpdates -skipPackagePluginValidation APP_NAME="$name" APP_ID=$id $EXTRA \
+     -allowProvisioningUpdates -skipPackagePluginValidation APP_NAME="$name" APP_ID=$id ${TEAM:+DEVELOPMENT_TEAM=$TEAM} $EXTRA \
      build > "$log" 2>&1; then
   grep -E "error:|DESERIALIZATION|Command .* failed|BUILD FAILED" "$log" | cut -c1-300 | head -20
   echo "full log: $log"
@@ -27,8 +27,8 @@ if ! xcodebuild -project ihatecrypto.xcodeproj -scheme ihatecrypto -configuratio
 fi
 grep -E "BUILD" "$log"
 rm -f "$log"
-# Release runs from ~/Applications: macOS refuses notifications (UNErrorDomain 1) to an app inside ~/Desktop, where
-# this repo lives. Debug stays in .build for tests; the build copy is unregistered so «open -b» and the Dock find one app.
+# Release runs from ~/Applications: macOS refuses notifications (UNErrorDomain 1) to an app inside ~/Desktop, where a
+# checkout may live. Debug stays in .build for tests; the build copy is unregistered so «open -b» and the Dock find one app.
 if [ "${1:-Release}" = Release ]; then
   built="../.build/xcode/Build/Products/Release/$name.app"
   dev=~/Applications/"$name.app"

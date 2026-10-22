@@ -112,6 +112,12 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!HLGuard.check(action("spotSend", [("destination", .string("0x000000000000000000000000000000000000dEaD"))]), owner: owner, recipients: [quoteDeposit]).ok)
     #expect(!HLGuard.check(action("vaultTransfer"), owner: owner, recipients: []).ok)
     #expect(!HLGuard.check(action("approveAgent", [("agentAddress", .string("0xBAD"))]), owner: owner, recipients: [], agent: "0xGOOD").ok)
+    // The trading key sets leverage without Touch ID: at most the risk rules' top, never Hyperliquid's own 40–50×.
+    #expect(HLGuard.check(action("updateLeverage", [("asset", .uint(0)), ("isCross", .bool(false)), ("leverage", .uint(5))]), owner: owner, recipients: []).ok)
+    #expect(HLGuard.check(action("updateLeverage", [("leverage", .uint(20))]), owner: owner, recipients: []).ok)
+    #expect(!HLGuard.check(action("updateLeverage", [("leverage", .uint(21))]), owner: owner, recipients: []).ok)
+    #expect(!HLGuard.check(action("updateLeverage", [("leverage", .uint(0))]), owner: owner, recipients: []).ok)
+    #expect(!HLGuard.check(action("updateLeverage"), owner: owner, recipients: []).ok)
 }
 
 @Test func depositGuardRejectsAnAddressBoundToSomeoneElse() {
@@ -184,4 +190,42 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!elsewhere.ok)
     let (approve, accounts) = try message([me, mine, scam, program], [(3, [1, 2, 0], [4] + withUnsafeBytes(of: UInt64(5).littleEndian, Array.init))])
     #expect(!SolanaGuard.check(approve, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
+}
+
+@Test func jupiterSwapsPayOnlyThisWalletsOwnAccount() throws {
+    let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let source = try SPL.associatedAccount(owner: me, mint: usdcMint), out = try SPL.associatedAccount(owner: me, mint: wsol)
+    let theirs = try SPL.associatedAccount(owner: deposit, mint: wsol)
+    let jup = SolanaGuard.jupiterSwap, event = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf"
+    // The tail Jupiter's route ends in, as lite-api built it for 1 USDC → SOL: in 1_000_000, quoted 9_386_507, 50 bp, no fee.
+    func tail(quoted: UInt64, slippage: UInt16 = 50, fee: UInt8 = 0) -> [UInt8] {
+        withUnsafeBytes(of: UInt64(1_000_000).littleEndian, Array.init) + withUnsafeBytes(of: quoted.littleEndian, Array.init)
+            + withUnsafeBytes(of: slippage.littleEndian, Array.init) + [fee]
+    }
+    let route: [UInt8] = [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a] + [1, 0, 0, 100, 0, 1]   // a one-step route plan
+    // route's accounts: token program, user, source, user destination, destination (the program's id: none), mint,
+    // platform fee (none), event authority, program.
+    let keys = [me, SPL.tokenProgram, source, out, jup, wsol, event, theirs]
+    let (m, accounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
+    // The output account is this wallet's own for the mint: derived here, no claim needed. The prompt names the least.
+    let ok = SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [:])
+    #expect(ok.ok)
+    #expect(ok.checks.contains("Jupiter swap → your account, at least 0.009339574 SOL."))
+    // The output sent to someone else's account, as the user destination or through the optional destination: refused.
+    let (other, otherAccounts) = try message(keys, [(4, [1, 0, 2, 7, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
+    #expect(!SolanaGuard.check(other, accounts: otherAccounts, policy: policy, tokenOwners: [:]).ok)
+    let (redirect, redirectAccounts) = try message(keys, [(4, [1, 0, 2, 3, 7, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
+    #expect(!SolanaGuard.check(redirect, accounts: redirectAccounts, policy: policy, tokenOwners: [:]).ok)
+    // shared_accounts_route: token program, program authority, user, source, program source, program destination,
+    // destination, source mint, destination mint, platform fee, Token-2022, event authority, program.
+    let shared: [UInt8] = [0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81, 3] + [1, 0, 0, 100, 0, 1]
+    let sharedKeys = [me, SPL.tokenProgram, deposit, source, theirs, out, usdcMint, wsol, jup, event]
+    let (s, sAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 5, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507, fee: 20))])
+    let sharedOK = SolanaGuard.check(s, accounts: sAccounts, policy: policy, tokenOwners: [:])
+    #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap → your account, at least 0.009339574 SOL; the site's fee 20 bp."))
+    let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 4, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507))])
+    #expect(!SolanaGuard.check(sTheirs, accounts: sTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
+    // Another of Jupiter's forms is left to the balance simulation, as before.
+    let (exactOut, exactOutAccounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c] + tail(quoted: 1))])
+    #expect(SolanaGuard.check(exactOut, accounts: exactOutAccounts, policy: policy, tokenOwners: [:]).checks.contains("Calls Jupiter Swap. The balance simulation checks the result."))
 }

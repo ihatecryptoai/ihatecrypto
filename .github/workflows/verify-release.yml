@@ -1,0 +1,30 @@
+name: Verify release
+
+# Rebuilds each published release from its tag on GitHub's Mac and compares it with the DMG, file by file, apart from
+# code signatures (App/verify-release.sh). A green run says the download is this code.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to check, like 0.7.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # The image with Xcode 27; the script picks the exact Xcode build the release names.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Rebuild and compare
+        run: App/verify-release.sh "$VERSION"
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}

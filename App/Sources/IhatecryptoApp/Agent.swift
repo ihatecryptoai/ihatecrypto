@@ -181,7 +181,7 @@ extension Workspace {
         // A skill is instructions the user added themselves, and its text goes with every later message unscreened anyway.
         if l.tool == "skill" { return found }
         let outside = ["token", "services", "service"].contains(l.tool) || AgentReads.tools.contains(l.tool)
-        let classifier: (any TextClassifier)? = jevScreening && outside ? openRouterKey.map { JevClassifier(apiKey: $0) } : nil
+        let classifier: (any TextClassifier)? = jevScreening && outside ? jevKey.map { JevClassifier(apiKey: $0) } : nil
         // The model is given at most this much of one lookup.
         let why = await InjectionGuard.lookupProblem(String(found.prefix(6000)), source: "\(l.tool) lookup", classifier: classifier)
         FileHandle.standardError.write(Data("ihatecrypto lookup screen: \(l.tool) \(l.arg.prefix(60)) → \(why ?? "data")\n".utf8))

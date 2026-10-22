@@ -31,6 +31,10 @@ settings:
     # and Keep running agent of its own (`Flavor`), so a build from this tree never touches the working one's.
     APP_NAME: ihatecrypto
     APP_ID: app.ihatecrypto.mac
+    # Written into Info.plist by Tools/build-release.sh, so verify-release.sh knows which XcodeGen made a release.
+    XCODEGEN_VERSION: ""
+    # The script below edits the built Info.plist, which a sandboxed script phase may not do.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
 targets:
   ihatecrypto:
     type: application
@@ -42,6 +46,12 @@ targets:
         product: IhatecryptoKit
       - package: Sparkle
       - target: IhatecryptoSigner
+    # Xcode writes the build Mac's macOS build into Info.plist; without it a release rebuilds byte for byte on any Mac
+    # with the same Xcode (verify-release.sh). The phase runs before code signing.
+    postBuildScripts:
+      - name: Info.plist without the build Mac's macOS
+        script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_ID)
@@ -79,6 +89,10 @@ targets:
     dependencies:
       - package: ihatecrypto
         product: IhatecryptoSignerKit
+    postBuildScripts:
+      - name: Info.plist without the build Mac's macOS
+        script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_ID).signer

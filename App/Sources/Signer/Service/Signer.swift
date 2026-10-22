@@ -12,8 +12,9 @@ import WalletCore
 /// has no network). Token-account owners it claims are re-derived here, and with presence on, the system
 /// prompt shows what the signer itself parsed, so a lying app is visible to the user.
 enum Signer {
-    /// Public addresses live in the service's sandbox defaults so status never touches the seed.
-    static var defaults: UserDefaults { .standard }
+    /// Public addresses and the signer's settings, out of the seed's way so status never touches it: in the Keychain
+    /// (SignerPrefs), not the sandbox's preferences file, which anything on the Mac could rewrite.
+    static var defaults: SignerPrefs { .shared }
 
     static func handle(_ request: SignerRequest) throws -> SignerReply {
         switch request {
@@ -621,7 +622,7 @@ enum Signer {
         var secret = try SeedStore.load(reason: reason, id: wallet.id, session: Wallets.signing == nil)
         defer { SeedStore.wipe(&secret) }
         guard wallet.kind == "phrase" else { // a key wallet holds that chain's key itself
-            remember(chain, secret, of: wallet)
+            try vouch(chain, secret, of: wallet)
             return try body(secret)
         }
         var key = switch chain {
@@ -630,23 +631,42 @@ enum Signer {
         default: try Derivation.ed25519(seed: secret, path: WalletPath.near(0))
         }
         defer { SeedStore.wipe(&key) }
-        remember(chain, key, of: wallet)
+        try vouch(chain, key, of: wallet)
         return try body(key)
     }
 
-    /// The address `key` signs for, kept among ours (OwnStore): read from the key, so a wallet already here before
-    /// OwnStore joins it with its next signature. The public test wallet stays out: anyone holds its key.
-    private static func remember(_ chain: String, _ key: Data, of wallet: SignerWallet) {
-        guard wallet.solana != publicTestSolana,
-              let a = chain == "solana" ? try? SolanaAccount.address(privateKey: key) : chain == "evm" ? try? EVMAccount.address(privateKey: key) : nil
+    /// The address `key` signs for must be the one the checks took as «ours» (`address`): the settings name it, the key
+    /// proves it, so a made-up «our address» can't pass money to itself. Then it's kept among ours (OwnStore), so a
+    /// wallet here before OwnStore joins it with its next signature. The public test wallet stays out: anyone holds its key.
+    private static func vouch(_ chain: String, _ key: Data, of wallet: SignerWallet) throws {
+        guard let a = chain == "solana" ? try? SolanaAccount.address(privateKey: key) : chain == "evm" ? try? EVMAccount.address(privateKey: key) : nil
         else { return }
-        OwnStore.add([a])
+        if let claimed = try? address(chain), RecipientStore.key(claimed) != RecipientStore.key(a) {
+            throw WalletError("This wallet's saved \(chain) address isn't the one its key signs for: nothing was signed.")
+        }
+        if wallet.solana != publicTestSolana { OwnStore.add([a]) }
     }
 
     static let publicTestSolana = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
 
     /// The public BIP-39 test phrase («abandon … about»): anyone can sign for it, so the self-test runs without prompts.
-    static var holdsPublicTestWallet: Bool { (try? address("solana")) == publicTestSolana }
+    /// Its address in the settings isn't enough: the wallet's seed must open without a prompt and derive it.
+    static var holdsPublicTestWallet: Bool {
+        guard (try? address("solana")) == publicTestSolana, let wallet = Wallets.active else { return false }
+        return signsWithoutPrompt(wallet, solana: publicTestSolana)
+    }
+
+    /// The wallet was sealed without Touch ID — its seed opens with no prompt — and, given `solana`, its key is that one.
+    /// A test flag in the settings counts only with this.
+    static func signsWithoutPrompt(_ wallet: SignerWallet, solana: String? = nil) -> Bool {
+        guard var secret = SeedStore.withoutPrompt(id: wallet.id) else { return false }
+        defer { SeedStore.wipe(&secret) }
+        guard let solana else { return true }
+        if wallet.kind != "phrase" { return (try? SolanaAccount.address(privateKey: secret)) == solana }
+        guard var key = try? Derivation.ed25519(seed: secret, path: WalletPath.solana(0)) else { return false }
+        defer { SeedStore.wipe(&key) }
+        return (try? SolanaAccount.address(privateKey: key)) == solana
+    }
 
     /// Adding, switching or removing a wallet once there is one is the user's act, in person: Touch ID or the password.
     /// A program that talks to the signer as ihatecrypto can't slip in its own wallet and wait for the user's deposits.
@@ -660,7 +680,8 @@ enum Signer {
     static func approve(_ recipients: [String]) throws {
         // The Test wallet signs without Touch ID by design (a few dollars for checks): asking it about a new address
         // only stops the check. Its approvals are its own (RecipientStore is per wallet), so no other wallet skips one.
-        guard !holdsPublicTestWallet, Wallets.active?.isTest != true else { return }
+        if holdsPublicTestWallet { return }
+        if let wallet = Wallets.active, wallet.isTest, signsWithoutPrompt(wallet) { return }
         let own = Set([try? address("solana"), (try? address("evm"))?.lowercased()].compactMap { $0 })
         // An address saved in the book was confirmed in person, whole, when it was saved; another wallet of this Mac's
         // is the user's own.

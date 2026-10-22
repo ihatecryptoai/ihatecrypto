@@ -235,7 +235,7 @@ extension Workspace {
         }
         guard jevScreening else { planReview = nil; jevNote = nil; return }
         reviewedIntent = intent
-        let requests = messages.filter(\.fromUser).map(\.text), lines = planLines, key = openRouterKey, client = llmClient(),
+        let requests = messages.filter(\.fromUser).map(\.text), lines = planLines, key = jevKey, client = llmClient(),
             language = replyLanguage, model = model
         // Both readers at once: the chat's model says what differs, the OpenRouter classifier adds a confident concern.
         @Sendable func byModel() async -> Result<String?, Error>? {
@@ -284,7 +284,7 @@ extension Workspace {
         do {
             let p = try await executor(wallet).prepare(intent, policy: policy, openVia1Click: openVia1Click == true)
             prepared = p
-            if jevScreening, let key = openRouterKey {
+            if jevScreening, let key = jevKey {
                 txReview = try? await JevReviewer.transactions(plan: planLines, signatures: p.steps, changes: p.changes, apiKey: key)
             }
         } catch {
@@ -334,7 +334,9 @@ extension Workspace {
 
     /// After execution «take closer» or «stop 2%» are about the open position: its orders move on the exchange
     /// instead of a new plan starting. Only stop and take may change; anything else is a new plan.
-    func editExecuted(from before: TradeIntent, to next: TradeIntent) async -> Bool {
+    /// `confirm`: a model read the message, so the new orders wait on a card for Confirm, like any other model reading
+    /// that touches a position; the user's own typed «stop 2%» moves them at once, as before.
+    func editExecuted(from before: TradeIntent, to next: TradeIntent, confirm: Bool = false) async -> Bool {
         guard let p = positions.first(where: { $0.coin == before.asset }) else { return false }
         var same = next
         same.stopPct = before.stopPct; same.takePct = before.takePct; same.takeR = before.takeR
@@ -342,6 +344,7 @@ extension Workspace {
         let long = p.size > 0
         let dir: Decimal = long ? 1 : -1
         let resolvedNext = Plan.resolve(next, market: market, equity: equity, policy: policy).intent
+        var moves: [PositionCommand] = []
         if let stopPct = resolvedNext.stopPct, stopPct != before.stopPct {
             let stop = p.entry * (1 - dir * stopPct / 100)
             // A wider stop may not break the per-trade limit.
@@ -350,11 +353,20 @@ extension Workspace {
                 reply("A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
                 return true
             }
-            await manage(.stopTo(stop), coin: p.coin)
+            moves.append(.stopTo(stop))
         }
         if let takePct = resolvedNext.takePct, takePct != before.takePct {
-            await manage(.takeTo(p.entry * (1 + dir * takePct / 100)), coin: p.coin)
+            moves.append(.takeTo(p.entry * (1 + dir * takePct / 100)))
         }
+        if confirm, !moves.isEmpty {
+            let what = moves.map { "\(Self.describe($0))" }.joined(separator: ", ")
+            pendingAction = .orders(moves, coin: p.coin, intent: next)
+            pendingText = "\(IntentParser.pretty(p.coin)): \(what)"
+            reply(say("\(IntentParser.pretty(p.coin)): \(what). Press Confirm to move the orders.",
+                      "\(IntentParser.pretty(p.coin)): \(what). Нажми Confirm, чтобы переставить ордера."))
+            return true
+        }
+        for move in moves { await manage(move, coin: p.coin) }
         intent = next
         executed = next
         return true
@@ -631,11 +643,17 @@ extension Workspace {
                 }
                 guard days > 0 else { reply(say("A recurring buy needs at least a day between buys.", "Между регулярными покупками нужен хотя бы день.")); return }
                 // The per-purchase rule applies to each run; a schedule adds up, so it is shown per month too.
+                // The first buy is a card like any other and waits for Confirm: a schedule set up from the chat never signs
+                // at once by itself. The schedule's own runs start one period later.
                 schedules.removeAll { $0.symbol == asset.symbol }
-                schedules.append(Schedule(symbol: asset.symbol, usdc: usdc, days: days, next: Date()))
+                var schedule = Schedule(symbol: asset.symbol, usdc: usdc, days: days, next: Date())
+                schedule.advance()
+                schedules.append(schedule)
                 let monthly = usdc * Decimal(30) / Decimal(days)
-                reply("Scheduled purchases: \(asset.symbol) for \(Fmt.usd(usdc)) \(days == 1 ? "daily" : days == 7 ? "weekly" : "every \(days) days") — ≈ \(Fmt.usd(monthly)) a month. The first one is now. Runs while ihatecrypto is open; each purchase goes through the same checks and signing.")
-                await runSchedules()
+                let every = days == 1 ? say("daily", "каждый день") : days == 7 ? say("weekly", "каждую неделю") : say("every \(days) days", "раз в \(days) дн.")
+                reply(say("Scheduled purchases: \(asset.symbol) for \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) a month. The first one is on the canvas: press Confirm to buy now. The next ones start \(Fmt.date(schedule.next)) and run while ihatecrypto is open; each goes through the same checks and signing.",
+                          "Регулярные покупки: \(asset.symbol) на \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) в месяц. Первая — карточкой на холсте: нажми Confirm, чтобы купить сейчас. Следующие пойдут с \(Fmt.date(schedule.next)), пока ihatecrypto открыт; каждая проходит те же проверки и подпись."))
+                await handleWallet(.buy(asset, usdc: usdc), quiet: true)
                 return
             case .stopSchedules:
                 let n = schedules.count
@@ -992,6 +1010,8 @@ extension Workspace {
                                     : say("Waiting for your Mac password — type it when macOS asks.", "Ждёт пароль от Mac — введи его, когда macOS спросит."), record: false)
             }
             defer { waiting.cancel() }
+            // Nobody may be at the Mac: a session the user opened for 5–30 minutes doesn't cover this buy, it asks again.
+            if SignerClient.isAvailable { _ = try? await SignerClient().send(.endSession) }
             do {
                 let line = try await executor(wallet).swap(asset, buy: true, amount: usdc, equity: equity)
                 notify(.moves, say("\(asset.symbol) purchase", "Покупка \(asset.symbol)"), line, schedule: "buy:\(asset.symbol)")

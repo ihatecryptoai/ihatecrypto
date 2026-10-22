@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- The README's top picture in the manner of the site's link previews: the slogan, the app window (app-<theme>.png, a
+     screenshot of the canvas) and the manifesto's 3D things and coins around it. hero-light.png and hero-dark.png, 1600x1280:
+       python3 -m http.server 8765   (from the repo root)
+       screenshot http://127.0.0.1:8765/images/hero.html and ?theme=dark at 1600x1280 -->
+<html><head><meta charset="utf-8">
+<style>
+  @font-face { font-family: 'DynaPuff'; font-weight: 600; src: url(../App/Tools/site/fonts/dynapuff-latin.woff2) format('woff2'); }
+  @font-face { font-family: 'Onest'; font-weight: 400 800; src: url(../App/Tools/site/fonts/onest-latin.woff2) format('woff2'); }
+  :root { --bg: #FAFAFB; --dot: #D9DCE2; --ink: #111111; --line: #E1E4EC; --bar: #F4F5F7; --muted: #5F636B; --shadow: rgba(17,17,17,.20); }
+  .dark { --bg: #0F1012; --dot: #26282D; --ink: #F4F4F5; --line: #2A2C31; --bar: #1B1C1F; --muted: #9A9DA4; --shadow: rgba(0,0,0,.6); }
+  * { box-sizing: border-box; margin: 0; }
+  body { position: relative; width: 1600px; height: 1280px; overflow: hidden; color: var(--ink); font-family: Onest, sans-serif; -webkit-font-smoothing: antialiased;
+         background: var(--bg) radial-gradient(var(--dot) 1.8px, transparent 2.2px) 0 0 / 32px 32px; }
+  .lock { position: absolute; left: 50%; top: 52px; translate: -50% 0; display: flex; align-items: center; gap: 14px; }
+  .lock svg { width: 64px; height: 64px; }
+  .lock b { font: 600 44px/1 DynaPuff, Onest, sans-serif; letter-spacing: -.3px; }
+  h1 { position: absolute; left: 0; right: 0; top: 142px; text-align: center; font: 800 100px/1 Onest, sans-serif; letter-spacing: -.045em; }
+  p { position: absolute; left: 0; right: 0; top: 268px; text-align: center; font: 700 40px/1.15 Onest, sans-serif; letter-spacing: -.025em; color: var(--muted); }
+  .ring { position: relative; margin-left: .2em; white-space: nowrap; color: var(--ink); }
+  .ring svg { position: absolute; left: -.45em; top: -.42em; width: calc(100% + .9em); height: 1.9em; overflow: visible; }
+  .ring path { fill: none; stroke: #FF7A2F; stroke-width: 3.5; stroke-linecap: round; }
+  .win { position: absolute; left: 210px; top: 372px; width: 1180px; border-radius: 18px; overflow: hidden; border: 1px solid var(--line);
+         background: var(--bar); box-shadow: 0 50px 100px -20px var(--shadow), 0 20px 40px -20px var(--shadow); }
+  .bar { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+  .bar i { width: 13px; height: 13px; border-radius: 50%; }
+  .win img { display: block; width: calc(100% + 24px); margin: -12px 0 0; }
+  .obj { position: absolute; display: block; filter: drop-shadow(0 18px 24px var(--shadow)); }
+  .coin { border-radius: 50%; }
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs><symbol id="f-wait" viewBox="0 0 140 140"><circle cx="70" cy="70" r="64" fill="#FF7A2F"/><circle cx="70" cy="70" r="62" fill="none" stroke="#111111" stroke-width="9" stroke-dasharray="7 7"/><circle cx="70" cy="70" r="52" fill="none" stroke="#111111" stroke-width="3.5"/><circle cx="50" cy="62" r="17" fill="#FFFFFF" stroke="#111111" stroke-width="5"/><circle cx="90" cy="62" r="17" fill="#FFFFFF" stroke="#111111" stroke-width="5"/><circle cx="54.08" cy="53.98" r="8" fill="#111111"/><circle cx="94.08" cy="53.98" r="8" fill="#111111"/><path d="M54 98 Q70 92 86 96" fill="none" stroke="#111111" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></symbol></defs></svg>
+<div class="lock"><svg viewBox="0 0 140 140"><use href="#f-wait"/></svg><b>ihatecrypto</b></div>
+<h1>Even crypto hates crypto.</h1>
+<p>Say it. See the move. <span class="ring">You confirm.<svg viewBox="0 0 200 80" preserveAspectRatio="none"><path d="M176 21C138 3 48 5 15 30C-5 47 33 74 102 74C168 74 204 53 189 29C179 15 151 7 122 8"/></svg></span></p>
+<div class="win"><div class="bar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div><img id="app" alt=""></div>
+<img class="obj coin" src="../App/Tools/site/mf/sol.png" style="left:210px;top:70px;width:72px;rotate:12deg">
+<img class="obj coin" src="../App/Tools/site/mf/eth.svg" style="right:220px;top:78px;width:68px;rotate:-8deg">
+<img class="obj" src="../App/Tools/site/mf/gaspump.webp" style="left:56px;top:170px;width:130px;rotate:-10deg">
+<img class="obj" src="../App/Tools/site/mf/hourglass.webp" style="right:64px;top:160px;width:96px;rotate:8deg">
+<img class="obj" src="../App/Tools/site/mf/bridge.webp" style="left:24px;top:450px;width:200px;rotate:8deg">
+<img class="obj coin" src="../App/Tools/site/mf/usdc.png" style="left:110px;top:700px;width:72px;rotate:-6deg">
+<img class="obj" src="../App/Tools/site/mf/wallet.webp" style="left:36px;top:860px;width:190px;rotate:-10deg">
+<img class="obj" src="../App/Tools/site/mf/button.webp" style="right:18px;top:430px;width:210px;rotate:-8deg">
+<img class="obj coin" src="../App/Tools/site/mf/tsla.png" style="right:112px;top:700px;width:72px;rotate:10deg">
+<img class="obj" src="../App/Tools/site/mf/magnifier.webp" style="right:34px;top:850px;width:190px;rotate:12deg">
+<img class="obj coin" src="../App/Tools/site/mf/btc.svg" style="left:170px;top:1150px;width:70px;rotate:-10deg">
+<img class="obj" src="../App/Tools/site/mf/hype.svg" style="right:170px;top:1156px;width:66px;rotate:8deg">
+<script>
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+document.documentElement.classList.toggle('dark', dark);
+document.getElementById('app').src = dark ? 'app-dark.png' : 'app-light.png';
+</script>
+</body></html>

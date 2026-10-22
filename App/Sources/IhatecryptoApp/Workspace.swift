@@ -218,7 +218,12 @@ final class Workspace {
     var finishedAction: (title: String, outcome: CanvasOutcome, route: [ActivityBubble])?
     /// The move that just failed on a canvas: its board's «Try again» lays the same card out again, quoted afresh.
     var retryCommand: (canvas: UUID?, command: WalletCommand)?
-    enum PendingAction { case wallet(WalletCommand), position(PositionCommand, coin: String), address(SavedAddress), transfer(SavedAddress, Decimal) }
+    /// `orders`: a model's new stop or take for an open position, moved on the exchange after Confirm; `intent` is the
+    /// plan with them, which becomes the canvas's then.
+    enum PendingAction {
+        case wallet(WalletCommand), position(PositionCommand, coin: String), orders([PositionCommand], coin: String, intent: TradeIntent)
+        case address(SavedAddress), transfer(SavedAddress, Decimal)
+    }
     /// The English command the pending action was understood as, for the confirm button.
     var pendingText: String?
     /// A paid API's price as its 402 named it, for the «pay …» card waiting for Confirm (Payments.swift).
@@ -401,9 +406,6 @@ final class Workspace {
     var tuning: String?
     /// Settings fill the main window in place of the canvas and the chat.
     var settingsOpen = false
-    /// A new version Sparkle has downloaded, waiting for a restart to install (Updater.swift): the app menu and the menu
-    /// bar's popover offer «Restart to update».
-    var updateReady: String?
 
     /// Shows Settings, on `tab` (a `SettingsView.Tab`) when given.
     func openSettings(_ tab: SettingsView.Tab? = nil) {
@@ -616,6 +618,13 @@ final class Workspace {
     var jevScreening = UserDefaults.standard.object(forKey: "jevScreening") as? Bool ?? true {
         didSet { UserDefaults.standard.set(jevScreening, forKey: "jevScreening") }
     }
+    /// The second check may use OpenRouter while the chat runs elsewhere: only when the user turned it on (Settings ›
+    /// Second check, or «Connect» there). A key left from an earlier OpenRouter chat doesn't send texts there by itself.
+    var jevOpenRouter = UserDefaults.standard.bool(forKey: "jevOpenRouter") {
+        didSet { UserDefaults.standard.set(jevOpenRouter, forKey: "jevOpenRouter") }
+    }
+    /// The key the second check sends texts with: OpenRouter's, when the chat runs there or the user turned it on.
+    var jevKey: String? { providerID == "openrouter" || jevOpenRouter ? openRouterKey : nil }
     /// On: Solana buys only the fixed verified coins. Off: any token by its mint, with its risks said first (TokensUI.swift).
     var safeSearch = UserDefaults.standard.object(forKey: "safeSearch") as? Bool ?? true {
         didSet { UserDefaults.standard.set(safeSearch, forKey: "safeSearch") }
@@ -787,6 +796,7 @@ final class Workspace {
         jevStatus = say("Waiting for the sign-in in the browser…", "Жду входа в браузере…")
         do {
             Keychain.save(try await openRouter.signIn(open: { url in Task { @MainActor in NSWorkspace.shared.open(url) } }), for: "openrouter")
+            jevOpenRouter = true
             signedInCache.remove("openrouter")
             credentialVersion += 1
             jevStatus = say("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель.")
@@ -1008,7 +1018,7 @@ final class Workspace {
         text = savedNames(in: text)
         // ponytail: «pasted» by its look, not by the pasteboard; a short paste with no address or link is read by the local rules only.
         let pasted = text.count >= 100 || text.contains(/0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|https?:\/\/|www\./)
-        let classifier: (any TextClassifier)? = jevScreening && pasted ? openRouterKey.map { JevClassifier(apiKey: $0, own: true) } : nil
+        let classifier: (any TextClassifier)? = jevScreening && pasted ? jevKey.map { JevClassifier(apiKey: $0, own: true) } : nil
         busy = true
         let screen = await InjectionGuard.screen(text, source: "chat message", classifier: classifier)
         busy = false
@@ -1176,8 +1186,8 @@ final class Workspace {
                 Updater.shared.check()
                 reply(say("Checking for a new version: Sparkle's window shows what it finds.", "Проверяю новую версию: окно Sparkle покажет, что нашлось."))
             } else {
-                reply(say("This copy was built on this Mac, so it doesn't update itself. The copy from the site checks once a day.",
-                          "Эта копия собрана на этом Маке, поэтому сама не обновляется. Копия с сайта проверяет обновления раз в день."))
+                reply(say("This copy was built on this Mac, so it doesn't look for updates. The copy from the site looks once a day.",
+                          "Эта копия собрана на этом Маке, поэтому обновлений не ищет. Копия с сайта проверяет их раз в день."))
             }
             return
         }
@@ -1291,6 +1301,10 @@ final class Workspace {
         switch pending {
         case .wallet(let command): await move(command)
         case .position(let command, let coin): await manage(command, coin: coin)
+        case .orders(let commands, let coin, let next):
+            for command in commands { await manage(command, coin: coin) }
+            intent = next
+            executed = next
         case .transfer(let entry, let amount): await transfer(amount, to: entry)
         case .address(let entry):
             // Touch ID with the whole address on the prompt; only then is it in the book.
@@ -1363,7 +1377,7 @@ final class Workspace {
         // The model's lookups run here, on this canvas's data; the chat shows which one is under way.
         let lookup: @Sendable (ChatRouter.Lookup) async -> String = { [weak self] l in await self?.screenedLookup(l) ?? "" }
         // A second reader of every command: Jev when OpenRouter is connected, else the model reading it again.
-        let key = jevScreening ? openRouterKey : nil, recent = context.recent, model = model, known = Set(markets.keys)
+        let key = jevScreening ? jevKey : nil, recent = context.recent, model = model, known = Set(markets.keys)
         @Sendable func modelReading(_ command: String) async -> (answered: Bool, why: String?) {
             do { return (true, try await ChatRouter.verify(text, command: command, context: context, client: client, model: model, markets: known)) } catch { return (false, nil) }
         }
@@ -1682,7 +1696,7 @@ final class Workspace {
             let (edited, answer) = try await modelCall { try await ChatModel.edit(plan, message: text, client: client, model: model, history: history, replyLanguage: language) }
             busy = false
             let next = edited.map(Self.started)
-            if let next, await editExecuted(from: before, to: next) { return }
+            if let next, await editExecuted(from: before, to: next, confirm: true) { return }
             if let next { intent = next }
             let changes = next?.changes(from: before) ?? []
             let fallback = changes.isEmpty ? say("The model changed nothing.", "Модель ничего не изменила.") : planUpdated(changes)
@@ -1797,7 +1811,7 @@ final class Workspace {
                         "Какую позицию? Открыты: \(positions.map { IntentParser.pretty($0.coin) }.joined(separator: ", "))."), note: note)
             return true
         }
-        if await editExecuted(from: before, to: next) { return true }
+        if await editExecuted(from: before, to: next, confirm: true) { return true }
         intent = next
         let changes = next.changes(from: before)
         // Right after launch the prices may not be in yet: the plan is checked against its market, so load it first.

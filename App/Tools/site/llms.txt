@@ -4,6 +4,7 @@
 
 - Download: https://ihatecrypto.ai/ihatecrypto.dmg (the latest version, free, macOS 26 or later, Apple silicon and Intel; it updates itself).
 - Site: https://ihatecrypto.ai/
+- Source code: https://github.com/ihatecryptoai/ihatecrypto (GPL-3.0; non-custodial: keys are made and kept on the user's Mac).
 
 ## What you can ask
 
