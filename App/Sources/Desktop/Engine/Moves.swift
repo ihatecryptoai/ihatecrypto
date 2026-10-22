@@ -91,6 +91,7 @@ extension Engine {
         }
         if let missing = missingKey(command) { reply(missing, note: note); return }
         if let off = Modules.current.refusal(command, ru: russian) { reply(off, note: note); return }
+        if case .pay = command { await preparePayment(command, note: note); return }
         switch command {
         case .sendTo(let name, let amount, let net): prepareTransfer(amount, to: name, network: net, note: note); return
         case .receive:
@@ -144,7 +145,7 @@ extension Engine {
             reply(buys.isEmpty ? say("There were no recurring buys.", "Регулярных покупок не было.") : say("Recurring buys stopped (\(buys.count)).", "Регулярные покупки остановлены (\(buys.count))."), note: note)
             return
         case .yields, .allocate, .rebalance, .jupiterDCAOrders, .showApprovals, .multisigCreate, .multisigSend,
-             .multisigShow, .pay, .claimRewards, .sweepRewards, .contractCall, .receiveAcross:
+             .multisigShow, .claimRewards, .sweepRewards, .contractCall, .receiveAcross:
             reply(say("“\(command.summary)” isn't in the Windows app yet: for now it does it on a Mac. Nothing moved.",
                       "«\(command.summary)» в Windows-версии пока нет — это умеет версия для Mac. Ничего не ушло."), note: note)
             return
@@ -602,6 +603,7 @@ extension Engine {
         case .jupiterDCA(let asset, let usdc, let orders, let every):
             reply(try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every), note: "Jupiter DCA")
         case .jupiterDCACancel(let asset): reply(try await e.cancelJupiterDCA(asset), note: "Jupiter DCA")
+        case .pay: reply(try await pay(command, e), note: "MPP · Tempo")
         default:
             throw ExecutionError(say("“\(command.summary)” isn't in the Windows app yet. Nothing was signed.", "«\(command.summary)» в Windows-версии пока нет. Ничего не подписано."))
         }

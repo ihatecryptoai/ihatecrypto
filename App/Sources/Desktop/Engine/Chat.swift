@@ -195,6 +195,8 @@ extension Engine {
     /// The model's English command through the parsers, as typed. False when it isn't a command they know here.
     func runCanonical(_ canonical: String, userText text: String) async -> Bool {
         let note = "understood as “\(canonical)” · \(model)"
+        // A paid request before any other reading: its body is free text, where a contract or «then» belongs to the question.
+        if case .pay? = WalletCommand.parse(canonical), let command = WalletCommand.parse(canonical) { await handleWallet(command, note: note); return true }
         if let command = MemoryCommand.parse(canonical) { memoryCommand(command, note: note); return true }
         if let entry = JournalCommand.parse(canonical) { await journalCommand(entry, note: note); return true }
         if let study = StudyNote.parse(canonical) { studyNote(study, note: note); return true }
@@ -386,12 +388,14 @@ extension Engine {
         // A skill is instructions the user added themselves: not screened, as on the Mac.
         case "skill": return await skillLookup(l)
         case "trades", "journal", "study": found = await skillLookup(l)
+        case "services": found = await MPP.search(l.arg) + "\nUSDC on Tempo now: \(Fmt.num(tempoUSDC)); what's short comes from Solana."
+        case "service": found = await MPP.service(l.arg)
         case let tool where AgentReads.tools.contains(tool):
             found = await AgentReads.answer(tool, l.arg, me: .init(evm: evmAddress, solana: solanaAddress))
         default:
-            return "The Windows app has no «\(l.tool)» lookup yet. Lookups here: portfolio, market <ASSET>, token <ADDRESS or NAME>, skill <ID>, trades <ADDRESS|me>, journal, study, call, rpc, hl, fetch."
+            return "The Windows app has no «\(l.tool)» lookup yet. Lookups here: portfolio, market <ASSET>, token <ADDRESS or NAME>, skill <ID>, trades <ADDRESS|me>, journal, study, services <WORDS>, service <ID>, call, rpc, hl, fetch."
         }
-        let outside = ["token"].contains(l.tool) || AgentReads.tools.contains(l.tool)
+        let outside = ["token", "services", "service"].contains(l.tool) || AgentReads.tools.contains(l.tool)
         let classifier: (any TextClassifier)? = outside ? jevKey.map { JevClassifier(apiKey: $0) } : nil
         guard let why = await InjectionGuard.lookupProblem(String(found.prefix(6000)), source: "\(l.tool) lookup", classifier: classifier) else { return found }
         return "Withheld by ihatecrypto's guard: what the «\(l.tool) \(l.arg)» lookup brought back is not shown to you, because \(why). "

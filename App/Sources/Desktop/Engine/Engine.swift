@@ -100,6 +100,8 @@ final class Engine {
         didSet { Store.save(seenCosts, "seen.json") }
     }
     var costsLoading = false
+    /// A service's price waiting for Confirm («pay GET https://…»).
+    var payment: PaymentQuote?
     /// Skills the user added, the ones switched off, the ones loaded in this chat, and what they asked it to remember.
     var addedSkills: [Skill] = Store.load([Skill].self, "skills.json") ?? [] { didSet { Store.save(addedSkills, "skills.json") } }
     var skillsOff: Set<String> = Set(Store.load([String].self, "skills-off.json") ?? []) { didSet { Store.save(skillsOff.sorted(), "skills-off.json") } }
