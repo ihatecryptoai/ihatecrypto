@@ -77,6 +77,8 @@ extension Engine {
 
     /// No model connected: the local parsers read the message as typed.
     private func readWithoutModel(_ text: String) async {
+        if ScheduledTask.cancelsAll(text) { cancelTasks(note: nil); return }
+        if let task = ScheduledTask.parse(text) { schedule(task, note: nil); return }
         if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
         if let command = AddressBookCommand.parse(text) { await addressBook(command, userText: text); return }
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) { await alert(command, note: nil); return }
@@ -145,6 +147,8 @@ extension Engine {
     /// The model's English command through the parsers, as typed. False when it isn't a command they know here.
     func runCanonical(_ canonical: String, userText text: String) async -> Bool {
         let note = "understood as “\(canonical)” · \(model)"
+        if ScheduledTask.cancelsAll(canonical) { cancelTasks(note: note); return true }
+        if let task = ScheduledTask.parse(canonical) { schedule(task, note: note); return true }
         if let merged = ChatRouter.planChange(canonical, markets: Set(markets.keys)) { return await runCanonical(merged, userText: text) }
         if let steps = ChatRouter.steps(canonical) { return await chain(steps, note: note) }
         switch canonical.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".! ")) {
@@ -254,6 +258,7 @@ extension Engine {
         c.plan = intent == TradeIntent() ? nil : intent.command
         if let card { c.canvas.append("waiting for Confirm: " + card.title) }
         c.canvas += alerts.map { "price alert: " + alertText($0) }
+        c.canvas.append("schedule: " + (tasks.isEmpty ? "nothing scheduled" : tasks.map(taskText).joined(separator: "; ")))
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }
         c.addressBook = book.map { "\($0.name) (\(AddressCheck.Network(rawValue: $0.network)?.title ?? $0.network))" }
         c.balances = portfolioFacts()

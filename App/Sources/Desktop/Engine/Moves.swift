@@ -107,7 +107,26 @@ extension Engine {
                     _ = try tokenRecipient(name, network: network)
                 }
             } catch { reply(error.localizedDescription, note: note); return }
-        case .yields, .allocate, .rebalance, .schedule, .stopSchedules, .jupiterDCAOrders, .showApprovals, .multisigCreate, .multisigSend,
+        case .schedule(let asset, let usdc, let days):
+            // A recurring buy: the task buys later, each time as a card for Confirm; the first buy is a card now.
+            guard days > 0 else { reply(say("A recurring buy needs at least a day between buys.", "Между регулярными покупками нужен хотя бы день."), note: note); return }
+            let buy = WalletCommand.buy(asset, usdc: usdc)
+            tasks.removeAll { $0.steps == [buy.summary] }
+            tasks.append(ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days)))
+            reply(say("Recurring buy: \(buy.summary) every \(days == 7 ? "week" : days == 1 ? "day" : "\(days) days"). The first one is the card below; the next ones come as cards too.",
+                      "Регулярная покупка: \(buy.summary) раз в \(days == 7 ? "неделю" : days == 1 ? "день" : "\(days) дн."). Первая — карточка ниже; следующие тоже придут карточками."), note: note)
+            await handleWallet(buy, note: note)
+            return
+        case .stopSchedules:
+            func isBuy(_ t: ScheduledTask) -> Bool {
+                guard t.steps.count == 1, case .buy? = WalletCommand.parse(t.steps[0]) else { return false }
+                return true
+            }
+            let buys = tasks.filter(isBuy)
+            tasks.removeAll { t in buys.contains { $0.id == t.id } }
+            reply(buys.isEmpty ? say("There were no recurring buys.", "Регулярных покупок не было.") : say("Recurring buys stopped (\(buys.count)).", "Регулярные покупки остановлены (\(buys.count))."), note: note)
+            return
+        case .yields, .allocate, .rebalance, .jupiterDCAOrders, .showApprovals, .multisigCreate, .multisigSend,
              .multisigShow, .pay, .claimRewards, .sweepRewards, .contractCall, .receiveAcross:
             reply(say("“\(command.summary)” isn't in the Windows app yet: for now it does it on a Mac. Nothing moved.",
                       "«\(command.summary)» в Windows-версии пока нет — это умеет версия для Mac. Ничего не ушло."), note: note)

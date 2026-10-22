@@ -49,6 +49,15 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                     allow_foreground(pid);
                 }
             }
+            // Money that arrived, a price alert, a scheduled move waiting for Confirm: a Windows notification too,
+            // since the window may be in the tray.
+            if line.contains("\"event\":\"notify\"") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    use tauri_plugin_notification::NotificationExt;
+                    let (title, body) = (v["data"]["title"].as_str().unwrap_or("ihatecrypto"), v["data"]["body"].as_str().unwrap_or(""));
+                    let _ = handle.notification().builder().title(title).body(body).show();
+                }
+            }
             let _ = handle.emit("engine", line);
         }
         let _ = handle.emit("engine", "{\"event\":\"engineStopped\",\"data\":{}}");
@@ -228,6 +237,7 @@ fn main() {
     tauri::Builder::default()
         // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let engine = start_engine(app.handle())?;
             app.manage(engine);

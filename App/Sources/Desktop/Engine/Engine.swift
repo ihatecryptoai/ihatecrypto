@@ -94,6 +94,10 @@ final class Engine {
     var alerts: [PriceAlert] = Store.load([PriceAlert].self, "alerts.json") ?? [] {
         didSet { Store.save(alerts, "alerts.json") }
     }
+    /// Scheduled tasks and recurring buys, run by the minute.
+    var tasks: [ScheduledTask] = Store.load([ScheduledTask].self, "tasks.json") ?? [] {
+        didSet { Store.save(tasks, "tasks.json") }
+    }
 
     init(out: Outbox) { self.out = out }
 
@@ -188,6 +192,7 @@ final class Engine {
         var book: [SignerAddress]
         var history: [HistoryLine]
         var alerts: [Alert]
+        var tasks: [Alert]
     }
 
     func snapshot() -> Snapshot {
@@ -209,7 +214,8 @@ final class Engine {
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
-            alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) })
+            alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
+            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) })
     }
 
     // MARK: Requests from the window
@@ -254,6 +260,7 @@ final class Engine {
                 Task {
                     while true {
                         await refresh()
+                        await runDueTasks()
                         try? await Task.sleep(for: .seconds(60))
                     }
                 }
@@ -281,6 +288,7 @@ final class Engine {
             try await saveAddress(SignerAddress(name: r.name ?? "", network: r.network ?? "", address: r.address ?? "", memo: r.memo ?? ""))
         case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
+        case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")

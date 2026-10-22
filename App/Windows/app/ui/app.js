@@ -284,6 +284,8 @@ function portfolio() {
       h("div", { class: "row" }, h("span", { class: "sym" }, `${x.side} ${x.coin}`), h("span", { class: "num" }, `${x.size} @ ${x.entry} · ${x.pnl}`))))] : null,
     state.alerts.length ? [h("h2", {}, t("Price alerts", "Ценовые оповещения")), h("div", { class: "card" }, state.alerts.map((a) =>
       h("div", { class: "row" }, h("span", {}, a.text), h("button", { class: "btn", onclick: () => act("removeAlert", { wallet: a.id }) }, t("Remove", "Убрать")))))] : null,
+    state.tasks.length ? [h("h2", {}, t("Scheduled", "По расписанию")), h("div", { class: "card" }, state.tasks.map((a) =>
+      h("div", { class: "row" }, h("span", {}, a.text), h("button", { class: "btn", onclick: () => act("removeTask", { wallet: a.id }) }, t("Remove", "Убрать")))))] : null,
     h("h2", {}, t("By network", "По сетям")),
     p.networks.length ? h("div", { class: "cards" }, p.networks.map((n) => h("div", { class: "card" },
       h("div", { class: "row" }, h("b", {}, n.name), h("b", { class: "num" }, usd(n.usd))),

@@ -127,6 +127,15 @@ import Testing
         #expect((cleared.state?["alerts"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    @Test func aScheduledTaskIsKeptAndCancelled() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let set = try engine.call("send", ["text": "every week: buy SOL for 10 USDC"])
+        #expect((set.state?["tasks"] as? [[String: Any]])?.count == 1, "\(Self.chat(set.state).last ?? "")")
+        let cancelled = try engine.call("send", ["text": "cancel scheduled tasks"])
+        #expect((cancelled.state?["tasks"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {
         let engine = try Engine()
         try engine.call("hello")
