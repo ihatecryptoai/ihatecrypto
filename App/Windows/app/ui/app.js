@@ -106,6 +106,7 @@ function icon(name) {
     check: "M5 12l4 4 10-10",
     more: "M6 12h.01M12 12h.01M18 12h.01",
     back: "M15 6l-6 6 6 6",
+    mic: "M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3",
   };
   const s = svg("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round" },
     svg("path", { d: paths[name] || "" }));
@@ -741,13 +742,32 @@ function chatPanel() {
         h("button", { class: "btn primary", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("check"), s.card.confirm)) : null,
       pointed ? h("div", { class: "attach" }, "📎 " + (pointed.kind === "move" || pointed.kind === "result" || pointed.kind === "chart" ? pointed.title : liveTitle(pointed.kind)),
         h("button", { class: "icon-btn", onclick: () => { attached = null; render(); } }, icon("close"))) : null,
-      h("div", { class: "composer-inner" }, field, h("button", { class: "btn primary", disabled: s.thinking, onclick: sendComposer }, t("Send", "Отправить"))),
+      h("div", { class: "composer-inner" }, field,
+        h("button", { class: "btn mic" + (listening ? " on" : ""), title: t("Speak (the keyboard layout's language)", "Сказать (язык раскладки)"), disabled: listening, onclick: speak }, icon("mic")),
+        h("button", { class: "btn primary", disabled: s.thinking, onclick: sendComposer }, t("Send", "Отправить"))),
       h("div", { class: "model-line" }, s.model.connected ? `${s.model.name} · ${s.model.model || ""}` : t("No model connected: Settings › Model.", "Модель не подключена: Настройки › Модель."))));
 }
 
 function optionCards() {
   return h("div", { class: "options" }, state.options.map((o, i) =>
     h("button", { class: "option" + (o.recommended ? " rec" : ""), onclick: () => act("pick", { index: i }) }, h("b", {}, o.title), o.comment ? h("span", {}, o.comment) : null)));
+}
+
+/** The mic: Windows' speech recognizer listens until a pause; the words go into the field, never sent by themselves. */
+let listening = false;
+async function speak() {
+  listening = true;
+  render();
+  try {
+    const text = (await invoke("listen")).trim();
+    if (text) composerText = composerText ? composerText.trimEnd() + " " + text : text;
+  } catch (e) {
+    toast(String(e));
+  } finally {
+    listening = false;
+    render();
+    document.getElementById("composer")?.focus();
+  }
 }
 
 function toggleChat() { chatFull = !chatFull; store("chatFull", chatFull); render(); }

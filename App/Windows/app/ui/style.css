@@ -230,6 +230,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .composer-inner { display: flex; gap: 8px; align-items: flex-end; }
 .composer textarea { flex: 1; resize: none; min-height: 40px; max-height: 160px; border-radius: 12px; padding: 9px 12px; }
 .composer .btn { height: 40px; border-radius: 12px; }
+.composer .mic { width: 40px; padding: 0; justify-content: center; }
+.composer .mic.on { border-color: var(--accent); color: var(--accent); }
 .model-line { margin-top: 5px; font-size: 11px; color: var(--muted); }
 
 /* Onboarding and the phrase */

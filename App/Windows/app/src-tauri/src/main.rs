@@ -75,6 +75,14 @@ fn allow_foreground(pid: u32) {
 fn allow_foreground(_pid: u32) {}
 
 /// One request line to the engine.
+mod voice;
+
+/// The mic: off the main thread, since it waits until the person stops speaking.
+#[tauri::command]
+async fn listen() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(voice::listen).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), String> {
     if line.contains('\n') { return Err("one line at a time".into()) }
@@ -252,7 +260,7 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install])
+        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {
