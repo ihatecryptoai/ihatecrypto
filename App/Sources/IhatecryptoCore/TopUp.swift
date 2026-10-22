@@ -40,6 +40,12 @@ public struct TopUpOrder: Equatable, Sendable {
     /// This wallet's address on `network`.
     public var recipient: String
 
+    /// Below this much SOL a Solana wallet can't sign its moves for long (fees, a new token account's rent): USDC alone
+    /// there is a dead end (the owner, 2026-10-23: «закинул USDC, а оказалось, что надо было ещё и газ»).
+    public static let solanaFeeFloor: UInt64 = 5_000_000
+    /// What a top-up of USDC on Solana from a browser wallet brings along, in the same approval, to a wallet below it.
+    public static let solanaFeeTopUp: UInt64 = 10_000_000
+
     public init(network: Network, coin: Coin, amount: Decimal?, recipient: String) {
         (self.network, self.coin, self.amount, self.recipient) = (network, network.coin == nil && coin == .native ? .usdc : coin, amount, recipient)
     }

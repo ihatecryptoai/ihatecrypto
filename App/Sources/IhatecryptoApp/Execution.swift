@@ -574,6 +574,8 @@ extension Workspace {
                 reply(try await e.crossSwap(a, on: from, for: b, on: to, amount: amount, near: near),
                       note: "Relay · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
+            case .solanaTo("hyperliquid", let amount):
+                reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
             case .solanaTo(let place, let amount):
                 // Never a guess: a network the app doesn't know gets nothing.
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't move money to \(place).") }
@@ -938,6 +940,47 @@ extension Workspace {
         await loadFeeApproval()
     }
 
+    /// Card commands of the second check's notice below.
+    static let jevOpenRouterOn = "let the second check use openrouter", jevOpenRouterOff = "keep the second check on the chat's model"
+
+    /// Before 0.7.0 an OpenRouter key on this Mac made the second check send texts there by itself; since a8ea990 only
+    /// when the user turns it on. Whoever had that hears it once, with the switch as a card (the 2026-10-22 review).
+    func noteSecondCheckChange() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "jevOpenRouter") == nil, !d.bool(forKey: "jevOpenRouterNoted"), jevScreening, providerID != "openrouter",
+              openRouterKey != nil, (d.string(forKey: "onboardingStep") ?? "").isEmpty, liveSteps == nil else { return }
+        d.set(true, forKey: "jevOpenRouterNoted")
+        reply(say("The second check no longer sends your texts to OpenRouter by itself: your chat's model reads each command and plan twice. To have OpenRouter's model check them too, as before, turn it on — Settings › Second check has the same switch.",
+                  "Вторая проверка больше не отправляет тексты в OpenRouter сама: каждую команду и план дважды читает модель чата. Чтобы, как раньше, их проверяла ещё и модель OpenRouter, включи её — тот же переключатель есть в Settings › Second check."))
+        offerCards([
+            ChatRouter.Option(title: say("Use OpenRouter for the second check", "Проверять ещё и через OpenRouter"),
+                              comment: say("It receives your messages, lookups and plans", "Туда уйдут сообщения, найденное и планы"), command: Self.jevOpenRouterOn),
+            ChatRouter.Option(title: say("Keep it on the chat's model", "Оставить модель чата"), comment: "Settings › Second check", command: Self.jevOpenRouterOff),
+        ])
+    }
+
+    /// Card commands of the offer below.
+    static let tradingKeyOn = "approve the hyperliquid trading key", tradingKeyLater = "leave the hyperliquid trading key off"
+
+    /// Hyperliquid's first money on this wallet (a move, a trade's bridge, a deposit from outside): its trading key can be
+    /// approved now, so the chat offers it, once per address. Nothing signs until the card is picked and Touch ID says so.
+    func offerTradingKey() {
+        guard !agentActive, agentAddress == nil, let evm = signerWallet?.evm, evm.lowercased() == hlAddress.lowercased(),
+              let hl, hl.accountValue + hl.spotUSDC > 0, (UserDefaults.standard.string(forKey: "onboardingStep") ?? "").isEmpty,
+              liveSteps == nil, pendingAction == nil, !executing, !busy else { return }
+        let key = "tradingKeyOffered-" + evm.lowercased()
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        reply(say("Hyperliquid is open on this wallet. Turn on its trading key? Orders, stops and closes then go without \(ledgerActive ? "the Ledger's buttons" : Presence.name); the key can't withdraw.",
+                  "Hyperliquid на этом кошельке открыт. Включить торговый ключ? Тогда ордера, стопы и закрытия идут без \(ledgerActive ? "кнопок Ledger" : Presence.ruGen); вывести деньги ключ не может."))
+        offerCards([
+            ChatRouter.Option(title: say("Turn on the trading key", "Включить торговый ключ"),
+                              comment: say("One \(ledgerActive ? "approval on the Ledger" : Presence.name); it can't withdraw", "Одно подтверждение \(ledgerActive ? "на Ledger" : Presence.ruIns); вывести не может"),
+                              command: Self.tradingKeyOn, recommended: true),
+            ChatRouter.Option(title: say("Not now", "Не сейчас"), comment: "Settings › Wallet › Hyperliquid", command: Self.tradingKeyLater),
+        ])
+    }
+
     /// Turns the paused trading key back on; the signer asks for Touch ID first.
     func resumeTradingKey() async {
         do {
@@ -952,9 +995,18 @@ extension Workspace {
     /// The signer makes an agent key and signs its approval with the main key; the approval goes to Hyperliquid,
     /// and only when the exchange accepts it do orders switch to the agent.
     func enableAgent() async {
-        // Hyperliquid refuses a key for an account that has never had a deposit: say so before Touch ID or the Ledger.
+        // Hyperliquid refuses a key for an account that has never had a deposit: say what opens it, and offer the way,
+        // before Touch ID or the Ledger (the owner, 2026-10-23: «давайте пополним… хотя бы 1 доллар и минимальная ставка 10»).
         if let evm = signerWallet?.evm, (try? await Hyperliquid.isNewAccount(evm)) == true {
-            reply("No trading key yet: Hyperliquid takes one once the account has had a deposit. Until then every order asks for \(ledgerActive ? "the Ledger's buttons" : Presence.name); after the first deposit, Settings › Wallet › Hyperliquid has the button.")
+            reply(say("Hyperliquid isn't open on this wallet yet. It opens with the first USDC that lands there: about $1 of it pays the opening fee, and the smallest order is $10, so bring at least $11. Then the trading key turns on with one \(ledgerActive ? "approval on the Ledger" : Presence.name).",
+                      "Hyperliquid на этом кошельке ещё не открыт. Он открывается первыми USDC, которые туда придут: около $1 уходит на открытие, а самый маленький ордер — $10, так что нужно хотя бы $11. После этого торговый ключ включается одним подтверждением \(ledgerActive ? "на Ledger" : Presence.ruIns)."))
+            let canMove = (solana?.usdc ?? 0) >= 11
+            offerCards((canMove ? [ChatRouter.Option(title: say("Move 11 USDC to Hyperliquid", "Перевести 11 USDC на Hyperliquid"),
+                                                     comment: say("From Solana; the card waits for your Confirm", "С Solana; карточка ждёт Confirm"),
+                                                     command: "move 11 USDC from Solana to Hyperliquid", recommended: true)] : [])
+                       + [ChatRouter.Option(title: say("Top up ihatecrypto", "Пополнить ihatecrypto"),
+                                            comment: say("From a browser wallet, your phone or an exchange", "Из кошелька в браузере, с телефона или с биржи"),
+                                            command: WalletCommand.receive.summary, recommended: !canMove)])
             return
         }
         if ledgerActive { await enableLedgerAgent(); return }
@@ -983,8 +1035,15 @@ extension Workspace {
             await refresh()
             checkAlerts()
             await guardPositions()
-            await runSchedules()
-            await runDueTask()
+            // A scheduled buy can wait on Touch ID with no one at the Mac: it runs beside the loop, so refreshes and alerts
+            // go on meanwhile (the 2026-10-22 review). While it signs, `executing` keeps other moves from starting.
+            if scheduledRun == nil {
+                scheduledRun = Task { [weak self] in
+                    await self?.runSchedules()
+                    await self?.runDueTask()
+                    self?.scheduledRun = nil
+                }
+            }
             remindTopUp()
         }
     }

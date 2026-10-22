@@ -460,10 +460,11 @@ public enum WalletCommand: Equatable, Sendable {
         }
         // Money leaving Solana («move 5 USDC to Base from Solana»): never a move back to it, whatever network is named.
         let fromSolana = q.contains(/(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(?:solana|солан)/)
-        // Out of the Solana wallet: «move 3 USDC from Solana to Robinhood», «переведи 3 USDC из соланы в робингуд».
+        // Out of the Solana wallet: «move 3 USDC from Solana to Robinhood», «переведи 3 USDC из соланы в робингуд», «move 11
+        // USDC from Solana to Hyperliquid» (the trading account, which the first deposit opens).
         // «из соланы в aave на арбитрум» is a deposit into Aave there, not an idle transfer: it's read further down.
         if !q.contains(/\baave\b|ааве|morpho|морфо/),
-           let m = q.firstMatch(of: /(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(?:solana|солан\w*)(?:[^.]|\.(?=\d))*?(?:\bto\b|\binto\b|\bв\b|\bна\b)\s+(?:the\s+)?(hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|бсц\w*|binance\s+smart\s+chain|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*)/) {
+           let m = q.firstMatch(of: /(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(?:solana|солан\w*)(?:[^.]|\.(?=\d))*?(?:\bto\b|\binto\b|\bв\b|\bна\b)\s+(?:the\s+)?(hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|hyperliquid|хайперликвид\w*|гиперликвид\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|бсц\w*|binance\s+smart\s+chain|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*)/) {
             return .solanaTo(Self.network(String(m.1)) ?? "robinhood", amount)
         }
         // Between two EVM networks, or from one to Hyperliquid, straight over Relay: «move 20 USDC from Base to Robinhood»,

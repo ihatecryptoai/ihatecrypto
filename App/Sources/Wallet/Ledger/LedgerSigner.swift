@@ -154,7 +154,8 @@ public struct LedgerSigner: TradeSigner {
         let verdict = HLGuard.check(action, owner: wallet.evm, recipients: [])
         guard verdict.ok else { throw Self.refuse(verdict) }
         if let agent, HLSigner.isTrading(action) { return try await agent(action, nonce) }
-        return try await typed(try HLSigner.l1Typed(action, nonce: nonce, mainnet: true), "a Hyperliquid order")
+        let what = HLAction.type(action) == "setReferrer" ? "ihatecrypto's referral code on Hyperliquid (4% off its fees)" : "a Hyperliquid order"
+        return try await typed(try HLSigner.l1Typed(action, nonce: nonce, mainnet: true), what)
     }
 
     /// The one approval of a trading key for the Ledger's Hyperliquid account: the device shows the key's address,

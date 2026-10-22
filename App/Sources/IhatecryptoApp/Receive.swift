@@ -14,6 +14,9 @@ import WalletCore
 /// Done card at its top.
 struct ReceiveBoard: View {
     @Environment(Workspace.self) private var ws
+    /// Inside the onboarding's Top up step: no header or frame of its own; `landed` hears what arrived.
+    var embedded = false
+    var landed: ((String) -> Void)? = nil
     @AppStorage("topUpWay") private var way = Way.browser
     @AppStorage("topUpNetwork") private var networkKey = "solana"
     /// Empty: any amount.
@@ -28,18 +31,22 @@ struct ReceiveBoard: View {
     @State private var held: (network: String, coins: [String: Decimal]) = ("", [:])
     /// What landed, in one line at the board's foot: no card of its own inside the board (the owner, 2026-10-15).
     @State private var arrived: String?
+    /// The chosen network's gas coin when the wallet has less of it than a move needs: dollars alone can't move there.
+    @State private var gasShort: String?
 
     enum Way: String, CaseIterable { case browser, phone, exchange }
 
     var body: some View {
         let order = self.order
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.down.circle.fill").foregroundStyle(Brand.accentInk).font(.system(size: 18))
-                Text("Top up ihatecrypto").font(.ui(16, .bold))
-                Spacer()
-                Button { withAnimation(StudioView.spring) { ws.showReceive = false } } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.hoverIcon).help("Close")
+        let content = VStack(alignment: .leading, spacing: 14) {
+            if !embedded {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(Brand.accentInk).font(.system(size: 18))
+                    Text("Top up ihatecrypto").font(.ui(16, .bold))
+                    Spacer()
+                    Button { withAnimation(StudioView.spring) { ws.showReceive = false } } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.hoverIcon).help("Close")
+                }
             }
             amountRow(order)
             networkRow(order)
@@ -61,17 +68,27 @@ struct ReceiveBoard: View {
                       systemImage: "hourglass")
                     .font(.ui(11)).foregroundStyle(.secondary)
             }
+            if order.coin == .usdc, let gas = gasShort, gas == order.network.coin { gasLine(order, gas) }
             if let problem { Text(problem).font(.ui(11, .semibold)).foregroundStyle(Brand.loss).fixedSize(horizontal: false, vertical: true) }
-            BalanceFreshness()
+            if !embedded { BalanceFreshness() }
         }
-        .padding(18)
-        .frame(width: 470, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 26).fill(Brand.card).shadow(color: .black.opacity(0.08), radius: 18, y: 10))
-        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(Brand.accent.opacity(0.5), lineWidth: 1.5))
+        Group {
+            if embedded {
+                content
+            } else {
+                content
+                    .padding(18)
+                    .frame(width: 470, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 26).fill(Brand.card).shadow(color: .black.opacity(0.08), radius: 18, y: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(Brand.accent.opacity(0.5), lineWidth: 1.5))
+            }
+        }
         .transition(.opacity)
+        .onChange(of: arrived) { if let arrived { landed?(arrived) } }
         .onAppear { waiting = way != .browser }
         .onChange(of: way) { problem = nil; if way != .browser { waiting = true } }
         .task(id: "\(order.network.key) \(order.coin) \(waiting)") { await watch(order) }
+        .task(id: "gas \(order.network.key) \(arrived ?? "")") { gasShort = await Self.gasShort(order) }
         .onDisappear { TopUpPage.shared.stop() }
     }
 
@@ -283,7 +300,8 @@ struct ReceiveBoard: View {
                           systemImage: "arrow.up.forward.app")
                         .font(.ui(13, .semibold)).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).controlSize(.large).disabled(o.units == nil || opening)
+                // Its own orange: inside the onboarding card the app's tint is taken off.
+                .buttonStyle(.borderedProminent).tint(Brand.accent).controlSize(.large).disabled(o.units == nil || opening)
             case .phone:
                 EmptyView()
             case .exchange:
@@ -339,6 +357,38 @@ struct ReceiveBoard: View {
 
     /// The order's coin at the wallet, by symbol, straight from the network: USDC and the network's coin for «any coin»
     /// (another token landing shows with the next portfolio read). Empty when the network didn't answer.
+    /// The network's gas coin when this wallet holds less of it than a move needs there (nil: enough, or no gas coin).
+    nonisolated static func gasShort(_ o: TopUpOrder) async -> String? {
+        guard let coin = o.network.coin else { return nil }
+        let floor = o.network.chainId == nil ? Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+            : EVMNetwork.named(o.network.key).map { Decimal($0.gasFloor) / 1_000_000_000_000_000_000 } ?? 0
+        guard let held = await balances(TopUpOrder(network: o.network, coin: .native, amount: nil, recipient: o.recipient))[coin] else { return nil }
+        return held < floor ? coin : nil
+    }
+
+    /// What to send of a network's gas coin, in dollars: a dollar, more where a move costs more (Ethereum's top-up is $2.5).
+    nonisolated static func gasUSD(_ key: String) -> Decimal { max(1, (EVMNetwork.named(key)?.topupUSD ?? 1).rounded(0, .up)) }
+
+    /// Dollars alone are a dead end where fees are paid in another coin: said before they're sent. A browser wallet on
+    /// Solana brings the SOL along in the same approval; the other ways get a button for the coin.
+    private func gasLine(_ o: TopUpOrder, _ gas: String) -> some View {
+        let bundled = o.network.chainId == nil && way == .browser
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: bundled ? "fuelpump.fill" : "exclamationmark.triangle.fill").font(.system(size: 12))
+                .foregroundStyle(bundled ? Brand.profit : Brand.accentInk)
+            Text(bundled ? "+ \(Fmt.num(Decimal(TopUpOrder.solanaFeeTopUp) / 1_000_000_000)) SOL for fees goes along, in the same approval: on Solana, USDC alone can't move."
+                         : "Send ≈ \(Fmt.usd(Self.gasUSD(o.network.key))) of \(gas) too: every move on \(o.network.title) pays its fee in \(gas), so \(o.network.usdcSymbol) alone can't move there.")
+                .font(.ui(11.5)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            if !bundled {
+                Button("Top up \(gas)") { coin = .native; amount = Self.presets(gas).first ?? "" }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+    }
+
     nonisolated static func balances(_ o: TopUpOrder) async -> [String: Decimal] {
         let net = o.network, coins: [TopUpOrder.Coin] = o.coin == .any ? [.usdc, .native] : [o.coin]
         var out: [String: Decimal] = [:]
@@ -512,5 +562,24 @@ extension Workspace {
         let text = say("💸 Received ", "💸 Пришло ") + lines.joined(separator: ", ") + "."
         notify(.incoming, say("Money arrived", "Пришли деньги"), text)
         reply(text, note: "incoming")
+    }
+}
+
+extension Workspace {
+    /// Where the wallet holds dollars but not the coin fees are paid in, so a first move there would stop: Solana without
+    /// SOL; an EVM network without its gas coin when Solana can't bring it either (topUpGas buys it with Solana's USDC,
+    /// which takes SOL there). The owner (2026-10-23): the first move must work, not «надо было ещё и газ».
+    var stuckDollars: [(network: String, coin: String, usd: Decimal)] {
+        let usd = solana?.usdc ?? 0, solanaPays = (solana?.sol ?? 0) >= Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+        var out: [(network: String, coin: String, usd: Decimal)] = []
+        if usd >= 1, !solanaPays { out.append(("Solana", "SOL", 1)) }
+        guard !(solanaPays && usd >= 2) else { return out }
+        for n in EVMNetwork.searched where n.feeToken == nil {
+            guard (usdc(on: n.key) ?? 0) >= 1 else { continue }
+            let gas = n.key == "base" ? base?.eth ?? 0 : n.key == "robinhood" ? robinhood?.eth ?? 0
+                : (holdings + otherTokens).first { $0.chain == n.key && $0.native }?.amount ?? 0
+            if gas < Decimal(n.gasFloor) / 1_000_000_000_000_000_000 { out.append((n.name, n.gasCoin, ReceiveBoard.gasUSD(n.key))) }
+        }
+        return out
     }
 }

@@ -305,19 +305,37 @@ enum CodeStore {
 
 /// Addresses outside the wallet the user allowed money to go to, per wallet, each confirmed in person once.
 enum RecipientStore {
-    static func all() -> Set<String> { Set(Trusted.state.recipients[Wallets.activeID] ?? []) }
+    /// The two lists, as on a Mac: money recipients, and contracts whose calls the signer can't read, allowed as calls
+    /// only — a call allowed once doesn't make the contract a place money or a spending right may go.
+    static let money = "approved", calls = "calls"
 
-    static func add(_ addresses: [String]) throws {
+    static func all(_ list: String = money) -> Set<String> {
         let id = Wallets.activeID
-        try Trusted.mutate("allow money to go to a new address") { s in
-            s.recipients[id] = Array(Set(s.recipients[id] ?? []).union(addresses.map(key))).sorted()
+        return Set((list == calls ? Trusted.state.calls?[id] : Trusted.state.recipients[id]) ?? [])
+    }
+
+    static func add(_ addresses: [String], to list: String = money) throws {
+        let id = Wallets.activeID, new = addresses.map(key)
+        try Trusted.mutate(list == calls ? "allow a contract call ihatecrypto can't read" : "allow money to go to a new address") { s in
+            if list == calls {
+                var all = s.calls ?? [:]
+                all[id] = Array(Set(all[id] ?? []).union(new)).sorted()
+                s.calls = all
+            } else {
+                s.recipients[id] = Array(Set(s.recipients[id] ?? []).union(new)).sorted()
+            }
         }
     }
 
     /// EVM addresses compare without case; Solana's base58 is case-sensitive.
     static func key(_ address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
 
-    static func delete(id: String) { try? Trusted.mutate("forget a wallet's approved addresses") { $0.recipients[id] = nil } }
+    static func delete(id: String) {
+        try? Trusted.mutate("forget a wallet's approved addresses") { s in
+            s.recipients[id] = nil
+            s.calls?[id] = nil
+        }
+    }
 }
 
 /// The addresses of the wallets whose keys this signer holds, written when each key was derived here.

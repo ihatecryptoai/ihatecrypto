@@ -388,6 +388,7 @@ struct ContentView: View {
             #endif
             await ws.loadSigner()
             ws.offerNewModules()
+            ws.noteSecondCheckChange()
             #if DEBUG
             // `-openBrowser <url>`: opens the dApp browser on that page, once the wallet is known.
             if UserDefaults.standard.string(forKey: "openBrowser") != nil { openWindow(id: "browser") }

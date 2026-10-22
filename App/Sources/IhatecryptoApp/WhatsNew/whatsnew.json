@@ -1,11 +1,47 @@
 [
   {
+    "version": "0.7.3",
+    "date": "2026-10-23",
+    "stories": [
+      {
+        "title": "A shorter start",
+        "text": "Setting up no longer stops to test the model: you pick it from the account's list. Top up is the app's own Top up — every network, a wallet in the browser, your phone or an exchange — and sees money land wherever it does. Skip it and the canvas opens at once; the Hyperliquid trading key comes only when Hyperliquid already holds your money.",
+        "symbol": "sparkles",
+        "color": "FF7A2F"
+      },
+      {
+        "title": "Hyperliquid from the chat",
+        "text": "«Move 11 USDC from Solana to Hyperliquid» opens your Hyperliquid account: about $1 of the first deposit pays its opening fee, and its smallest order is $10. Once money is there, the chat offers to turn on the trading key, and «turn on the trading key» does it.",
+        "symbol": "bolt.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Small safety fixes",
+        "text": "A site's call to a contract ihatecrypto can't read is allowed once as a call, never as a place money may go; a scheduled buy waiting for Touch ID no longer holds up alerts and refreshes; and if your second check used OpenRouter before 0.7.0, the chat asks once whether to keep it.",
+        "symbol": "checkmark.shield.fill",
+        "color": "5856D6"
+      }
+    ]
+  },
+  {
+    "version": "0.7.2",
+    "date": "2026-10-23",
+    "stories": [
+      {
+        "title": "The fee's settings, named right",
+        "text": "The fee's approval on a trade plan and What's New now point to Settings › Wallet › Hyperliquid, where ihatecrypto's fee shows with its Revoke button, and a Ledger names the referral code when it signs it. Every release also rebuilds byte for byte on GitHub's Mac now, not only on ours.",
+        "symbol": "wrench.and.screwdriver.fill",
+        "color": "5856D6"
+      }
+    ]
+  },
+  {
     "version": "0.7.1",
     "date": "2026-10-22",
     "stories": [
       {
         "title": "ihatecrypto's fee on Hyperliquid",
-        "text": "Trades on Hyperliquid placed in ihatecrypto carry a 0.05% fee for ihatecrypto, on top of the exchange's own: perps both ways, spot only when selling. The first trade you confirm asks you to approve it once, every plan shows it in the fees, and Settings › Hyperliquid can take the approval back.",
+        "text": "Trades on Hyperliquid placed in ihatecrypto carry a 0.05% fee for ihatecrypto, on top of the exchange's own: perps both ways, spot only when selling. The first trade you confirm asks you to approve it once, every plan shows it in the fees, and Settings › Wallet › Hyperliquid can take the approval back.",
         "symbol": "percent",
         "color": "FF7A2F"
       },

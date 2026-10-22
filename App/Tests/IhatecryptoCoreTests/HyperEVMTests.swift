@@ -78,3 +78,12 @@ import Testing
     #expect(Fmt.num(Decimal(string: "0.004")!) == "0")
     #expect(Fmt.num(0, maxFraction: 6) == "0")
 }
+
+/// The chat's «Move 11 USDC to Hyperliquid» card (enableAgent on an account Hyperliquid hasn't opened yet): a move it can run.
+@Test func openingHyperliquidCardIsAMove() {
+    #expect(WalletCommand.parse("move 11 USDC from Solana to Hyperliquid") == .solanaTo("hyperliquid", 11))
+    #expect(WalletCommand.parse("переведи 11 USDC с соланы на хайперликвид") == .solanaTo("hyperliquid", 11))
+    #expect(WalletCommand.parse(WalletCommand.solanaTo("hyperliquid", 11).summary) == .solanaTo("hyperliquid", 11))
+    // HyperEVM is still its own network, never the trading account.
+    #expect(WalletCommand.parse("move 2 USDC from Solana to HyperEVM") == .solanaTo("hyperevm", 2))
+}

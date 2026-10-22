@@ -49,10 +49,12 @@ targets:
       - package: Sparkle
       - target: IhatecryptoSigner
     # Xcode writes the build Mac's macOS build into Info.plist; without it a release rebuilds byte for byte on any Mac
-    # with the same Xcode (verify-release.sh). The phase runs before code signing.
+    # with the same Xcode (verify-release.sh). The phase runs before code signing, after Xcode writes the file.
     postBuildScripts:
       - name: Info.plist without the build Mac's macOS
         script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+        # The written Info.plist as an input: the phase runs after Xcode writes it (without it, on GitHub's Mac it ran first).
+        inputFiles: [$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)]
         basedOnDependencyAnalysis: false
     settings:
       base:
@@ -95,6 +97,8 @@ targets:
     postBuildScripts:
       - name: Info.plist without the build Mac's macOS
         script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+        # The written Info.plist as an input: the phase runs after Xcode writes it (without it, on GitHub's Mac it ran first).
+        inputFiles: [$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)]
         basedOnDependencyAnalysis: false
     settings:
       base:

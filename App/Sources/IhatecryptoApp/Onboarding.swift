@@ -9,27 +9,29 @@ import WalletCore
 
 /// After the first screen: what the app needs before the first move, one card at a time on the dotted canvas (design:
 /// D00–D16 on the onboarding canvas). «Get started» makes a wallet, «I already have a wallet» brings one; both connect
-/// a model first, then pick the networks, and only with Hyperliquid on approve the trading key and see the trade rules,
-/// then top up and choose notifications. The step is kept in UserDefaults, so a quit comes back to it; the recovery
-/// words are not: after a relaunch the words steps are passed.
+/// a model first, then pick the networks and top up. Topped up (or money already there), they choose notifications, and
+/// with Hyperliquid on and an account there that has had a deposit, approve the trading key and see the trade rules.
+/// «Later» on Top up goes straight to the canvas: nothing more to set up before there's money (the owner, 2026-10-23).
+/// The step is kept in UserDefaults, so a quit comes back to it; the recovery words are not: after a relaunch the words
+/// steps are passed.
 enum OnboardingStep: String {
-    case model, modelReady, newWallet, words, check, secure, passcode, bring, found, ledger, networks, tradingKey, rules, money, stayInTouch
+    case model, newWallet, words, check, secure, passcode, bring, found, ledger, networks, tradingKey, rules, money, stayInTouch
 
     /// Which of the rail's stops it belongs to.
     var stage: OnboardingStage {
         switch self {
-        case .model, .modelReady: .model
+        case .model: .model
         case .newWallet, .words, .check, .bring, .found, .ledger: .wallet
         case .secure, .passcode: .secure
         case .networks: .networks
-        case .tradingKey, .rules: .trading
         case .money, .stayInTouch: .money
+        case .tradingKey, .rules: .trading
         }
     }
 }
 
 enum OnboardingStage: Int, CaseIterable {
-    case model, wallet, secure, networks, trading, money
+    case model, wallet, secure, networks, money, trading
 
     var title: String {
         switch self {
@@ -37,8 +39,8 @@ enum OnboardingStage: Int, CaseIterable {
         case .wallet: "Wallet"
         case .secure: "Secure"
         case .networks: "Networks"
+        case .money: "Top up"
         case .trading: "Trading"
-        case .money: "Money"
         }
     }
 }
@@ -61,10 +63,15 @@ struct OnboardingView: View {
     private var step: OnboardingStep { OnboardingStep(rawValue: stepRaw) ?? .model }
     private var path: OnboardingPath { OnboardingPath(rawValue: pathRaw) ?? .fresh }
 
-    /// Hyperliquid on, and a wallet that can sign there: then the trading key and the rules come before the money.
+    /// Hyperliquid on, and a wallet that can sign there.
     private var trades: Bool {
         Modules(stored: modules).isOn(ModuleNetwork.hyperliquid) && ws.activeWallet?.evm != nil
     }
+    /// The wallet's Hyperliquid account has had a deposit (nil until read): only then does Hyperliquid take a trading key.
+    @State private var hlFunded: Bool?
+    /// The trading key and the rules come last, and only where the key can be approved now. A new wallet's account has
+    /// no deposit yet: the key waits for it (Settings › Wallet › Hyperliquid), the rules keep their defaults.
+    private var showsTrading: Bool { trades && hlFunded == true }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -91,6 +98,12 @@ struct OnboardingView: View {
         }
         .background { ZStack { Brand.canvas; DotGrid() }.ignoresSafeArea() }
         .animation(.easeOut(duration: 0.2), value: stepRaw)
+        // Read when Top up comes, and again once the wallet is known (a relaunch on this step reads before the signer
+        // answers): a deposit made meanwhile counts.
+        .task(id: "\(stepRaw) \(ws.signerWallet?.evm ?? "")") {
+            guard step.stage == .money || step.stage == .trading, trades, let evm = ws.signerWallet?.evm else { return }
+            if let new = try? await Hyperliquid.isNewAccount(evm) { hlFunded = !new }
+        }
         #if DEBUG
         // `-demoWords YES` with `-onboardingStep words`: the public BIP-39 test phrase, for screenshots of the words steps.
         .onAppear {
@@ -120,12 +133,12 @@ struct OnboardingView: View {
     }
 
     private func afterModel() { go(path == .fresh ? .newWallet : .bring) }
-    private func afterNetworks() { go(trades ? .tradingKey : .money) }
+    private func afterNetworks() { go(.money) }
 
     // MARK: The rail
 
     private var rail: some View {
-        let stages = OnboardingStage.allCases.filter { $0 != .trading || trades }
+        let stages = OnboardingStage.allCases.filter { $0 != .trading || showsTrading }
         let current = step.stage
         return HStack(spacing: 6) {
             ForEach(stages, id: \.self) { s in
@@ -156,8 +169,7 @@ struct OnboardingView: View {
 
     @ViewBuilder private var page: some View {
         switch step {
-        case .model: ModelStep(next: { go(.modelReady) }, back: back)
-        case .modelReady: ModelReadyStep(next: afterModel, back: back)
+        case .model: ModelStep(next: afterModel, back: back)
         case .newWallet:
             NewWalletStep(back: back) { reply in
                 found = reply
@@ -186,10 +198,10 @@ struct OnboardingView: View {
         case .found: FoundStep(reply: found, next: { go(.secure) }, back: back)
         case .ledger: LedgerStep(next: { go(.networks) }, back: back)
         case .networks: NetworksStep(trades: trades, next: afterNetworks, back: back)
+        case .money: MoneyStep(keyWaits: trades && hlFunded != true, next: { go(.stayInTouch) }, later: finish, back: back)
+        case .stayInTouch: StayInTouchStep(last: !showsTrading, next: { showsTrading ? go(.tradingKey) : finish() }, back: back)
         case .tradingKey: TradingKeyStep(next: { go(.rules) }, back: back)
-        case .rules: RulesStep(next: { go(.money) }, back: back)
-        case .money: MoneyStep(next: { go(.stayInTouch) }, back: back)
-        case .stayInTouch: StayInTouchStep(finish: finish, back: back)
+        case .rules: RulesStep(next: finish, back: back)
         }
     }
 }
@@ -219,7 +231,9 @@ private struct OnboardingCard<Content: View, Quiet: View>: View {
                     Text(subtitle).font(.ui(13.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            content
+            // The app's orange tint stops here: buttons and menus inside a step stay grey, so nothing is orange on orange
+            // (the owner, 2026-10-21). The step's own button and the switches carry the accent themselves.
+            content.tint(nil)
             HStack(spacing: 18) {
                 quiet
                 Spacer(minLength: 8)
@@ -299,7 +313,9 @@ private struct Tile<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
+        // Every tile takes the card's whole width, whatever it holds.
         HStack(spacing: 12) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.035)))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(selected ? Brand.accent : .clear, lineWidth: 1.5))
@@ -338,6 +354,8 @@ private struct ModelStep: View {
                 keyRow
                 localRow
             }
+            // The person picks the model; on this Mac it's picked in the row above.
+            if ws.hasModel, ws.provider.info.kind != .local { modelPicker }
             if let status = ws.llmStatus { statusLine(status, ok: ws.hasModel) }
         } quiet: {
             QuietButton("Back", action: back)
@@ -347,22 +365,45 @@ private struct ModelStep: View {
 
     private func connected(_ id: String) -> Bool { ws.providerID == id && ws.hasModel }
 
+    /// The connected account's models (a subscription's live list), recommended one marked; the chat's menu changes it later.
+    private var modelPicker: some View {
+        let info = ws.provider.info
+        let listed = (ws.liveModels[info.id] ?? info.models).filter { LLMCatalog.chatRefusal(model: $0) == nil }
+        let list = listed.contains(ws.model) || ws.model.isEmpty ? listed : listed + [ws.model]
+        return HStack(spacing: 10) {
+            Text("Model").font(.ui(13.5, .semibold))
+            Picker("Model", selection: Binding(get: { ws.model }, set: { ws.model = $0 })) {
+                ForEach(list, id: \.self) { m in
+                    Text(LLMCatalog.displayName(model: m) + (m == info.defaultModel ? " · recommended" : "")).tag(m)
+                }
+            }
+            .labelsHidden().fixedSize()
+            Spacer(minLength: 8)
+            Text("Change it any time in the chat's menu.").font(.ui(11.5)).foregroundStyle(.secondary)
+        }
+        .task(id: info.id) { await ws.refreshLiveModels() }
+    }
+
     private func way(_ id: String, _ title: String, _ line: String, logo: String) -> some View {
         let p = LLMCatalog.provider(id: id)
         return Tile(selected: connected(id)) {
             LogoTile(logo: logo, size: 30)
+            // The words get their width first, so the button on the right doesn't fold the line; a login already on this
+            // Mac is a link under them, not a second button beside it.
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.ui(14.5, .bold))
                 Text(line).font(.ui(12)).foregroundStyle(.secondary)
+                if !connected(id), let p, let existing = p.info.existingLoginLabel, p.info.signInLabel != nil, p.existingLogin() != nil {
+                    Button(existing) { ws.providerID = id; ws.useExistingLogin() }
+                        .buttonStyle(.plain).font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk).pointerStyle(.link)
+                        .padding(.top, 2)
+                }
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             if connected(id) {
                 Label("Connected", systemImage: "checkmark.circle.fill").font(.ui(12.5, .semibold)).foregroundStyle(Brand.profit)
             } else if let p {
-                if let existing = p.info.existingLoginLabel, p.info.signInLabel != nil, p.existingLogin() != nil {
-                    Button(existing) { ws.providerID = id; ws.useExistingLogin() }
-                        .buttonStyle(.plain).font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk).pointerStyle(.link)
-                }
                 Button(p.info.signInLabel ?? p.info.existingLoginLabel ?? "Connect") {
                     ws.providerID = id
                     if p.info.signInLabel != nil { Task { await ws.signIn() } } else { ws.useExistingLogin() }
@@ -403,40 +444,6 @@ private struct ModelStep: View {
                 LocalModelsPanel()
             }
         }
-    }
-}
-
-private struct ModelReadyStep: View {
-    @Environment(Workspace.self) private var ws
-    let next: () -> Void
-    let back: () -> Void
-
-    var body: some View {
-        let score = ws.score(ws.providerID, ws.model)
-        OnboardingCard(mood: ws.examProgress != nil ? .thinking : score?.good == true ? .done : .waiting,
-                       title: "\(ws.provider.info.name) is connected",
-                       subtitle: "A check of how \(LLMCatalog.displayName(model: ws.model)) reads the chat: \(ModelExam.questions.count) requests people send. Change the model any time in the chat's menu.",
-                       primary: "Continue", busy: false, action: next) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Spacer()
-                    Text("«buy SOL for $5», «show the ETH chart», «long bitcoin, risk $5»…").font(.ui(13)).foregroundStyle(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 8).background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0x111111)))
-                }
-                HStack(alignment: .top, spacing: 9) {
-                    BrandLogo(size: 24, mood: score?.good == true ? .done : .thinking)
-                    Text(ws.examProgress.map { "Reading \($0 + 1) of \(ModelExam.questions.count)…" } ?? ws.llmStatus ?? "…").font(.ui(13))
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 40)
-                }
-            }
-        } quiet: {
-            QuietButton("Use another", action: back)
-            QuietButton("Check again") { Task { await ws.checkModel() } }
-        }
-        .task { if ws.score(ws.providerID, ws.model) == nil { await ws.checkModel() } }
     }
 }
 
@@ -690,14 +697,14 @@ private struct PasscodeStep: View {
     @State private var made = AppLock.shared.codeSet
 
     var body: some View {
-        OnboardingCard(mood: made ? .done : .tuning, title: made ? "Your code is set" : "Make a 6-digit code",
+        OnboardingCard(mood: made ? .done : .tuning, title: made ? "Your code is set" : "Lock ihatecrypto when you step away",
                        subtitle: made ? "ihatecrypto locks after \(AppLock.shared.lockAfter == 60 ? "an hour" : "\(AppLock.shared.lockAfter) min") away, and on sleep. Change it in Settings › Wallet."
-                       : "It opens ihatecrypto" + (Presence.touchID ? ", and so does Touch ID." : ". On this Mac it also signs your moves, instead of the Mac password."),
+                       : "Six digits open it again." + (Presence.touchID ? " Touch ID opens it too." : " On this Mac they also sign your moves, instead of the Mac password."),
                        primary: "Continue", enabled: made, action: next) {
             if !made { CodeMaker { made = true } }
         } quiet: {
             QuietButton("Back", action: back)
-            if !made { QuietButton("Skip", action: next) }
+            if !made { QuietButton("Skip for now", action: next) }
         }
     }
 }
@@ -970,7 +977,7 @@ private struct NetworksStep: View {
                         TokenLogo(name: n.logo, size: 26).clipShape(Circle()).saturation(has ? 1 : 0)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(n.name).font(.ui(13.5, .bold))
-                            Text(has ? (n == .hyperliquid && m.isOn(n) ? "\(n.uses) · adds two steps: trading key, rules" : n.uses) : "No address for it in this wallet")
+                            Text(has ? (n == .hyperliquid && m.isOn(n) ? "\(n.uses) · its trading key comes after the first deposit" : n.uses) : "No address for it in this wallet")
                                 .font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 8)
@@ -1088,56 +1095,128 @@ private struct RulesStep: View {
 
 // MARK: - Money and staying in touch
 
+/// Top up (variant A on the onboarding canvas, picked 2026-10-21): the Top up board itself inside the card, every
+/// network and way it has; once money lands, «Money landed». A wallet that already holds money (one brought along)
+/// first shows what's on it, with Top up more.
 private struct MoneyStep: View {
     @Environment(Workspace.self) private var ws
+    /// Hyperliquid is on, but its account has no deposit yet: the trading key waits for one.
+    let keyWaits: Bool
     let next: () -> Void
+    /// «I'll do it later»: no money, so the rest of the setup waits too; the canvas opens.
+    let later: () -> Void
     let back: () -> Void
-    /// Solana's USDC and SOL when the card opened: what lands after shows here.
-    @State private var start: (usdc: Decimal, sol: Decimal)?
-
-    private var landed: String? {
-        guard let start, let now = ws.solana else { return nil }
-        let parts = [now.usdc > start.usdc ? "\(Fmt.num(now.usdc - start.usdc)) USDC" : nil,
-                     now.sol > start.sol ? "\(Fmt.num(now.sol - start.sol, maxFraction: 6)) SOL" : nil].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " and ")
-    }
+    /// What the board saw land: «Landed on Solana: +20 USDC, 0 → 20».
+    @State private var landed: String?
+    /// The board asked for although the wallet already has money.
+    @State private var more = false
 
     var body: some View {
-        OnboardingCard(mood: landed != nil ? .done : .waiting, title: "Add money",
-                       subtitle: "Send USDC from an exchange or another wallet. It shows up here as it lands.",
-                       primary: landed != nil ? "Continue" : "I'll do it later", action: next) {
-            VStack(spacing: 10) {
-                if isSolanaAddress(ws.solanaAddress) {
-                    ReceiveCard(logo: "sol", network: "Solana", badge: "recommended", address: ws.solanaAddress,
-                                what: "USDC or SOL on the Solana network. USDC is what ihatecrypto trades with; keep ≈ 0.02 SOL for fees.",
-                                tint: Brand.solanaTint)
-                }
-                if isEVMAddress(ws.hlAddress) {
-                    ReceiveCard(logo: "base", network: "Base", badge: nil, address: ws.hlAddress,
-                                what: "USDC or ETH on Base. Hyperliquid uses the same address, but money gets there through ihatecrypto.",
-                                tint: Color(light: 0xEAF0FF, dark: 0x14213F))
-                }
+        if let landed {
+            landedCard(landed)
+        } else if !more, ws.balanceReady, (ws.total ?? 0) >= 1 {
+            hasMoneyCard
+        } else {
+            OnboardingCard(mood: .waiting, title: "Top up ihatecrypto",
+                           subtitle: "From a wallet in this browser, your phone or an exchange. It shows here the moment it lands.",
+                           primary: "Continue", enabled: false, action: next) {
+                ReceiveBoard(embedded: true) { landed = $0 }
+            } quiet: {
+                QuietButton("Back", action: back)
+                QuietButton("I'll do it later", action: later)
             }
-            statusLine("On an exchange, pick the network exactly: Solana (SPL) or Base. Sent on another network, money can get stuck.", ok: false)
-            if let landed {
-                statusLine("\(landed) arrived on Solana", ok: true)
-            } else {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Waiting for a deposit… balances refresh every 30 s.").font(.ui(12)).foregroundStyle(.secondary)
-                }
+        }
+    }
+
+    private func landedCard(_ line: String) -> some View {
+        OnboardingCard(mood: .done, title: "Money landed", subtitle: "It's in your portfolio. On the canvas the chat can put it to work.",
+                       primary: "Continue", action: next) {
+            statusLine(line, ok: true)
+            gasWarning
+            if keyWaits, !ws.agentActive {
+                FactRow(icon: "key.fill", title: "The Hyperliquid trading key is waiting",
+                        line: "It turns on after Hyperliquid's first deposit. On the canvas, say «move 10 USDC to Hyperliquid», then approve the key in Settings › Wallet › Hyperliquid.")
             }
         } quiet: {
             QuietButton("Back", action: back)
+            QuietButton("Top up more") { landed = nil; more = true }
         }
-        // Taken once the balance is known: money already there when the card opened isn't «arrived».
-        .onAppear { start = ws.solana.map { ($0.usdc, $0.sol) } }
-        .onChange(of: ws.solana == nil) { if start == nil { start = ws.solana.map { ($0.usdc, $0.sol) } } }
+    }
+
+    /// The portfolio's networks, as its cards order them: Solana, Hyperliquid and Robinhood first, $100 or less folded.
+    private var hasMoneyCard: some View {
+        let held = ws.networkUSD
+        let present = Set([ws.solana != nil ? ModuleNetwork.solana : nil, ws.hl != nil ? .hyperliquid : nil].compactMap { $0 })
+        let order = PortfolioSplit.networkCards(held, present: present)
+        return OnboardingCard(mood: .done, title: "Your wallet already has money",
+                              subtitle: "\(masked(Fmt.usd(ws.total ?? 0))) across your networks. Top up more now, or any time from Top up in the sidebar.",
+                              primary: "Continue", action: next) {
+            VStack(spacing: 6) {
+                ForEach(order.cards, id: \.self) { n in row(TokenLogo(name: n.logo, size: 26, round: true), n.name, held[n] ?? 0) }
+                if !order.folded.isEmpty {
+                    row(Image(systemName: "square.stack.3d.up").font(.system(size: 14, weight: .semibold)).frame(width: 26, height: 26),
+                        "Other networks", order.folded.reduce(0) { $0 + (held[$1] ?? 0) }, detail: order.folded.map(\.name).joined(separator: ", "))
+                }
+            }
+            gasWarning
+            Button { more = true } label: {
+                Tile {
+                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 22)).foregroundStyle(Brand.accentInk)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Top up more").font(.ui(14, .bold))
+                        Text("The same Top up as for a new wallet: amount, network, browser wallet, phone or exchange").font(.ui(11.5)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).modifier(HoverLift(radius: 14))
+        } quiet: {
+            QuietButton("Back", action: back)
+        }
+    }
+
+    /// Dollars where the network's fee coin is missing: the first move there would stop, so it's said here, with the way
+    /// to add it (the Top up board, which offers the coin).
+    @ViewBuilder private var gasWarning: some View {
+        if let stuck = ws.stuckDollars.first {
+            Button { landed = nil; more = true } label: {
+                Tile {
+                    Image(systemName: "fuelpump.fill").font(.system(size: 18)).foregroundStyle(Brand.accentInk).frame(width: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Add \(stuck.coin) for fees on \(stuck.network)").font(.ui(14, .bold))
+                        Text("The dollars there can't move until ≈ \(Fmt.usd(stuck.usd)) of \(stuck.coin) pays the network's fees. Top up \(stuck.coin) the same way.")
+                            .font(.ui(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).modifier(HoverLift(radius: 14))
+        }
+    }
+
+    private func row(_ logo: some View, _ name: String, _ usd: Decimal, detail: String? = nil) -> some View {
+        HStack(spacing: 12) {
+            logo
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.ui(14, .bold))
+                if let detail { Text(detail).font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            Text(masked(Fmt.usd(usd))).font(.ui(15, .heavy)).monospacedDigit()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.035)))
     }
 }
 
 private struct StayInTouchStep: View {
-    let finish: () -> Void
+    /// No trading key after it: the canvas comes next.
+    let last: Bool
+    let next: () -> Void
     let back: () -> Void
     @State private var notices: Bool?
     @State private var keepRunning = KeepRunning.isOn
@@ -1146,7 +1225,7 @@ private struct StayInTouchStep: View {
     var body: some View {
         OnboardingCard(mood: .idle, title: "Stay in touch",
                        subtitle: "So a price alert or a finished move reaches you, and schedules run with the window closed.",
-                       primary: "Finish", action: finish) {
+                       primary: last ? "Finish" : "Continue", action: next) {
             VStack(spacing: 8) {
                 Tile {
                     item("bell.badge", "Notifications", notices == false ? "Off in System Settings › Notifications › ihatecrypto" : "Money arrived, an alert fired, a move finished or needs your Confirm")

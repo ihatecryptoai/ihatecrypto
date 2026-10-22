@@ -111,16 +111,44 @@ final class TopUpPage {
     }
 
     /// The transfer as the connected wallet will sign it: `from` pays the fee, USDC goes by TransferChecked into this
-    /// wallet's account (made if missing), SOL by a system transfer.
+    /// wallet's account (made if missing), SOL by a system transfer. USDC to a wallet with almost no SOL brings
+    /// `TopUpOrder.solanaFeeTopUp` along in the same transaction: USDC alone can't move on Solana.
     nonisolated static func solanaTransfer(_ order: TopUpOrder, units: UInt64, from: String) async throws -> Data {
-        let blockhash = try await SolanaRPC().latestBlockhash().blockhash
+        let rpc = SolanaRPC()
+        let blockhash = try await rpc.latestBlockhash().blockhash
         if order.coin == .native {
-            let transfer = SolanaInstruction(program: "11111111111111111111111111111111",
-                                             accounts: [.init(pubkey: from, isSigner: true, isWritable: true), .init(pubkey: order.recipient, isSigner: false, isWritable: true)],
-                                             data: withUnsafeBytes(of: UInt32(2).littleEndian) { Data($0) } + withUnsafeBytes(of: units.littleEndian) { Data($0) })
+            let transfer = SolanaInstruction(program: system, accounts: [.init(pubkey: from, isSigner: true, isWritable: true),
+                                                                         .init(pubkey: order.recipient, isSigner: false, isWritable: true)],
+                                             data: le(UInt32(2)) + le(units))
             return SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([transfer], payer: from, blockhash: blockhash))
         }
+        if let sol = try? await rpc.balance(order.recipient), sol < TopUpOrder.solanaFeeFloor {
+            return SolanaTransaction.unsigned(try usdcWithFees(order, units: units, from: from, blockhash: blockhash))
+        }
         return SolanaTransaction.unsigned(try SPL.transferMessage(payer: from, to: order.recipient, mint: order.network.usdc, amount: units, decimals: 6, blockhash: blockhash))
+    }
+
+    nonisolated static let system = "11111111111111111111111111111111"
+    nonisolated static func le<T: FixedWidthInteger>(_ n: T) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
+
+    /// USDC into this wallet's account (made if missing) and `TopUpOrder.solanaFeeTopUp` SOL to the wallet itself, in one
+    /// message `from` signs and pays for.
+    nonisolated static func usdcWithFees(_ order: TopUpOrder, units: UInt64, from: String, blockhash: String) throws -> Data {
+        let mint = order.network.usdc
+        let mine = try SPL.associatedAccount(owner: from, mint: mint), theirs = try SPL.associatedAccount(owner: order.recipient, mint: mint)
+        let create = SolanaInstruction(program: SPL.associatedTokenProgram, accounts: [
+            .init(pubkey: from, isSigner: true, isWritable: true), .init(pubkey: theirs, isSigner: false, isWritable: true),
+            .init(pubkey: order.recipient, isSigner: false, isWritable: false), .init(pubkey: mint, isSigner: false, isWritable: false),
+            .init(pubkey: system, isSigner: false, isWritable: false), .init(pubkey: SPL.tokenProgram, isSigner: false, isWritable: false),
+        ], data: Data([1]))
+        let usdc = SolanaInstruction(program: SPL.tokenProgram, accounts: [
+            .init(pubkey: mine, isSigner: false, isWritable: true), .init(pubkey: mint, isSigner: false, isWritable: false),
+            .init(pubkey: theirs, isSigner: false, isWritable: true), .init(pubkey: from, isSigner: true, isWritable: false),
+        ], data: Data([12]) + le(units) + Data([6]))
+        let fees = SolanaInstruction(program: system, accounts: [
+            .init(pubkey: from, isSigner: true, isWritable: true), .init(pubkey: order.recipient, isSigner: false, isWritable: true),
+        ], data: le(UInt32(2)) + le(TopUpOrder.solanaFeeTopUp))
+        return try SolanaTransaction.compileMessage([create, usdc, fees], payer: from, blockhash: blockhash)
     }
 
     /// The page: the order, the wallets this browser has (Wallet Standard for Solana, EIP-6963 for EVM), one button each.

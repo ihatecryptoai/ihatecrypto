@@ -21,6 +21,9 @@ enum Trusted {
     struct State: Codable, Equatable {
         var prefs: [String: Pref] = [:]
         var recipients: [String: [String]] = [:]
+        /// Contracts whose calls the signer can't read, allowed as calls only, per wallet (nil in states sealed before
+        /// there were two lists, so their seal still checks).
+        var calls: [String: [String]]?
         var own: [String] = []
         var book: [SignerAddress] = []
     }
@@ -103,7 +106,7 @@ enum Trusted {
                         for k in ["activeWallet", "solana", "evm", "near"] { state.prefs[k] = nil }
                     }
                 }
-                (state.recipients, state.own, state.book) = ([:], [], [])
+                (state.recipients, state.calls, state.own, state.book) = ([:], nil, [], [])
                 try write(state, key: key)
                 return
             }
@@ -158,6 +161,7 @@ enum Trusted {
     /// a session no longer — and every other setting the same.
     static func takesTrustAway(from old: State, to new: State) -> Bool {
         for (id, list) in new.recipients where !Set(list).isSubset(of: Set(old.recipients[id] ?? [])) { return false }
+        for (id, list) in new.calls ?? [:] where !Set(list).isSubset(of: Set(old.calls?[id] ?? [])) { return false }
         guard Set(new.own).isSubset(of: Set(old.own)), Set(new.book).isSubset(of: Set(old.book)) else { return false }
         for key in Set(old.prefs.keys).union(new.prefs.keys) {
             let (was, now) = (old.prefs[key], new.prefs[key])

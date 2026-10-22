@@ -65,6 +65,9 @@ canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that on
 ## Conventions
 
 - A new network: follow `.claude/skills/add-network/SKILL.md`, after an issue says the network is wanted.
+- Dollars without gas are a dead end: on any network, and in any new feature that brings money somewhere, the first
+  move with only USDC there must work, or the app must say what to add before it's sent (Top up's gas line,
+  `Workspace.stuckDollars`; the add-network skill, «The first move with dollars only»).
 - A new model provider: `App/Sources/LLM/README.md`.
 - A new Solana DeFi protocol: a folder `DeFi/<Protocol>/`, a target in `Package.swift`, its program in
   `SolanaGuard.knownPrograms`, and balance rules for the simulation check.

@@ -2776,13 +2776,15 @@ extension Workspace {
     private func outRoute(to place: String, amount: Decimal) -> MoveRoute {
         let name = WalletCommand.placeName(place)
         let stable = place == "robinhood" ? "USDG" : "USDC"
-        let there = place == "robinhood" ? robinhood?.usdg : usdc(on: place)
+        let there = place == "robinhood" ? robinhood?.usdg : place == "hyperliquid" ? hl.map { $0.withdrawable + $0.spotUSDC } : usdc(on: place)
         let fill = RouteFill(rawValue: place) ?? .relay
         return MoveRoute(title: "Move \(Fmt.num(amount)) USDC · Solana → \(name)",
                          footer: "One Solana signature for the Relay bridge, checked and simulated before it’s signed; it pays only your own address on \(name). Press Confirm.",
                          steps: [
             step("sol", "FROM · SOLANA", "\(Fmt.num(amount)) USDC", "USDC on Solana", .solana, money: moneyMove("USDC", on: "solana", by: -amount)),
-            step("relay", "BRIDGE · RELAY", "\(Fmt.num(amount)) USDC", place == "tempo" ? "a few seconds · fees there come out of the USDC" : "a few seconds · + \(EVMNetwork.named(place)?.gasCoin ?? "ETH") for gas when there's none", .relay),
+            step("relay", "BRIDGE · RELAY", "\(Fmt.num(amount)) USDC", place == "tempo" ? "a few seconds · fees there come out of the USDC"
+                 : place == "hyperliquid" ? "a few seconds · a first deposit pays Hyperliquid's ≈ $1 opening fee"
+                 : "a few seconds · + \(EVMNetwork.named(place)?.gasCoin ?? "ETH") for gas when there's none", .relay),
             step(ModuleNetwork(place: place)?.logo ?? place, "TO · \(name.uppercased())", "≈ \(Fmt.num(amount)) \(stable)",
                  "your own address ✓", fill, money: there == nil ? [] : moneyMove(stable, on: place, by: amount, approx: true)),
         ])

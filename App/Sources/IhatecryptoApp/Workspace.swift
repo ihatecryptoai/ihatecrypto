@@ -86,6 +86,8 @@ final class Workspace {
     @ObservationIgnored var protocolsReadAt: Date?
     /// A read of the other networks' tokens is under way (refresh starts one and doesn't wait for it).
     @ObservationIgnored var holdingsLoading = false
+    /// The scheduled buys' and tasks' run, beside the watch loop: one at a time, and a Touch ID left unanswered holds only it.
+    @ObservationIgnored var scheduledRun: Task<Void, Never>?
     /// Solana tokens a swap named, as Jupiter resolved them (TokensUI.solanaAsset): the card and the run read them again.
     @ObservationIgnored var spotAssets: [String: SpotAsset] = [:]
     /// Every token beyond the balances read one by one, Solana's first. Stock tokens the Robinhood card already shows
@@ -1223,8 +1225,10 @@ final class Workspace {
             }
             return
         }
-        if text.lowercased().contains(/(?:resume|unpause|turn\s+on|включи|верни)\s+(?:the\s+)?(?:trading\s+key|торгов\w*\s+ключ)/) {
-            await resumeTradingKey()
+        // «turn on the trading key»: one that was never approved is approved now (Hyperliquid has to be open for it); a paused
+        // one is resumed.
+        if text.lowercased().contains(/(?:resume|unpause|turn\s+on|enable|approve|включи|верни|одобри)\s+(?:the\s+)?(?:hyperliquid\s+)?(?:trading\s+key|торгов\w*\s+ключ)/) {
+            if agentAddress == nil { await enableAgent() } else { await resumeTradingKey() }
             return
         }
         // A connected model reads every message first: its meaning, not keywords. What it understood goes through
@@ -2107,6 +2111,7 @@ final class Workspace {
             hl = b
             hlError = nil
             positions = p
+            offerTradingKey()
             // Tuples aren't Equatable: without these checks @Observable redraws on every refresh.
             if d.count != dexBalances.count || d.contains(where: { dex, new in dexBalances[dex].map { $0 != new } ?? true }) { dexBalances = d }
             orders = o

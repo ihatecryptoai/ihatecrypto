@@ -67,6 +67,26 @@ func ledgerCheck(_ args: [String]) async throws {
             _ = try await signer.signHyperliquidUser(HLSigner.usdSendAction(destination: main, amount: "25", time: 1_760_000_000_002, mainnet: true), recipients: [main])
             print("✓ usdSend of 25 USDC to Main signed on the device")
         } catch { print("✗ usdSend: \(error.localizedDescription)") }
+        // ihatecrypto's fee on Hyperliquid: approved and taken back on the device; the referral code as typed data.
+        for (rate, n) in [(HLBuilder.rate, UInt64(1_760_000_000_004)), (HLBuilder.revoke, 1_760_000_000_005)] {
+            do {
+                let action = HLBuilder.approveAction(maxFeeRate: rate, nonce: n, mainnet: true)
+                let sig = try await signer.signHyperliquidUser(action, recipients: [])
+                let (type, fields) = try HLSigner.userAction(action)
+                let who = try EVMSigner.recover(digest: try HLSigner.userParts(type, fields: fields, mainnet: true).digest, signature: sig)
+                print("✓ approveBuilderFee \(rate) signed on the device, recovered to \(who)")
+            } catch { print("✗ approveBuilderFee \(rate): \(error.localizedDescription)") }
+        }
+        do {
+            _ = try await signer.signHyperliquid(HLBuilder.referrerAction, nonce: 1_760_000_000_006)
+            print("✓ setReferrer \(HLBuilder.referralCode) signed on the device")
+        } catch { print("✗ setReferrer: \(error.localizedDescription)") }
+        do {
+            let foreign = MsgPack.map([("type", .string("approveBuilderFee")), ("maxFeeRate", .string(HLBuilder.rate)),
+                                       ("builder", .string("0x000000000000000000000000000000000000dead")), ("nonce", .uint(1_760_000_000_007))])
+            _ = try await signer.signHyperliquidUser(foreign, recipients: [])
+            print("✗ A fee approval for a stranger was signed!")
+        } catch { print("✓ Fee approval for a stranger refused before the device: \(error.localizedDescription)") }
         // With a trading key, orders don't reach the device at all.
         let withAgent = LedgerSigner(device: device, wallet: TradeWallet(solana: "", evm: address),
                                      agent: { action, nonce in try HLSigner.signL1(action, privateKey: Data(repeating: 1, count: 32), nonce: nonce, mainnet: true) },

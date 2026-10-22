@@ -39,6 +39,14 @@ Answer for yourself:
   `depositErc20` to the depository from `/chains`), the fee and the time. A few lines of Python against `/quote/v2`
   are enough.
 - **Blockscout.** Whether the network has an instance. If not, read the balance over RPC, as `Holdings.tempo` does.
+- **The first move with dollars only.** Someone tops up only USDC there — from an exchange, a phone or a browser wallet
+  — and nothing else. Can their first move go? If fees are paid in another coin, they can't, and the network must
+  not leave them there (the owner, 2026-10-23: «закинул USDC, а оказалось, что надо было ещё и газ… подумай обо всех
+  сетях»). Answer each, with a live check: how much of the fee coin a move needs (`gasFloor`); whether Top up warns
+  before they send (`ReceiveBoard.gasLine`) and a browser-wallet top-up can bring the coin along (Solana does:
+  `TopUpPage.usdcWithFees`); whether the app can bring gas from another network (`topUpGas` needs Solana's USDC and
+  SOL) or buy it gaslessly (Relay's `usePermit` for USDC, Jupiter's gasless swap); whether `Workspace.stuckDollars`
+  sees the network. A network that takes fees in its dollar (Tempo) answers «nothing to do» — write that down too.
 
 ## 2. Checklist (every place each network touched)
 
@@ -102,6 +110,14 @@ Answer for yourself:
   (on Tempo that dropped fal and OpenAI, whose fees were sponsored, and StableStudio, whose reply came later).
 - [ ] Add the network to the shared «BRIDGE · RELAY» form (the Move money group). `BlocksTests.everyBlockExampleParses`
   passes.
+
+**Dollars without gas**
+- [ ] `ReceiveBoard.gasShort` / `gasLine` read the network's fee coin and floor: Top up says «send ≈ $1 of <coin> too»
+  before USDC goes, and its button switches to the coin. A screenshot of Top up on the network with no gas.
+- [ ] `Workspace.stuckDollars` lists the network when it holds dollars and not its fee coin (and Solana can't bring
+  it); onboarding's «Money landed» shows it.
+- [ ] Live, on the Dev test wallet: USDC there with no gas coin, then the first move (a swap or a move back to Solana)
+  — it must work, or the app must say plainly what to add and offer it.
 
 **Chat and commands**
 - [ ] `App/Sources/IhatecryptoCore/PositionCommand.swift`: the network's words in `network(_:)` and `network(in:)`

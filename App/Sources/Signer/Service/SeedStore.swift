@@ -474,19 +474,22 @@ enum CodeStore {
 /// signer's own Keychain group, so the app — or anything posing as it — can't add one silently.
 enum RecipientStore {
     static let service = "app.ihatecrypto.recipients"
+    /// The two lists: money recipients, and contracts whose calls the signer can't read, allowed as calls only — a call
+    /// allowed once doesn't make the contract a place money or a spending right may go (the 2026-10-22 review).
+    static let money = "approved", calls = "calls"
     /// Per wallet: an address approved for one wallet isn't approved for another.
-    static func query(_ id: String) -> [String: Any] {
+    static func query(_ id: String, _ list: String = money) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: Wallets.scoped("approved", id),
+            kSecAttrAccount as String: Wallets.scoped(list, id),
             kSecUseDataProtectionKeychain as String: true,
         ]
     }
-    static var base: [String: Any] { query(Wallets.activeID) }
+    static func base(_ list: String) -> [String: Any] { query(Wallets.activeID, list) }
 
-    static func all() -> Set<String> {
-        var q = base
+    static func all(_ list: String = money) -> Set<String> {
+        var q = base(list)
         q[kSecReturnData as String] = true
         var out: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data,
@@ -494,11 +497,11 @@ enum RecipientStore {
         return Set(list)
     }
 
-    static func add(_ addresses: [String]) throws {
-        let list = Array(all().union(addresses.map(key))).sorted()
-        SecItemDelete(base as CFDictionary)
-        var q = base
-        q[kSecValueData as String] = try JSONEncoder().encode(list)
+    static func add(_ addresses: [String], to list: String = money) throws {
+        let entries = Array(all(list).union(addresses.map(key))).sorted()
+        SecItemDelete(base(list) as CFDictionary)
+        var q = base(list)
+        q[kSecValueData as String] = try JSONEncoder().encode(entries)
         q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let status = SecItemAdd(q as CFDictionary, nil)
         guard status == errSecSuccess else { throw WalletError("Keychain didn't save the approved address: \(status)") }
@@ -507,7 +510,7 @@ enum RecipientStore {
     /// EVM addresses compare without case; Solana's base58 is case-sensitive.
     static func key(_ address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
 
-    static func delete(id: String) { SecItemDelete(query(id) as CFDictionary) }
+    static func delete(id: String) { for list in [money, calls] { SecItemDelete(query(id, list) as CFDictionary) } }
 }
 
 /// The addresses of the wallets whose keys this signer holds, each written when its key was derived here: money between

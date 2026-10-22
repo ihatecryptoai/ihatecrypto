@@ -306,7 +306,7 @@ struct CodeMaker: View {
     @State private var problem: String?
     @State private var busy = false
 
-    var step: String { first == nil ? "STEP 1 OF 2 · TYPE IT" : "STEP 2 OF 2 · ONCE MORE" }
+    var step: String { first == nil ? "TYPE 6 DIGITS" : "TYPE THEM AGAIN" }
     var ready: Bool { code.count == Passcode.length && !busy }
 
     var body: some View {
@@ -325,7 +325,7 @@ struct CodeMaker: View {
             HStack(spacing: 10) {
                 Text("Lock after").font(.ui(12.5)).foregroundStyle(.secondary)
                 LockAfterPicker()
-                Text("and always on sleep").font(.ui(12)).foregroundStyle(.secondary)
+                Text("away, and when the Mac sleeps").font(.ui(12.5)).foregroundStyle(.secondary)
             }
         }
     }

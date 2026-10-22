@@ -98,6 +98,18 @@ extension Executor {
         return "Sent \(Fmt.num(usdc)) USDC to \(label) on Hyperliquid" + (opening > 0 ? ", plus 1 USDC Hyperliquid kept once for opening their account." : ".")
     }
 
+    /// «move 11 USDC from Solana to Hyperliquid»: that much USDC from Solana over Relay to the wallet's own Hyperliquid account;
+    /// the first deposit opens it (Relay's price then takes the ≈ $1 opening fee). Waits until it lands.
+    public func solanaToHyperliquid(usdc: Decimal) async throws -> String {
+        guard usdc >= Self.minBridgeUSDC else { throw ExecutionError("At least \(Fmt.num(Self.minBridgeUSDC)) USDC: less isn't worth the bridge.") }
+        let (step, changes) = try await prepareBridge(.send(usdc))
+        report("\(Fmt.num(step.spend)) USDC from Solana → ≈ \(Fmt.num(step.arriving)) USDC on Hyperliquid. " + changes.joined(separator: " "))
+        try await sendBridge(step)
+        let now = (try? await Hyperliquid.balance(user: wallet.evm)).map { $0.withdrawable + $0.spotUSDC }
+        return "Moved ≈ \(Fmt.num(step.arriving)) USDC to Hyperliquid" + (now.map { ": \(Fmt.num($0)) USDC free there now." } ?? ".")
+            + " Its smallest order is $10. Say “withdraw USDC to Solana” to bring it back."
+    }
+
     /// What Hyperliquid lacks for a send comes over first, as ensureEVM does for an EVM network: from Solana over Relay,
     /// else straight from the EVM network holding it. «Send 150 USDC to HL wallet» with $3.96 there and the money on
     /// Solana failed at the signature (2026-10-22).

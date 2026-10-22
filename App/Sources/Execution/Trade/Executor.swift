@@ -339,7 +339,7 @@ public actor Executor {
         }
         // ihatecrypto's fee is asked for once, here, by the signer; it stays off a card where Hyperliquid has it approved.
         if askFee, let fee = await allowedFee(), fee < HLBuilder.fee {
-            steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Hyperliquid can take it back.")
+            steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Wallet › Hyperliquid can take it back.")
         }
         steps.append("Leverage \(leverage)×, isolated margin.")
         if let limit = intent.entryPx {

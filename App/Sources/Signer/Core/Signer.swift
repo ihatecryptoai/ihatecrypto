@@ -426,7 +426,13 @@ enum Signer {
                 v.problems.append("Money or the right to spend it goes to an unapproved address \(payee).")
             }
             guard v.ok else { return refused(v) }
-            try approve(recipients)
+            // A contract whose call can't be read (a site's, from the browser) comes as a recipient only to be asked
+            // about: it's allowed as a call, apart from money recipients, unless the call also pays it coins.
+            let payees = Set(call.payees(to: to, value: value, chainId: chainId).map(RecipientStore.key))
+            let target: String? = if case .contract = call, !EVMCall.knownSpenders(chainId: chainId).contains(RecipientStore.key(to)),
+                                     !payees.contains(RecipientStore.key(to)) { RecipientStore.key(to) } else { nil }
+            try approve(recipients.filter { RecipientStore.key($0) != target })
+            if let target, recipients.contains(where: { RecipientStore.key($0) == target }) { try approve([target], calls: true) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: call.summary(chainId: chainId, to: to, value: value) + "\nnetwork fee " + tx.feeText) {
                 try tx.signed(privateKey: $0).raw
@@ -702,7 +708,9 @@ enum Signer {
 
     /// Money to an address outside the wallet: each new address is confirmed in person once, with the address on
     /// the prompt, and remembered in the signer's own Keychain. The app saying «the user approved it» isn't enough.
-    static func approve(_ recipients: [String]) throws {
+    /// `calls`: contracts whose calls the signer can't read, allowed in person as calls and kept in their own list, so a
+    /// later payment or approval to one asks again.
+    static func approve(_ recipients: [String], calls: Bool = false) throws {
         // The Test wallet signs without Touch ID by design (a few dollars for checks): asking it about a new address
         // only stops the check. Its approvals are its own (RecipientStore is per wallet), so no other wallet skips one.
         if holdsPublicTestWallet { return }
@@ -711,12 +719,14 @@ enum Signer {
         let own = Set([try? address("solana"), (try? address("evm"))?.lowercased()].compactMap { $0 })
         // An address saved in the book was confirmed in person, whole, when it was saved; another wallet of this Mac's
         // is the user's own.
-        let known = RecipientStore.all().union(AddressBookStore.all().map { RecipientStore.key($0.address) }).union(OwnStore.all())
+        let known = calls ? RecipientStore.all(RecipientStore.calls)
+            : RecipientStore.all().union(AddressBookStore.all().map { RecipientStore.key($0.address) }).union(OwnStore.all())
         let new = Array(Set(recipients.map(RecipientStore.key).filter { !known.contains($0) && !own.contains($0) })).sorted()
         guard !new.isEmpty else { return }
         // The automation wallet signs with no one at the Mac: its prompt closes by itself after a minute.
-        try SeedStore.confirm("allow ihatecrypto to send money to a new address:\n" + new.joined(separator: "\n"), within: Wallets.signing == nil ? nil : 60)
-        try RecipientStore.add(new)
+        let what = calls ? "allow ihatecrypto to call a contract whose call it can't read:\n" : "allow ihatecrypto to send money to a new address:\n"
+        try SeedStore.confirm(what + new.joined(separator: "\n"), within: Wallets.signing == nil ? nil : 60)
+        try RecipientStore.add(new, to: calls ? RecipientStore.calls : RecipientStore.money)
     }
 
     /// A NEAR receiver ihatecrypto may pay: a valid account, among the saved addresses the app passed, with a real block hash.

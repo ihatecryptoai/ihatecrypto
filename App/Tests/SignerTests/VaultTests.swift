@@ -164,6 +164,27 @@ func setEnv(_ name: String, _ value: String) {
         #expect(RecipientStore.all() == ["0x000000000000000000000000000000000000beef"])
     }
 
+    @Test(.enabled(if: fakeHello)) func anAllowedCallIsACallOnlyAndPendingCantAddOne() throws {
+        let imported = try importWallet()
+        SeedStore.endSession()
+        let contract = "0x000000000000000000000000000000000000c0de"
+        try Vault.$scope.withValue(Vault.Scope()) { try Signer.approve([contract], calls: true) }
+        Trusted.reload()
+        // Kept among calls, never among the places money may go.
+        #expect(RecipientStore.all(RecipientStore.calls) == [contract] && RecipientStore.all().isEmpty)
+        // A pending file that adds a call is read as nothing.
+        let id = try #require(imported.activeWallet)
+        SeedStore.endSession()
+        try send(.renameWallet(id: id, label: "Savings"))
+        var file = try JSONDecoder().decode(Trusted.File.self, from: try #require(Vault.read("pending.json")))
+        var bad = try JSONDecoder().decode(Trusted.State.self, from: file.body)
+        bad.calls = [id: [contract, "0x000000000000000000000000000000000000dead"]]
+        file.body = try JSONEncoder().encode(bad)
+        try Vault.write("pending.json", JSONEncoder().encode(file))
+        Trusted.reload()
+        #expect(RecipientStore.all(RecipientStore.calls) == [contract])
+    }
+
     @Test func aTestWalletSignsWithNoPrompt() throws {
         setEnv("WINSEC_FAKE_HELLO", "0")
         let made = try send(.createWallet(requirePresence: false))

@@ -482,6 +482,18 @@ extension Workspace {
         // moving meanwhile; Touch ID still signs it.
         if option.command.hasPrefix(Self.moduleOn) || option.command == Self.moduleKeepOff { answerNewModules(option.command); return }
         if option.command.hasPrefix(Self.openVia) { await chooseOpening(option.command); return }
+        if option.command == Self.tradingKeyOn { await enableAgent(); return }
+        if option.command == Self.jevOpenRouterOn || option.command == Self.jevOpenRouterOff {
+            jevOpenRouter = option.command == Self.jevOpenRouterOn
+            reply(jevOpenRouter ? say("On: OpenRouter's model checks every command and plan too.", "Включено: каждую команду и план проверяет ещё и модель OpenRouter.")
+                                : say("Kept on the chat's model. Settings › Second check changes it.", "Оставил модель чата. Поменять можно в Settings › Second check."))
+            return
+        }
+        if option.command == Self.tradingKeyLater {
+            reply(say("Left off. Settings › Wallet › Hyperliquid turns it on any time, or say «turn on the trading key».",
+                      "Оставил выключенным. Включить можно в Settings › Wallet › Hyperliquid или словами «включи торговый ключ»."))
+            return
+        }
         if option.command == Self.sendAnyway || option.command == Self.leaveCostly {
             let costly = costlyMove
             costlyMove = nil

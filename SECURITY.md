@@ -38,12 +38,15 @@ overwritten in memory.
 
 **What asks in person.** One Touch ID covers one move, for a session of one minute by default; locking the screen or
 sleep ends it. Adding, switching or removing a wallet, saving an address book entry and paying a new address each ask
-in person, with the address on the prompt (a test wallet skips the last one). The prompt shows the amounts and addresses the signer parsed itself, so an
-app that lies about a transaction is visible there.
+in person, with the address on the prompt (a test wallet skips the last one). A site's call to a contract whose calldata
+the signer can't read is allowed in person once per contract, and kept apart from payment recipients: it doesn't make
+that contract a place money or a spending right may go without asking. The prompt shows the amounts and addresses the
+signer parsed itself, so an app that lies about a transaction is visible there.
 
 **What signs without Touch ID.** Only what the user turns on: a test wallet made fresh in the app, an automation
-wallet that signs only scheduled tasks' moves, and the Hyperliquid trading key, which can place and cancel orders but
-can't withdraw. Turning each one on asks in person.
+wallet that signs only scheduled tasks' moves, and the Hyperliquid trading key. That key can place and cancel orders,
+set leverage up to 20× and bind ihatecrypto's referral code; it can't withdraw or transfer. Turning each one on asks in
+person.
 
 **The Guard.** Plain code checks every transaction before it is signed, and the signer runs the checks again itself:
 
@@ -53,14 +56,18 @@ can't withdraw. Turning each one on asks in person.
 - Simulation: the transaction runs on the network first, and the balances after must match what the user approved.
 - Bridges: a 1Click deposit address must be bound by 1Click to the user's recipient, refund address, assets and
   amount. A Relay deposit must come from the user's wallet and name them as sender and recipient.
-- Hyperliquid: orders stay inside the account; transfers out go only to an approved address.
+- Hyperliquid: orders stay inside the account; transfers out go only to an approved address. An order may pay
+  ihatecrypto's fee (a 0.05% builder fee), only to ihatecrypto's own address and at no more than that rate, and only after
+  the user approved that fee once in person; a fee approval for any other address or rate, and any referral code but
+  ihatecrypto's, are refused.
 - EVM: the signer decodes calldata itself and refuses unlimited approvals, `setApprovalForAll`, permits, Permit2 for
   longer than a day and `transferFrom` out of the user's wallet. Typed data with Permit or nested types, and a bare
   hash to sign, are refused.
 
 **Untrusted text.** Pasted messages and what the model's lookups bring back (token listings, pages, API replies) pass
-local rules before any model reads them. An optional second check (TypeSafe Jev through OpenRouter, Settings › AI model)
-can stop a text but can never approve one. An address found by a lookup never becomes a recipient. A typed «yes» never
+local rules before any model reads them. A second check (Settings › Second check) has the chat's model read each
+command and plan again, and a separate model on OpenRouter too when the user turns that on; it can stop a text but can
+never approve one. An address found by a lookup never becomes a recipient. A typed «yes» never
 signs: only the Confirm button does.
 
 **Local debug API.** Not in a release: only development builds (`build-app.sh`, `swift run`) have it. There it is off
