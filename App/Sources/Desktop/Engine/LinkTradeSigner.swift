@@ -10,11 +10,19 @@ import WalletCore
 nonisolated struct LinkTradeSigner: TradeSigner {
     /// While a signature waits (Windows Hello may be up), the window says so.
     let waiting: @Sendable (Bool) -> Void
+    /// A scheduled task's run on the automation wallet: the signer is told which wallet signs, and allows it only a
+    /// task's moves.
+    var asWallet: String?
+
+    init(asWallet: String? = nil, waiting: @escaping @Sendable (Bool) -> Void) {
+        self.asWallet = asWallet
+        self.waiting = waiting
+    }
 
     private func send(_ request: SignerRequest) async throws -> SignerReply {
         waiting(true)
         defer { waiting(false) }
-        return try await SignerLink.shared.send(request)
+        return try await SignerLink.shared.send(asWallet.map { .asWallet(id: $0, request: request) } ?? request)
     }
 
     static func reason(_ reply: SignerReply) -> String {

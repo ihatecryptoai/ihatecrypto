@@ -244,7 +244,9 @@ final class Engine {
         var book: [SignerAddress]
         var history: [HistoryLine]
         var alerts: [Alert]
-        var tasks: [Alert]
+        struct TaskView: Encodable { var id: String; var text: String; var paused: Bool; var automatic: Bool }
+        var tasks: [TaskView]
+        var automation: SignerWallet?
         var skills: [SkillView]
         var memory: [String]
         var favorites: [FavoriteToken]
@@ -278,7 +280,8 @@ final class Engine {
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
-            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) },
+            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney) },
+            automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
             canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
@@ -360,6 +363,8 @@ final class Engine {
         case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
+        case "taskOn": setTask(r.wallet ?? "", on: r.test == true)
+        case "createAutomationWallet": await createAutomationWallet()
         case "addSkill": try addSkill(r.text ?? "", fileName: r.name ?? "skill.md")
         case "removeSkill": addedSkills.removeAll { $0.id == r.wallet }; skillsOff.remove(r.wallet ?? "")
         case "skillOn":

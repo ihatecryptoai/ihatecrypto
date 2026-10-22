@@ -214,6 +214,9 @@ extension Engine {
             try? await signerCall(.lock)
             reply(say("Locked.", "Заблокировано."), note: note)
             return true
+        case "create an automation wallet":
+            await createAutomationWallet(note: note)
+            return true
         case "clear the plan":
             intent = TradeIntent()
             cancelPending()

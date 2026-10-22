@@ -612,10 +612,7 @@ function liveBoard(kind) {
       return state.alerts.length ? h("div", {}, state.alerts.map((a) => h("div", { class: "row" }, h("span", {}, a.text),
         h("button", { class: "icon-btn", title: t("Remove", "Убрать"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("close")))))
         : h("div", { class: "empty" }, t("No alerts: “tell me when BTC is above 120000”.", "Оповещений нет: «скажи, когда BTC выше 120000»."));
-    case "schedule":
-      return state.tasks.length ? h("div", {}, state.tasks.map((a) => h("div", { class: "row" }, h("span", {}, a.text),
-        h("button", { class: "icon-btn", title: t("Remove", "Убрать"), onclick: () => act("removeTask", { wallet: a.id }) }, icon("close")))))
-        : h("div", { class: "empty" }, t("Nothing scheduled: “every day at 9: buy SOL for 5 USDC”.", "Ничего не запланировано: «каждый день в 9: купи SOL на 5 USDC»."));
+    case "schedule": return scheduleBody();
     case "positions":
       return state.positions.length ? h("div", {}, state.positions.map((x) => h("div", { class: "row" },
         h("span", { class: "sym " + (x.side === "long" ? "gain" : "loss") }, `${x.side} ${x.coin}`), h("span", { class: "num" }, `${x.size} @ ${x.entry} · ${x.pnl}`))))
@@ -633,6 +630,30 @@ function liveBoard(kind) {
           h("button", { class: "btn", onclick: () => suggest("make a multisig 2 of 2 with Phone on base") }, t("Make a multisig", "Сделать мультисиг")));
     default: return null;
   }
+}
+
+/** The tasks with their switches, and the automation wallet they spend from. */
+function scheduleBody() {
+  const a = state.automation;
+  return h("div", {},
+    state.tasks.length ? state.tasks.map((x) => h("div", { class: "row" },
+      h("label", { class: "check-row" },
+        // A task that pays by itself runs only once switched on here: a click, never a chat message.
+        h("input", { type: "checkbox", id: "task-" + x.id, checked: !x.paused, onchange: (e) => act("taskOn", { wallet: x.id, test: e.target.checked }) }),
+        h("span", {}, x.text, h("div", { class: "muted small" }, x.automatic ? t("pays by itself from ", "платит сама с ") + (a ? a.label : "") + t(", no Windows Hello", ", без Windows Hello")
+          : t("a money move waits for Confirm", "перевод ждёт «Подтвердить»")))),
+      h("button", { class: "icon-btn", title: t("Remove", "Убрать"), onclick: () => act("removeTask", { wallet: x.id }) }, icon("close"))))
+      : h("div", { class: "empty" }, t("Nothing scheduled: “every day at 9: buy SOL for 5 USDC”.", "Ничего не запланировано: «каждый день в 9: купи SOL на 5 USDC».")),
+    h("div", { class: "eyebrow" }, t("Automation wallet", "Кошелёк автоматизации")),
+    a ? h("div", {},
+      h("p", { class: "muted small" }, t("Tasks you switch on spend from it without Windows Hello, only to your own wallets and saved addresses; what they buy goes on to your main wallet. Keep only their budget here: USDC and a little SOL.",
+        "Задачи, которые ты включил, тратят с него без Windows Hello — только на твои кошельки и сохранённые адреса; купленное уходит на основной кошелёк. Держи здесь только их бюджет: USDC и немного SOL.")),
+      a.solana ? [h("div", { class: "small" }, "Solana"), h("div", { class: "address" }, a.solana), copyButton(a.solana)] : null,
+      a.evm ? [h("div", { class: "small", style: "margin-top:8px" }, "EVM"), h("div", { class: "address" }, a.evm), copyButton(a.evm)] : null,
+      h("div", { class: "btns", style: "margin-top:8px" }, h("button", { class: "btn", onclick: () => suggest(`send 10 USDC to ${a.label}`) }, t("Top it up", "Пополнить"))))
+      : h("div", {}, h("p", { class: "muted small" }, t("Without it, every money move a task makes waits for your Confirm. With it, the tasks you switch on run by themselves from a small budget.",
+        "Без него каждый перевод задачи ждёт твоего «Подтвердить». С ним включённые задачи идут сами с небольшого бюджета.")),
+        h("button", { class: "btn", onclick: () => act("createAutomationWallet") }, icon("plus"), t("Create an automation wallet", "Создать кошелёк автоматизации"))));
 }
 
 function receiveBody() {
@@ -835,7 +856,8 @@ function settings() {
       h("div", { class: "btns", style: "margin-top:12px" },
         h("button", { class: "btn", onclick: () => act("createWallet", { test: false }) }, t("New wallet", "Новый кошелёк")),
         h("button", { class: "btn", onclick: showImport }, t("Import a phrase", "Импортировать фразу")),
-        h("button", { class: "btn", onclick: () => act("createWallet", { test: true }) }, t("New test wallet", "Новый тестовый")))),
+        h("button", { class: "btn", onclick: () => act("createWallet", { test: true }) }, t("New test wallet", "Новый тестовый")),
+        s.automation ? null : h("button", { class: "btn", onclick: () => act("createAutomationWallet") }, t("New automation wallet", "Кошелёк автоматизации")))),
 
     h("h2", {}, t("Updates", "Обновления")),
     h("div", { class: "card" },

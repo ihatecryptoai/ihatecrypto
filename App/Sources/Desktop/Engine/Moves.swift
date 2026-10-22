@@ -15,8 +15,8 @@ extension Engine {
     var journal: Journal { Journal(url: Store.url("journal.jsonl")) }
 
     /// The signer over its pipe; while it waits for Windows Hello the window shows so and lets it come forward.
-    func tradeSigner() -> LinkTradeSigner {
-        LinkTradeSigner { [weak self] on in
+    func tradeSigner(asWallet: String? = nil) -> LinkTradeSigner {
+        LinkTradeSigner(asWallet: asWallet) { [weak self] on in
             Task { @MainActor in
                 guard let self else { return }
                 self.signing += on ? 1 : -1
@@ -27,8 +27,13 @@ extension Engine {
     }
 
     func executor() throws -> Executor {
-        guard let wallet = tradeWallet else { throw ExecutionError(say("Add a wallet first.", "Сначала добавь кошелёк.")) }
-        return Executor(wallet: wallet, signer: tradeSigner(), journal: journal) { [weak self] text in
+        guard var wallet = tradeWallet else { throw ExecutionError(say("Add a wallet first.", "Сначала добавь кошелёк.")) }
+        // A scheduled task on the automation wallet: its addresses, the signer told which wallet signs, and what it buys
+        // owed to the wallet that's on.
+        let automation = TaskRun.automation
+        if let a = automation { wallet = TradeWallet(solana: a.solana ?? wallet.solana, evm: a.evm ?? wallet.evm) }
+        let owes = automation != nil
+        return Executor(wallet: wallet, signer: tradeSigner(asWallet: automation?.id), journal: journal) { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
                 self.running?.lines.append(text)
@@ -41,12 +46,17 @@ extension Engine {
                 guard let self else { return }
                 if from == .usdc { self.appCosts[to.mint, default: CostBasis()].bought(received, for: spent) }
                 if to == .usdc { self.appCosts[from.mint]?.sold(spent) }
+                if owes {
+                    self.owe("solana:\(to.mint == CostBasis.wsol ? "SOL" : to.mint)", received)
+                    self.owe("solana:\(from.mint == CostBasis.wsol ? "SOL" : from.mint)", -spent)
+                }
             }
         } traded: { [weak self] key, tokens, dollars in
             // A buy through ihatecrypto on an EVM network: its cost, kept like the Solana swaps'.
             Task { @MainActor in
                 guard let self else { return }
                 if tokens > 0 { self.appCosts[key, default: CostBasis()].bought(tokens, for: dollars) } else { self.appCosts[key]?.sold(-tokens) }
+                if owes { self.owe(key, tokens) }
             }
         }
     }
@@ -464,7 +474,10 @@ extension Engine {
             case .recurring(let buy, let days):
                 try await move(buy)
                 tasks.removeAll { $0.steps == [buy.summary] }
-                tasks.append(ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days)))
+                // A recurring buy pays from the wallet that's on, as on the Mac: never from the automation wallet.
+                var recurring = ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
+                recurring.fromActive = true
+                tasks.append(recurring)
             case .chain(let steps):
                 for (i, step) in steps.enumerated() {
                     running?.lines.append(say("Step \(i + 1): ", "Шаг \(i + 1): ") + step.title)

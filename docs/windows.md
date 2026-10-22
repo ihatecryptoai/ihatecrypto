@@ -106,8 +106,10 @@ chat runs through the Executor (transfers, swaps, bridges, lending, Hyperliquid 
 rules with every signature on the card, managing open positions, the best rates and spreading or rebalancing money
 across them, Merkl's rewards (claim, or sweep them into USDC), token approvals with a revoke on each, Jupiter DCA,
 coins from networks without a wallet here (NEAR Intents' deposit address), several moves in one message under one Confirm,
-price alerts and scheduled tasks with recurring buys (checked every minute while the app runs; their moves come as
-cards for Confirm, with a Windows notification), the tray (closing the window keeps it running, as the Mac's menu bar
+price alerts and scheduled tasks with recurring buys (checked every minute while the app runs, with a Windows
+notification), the automation wallet (a task the person switched on in the Schedule block spends from it without
+Windows Hello, only to their own wallets and confirmed addresses, and what it buys goes on to the main wallet; a sale
+and a recurring buy wait for Confirm on the wallet that's on; without it a task's moves come as cards), the tray (closing the window keeps it running, as the Mac's menu bar
 does), price charts and the day's movers in the chat, P/L (Hyperliquid's trading after fees and
 funding, open positions, the portfolio's change without money moved in or out, and each coin's P/L against what it
 cost: the chain's history priced on the day, the app's own buys, or when first seen), favorite tokens and token cards (DexScreener), paid requests to services (MPP: the price on a card, paid in USDC
@@ -117,8 +119,7 @@ Mac: the model reads every command and trade plan again, Jev through OpenRouter 
 plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
-Not yet: the automation wallet (a task's moves sign only after Confirm), the dApp browser, Ledger, watched wallets,
-voice, contract calls.
+Not yet: the dApp browser, Ledger, watched wallets, voice, contract calls.
 
 ## Checking on a Windows machine
 
