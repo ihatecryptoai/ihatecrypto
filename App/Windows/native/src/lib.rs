@@ -211,9 +211,13 @@ fn with_details<T: Send + 'static>(reason: &str, body: impl FnOnce() -> T + Send
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            if started.elapsed() < Duration::from_secs(4)
+            // It can open behind the app's window, or a moment after: brought forward while it isn't in front, for
+            // half a minute at most, so a person who switched away on purpose isn't pulled back for ever.
+            if started.elapsed() < Duration::from_secs(30)
                 && let Ok(dialog) = FindWindowW(w!("Credential Dialog Xaml Host"), PCWSTR::null()) {
-                    let _ = SetForegroundWindow(dialog);
+                    if GetForegroundWindow() != dialog { let _ = SetForegroundWindow(dialog); }
+                    // The details stay readable beside the dialog, never over its title: above it, else below it.
+                    if let Some(window) = window { keep_clear(window, dialog) }
                 }
         }
         std::thread::sleep(Duration::from_millis(30));
@@ -229,6 +233,22 @@ fn with_details<T: Send + 'static>(reason: &str, body: impl FnOnce() -> T + Send
     worker.join().expect("the Windows Hello thread panicked")
 }
 
+/// Moves the details window off Windows Hello's dialog when they overlap: above it when there's room, else below it.
+unsafe fn keep_clear(window: HWND, dialog: HWND) {
+    unsafe {
+        let (mut ours, mut theirs) = (RECT::default(), RECT::default());
+        if GetWindowRect(window, &mut ours).is_err() || GetWindowRect(dialog, &mut theirs).is_err() { return }
+        let overlap = ours.left < theirs.right && theirs.left < ours.right && ours.top < theirs.bottom && theirs.top < ours.bottom;
+        if !overlap { return }
+        let height = ours.bottom - ours.top;
+        let gap = 8;
+        let screen = GetSystemMetrics(SM_CYSCREEN);
+        let top = if theirs.top - height - gap >= 0 { theirs.top - height - gap }
+            else if theirs.bottom + gap + height <= screen { theirs.bottom + gap } else { 0 };
+        let _ = SetWindowPos(window, Some(HWND_TOPMOST), ours.left, top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 unsafe fn details_window(reason: &str) -> Option<HWND> {
     unsafe {
         let instance = GetModuleHandleW(None).ok()?;
@@ -242,9 +262,24 @@ unsafe fn details_window(reason: &str) -> Option<HWND> {
             };
             RegisterClassW(&class);
         });
-        let lines = reason.lines().count().max(1) as i32;
+        // As tall as the text needs once it's wrapped at this width, in the font WM_PAINT draws it with.
         let dpi = GetDpiForSystem().max(96) as i32;
-        let (width, height) = (560 * dpi / 96, (64 + 22 * lines) * dpi / 96);
+        let width = 560 * dpi / 96;
+        let pad = 16 * dpi / 96;
+        let dc = GetDC(None);
+        let font = CreateFontW(-(15 * dpi / 72), 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                               CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, w!("Segoe UI"));
+        let old = SelectObject(dc, font.into());
+        let mut measure = wide(reason);
+        measure.pop();
+        let mut rect = RECT { left: 0, top: 0, right: width - 2 * pad, bottom: 0 };
+        DrawTextW(dc, &mut measure, &mut rect, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+        SelectObject(dc, old);
+        let _ = DeleteObject(font.into());
+        ReleaseDC(None, dc);
+        let mut frame = RECT { left: 0, top: 0, right: width, bottom: rect.bottom + 2 * pad };
+        let _ = AdjustWindowRectEx(&mut frame, WS_POPUP | WS_CAPTION, false, WS_EX_TOPMOST | WS_EX_TOOLWINDOW);
+        let height = frame.bottom - frame.top;
         let x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
         let title = wide("ihatecrypto · Windows Hello");
         let window = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, DETAILS_CLASS, PCWSTR(title.as_ptr()), WS_POPUP | WS_CAPTION,
@@ -417,6 +452,17 @@ unsafe fn harden_threads(acl: *mut ACL) -> bool {
                                                 None, None, Some(acl), None);
                         if r != ERROR_SUCCESS { all = false }
                         let _ = CloseHandle(thread);
+                    }
+                    // Gone since the snapshot: nothing to protect.
+                    Err(e) if e.code() == ERROR_INVALID_PARAMETER.to_hresult() => {}
+                    // Born with the rule already (the main thread, from winsec_spawn_signer; later ones from the token's
+                    // default): its OWNER RIGHTS entry takes WRITE_DAC from us too. It counts as protected only if what
+                    // the rule is for — pointing it at other code, stopping it — is refused to us as well.
+                    Err(e) if e.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+                        match OpenThread(THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_SET_INFORMATION, false, entry.th32ThreadID) {
+                            Ok(thread) => { all = false; let _ = CloseHandle(thread); }
+                            Err(e) => if e.code() != ERROR_ACCESS_DENIED.to_hresult() && e.code() != ERROR_INVALID_PARAMETER.to_hresult() { all = false },
+                        }
                     }
                     Err(_) => all = false,
                 }

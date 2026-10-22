@@ -74,7 +74,7 @@ the window in the background. On Linux the core, the signer and the engine build
 
 On Windows, from `App/`: `pwsh Windows/build.ps1` builds winsec.dll, the engine and the signer in release, copies the
 Swift runtime beside them and makes the installer
-(`Windows/app/src-tauri/target/release/bundle/nsis/ihatecrypto_<version>_x64-setup.exe`). It needs Rust, Swift 6.4.1,
+(`Windows/app/src-tauri/target/release/bundle/nsis/ihatecrypto_<version>_<x64|arm64>-setup.exe`). It needs Rust, Swift 6.4.1,
 Node (for the Tauri CLI) and Visual Studio's C++ tools. The GitHub workflow `windows.yml` does the same on every push
 to `windows` and keeps the installer as an artifact for two weeks.
 
@@ -156,3 +156,16 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
     bought arrives on the main wallet.
+
+### What a Windows 11 machine has shown so far
+
+On Windows 11 ARM64 (build 26300) in a virtual machine with a software TPM, 2026-10-23: `build.ps1` built and the
+installer installed; the Swift package's tests pass there (485; the network ones and the stand-in Hello's skipped).
+Steps 1, 3, 4, 6 and 7 hold: the phrase window is left out of a screenshot, the copied words carry the formats that
+keep them out of Win+V history and the cloud and are cleared after a minute, a process of the same user is refused the
+signer's memory, its threads and their context. In the browser app.hyperliquid.xyz's Connect lists ihatecrypto, its ask
+comes to the canvas as a card with a Windows notification, and after Confirm the site shows the address. Step 2 says
+the key can't be shown to be in the TPM: a software TPM can't attest it, a real one should. What that run fixed: Windows
+Hello's dialog opening behind the window, the signer's details covering the dialog's title or cut short, a white browser
+window, a window taller than a small screen, a false «threads' rule» note. Still to check on a real PC: a move (5), the
+mic (8), a site's page refused `engine_send` (9), a Ledger (10) and the automation wallet (11).

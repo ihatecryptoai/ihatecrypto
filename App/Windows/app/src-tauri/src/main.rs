@@ -66,6 +66,7 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                 if let Some(pid) = serde_json::from_str::<serde_json::Value>(&line).ok()
                     .and_then(|v| v["data"]["pid"].as_str().and_then(|p| p.parse::<u32>().ok())) {
                     allow_foreground(pid);
+                    bring_hello_forward();
                 }
             }
             // Money that arrived, a price alert, a scheduled move waiting for Confirm: a Windows notification too,
@@ -94,6 +95,26 @@ fn allow_foreground(pid: u32) {
 #[cfg(not(windows))]
 fn allow_foreground(_pid: u32) {}
 
+/// Windows Hello's dialog can open behind this window, which keeps the foreground: while the window is in front it may
+/// hand the foreground on, so for a few seconds it brings the dialog forward once it shows.
+#[cfg(windows)]
+fn bring_hello_forward() {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetForegroundWindow, SetForegroundWindow};
+    use windows::core::{PCWSTR, w};
+    std::thread::spawn(|| {
+        for _ in 0..60 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if let Ok(dialog) = unsafe { FindWindowW(w!("Credential Dialog Xaml Host"), PCWSTR::null()) } {
+                if unsafe { GetForegroundWindow() } == dialog { return }
+                let _ = unsafe { SetForegroundWindow(dialog) };
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn bring_hello_forward() {}
+
 /// One request line to the engine.
 mod voice;
 
@@ -112,8 +133,10 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
 
 /// ihatecrypto's browser: a window of its own for https sites, with the wallet provider in every page. It shares nothing
 /// with the main window's page; its only way to the wallet is `dapp_call`.
+// Async: on Windows a webview made inside a synchronous command waits on the event loop that command holds, and the
+// window stays white (wry #583).
 #[tauri::command]
-fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
     let url = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
     if url.scheme() != "https" { return Err("only https sites".into()) }
     if let Some(window) = app.get_webview_window("browser") {
@@ -332,6 +355,14 @@ fn main() {
             #[cfg(debug_assertions)]
             ui_eval(app.handle());
             tray(app)?;
+            // A screen smaller than the window (a small laptop, a VM): it opens maximized instead of reaching under
+            // the taskbar.
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                    if size.width < 1240.0 || size.height < 860.0 { let _ = window.maximize(); }
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -38,6 +38,8 @@ extension Engine {
     func signerCall(_ request: SignerRequest) async throws -> SignerReply {
         signing += 1
         changed()
+        // Windows Hello may ask: the window lets the signer, and Hello's dialog, come forward (as for a move's signature).
+        if let pid = await SignerLink.shared.pid { out.event("signerForeground", ["pid": "\(pid)"]) }
         defer { signing -= 1; changed() }
         let reply = try await SignerLink.shared.send(request)
         await readStatus()
