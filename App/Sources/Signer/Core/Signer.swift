@@ -513,7 +513,8 @@ enum Signer {
                 defer { SeedStore.wipe(&agent) }
                 r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: mainnet)
             } else {
-                r.signature = try withKey("evm", reason: prompt("sign a Hyperliquid order", verdict)) {
+                let what = HLAction.type(action) == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees" : "sign a Hyperliquid order"
+                r.signature = try withKey("evm", reason: prompt(what, verdict)) {
                     try HLSigner.signL1(action, privateKey: $0, nonce: nonce, mainnet: mainnet)
                 }
             }
@@ -539,7 +540,9 @@ enum Signer {
             let (type, fields) = try HLSigner.userAction(action)
             try approve(recipients)
             var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: prompt("sign a Hyperliquid transfer", verdict)) {
+            let what = type != "ApproveBuilderFee" ? "sign a Hyperliquid transfer"
+                : HLAction.text(action, "maxFeeRate") == HLBuilder.revoke ? "take back ihatecrypto's fee approval" : "approve ihatecrypto's fee on your Hyperliquid trades"
+            r.signature = try withKey("evm", reason: prompt(what, verdict)) {
                 try HLSigner.signUserAction(type, fields: fields, privateKey: $0, mainnet: mainnet)
             }
             r.checks = verdict.checks

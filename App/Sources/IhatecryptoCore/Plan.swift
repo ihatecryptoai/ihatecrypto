@@ -1,4 +1,5 @@
 import Foundation
+import HyperliquidSigning
 
 public struct Market: Sendable, Equatable {
     public let name: String
@@ -61,8 +62,10 @@ public struct Sizing: Sendable, Equatable {
     public let stopPrice: Decimal
     public let takePrice: Decimal?
     public let liquidationPrice: Decimal
-    /// Taker fee for entry and exit at the stop.
+    /// Fees for entry and exit at the stop: Hyperliquid's taker fee and ihatecrypto's.
     public let feesUSD: Decimal
+    /// ihatecrypto's part of `feesUSD`.
+    public let builderFeesUSD: Decimal
     public let lossAtStopUSD: Decimal
     public let profitAtTakeUSD: Decimal?
 }
@@ -71,6 +74,10 @@ public struct Sizing: Sendable, Equatable {
 public enum RiskCalc {
     /// Hyperliquid tier-0 taker fee (RESEARCH.md §8).
     public static let takerFee = Decimal(string: "0.00045")!
+    /// ihatecrypto's fee on each side (HLBuilder), on top of Hyperliquid's.
+    public static let builderFee = HLBuilder.share
+    /// What each side of a trade pays in all.
+    public static let tradeFee = takerFee + builderFee
 
     /// `entry`: a limit price; the mark when nil.
     public static func size(
@@ -80,13 +87,13 @@ public enum RiskCalc {
         let dir: Decimal = side == .long ? 1 : -1
         let s = stopPct / 100
         let stop = entry * (1 - dir * s)
-        // Loss per coin if the stop fills at its price: the move plus taker fee on both legs.
-        let perCoinLoss = entry * s + (entry + stop) * takerFee
+        // Loss per coin if the stop fills at its price: the move plus the fees on both legs.
+        let perCoinLoss = entry * s + (entry + stop) * tradeFee
         let size = (riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
         let notional = size * entry
-        let fees = size * (entry + stop) * takerFee
+        let fees = size * (entry + stop) * tradeFee
         let take = takePct.map { entry * (1 + dir * $0 / 100) }
-        let profit = take.map { size * abs($0 - entry) - size * (entry + $0) * takerFee }
+        let profit = take.map { size * abs($0 - entry) - size * (entry + $0) * tradeFee }
         // Isolated margin, lowest tier: maintenance = 1 / (2 · max leverage).
         // ponytail: ignores Hyperliquid margin tiers, fine below the first tier's notional; read marginTables for big positions.
         let l = 1 / (2 * Decimal(market.maxLeverage))
@@ -94,7 +101,7 @@ public enum RiskCalc {
         return Sizing(
             size: size, entry: entry, notional: notional, margin: notional / leverage,
             stopPrice: stop, takePrice: take, liquidationPrice: liq,
-            feesUSD: fees, lossAtStopUSD: size * entry * s + fees, profitAtTakeUSD: profit
+            feesUSD: fees, builderFeesUSD: size * (entry + stop) * builderFee, lossAtStopUSD: size * entry * s + fees, profitAtTakeUSD: profit
         )
     }
 }
@@ -332,6 +339,7 @@ public enum Plan {
                 : "Limit: \(Fmt.num(s.size, maxFraction: m.szDecimals)) \(m.name) at \(Fmt.price(s.entry)), now \(Fmt.price(m.markPx)). Waiting; stop and take-profit start after entry.",
             "Notional \(Fmt.usd(s.notional)), margin \(Fmt.usd(s.margin)) at \(Fmt.num(i.leverage ?? 1))× leverage\(i.leverage == nil ? " (default)" : "").",
             "Liquidation ≈ \(Fmt.price(s.liquidationPrice)), isolated margin.",
+            "Fees per side: Hyperliquid \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))%, ihatecrypto \(Fmt.num(RiskCalc.builderFee * 100, maxFraction: 3))%.",
         ]
         if let p = e.problem { lines.append(p) }
         return Block(id: "position", label: label, title: title, lines: lines, status: e.problem == nil ? .ready : .blocked)
@@ -343,7 +351,7 @@ public enum Plan {
             return Block(id: "protection", label: label, title: "Stop & take-profit", lines: ["Set a stop in %, e.g. “stop 3%”."], status: .needsInput)
         }
         var lines = [
-            "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)). Loss ≈ \(Fmt.usd(s.lossAtStopUSD)) incl. \(Fmt.usd(s.feesUSD)) fees.",
+            "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)). Loss ≈ \(Fmt.usd(s.lossAtStopUSD)) incl. \(Fmt.usd(s.feesUSD)) fees (ihatecrypto \(Fmt.usd(s.builderFeesUSD))).",
         ]
         if let t = i.takePct, let tp = s.takePrice, let profit = s.profitAtTakeUSD {
             lines.append("Take-profit \(Fmt.pct(t)) → \(Fmt.price(tp)). Profit ≈ \(Fmt.usd(profit)).")

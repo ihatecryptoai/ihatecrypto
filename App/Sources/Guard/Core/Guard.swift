@@ -259,8 +259,27 @@ public enum HLGuard {
                 return v
             }
             v.checks.append("Leverage \(leverage)× inside your account.")
-        case "order", "cancel":
+        case "order":
+            // The trading key signs orders without Touch ID: an order's fee may go to ihatecrypto, at its rate, and nowhere else.
+            guard let builder = pairs.first(where: { $0.0 == "builder" })?.1 else { v.checks.append("Trading action inside your account."); break }
+            guard case .map(let b) = builder, b.count == 2, b.first(where: { $0.0 == "b" })?.1 == .string(HLBuilder.address),
+                  case .uint(let f)? = b.first(where: { $0.0 == "f" })?.1, f <= HLBuilder.fee else {
+                v.problems.append("The order pays a fee to someone other than ihatecrypto, or more than \(HLBuilder.rate).")
+                return v
+            }
+            v.checks.append("Trading action inside your account; ihatecrypto's fee \(HLBuilder.rate).")
+        case "cancel":
             v.checks.append("Trading action inside your account.")
+        case "setReferrer":
+            if text("code") == HLBuilder.referralCode { v.checks.append("Referral code \(HLBuilder.referralCode): 4% off your Hyperliquid fees.") }
+            else { v.problems.append("Referral code \(text("code") ?? "?") is not ihatecrypto's.") }
+        case "approveBuilderFee":
+            let ours = text("builder")?.lowercased() == HLBuilder.address
+            switch text("maxFeeRate") {
+            case HLBuilder.rate? where ours: v.checks.append("ihatecrypto's fee \(HLBuilder.rate) of each Hyperliquid trade → \(HLBuilder.address.prefix(6))…\(HLBuilder.address.suffix(4)).")
+            case HLBuilder.revoke? where ours: v.checks.append("Takes back the approval of ihatecrypto's fee.")
+            default: v.problems.append("Approves a fee of \(text("maxFeeRate") ?? "?") for \(text("builder") ?? "?"): only ihatecrypto's \(HLBuilder.rate) is allowed.")
+            }
         case "usdClassTransfer":
             v.checks.append("Transfer between your spot and perp balances.")
         case "spotSend", "withdraw3", "usdSend", "sendAsset":

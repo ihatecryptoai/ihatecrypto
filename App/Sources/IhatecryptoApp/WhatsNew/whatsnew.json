@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.7.1",
+    "date": "2026-10-22",
+    "stories": [
+      {
+        "title": "ihatecrypto's fee on Hyperliquid",
+        "text": "Trades on Hyperliquid placed in ihatecrypto carry a 0.05% fee for ihatecrypto, on top of the exchange's own: perps both ways, spot only when selling. The first trade you confirm asks you to approve it once, every plan shows it in the fees, and Settings › Hyperliquid can take the approval back.",
+        "symbol": "percent",
+        "color": "FF7A2F"
+      },
+      {
+        "title": "4% off Hyperliquid's fees",
+        "text": "A Hyperliquid account without a referral code gets ihatecrypto's, IHATECRYPTO, on its first trade here: the exchange then takes 4% less of its own fee. The trading key signs it, with no prompt.",
+        "symbol": "tag.fill",
+        "color": "34C759"
+      }
+    ]
+  },
+  {
     "version": "0.7.0",
     "date": "2026-10-22",
     "stories": [

@@ -1,4 +1,5 @@
 import AppKit
+import HyperliquidSigning
 import IhatecryptoCore
 import LLMCatalog
 import LLMCore
@@ -485,6 +486,14 @@ struct SettingsView: View {
                         Button("Resume…") { Task { await ws.resumeTradingKey() } }.disabled(ws.executing)
                     }
                 }
+                SettingsRow("ihatecrypto's fee", icon: "percent", info: "\(HLBuilder.rate) of each Hyperliquid trade placed in ihatecrypto, on top of the exchange's own fee: perps both ways, spot only when selling. Hyperliquid takes it, and only once you approve it: the first trade you confirm asks. «Revoke» takes the approval back, and the next trade asks again. The referral code \(HLBuilder.referralCode) gives the account 4% off Hyperliquid's fees.") {
+                    SettingsPill(text: ws.feeApproved == true ? "\(HLBuilder.rate) · Approved" : ws.feeApproved == false ? "\(HLBuilder.rate) · Not yet" : HLBuilder.rate,
+                                 good: ws.feeApproved == true)
+                    if ws.feeApproved == true {
+                        Button("Revoke…") { Task { await ws.revokeFee() } }.disabled(ws.executing)
+                    }
+                }
+                .task(id: ws.hlAddress) { await ws.loadFeeApproval() }
             }
         }
     }

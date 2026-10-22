@@ -167,7 +167,7 @@ extension Workspace {
         let signer: any TradeSigner = if let automation { XPCTradeSigner(asWallet: automation.id) }
             else if ledgerActive { ledgerSigner(wallet) } else { XPCTradeSigner() }
         let owes = automation != nil
-        return Executor(wallet: wallet, signer: signer, journal: Journal(url: journalURL)) { [weak self] text in
+        return Executor(wallet: wallet, signer: signer, journal: Journal(url: journalURL), askFee: !owes) { [weak self] text in
             Task { @MainActor in
                 self?.reply(text, note: "execution")
                 self?.runningAction?.lines.append(text)
@@ -210,6 +210,7 @@ extension Workspace {
         }
         if !resolved.notes.isEmpty { out.append("The user asked to fill in the rest by the rules: " + resolved.notes.joined(separator: " ")) }
         // From where the card says: Solana, or the EVM network that holds it when Solana is short.
+        out.append("Fees on each side: Hyperliquid's \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))% and ihatecrypto's \(HLBuilder.rate) (the user approves it once, on the first trade).")
         if let a = intent.amountUSDC { out.append("Move \(Fmt.num(a)) USDC from \(fundingNet?.name ?? "Solana") to Hyperliquid.") }
         else if let q = quote { out.append("Bridge \(q.provider): \(Fmt.num(q.amountIn)) USDC from \(fundingNet?.name ?? "Solana") to Hyperliquid.") }
         return out
@@ -352,7 +353,7 @@ extension Workspace {
         if let stopPct = resolvedNext.stopPct, stopPct != before.stopPct {
             let stop = p.entry * (1 - dir * stopPct / 100)
             // A wider stop may not break the per-trade limit.
-            let loss = abs(p.entry - stop) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.takerFee
+            let loss = abs(p.entry - stop) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
             if let equity, equity > 0, loss / equity * 100 > policy.maxRiskPct {
                 reply("A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
                 return true
@@ -914,6 +915,27 @@ extension Workspace {
         AppLock.shared.lock()
         reply(ok ? "🔒 Locked. The next signature asks for \(Presence.name), and the trading key is paused — resume it in Settings › Wallet, or say «resume the trading key»."
                  : "Couldn’t reach the signing process to lock it.")
+    }
+
+    /// Whether this Hyperliquid account approved ihatecrypto's fee, for Settings; nil when Hyperliquid didn't answer.
+    func loadFeeApproval() async {
+        let user = hlAddress
+        let approved = user.isEmpty ? nil : await Executor.allowedFee(user).map { $0 >= HLBuilder.fee }
+        if user == hlAddress { feeApproved = approved }
+    }
+
+    /// Takes back the approval of ihatecrypto's fee (the signer asks first). The next trade confirmed asks for it again.
+    func revokeFee() async {
+        guard let wallet = signerWallet else { return }
+        executing = true
+        defer { executing = false }
+        do {
+            try await executor(wallet).setFeeApproval(false)
+            reply("ihatecrypto's fee approval is taken back. New orders go without it; stops and take-profits already on the exchange keep it until they fill or move. The next Hyperliquid trade you confirm asks for it again.")
+        } catch {
+            reply("The fee approval stayed: \(error.localizedDescription)")
+        }
+        await loadFeeApproval()
     }
 
     /// Turns the paused trading key back on; the signer asks for Touch ID first.

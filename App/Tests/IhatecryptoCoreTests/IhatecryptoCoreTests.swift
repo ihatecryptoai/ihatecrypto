@@ -68,11 +68,12 @@ private let twelve = "abandon ability able about above absent absorb abstract ab
 
 @Test func longSizingKeepsLossAtStopWithinRisk() {
     let s = RiskCalc.size(riskUSD: 10, stopPct: 3, takePct: 6, leverage: 2, side: .long, market: eth)
-    // per coin: 2000·0.03 + (2000 + 1940)·0.00045 = 61.773 → 10 / 61.773 = 0.16188… → 0.1618
-    #expect(s.size == d("0.1618"))
+    // per coin: 2000·0.03 + (2000 + 1940)·0.00095 (Hyperliquid 0.045% + ihatecrypto 0.05%) = 63.743 → 10 / 63.743 = 0.15688… → 0.1568
+    #expect(s.size == d("0.1568"))
     #expect(s.stopPrice == 1940)
     #expect(s.takePrice == 2120)
-    #expect(s.margin == d("161.8"))
+    #expect(s.margin == d("156.8"))
+    #expect(s.builderFeesUSD == d("0.1568") * 3940 * d("0.0005"))
     #expect(s.lossAtStopUSD <= 10)
     #expect(s.lossAtStopUSD > d("9.9"))
     #expect(s.liquidationPrice < s.stopPrice)
@@ -118,7 +119,7 @@ private func intent(risk: String = "10", stop: String = "3", lev: String? = nil)
 @Test func bridgeSkippedWhenHyperCoreCoversMargin() {
     let e = Plan.evaluate(intent(lev: "2"), market: eth)
     #expect(Plan.bridgeNeed(intent(lev: "2"), e, hlWithdrawable: 500) == nil)
-    #expect(Plan.bridgeNeed(intent(lev: "2"), e, hlWithdrawable: 100) == d("62.09")) // 161.8 margin + 0.28… fees − 100, rounded up
+    #expect(Plan.bridgeNeed(intent(lev: "2"), e, hlWithdrawable: 100) == d("57.39")) // 156.8 margin + 0.58… fees − 100, rounded up
 }
 
 @Test func aLimitBelowThePriceIsFundedForTheMarginHeldAtThePrice() {

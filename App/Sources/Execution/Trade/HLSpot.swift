@@ -28,7 +28,7 @@ extension Executor {
         r.httpMethod = "POST"
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try JSONSerialization.jsonObject(with: try await URLSession.shared.data(for: r).0)
+        return try JSONSerialization.jsonObject(with: try await URLSession.shared.data(for: r).0, options: .fragmentsAllowed)
     }
 
     /// The token's pair against USDC (token 0) on HyperCore, from spotMeta: its tokens and its pairs.
@@ -123,6 +123,7 @@ extension Executor {
     /// Buys `symbol` on Hyperliquid's spot book for `usdc`, or sells `amount` of it (nil = all that's free) for USDC.
     public func hlSpot(buy: Bool, symbol: String, usdc: Decimal?, amount: Decimal?) async throws -> String {
         let pair = try await Self.spotPair(symbol), mid = try await Self.spotMid(pair)
+        try await prepareFee()
         if buy {
             guard let usdc, usdc >= Self.spotMinimum else { throw ExecutionError("Hyperliquid's spot book takes orders from 10 USDC.") }
             let free = try await spotFree("USDC")

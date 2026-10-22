@@ -78,7 +78,7 @@ let package = Package(
         ),
 
         // Trading plan: knows only the LLMClient protocol, not the providers.
-        .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge"]),
+        .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge", "HyperliquidSigning"]),
         .executableTarget(
             name: "IhatecryptoApp",
             dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",

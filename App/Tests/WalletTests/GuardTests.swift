@@ -120,6 +120,34 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!HLGuard.check(action("updateLeverage"), owner: owner, recipients: []).ok)
 }
 
+/// The trading key signs orders and the referral code without Touch ID: a fee only to ihatecrypto at its rate, only its code,
+/// and a fee approval only for ihatecrypto's rate or its revocation.
+@Test func hyperliquidGuardHoldsFeesAndCodeToIhatecrypto() throws {
+    let owner = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"
+    let plain = try HLAction.order([HLOrder(asset: 0, isBuy: true, price: 100, size: 1, reduceOnly: false, kind: .limit(tif: "Ioc"))])
+    func check(_ a: MsgPack) -> Bool { HLGuard.check(a, owner: owner, recipients: []).ok }
+    func with(_ builder: MsgPack) -> MsgPack {
+        guard case .map(let pairs) = plain else { return plain }
+        return .map(pairs + [("builder", builder)])
+    }
+    #expect(check(HLAction.withBuilder(plain)))
+    #expect(check(with(.map([("b", .string(HLBuilder.address)), ("f", .uint(10))]))))
+    #expect(!check(with(.map([("b", .string(HLBuilder.address)), ("f", .uint(HLBuilder.fee + 1))]))))
+    #expect(!check(with(.map([("b", .string("0x000000000000000000000000000000000000dead")), ("f", .uint(10))]))))
+    #expect(!check(with(.map([("b", .string(HLBuilder.address)), ("f", .uint(10)), ("x", .uint(1))]))))
+    #expect(!check(with(.string(HLBuilder.address))))
+
+    #expect(check(HLBuilder.referrerAction))
+    #expect(!check(.map([("type", .string("setReferrer")), ("code", .string("SOMEONE"))])))
+
+    #expect(check(HLBuilder.approveAction(nonce: 1, mainnet: true)))
+    #expect(check(HLBuilder.approveAction(maxFeeRate: HLBuilder.revoke, nonce: 1, mainnet: true)))
+    #expect(!check(HLBuilder.approveAction(maxFeeRate: "0.1%", nonce: 1, mainnet: true)))
+    let foreign = MsgPack.map([("type", .string("approveBuilderFee")), ("maxFeeRate", .string(HLBuilder.rate)),
+                               ("builder", .string("0x000000000000000000000000000000000000dead")), ("nonce", .uint(1))])
+    #expect(!check(foreign))
+}
+
 @Test func depositGuardRejectsAnAddressBoundToSomeoneElse() {
     let bound = ["recipient": "0xAttacker", "refundTo": me, "originAsset": "nep141:sol.omft.near",
                  "destinationAsset": "hc", "amount": "130000000"]

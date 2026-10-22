@@ -32,3 +32,4 @@
 ## Cost
 
 - The app is a free download. The user pays network fees and their own AI plan.
+- On Hyperliquid, ihatecrypto takes 0.05% of each trade (a builder fee), on top of the exchange's own fee: perps both ways, spot only on sales. The user approves it once, on the first trade. The account also gets ihatecrypto's referral code: 4% off Hyperliquid's fees.

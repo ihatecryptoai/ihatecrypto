@@ -125,7 +125,15 @@ public actor Executor {
     /// A token bought (+tokens, for dollars) or sold (−tokens) on an EVM network, under «chain:contract» (Holding.id), so
     /// the P/L knows what a Relay buy cost: its money and its tokens are two transactions the chain can't pair.
     let traded: (@Sendable (String, Decimal, Decimal) -> Void)?
+    /// The user confirmed this move in the window: it may ask them to approve ihatecrypto's fee (prepareFee). A scheduled
+    /// task's run never asks; its orders carry the fee only once the account approved it.
+    let askFee: Bool
     private var lastNonce: UInt64 = 0
+    /// The fee this account lets ihatecrypto take (maxBuilderFee), read once per move; nil when it couldn't be read.
+    private var allowed: UInt64?
+    private var allowedRead = false
+    /// Accounts whose referral was looked at in this run of the app: once each.
+    static let referralLooked = Mutex<Set<String>>([])
     /// «chainId:address» → the nonce after that wallet's last confirmed transaction there, across moves (nextNonce).
     static let evmNonces = Mutex<[String: UInt64]>([:])
 
@@ -157,10 +165,11 @@ public actor Executor {
     /// Market stop and take fill up to this far past the trigger, as Hyperliquid's own interface does.
     static let triggerSlippage = Decimal(string: "0.1")!
 
-    public init(wallet: TradeWallet, signer: any TradeSigner, journal: Journal, rpc: SolanaRPC = SolanaRPC(),
+    public init(wallet: TradeWallet, signer: any TradeSigner, journal: Journal, rpc: SolanaRPC = SolanaRPC(), askFee: Bool = false,
                 report: @escaping @Sendable (String) -> Void, swapped: (@Sendable (SpotAsset, SpotAsset, Decimal, Decimal) -> Void)? = nil,
                 traded: (@Sendable (String, Decimal, Decimal) -> Void)? = nil) {
         self.wallet = wallet
+        self.askFee = askFee
         self.signer = signer
         self.journal = journal
         self.rpc = rpc
@@ -328,6 +337,10 @@ public actor Executor {
             steps.append("Transfer \(Fmt.num(t.usdc)) USDC from the main Hyperliquid balance to the \(t.dex) exchange — its markets have their own margin.")
             changes.append("Hyperliquid \(t.dex), free: \(Fmt.usd(dexFree)) → \(Fmt.usd(dexFree + t.usdc)) before entry.")
         }
+        // ihatecrypto's fee is asked for once, here, by the signer; it stays off a card where Hyperliquid has it approved.
+        if askFee, let fee = await allowedFee(), fee < HLBuilder.fee {
+            steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Hyperliquid can take it back.")
+        }
         steps.append("Leverage \(leverage)×, isolated margin.")
         if let limit = intent.entryPx {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) as a limit at \(Fmt.price(HLAction.price(limit, szDecimals: market.szDecimals))) (now \(Fmt.price(market.markPx))), waiting on the exchange, with stop −\(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit +\(Fmt.pct($0))" } ?? ""), active once it fills.")
@@ -388,6 +401,7 @@ public actor Executor {
             report(try await bridge(f.net, to: nil, hyperliquid: true, usdc: f.usdc))
         }
         if let t = p.dexTransfer { try await moveMargin(from: "", to: t.dex, usdc: t.usdc) }
+        try await prepareFee()
 
         let lev = try await post(Self.leverageAction(asset: p.market.index, leverage: p.leverage), label: "leverage")
         guard case .ok = lev else { throw ExecutionError("Hyperliquid rejected leverage \(p.leverage)×: \(lev).") }
@@ -646,7 +660,7 @@ public actor Executor {
             return "No open \(asset) position."
         }
         let long = position.size > 0
-        let fees = position.entry * 2 * RiskCalc.takerFee
+        let fees = position.entry * 2 * RiskCalc.tradeFee
         let stop = HLAction.price(target ?? (long ? position.entry + fees : position.entry - fees), szDecimals: market.szDecimals)
         guard long ? stop < market.markPx : stop > market.markPx else {
             throw ExecutionError("Stop \(Fmt.price(stop)) is \(long ? "above" : "below") the current price \(Fmt.price(market.markPx)): it would trigger at once. To exit, type «close».")
@@ -676,7 +690,7 @@ public actor Executor {
                                policy: RiskPolicy) -> Decimal? {
         if let current, long ? stop >= current : stop <= current { return nil }
         guard current != nil, let equity, equity > 0 else { return nil }
-        let loss = max(0, long ? entry - stop : stop - entry) * size + size * (entry + stop) * RiskCalc.takerFee
+        let loss = max(0, long ? entry - stop : stop - entry) * size + size * (entry + stop) * RiskCalc.tradeFee
         return loss / equity * 100 > policy.maxRiskPct ? loss : nil
     }
 
@@ -692,8 +706,18 @@ public actor Executor {
         return lastNonce
     }
 
-    /// Signs, journals before sending, sends, journals the reply.
+    /// Signs, journals before sending, sends, journals the reply. An order carries ihatecrypto's fee once the account has
+    /// approved it; a refusal over the fee (the approval taken back meanwhile) never stops an order: it goes again without.
     func post(_ action: MsgPack, label: String) async throws -> HLReply {
+        if HLAction.type(action) == "order", (await allowedFee() ?? 0) >= HLBuilder.fee {
+            let reply = try await send(HLAction.withBuilder(action), label: label)
+            guard case .error(let e) = reply, e.lowercased().contains("builder") else { return reply }
+            allowed = 0
+        }
+        return try await send(action, label: label)
+    }
+
+    private func send(_ action: MsgPack, label: String) async throws -> HLReply {
         let nonce = nonce()
         let signature = try await signer.signHyperliquid(action, nonce: nonce)
         try journal.append(.init(chain: "hyperliquid", id: "\(nonce)", kind: .signed, note: label))
@@ -701,6 +725,52 @@ public actor Executor {
         let reply = HLReply.parse(data)
         try journal.append(.init(chain: "hyperliquid", id: "\(nonce)", kind: reply.isError ? .failed : .confirmed, note: "\(reply)"))
         return reply
+    }
+
+    // MARK: ihatecrypto's fee and referral code (HLBuilder)
+
+    /// What this account lets ihatecrypto take, in tenths of a basis point; nil when Hyperliquid didn't answer.
+    public static func allowedFee(_ user: String) async -> UInt64? {
+        (try? await hlInfo(["type": "maxBuilderFee", "user": user.lowercased(), "builder": HLBuilder.address]) as? NSNumber)?.uint64Value
+    }
+
+    func allowedFee() async -> UInt64? {
+        if !allowedRead { (allowed, allowedRead) = (await Self.allowedFee(wallet.evm), true) }
+        return allowed
+    }
+
+    /// Before the first order of a move the user confirmed: ihatecrypto's fee approved once (the signer shows it; turned
+    /// down, the move stops before any order), and the referral code bound when the account has none. A fee Hyperliquid
+    /// won't take, or a signer that can't sign it, leaves the trade without the fee.
+    func prepareFee() async throws {
+        if askFee, let fee = await allowedFee(), fee < HLBuilder.fee {
+            do { try await setFeeApproval(true) } catch let stop as GuardStop { throw stop } catch {}
+        }
+        await bindReferral()
+    }
+
+    /// Approves ihatecrypto's fee (`HLBuilder.rate`) for this account, or takes the approval back (`on` false).
+    public func setFeeApproval(_ on: Bool) async throws {
+        let n = nonce()
+        let action = HLBuilder.approveAction(maxFeeRate: on ? HLBuilder.rate : HLBuilder.revoke, nonce: n, mainnet: true)
+        let note = on ? "approve ihatecrypto's fee \(HLBuilder.rate)" : "take back ihatecrypto's fee"
+        let signature = try await signer.signHyperliquidUser(action, recipients: [])
+        try journal.append(.init(chain: "hyperliquid", id: "\(n)", kind: .signed, note: note))
+        let reply = HLReply.parse(try await HLExchange.send(action: action, nonce: n, signature: signature, mainnet: true))
+        try journal.append(.init(chain: "hyperliquid", id: "\(n)", kind: reply.isError ? .failed : .confirmed, note: "\(note): \(reply)"))
+        guard !reply.isError else { throw ExecutionError("Hyperliquid didn't take it: \(reply).") }
+        (allowed, allowedRead) = (on ? HLBuilder.fee : 0, true)
+        if on { report("ihatecrypto's fee approved: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own.") }
+    }
+
+    /// Binds ihatecrypto's referral code to an account that has none (4% off its Hyperliquid fees), signed like an order:
+    /// by the trading key, without a prompt. Once per account per run of the app; nothing in it stops a trade.
+    func bindReferral() async {
+        let user = wallet.evm.lowercased()
+        guard Self.referralLooked.withLock({ $0.insert(user).inserted }),
+              let state = try? await Self.hlInfo(["type": "referral", "user": user]) as? [String: Any], state["referredBy"] is NSNull,
+              let reply = try? await post(HLBuilder.referrerAction, label: "referral code \(HLBuilder.referralCode)"), !reply.isError else { return }
+        report("Referral code \(HLBuilder.referralCode) on: 4% off your Hyperliquid fees.")
     }
 
     private func verifyProtection(coin: String, stop: Decimal, take: Decimal?) async throws {

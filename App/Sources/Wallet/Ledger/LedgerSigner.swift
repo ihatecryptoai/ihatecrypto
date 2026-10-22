@@ -168,7 +168,9 @@ public struct LedgerSigner: TradeSigner {
         let verdict = HLGuard.check(action, owner: wallet.evm, recipients: Set(recipients))
         guard verdict.ok else { throw Self.refuse(verdict) }
         let (type, fields) = try HLSigner.userAction(action)
-        return try await typed(HLSigner.userTyped(type, fields: fields, mainnet: true), "a Hyperliquid transfer")
+        let what = type != "ApproveBuilderFee" ? "a Hyperliquid transfer"
+            : HLAction.text(action, "maxFeeRate") == HLBuilder.revoke ? "taking back ihatecrypto's fee approval" : "ihatecrypto's \(HLBuilder.rate) fee on your Hyperliquid trades"
+        return try await typed(HLSigner.userTyped(type, fields: fields, mainnet: true), what)
     }
 
     public func signRelayMapping(wallet w: String, depositor: String, id: Data, nonce: UInt64) async throws -> EVMSignature {

@@ -82,6 +82,33 @@ public struct HLOrder: Sendable {
     }
 }
 
+/// ihatecrypto's fee on Hyperliquid trades (a builder code) and its referral code. Both are public by design: every order
+/// that pays the fee names this address on the exchange, and the code is a public link.
+public enum HLBuilder {
+    /// Where the fee goes, lowercase as an order's builder field must be.
+    public static let address = "0x3828b920d705587b16be05d2d3764333a58c87ec"
+    /// Tenths of a basis point: 50 = 0.05% of the trade's value.
+    public static let fee: UInt64 = 50
+    /// The approval's maxFeeRate: exactly the fee, so the fee can't grow without a new approval.
+    public static let rate = "0.05%"
+    /// The approval taken back.
+    public static let revoke = "0%"
+    public static let referralCode = "IHATECRYPTO"
+    /// The fee as a share of the trade: 0.0005.
+    public static var share: Decimal { Decimal(fee) / 100_000 }
+
+    /// approveBuilderFee, signed by the main key: `maxFeeRate` is `rate` to approve, `revoke` to take it back.
+    public static func approveAction(maxFeeRate: String = rate, nonce: UInt64, mainnet: Bool) -> MsgPack {
+        .map([
+            ("type", .string("approveBuilderFee")), ("maxFeeRate", .string(maxFeeRate)), ("builder", .string(address)),
+            ("nonce", .uint(nonce)), ("signatureChainId", .string("0x66eee")), ("hyperliquidChain", .string(mainnet ? "Mainnet" : "Testnet")),
+        ])
+    }
+
+    /// setReferrer, an L1 action: the account gets 4% off Hyperliquid's fees, ihatecrypto a share of them.
+    public static var referrerAction: MsgPack { .map([("type", .string("setReferrer")), ("code", .string(referralCode))]) }
+}
+
 public enum HLAction {
     /// {"type": "order", "orders": […], "grouping": …}. grouping: "na", "normalTpsl" or "positionTpsl".
     public static func order(_ orders: [HLOrder], grouping: String = "na") throws -> MsgPack {
@@ -90,6 +117,22 @@ public enum HLAction {
             ("orders", .array(try orders.map(wire))),
             ("grouping", .string(grouping)),
         ])
+    }
+
+    /// The action's "type" field.
+    public static func type(_ action: MsgPack) -> String? { text(action, "type") }
+
+    /// A string field of the action.
+    public static func text(_ action: MsgPack, _ key: String) -> String? {
+        guard case .map(let pairs) = action, case .string(let s)? = pairs.first(where: { $0.0 == key })?.1 else { return nil }
+        return s
+    }
+
+    /// The same order action paying ihatecrypto's fee: {"b": address, "f": fee} as its last key, after grouping, where the
+    /// SDK puts it (the hash covers the order of keys). Anything else comes back as it was.
+    public static func withBuilder(_ action: MsgPack) -> MsgPack {
+        guard type(action) == "order", case .map(let pairs) = action, !pairs.contains(where: { $0.0 == "builder" }) else { return action }
+        return .map(pairs + [("builder", .map([("b", .string(HLBuilder.address)), ("f", .uint(HLBuilder.fee))]))])
     }
 
     /// {"type": "cancel", "cancels": [{"a": asset, "o": oid}, …]}
@@ -141,10 +184,10 @@ public enum HLAction {
 }
 
 public enum HLSigner {
-    /// Orders, cancels and leverage: what a trading (agent) key may sign. Nothing here moves money out of the account.
+    /// Orders, cancels, leverage and the referral code: what a trading (agent) key may sign. Nothing here moves money out
+    /// of the account (the guard holds an order's fee and the code to ihatecrypto's own).
     public static func isTrading(_ action: MsgPack) -> Bool {
-        guard case .map(let pairs) = action, case .string(let t)? = pairs.first(where: { $0.0 == "type" })?.1 else { return false }
-        return ["order", "cancel", "updateLeverage", "batchModify", "modify"].contains(t)
+        HLAction.type(action).map(["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer"].contains) ?? false
     }
 
     /// keccak256(msgpack(action) ‖ nonce ‖ vault flag [‖ vault] [‖ 0x00 ‖ expiresAfter]).
@@ -227,6 +270,7 @@ public enum HLSigner {
                                     ("token", "string"), ("amount", "string"), ("fromSubAccount", "string"), ("nonce", "uint64")]),
         "withdraw3": ("Withdraw", [("destination", "string"), ("amount", "string"), ("time", "uint64")]),
         "usdSend": ("UsdSend", [("destination", "string"), ("amount", "string"), ("time", "uint64")]),
+        "approveBuilderFee": ("ApproveBuilderFee", [("maxFeeRate", "string"), ("builder", "address"), ("nonce", "uint64")]),
     ]
 
     /// The EIP-712 type and fields of a user-signed action, read from the action itself: what is signed is what the
@@ -240,6 +284,7 @@ public enum HLSigner {
         let fields: [EIP712.Field] = try schema.fields.map { name, type in
             switch (type, values[name]) {
             case ("string", .string(let s)?): return EIP712.Field(name, type, .string(s))
+            case ("address", .string(let s)?): return EIP712.Field(name, type, .address(s))
             case ("bool", .bool(let b)?): return EIP712.Field(name, type, .bool(b))
             case ("uint64", .uint(let n)?): return EIP712.Field(name, type, .uint(n))
             default: throw WalletError("The action has no \(name) field of type \(type).")

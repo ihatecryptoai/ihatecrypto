@@ -133,6 +133,34 @@ private func order(_ kind: HLOrder.Kind, cloid: String? = nil) throws -> MsgPack
                  s: "0x11a6a24900e6e314136d2592e2f8d502cd89b7c15b198e1bee043c9589f9fad7", v: 27))
 }
 
+/// ihatecrypto's fee, its approval and the referral code, signed as the SDK signs them (vectors from hyperliquid-python-sdk
+/// 0.24.0 with the same key).
+@Test func builderFeeAndReferralMatchSDK() throws {
+    let paid = HLAction.withBuilder(try order(.limit(tif: "Gtc")))
+    #expect(same(try HLSigner.signL1(paid, privateKey: sdkKey, nonce: 0, mainnet: true),
+                 r: "0x5e8c92ae5a6121cb3b525595e2901fd2de28827ae13c17f94be82a0cebf62db2",
+                 s: "0x5f0352b6529630059d7ff11bc9ee18e537cd3f0051c3567e23a558add870bccd", v: 28))
+    #expect(same(try HLSigner.signL1(paid, privateKey: sdkKey, nonce: 0, mainnet: false),
+                 r: "0x43aae64cf52cd48e2afd5e0398a653c359075622eb49bd0483449e7a563f4367",
+                 s: "0xddc237f4a723ac7127115bb2f4fef2e90b0f2142ec60dc2e835872cb7bf24c4", v: 27))
+    #expect(HLAction.withBuilder(paid) == paid)
+    #expect(HLAction.withBuilder(HLAction.cancel([(1, 2)])) == HLAction.cancel([(1, 2)]))
+
+    #expect(same(try HLSigner.signL1(HLBuilder.referrerAction, privateKey: sdkKey, nonce: 0, mainnet: true),
+                 r: "0x3ecf6d083e20b2c32e7229b1b71d95514cb21638294db542908c856800193a28",
+                 s: "0x5b581d2ede67292edf94d686e49195e8a17c9878ee165d2a2391ab9f481e7c6c", v: 27))
+    #expect(HLSigner.isTrading(HLBuilder.referrerAction))
+
+    func approval(_ rate: String) throws -> EVMSignature {
+        let (type, fields) = try HLSigner.userAction(HLBuilder.approveAction(maxFeeRate: rate, nonce: 1_792_000_000_000, mainnet: true))
+        return try HLSigner.signUserAction(type, fields: fields, privateKey: sdkKey, mainnet: true)
+    }
+    #expect(same(try approval(HLBuilder.rate), r: "0x9d626107e73eb1083567f12193d488e017b0d88e9c80b0bc7f9852523f7429e1",
+                 s: "0x3002a3c1e7643fb43d7226afe2db284b24a2f9688eee279917b36a3befafa07c", v: 28))
+    #expect(same(try approval(HLBuilder.revoke), r: "0x5eece18dcf83f4239b91b4d7da79940347502c4a28c0af61ae736b1987047185",
+                 s: "0x255505b9ddc87a5d9e76a903f129db73df869a9888ab23ec0473c2b64494c9b", v: 27))
+}
+
 @Test func wireNumbersMatchSDKFormat() throws {
     #expect(try HLAction.number(100) == "100")
     #expect(try HLAction.number(Decimal(string: "1670.1")!) == "1670.1")

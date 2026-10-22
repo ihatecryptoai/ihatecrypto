@@ -151,6 +151,8 @@ final class Workspace {
     /// The signer's Hyperliquid agent: orders without Touch ID, no withdrawals.
     var agentAddress: String?
     var agentActive = false
+    /// The Hyperliquid account approved ihatecrypto's fee (HLBuilder); nil until read (Settings reads it).
+    var feeApproved: Bool?
     /// Seconds one Touch ID confirmation keeps signing open (the signer's setting).
     var sessionLength = SignerSession.standard
 
