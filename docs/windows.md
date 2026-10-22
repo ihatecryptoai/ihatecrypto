@@ -102,13 +102,14 @@ rules with every signature on the card, managing open positions, several moves i
 price alerts and scheduled tasks with recurring buys (checked every minute while the app runs; their moves come as
 cards for Confirm, with a Windows notification), the tray (closing the window keeps it running, as the Mac's menu bar
 does), price charts and the day's movers in the chat, P/L (Hyperliquid's trading after fees and
-funding, open positions, and the portfolio's change without money moved in or out), the second check (on by default, as on the
+funding, open positions, the portfolio's change without money moved in or out, and each coin's P/L against what it
+cost: the chain's history priced on the day, the app's own buys, or when first seen), the second check (on by default, as on the
 Mac: the model reads every command and trade plan again, Jev through OpenRouter when allowed, and code checks that a
 plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
 Not yet: the canvas and its boards, the automation wallet (a task's moves sign only after Confirm), the dApp browser,
-multisig, Ledger, the P/L of each held token by its cost, favorites, skills, paid requests (MPP), voice, notifications.
+multisig, Ledger, favorites, skills, paid requests (MPP), voice, notifications.
 
 ## Checking on a Windows machine
 

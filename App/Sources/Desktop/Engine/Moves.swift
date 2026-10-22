@@ -29,6 +29,19 @@ extension Engine {
                 self?.running?.lines.append(text)
                 self?.changed()
             }
+        } swapped: { [weak self] from, to, spent, received in
+            // Bought with USDC: its cost; sold for USDC: that share of the cost goes. Other swaps have no dollar side.
+            Task { @MainActor in
+                guard let self else { return }
+                if from == .usdc { self.appCosts[to.mint, default: CostBasis()].bought(received, for: spent) }
+                if to == .usdc { self.appCosts[from.mint]?.sold(spent) }
+            }
+        } traded: { [weak self] key, tokens, dollars in
+            // A buy through ihatecrypto on an EVM network: its cost, kept like the Solana swaps'.
+            Task { @MainActor in
+                guard let self else { return }
+                if tokens > 0 { self.appCosts[key, default: CostBasis()].bought(tokens, for: dollars) } else { self.appCosts[key]?.sold(-tokens) }
+            }
         }
     }
 

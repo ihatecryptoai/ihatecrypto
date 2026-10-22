@@ -307,7 +307,8 @@ function portfolio() {
       h("div", { class: "row" }, h("b", {}, n.name), h("b", { class: "num" }, usd(n.usd))),
       n.rows.map((r) => h("div", { class: "row" },
         h("span", { class: "sym" }, r.icon ? h("img", { src: r.icon, alt: "" }) : null, r.symbol),
-        h("span", { class: "num" }, r.amount, r.usd !== undefined && r.usd !== null ? h("span", { class: "muted small" }, "  " + usd(r.usd)) : null))))))
+        h("span", { class: "num" }, r.amount, r.usd !== undefined && r.usd !== null ? h("span", { class: "muted small" }, "  " + usd(r.usd)) : null,
+          r.pnl ? h("span", { class: "small " + (r.gain < 0 ? "loss" : "gain") }, "  " + r.pnl) : null))))))
       : h("div", { class: "empty" }, t("Nothing here yet. Receive shows where to send money.", "Пока пусто. Во вкладке «Получить» — куда отправить деньги.")),
     p.errors.length ? h("p", { class: "muted small" }, t("Didn't answer: ", "Не ответили: ") + p.errors.join("; ")) : null,
   ));

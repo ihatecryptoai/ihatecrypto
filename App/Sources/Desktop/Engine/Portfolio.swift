@@ -13,6 +13,12 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         var value: Decimal
         var usd: Decimal?
         var icon: String?
+        /// Where its cost is kept (CostBasis): the mint on Solana, «chain:contract» elsewhere; nil for dollars and perps.
+        var key: String?
+        var contract: String?
+        /// «+$1.20 (+5.0%)» against what it cost, when known.
+        var pnl: String?
+        var gain: Decimal?
     }
     struct Network: Encodable, Equatable {
         var key: String
@@ -57,8 +63,9 @@ extension Engine {
         let next = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
         // Another wallet since the last read: its balances aren't money that arrived.
         if portfolio.updatedAt != nil, portfolioOwner == me.solana { announceIncoming(from: portfolio, to: next) }
-        portfolio = next
+        portfolio = withProfit(next)
         portfolioOwner = me.solana
+        Task { await loadCosts() }
         if errors.isEmpty { recordEquity(next.total, wallet: me.solana) }
         positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
         await checkAlerts()
@@ -110,8 +117,18 @@ extension Engine {
         case failure(String, String)
     }
 
-    nonisolated static func row(_ symbol: String, _ amount: Decimal, usd: Decimal? = nil, icon: URL? = nil) -> PortfolioView.Row {
-        .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), value: amount, usd: usd, icon: icon?.absoluteString)
+    /// `chain` and `contract` for a coin whose P/L counts (not a dollar, not the perps' margin).
+    nonisolated static func row(_ symbol: String, _ amount: Decimal, usd: Decimal? = nil, icon: URL? = nil, chain: String? = nil, contract: String? = nil) -> PortfolioView.Row {
+        var key: String?
+        if let chain, let contract, !Stablecoins.isGenuine(contract, on: chain) {
+            key = switch chain {
+            case "solana": contract
+            case "hyperliquid": "hyperliquid:\(contract.lowercased())"
+            default: "\(chain):\(contract.lowercased())"
+            }
+        }
+        return .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), value: amount, usd: usd, icon: icon?.absoluteString,
+                     key: key, contract: key == nil ? nil : contract)
     }
 
     nonisolated static func solana(_ owner: String) async -> Read {
@@ -119,8 +136,8 @@ extension Engine {
             let b = try await Solana.balance(owner: owner)
             var rows: [PortfolioView.Row] = []
             if b.usdc > 0 { rows.append(row("USDC", b.usdc, usd: b.usdc)) }
-            if b.sol > 0 { rows.append(row("SOL", b.sol)) }
-            rows += b.tokens.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon) }
+            if b.sol > 0 { rows.append(row("SOL", b.sol, chain: "solana", contract: CostBasis.wsol)) }
+            rows += b.tokens.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "solana", contract: $0.contract) }
             return .success(.init(key: "solana", name: "Solana", usd: 0, rows: rows))
         } catch {
             return .failure("solana", "Solana: \(error.localizedDescription)")
@@ -134,7 +151,7 @@ extension Engine {
             if b.accountValue > 0 { rows.append(row("Perps", b.accountValue, usd: b.accountValue)) }
             if b.spotUSDC > 0 { rows.append(row("USDC", b.spotUSDC, usd: b.spotUSDC)) }
             rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" && $0.looksReal }
-                .map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon) }
+                .map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "hyperliquid", contract: $0.contract) }
             return .success(.init(key: "hyperliquid", name: "Hyperliquid", usd: 0, rows: rows))
         } catch {
             return .failure("hyperliquid", "Hyperliquid: \(error.localizedDescription)")
@@ -153,9 +170,9 @@ extension Engine {
                         let coin = Decimal(try await gas) / Decimal(sign: .plus, exponent: 18, significand: 1)
                         var rows: [PortfolioView.Row] = []
                         if usd > 0 { rows.append(row(net.key == "robinhood" ? "USDG" : "USDC", usd, usd: usd)) }
-                        if coin > 0 { rows.append(row(net.gasCoin, coin)) }
+                        if coin > 0 { rows.append(row(net.gasCoin, coin, chain: net.key, contract: "native")) }
                         let others = (await Holdings.evm(net.key, address: owner, native: false, skip: [net.usdc.lowercased()])) ?? []
-                        rows += others.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon) }
+                        rows += others.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: net.key, contract: $0.contract) }
                         return (i, .success(.init(key: net.key, name: net.name, usd: 0, rows: rows)))
                     } catch {
                         return (i, .failure(net.key, "\(net.name): \(error.localizedDescription)"))
@@ -173,7 +190,10 @@ extension Engine {
         do {
             let b = try await Near.balance(account: account)
             let total = b.near + b.wrapped
-            return .success(.init(key: "near", name: "NEAR", usd: 0, rows: total > 0 ? [row("NEAR", total)] : []))
+            var rows = total > 0 ? [row("NEAR", total)] : []
+            rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" && $0.looksReal }
+                .map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "near", contract: $0.contract) }
+            return .success(.init(key: "near", name: "NEAR", usd: 0, rows: rows))
         } catch {
             return .failure("near", "NEAR: \(error.localizedDescription)")
         }

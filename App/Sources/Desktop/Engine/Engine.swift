@@ -91,6 +91,15 @@ final class Engine {
     var lastOwnMove = Date.distantPast
     /// The wallet the balances on screen were read for.
     var portfolioOwner: String?
+    /// What each coin cost: read from the chain (by amount held then), recorded by the app's own buys, or first seen.
+    var chainCost: [String: (held: Decimal, cost: CostBasis)] = [:]
+    var appCosts: [String: CostBasis] = Store.load([String: CostBasis].self, "costs.json") ?? [:] {
+        didSet { Store.save(appCosts, "costs.json") }
+    }
+    var seenCosts: [String: CostBasis] = Store.load([String: CostBasis].self, "seen.json") ?? [:] {
+        didSet { Store.save(seenCosts, "seen.json") }
+    }
+    var costsLoading = false
 
     // Chat
     var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
