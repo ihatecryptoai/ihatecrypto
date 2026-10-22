@@ -144,8 +144,13 @@ extension Engine {
             tasks.removeAll { t in buys.contains { $0.id == t.id } }
             reply(buys.isEmpty ? say("There were no recurring buys.", "Регулярных покупок не было.") : say("Recurring buys stopped (\(buys.count)).", "Регулярные покупки остановлены (\(buys.count))."), note: note)
             return
-        case .yields, .allocate, .rebalance, .jupiterDCAOrders, .showApprovals, .multisigCreate, .multisigSend,
-             .multisigShow, .claimRewards, .sweepRewards, .contractCall, .receiveAcross:
+        case .yields(let asset): await showYields(asset, note: note); return
+        case .allocate, .rebalance: await preparePlan(command, note: note); return
+        case .claimRewards, .sweepRewards: await prepareClaim(command, note: note); return
+        case .showApprovals: await showApprovals(note: note); return
+        case .jupiterDCAOrders: await showJupiterDCA(note: note); return
+        case .receiveAcross(let net, let token, let amount?): await receiveAcross(net, token, amount, note: note); return
+        case .multisigCreate, .multisigSend, .multisigShow, .contractCall:
             reply(say("“\(command.summary)” isn't in the Windows app yet: for now it does it on a Mac. Nothing moved.",
                       "«\(command.summary)» в Windows-версии пока нет — это умеет версия для Mac. Ничего не ушло."), note: note)
             return
@@ -604,6 +609,11 @@ extension Engine {
             reply(try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every), note: "Jupiter DCA")
         case .jupiterDCACancel(let asset): reply(try await e.cancelJupiterDCA(asset), note: "Jupiter DCA")
         case .pay: reply(try await pay(command, e), note: "MPP · Tempo")
+        case .allocate(let symbol, let share, let limit, let without, let from):
+            reply(try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: true).text, note: "DeFi")
+        case .rebalance(let share): reply(try await e.rebalance(maxShare: share ?? 50, execute: true).text, note: "DeFi")
+        case .claimRewards: reply(try await e.claimRewards(), note: "Merkl")
+        case .sweepRewards(let min, let into): reply(try await e.sweepRewards(minUSD: min, into: into), note: "Merkl · Uniswap")
         default:
             throw ExecutionError(say("“\(command.summary)” isn't in the Windows app yet. Nothing was signed.", "«\(command.summary)» в Windows-версии пока нет. Ничего не подписано."))
         }

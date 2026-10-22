@@ -98,7 +98,9 @@ Receive, the address book, the portfolio on Solana, Hyperliquid, every EVM netwo
 (an API key, a browser sign-in to ChatGPT or OpenRouter caught on 127.0.0.1, a local model, or a login another app
 has) or plain commands without one, every money command the Mac's
 chat runs through the Executor (transfers, swaps, bridges, lending, Hyperliquid spot), Hyperliquid trades by the risk
-rules with every signature on the card, managing open positions, several moves in one message under one Confirm,
+rules with every signature on the card, managing open positions, the best rates and spreading or rebalancing money
+across them, Merkl's rewards (claim, or sweep them into USDC), token approvals with a revoke on each, Jupiter DCA,
+coins from networks without a wallet here (NEAR Intents' deposit address), several moves in one message under one Confirm,
 price alerts and scheduled tasks with recurring buys (checked every minute while the app runs; their moves come as
 cards for Confirm, with a Windows notification), the tray (closing the window keeps it running, as the Mac's menu bar
 does), price charts and the day's movers in the chat, P/L (Hyperliquid's trading after fees and
@@ -111,7 +113,7 @@ plan holds no more money or risk than named), history from the journal, lock and
 length, signed updates.
 
 Not yet: the canvas and its boards, the automation wallet (a task's moves sign only after Confirm), the dApp browser,
-multisig, Ledger, watched wallets, voice, notifications.
+multisig, Ledger, watched wallets, voice.
 
 ## Checking on a Windows machine
 
