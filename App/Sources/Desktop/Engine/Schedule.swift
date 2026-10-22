@@ -22,6 +22,13 @@ extension Engine {
             return
         }
         var task = task
+        // A top-up of the automation wallet pays from the wallet that's on, with Confirm: never from itself.
+        if let a = automationWallet, task.steps.contains(where: { step in
+            switch WalletCommand.parse(step) {
+            case .sendTo(let name, _, _)?, .sendToken(let name, _, _, _)?, .sendSol(let name, _)?: name.lowercased() == a.label.lowercased()
+            default: false
+            }
+        }) { task.fromActive = true }
         let paused = waitsForSwitch(task)
         if paused { task.paused = true }
         tasks.append(task)

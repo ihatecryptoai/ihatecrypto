@@ -248,7 +248,16 @@ extension Engine {
             guard let network else { return true }
             return e.network == network || (Self.evmPlaces.contains(network) && (Self.evmPlaces.contains(e.network) || e.network == "hyperliquid"))
         }
-        return named.first(where: fits) ?? named.first
+        return named.first(where: fits) ?? named.first ?? ownWallet(name, network: network)
+    }
+
+    /// Another wallet of this computer by its name («send 10 USDC to Automation»): the user's own, which the signer
+    /// knows as ours, so it needs no saving first.
+    func ownWallet(_ name: String, network: String?) -> SignerAddress? {
+        guard let w = status?.wallets?.first(where: { $0.label.lowercased() == name.lowercased() && $0.id != activeWallet?.id }) else { return nil }
+        let net = network ?? (w.solana != nil ? "solana" : "base")
+        let address = net == "solana" ? w.solana : net == "near" ? w.near : w.evm
+        return address.map { SignerAddress(name: w.label, network: net, address: $0, memo: "") }
     }
 
     func tokenRecipient(_ name: String, network: String?) throws -> (entry: SignerAddress, network: String) {
