@@ -21,6 +21,7 @@ extension Engine {
             return
         }
         tasks.append(task)
+        pin(Board(kind: "schedule", title: "schedule"))
         reply(say("Scheduled: \(taskText(task)). It runs while ihatecrypto is open or in the tray; a money move comes as a card for Confirm.",
                   "Запланировано: \(taskText(task)). Выполнится, пока ihatecrypto открыт или в трее; перевод придёт карточкой на подтверждение."), note: note)
     }

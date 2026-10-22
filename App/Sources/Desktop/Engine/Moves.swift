@@ -14,9 +14,9 @@ import WalletCore
 extension Engine {
     var journal: Journal { Journal(url: Store.url("journal.jsonl")) }
 
-    func executor() throws -> Executor {
-        guard let wallet = tradeWallet else { throw ExecutionError(say("Add a wallet first.", "Сначала добавь кошелёк.")) }
-        let signer = LinkTradeSigner { [weak self] on in
+    /// The signer over its pipe; while it waits for Windows Hello the window shows so and lets it come forward.
+    func tradeSigner() -> LinkTradeSigner {
+        LinkTradeSigner { [weak self] on in
             Task { @MainActor in
                 guard let self else { return }
                 self.signing += on ? 1 : -1
@@ -24,10 +24,16 @@ extension Engine {
                 self.changed()
             }
         }
-        return Executor(wallet: wallet, signer: signer, journal: journal) { [weak self] text in
+    }
+
+    func executor() throws -> Executor {
+        guard let wallet = tradeWallet else { throw ExecutionError(say("Add a wallet first.", "Сначала добавь кошелёк.")) }
+        return Executor(wallet: wallet, signer: tradeSigner(), journal: journal) { [weak self] text in
             Task { @MainActor in
-                self?.running?.lines.append(text)
-                self?.changed()
+                guard let self else { return }
+                self.running?.lines.append(text)
+                self.updateBoard(self.runningBoard) { $0.lines.append(text) }
+                self.changed()
             }
         } swapped: { [weak self] from, to, spent, received in
             // Bought with USDC: its cost; sold for USDC: that share of the cost goes. Other swaps have no dollar side.
@@ -48,14 +54,19 @@ extension Engine {
     // MARK: Cards
 
     func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = []) {
+        // A card waiting before this one stays on the canvas, marked: nothing of it was signed.
+        updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Replaced by the next card: nothing was signed.", "Заменена следующей карточкой: ничего не подписано.")) }
         self.pending = pending
         // A warning on the card is read before the button: the button says it goes ahead despite it.
-        card = Card(id: UUID().uuidString, title: title, lines: lines, warnings: warnings,
+        let id = UUID().uuidString
+        card = Card(id: id, title: title, lines: lines, warnings: warnings,
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
-        changed()
+        pin(Board(id: id, kind: "move", title: title, lines: warnings.map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
     }
 
     func cancelPending() {
+        updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Cancelled: nothing was signed.", "Отменено: ничего не подписано.")) }
+        if case .wallet(.multisigCreate)? = pending { multisigDraft = nil }
         pending = nil
         card = nil
         awaitingAmount = nil
@@ -95,6 +106,7 @@ extension Engine {
         switch command {
         case .sendTo(let name, let amount, let net): prepareTransfer(amount, to: name, network: net, note: note); return
         case .receive:
+            pin(Board(kind: "receive", title: "receive"))
             let lines = [solanaAddress.map { "Solana: \($0)" }, evmAddress.map { "Base, Arbitrum, Ethereum, Hyperliquid…: \($0)" }, nearAddress.map { "NEAR: \($0)" }]
             reply(say("Your addresses (Receive shows them with Copy):\n", "Твои адреса (во вкладке «Получить» — с кнопкой «Копировать»):\n")
                   + lines.compactMap { $0 }.joined(separator: "\n")
@@ -150,7 +162,10 @@ extension Engine {
         case .showApprovals: await showApprovals(note: note); return
         case .jupiterDCAOrders: await showJupiterDCA(note: note); return
         case .receiveAcross(let net, let token, let amount?): await receiveAcross(net, token, amount, note: note); return
-        case .multisigCreate, .multisigSend, .multisigShow, .contractCall:
+        case .multisigCreate: await prepareMultisig(command, note: note); return
+        case .multisigSend: await prepareMultisigSend(command, note: note); return
+        case .multisigShow: showMultisig(note: note); return
+        case .contractCall:
             reply(say("“\(command.summary)” isn't in the Windows app yet: for now it does it on a Mac. Nothing moved.",
                       "«\(command.summary)» в Windows-версии пока нет — это умеет версия для Mac. Ничего не ушло."), note: note)
             return
@@ -409,11 +424,24 @@ extension Engine {
     /// The Confirm button: the one way a move starts.
     func confirm() async {
         guard let waiting = pending, let title = card?.title else { return }
+        // The card's block turns into the running move in the same step: nothing leaves the canvas meanwhile.
+        runningBoard = card?.id
+        updateBoard(runningBoard) { $0.state = "running" }
         pending = nil
         card = nil
         running = (title, [])
         changed()
-        defer { running = nil; lastOwnMove = Date(); changed(); Task { await refresh() } }
+        let said = messages.count
+        defer {
+            // What the move ended with stays on its block.
+            let outcome = messages.dropFirst(said).last { !$0.fromUser }?.text
+            updateBoard(runningBoard) { b in
+                if b.state == "running" { b.state = "done" }
+                if let outcome { b.lines.append(String(outcome.prefix(400))) }
+            }
+            runningBoard = nil
+            running = nil; lastOwnMove = Date(); changed(); Task { await refresh() }
+        }
         let started = Date()
         do {
             switch waiting {
@@ -455,6 +483,7 @@ extension Engine {
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))
             }
         } catch {
+            updateBoard(runningBoard) { $0.state = "failed" }
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice.
             let sent = (try? journal.unresolved())?.filter { $0.at >= started.addingTimeInterval(-1) } ?? []
             if sent.isEmpty, let loss = error as? CostlyMove {
@@ -484,8 +513,7 @@ extension Engine {
         guard let c = costly else { return }
         costly = nil
         await Executor.$lossAccepted.withValue(c.lost) {
-            pending = c.pending
-            card = Card(id: UUID().uuidString, title: c.title, confirm: say("Confirm", "Подтвердить"))
+            show(c.pending, title: c.title)
             await confirm()
         }
     }
@@ -613,6 +641,8 @@ extension Engine {
             reply(try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: true).text, note: "DeFi")
         case .rebalance(let share): reply(try await e.rebalance(maxShare: share ?? 50, execute: true).text, note: "DeFi")
         case .claimRewards: reply(try await e.claimRewards(), note: "Merkl")
+        case .multisigCreate: reply(try await runMultisigCreate(), note: "Safe · multisig")
+        case .multisigSend: reply(try await runMultisigSend(command), note: "Safe · multisig")
         case .sweepRewards(let min, let into): reply(try await e.sweepRewards(minUSD: min, into: into), note: "Merkl · Uniswap")
         default:
             throw ExecutionError(say("“\(command.summary)” isn't in the Windows app yet. Nothing was signed.", "«\(command.summary)» в Windows-версии пока нет. Ничего не подписано."))

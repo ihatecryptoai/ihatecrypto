@@ -24,6 +24,8 @@ extension Engine {
                           "DexScreener не знает этот токен\(chain.map { " на \($0)" } ?? ""): ни один пул им не торгует, цены нет."), note: note)
                 return
             }
+            pin("result", "\(info.symbol) · \(info.chain)", lines: [describe(info), info.address],
+                actions: [.init(title: say("Add to favorites", "В избранное"), command: "add \(info.address) to favorites")])
             reply(describe(info) + say(" It’s a contract, not an address to send money to.", " Это контракт, а не адрес для перевода денег."), note: note ?? "DexScreener")
         case .unfavorite(let symbol):
             let before = favorites.count
@@ -40,6 +42,7 @@ extension Engine {
                                       price: info.priceUSD, change24h: info.change24h, liquidity: info.liquidityUSD)
             favorites.removeAll { $0.id == token.id }
             favorites.append(token)
+            pin(Board(kind: "favorites", title: "favorites"))
             reply("⭐ " + describe(info) + say(" It’s in your favorites now.", " Теперь в избранном."), note: note ?? "DexScreener")
         }
     }

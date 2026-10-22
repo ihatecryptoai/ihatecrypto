@@ -68,6 +68,7 @@ extension Engine {
             lines = PnL.facts(r, pretty: IntentParser.pretty)
         }
         if !held.isEmpty { lines.append(say("Held now: ", "Сейчас в кошельке: ") + held.joined(separator: ", ") + ".") }
+        pin("result", "P/L · " + period + (r.coin.map { " · " + IntentParser.pretty($0) } ?? ""), lines: lines)
         reply(lines.joined(separator: " "), note: note)
     }
 

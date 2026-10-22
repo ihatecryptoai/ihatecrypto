@@ -42,6 +42,8 @@ extension Engine {
                 + (o.tvlUSD.map { ", \(Fmt.usd(($0 / 1_000_000).rounded(1, .plain)))M " + say("deposited", "в депозитах") } ?? "")
         }.joined(separator: "\n"), note: note ?? "DeFi")
         options = rates.prefix(4).compactMap { o in o.how.map { ChatRouter.Option(title: "\(o.place) · \(Fmt.num(o.apy.rounded(2, .plain)))%", comment: o.note, command: $0) } }
+        pin("result", say("Rates", "Ставки") + (asset.map { " · \($0)" } ?? ""), lines: rates.prefix(12).map { "\($0.place) (\($0.asset)) · \(Fmt.num($0.apy.rounded(2, .plain)))%" },
+            actions: rates.prefix(4).compactMap { o in o.how.map { Board.Action(title: "\(o.place) · \(Fmt.num(o.apy.rounded(2, .plain)))%", command: $0) } })
         changed()
     }
 
@@ -97,6 +99,9 @@ extension Engine {
         do {
             guard let account = try await SignerLink.shared.send(.nearAddress).nearAddress else { throw ExecutionError("The signer has no NEAR account for a refund.") }
             let r = try await executor().receiveAcross(token, amount: amount, network: network, nearAccount: account)
+            pin("result", say("Receive \(token.uppercased()) from \(title)", "Получить \(token.uppercased()) из \(title)"),
+                lines: [say("Send \(Fmt.num(amount)) \(token.uppercased()) on \(title) within an hour to:", "Отправь \(Fmt.num(amount)) \(token.uppercased()) в сети \(title) в течение часа на:"), r.deposit,
+                        say("≈ \(r.quote.amountOutFormatted) USDC lands on Solana", "На Solana придёт ≈ \(r.quote.amountOutFormatted) USDC")])
             reply(say("Send \(Fmt.num(amount)) \(token.uppercased()) on \(title) within an hour to:\n\(r.deposit)\n≈ \(r.quote.amountOutFormatted) USDC lands on Solana (at least \(Fmt.num(r.minimum)) \(token.uppercased())).",
                       "Отправь \(Fmt.num(amount)) \(token.uppercased()) в сети \(title) в течение часа на:\n\(r.deposit)\nНа Solana придёт ≈ \(r.quote.amountOutFormatted) USDC (не меньше \(Fmt.num(r.minimum)) \(token.uppercased()))."),
                   note: note ?? "NEAR Intents · \(title)")
@@ -117,6 +122,9 @@ extension Engine {
         reply(say("Token approvals:\n", "Разрешения на токены:\n") + list.prefix(20).map { a in
             "\(a.symbol) on \(a.chain) → \(a.spenderName ?? a.spender)" + (a.unlimited ? say(" · unlimited", " · без лимита") : "") + (a.permit2 ? " · Permit2" : "")
         }.joined(separator: "\n"), note: note ?? say("approvals", "разрешения"))
+        pin("result", say("Approvals", "Разрешения"), lines: list.prefix(30).map { "\($0.symbol) on \($0.chain) → \($0.spenderName ?? $0.spender)" + ($0.unlimited ? " · unlimited" : "") },
+            actions: list.prefix(12).map { a in Board.Action(title: say("Revoke \(a.symbol) · \(a.chain)", "Отозвать \(a.symbol) · \(a.chain)"),
+                                                             command: WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2).summary) })
         options = list.prefix(6).map { a in
             let c = WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2)
             return ChatRouter.Option(title: say("Revoke \(a.symbol) for \(a.spenderName ?? String(a.spender.prefix(10)))", "Отозвать \(a.symbol) у \(a.spenderName ?? String(a.spender.prefix(10)))"),
@@ -127,6 +135,13 @@ extension Engine {
 
     func showJupiterDCA(note: String?) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { reply(say("Jupiter didn't answer.", "Jupiter не ответил."), note: note); return }
+        if !orders.isEmpty {
+            let symbol: (String) -> String = { mint in mint == SpotAsset.usdc.mint ? "USDC" : SpotAsset.all.first { $0.mint == mint }?.symbol ?? String(mint.prefix(6)) + "…" }
+            pin("result", "Jupiter DCA", lines: orders.prefix(10).map { o in
+                "\(Fmt.num(o.used, maxFraction: 2)) / \(Fmt.num(o.deposited, maxFraction: 2)) \(symbol(o.inputMint)) → \(Fmt.num(o.received, maxFraction: 6)) \(symbol(o.outputMint)) · "
+                    + say("\(o.fills) swaps, every \(o.every / 3600) h", "\(o.fills) обменов, раз в \(o.every / 3600) ч")
+            })
+        }
         reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
               : say("Running Jupiter DCA: \(orders.count).", "Запущено Jupiter DCA: \(orders.count)."), note: note ?? "Jupiter DCA")
     }

@@ -12,7 +12,7 @@ import WalletCore
 /// local parsers with no model), then the same command parsers and checks. Nothing here signs: a move becomes a card,
 /// and only the window's Confirm carries it out.
 extension Engine {
-    func send(_ raw: String, shown: String? = nil) async {
+    func send(_ raw: String, shown: String? = nil, about board: String? = nil) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !thinking else { return }
         // A recovery phrase is never shown, kept or sent anywhere: not even into the chat's history.
@@ -21,12 +21,17 @@ extension Engine {
                       "Похоже на фразу восстановления. Я её не показываю, не храню и никуда не отправляю. Импортируй её в «Кошельки › Импорт»."))
             return
         }
-        messages.append(Message(fromUser: true, text: shown ?? text))
+        // A block the person pointed at (right-click › Ask in chat): its words go to the model with the message.
+        attached = board.flatMap { id in boards.first { $0.id == id } }
+        var said = Message(fromUser: true, text: shown ?? text)
+        said.context = attached.map(blockFacts)
+        messages.append(said)
+        nameCanvas(from: shown ?? text)
         saveChat()
         options = []
         thinking = true
         changed()
-        defer { thinking = false; draft = nil; changed() }
+        defer { thinking = false; draft = nil; attached = nil; changed() }
 
         // Before the parser or any model sees it. Jev reads a message that may hold a paste (an address, a link, or more
         // than anyone types as a command), told it is the user's own.
@@ -341,6 +346,8 @@ extension Engine {
         c.recent = recentChat()
         c.plan = intent == TradeIntent() ? nil : intent.command
         if let card { c.canvas.append("waiting for Confirm: " + card.title) }
+        if let attached { c.canvas.append("the user points at this block on the canvas: " + blockFacts(attached)) }
+        c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block «\($0.title)»: " + $0.lines.prefix(6).joined(separator: "; ") }
         c.canvas += alerts.map { "price alert: " + alertText($0) }
         c.canvas.append("schedule: " + (tasks.isEmpty ? "nothing scheduled" : tasks.map(taskText).joined(separator: "; ")))
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }

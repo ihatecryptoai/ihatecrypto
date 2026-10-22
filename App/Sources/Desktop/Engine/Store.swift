@@ -78,4 +78,6 @@ nonisolated struct Settings: Codable, Equatable {
     var secondCheck: Bool?
     /// The second check may also ask TypeSafe Jev through OpenRouter while the chat runs elsewhere: only when turned on.
     var jevOpenRouter: Bool?
+    /// The canvas open last.
+    var canvas: String?
 }

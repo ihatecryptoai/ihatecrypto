@@ -172,6 +172,25 @@ import Testing
         #expect((cancelled.state?["tasks"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    @Test func eachCanvasKeepsItsOwnChatAndBlocks() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let first = try engine.call("send", ["text": "remember: canvases keep their chat"])
+        let firstID = try #require(first.state?["canvas"] as? String)
+        try engine.call("addBoard", ["name": "receive"])
+        // A live block shows once: asked again, it comes to the top instead.
+        let again = try engine.call("addBoard", ["name": "receive"])
+        #expect((again.state?["boards"] as? [[String: Any]])?.map { $0["kind"] as? String } == ["receive"])
+        let made = try engine.call("newCanvas")
+        #expect(made.state?["canvas"] as? String != firstID)
+        #expect(Self.chat(made.state).isEmpty)
+        #expect((made.state?["boards"] as? [[String: Any]])?.isEmpty == true)
+        #expect((made.state?["canvases"] as? [[String: Any]])?.count == 2)
+        let back = try engine.call("openCanvas", ["wallet": firstID])
+        #expect(Self.chat(back.state).first == "remember: canvases keep their chat")
+        #expect((back.state?["boards"] as? [[String: Any]])?.count == 1)
+    }
+
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {
         let engine = try Engine()
         try engine.call("hello")
@@ -193,6 +212,9 @@ import Testing
 
         let cancelled = try engine.call("cancel")
         #expect(cancelled.state?["card"] == nil)
+        // The card stays on the canvas, marked: nothing of it was signed.
+        let move = (cancelled.state?["boards"] as? [[String: Any]])?.first
+        #expect(move?["kind"] as? String == "move" && move?["state"] as? String == "cancelled")
 
         // Two moves in one message: one card with both, waiting for the one Confirm.
         let chain = try engine.call("send", ["text": "send 1 USDC to mom then send 2 USDC to mom"])

@@ -33,6 +33,7 @@ extension Engine {
                 return
             }
             alerts.append(a)
+            pin(Board(kind: "alerts", title: "alerts"))
             reply(say("Set: \(alertText(a)) (now \(Fmt.price(mark))). It's checked every minute while ihatecrypto is open",
                       "Поставил: \(alertText(a)) (сейчас \(Fmt.price(mark))). Проверяю раз в минуту, пока ihatecrypto открыт")
                   + (a.steps == nil ? "." : say("; when it fires, its moves come as cards for Confirm.", "; когда сработает, действия придут карточками на подтверждение.")), note: note)

@@ -17,6 +17,8 @@ nonisolated struct Message: Codable, Equatable, Identifiable {
     var at = Date()
     /// A price chart drawn under the text.
     var chart: ChartLine?
+    /// What a block the person pointed at told the model with this message, shown over it.
+    var context: String?
 }
 
 /// A market's closes over a range, for the window to draw as a line.
@@ -109,14 +111,29 @@ final class Engine {
     var memory: [String] = Store.load([String].self, "memory.json") ?? [] { didSet { Store.save(memory, "memory.json") } }
     var favorites: [FavoriteToken] = Store.load([FavoriteToken].self, "favorites.json") ?? [] { didSet { Store.save(favorites, "favorites.json"); changed() } }
 
+    // Canvases: each has its own chat and blocks.
+    lazy var canvases: [CanvasDoc] = Self.loadCanvases()
+    lazy var canvasID: String = settings.canvas.flatMap { id in canvases.contains { $0.id == id } ? id : nil } ?? canvases[0].id
+    var messages: [Message] {
+        get { canvases[canvasIndex].messages }
+        set { canvases[canvasIndex].messages = newValue }
+    }
+
     // Chat
-    var messages: [Message] = Store.load([Message].self, "chat.json") ?? []
     var thinking = false
     var draft: String?
     var pending: Pending?
     var card: Card?
     var options: [ChatRouter.Option] = []
     var running: (title: String, lines: [String])?
+    /// The block of the move that runs now.
+    var runningBoard: String?
+    /// The block the message being read is about.
+    var attached: Board?
+    /// Multisigs made here, the set-up card's choices, and a payment out of one waiting for Confirm.
+    var multisigs: [Multisig] = Store.load([Multisig].self, "multisigs.json") ?? []
+    var multisigDraft: MultisigDraft?
+    var multisigPayment: MultisigPayment?
     var awaitingAmount: WalletCommand?
     /// A move the loss cap stopped (CostlyMove): offered again with that loss accepted («Send anyway»), never by itself.
     var costly: (pending: Pending, title: String, lost: Decimal)?
@@ -182,7 +199,7 @@ final class Engine {
         changed()
     }
 
-    func saveChat() { Store.save(Array(messages.suffix(300)), "chat.json") }
+    func saveChat() { saveCanvases() }
 
     nonisolated struct Snapshot: Encodable {
         struct Signer: Encodable {
@@ -231,6 +248,14 @@ final class Engine {
         var skills: [SkillView]
         var memory: [String]
         var favorites: [FavoriteToken]
+        struct CanvasRow: Encodable { var id: String; var title: String; var at: Date }
+        var canvases: [CanvasRow]
+        var canvas: String
+        var boards: [Board]
+        var runningBoard: String?
+        var multisigs: [Multisig]
+        var multisigDraft: MultisigDraft?
+        var candidates: [Multisig.Key]
     }
 
     func snapshot() -> Snapshot {
@@ -255,7 +280,9 @@ final class Engine {
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) },
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
-            memory: memory, favorites: favorites)
+            memory: memory, favorites: favorites,
+            canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
+            runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates)
     }
 
     // MARK: Requests from the window
@@ -278,6 +305,8 @@ final class Engine {
         var memo: String?
         var language: String?
         var seconds: Int?
+        var board: String?
+        var threshold: Int?
     }
 
     func handle(_ r: Request) async {
@@ -306,7 +335,7 @@ final class Engine {
                 }
             }
             return [:]
-        case "send": await send(r.text ?? "")
+        case "send": await send(r.text ?? "", about: r.board)
         case "confirm": await confirm()
         case "cancel": cancelPending()
         case "pick":
@@ -344,6 +373,22 @@ final class Engine {
         case "language": settings.language = r.language == "auto" ? nil : r.language
         case "secondCheck": settings.secondCheck = r.test ?? true
         case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
+        case "newCanvas": try newCanvas()
+        case "openCanvas": try openCanvas(r.wallet ?? "")
+        case "renameCanvas": renameCanvas(r.wallet ?? "", r.label ?? "")
+        case "removeCanvas": try removeCanvas(r.wallet ?? "")
+        case "addBoard":
+            guard let kind = r.name, Self.liveBoards.contains(kind) else { throw WalletError("Unknown block «\(r.name ?? "")».") }
+            pin(Board(kind: kind, title: kind))
+        case "closeBoard":
+            guard r.board != card?.id, r.board != runningBoard else { throw WalletError(say("Confirm or cancel the move first.", "Сначала подтверди или отмени перевод.")) }
+            boards.removeAll { $0.id == r.board }
+        case "multisigKey": try multisigKey(add: r.address, remove: r.wallet)
+        case "multisigThreshold": updateMultisigDraft { $0.threshold = r.threshold ?? $0.threshold }
+        case "multisigNetwork": updateMultisigDraft { d in
+            guard let n = r.network, Self.multisigNetworks.contains(n) else { return }
+            if d.networks.contains(n) { if d.networks.count > 1 { d.networks.removeAll { $0 == n } } } else { d.networks.append(n) }
+        }
         case "clearChat":
             messages = []
             loadedSkills = []
