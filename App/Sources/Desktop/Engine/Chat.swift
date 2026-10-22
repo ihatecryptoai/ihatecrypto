@@ -84,6 +84,7 @@ extension Engine {
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) { await alert(command, note: nil); return }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
         if let command = WalletCommand.parse(text) { await handleWallet(command); return }
+        if let command = ChartCommand.parse(text, markets: Set(markets.keys)) { await chart(command, note: nil); return }
         if !positions.isEmpty, let command = PositionCommand.parse(text) {
             if let coin = targetCoin(for: text) { pendPosition(command, coin: coin, text: text) } else { askWhichPosition() }
             return
@@ -119,6 +120,8 @@ extension Engine {
             return
         }
         defer { offer(reading.options, userText: text, found: reading.found) }
+        // The chart the answer points to opens with it.
+        if let show = reading.show, let command = ChartCommand.parse(show, markets: Set(markets.keys)) { await chart(command, note: model) }
         switch reading.route {
         case .confirm:
             reply(pending != nil
@@ -165,6 +168,10 @@ extension Engine {
         }
         if let command = AlertCommand.parse(canonical, markets: Set(markets.keys)) {
             await alert(command, note: note)
+            return true
+        }
+        if let command = ChartCommand.parse(canonical, markets: Set(markets.keys)) {
+            await chart(command, note: note)
             return true
         }
         if let command = AddressBookCommand.parse(canonical) {

@@ -223,7 +223,8 @@ function page() {
 
 function chat() {
   const s = state;
-  const items = s.chat.map((m) => h("div", { class: "msg " + (m.fromUser ? "user" : "app") }, m.text, m.note ? h("span", { class: "note" }, m.note) : null));
+  const items = s.chat.map((m) => h("div", { class: "msg " + (m.fromUser ? "user" : "app") }, m.text, m.chart ? sparkline(m.chart) : null,
+    m.note ? h("span", { class: "note" }, m.note) : null));
   if (s.thinking) items.push(h("div", { class: "thinking" }, s.draft || h("span", { class: "dots" }, t("Reading", "Читаю"))));
   if (s.running) {
     items.push(h("div", { class: "move running" }, h("h3", {}, s.running.title), h("ul", {}, s.running.lines.map((l) => h("li", {}, l))),
@@ -259,6 +260,21 @@ function chat() {
       h("div", { class: "composer-inner" }, field, h("button", { class: "btn primary", disabled: s.thinking, onclick: sendComposer }, t("Send", "Отправить"))),
       h("div", { class: "model-line" }, m.connected ? `${m.name} · ${m.model || ""}` : t("No model connected: plain commands only. Settings › Model.", "Модель не подключена: только простые команды. Настройки › Модель."))),
   ];
+}
+
+/** A market's closes as a line, drawn from numbers only. */
+function sparkline(c) {
+  const w = 520, hgt = 120, pts = c.closes;
+  const min = Math.min(...pts), max = Math.max(...pts), span = max - min || 1;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${hgt}`);
+  svg.setAttribute("class", "spark");
+  const line = document.createElementNS(ns, "polyline");
+  line.setAttribute("points", pts.map((p, i) => `${(i / (pts.length - 1 || 1)) * w},${hgt - 6 - ((p - min) / span) * (hgt - 12)}`).join(" "));
+  line.setAttribute("class", c.change.startsWith("-") ? "down" : "up");
+  svg.append(line);
+  return h("div", { class: "chart" }, svg, h("div", { class: "muted small" }, `${c.title} · ${t("low", "мин")} ${c.low} · ${t("high", "макс")} ${c.high} · ${c.change}`));
 }
 
 function autosize(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 160) + "px"; }

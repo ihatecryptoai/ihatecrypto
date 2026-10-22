@@ -15,6 +15,17 @@ nonisolated struct Message: Codable, Equatable, Identifiable {
     /// Under the reply, small: which model, which guard, which network.
     var note: String?
     var at = Date()
+    /// A price chart drawn under the text.
+    var chart: ChartLine?
+}
+
+/// A market's closes over a range, for the window to draw as a line.
+nonisolated struct ChartLine: Codable, Equatable {
+    var title: String
+    var closes: [Double]
+    var low: String
+    var high: String
+    var change: String
 }
 
 /// What waits for the Confirm button. Only the button carries one out (`confirm`): a typed «yes» never does.

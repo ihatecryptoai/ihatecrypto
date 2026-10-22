@@ -102,6 +102,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .msg.user { align-self: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: 14px 14px 4px 14px; padding: 9px 13px; }
 .msg.app { align-self: flex-start; padding: 2px 2px; }
 .msg .note { display: block; color: var(--muted); font-size: 11.5px; margin-top: 4px; white-space: normal; }
+.chart { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; white-space: normal; }
+.spark { width: 100%; height: 120px; display: block; }
+.spark polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.spark .up { stroke: var(--ok); }
+.spark .down { stroke: var(--danger); }
 .thinking { color: var(--muted); align-self: flex-start; white-space: pre-wrap; }
 .dots::after { content: "…"; animation: blink 1.2s steps(3, end) infinite; }
 @keyframes blink { 0% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
