@@ -1,0 +1,43 @@
+[package]
+name = "winsec"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The Windows calls ihatecrypto's Swift signer and engine make: Windows Hello, DPAPI, process hardening, the signer's spawn"
+
+[lib]
+# A DLL with a C ABI: the Swift signer and engine link its import library.
+crate-type = ["cdylib"]
+
+[target.'cfg(windows)'.dependencies]
+zeroize = "1.9.1"
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Security_Credentials",
+    "Security_Cryptography",
+    "Storage_Streams",
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+panic = "abort"
+lto = true

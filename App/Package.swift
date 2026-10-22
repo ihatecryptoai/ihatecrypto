@@ -63,8 +63,9 @@ let package = Package(
         // Signing process: the XPC protocol shared by the app and Signer, and the service itself
         // (built as an .xpc by project.yml; the SwiftPM target only compile-checks it).
         .target(name: "SignerAPI", dependencies: ["WalletCore", "HyperliquidSigning"], path: "Sources/Signer/API"),
+        // Core: what the signer decides, the same on every system; Service: the Mac's Keychain, Secure Enclave and XPC.
         .executableTarget(name: "IhatecryptoSigner", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"],
-                          path: "Sources/Signer/Service"),
+                          path: "Sources/Signer", sources: ["Core", "Service"]),
         // A Ledger over USB (or its emulator over TCP): the Ethereum and Solana apps sign what the guard let through.
         .target(name: "Ledger", dependencies: ["WalletCore", "EVMChain", "SolanaChain", "HyperliquidSigning", "TxGuard", "TradeExecution"],
                 path: "Sources/Wallet/Ledger"),
@@ -120,3 +121,31 @@ for target in package.targets {
     if target.name == "WalletCore" { target.dependencies.append(.product(name: "CryptoExtras", package: "swift-crypto")) }
 }
 #endif
+
+// The desktop app — Windows, or a Mac with IHATECRYPTO_DESKTOP=1 to work on it there: a signer that keeps keys under
+// Windows Hello (`Signer/Windows`), started by the engine the window talks to. Off Windows, `CWinSec` is a stand-in that
+// guards nothing; on Windows it is winsec.dll (App/Windows/native), built first with cargo. It replaces the Mac's
+// window and XPC signer, which share `Signer/Core` with it.
+#if os(macOS)
+let desktop = Context.environment["IHATECRYPTO_DESKTOP"] == "1"
+let desktopCrypto: [Target.Dependency] = []
+#else
+let desktop = true
+let desktopCrypto: [Target.Dependency] = [.product(name: "Crypto", package: "swift-crypto")]
+#endif
+#if os(Windows)
+let winsec: [LinkerSetting] = [.linkedLibrary("winsec"), .unsafeFlags(["-L", Context.packageDirectory + "/Windows/native/target/release"])]
+#else
+let winsec: [LinkerSetting] = []
+#endif
+if desktop {
+    package.targets.removeAll { ["IhatecryptoApp", "IhatecryptoSigner", "IhatecryptoAppTests"].contains($0.name) }
+    package.products += [.executable(name: "ihatecrypto-signer", targets: ["WinSigner"])]
+    package.targets += [
+        .target(name: "CWinSec", path: "Sources/Native/WinSec", linkerSettings: winsec),
+        .target(name: "SignerCore", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain", "CWinSec"] + desktopCrypto,
+                path: "Sources/Signer", exclude: ["Windows/Main"], sources: ["Core", "Windows"]),
+        .executableTarget(name: "WinSigner", dependencies: ["SignerCore", "CWinSec"], path: "Sources/Signer/Windows/Main"),
+        .testTarget(name: "SignerTests", dependencies: ["SignerCore", "SignerAPI", "WalletCore", "CWinSec"] + desktopCrypto),
+    ]
+}
