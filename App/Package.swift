@@ -153,7 +153,7 @@ if desktop {
         .testTarget(name: "EngineTests", dependencies: ["DesktopEngine", "WinSigner", "CWinSec"]),
         // What the window talks to: the chat, the cards and the balances over the same core as the Mac's window.
         .executableTarget(name: "DesktopEngine",
-                          dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "SignerAPI", "HyperliquidSigning",
+                          dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning",
                                          "SolanaChain", "EVMChain", "TradeExecution", "ExecutionCore", "OneClickKit", "CWinSec"],
                           path: "Sources/Desktop/Engine", swiftSettings: [.defaultIsolation(MainActor.self)]),
     ]

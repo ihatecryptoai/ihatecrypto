@@ -93,6 +93,8 @@ a { color: inherit; }
 .field label { font-size: 12px; color: var(--muted); }
 input, select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+.check-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.check-row input { margin-top: 3px; accent-color: var(--accent); }
 .address { font-family: var(--mono); font-size: 13px; word-break: break-all; user-select: text; }
 
 /* Chat */

@@ -202,6 +202,8 @@ final class Engine {
         var plan: String?
         var model: ModelView
         var providers: [ProviderView]
+        var secondCheck: Bool
+        var jevOpenRouter: Bool
         var language: String
         var russian: Bool
         var book: [SignerAddress]
@@ -227,7 +229,7 @@ final class Engine {
             options: options.map { .init(title: $0.title, comment: $0.comment, recommended: $0.recommended) },
             running: running.map { .init(title: $0.title, lines: $0.lines) },
             plan: intent == TradeIntent() ? nil : intent.command,
-            model: modelView, providers: providerViews,
+            model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0)) })
@@ -311,6 +313,8 @@ final class Engine {
         case "disconnectModel": disconnect(provider: r.provider ?? "")
         case "setModel": settings.model = r.model
         case "language": settings.language = r.language == "auto" ? nil : r.language
+        case "secondCheck": settings.secondCheck = r.test ?? true
+        case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
         case "clearChat":
             messages = []
             cancelPending()

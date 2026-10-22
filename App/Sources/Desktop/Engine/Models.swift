@@ -90,6 +90,18 @@ extension Engine {
         settings.model = p.info.defaultModel
     }
 
+    var secondCheck: Bool { settings.secondCheck ?? true }
+
+    /// The OpenRouter key Jev may use: when the chat is on OpenRouter, or the user turned Jev on for it.
+    var jevKey: String? {
+        guard secondCheck, providerID == "openrouter" || settings.jevOpenRouter == true else { return nil }
+        switch Store.credentials()["openrouter"] {
+        case .apiKey(let key)?: return key
+        case .oauth(let tokens)?: return tokens.access
+        default: return nil
+        }
+    }
+
     func disconnect(provider id: String) {
         Store.setCredential(nil, for: id)
         changed()

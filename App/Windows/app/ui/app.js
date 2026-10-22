@@ -419,6 +419,14 @@ function settings() {
     h("div", { class: "card" }, h("select", { onchange: (e) => act("language", { language: e.target.value }) },
       [["auto", t("As I write", "Как я пишу")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: s.language === v }, l)))),
 
+    h("h2", {}, t("Second check", "Вторая проверка")),
+    h("div", { class: "card" },
+      h("label", { class: "check-row" }, h("input", { type: "checkbox", id: "second-check", checked: s.secondCheck, onchange: (e) => act("secondCheck", { test: e.target.checked }) }),
+        h("span", {}, t("The model reads every command and every trade plan again before a card is drawn. On a doubt nothing runs: you pick.",
+          "Модель перечитывает каждую команду и каждый план сделки, прежде чем нарисовать карточку. При сомнении ничего не запускается — выбираешь ты."))),
+      h("label", { class: "check-row" }, h("input", { type: "checkbox", id: "jev-openrouter", checked: s.jevOpenRouter, disabled: !s.secondCheck, onchange: (e) => act("jevOpenRouter", { test: e.target.checked }) }),
+        h("span", {}, t("Also ask TypeSafe Jev through OpenRouter (your OpenRouter key; the message goes there).", "Также спрашивать TypeSafe Jev через OpenRouter (твой ключ OpenRouter; сообщение уходит туда).")))),
+
     h("h2", {}, t("Signing", "Подпись")),
     h("div", { class: "card" },
       s.signer.notes.map((n) => h("p", { class: "small" }, n)),

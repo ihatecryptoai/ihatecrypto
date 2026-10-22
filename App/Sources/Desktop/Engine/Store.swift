@@ -73,4 +73,9 @@ nonisolated struct Settings: Codable, Equatable {
     var language: String?
     var provider: String?
     var model: String?
+    /// The second check (on unless turned off, as on the Mac): the model reads every command again, and a trade plan
+    /// against the user's words, before a card is drawn.
+    var secondCheck: Bool?
+    /// The second check may also ask TypeSafe Jev through OpenRouter while the chat runs elsewhere: only when turned on.
+    var jevOpenRouter: Bool?
 }

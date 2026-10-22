@@ -101,11 +101,13 @@ chat runs through the Executor (transfers, swaps, bridges, lending, Hyperliquid 
 rules with every signature on the card, managing open positions, several moves in one message under one Confirm,
 price alerts and scheduled tasks with recurring buys (checked every minute while the app runs; their moves come as
 cards for Confirm, with a Windows notification), the tray (closing the window keeps it running, as the Mac's menu bar
-does), price charts and the day's movers in the chat, history from the journal, lock and the session
+does), price charts and the day's movers in the chat, the second check (on by default, as on the
+Mac: the model reads every command and trade plan again, Jev through OpenRouter when allowed, and code checks that a
+plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
 Not yet: the canvas and its boards, the automation wallet (a task's moves sign only after Confirm), the dApp browser,
-multisig, Ledger, P/L, favorites, skills, the second check (Jev), paid requests (MPP), voice, notifications.
+multisig, Ledger, P/L, favorites, skills, paid requests (MPP), voice, notifications.
 
 ## Checking on a Windows machine
 

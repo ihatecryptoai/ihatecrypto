@@ -1,6 +1,7 @@
 import EVMChain
 import ExecutionCore
 import Foundation
+import GuardJev
 import IhatecryptoCore
 import OneClickKit
 import SignerAPI
@@ -35,8 +36,9 @@ extension Engine {
 
     func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = []) {
         self.pending = pending
+        // A warning on the card is read before the button: the button says it goes ahead despite it.
         card = Card(id: UUID().uuidString, title: title, lines: lines, warnings: warnings,
-                    confirm: say("Confirm", "Подтвердить"))
+                    confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
         changed()
     }
 
@@ -324,10 +326,14 @@ extension Engine {
             return
         }
         if let off = Modules.current.refusal(trade: market?.dex != nil, bridges: next.amountUSDC != nil, ru: russian) { reply(off, note: note); return }
+        // Code first, second check on or off: the plan never holds more money or more risk than its command named.
+        var warnings: [String] = []
+        if let market, let sizing = evaluation.sizing, let why = Plan.moneyProblem(named: next, sizing: sizing, market: market) { warnings.append(why) }
         do {
             let p = try await executor().prepare(next)
+            if warnings.isEmpty, secondCheck, let review = await reviewPlan(next, p) { warnings.append(review) }
             show(.trade(p), title: "\(next.side == .long ? "Long" : "Short") \(IntentParser.pretty(next.asset))",
-                 lines: p.steps + p.changes)
+                 lines: p.steps + p.changes, warnings: warnings)
             reply((said.isEmpty ? "" : said + "\n") + say("The trade is on the card with every signature in order. Press Confirm, or change it in words.",
                                                           "Сделка на карточке, все подписи по порядку. Нажми «Подтвердить» или измени её словами."), note: note)
         } catch {
@@ -363,6 +369,20 @@ extension Engine {
                        "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
         reply(say("In steps: ", "По шагам: ") + parsed.map(\.title).joined(separator: " → ") + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена»."), note: note)
         return true
+    }
+
+    /// The second check of a trade: the chat's model reads the plan against the user's words (Jev too, when allowed),
+    /// and its signatures with their balance changes. It can only warn.
+    func reviewPlan(_ intent: TradeIntent, _ p: Executor.Prepared) async -> String? {
+        let requests = messages.filter(\.fromUser).suffix(6).map(\.text)
+        let lines = [intent.command] + p.steps
+        if let client = llmClient(), let why = try? await ChatRouter.verifyPlan(requests: requests, plan: lines, language: replyLanguage, client: client, model: model) {
+            return why
+        }
+        guard let key = jevKey else { return nil }
+        if let r = try? await JevReviewer.plan(requests: requests, plan: lines, apiKey: key), r.concern { return r.text }
+        if let r = try? await JevReviewer.transactions(plan: lines, signatures: p.steps, changes: p.changes, apiKey: key), r.concern { return r.text }
+        return nil
     }
 
     // MARK: Confirm
