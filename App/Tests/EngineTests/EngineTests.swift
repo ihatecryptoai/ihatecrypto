@@ -8,6 +8,7 @@ import Testing
 @Suite(.serialized) struct EngineTests {
     final class Engine: @unchecked Sendable {
         let process = Process()
+        let dir: URL
         let input = Pipe(), output = Pipe()
         /// Lines the engine wrote, read on a thread of their own so a wait can time out.
         let lock = NSLock()
@@ -24,7 +25,7 @@ import Testing
             #else
             process.executableURL = products.appendingPathComponent("ihatecrypto-engine")
             #endif
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ihatecrypto-engine-tests-\(UUID().uuidString)")
+            dir = FileManager.default.temporaryDirectory.appendingPathComponent("ihatecrypto-engine-tests-\(UUID().uuidString)")
             var env = ProcessInfo.processInfo.environment
             env["IHATECRYPTO_ENGINE_DIR"] = dir.appendingPathComponent("engine").path
             env["IHATECRYPTO_SIGNER_DIR"] = dir.appendingPathComponent("signer").path
@@ -54,6 +55,8 @@ import Testing
         deinit {
             try? input.fileHandleForWriting.close()
             process.waitUntilExit()
+            // The stand-in's wallets go with the test.
+            try? FileManager.default.removeItem(at: dir)
         }
 
         /// Sends one request and reads until its answer, returning the last state seen on the way.
