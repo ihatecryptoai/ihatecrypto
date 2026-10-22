@@ -399,7 +399,9 @@ extension Engine {
         do {
             switch waiting {
             case .wallet(let command): try await move(command)
-            case .transfer(let entry, let amount): reply(try await transfer(amount, to: entry), note: "transfer")
+            case .transfer(let entry, let amount):
+                reply(try await transfer(amount, to: entry), note: "transfer")
+                recordFlow(-amount, "sent to \(entry.name)")
             case .position(let command, let coin): reply(try await executor().manage(command, asset: coin), note: "Hyperliquid")
             case .trade(let p):
                 guard p.isFresh else {
@@ -422,7 +424,9 @@ extension Engine {
                     changed()
                     switch step {
                     case .wallet(let command): try await move(command)
-                    case .transfer(let entry, let amount): reply(try await transfer(amount, to: entry), note: "transfer")
+                    case .transfer(let entry, let amount):
+                reply(try await transfer(amount, to: entry), note: "transfer")
+                recordFlow(-amount, "sent to \(entry.name)")
                     }
                     // The next step reads balances after this one landed.
                     await refresh()

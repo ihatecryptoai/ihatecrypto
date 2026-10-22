@@ -89,6 +89,7 @@ extension Engine {
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
         if let command = WalletCommand.parse(text) { await handleWallet(command); return }
         if let command = ChartCommand.parse(text, markets: Set(markets.keys)) { await chart(command, note: nil); return }
+        if let command = PnLCommand.parse(text, markets: Set(markets.keys)) { await showPnL(command, note: nil); return }
         if !positions.isEmpty, let command = PositionCommand.parse(text) {
             if let coin = targetCoin(for: text) { pendPosition(command, coin: coin, text: text) } else { askWhichPosition() }
             return
@@ -215,6 +216,10 @@ extension Engine {
             await chart(command, note: note)
             return true
         }
+        if let command = PnLCommand.parse(canonical, markets: Set(markets.keys)) {
+            await showPnL(command, note: note)
+            return true
+        }
         if let command = AddressBookCommand.parse(canonical) {
             // The model only rewords: an address it wrote must be in the user's own message, character for character.
             if case .save(let address, _, _) = command, !text.contains(address) { return false }
@@ -263,7 +268,7 @@ extension Engine {
 
     /// A question gets an answer from the portfolio and the positions, never a plan.
     func answer(_ question: String, client: any LLMClient) async {
-        var facts = portfolioFacts()
+        var facts = portfolioFacts() + (await pnlFacts())
         if let coin = IntentParser.namedAsset(question, markets: Set(markets.keys)), let line = marketLine(coin) { facts.append(line) }
         let system = """
         You are ihatecrypto, the user's crypto assistant. Answer the question using ONLY the facts below — balances, open positions \
@@ -286,7 +291,7 @@ extension Engine {
         // Only what this app runs: a card for P/L or the dApp browser would end in «not on Windows yet».
         func runs(_ c: String) -> Bool {
             runnable(c) || ChartCommand.parse(c, markets: names) != nil || AddressBookCommand.parse(c) != nil
-                || ScheduledTask.parse(c) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
+                || ScheduledTask.parse(c) != nil || PnLCommand.parse(c, markets: names) != nil || ChatRouter.steps(c)?.allSatisfy(runnable) == true
         }
         options = list.filter { o in
             o.command.isEmpty || ChatRouter.parses(o.command, markets: names) && runs(o.command)
@@ -343,7 +348,7 @@ extension Engine {
     func screenedLookup(_ l: ChatRouter.Lookup) async -> String {
         let found: String
         switch l.tool {
-        case "portfolio": found = portfolioFacts().joined(separator: "\n")
+        case "portfolio": found = (portfolioFacts() + (await pnlFacts())).joined(separator: "\n")
         case "market":
             guard let coin = IntentParser.namedAsset(l.arg, markets: Set(markets.keys)), let line = marketLine(coin) else {
                 return "No Hyperliquid market for «\(l.arg)». For a token by its contract or name use the token lookup."

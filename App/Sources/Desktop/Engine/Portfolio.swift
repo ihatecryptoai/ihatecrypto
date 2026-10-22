@@ -59,6 +59,7 @@ extension Engine {
         if portfolio.updatedAt != nil, portfolioOwner == me.solana { announceIncoming(from: portfolio, to: next) }
         portfolio = next
         portfolioOwner = me.solana
+        if errors.isEmpty { recordEquity(next.total, wallet: me.solana) }
         positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions
         await checkAlerts()
         changed()
@@ -80,6 +81,13 @@ extension Engine {
             return "+\(Fmt.num(now - was, maxFraction: parts[1] == "SOL" ? 4 : 2)) \(parts[1]) " + say("on", "на") + " \(parts[0])"
         }
         guard !lines.isEmpty else { return }
+        // What came in, in dollars, so the P/L counts it as money moved in, not as profit.
+        for (key, now) in after {
+            let parts = key.split(separator: "|"), was = before[key] ?? 0
+            guard now > was else { continue }
+            let usd = parts[1] == "SOL" ? (markets["SOL"]?.markPx ?? 0) * (now - was) : now - was
+            recordFlow(usd, "\(parts[1]) in on \(parts[0])")
+        }
         let text = say("💸 Received ", "💸 Пришло ") + lines.joined(separator: ", ") + "."
         out.event("notify", ["title": say("Money arrived", "Пришли деньги"), "body": text])
         reply(text, note: "incoming")

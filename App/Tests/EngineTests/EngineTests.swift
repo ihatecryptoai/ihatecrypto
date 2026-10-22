@@ -130,6 +130,17 @@ import Testing
         #expect((cleared.state?["alerts"] as? [[String: Any]])?.isEmpty == true)
     }
 
+    @Test func profitAndLossAnswersFromHyperliquidAndThePortfolio() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        try engine.call("createWallet", ["test": true])
+        try engine.call("phraseSaved")
+        let r = try engine.call("send", ["text": "pnl week"])
+        #expect(Self.chat(r.state).last?.contains("P/L") == true, "\(Self.chat(r.state).last ?? "")")
+        let held = try engine.call("send", ["text": "how much did i make on AERO"])
+        #expect(Self.chat(held.state).last?.contains("nothing to count") == true, "\(Self.chat(held.state).last ?? "")")
+    }
+
     @Test func aScheduledTaskIsKeptAndCancelled() throws {
         let engine = try Engine()
         try engine.call("hello")
