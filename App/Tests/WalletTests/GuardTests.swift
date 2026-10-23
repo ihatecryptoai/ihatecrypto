@@ -258,3 +258,73 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     let (exactOut, exactOutAccounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c] + tail(quoted: 1))])
     #expect(SolanaGuard.check(exactOut, accounts: exactOutAccounts, policy: policy, tokenOwners: [:]).checks.contains("Calls Jupiter Swap. The balance simulation checks the result."))
 }
+
+/// Past its 7 days the trading key still signs what can't open or add to a position: cancels and reduce-only orders.
+@Test func onlyCancelsAndReduceOnlyOrdersCountAsReducing() throws {
+    let stop = HLOrder(asset: 0, isBuy: false, price: 90, size: 1, reduceOnly: true, kind: .trigger(price: 90, isMarket: true, tpsl: "sl"))
+    let take = HLOrder(asset: 0, isBuy: false, price: 120, size: 1, reduceOnly: true, kind: .trigger(price: 120, isMarket: true, tpsl: "tp"))
+    let entry = HLOrder(asset: 0, isBuy: true, price: 100, size: 1, reduceOnly: false, kind: .limit(tif: "Ioc"))
+    #expect(HLAction.onlyReduces(try HLAction.order([stop, take], grouping: "positionTpsl")))
+    #expect(HLAction.onlyReduces(HLAction.cancel([(asset: 0, oid: 7)])))
+    #expect(!HLAction.onlyReduces(try HLAction.order([entry, stop, take], grouping: "normalTpsl")))
+    #expect(!HLAction.onlyReduces(try HLAction.order([entry])))
+    #expect(!HLAction.onlyReduces(.map([("type", .string("updateLeverage")), ("asset", .uint(0)), ("isCross", .bool(true)), ("leverage", .uint(20))])))
+    #expect(!HLAction.onlyReduces(.map([("type", .string("order")), ("orders", .array([]))])))
+}
+
+/// Kamino's own deposit of 1 USDC for the public test wallet, as api.kamino.finance/ktx/klend/deposit built it on
+/// 2026-10-23: its market sits in a lookup table the signer can't read, so its obligation (a static key) pins it.
+private let kaminoDeposit = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQAHDfA2J2JGp1ud4zSe1CsV4jL2UY/CD1/NTx1k6B+b0lj3QNLyfEYfKen+uhq4rNOUlqnGWwrmKnE/AflBqZO/Ve1aRnW1WggmL3Vf3UQOsZzVOKHVpZVsiwC6TyyASQbL2QJdjpysvXf+cnGWANufIaEAmn/fFCc/tIZaajBN8TKguSJSa23j1GNeN6zOWW7+FAVUuV3/wGHpq8erzrI0Zx3M7ZodtpC82UOFcwLkxH6bh0yN7njVop10qrBF/0KhgirLusdJNuJSIjry4kuNaAHHDA43Wl/ptAb7msWZE5sqeijp9PaxtFn7emfPXWJQfuJoNup09KhY5ahANQgjU4oCd6avlzObesiNGJLJBEb1AAIwkmb2LlPBGCRJggAAAIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAADYsBAXY9PlHxJuYVbehd6MYTBZuERo0No/6KKiJRzHAQSyrLESWMzjaCxBi6hy/z35EQJxLxWvEra+abNDWwAIRyEjfpVN/N3e52di4+JWwE44ud+B8DgfaI2MVokGb7wJCgAFAkBCDwAJBgABABQSFwEBCAQCAAASDQAAAAC4OnEbAAAAAP4MBgAAAwwWEih1qbBFxRcPolpGdbVaCCYvdV/dRA6xnNU4odWllWyLALpPLIBJBsvZDAkAAAUTEhIDFhIK+wrnTBsLn2AAAAwLAAAFBxARBBMLFhIJiD8PutOYqKQADAYQEwwMDAYIAtqK60/JGWYMAhMFCCGEk+SXwEhZDBEABRMHEBQPDg0BDBcXFQQRCxDY4L8bzJdmr0BCDwAAAAAAAdPybyS0lhPzfd731GDYyADDreDn/OIlObPzdaF5EZpeBYVEhJaXBggCngUEBw=="
+
+@Test func kaminoRunsOnlyInstructionsThatPayTheSignerOnItsOwnPosition() throws {
+    let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+    #expect(SolanaGuard.kaminoObligation(owner: owner) == "EnxJnydiZPsyQx2ZmXdg7vfggsRLQWpogz19cP6R9SPb")
+    let wire = try #require(Data(base64Encoded: kaminoDeposit))
+    func verdict(_ wire: Data) throws -> Verdict {
+        let m = try SolanaMessage.parse(transaction: wire)
+        // The lookup table's entries as an app might claim them: the check mustn't depend on them.
+        let looked = m.lookups.flatMap { $0.writable + $0.readonly }.indices.map { Base58.encode(Data(repeating: UInt8($0 + 1), count: 32)) }
+        return SolanaGuard.check(m, accounts: m.staticKeys + looked, policy: SolanaPolicy(owner: owner, trustLookupTables: false), tokenOwners: [:])
+    }
+    let real = try verdict(wire)
+    #expect(real.ok, "\(real.problems)")
+    // Someone else's obligation (another market's, or another owner's) in its place.
+    let obligation = try Base58.decode("EnxJnydiZPsyQx2ZmXdg7vfggsRLQWpogz19cP6R9SPb")
+    let at = try #require(wire.range(of: obligation))
+    var swapped = wire
+    swapped.replaceSubrange(at, with: Data(repeating: 9, count: 32))
+    #expect(try !verdict(swapped).ok)
+    // deposit_reserve_liquidity, which mints the collateral to any account, in place of the obligation deposit.
+    let v2 = Data([0xd8, 0xe0, 0xbf, 0x1b, 0xcc, 0x97, 0x66, 0xaf])
+    let d = try #require(wire.range(of: v2))
+    var mintsElsewhere = wire
+    mintsElsewhere.replaceSubrange(d, with: Data([0xa9, 0xc9, 0x1e, 0x7e, 0x06, 0xcd, 0x66, 0x44]))
+    #expect(try !verdict(mintsElsewhere).ok)
+}
+
+/// Jupiter Lend's deposit and withdrawal of 1 USDC and a Jupiter DCA order of 100 USDC → SOL for the public test wallet,
+/// as lite-api.jup.ag and api.jup.ag built them on 2026-10-23: each pays only the signer's own accounts.
+private let jupiterLendDeposit = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkS8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPccj71J70/rvu0J/yTO1674UGxqeljWsbxMzyBLGGTIhUDS8nxGHynp/roauKzTlJapxlsK5ipxPwH5QamTv1XtZfXf/XyEr3Wopfe9zqFiLis6v4f8U6hxuQhWGjqLG95uxTRcaS26p8mN5qM4XiYgYQGzhBlklxtkIakhwHV1nAIRE+8/cf8FyV6ejOFzFvFRe8v54cSEIbvrhfgwTQQYeXyzPK1sDIBzsh2kxDdkBYXtOfawRnLIelHWBYy3JvqgC5ZIwUW4+UWatmCd5Vc8UzUhP8EscD1FvC2CJQgA1veA4oganO3BaPj9y3TzLqfiwk9dDCxaIuRcmdJ+MiQSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHJ/EQ+a2cgo929kauPWYlbJknEb75921PaoQRwAgT1Uepp778BbCkWRDvAOfH/e3tf8kYkOWoSREcIpwuparJSaJkbJuRq/cvVvsHRwHJwyp3lX50EzExEKvsHW7PCICMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4Wcb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hCv4bkS5IXpX9FespN9/8SzejFtCmOBL/ArpJtMbBjR4K/h6X5FbLuS5kKiW1C6Y5b/JIFkvKdGljqEWSrNbMwwbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpCNTKvRKW8ADZ4CtpnFmGh8XjZiJJXy59jLiWltOq8WoBDxEAAgQOCgEGBQgLBwMQDBENCRDyI8aJUuHytkBCDwAAAAAA"
+private let jupiterLendWithdraw = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkT8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPccj71J70/rvu0J/yTO1674UGxqeljWsbxMzyBLGGTIhUDS8nxGHynp/roauKzTlJapxlsK5ipxPwH5QamTv1XtZfXf/XyEr3Wopfe9zqFiLis6v4f8U6hxuQhWGjqLG95uxTRcaS26p8mN5qM4XiYgYQGzhBlklxtkIakhwHV1nAIRE+8/cf8FyV6ejOFzFvFRe8v54cSEIbvrhfgwTQQYeXyzPK1sDIBzsh2kxDdkBYXtOfawRnLIelHWBYy3JvqgC5ZIwUW4+UWatmCd5Vc8UzUhP8EscD1FvC2CJQgA1veA4oganO3BaPj9y3TzLqfiwk9dDCxaIuRcmdJ+MiQSBDEN4MUqaL/buRQj3/nOWgSj23k04ooSfCTii9x91BEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEcn8RD5rZyCj3b2Rq49ZiVsmScRvvn3bU9qhBHACBPVR6mnvvwFsKRZEO8A58f97e1/yRiQ5ahJERwinC6lqslJomRsm5Gr9y9W+wdHAcnDKneVfnQTMTEQq+wdbs8IgIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEK/huRLkhelf0V6yk33/xLN6MW0KY4Ev8Cukm0xsGNHgr+HpfkVsu5LmQqJbULpjlv8kgWS8p0aWOoRZKs1szDBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKmXNQm9Ur4PKo8EBMUD3U1E8ZHbXvOOAjdI/QFJYEEJLgEQEgAEAgsBDwYFCAwHCQMRDRIOChC3EkaclG2hIkBCDwAAAAAA"
+private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAgN8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPdA0vJ8Rh8p6f66Gris05SWqcZbCuYqcT8B+UGpk79V7Yq3C3dSmy6SMXmaC86a+QNB8cM57M8nvXfavvug7xwr4nQ/DK+NdbsMGe0wCTT41rh+ExTnoFi4Cj6ruTycByXsYF21KZtx/G85tfoFGdt2xIhsqTLuddL1Tk70GQ1aUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FmwdagGY3nKb+NwN/8MKNVUpuTWNtnoUYz+brrpP1I2/rUn1F1kDj7BX2FdWw4jpUqWuD8Lggv3BjXyQ0rGQMwExvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFZnavCXYB4DeVN4DdHU86ACyRfTVP8tOOh1oPI9Z1GlQQGAAUCAAAAAAYACQNADQMAAAAAAAkGAAEADAUIAQELDQQAAAwHAQMCBQgJCgsrjncrbaI0C7EyNdtqAAAAAADh9QUAAAAAgPD6AgAAAACAUQEAAAAAAAAAAA=="
+
+@Test func jupiterLendAndDCAPayOnlyTheSignersOwnAccounts() throws {
+    let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+    func verdict(_ wire: Data) throws -> Verdict {
+        let m = try SolanaMessage.parse(transaction: wire)
+        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: owner, trustLookupTables: false), tokenOwners: [:])
+    }
+    for b64 in [jupiterLendDeposit, jupiterLendWithdraw, jupiterDCAOrder] {
+        let v = try verdict(try #require(Data(base64Encoded: b64)))
+        #expect(v.ok, "\(v.problems)")
+    }
+    // Each one's payee swapped for someone else's account: the fToken account of the deposit, the USDC account of the
+    // withdrawal, the order's own USDC source.
+    let usdcATA = try Base58.decode("5N3f1tj9v1vc5TUZ8S7mCAnVmjVKrfnzXWhxLaxyZAgt"), fTokenATA = try Base58.decode("8TQFpKF11utuu39gVXVv7aGahirPsf4y72XQFkUNYnoM")
+    for (b64, key) in [(jupiterLendDeposit, fTokenATA), (jupiterLendWithdraw, usdcATA), (jupiterDCAOrder, usdcATA)] {
+        var wire = try #require(Data(base64Encoded: b64))
+        let at = try #require(wire.range(of: key))
+        wire.replaceSubrange(at, with: Data(repeating: 9, count: 32))
+        #expect(try !verdict(wire).ok)
+    }
+}

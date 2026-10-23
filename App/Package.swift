@@ -154,7 +154,7 @@ if desktop {
         // What the window talks to: the chat, the cards and the balances over the same core as the Mac's window.
         .executableTarget(name: "DesktopEngine",
                           dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning",
-                                         "SolanaChain", "EVMChain", "TradeExecution", "ExecutionCore", "OneClickKit", "DeFiYields", "DeFiJupiterLend", "DeFiKamino", "Ledger", "CWinSec"],
+                                         "SolanaChain", "EVMChain", "TradeExecution", "ExecutionCore", "OneClickKit", "DeFiYields", "DeFiJupiterLend", "DeFiKamino", "JupiterSwap", "Ledger", "CWinSec"],
                           path: "Sources/Desktop/Engine", swiftSettings: [.defaultIsolation(MainActor.self)]),
     ]
 }

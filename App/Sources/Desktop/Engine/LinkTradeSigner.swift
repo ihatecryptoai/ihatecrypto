@@ -111,4 +111,34 @@ nonisolated struct LinkTradeSigner: TradeSigner {
         guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
         return signature
     }
+
+    // Dollars without gas, as the Mac's XPCTradeSigner: someone else pays the fee and the signer reads what it signs.
+
+    func signSolanaSponsored(_ wire: Data, accounts: [String], tokenOwners: [String: String], sponsor: String) async throws -> Data {
+        let reply = try await send(.signSolana(wire: wire, accounts: accounts, recipients: [], tokenOwners: tokenOwners, sponsor: sponsor))
+        guard reply.ok, let signed = reply.signedWire else { throw ExecutionError(Self.reason(reply)) }
+        return signed
+    }
+
+    func signSponsoredTransfer(_ t: SponsoredTransfer, recipients: [String]) async throws -> Data {
+        let reply = try await send(.signSponsoredTransfer(chainId: t.chainId, nonce: t.nonce, gasLimit: t.gasLimit, token: t.token, to: t.to,
+                                                          amount: t.amount, recipients: recipients))
+        guard reply.ok, let raw = reply.signedRaw else { throw ExecutionError(Self.reason(reply)) }
+        return raw
+    }
+
+    func signRelayMulticallPermit(_ m: RelayMulticallPermit) async throws -> [EVMSignature] {
+        let reply = try await send(.signRelayMulticallPermit(chainId: m.chainId, token: m.token, value: m.value, validBefore: m.validBefore,
+                                                             relayer: m.relayer, refundTo: m.refundTo, nftRecipient: m.nftRecipient, metadata: m.metadata,
+                                                             calls: m.calls.map { SignerCall3(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, data: $0.callData) }))
+        guard reply.ok, let signatures = reply.signatures, signatures.count == 2 else { throw ExecutionError(Self.reason(reply)) }
+        return signatures
+    }
+
+    func signReceiveAuthorization(_ p: Permit3009) async throws -> EVMSignature {
+        let reply = try await send(.signReceiveAuthorization(chainId: p.chainId, token: p.token, to: p.to, value: p.value,
+                                                             validBefore: p.validBefore, nonce: p.nonce))
+        guard reply.ok, let signature = reply.signature else { throw ExecutionError(Self.reason(reply)) }
+        return signature
+    }
 }

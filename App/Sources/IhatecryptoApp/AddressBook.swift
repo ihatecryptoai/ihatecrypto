@@ -156,14 +156,19 @@ enum AddressIcons {
         }
     }
 
-    /// The site's own icon, by its domain («bybit.com»), through Google's favicon service at 128 px.
+    /// The site's own icon, by its domain («bybit.com»), asked of the site itself: a favicon service (Google's) would learn
+    /// which exchanges the address book names. The touch icon first (180 px), then the favicon, if it has 32 px or more.
     static func logo(domain: String) async -> NSImage? {
         let host = domain.lowercased().replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
             .split(separator: "/").first.map(String.init) ?? ""
-        guard host.contains("."), let url = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=128"),
-              let (data, response) = try? await URLSession.shared.data(from: url), (response as? HTTPURLResponse)?.statusCode == 200,
-              let image = NSImage(data: data), image.size.width >= 32 else { return nil }
-        return image
+        guard host.contains(".") else { return nil }
+        for path in ["apple-touch-icon.png", "favicon.ico"] {
+            guard let url = URL(string: "https://\(host)/\(path)"),
+                  let (data, response) = try? await URLSession.shared.data(from: url), (response as? HTTPURLResponse)?.statusCode == 200,
+                  let image = NSImage(data: data), (image.representations.map(\.pixelsWide).max() ?? 0) >= 32 else { continue }
+            return image
+        }
+        return nil
     }
 }
 

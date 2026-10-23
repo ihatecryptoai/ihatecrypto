@@ -159,7 +159,7 @@ func setEnv(_ name: String, _ value: String) {
     @Test(.enabled(if: fakeHello)) func aNewAddressAsksWindowsHelloAndIsKept() throws {
         _ = try importWallet()
         SeedStore.endSession()
-        try Vault.$scope.withValue(Vault.Scope()) { try Signer.approve(["0x000000000000000000000000000000000000beef"]) }
+        try Vault.$scope.withValue(Vault.Scope()) { try Signer.approve(["0x000000000000000000000000000000000000beef"], doing: "send 1 USDC") }
         Trusted.reload()
         #expect(RecipientStore.all() == ["0x000000000000000000000000000000000000beef"])
     }
@@ -168,7 +168,7 @@ func setEnv(_ name: String, _ value: String) {
         let imported = try importWallet()
         SeedStore.endSession()
         let contract = "0x000000000000000000000000000000000000c0de"
-        try Vault.$scope.withValue(Vault.Scope()) { try Signer.approve([contract], calls: true) }
+        try Vault.$scope.withValue(Vault.Scope()) { try Signer.approve([contract], calls: true, doing: "call a contract") }
         Trusted.reload()
         // Kept among calls, never among the places money may go.
         #expect(RecipientStore.all(RecipientStore.calls) == [contract] && RecipientStore.all().isEmpty)

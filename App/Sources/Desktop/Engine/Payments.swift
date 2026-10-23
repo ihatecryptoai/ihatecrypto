@@ -12,7 +12,12 @@ extension Engine {
         let challenge: MPP.Challenge
         let ask: String
         let service: String
+        /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
+        var probed = false
     }
+
+    /// Services whose price came out different once they saw the request's content: quoted with it from then on.
+    nonisolated(unsafe) static var pricedWithContent: Set<String> = []
 
     var tempoUSDC: Decimal { portfolio.networks.first { $0.key == "tempo" }?.rows.first { $0.symbol == "USDC" }?.value ?? 0 }
 
@@ -21,10 +26,22 @@ extension Engine {
             reply(say("That isn't a web address ihatecrypto can call.", "Это не веб-адрес, который ihatecrypto может вызвать."), note: note)
             return
         }
+        if MPP.refusesProof.contains(host.lowercased()) {
+            reply(say("\(host) takes the payment and then refuses its proof (checked 2026-10-23), so ihatecrypto doesn't pay it. Ask for another service.",
+                      "\(host) берёт оплату, а потом не принимает её подтверждение (проверено 2026-10-23), поэтому ihatecrypto его не оплачивает. Попроси другой сервис."), note: note)
+            return
+        }
         let ask = messages.last(where: \.fromUser)?.text ?? ""
         do {
             async let named = MPP.serviceName(url)
-            let (status, headers, data) = try await MPP.call(method, url, body)
+            // The price is asked without the request's content (an email's text, a phone number), so a service the user
+            // turns down never sees it; one that can't quote without it gets it unpaid, as the protocol has it.
+            var probed = !(body ?? "").isEmpty && !Self.pricedWithContent.contains(url)
+            var (status, headers, data) = try await MPP.call(method, url, probed ? nil : body)
+            if probed, status != 402 {
+                probed = false
+                (status, headers, data) = try await MPP.call(method, url, body)
+            }
             let service = await named ?? host
             guard status == 402 else {
                 if (200..<300).contains(status) {
@@ -38,7 +55,7 @@ extension Engine {
             case .failure(let refusal):
                 reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
             case .success(let c):
-                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service)
+                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed)
                 let price = Fmt.num(c.usdc, maxFraction: 6), short = tempoUSDC < c.usdc + Decimal(string: "0.01")!
                 show(.wallet(command), title: say("Pay \(price) USDC · \(service)", "Оплатить \(price) USDC · \(service)"), lines: [
                     say("One Tempo transfer of \(price) USDC to the address \(host) named: \(c.payee)", "Один перевод \(price) USDC на Tempo, на адрес, который назвал \(host): \(c.payee)"),
@@ -60,12 +77,14 @@ extension Engine {
             throw ExecutionError("The service's price is gone; ask for it again.")
         }
         var c = quote.challenge
-        if let expires = c.expires, expires.timeIntervalSinceNow < 30 {
+        if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 30 }) == true {
             let (status, headers, _) = try await MPP.call(method, url, body)
             guard status == 402, case .success(let fresh) = MPP.challenge(headers["www-authenticate"] ?? "") else {
                 throw ExecutionError("The service didn't quote again (\(status)); nothing was paid.")
             }
             guard fresh.amount == c.amount, fresh.payee.lowercased() == c.payee.lowercased() else {
+                // Its price depends on the request: from now on it's asked with the content, so the next card shows it.
+                if quote.probed { Self.pricedWithContent.insert(url) }
                 throw ExecutionError("The price changed to \(Fmt.num(fresh.usdc, maxFraction: 6)) USDC; nothing was paid. Ask again to see the new card.")
             }
             c = fresh

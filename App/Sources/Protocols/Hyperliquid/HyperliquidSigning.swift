@@ -122,6 +122,21 @@ public enum HLAction {
     /// The action's "type" field.
     public static func type(_ action: MsgPack) -> String? { text(action, "type") }
 
+    /// A cancel, or orders that are all reduce-only (a stop, a take, a close): nothing that opens or adds to a position.
+    public static func onlyReduces(_ action: MsgPack) -> Bool {
+        guard case .map(let pairs) = action else { return false }
+        switch type(action) {
+        case "cancel", "cancelByCloid": return true
+        case "order":
+            guard case .array(let orders)? = pairs.first(where: { $0.0 == "orders" })?.1, !orders.isEmpty else { return false }
+            return orders.allSatisfy { o in
+                guard case .map(let f) = o, case .bool(true)? = f.first(where: { $0.0 == "r" })?.1 else { return false }
+                return true
+            }
+        default: return false
+        }
+    }
+
     /// A string field of the action.
     public static func text(_ action: MsgPack, _ key: String) -> String? {
         guard case .map(let pairs) = action, case .string(let s)? = pairs.first(where: { $0.0 == key })?.1 else { return nil }

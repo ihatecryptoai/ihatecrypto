@@ -1,6 +1,8 @@
+import CryptoKit
 import Foundation
 @testable import IhatecryptoCore
 import Testing
+import WalletCore
 
 private func d(_ s: String) -> Decimal { Decimal(string: s)! }
 private let eth = Market(name: "ETH", markPx: 2000, szDecimals: 4, maxLeverage: 25)
@@ -62,6 +64,26 @@ private let twelve = "abandon ability able about above absent absorb abstract ab
     #expect(!SeedGuard.containsMnemonic("лонг ETH риск $10 стоп 3% тейк 6% плечо 2x"))
     let eleven = twelve.split(separator: " ").dropLast().joined(separator: " ")
     #expect(!SeedGuard.containsMnemonic(eleven))
+}
+
+// Hardhat's account #0: a public test key.
+private let hardhatKey = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+@Test func seedGuardCatchesPrivateKeys() throws {
+    let secret = Data(repeating: 7, count: 32)
+    let pair = secret + (try Curve25519.Signing.PrivateKey(rawRepresentation: secret)).publicKey.rawRepresentation
+    #expect(SeedGuard.containsPrivateKey("import this " + Base58.encode(pair)))
+    #expect(SeedGuard.containsPrivateKey("[" + pair.map { String($0) }.joined(separator: ", ") + "]"))
+    #expect(SeedGuard.containsPrivateKey("my private key " + hardhatKey))
+    #expect(SeedGuard.containsPrivateKey("вот ключ: 0x" + hardhatKey))
+}
+
+@Test func seedGuardLetsSignaturesHashesAndAccountsThrough() {
+    // 64 bytes that aren't a keypair: a Solana transaction's signature.
+    #expect(!SeedGuard.containsPrivateKey("what did " + Base58.encode(Data((0..<64).map { UInt8($0) })) + " do?"))
+    // 64 hex digits with no word for a key: a NEAR account, a transaction hash.
+    #expect(!SeedGuard.containsPrivateKey("send 1 NEAR to " + hardhatKey))
+    #expect(!SeedGuard.containsPrivateKey("what is 0x" + hardhatKey))
 }
 
 // MARK: Risk

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import WalletCore
 
 public enum Side: String, Codable, Sendable {
@@ -239,6 +240,27 @@ public enum SeedGuard {
         for word in text.lowercased().split(whereSeparator: { !$0.isLetter }) {
             run = BIP39.index[String(word)] != nil ? run + 1 : 0
             if run >= 12 { return true }
+        }
+        return false
+    }
+
+    /// True when the text holds a private key: a Solana keypair — 64 bytes in Base58 or as a JSON array, its second half the
+    /// first half's public key, so a transaction's signature (64 bytes too) isn't one — or 32 bytes of hex (an EVM key)
+    /// with a word for a key beside it: alone, 64 hex digits are as likely a transaction hash or a NEAR account.
+    /// ponytail: an EVM key pasted with no such word passes; nothing in the hex itself tells it from a hash.
+    public static func containsPrivateKey(_ text: String) -> Bool {
+        func keypair(_ b: Data) -> Bool {
+            b.count == 64 && (try? Curve25519.Signing.PrivateKey(rawRepresentation: b.prefix(32)))?.publicKey.rawRepresentation == b.suffix(32)
+        }
+        for m in text.matches(of: /\[\s*\d{1,3}(?:\s*,\s*\d{1,3}){63}\s*\]/) {
+            let bytes = m.output.split(whereSeparator: { !$0.isNumber }).compactMap { UInt8($0) }
+            if bytes.count == 64, keypair(Data(bytes)) { return true }
+        }
+        let keyWord = text.lowercased().contains(/private|secret|\bkey\b|приват|секрет|ключ/)
+        for word in text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
+            let hex = word.hasPrefix("0x") ? word.dropFirst(2) : word
+            if keyWord, hex.count == 64, hex.allSatisfy(\.isHexDigit) { return true }
+            if (86...88).contains(word.count), let b = try? Base58.decode(String(word)), keypair(b) { return true }
         }
         return false
     }

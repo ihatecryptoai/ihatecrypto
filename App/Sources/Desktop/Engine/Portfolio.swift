@@ -108,6 +108,8 @@ extension Engine {
         await refreshFavorites()
         await checkAlerts()
         await readTransit()
+        // Every network's gas coin is known now: dollars without it get their way out offered (once a network).
+        offerGasWays()
         changed()
     }
 

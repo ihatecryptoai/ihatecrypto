@@ -21,6 +21,12 @@ extension Engine {
                       "Похоже на фразу восстановления. Я её не показываю, не храню и никуда не отправляю. Импортируй её в «Кошельки › Импорт»."))
             return
         }
+        // A private key the same: kept from the chat, the model and the history.
+        if SeedGuard.containsPrivateKey(text) {
+            reply(say("That looks like a private key. I don’t show it, store it or send it anywhere. Import a key in Settings › Wallets.",
+                      "Похоже на приватный ключ. Я его не показываю, не храню и никуда не отправляю. Импортируй ключ в «Настройки › Кошельки». Если это хеш транзакции, напиши его с «0x»."))
+            return
+        }
         // A block the person pointed at (right-click › Ask in chat): its words go to the model with the message.
         attached = board.flatMap { id in boards.first { $0.id == id } }
         var said = Message(fromUser: true, text: shown ?? text)

@@ -34,7 +34,7 @@ extension Executor {
         if s == UniswapV3.on(chainId)?.router || (chainId == 4663 && s == UniswapV3.robinhoodRouter) { return "Uniswap v3 router" }
         if s == UniswapV2.on(chainId)?.router { return "Uniswap v2 router" }
         if s == UniswapV4.on(chainId)?.router { return "Uniswap's Universal Router" }
-        if ["0x4cd00e387622c35bddb9b4c962c136462338bc31", "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be"].contains(s) { return "Relay" }
+        if s == "0x4cd00e387622c35bddb9b4c962c136462338bc31" || Permit3009.relayProxies.contains(s) { return "Relay" }
         if AaveV3.markets.contains(where: { $0.rpc.chainId == chainId && $0.pool.lowercased() == s }) { return "Aave pool" }
         if MorphoVault.vaults.contains(where: { $0.rpc.chainId == chainId && $0.address.lowercased() == s }) { return "Morpho vault" }
         return nil
@@ -67,7 +67,7 @@ extension Executor {
             url.queryItems = [URLQueryItem(name: "filter", value: "from")] + (next ?? [:]).map { URLQueryItem(name: $0.key, value: "\($0.value)") }
             guard page == 0 || next != nil, let u = url.url else { break }
             var r = URLRequest(url: u, timeoutInterval: 30)
-            r.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+            r.setValue(Holdings.browser["User-Agent"], forHTTPHeaderField: "User-Agent")
             var list: [String: Any]?
             for attempt in 0..<4 {
                 guard let (data, response) = try? await URLSession.shared.data(for: r) else { break }

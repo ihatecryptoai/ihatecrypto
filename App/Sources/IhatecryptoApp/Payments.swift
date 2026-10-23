@@ -12,6 +12,8 @@ struct PaymentQuote {
     let challenge: MPP.Challenge
     let ask: String
     let service: String
+    /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
+    var probed = false
 }
 
 /// What a service sent back, on the canvas: its results as rows (or its values), who answered, what it cost. A paid
@@ -25,20 +27,32 @@ nonisolated struct ServiceAnswer: Codable, Hashable {
     let raw: String
 }
 
-/// «pay POST https://… {…}»: a paid API on Tempo (MPP). The request goes out once unpaid; the service's 402 names the
-/// price and the payee, which the card shows. After Confirm ihatecrypto pays that USDC on Tempo itself (the signer checks
-/// the payee as a new recipient) and sends the request again with the transaction's hash as the proof.
+/// «pay POST https://… {…}»: a paid API on Tempo (MPP). The price is asked without the request's content (an email's
+/// text, a phone number), so a service the user turns down never sees it; the service's 402 names the price and the
+/// payee, which the card shows. After Confirm the request goes with its content, the same price is checked, ihatecrypto
+/// pays that USDC on Tempo itself (the signer checks the payee as a new recipient) and sends the request again with the
+/// transaction's hash as the proof. A service that can't quote without the content gets it unpaid, as the protocol has it.
 extension Workspace {
     func preparePayment(_ command: WalletCommand, note: String? = nil) async {
         guard case .pay(let method, let url, let body) = command, let host = URL(string: url)?.host() else {
             reply(say("That isn't a web address ihatecrypto can call.", "Это не веб-адрес, который ihatecrypto может вызвать."), note: note)
             return
         }
+        if MPP.refusesProof.contains(host.lowercased()) {
+            reply(say("\(host) takes the payment and then refuses its proof (checked 2026-10-23), so ihatecrypto doesn't pay it. Ask for another service.",
+                      "\(host) берёт оплату, а потом не принимает её подтверждение (проверено 2026-10-23), поэтому ihatecrypto его не оплачивает. Попроси другой сервис."), note: note)
+            return
+        }
         agentStep = say("Asking \(host) for its price", "Спрашиваю цену у \(host)")
         let ask = messages.last(where: \.fromUser)?.text ?? ""
         do {
             async let named = MPP.serviceName(url)
-            let (status, headers, data) = try await MPP.call(method, url, body)
+            var probed = !(body ?? "").isEmpty && !Self.pricedWithContent.contains(url)
+            var (status, headers, data) = try await MPP.call(method, url, probed ? nil : body)
+            if probed, status != 402 {
+                probed = false
+                (status, headers, data) = try await MPP.call(method, url, body)
+            }
             let service = await named ?? host
             guard status == 402 else {
                 if (200..<300).contains(status) {
@@ -52,7 +66,7 @@ extension Workspace {
             case .failure(let refusal):
                 reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
             case .success(let c):
-                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service)
+                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed)
                 pendingAction = .wallet(command)
                 pendingText = "pay \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(service)"
                 let short = (tempoUSDC ?? 0) < c.usdc + Decimal(string: "0.01")!
@@ -69,17 +83,22 @@ extension Workspace {
 
     /// After Confirm: the quoted price paid on Tempo, then the request again with the proof. A quote about to expire is
     /// asked for again, and only the same price to the same payee is paid.
+    /// Services whose price came out different once they saw the request's content: quoted with it from then on.
+    nonisolated(unsafe) static var pricedWithContent: Set<String> = []
+
     func pay(_ command: WalletCommand, _ e: Executor) async throws -> String {
         guard case .pay(let method, let url, let body) = command, let quote = payment, quote.command == command else {
             throw ExecutionError("The service's price is gone; ask for it again.")
         }
         var c = quote.challenge
-        if let expires = c.expires, expires.timeIntervalSinceNow < 30 {
+        if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 30 }) == true {
             let (status, headers, _) = try await MPP.call(method, url, body)
             guard status == 402, case .success(let fresh) = MPP.challenge(headers["www-authenticate"] ?? "") else {
                 throw ExecutionError("The service didn't quote again (\(status)); nothing was paid.")
             }
             guard fresh.amount == c.amount, fresh.payee.lowercased() == c.payee.lowercased() else {
+                // Its price depends on the request: from now on it's asked with the content, so the next card shows it.
+                if quote.probed { Self.pricedWithContent.insert(url) }
                 throw ExecutionError("The price changed to \(Fmt.num(fresh.usdc, maxFraction: 6)) USDC; nothing was paid. Ask again to see the new card.")
             }
             c = fresh

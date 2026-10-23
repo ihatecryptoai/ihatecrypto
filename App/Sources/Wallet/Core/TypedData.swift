@@ -33,6 +33,20 @@ public struct TypedData: Sendable {
     /// user-signed ones (Withdraw, UsdSend, SpotSend, ApproveAgent…, domain «HyperliquidSignTransaction») and the L1
     /// «Agent» that signs an action's hash blind — which the main key, the Hyperliquid account's own, signs only in
     /// ihatecrypto's guarded steps; EIP-3009 transfers by signature; any struct that names a payee and an amount.
+    /// `refusal`, and, given the wallet's own address, any struct that names someone else's address beside an amount,
+    /// whatever its fields are called: a site's own order or payment kind can call its payee «taker» or «dest». An
+    /// address that is this wallet's, the zero address or the verifying contract isn't someone else.
+    public func refusal(owner: String?) -> String? {
+        if let refusal { return refusal }
+        guard let owner = owner?.lowercased() else { return nil }
+        let zero = "0x" + String(repeating: "0", count: 40)
+        let others = fields.filter { $0.type == "address" && ![owner, zero, verifyingContract].contains($0.value.lowercased()) }
+        let amountWords = ["amount", "value", "wad", "qty", "quantity", "size", "price", "sum", "balance", "shares", "tokens", "units"]
+        let amount = fields.first { f in f.type.hasPrefix("uint") && amountWords.contains { f.name.lowercased().contains($0) } }
+        guard let other = others.first, let amount else { return nil }
+        return "\(primaryType) names \(other.value) («\(other.name)») beside an amount («\(amount.name)»): a signature like that can move money. ihatecrypto doesn't sign it for a site."
+    }
+
     public var refusal: String? {
         // ERC-4337's EntryPoints (v0.6, v0.7, v0.8; Batch7702.entryPoints, which this module can't import): a wallet
         // delegated to an account contract (EIP-7702) does whatever a user operation signed for one says.

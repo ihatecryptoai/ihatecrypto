@@ -813,7 +813,8 @@ public enum EVMCall: Equatable, Sendable {
     /// 2026-10-03), Circle's CCTP TokenMessenger, USDT0's adapter on Ethereum, Tempo's exchange. An approve to any other spender
     /// needs it approved in person, like a recipient.
     public static func knownSpenders(chainId: UInt64) -> Set<String> {
-        var s = ["0x4cd00e387622c35bddb9b4c962c136462338bc31", "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be"]
+        // Relay's depository and its approval proxies (v3, and v3.2 from 2026-10-26).
+        var s = ["0x4cd00e387622c35bddb9b4c962c136462338bc31"] + Permit3009.relayProxies
         s += AaveV3.markets.filter { $0.rpc.chainId == chainId }.map(\.pool) + MorphoVault.vaults.filter { $0.rpc.chainId == chainId }.map(\.address)
         if CCTP.domain(chainId) != nil { s.append(CCTP.tokenMessenger) }
         if let usdt0 = USDT0.on(chainId), usdt0.approves { s.append(usdt0.oft) }
@@ -823,6 +824,21 @@ public enum EVMCall: Equatable, Sendable {
         if chainId == EVMRPC.robinhood.chainId { s.append(UniswapV3.robinhoodRouter) }
         if let v4 = UniswapV4.on(chainId) { s += [v4.router, UniswapV4.permit2] }
         return Set(s.map { $0.lowercased() })
+    }
+
+    /// Contracts ihatecrypto's own moves call with calldata the signer doesn't read: Relay's depository and approval proxies
+    /// (a quote's call), Tempo's exchange and fee manager, Safe's factory. Uniswap's routers, Permit2, Aave and the rest get
+    /// only calls the decoder reads from ihatecrypto; an unread one there (a site's) could spend what was approved to them.
+    static let ownUnreadCallees: Set<String> = Set([RelayMulticallPermit.depository, Tempo.exchange, Tempo.feeManager, Safe.factory].map { $0.lowercased() })
+        .union(Permit3009.relayProxies)
+
+    /// The contract of a call the signer can't read, to be allowed in person once, whoever asks for it (a site, the chat's
+    /// `call`): nil when the call is read, pays that contract (then it's a recipient), or is one of ihatecrypto's own.
+    public func unreadTarget(to: String, value: UInt64, chainId: UInt64) -> String? {
+        let target = to.lowercased()
+        guard case .contract = self, !Self.ownUnreadCallees.contains(target),
+              !payees(to: to, value: value, chainId: chainId).contains(where: { $0.lowercased() == target }) else { return nil }
+        return target
     }
 
     /// Who gets money, or the right to spend it, from this call: `to` when it carries coins (unless they come straight back,

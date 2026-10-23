@@ -173,3 +173,11 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect(WalletCommand.parse("move 20 USDC from Base to Robinhood") == .bridge(from: "base", to: "robinhood", 20))
     #expect(ChatRouter.parses("add gas on robinhood for 1 USDC", markets: []))
 }
+
+/// Services that took the test wallet's payment and refused its proof (2026-10-23) stay out of the model's search.
+@Test func servicesThatRefuseTheProofAreNeverOffered() {
+    #expect(MPP.unpayable(["serviceUrl": "https://api.aisa.one"]))
+    #expect(MPP.unpayable(["serviceUrl": "https://mpp.alchemy.com"]))
+    #expect(MPP.unpayable(["serviceUrl": "https://stableenrich.dev"]))
+    #expect(!MPP.unpayable(["serviceUrl": "https://brave.mpp.paywithlocus.com"]))
+}

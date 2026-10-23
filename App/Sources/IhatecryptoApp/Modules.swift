@@ -9,6 +9,8 @@ import WalletCore
 
 /// A market's candles on the canvas, with the levels that matter for it. Kept with the canvas: reopened, it shows
 /// the snapshot and when it was taken, until Refresh.
+enum ChartPlace: String { case column, beside, plan }
+
 nonisolated struct ChartState: Equatable, Codable {
     var coin: String
     var range: ChartCommand.Range
@@ -38,6 +40,19 @@ extension Workspace {
         } catch {
             chart?.error = error.localizedDescription
         }
+    }
+
+    /// Where the chart goes on the canvas (the owner's picks, 2026-10-23): a trade plan of its coin is drawn on it
+    /// (PlanChartBoard); beside anything else on the canvas, so no Confirm sits above the chart; on its own, at the top.
+    /// `tradePlan`: a long or short is planned on the canvas (its route cards are drawn).
+    func chartPlace(tradePlan: Bool) -> ChartPlace? {
+        guard let chart else { return nil }
+        if tradePlan, chart.coin.caseInsensitiveCompare(intent.asset) == .orderedSame { return .plan }
+        let busy = tradePlan || managesPosition || positions.contains { $0.coin == chart.coin }
+            || pendingAction != nil || moveRunning || allocationPreview != nil || rebalancePlan != nil
+            || (savedBoard ?? finishedCanvas) != nil || currentScheduleKey != nil || serviceAnswer != nil
+            || !(yieldOptions ?? heldAnswer?.yields ?? []).isEmpty
+        return busy ? .beside : .column
     }
 
     /// «chart ETH», «what's moving».
@@ -114,7 +129,7 @@ struct ChartBoard: View {
                 }
                 .buttonStyle(.hoverIcon).disabled(refreshing).help("Load fresh candles from Hyperliquid")
             }
-            AssetPrice(pointer: pointer, now: points.last?.close ?? market?.markPx, change: change(points),
+            AssetPrice(pointer: pointer, now: points.last?.close ?? market?.markPx, change: Self.change(points),
                        range: Binding(get: { state.range }, set: { r in Task { await ws.openChart(state.coin, range: r) } }))
             AssetChart(points: points, range: state.range, pointer: pointer, levels: levels, error: state.error.map { "The chart didn’t load: \($0)" })
             if let m = market {
@@ -137,7 +152,7 @@ struct ChartBoard: View {
         .task { await ws.loadChainCosts() }
     }
 
-    private func change(_ points: [TokenMarket.Point]) -> Decimal? {
+    static func change(_ points: [TokenMarket.Point]) -> Decimal? {
         guard let first = points.first?.close, let last = points.last?.close, first > 0 else { return nil }
         return (last - first) / first * 100
     }
@@ -157,6 +172,73 @@ struct ChartBoard: View {
             out.append(ChartLevel(id: a.id.uuidString, price: d(a.price), label: "Alert", color: .orange, dashed: true))
         }
         return out
+    }
+}
+
+/// A trade plan drawn on its coin's chart (the owner's pick C, 2026-10-23: «план нарисован на чарте … при трединге»):
+/// the plan's title with Cancel and Confirm on top, its entry, stop and take across the candles with the loss and the
+/// gain between them, and the trade's numbers under them. The route cards follow under the board.
+struct PlanChartBoard<Header: View>: View {
+    @Environment(Workspace.self) private var ws
+    let state: ChartState
+    @ViewBuilder let header: () -> Header
+    @State private var refreshing = false
+    @State private var pointer = ChartPointer()
+
+    var body: some View {
+        let points = state.candles.map { TokenMarket.Point(time: $0.time, close: $0.close) }
+        let sizing = ws.evaluation.sizing
+        VStack(alignment: .leading, spacing: 14) {
+            header()
+            HStack(alignment: .center, spacing: 4) {
+                AssetPrice(pointer: pointer, now: points.last?.close ?? ws.markets[state.coin]?.markPx, change: ChartBoard.change(points),
+                           range: Binding(get: { state.range }, set: { r in Task { await ws.openChart(state.coin, range: r) } }))
+                Button {
+                    refreshing = true
+                    Task { await ws.openChart(state.coin, range: state.range); refreshing = false }
+                } label: {
+                    if refreshing { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
+                }
+                .buttonStyle(.hoverIcon).disabled(refreshing)
+                .help(state.at.map { "Candles as of \(Fmt.date($0)). Load fresh ones from Hyperliquid" } ?? "Load fresh candles from Hyperliquid")
+                Button { withAnimation(StudioView.spring) { ws.chart = nil } } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.hoverIcon).help("Hide the chart; the plan stays")
+            }
+            AssetChart(points: points, range: state.range, pointer: pointer, levels: levels(sizing), zones: zones(sizing), height: 250,
+                       error: state.error.map { "The chart didn’t load: \($0)" })
+            if let sizing { AssetStats(changes: [], tiles: tiles(sizing), perRow: 5) }
+        }
+        .assetCard(width: nil)
+    }
+
+    private func d(_ x: Decimal) -> Double { NSDecimalNumber(decimal: x).doubleValue }
+
+    private func levels(_ s: Sizing?) -> [ChartLevel] {
+        var out = ws.alerts.filter { $0.coin == state.coin }
+            .map { ChartLevel(id: $0.id.uuidString, price: d($0.price), label: "Alert", color: .orange, dashed: true) }
+        guard let s else { return out }
+        out.append(ChartLevel(id: "entry", price: d(s.entry), label: ws.intent.entryPx == nil ? "Entry ≈" : "Limit", color: Brand.accent, dashed: true))
+        out.append(ChartLevel(id: "stop", price: d(s.stopPrice), label: "Stop", color: Brand.loss, dashed: false))
+        if let take = s.takePrice { out.append(ChartLevel(id: "take", price: d(take), label: "Take", color: Brand.profit, dashed: false)) }
+        return out
+    }
+
+    private func zones(_ s: Sizing?) -> [ChartZone] {
+        guard let s else { return [] }
+        return [ChartZone(id: "loss", from: d(s.entry), to: d(s.stopPrice), color: Brand.loss)]
+            + (s.takePrice.map { [ChartZone(id: "gain", from: d(s.entry), to: d($0), color: Brand.profit)] } ?? [])
+    }
+
+    /// The liquidation isn't drawn (far off the candles), so it is a number here.
+    private func tiles(_ s: Sizing) -> [(String, String?)] {
+        let intent = ws.resolved.intent
+        let pct = ws.equity.flatMap { $0 > 0 ? (s.lossAtStopUSD / $0 * 100).rounded(1, .plain) : nil }
+        return [("\(intent.side == .long ? "Long" : "Short") · \(Fmt.num(intent.leverage ?? 1))×",
+                 "\(Fmt.usd(s.notional)) · \(Fmt.num(s.size, maxFraction: ws.markets[state.coin]?.szDecimals ?? 4)) \(IntentParser.pretty(state.coin))"),
+                ("Margin", Fmt.usd(s.margin)),
+                ("Liquidation", "≈ \(Fmt.price(s.liquidationPrice))"),
+                ("At the stop", "−\(Fmt.usd(s.lossAtStopUSD))" + (pct.map { " · \(Fmt.num($0))%" } ?? "")),
+                ("At the take", s.profitAtTakeUSD.map { "+\(Fmt.usd($0))" })]
     }
 }
 

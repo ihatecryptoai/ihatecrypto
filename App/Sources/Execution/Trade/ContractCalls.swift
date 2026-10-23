@@ -17,7 +17,7 @@ public struct ContractTrust: Sendable, Equatable {
     /// No explorer for this network, or it didn't answer: nothing is known.
     public var unknown = false
 
-    static let browser = ["User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"]
+    static let browser = Holdings.browser
 
     public static func check(_ address: String, on network: String) async -> ContractTrust {
         guard let host = Holdings.blockscout[network],

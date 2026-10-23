@@ -356,8 +356,14 @@ public enum MPP {
     // ponytail: by host, as measured; a service's 402 is still checked before any card (MPP.challenge).
     static func unpayable(_ s: [String: Any]) -> Bool {
         let host = (s["serviceUrl"] as? String).flatMap { URL(string: $0)?.host()?.lowercased() } ?? ""
-        return host.hasSuffix(".mpp.tempo.xyz") || ["mpp.orthogonal.com", "api.exa.ai", "api.nansen.ai"].contains(host)
+        return host.hasSuffix(".mpp.tempo.xyz") || ["mpp.orthogonal.com", "api.exa.ai", "api.nansen.ai"].contains(host) || refusesProof.contains(host)
     }
+
+    /// Services that take the payment and then refuse its proof, measured live 2026-10-23 on the Dev test wallet: AIsa
+    /// answers «credential request does not match this route's requirements» to every proof (GET and POST), Alchemy's
+    /// own receipt check fails (403 from its node), StableEnrich answers 402 again to a push proof. Their 402 looks
+    /// payable, so they're never paid, even when the chat names the address.
+    public static let refusesProof: Set<String> = ["api.aisa.one", "mpp.alchemy.com", "stableenrich.dev"]
 
     static func tokens(_ text: String) -> [String] { text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init) }
 

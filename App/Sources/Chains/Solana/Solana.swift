@@ -151,10 +151,11 @@ public enum SolanaTransaction {
         return (Base58.encode(signature), compact(1) + signature + message)
     }
 
-    /// Signs a transaction someone else built (Jupiter). Refuses unless our key is the fee payer, account 0.
-    public static func sign(_ wire: Data, privateKey: Data) throws -> (signature: String, wire: Data) {
+    /// Signs a transaction someone else built (Jupiter). Refuses unless our key is the fee payer, account 0 — or, with a
+    /// `sponsor` (a 32-byte public key) paying, unless it is account 0 and our key the second and last signer.
+    public static func sign(_ wire: Data, privateKey: Data, sponsor: Data? = nil) throws -> (signature: String, wire: Data) {
         let signer = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)
-        let (message, slot) = try unsigned(wire, payer: signer.publicKey.rawRepresentation)
+        let (message, slot) = try unsigned(wire, payer: signer.publicKey.rawRepresentation, sponsor: sponsor)
         let signature = try signer.signature(for: message)
         var signed = wire
         signed.replaceSubrange(slot, with: signature)
@@ -162,8 +163,9 @@ public enum SolanaTransaction {
     }
 
     /// The message our key signs and where in `wire` its 64-byte signature goes. Refuses unless `payer` (a 32-byte
-    /// public key) is the fee payer, account 0, and the only signer.
-    public static func unsigned(_ wire: Data, payer: Data) throws -> (message: Data, slot: Range<Data.Index>) {
+    /// public key) is the fee payer, account 0, and the only signer; with a `sponsor`, unless the sponsor is account 0 and
+    /// `payer` account 1 of exactly two signers.
+    public static func unsigned(_ wire: Data, payer: Data, sponsor: Data? = nil) throws -> (message: Data, slot: Range<Data.Index>) {
         var offset = 0
         let signatureCount = try readCompact(wire, &offset)
         let signaturesStart = offset
@@ -173,13 +175,23 @@ public enum SolanaTransaction {
 
         var m = message.startIndex
         if message[m] & 0x80 != 0 { m += 1 }                    // versioned (v0) prefix
-        guard message[m] == 1 else { throw WalletError("The transaction needs \(message[m]) signatures; expected only ours") }
+        let signers = sponsor == nil ? 1 : 2
+        guard message[m] == signers, signatureCount == signers else {
+            throw WalletError("The transaction needs \(message[m]) signatures; expected \(sponsor == nil ? "only ours" : "the fee payer's and ours")")
+        }
         m += 3
         var keyOffset = m - message.startIndex
-        _ = try readCompact(message, &keyOffset)
-        let feePayer = message.subdata(in: (message.startIndex + keyOffset)..<(message.startIndex + keyOffset + 32))
-        guard feePayer == payer else { throw WalletError("The fee payer isn't our wallet") }
-        return (message, (wire.startIndex + signaturesStart)..<(wire.startIndex + signaturesStart + 64))
+        guard try readCompact(message, &keyOffset) >= signers, message.startIndex + keyOffset + 32 * signers <= message.endIndex else {
+            throw WalletError("Incomplete transaction")
+        }
+        func key(_ i: Int) -> Data { message.subdata(in: (message.startIndex + keyOffset + 32 * i)..<(message.startIndex + keyOffset + 32 * (i + 1))) }
+        if let sponsor {
+            guard key(0) == sponsor, sponsor != payer, key(1) == payer else { throw WalletError("The fee payer isn't the sponsor, or our wallet isn't the second signer") }
+        } else {
+            guard key(0) == payer else { throw WalletError("The fee payer isn't our wallet") }
+        }
+        let start = wire.startIndex + signaturesStart + 64 * (signers - 1)
+        return (message, start..<(start + 64))
     }
 
     static func compact(_ n: Int) -> Data {

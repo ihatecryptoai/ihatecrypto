@@ -78,6 +78,10 @@ extension Engine {
         card = Card(id: id, title: title, lines: lines, warnings: warnings,
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
         pin(Board(id: id, kind: "move", title: title, lines: warnings.map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
+        jupiterShown = nil
+        if case .wallet(let command) = pending { Task { await quoteCard(command, board: id) } }
+        // A Base or Arbitrum trade's two ways, for its step's way picker (RouteEdit.swift).
+        if case .wallet(let c) = pending, RouteEdit.wayKey(c) != nil { Task { await quoteWays(c) } }
     }
 
     func cancelPending() {
@@ -689,7 +693,7 @@ extension Engine {
             reply(try await e.revokeApproval(try net(place), token: token, spender: spender, permit2: permit2), note: "approvals")
         case .swapOn("solana", let from, let to, let amount):
             guard let a = await solanaAsset(from), let b = await solanaAsset(to) else { throw ExecutionError("Jupiter couldn't name both tokens of this swap. Nothing was signed.") }
-            reply(try await e.convert(from: a, to: b, amount: amount), note: "Solana · Jupiter")
+            reply(try await e.convert(from: a, to: b, amount: amount, shown: shownOut(command)), note: "Solana · Jupiter")
         case .swapOn("near", let from, let to, let amount):
             reply(try await e.intentSwap(from, on: "near", for: to, on: "near", amount: amount, near: try await nearAccount()), note: "NEAR Intents · 1Click")
         case .swapOn("hyperliquid", let from, let to, let amount): reply(try await e.hlSpotSwap(from: from, to: to, amount: amount), note: "Hyperliquid · spot")
@@ -711,8 +715,8 @@ extension Engine {
         case .bridge(let from, let to, let amount):
             let hyperliquid = to == "hyperliquid"
             reply(try await e.bridge(try net(from), to: hyperliquid ? nil : try net(to), hyperliquid: hyperliquid, usdc: amount), note: "Relay")
-        case .buy(let asset, let usdc): reply(try await e.swap(asset, buy: true, amount: usdc, equity: portfolio.total), note: "Solana · Jupiter")
-        case .sell(let asset, let amount): reply(try await e.swap(asset, buy: false, amount: amount), note: "Solana · Jupiter")
+        case .buy(let asset, let usdc): reply(try await e.swap(asset, buy: true, amount: usdc, equity: portfolio.total, shown: shownOut(command)), note: "Solana · Jupiter")
+        case .sell(let asset, let amount): reply(try await e.swap(asset, buy: false, amount: amount, shown: shownOut(command)), note: "Solana · Jupiter")
         case .jupiterDCA(let asset, let usdc, let orders, let every):
             reply(try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every), note: "Jupiter DCA")
         case .jupiterDCACancel(let asset): reply(try await e.cancelJupiterDCA(asset), note: "Jupiter DCA")
