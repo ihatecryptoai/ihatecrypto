@@ -119,7 +119,8 @@ function moveBoard(b, newest) {
       h("span", { class: "route-move-title" }, b.title),
       h("span", { class: "route-status-chip " + status[1] }, status[0]),
       runningHere ? h("span", { class: "route-rc-spinner" }) : null,
-      h("span", { class: "spacer" }),
+      // Right after the chip, not at the route's far end (the Mac's Spacer): a wide route would put Confirm under
+      // «Add block» and Windows' caption buttons.
       waitingHere ? h("div", { class: "btns route-nowrap" },
         h("button", { class: "btn route-large", onclick: () => act("cancel") }, t("Cancel", "Отмена")),
         h("button", { class: "btn primary route-large", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("hello"), s.card.confirm)) : null),

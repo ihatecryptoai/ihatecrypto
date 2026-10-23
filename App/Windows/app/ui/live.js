@@ -5,7 +5,7 @@
 // (Multisig.swift) and the Ledger's connect board (Ledger.swift). A button here never moves money: it puts the command
 // in the chat field (`suggest`), and the chat's card waits for Confirm.
 
-import { ui, act, render, t, h, svg, icon, addIcons, logo, usd, masked, popup, suggest, store, presence, invoke, toast } from "./core.js";
+import { ui, act, render, t, h, svg, icon, addIcons, logo, usd, masked, popup, suggest, store, presence, invoke, toast, qrCode } from "./core.js";
 import { blockFrame } from "./boards.js";
 
 addIcons({
@@ -153,13 +153,16 @@ function receiveBody() {
     h("p", { class: "live-lead" }, t("ihatecrypto can't pull money in: send it here from an exchange or another wallet, on that network.",
       "ihatecrypto не может сам забрать деньги: отправь их сюда с биржи или другого кошелька, именно в этой сети.")),
     cards.length ? cards.map((c) => h("div", { class: "live-receive-card tint-" + c.tint },
-      h("div", { class: "live-receive-head" },
-        h("span", { class: "live-logo-stack" }, c.logos.map((k) => netLogo(k, 20))),
-        h("b", {}, c.title),
-        c.badge ? h("span", { class: "live-badge" }, c.badge) : null),
-      h("div", { class: "live-receive-what" }, c.what),
-      addressLines(c.address, 26),
-      copyAddress(c.address)))
+      h("div", { class: "live-receive-qr", title: t("Scan with the exchange or wallet app", "Сканируй приложением биржи или кошелька") },
+        qrCode(c.address, "live-qr"), h("span", { class: "live-receive-qr-logo" }, netLogo(c.logos[0], 26))),
+      h("div", { class: "live-receive-text" },
+        h("div", { class: "live-receive-head" },
+          h("span", { class: "live-logo-stack" }, c.logos.map((k) => netLogo(k, 20))),
+          h("b", {}, c.title),
+          c.badge ? h("span", { class: "live-badge" }, c.badge) : null),
+        h("div", { class: "live-receive-what" }, c.what),
+        addressLines(c.address, 26),
+        copyAddress(c.address))))
       : note(t("No wallet on this computer yet: add one in Settings › Wallets.", "На этом компьютере пока нет кошелька: добавь его в Настройках › Кошельки.")),
     h("button", { class: "link-btn live-more", onclick: () => { ui.view = "topup"; render(); } }, icon("arrow.down.circle", 12), t("Top up: amounts, a wallet app or an exchange", "Пополнить: сумма, кошелёк или биржа")),
   ];

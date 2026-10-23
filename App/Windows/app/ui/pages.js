@@ -2,11 +2,10 @@
 // sidebar of tabs, each a column of sections with rows), History (HistoryView.swift) and Top up (ReceiveBoard in
 // Receive.swift). Settings cover the chat while open; History and Top up keep it floating, as the canvas does.
 
-import { ui, act, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence } from "./core.js";
+import { ui, act, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode } from "./core.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel } from "./chat.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
-import { qrMatrix } from "./qr.js";
 
 const back = () => { ui.view = "canvas"; render(); };
 
@@ -444,7 +443,7 @@ export function topUpPage() {
       tileWay("exchange", "globe", t("Exchange", "Биржа"), t("Binance, OKX, Bybit… by address", "Binance, OKX, Bybit… по адресу"), t("the exchange's withdrawal fee", "комиссия биржи за вывод"))),
     h("div", { class: "page-tu-body" },
       h("div", { class: "page-tu-qr", title: way === "exchange" ? t("Scan with the exchange's app", "Сканируй приложением биржи") : t("Scan with your phone's wallet", "Сканируй кошельком в телефоне") },
-        qr(qrText), h("span", { class: "page-tu-qr-logo" }, logo(net.logo, 26))),
+        qrCode(qrText, "page-qr"), h("span", { class: "page-tu-qr-logo" }, logo(net.logo, 26))),
       h("div", { class: "page-tu-text" }, h("b", {}, title), h("div", { class: "small" }, detail), addressLines(recipient))),
     way === "exchange" ? h("div", { class: "page-tu-warn pg-jev-ink" }, icon("exclamationmark.triangle", 13),
       h("span", {}, t(`Pick the network exactly: ${solana ? "Solana (SPL)" : net.title}. Sent on another network, money can get stuck. Many exchanges withdraw USDC on Solana or Base for well under a dollar.`,
@@ -479,12 +478,3 @@ function addressLines(address, perLine = 22) {
     h("button", { class: "btn small", onclick: () => copy(address) }, icon("copy", 12), t("Copy address", "Скопировать адрес")));
 }
 
-/** A QR code (qr.js) drawn as squares on white, with a quiet edge for the camera. */
-function qr(text) {
-  const m = qrMatrix(text);
-  const size = m.length, q = 2;
-  let d = "";
-  m.forEach((row, y) => row.forEach((dark, x) => { if (dark) d += `M${x + q} ${y + q}h1v1h-1z`; }));
-  return svg("svg", { viewBox: `0 0 ${size + 2 * q} ${size + 2 * q}`, class: "page-qr", "shape-rendering": "crispEdges" },
-    svg("rect", { width: size + 2 * q, height: size + 2 * q, fill: "#fff" }), svg("path", { d, fill: "#000" }));
-}

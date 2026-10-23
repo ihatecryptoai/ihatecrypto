@@ -31,7 +31,12 @@
   padding: 2px 6px; border-radius: 999px; }
 
 /* Receive */
-.live-receive-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 18px; background: var(--fill); }
+.live-receive-card { display: flex; align-items: flex-start; gap: 14px; padding: 12px; border-radius: 18px; background: var(--fill); }
+.live-receive-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.live-receive-qr { position: relative; flex: none; padding: 6px; border-radius: 12px; background: #fff; }
+.live-qr { width: 104px; height: 104px; display: block; }
+.live-receive-qr-logo { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.live-receive-qr-logo .logo { box-shadow: 0 0 0 3px #fff; }
 .live-receive-card.tint-solana { background: var(--solana-tint); }
 .live-receive-head { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 .live-receive-what { font-size: 10.5px; line-height: 1.45; }

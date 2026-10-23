@@ -3,6 +3,7 @@
 // way it runs.
 
 import { logoFiles } from "./logos.js";
+import { qrMatrix } from "./qr.js";
 
 const tauri = window.__TAURI__;
 export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
@@ -100,6 +101,16 @@ export function svg(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
   for (const c of children.flat(Infinity)) if (c) el.append(c);
   return el;
+}
+
+/** A QR code (qr.js) drawn as squares on white, with a quiet edge for the camera. */
+export function qrCode(text, cls) {
+  const m = qrMatrix(text);
+  const size = m.length, q = 2;
+  let d = "";
+  m.forEach((row, y) => row.forEach((dark, x) => { if (dark) d += `M${x + q} ${y + q}h1v1h-1z`; }));
+  return svg("svg", { viewBox: `0 0 ${size + 2 * q} ${size + 2 * q}`, class: cls, "shape-rendering": "crispEdges" },
+    svg("rect", { width: size + 2 * q, height: size + 2 * q, fill: "#fff" }), svg("path", { d, fill: "#000" }));
 }
 
 /** Icons as fixed paths on a 24-point grid (lines, 1.8 wide): nothing the engine sends becomes markup. The names follow
