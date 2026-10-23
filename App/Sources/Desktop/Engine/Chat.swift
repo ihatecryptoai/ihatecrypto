@@ -31,6 +31,7 @@ extension Engine {
         attached = board.flatMap { id in boards.first { $0.id == id } }
         var said = Message(fromUser: true, text: shown ?? text)
         said.context = attached.map(blockFacts)
+        said.contexts = sentContexts()
         messages.append(said)
         // The user wrote: a request the model was carrying on with is theirs to steer now.
         agentGoal = nil
@@ -39,7 +40,7 @@ extension Engine {
         options = []
         thinking = true
         changed()
-        defer { thinking = false; draft = nil; attached = nil; changed() }
+        defer { thinking = false; draft = nil; attached = nil; alsoAttached = []; agentStep = nil; changed() }
 
         // Before the parser or any model sees it. Jev reads a message that may hold a paste (an address, a link, or more
         // than anyone types as a command), told it is the user's own.
@@ -155,13 +156,23 @@ extension Engine {
         let checker = check
         var reading: ChatRouter.Reading?
         var failure = ""
-        for _ in 0..<2 where reading == nil {
+        stopRequested = false
+        // A call Stop cuts off (ChatTurns.modelCall): nothing it would have led to runs.
+        for _ in 0..<2 where reading == nil && !stopRequested {
             do {
-                reading = try await ChatRouter.route(text, context: context, client: client, model: model, markets: names, lookup: lookup, check: checker,
-                                                     draft: { [weak self] words in Task { @MainActor in self?.draft = words; self?.changed() } })
+                reading = try await modelCall {
+                    try await ChatRouter.route(text, context: context, client: client, model: model, markets: names, lookup: lookup, check: checker,
+                                               draft: { [weak self] words in Task { @MainActor in self?.draft = words; self?.changed() } })
+                }
             } catch {
+                if stopRequested { break }
                 failure = error.localizedDescription
             }
+        }
+        if stopRequested {
+            stopRequested = false
+            reply(say(Self.stoppedLine.0, Self.stoppedLine.1), note: model)
+            return
         }
         guard let reading else {
             reply(say("I couldn’t reach \(model) (\(failure.prefix(140))), so I didn’t act on this — nothing moved. Send it again, or pick another model in Settings.",
@@ -199,6 +210,7 @@ extension Engine {
             if reading.quiet, r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { quietCheck = true; return }
             reply(r, note: model)
         case .command(let canonical):
+            noteUnderstood(canonical)
             guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.displays, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address isn’t in your message, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет в твоём сообщении, поэтому я его не использую. Вставь сам адрес."), note: model)
@@ -211,6 +223,7 @@ extension Engine {
             } else if reading.continues {
                 // Their request goes on after this step: the model hears how it went now, or after the Confirm when it moves money.
                 agentGoal = AgentGoal(request: said ?? text, command: canonical, mark: mark, round: round)
+                agentGoal?.next = reading.next
                 if let next = reading.next { reply(say("Next, once this is through: ", "Дальше, когда это пройдёт: ") + next, note: model) }
                 Task { await continueAgent() }
             }
@@ -235,6 +248,7 @@ extension Engine {
         case "lock":
             try? await signerCall(.lock)
             reply(say("Locked.", "Заблокировано."), note: note)
+            await lockApp()
             return true
         case "create an automation wallet":
             await createAutomationWallet(note: note)
@@ -296,8 +310,9 @@ extension Engine {
 
     /// The model's change to the trade plan (ChatModel.edit), drawn as a fresh card.
     func editPlan(_ text: String, client: any LLMClient) async {
+        let before = intent, model = model, history = recentChat(), language = replyLanguage
         do {
-            let (edited, answer) = try await ChatModel.edit(intent, message: text, client: client, model: model, history: recentChat(), replyLanguage: replyLanguage)
+            let (edited, answer) = try await modelCall { try await ChatModel.edit(before, message: text, client: client, model: model, history: history, replyLanguage: language) }
             guard let next = edited?.started else {
                 reply(answer.isEmpty ? say("The model changed nothing.", "Модель ничего не изменила.") : answer, note: model)
                 return
@@ -317,10 +332,11 @@ extension Engine {
         and markets. The user may write in any language; answer in \(replyLanguage), in 1–4 short sentences with the numbers. If the \
         facts don't contain the answer, say so. Never invent trades, prices or addresses. The decision is the user's; never promise an outcome.
         """
+        let request = LLMRequest(model: model, messages: [
+            LLMMessage(.system, system), LLMMessage(.user, "Facts:\n" + facts.joined(separator: "\n") + "\n\nQuestion: " + question),
+        ])
         do {
-            let text = try await client.complete(LLMRequest(model: model, messages: [
-                LLMMessage(.system, system), LLMMessage(.user, "Facts:\n" + facts.joined(separator: "\n") + "\n\nQuestion: " + question),
-            ]))
+            let text = try await modelCall { try await client.complete(request) }
             reply(text.trimmingCharacters(in: .whitespacesAndNewlines), note: "\(model) · from your portfolio")
         } catch {
             reply(say("The model is unavailable: ", "Модель недоступна: ") + error.localizedDescription, note: model)
@@ -358,11 +374,14 @@ extension Engine {
 
     // MARK: What the model may read
 
+    /// The whole chat as the model reads it: a person's message whole (up to 3000 characters), our replies' gist.
     func chatLines() -> [String] {
-        messages.suffix(24).map { $0.fromUser ? "user: " + $0.text.prefix(3000) : "ihatecrypto: " + $0.text.prefix(600) }
+        messages.map { $0.fromUser ? "user: " + $0.text.prefix(3000) : "ihatecrypto: " + $0.text.prefix(600) }
     }
 
-    func recentChat() -> [String] { Array(chatLines().dropLast()) }
+    /// What goes with a message: all of it while it's short, its newest lines once it's long or the window small
+    /// (ChatRecall, as on the Mac); the last line is the message itself.
+    func recentChat() -> [String] { Array(sentChat(chatLines()).dropLast()) }
 
     /// What the model may know besides the message: the chat, the plan, positions, address-book names and balances.
     /// Never keys or the user's own addresses.
@@ -372,6 +391,7 @@ extension Engine {
         c.plan = intent == TradeIntent() ? nil : intent.command
         if let card { c.canvas.append("waiting for Confirm: " + card.title) }
         if let attached { c.canvas.append("the user points at this block on the canvas: " + blockFacts(attached)) }
+        c.canvas += alsoAttached.map { "the user points at this block on the canvas too: " + blockFacts($0) }
         c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block " + blockFacts($0) }
         c.canvas += alerts.map { "price alert: " + alertText($0) }
         c.canvas.append("schedule: " + (tasks.isEmpty ? "nothing scheduled" : tasks.map(taskText).joined(separator: "; ")))
@@ -409,6 +429,7 @@ extension Engine {
 
     /// One lookup the model asked for, then screened: what addresses the assistant or pushes money never reaches it.
     func screenedLookup(_ l: ChatRouter.Lookup) async -> String {
+        if let step = lookupStep(l) { agentStep = step; changed() }
         let found: String
         switch l.tool {
         case "portfolio": found = (portfolioFacts() + (await pnlFacts())).joined(separator: "\n")

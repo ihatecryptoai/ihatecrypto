@@ -47,7 +47,7 @@ enum Signer {
             let onlyPublicTest = false
             #endif
             if !onlyPublicTest {
-                try SeedStore.confirm("save your new 6-digit passcode: it opens the app" + (Presence.touchID ? "" : " and signs your moves"))
+                try SeedStore.confirm("save your new 6-digit passcode: it opens the app" + (CodeStore.canSign ? " and signs your moves" : ""))
             }
             defer { SeedStore.endSession() } // a confirmation, not a move: it leaves no session for an unrelated signature
             try CodeStore.set(code, presence: SeedStore.confirmed)
@@ -67,7 +67,7 @@ enum Signer {
 
         case .enterCode(let code, let sign):
             guard CodeStore.isSet else {
-                var r = SignerReply(ok: false, error: "There is no passcode: your Mac password opens ihatecrypto.")
+                var r = SignerReply(ok: false, error: "There is no passcode: \(CodeStore.fallback) opens ihatecrypto.")
                 (r.codeSet, r.codeOff) = (false, true)
                 return r
             }
@@ -86,7 +86,7 @@ enum Signer {
                 r.codeSet = true
                 return r
             case .off:
-                var r = SignerReply(ok: false, error: "\(CodeStore.tries) wrong codes: the code is off. Only your Mac password opens ihatecrypto and signs now.")
+                var r = SignerReply(ok: false, error: "\(CodeStore.tries) wrong codes: the code is off. Only \(CodeStore.fallback) opens ihatecrypto" + (CodeStore.canSign ? " and signs" : "") + " now.")
                 (r.codeSet, r.codeOff) = (false, true)
                 return r
             }

@@ -13,6 +13,8 @@ tauri = { version = "2.12.5", features = ["tray-icon", "unstable"] }
 tauri-plugin-updater = "2.14.0"
 tauri-plugin-notification = "2.7.0"
 serde_json = "1"
+tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-autostart = "2.7.0"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Foundation", "Globalization", "Media_SpeechRecognition", "Win32_Foundation", "Win32_Globalization", "Win32_System_DataExchange",

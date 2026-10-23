@@ -3,7 +3,7 @@
 // mood; the conversation; the field with the model, the networks and the context over it. It never moves money: a
 // move waits as a card, and only Confirm on it (here or on the canvas) runs it.
 
-import { ui, act, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, suggest, autosize, link, presence } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, suggest, autosize, link, presence } from "./core.js";
 import { railEdge } from "./rail.js";
 import { blockTitle } from "./boards.js";
 
@@ -42,6 +42,16 @@ addIcons({
   "lock.shield": "M12 3.5 19 6v5.5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6zM9.5 11.5h5v4h-5zM10.5 11.5v-1.3a1.5 1.5 0 0 1 3 0v1.3",
   "person.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 12.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6.5 18a6 6 0 0 1 11 0",
   desktop: "M3.5 4.5h17v11h-17zM9 20h6M12 15.5V20",
+  "stop.fill": "M7.5 7.5h9v9h-9z",
+  curlybraces: "M9 4.5c-2 0-2.5 1-2.5 2.5v2c0 1.5-.7 2.5-2 2.5 1.3.5 2 1.5 2 3v2c0 1.5.5 2.5 2.5 2.5M15 4.5c2 0 2.5 1 2.5 2.5v2c0 1.5.7 2.5 2 2.5-1.3.5-2 1.5-2 3v2c0 1.5-.5 2.5-2.5 2.5",
+  hourglass: "M7 3.5h10M7 20.5h10M8 3.5c0 4 8 5 8 8.5s-8 4.5-8 8.5M16 3.5c0 4-8 5-8 8.5s8 4.5 8 8.5",
+  "play.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM10 8.5v7l5.5-3.5z",
+  "exclamationmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5v5.5M12 16.5h.01",
+  magnifyingglass: "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM15.5 15.5 20 20",
+  "circle.dotted": "M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7",
+  "xmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
+  "shield.lefthalf": "M12 3.5 19 6v5.5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6zM12 3.5v17",
+  "circle.lefthalf": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 3v18",
 });
 
 // MARK: Where the panel sits
@@ -137,6 +147,8 @@ export function chatPanel() {
   const s = ui.state;
   const panel = h("div", { class: "chat-panel glass" });
   const mood = moodNow();
+  // The model menu's lists are read when the chip first appears (and after the menu closes), never while it's open.
+  if (!modelsAsked) { modelsAsked = true; act("refreshModels"); }
   const head = h("div", { class: "chat-head", title: t("Drag to move · double-click: back to its corner", "Перетащи, чтобы подвинуть · двойной клик — на место"),
       onpointerdown: (e) => moveBy(e, panel), ondblclick: (e) => { if (!e.target.closest("button")) dock(); } },
     mascot(30, mood),
@@ -160,7 +172,7 @@ export function chatPanel() {
 function moodNow() {
   const s = ui.state;
   if (s.thinking || s.runningBoard) return "thinking";
-  if (listening) return "listening";
+  if (voice.on) return "listening";
   if (s.card) return "waiting";
   const newest = s.boards.find((b) => b.kind === "move");
   if (newest?.state === "failed") return "error";
@@ -174,7 +186,7 @@ function statusLine(mood) {
     case "error": return t("Something went wrong", "Что-то пошло не так");
     case "thinking":
       if (s.runningBoard) return s.signer.waiting ? t(`${presence()} is asking for you`, `${presence()} спрашивает тебя`) : t("Carrying it out", "Выполняю");
-      return t("Reading…", "Читаю…");
+      return t("Working on it", "Работаю над этим");
     case "listening": return t("Listening…", "Слушаю…");
     case "waiting": return t("Waiting for your Confirm", "Ждёт твоего «Подтвердить»");
     case "done": return t("Done", "Готово");
@@ -186,37 +198,67 @@ function statusLine(mood) {
 
 function conversation(s) {
   const items = [];
-  const last = s.chat.length - 1;
   s.chat.forEach((m, i) => {
-    items.push(m.fromUser ? userMessage(m) : reply(m));
-    // Ways to go on live under the reply that offered them.
-    if (i === last && !m.fromUser && s.options.length && !s.thinking) items.push(answers(m.id));
+    // A move's steps as it ran: one card; the reply right after it is what the move came to.
+    if (m.steps) { items.push(stepsCard(m.steps, false)); return; }
+    items.push(m.fromUser ? userMessage(m) : reply(m, i > 0 && !!s.chat[i - 1].steps));
+    // The cards a reply offered stay under it: the last reply's live, older ones folded with their pick.
+    if (!m.fromUser && m.options?.length) items.push(answers(m));
   });
-  if (s.running) items.push(stepsCard(s.running));
+  if (s.running) items.push(stepsCard(s.running.lines.length ? s.running.lines : [s.running.title], true));
+  const last = s.chat.length - 1;
   if (s.thinking && (last < 0 || s.chat[last].fromUser)) {
-    items.push(s.draft ? reply({ fromUser: false, text: s.draft, draft: true }) : thinkingDots());
+    items.push(s.draft ? reply({ fromUser: false, text: s.draft, draft: true }) : thinkingDots(s.agentStep));
   }
-  if (s.options.length && !s.thinking && (last < 0 || s.chat[last].fromUser)) items.push(answers("start"));
+  // Cards offered with no reply above them (the start's).
+  if (s.options.length && !s.optionsMessage && !s.thinking) items.push(answers(null));
   if (!s.chat.length && !s.thinking) items.push(...ideas());
   return items;
 }
 
-/** Yours: an orange outline, no fill; its time beside it, at the bubble's foot. */
+/** Yours: an orange outline, no fill; its time beside it, at the bubble's foot; what went with it as chips over it. */
 function userMessage(m) {
+  const chips = m.contexts?.length ? m.contexts : m.context ? [{ title: m.context.split(":")[0].replace(/[«»]/g, ""), about: m.context, bare: false }] : [];
   return h("div", { class: "chat-msg-user" },
-    m.context ? sentContext(m.context) : null,
+    chips.length ? h("div", { class: "chat-context-row" }, h("span", { class: "chat-context-label" }, icon("paperclip", 11), t("Context", "Контекст")), chips.map(sentContext)) : null,
     h("div", { class: "chat-msg-user-row" },
       m.at ? h("span", { class: "chat-msg-time num" }, stamp(m.at)) : null,
-      h("div", { class: "chat-bubble selectable" }, m.text)));
+      h("div", { class: "chat-bubble selectable" }, mentions(m.text))));
 }
 
-/** What a block the person pointed at told the model with this message: a chip over it; a click shows the words. */
-function sentContext(text) {
+/** One block a message went with: a chip; a click shows the words it went as, and says so when only its name went. */
+function sentContext(c) {
   const chip = h("button", { class: "chat-context-chip", title: t("What the model got with this message", "Что модель получила с этим сообщением"),
     onclick: (e) => { e.stopPropagation(); popover(chip, h("div", { class: "chat-pop-context" },
-      h("div", { class: "eyebrow" }, t("Sent to the model", "Ушло модели")), h("div", { class: "selectable" }, text))); } },
-  icon("square.on.square", 11), h("span", { class: "one-line" }, text.split("\n")[0].slice(0, 60)), icon("chevron.down", 9));
-  return h("div", { class: "chat-context-row" }, h("span", { class: "chat-context-label" }, icon("paperclip", 11), t("Context", "Контекст")), chip);
+      h("div", { class: "eyebrow" }, t("Sent to the model", "Ушло модели")), h("div", { class: "selectable" }, c.about),
+      c.bare ? h("div", { class: "chat-bare" }, t("Only the block's name went: its numbers don't reach the model yet.", "Ушло только название блока: его цифры модели пока не передаются.")) : null)); } },
+  icon("square.on.square", 11), h("span", { class: "one-line" }, c.title), icon(c.bare ? "exclamationmark.circle" : "chevron.down", 9));
+  if (c.bare) chip.classList.add("chat-bare-chip");
+  return chip;
+}
+
+/** «$SOL», «$<mint>», «$0x…» as the token's chip, as the field had them; «$5» stays dollars (the Mac's TokenMentions). */
+const mentionRe = /(^|[\s(«"'])\$(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9]{0,11})(?=$|[\s,.;:!?)»"'])/g;
+function mentions(text) {
+  const out = [];
+  let at = 0, m;
+  mentionRe.lastIndex = 0;
+  while ((m = mentionRe.exec(text))) {
+    const start = m.index + m[1].length;
+    out.push(text.slice(at, start), tokenChip(m[2]));
+    at = mentionRe.lastIndex;
+  }
+  out.push(text.slice(at));
+  return out;
+}
+
+function tokenChip(token) {
+  const address = /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(token);
+  const found = address ? (lookups.get(token) || [])[0] : null;
+  if (address && !lookups.has(token)) lookUp(token);
+  const label = address ? found?.symbol || `${token.slice(0, 5)}…${token.slice(-4)}` : token.toUpperCase();
+  const held = !address && heldRow(token.toUpperCase());
+  return h("span", { class: "chat-token-chip", title: address ? token : label }, logo(address ? (found?.symbol || "?") : token, 14, found?.image || held?.icon), label);
 }
 
 /** «Claude Opus 5.5» from «claude-opus-5-5», «GPT-5.4» from «gpt-5.4». */
@@ -253,23 +295,49 @@ function header(note) {
 
 // ponytail: the Mac marks a move's outcome by the steps before it; here a result card gets the check unless its note is
 // one of these, which say something without a move behind it.
-const quietNotes = new Set(["guard", "guard: sends go to saved addresses", "Confirm is a button", "schedule", "price alert", "browser", "incoming"]);
+const quietNotes = new Set(["guard", "guard: sends go to saved addresses", "Confirm is a button", "schedule", "price alert", "browser", "incoming", "from the route"]);
 
-/** One answer: a header line, then its words; a result keeps a card, a failure a red one (ChatReplies.Reply). */
-function reply(m) {
+/** A service's raw JSON after the words (MPP.splitData): folded into a card, not a wall of braces. */
+function splitData(text) {
+  const m = text.match(/\n\s*\n(?=\s*[{[]\s*\n?\s*")/);
+  if (!m) return [text, null];
+  const data = text.slice(m.index + m[0].length).trim();
+  if (data.length <= 40 || !(data.includes('":') || data.includes('" :'))) return [text, null];
+  return [text.slice(0, m.index).trim(), data];
+}
+
+/** «✓ Market: …», «✗ Stop: not set — …»: a plan checked item by item, three marked lines at least (the Mac's Checklist). */
+function checklist(text) {
+  const lines = text.split("\n");
+  const mark = (l) => (/^[✓✗⚠·] /.test(l) ? l[0] : null);
+  const first = lines.findIndex((l) => mark(l));
+  if (first < 0) return null;
+  let last = lines.length - 1;
+  while (last > first && !mark(lines[last])) last--;
+  const marked = lines.slice(first, last + 1).filter(mark);
+  if (marked.length < 3) return null;
+  return { intro: lines.slice(0, first).join("\n").trim(), items: marked.map((l) => ({ mark: l[0], text: l.slice(2) })), next: lines.slice(last + 1).join("\n").trim() };
+}
+
+/** One answer: a header line, then its words; a result keeps a card, a failure a red one, a checklist its own (Reply). */
+function reply(m, outcome = false) {
   const head = header(m.note);
   const emoji = (m.text.match(/^(\p{Extended_Pictographic}️?)\s*/u) || [])[1];
-  const text = emoji ? m.text.slice(m.text.indexOf(emoji) + emoji.length).trimStart() : m.text;
+  const full = emoji ? m.text.slice(m.text.indexOf(emoji) + emoji.length).trimStart() : m.text;
+  const [text, data] = splitData(full);
   const failed = text.startsWith("Failed: ");
-  const boxed = !failed && (emoji || head?.result);
-  const done = boxed && !emoji && !quietNotes.has(m.note);
+  const list = failed ? null : checklist(text);
+  const boxed = !failed && !list && (outcome || emoji || head?.result);
+  const done = boxed && (outcome || (!emoji && !quietNotes.has(m.note)));
   let body;
   if (failed) {
     body = h("div", { class: "chat-reply-failed" }, icon("xmark.octagon", 15), h("div", { class: "chat-words" }, words(text.slice(8))));
+  } else if (list) {
+    body = checklistCard(list);
   } else if (done || emoji) {
     body = h("div", { class: "chat-reply-row" },
       h("span", { class: "chat-reply-tile" + (done ? " chat-done" : "") }, done ? icon("check", 14) : emoji),
-      h("div", { class: "chat-words" }, words(text)));
+      h("div", { class: "chat-words" }, words(done && emoji ? `${emoji} ${text}` : text)));
   } else {
     body = h("div", { class: "chat-words" }, words(text));
   }
@@ -279,8 +347,39 @@ function reply(m) {
       head ? h("span", { class: "one-line" }, head.label) : null,
       m.at ? h("span", { class: "num" }, (head ? "· " : "") + stamp(m.at)) : null) : null,
     body,
+    data ? dataCard(data) : null,
     m.chart ? sparkCard(m.chart) : null);
 }
+
+function checklistCard(list) {
+  const marks = { "✓": ["check", "chat-ok", "OK"], "✗": ["xmark", "chat-no", t("Missing or blocked", "Нет или заблокировано")],
+    "⚠": ["exclamationmark.triangle", "chat-warn", t("Warning", "Предупреждение")], "·": ["circle.dotted", "chat-opt", t("Optional", "Необязательно")] };
+  return h("div", { class: "chat-checklist" },
+    list.intro ? h("div", { class: "chat-words" }, words(list.intro)) : null,
+    h("div", { class: "chat-checklist-box" }, list.items.map((it) => {
+      const [ico, cls, label] = marks[it.mark];
+      return h("div", { class: "chat-check-row" }, h("span", { class: "chat-check-mark " + cls, "aria-label": label }, icon(ico, 12)), h("span", { class: "selectable" }, rich(it.text)));
+    })),
+    list.next ? h("div", { class: "chat-check-next selectable" }, rich(list.next)) : null);
+}
+
+/** What a service's JSON found (titles with their sites, or its first values), and the JSON itself behind «Show JSON». */
+function dataCard(json) {
+  const values = (keys) => [...json.matchAll(new RegExp(`"(?:${keys})"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "g"))].map((m) => m[1].replace(/\\(.)/g, "$1")).filter(Boolean);
+  const titles = values("title|name|headline"), urls = values("url|link").filter((u) => u.startsWith("http"));
+  const rows = titles.length ? titles.slice(0, 4).map((title, i) => ({ title, url: urls[i] }))
+    : [...json.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].slice(0, 4).map((m) => ({ title: `${m[1]}: ${m[2]}` }));
+  const raw = h("pre", { class: "chat-data-json selectable", hidden: true }, json);
+  const toggle = h("button", { class: "link-btn", title: t("The service's answer as it came", "Ответ сервиса как он пришёл"),
+    onclick: () => { raw.hidden = !raw.hidden; toggle.lastChild.textContent = raw.hidden ? t("Show JSON", "Показать JSON") : t("Hide JSON", "Скрыть JSON"); } },
+  icon("chevron.down", 9), h("span", {}, t("Show JSON", "Показать JSON")));
+  return h("div", { class: "chat-data-card" },
+    h("div", { class: "chat-data-head" }, icon("curlybraces", 11), h("span", { class: "eyebrow" }, t("Service answer", "Ответ сервиса")), h("span", { class: "spacer" }), toggle),
+    rows.map((r) => h("div", { class: "chat-data-row" }, r.url ? [link(r.url, r.title), h("div", { class: "small chat-data-host" }, hostOf(r.url))] : h("div", { class: "small" }, r.title))),
+    raw);
+}
+
+function hostOf(url) { try { return new URL(url).hostname; } catch { return url; } }
 
 /** «14:57» today, «Oct 16, 22:38» before. */
 function stamp(iso) {
@@ -352,32 +451,39 @@ function sparkCard(c) {
     h("div", { class: "small secondary num" }, `${t("low", "мин")} ${c.low} · ${t("high", "макс")} ${c.high}`));
 }
 
-/** A move being carried out, its lines as a checklist with a rail (StepsCard). */
-function stepsCard(r) {
-  const lines = r.lines.length ? r.lines : [r.title];
+/** A move's steps as a checklist with a rail (StepsCard): «Executing» with a spinner on the last while it runs, then
+ *  «Executed · N steps», kept in the chat. */
+function stepsCard(lines, running) {
+  const count = lines.length;
+  const done = t(`Executed · ${count} ${count === 1 ? "step" : "steps"}`, `Выполнено · шагов: ${count}`);
   return h("div", { class: "chat-steps-card" },
-    h("div", { class: "chat-steps-head" }, icon("bolt", 11), t("Executing", "Выполняется"), " · ", r.title),
-    lines.map((line, i) => {
+    h("div", { class: "chat-steps-head" }, icon("bolt", 11), running ? t("Executing", "Выполняется") : done),
+    lines.map((raw, i) => {
+      const line = raw.replace(": done.", "");
       const last = i === lines.length - 1;
-      const failed = /failed|refused|не вышло|отказ/i.test(line);
+      const failed = /failed|refused|не вышло|отказ/i.test(raw);
       const cut = line.indexOf(". ");
       return h("div", { class: "chat-step-line" },
-        h("div", { class: "chat-step-rail" }, last ? h("span", { class: "chat-spinner" }) : h("span", { class: "chat-step-dot" + (failed ? " chat-failed" : "") }, icon(failed ? "xmark" : "check", 9)),
+        h("div", { class: "chat-step-rail" }, running && last ? h("span", { class: "chat-spinner" }) : h("span", { class: "chat-step-dot" + (failed ? " chat-failed" : "") }, icon(failed ? "xmark" : "check", 9)),
           last ? null : h("span", { class: "chat-step-track" })),
-        h("div", { class: "chat-step-text selectable" }, cut > 0 ? [h("div", {}, rich(line.slice(0, cut))), h("div", { class: "small secondary" }, line.slice(cut + 2))] : rich(line)));
+        h("div", { class: "chat-step-text selectable" }, cut > 0 ? [h("div", {}, rich(line.slice(0, cut))), h("div", { class: "small secondary", title: line.slice(cut + 2) }, line.slice(cut + 2))] : rich(line)));
     }));
 }
 
-function thinkingDots() {
-  return h("div", { class: "chat-dots", "aria-label": t("The assistant is thinking", "Ассистент думает") }, h("span"), h("span"), h("span"));
+/** Three dots breathing where the reply will appear, with what the model is looking up now («Checking gas…»). */
+function thinkingDots(step) {
+  return h("div", { class: "chat-dots-row" },
+    h("div", { class: "chat-dots", "aria-label": t("The assistant is thinking", "Ассистент думает") }, h("span"), h("span"), h("span")),
+    step ? h("span", { class: "chat-dots-step one-line" }, step + "…") : null);
 }
 
 // MARK: Ways to go on
 
-/** Folded by hand, by the reply they came with. */
-const folded = new Set();
+/** Folded or opened by hand, by the reply they came with: true folded. Otherwise the live set is open and older ones folded. */
+const folds = new Map();
 /** The card ↑↓ from an empty field moved to; Return picks it. */
 let cardKey = null;
+const LIVE_FOR = 30 * 60 * 1000;
 
 /** NextSteps.icon, read from the card's words: the engine sends no command with them. */
 function optionIcon(title) {
@@ -390,24 +496,52 @@ function optionIcon(title) {
     : c.startsWith("pay") ? "creditcard" : "arrow.right.circle";
 }
 
-/** The cards the last reply offered, under its words (Answers + OptionCard): a tap carries one out. */
-function answers(key) {
+/** The live set: the last reply's cards, under 30 minutes old, while nothing is under way. */
+function liveMessage() {
   const s = ui.state;
-  const shut = folded.has(key);
-  return h("div", { class: "chat-answers" },
-    shut ? null : s.options.map((o, i) => h("button", {
-      class: "chat-option" + (o.recommended && cardKey === null ? " chat-rec" : "") + (cardKey === i ? " chat-keyed" : ""),
-      disabled: !!s.runningBoard, title: o.comment || o.title, onclick: () => { cardKey = null; act("pick", { index: i }); },
-    },
-    h("span", { class: "chat-option-icon" }, icon(optionIcon(o.title), 13)),
-    h("span", { class: "chat-option-text" },
-      h("span", { class: "chat-option-title" }, o.title, o.recommended ? h("span", { class: "chat-rec-chip" }, t("Recommended", "Рекомендую")) : null),
-      o.comment ? h("span", { class: "chat-option-comment" }, o.comment) : null))),
-    h("div", { class: "chat-answers-foot" },
-      h("button", { class: "link-btn chat-fold", onclick: () => { shut ? folded.delete(key) : folded.add(key); render(); } },
-        shut ? t(`Options: ${s.options.length}`, `Варианты: ${s.options.length}`) : t("Fold", "Свернуть"), icon(shut ? "chevron.down" : "chevron.up", 10)),
-      shut ? null : h("span", { class: "small secondary" }, t("Or write your own. ↑ ↓ to choose, ⏎ to answer.", "Или напиши свой вариант. ↑ ↓ — выбрать, ⏎ — ответить."))));
+  if (!s.options.length || s.thinking || !s.optionsMessage) return null;
+  const m = s.chat.find((x) => x.id === s.optionsMessage);
+  return m && Date.now() - new Date(m.at).getTime() < LIVE_FOR ? m : null;
 }
+
+/** The cards a reply offered, under its words (Answers + OptionCard): a tap carries one out while they're the live ones; old
+ *  ones fold to one line, the pick staying in view with its check; any set folds or opens by hand. `m` null: cards offered
+ *  with no reply above them. */
+function answers(m) {
+  const s = ui.state;
+  const key = m ? m.id : "start";
+  const live = m ? liveMessage()?.id === m.id : !s.thinking;
+  const options = m ? m.options : s.options;
+  const picked = m?.picked ?? null;
+  const folded = folds.has(key) ? folds.get(key) : !live;
+  const shown = folded ? (picked !== null && options[picked] ? [picked] : []) : options.map((_, i) => i);
+  if (live && !folded && !shown.length) return null;
+  return h("div", { class: "chat-answers" },
+    shown.map((i) => {
+      const o = options[i];
+      const card = h("button", {
+        class: "chat-option" + (o.recommended && cardKey === null && live ? " chat-rec" : "") + (live && cardKey === i ? " chat-keyed" : "")
+          + (live ? "" : " chat-past") + (picked === i ? " chat-picked" : ""),
+        disabled: live && !!s.runningBoard, tabindex: live ? null : "-1", title: o.comment || o.title,
+        onclick: () => { if (!live) return; cardKey = null; act("pick", { index: i }); },
+      },
+      h("span", { class: "chat-option-icon" }, icon(picked === i ? "check" : optionIcon(o.title), 13)),
+      h("span", { class: "chat-option-text" },
+        h("span", { class: "chat-option-title" }, o.title, o.recommended && picked === null ? h("span", { class: "chat-rec-chip" }, t("Recommended", "Рекомендую")) : null),
+        o.comment ? h("span", { class: "chat-option-comment" }, o.comment) : null));
+      return card;
+    }),
+    shown.length < options.length || !folded ? h("div", { class: "chat-answers-foot" },
+      h("button", { class: "link-btn chat-fold", onclick: () => { folds.set(key, !folded); render(); },
+        title: live ? t("Fold the cards; they stay pickable when opened", "Свернуть варианты; раскрытые снова можно выбрать")
+          : t("Offered earlier: a newer message or 30 minutes have passed, so their numbers may be old", "Предлагались раньше: был новый вопрос или прошло 30 минут, цифры в них могли устареть") },
+        !folded ? t("Fold", "Свернуть") : picked === null ? t(`Options: ${options.length}`, `Варианты: ${options.length}`) : t(`Other options: ${options.length - 1}`, `Другие варианты: ${options.length - 1}`),
+        icon(folded ? "chevron.down" : "chevron.up", 10)),
+      live && !folded ? h("span", { class: "small secondary" }, t("Or write your own. ↑ ↓ to choose, ⏎ to answer.", "Или напиши свой вариант. ↑ ↓ — выбрать, ⏎ — ответить.")) : null) : null);
+}
+
+// A live set folds by itself at 30 minutes, the chat otherwise untouched.
+setInterval(() => { if (ui.state?.optionsMessage) render(); }, 60 * 1000);
 
 // The start screen's ideas: four of the plan templates at a time (TemplatesPanel), a different four each launch.
 const templates = [
@@ -452,74 +586,179 @@ function ideas() {
 
 // MARK: The field
 
-let listening = false;
-let listenStart = 0;
-let listenTimer = null;
 /** The field's text when Esc closed the «/ @ $» list: it stays closed until the text changes. */
 let dismissed = null;
 let pick = 0;
 /** The sent message ↑ brought back into the field, by its place in the sent list. */
 let recalled = null;
+/** The blocks the next message goes with besides the newest (ui.attached, which the canvas lights), oldest first. */
+let attachStack = [];
+let lastAttached = null;
+/** What DexScreener knows of an address typed after «@» or «$», by address; «pending» while it's asked. */
+const lookups = new Map();
+/** The «/» list (BlockCatalog), from the engine once. */
+let catalogRows = null;
+let modelsAsked = false;
+let quoteTimer = null;
+
+/** Every block the next message is about, the newest last. Each right-click adds one; one taken out elsewhere goes. */
+function attachedIds() {
+  const s = ui.state;
+  if (lastAttached && !ui.attached) attachStack = attachStack.filter((id) => id !== lastAttached);
+  if (ui.attached && !attachStack.includes(ui.attached)) attachStack.push(ui.attached);
+  lastAttached = ui.attached;
+  attachStack = attachStack.filter((id) => s.boards.some((b) => b.id === id));
+  return attachStack;
+}
+
+/** Whether a block is among the ones the next message goes with: for the canvas to light every one of them. */
+export function isAttached(id) { return attachStack.includes(id) || ui.attached === id; }
+
+function detach(id) {
+  attachStack = attachStack.filter((x) => x !== id);
+  if (ui.attached === id) ui.attached = attachStack[attachStack.length - 1] || null;
+  lastAttached = ui.attached;
+  render();
+}
 
 function composer(s) {
+  const ids = attachedIds();
   const field = h("textarea", {
     id: "composer", rows: "1", spellcheck: "false",
     placeholder: s.card ? t("Ask about it, change it («make it 0.02»), or something else", "Спроси о нём, измени («сделай 0.02») или что-то другое")
-      : ui.attached ? t("Ask about it, or say what to do with it…", "Спроси о нём или скажи, что с ним сделать…")
+      : ids.length > 1 ? t(`Ask about these ${ids.length}, or say what to do with them…`, `Спроси про эти ${ids.length} или скажи, что с ними сделать…`)
+      : ids.length ? t("Ask about it, or say what to do with it…", "Спроси о нём или скажи, что с ним сделать…")
       : t("What should we do? / blocks, @ names, $ tokens", "Что сделаем? / блоки, @ имена, $ токены"),
-    oninput: (e) => { ui.composerText = e.target.value; recalled = null; cardKey = null; autosize(e.target, 140); refreshSuggestions(e.target); sendLit(); },
+    oninput: (e) => { ui.composerText = e.target.value; recalled = null; cardKey = null; autosize(e.target, 140); refreshSuggestions(e.target); sendLit(); drawHelpers(); },
     onkeydown: keys,
     onclick: (e) => refreshSuggestions(e.target),
     onkeyup: (e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) refreshSuggestions(e.target); },
   });
   field.value = ui.composerText;
-  setTimeout(() => autosize(field, 140), 0);
-  const pointed = ui.attached && s.boards.find((b) => b.id === ui.attached);
-  if (ui.attached && !pointed) ui.attached = null;
+  setTimeout(() => { autosize(field, 140); drawHelpers(); }, 0);
   const waiting = s.card;
+  const listening = voice.on;
   return h("div", { class: "chat-composer" },
+    !listening ? positionChips(s) : null,
     listening ? listeningRow() : h("div", { class: "chat-chips" }, modelChip(s), networksChip(), h("span", { class: "spacer" }), contextChip(s)),
-    pointed && !listening ? h("div", { class: "chat-attached" }, icon("square.on.square", 11), h("span", { class: "one-line" }, blockTitle(pointed) || pointed.title),
-      h("button", { class: "icon-btn", title: t("Take it out of the message", "Убрать из сообщения"), onclick: () => { ui.attached = null; render(); } }, icon("xmark", 11))) : null,
-    s.model.connected || listening ? null : connectBar(),
+    ids.length && !listening ? h("div", { class: "chat-attached-row" }, ids.map((id) => {
+      const b = s.boards.find((x) => x.id === id);
+      return h("div", { class: "chat-attached" }, icon("square.on.square", 11), h("span", { class: "one-line" }, blockTitle(b) || b.title),
+        h("button", { class: "icon-btn", title: t("Take it out of the message", "Убрать из сообщения"), onclick: () => detach(id) }, icon("xmark", 11)));
+    })) : null,
     h("div", { id: "chat-suggest", class: "chat-suggest-slot" }),
+    h("div", { id: "chat-helper", class: "chat-helper-slot" }),
+    // Without a model the bar says how to get one; plain commands still work in the field under it.
+    s.model.connected || listening ? null : connectBar(s),
     listening ? voicePanel() : h("div", { class: "chat-field" + (waiting ? " chat-waiting" : "") },
       waiting ? waitingBar(waiting) : null,
       h("div", { class: "chat-entry" },
         h("button", { class: "chat-round-btn chat-glassy", title: t("Plan templates", "Шаблоны планов"), onclick: (e) => templatesMenu(e.currentTarget) }, icon("square.grid", 15)),
         field,
         h("button", { class: "icon-btn chat-mic", title: t("Speak instead of typing (the keyboard layout's language)", "Сказать голосом (язык раскладки)"), onclick: speak }, icon("mic", 16)),
-        h("button", { id: "chat-send", class: "chat-round-btn chat-send" + (ui.composerText.trim() ? " chat-lit" : ""), title: t("Send", "Отправить"), disabled: s.thinking, onclick: send }, icon("arrow.up", 15)))),
+        sendButton(s))),
   );
+}
+
+/** Send, or Stop while the model answers; a signed move can't be called back, so then it waits, saying why. */
+function sendButton(s) {
+  if (s.modelRunning || s.runningBoard) {
+    return h("button", { id: "chat-send", class: "chat-round-btn chat-stop" + (s.runningBoard ? " chat-off" : ""), disabled: !!s.runningBoard, "aria-label": t("Stop", "Стоп"),
+      title: s.runningBoard ? t("A signed move is going through: it can't be called back. The chat says when it lands.", "Подписанное действие уже идёт: его не отозвать. Чат скажет, когда оно пройдёт.")
+        : t("Stop — the model stops, nothing runs (Esc)", "Стоп — модель останавливается, ничего не запускается (Esc)"),
+      onclick: () => act("stopModel") }, icon("stop.fill", 12));
+  }
+  return h("button", { id: "chat-send", class: "chat-round-btn chat-send" + (ui.composerText.trim() ? " chat-lit" : ""), title: t("Send", "Отправить"), disabled: s.thinking, onclick: send }, icon("arrow.up", 15));
 }
 
 function sendLit() { document.getElementById("chat-send")?.classList.toggle("chat-lit", !!ui.composerText.trim()); }
 
-/** While a move waits, the field carries it: what it is, Cancel and Confirm in one place; its steps stay on the canvas. */
+/** While a move waits, the field carries it: what it is, Cancel and Confirm in one place; a priced swap counts down its
+ *  15 s after the quote, then Refresh asks again (the Mac's waitingBar). */
 function waitingBar(card) {
   const s = ui.state;
   const title = card.title.charAt(0).toUpperCase() + card.title.slice(1);
+  const q = s.quote;
+  const left = q?.state === "fresh" && q.at ? Math.min(15, Math.max(0, Math.ceil(15 - (Date.now() - new Date(q.at).getTime()) / 1000))) : 0;
+  const stateNow = q?.state === "fresh" && left === 0 ? "stale" : q?.state;
   const line = s.runningBoard ? (s.signer.waiting ? t(`${presence()} is asking for you…`, `${presence()} спрашивает тебя…`) : t("Signing…", "Подписываю…"))
+    : stateNow === "quoting" ? t("Getting the price…", "Узнаю цену…")
+    : stateNow === "stale" ? (q.line ? q.line + " · " : "") + t("the price is over 15 s old", "цене больше 15 с")
+    : stateNow === "fresh" ? `${q.line || t("Quoted", "Цена есть")} · ${left} ${t("s", "с")}`
     : t(`Its steps are on the canvas · signs after ${presence()}`, `Шаги — на холсте · подпись после ${presence()}`);
+  clearInterval(quoteTimer);
+  if (stateNow === "fresh") {
+    quoteTimer = setInterval(() => {
+      const n = Math.min(15, Math.max(0, Math.ceil(15 - (Date.now() - new Date(q.at).getTime()) / 1000)));
+      const el = document.getElementById("chat-quote-line");
+      if (n === 0) { clearInterval(quoteTimer); render(); return; }
+      if (el) el.textContent = `${q.line || t("Quoted", "Цена есть")} · ${n} ${t("s", "с")}`;
+    }, 1000);
+  }
   const busy = s.thinking || !!s.runningBoard;
+  const confirm = stateNow === "stale"
+    ? h("button", { class: "chat-pill-accent", disabled: busy, title: t("Ask for the price again; Confirm comes back for 15 s", "Спросить цену заново; «Подтвердить» вернётся на 15 с"), onclick: () => act("requote") },
+      icon("arrow.clockwise", 13), t("Refresh", "Обновить"))
+    : stateNow === "quoting" ? h("span", { class: "chat-pill-quiet" }, icon("hourglass", 13), t("Quoting…", "Котирую…"))
+    : h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm") }, icon("check", 13), card.confirm);
   return h("div", { class: "chat-waiting-bar" },
     h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
-      h("div", {}, h("div", { class: "chat-waiting-title" }, title), h("div", { class: "chat-waiting-line" }, line))),
+      h("div", {}, h("div", { class: "chat-waiting-title" }, title), h("div", { id: "chat-quote-line", class: "chat-waiting-line num" }, line))),
     h("div", { class: "chat-waiting-buttons" },
-      h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel") }, t("Cancel", "Отмена")),
-      h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm") }, icon("check", 13), card.confirm)));
+      h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel") }, t("Cancel", "Отмена")), confirm));
 }
 
-/** No model reads the chat yet: plain commands still work, and here is how to get one (ConnectModelBar). */
-function connectBar() {
-  const way = (name, file) => h("button", { class: "chat-way-chip", onclick: openSettings }, logo(file, 20), name);
+/** An open position under the chat: its usual changes, each put in the field to send (never sent by a button). */
+function positionChips(s) {
+  if (!s.positions?.length || s.card) return null;
+  const coin = s.positions.length > 1 ? " " + s.positions[0].coin : "";
+  const chips = [["move stop to breakeven", "shield.lefthalf"], ["trail 2%", "arrow.up.right"], ["close half", "circle.lefthalf"], ["close", "xmark.circle"]];
+  return h("div", { class: "chat-position-chips" }, chips.map(([phrase, ico]) =>
+    h("button", { class: "chat-pos-chip" + (phrase === "close" ? " loss" : ""), title: t(`Puts “${phrase}${coin}” in the field`, `Вставит «${phrase}${coin}» в поле`), onclick: () => suggest(phrase + coin) },
+      icon(ico, 12), phrase)));
+}
+
+/** No model reads the chat yet, or the one on this PC can't answer: how to get one, or what it still needs (ConnectModelBar). */
+function connectBar(s) {
+  const m = s.models || {}, model = s.model.model || "", name = modelName(model);
+  const local = s.model.provider === "ollama" && !m.refusals?.[model];
+  const down = local && m.servers?.ollama === false;
+  const size = m.sizes?.[model];
+  const loading = m.downloads?.[model];
+  const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
+  const way = (title, file) => h("button", { class: "chat-way-chip", onclick: () => openSettings() }, logo(file, 20), title);
+  const chip = (title, ico, run, accent = false, disabled = false) => h("button", { class: "chat-way-chip" + (accent ? " chat-accent" : ""), disabled, onclick: run }, icon(ico, 13), title);
+  let head, line, actions = [];
+  if (down) {
+    head = t("Ollama isn't running", "Ollama не запущена");
+    line = t("Open it to chat with a model on this PC — or connect a subscription instead.", "Открой её, чтобы общаться с моделью на этом ПК, — или подключи подписку.");
+    actions.push(m.installed ? chip(t("Open Ollama", "Открыть Ollama"), "play.circle", () => act("startOllama")) : chip(t("Get Ollama", "Скачать Ollama"), "arrow.down.circle", () => act("getOllama"), true));
+    actions.push(chip(t("Check again", "Проверить снова"), "arrow.clockwise", () => act("refreshModels")));
+  } else if (local) {
+    head = t(`${name} isn't on this PC yet`, `${name} пока нет на этом ПК`);
+    line = size ? t(`≈ ${size.toFixed(1)} GB to download; it runs in ≈ ${Math.round(size * 1.2)} GB of this PC's ${m.memoryGB} GB`, `≈ ${size.toFixed(1)} ГБ скачать; работает в ≈ ${Math.round(size * 1.2)} ГБ из ${m.memoryGB} ГБ этого ПК`)
+      + (fits(size) ? "." : t(" — too big for it: pick a smaller one or a subscription.", " — слишком большая: выбери поменьше или подписку."))
+      : t("Download it, or use one this PC already has.", "Скачай её или выбери ту, что уже есть на этом ПК.");
+    if (loading !== undefined) actions.push(chip(t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`), "arrow.down.circle", null, false, true));
+    else if (!size || fits(size)) actions.push(chip(size ? t(`Download · ≈ ${size.toFixed(1)} GB`, `Скачать · ≈ ${size.toFixed(1)} ГБ`) : t("Download", "Скачать"), "arrow.down.circle", () => act("downloadModel", { model }), true));
+    for (const have of (m.live?.ollama || []).filter((x) => !m.refusals?.[x]).slice(0, 2)) {
+      actions.push(chip(t(`Use ${modelName(have)}`, `Взять ${modelName(have)}`), "desktop", () => act("connectModel", { provider: "ollama", model: have })));
+    }
+  } else if (m.refusals?.[model]) {
+    head = t(`${name} is too small for the chat`, `${name} слишком мала для чата`);
+    line = t("Pick a bigger model above, or connect a subscription.", "Выбери модель побольше или подключи подписку.");
+  } else {
+    head = t("Connect a model to chat", "Подключи модель для чата");
+    line = t("The chat needs a model to understand you: a subscription you already pay for, an API key, or a free model on this PC. Plain commands work without one: «send 5 USDC to Mom».",
+      "Чату нужна модель, чтобы понимать тебя: подписка, за которую ты уже платишь, API-ключ или бесплатная модель на этом ПК. Простые команды работают и без неё: «отправь 5 USDC маме».");
+  }
   return h("div", { class: "chat-connect-bar" },
-    h("b", {}, t("Connect a model to chat", "Подключи модель для чата")),
-    h("div", { class: "small secondary" }, t("Plain commands work without one: «send 5 USDC to Mom».", "Простые команды работают и без неё: «отправь 5 USDC маме».")),
-    h("div", { class: "chat-way-chips" }, way("ChatGPT", "llm-openai"), way("Claude", "llm-claude"), way("OpenRouter", "llm-openrouter")));
+    h("b", {}, head), h("div", { class: "small secondary" }, line),
+    h("div", { class: "chat-way-chips" }, actions, way("ChatGPT", "llm-openai"), way("Claude", "llm-claude"), way("OpenRouter", "llm-openrouter"),
+      local ? null : chip(t("On this PC", "На этом ПК"), "desktop", () => act("connectModel", { provider: "ollama", model: m.recommended?.ollama || undefined }))));
 }
 
-function openSettings() { document.querySelector(".menu")?.remove(); ui.view = "settings"; render(); }
+function openSettings(tab) { document.querySelector(".menu")?.remove(); if (tab) store("settingsTab", tab); ui.view = "settings"; render(); }
 
 function keys(e) {
   const s = ui.state;
@@ -529,11 +768,17 @@ function keys(e) {
     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(rows[Math.min(pick, rows.length - 1)], e.target); return; }
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dismissed = e.target.value; drawSuggestions([]); return; }
   }
-  // ↑↓ from an empty field walk the cards under the last reply; then what was sent, as a terminal's history.
+  // Esc stops the model, as the Stop button does.
+  if (e.key === "Escape" && s.modelRunning) { e.preventDefault(); e.stopPropagation(); act("stopModel"); return; }
+  // ↑↓ with the caret on the draft's amount: a step up or down, between none and all that's held.
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && nudge(e.target, e.key === "ArrowUp")) { e.preventDefault(); return; }
+  // ↑↓ from an empty field walk the live cards under the last reply; then what was sent, as a terminal's history.
   const empty = !e.target.value;
-  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && empty && s.options.length && !s.thinking) {
+  const live = liveMessage();
+  const cards = live && folds.get(live.id) !== true ? s.options : null;
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && empty && cards) {
     e.preventDefault();
-    cardKey = e.key === "ArrowUp" ? Math.max(0, (cardKey ?? s.options.length) - 1) : cardKey !== null && cardKey + 1 < s.options.length ? cardKey + 1 : null;
+    cardKey = e.key === "ArrowUp" ? Math.max(0, (cardKey ?? cards.length) - 1) : cardKey !== null && cardKey + 1 < cards.length ? cardKey + 1 : null;
     render();
     return;
   }
@@ -546,12 +791,13 @@ function keys(e) {
     e.target.value = ui.composerText;
     autosize(e.target, 140);
     sendLit();
+    drawHelpers();
     return;
   }
   if (e.key === "Escape" && cardKey !== null) { e.stopPropagation(); cardKey = null; render(); return; }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    if (empty && cardKey !== null && s.options[cardKey]) { const i = cardKey; cardKey = null; act("pick", { index: i }); return; }
+    if (empty && cardKey !== null && cards?.[cardKey]) { const i = cardKey; cardKey = null; act("pick", { index: i }); return; }
     send();
   }
 }
@@ -561,31 +807,173 @@ function send() {
   if (!text || ui.state.thinking) return;
   ui.composerText = "";
   recalled = null;
-  const board = ui.attached || undefined;
+  const ids = attachedIds().slice();
+  attachStack = [];
   ui.attached = null;
-  act("send", { text, board });
+  lastAttached = null;
+  act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined });
   render();
 }
 
-// «/» lists the blocks (a pick adds it to the canvas), «@» the saved names and favorite tokens, «$» the tokens held.
-const blockKinds = [
-  ["receive", "Receive", "Получить", "your addresses"],
-  ["addresses", "Address book", "Адресная книга", "names money may go to"],
-  ["history", "History", "История", "what was signed"],
-  ["favorites", "Favorites", "Избранное", "tokens and wallets you watch"],
-  ["alerts", "Price alerts", "Ценовые оповещения", "pings at a price"],
-  ["schedule", "Schedule", "Расписание", "tasks and the automation wallet"],
-  ["positions", "Open positions", "Открытые позиции", "Hyperliquid"],
-  ["multisig", "Multisig", "Мультисиг", "a vault several keys sign"],
-  ["ledger", "Ledger", "Ledger", "the hardware wallet"],
-];
+// MARK: Over the field: the amount it says, a top-up of the automation wallet
 
-/** The word at the caret when it starts with «/», «@» or «$», with where it starts. */
+/** «send 0.01 SOL to …», «buy SOL for 1 USDC»: each «<number> <ticker>» in the text (the Mac's DraftAmount). */
+function draftAmounts(text) {
+  return [...text.matchAll(/(\d+(?:\.\d+)?)\s*\$?([A-Za-z][A-Za-z0-9₮]{1,9})\b/g)].map((m) => ({ start: m.index, end: m.index + m[1].length, value: Number(m[1]), text: m[1], ticker: m[2].toUpperCase() }));
+}
+
+/** The network the draft names («on Base», «from Solana»), as a key. */
+function draftPlace(text) {
+  const tl = text.toLowerCase();
+  const nets = ui.state.portfolio.networks || [];
+  return nets.find((n) => [n.name.toLowerCase(), n.key].some((k) => tl.includes(" on " + k) || tl.includes(" from " + k)))?.key || null;
+}
+
+/** A row of the wallet's for a ticker, where most of it is (or on `place`). */
+function heldRow(ticker, place) {
+  let best = null;
+  for (const n of ui.state.portfolio.networks || []) {
+    if (place && n.key !== place) continue;
+    for (const r of n.rows) if (r.section !== "defi" && r.symbol.toUpperCase() === ticker && (!best || r.value > best.row.value)) best = { row: r, net: n };
+  }
+  return best ? { ...best.row, net: best.net } : null;
+}
+
+/** What the draft says of a token the wallet holds: the amount, how much is held and where. */
+function draftAmount() {
+  const s = ui.state;
+  if (s.thinking || s.card) return null;
+  const text = ui.composerText, place = draftPlace(text);
+  for (const a of draftAmounts(text)) {
+    const r = heldRow(a.ticker, place);
+    if (r && r.value > 0) return { a, held: r.value, exact: r.amount.replace(/,/g, ""), price: r.usd && r.value ? r.usd / r.value : null, place: r.net };
+  }
+  return null;
+}
+
+/** One step of ↑↓ and the slider: a tenth of the held amount's order — 0.01 of 0.17 SOL, 1 of 45 USDC. */
+const stepScale = (held) => Math.max(0, 1 - (held > 0 ? Math.floor(Math.log10(held)) : 0));
+const written = (v, scale) => v.toLocaleString("en-US", { maximumFractionDigits: scale, useGrouping: false });
+
+/** The draft with its amount set to `text`, the caret after it. */
+function setAmount(a, text) {
+  const field = document.getElementById("composer");
+  ui.composerText = ui.composerText.slice(0, a.start) + text + ui.composerText.slice(a.end);
+  if (field) { field.value = ui.composerText; const c = a.start + text.length; field.setSelectionRange(c, c); }
+  drawHelpers();
+}
+
+function nudge(el, up) {
+  const d = draftAmount();
+  if (!d) return false;
+  const caret = el.selectionStart;
+  if (caret < d.a.start || caret > d.a.end) return false;
+  const scale = stepScale(d.held), step = 10 ** -scale;
+  const factor = 10 ** scale;
+  const next = Math.min(d.held, Math.max(0, up ? Math.floor((d.a.value + step) * factor + 1e-9) / factor : Math.ceil((d.a.value - step) * factor - 1e-9) / factor));
+  setAmount(d.a, next >= d.held ? d.exact : written(next, scale));
+  return true;
+}
+
+/** The draft's amount panel, or the automation top-up's balances, over the field; drawn on its own as the text changes. */
+function drawHelpers() {
+  const slot = document.getElementById("chat-helper");
+  if (!slot) return;
+  const top = topUpDraft();
+  const d = top === null ? draftAmount() : null;
+  slot.replaceChildren(top !== null ? topUpBalances(top) : d ? amountSlider(d) : "");
+}
+
+function amountSlider(d) {
+  const scale = stepScale(d.held);
+  const set = (v) => setAmount(d.a, v >= d.held ? d.exact : written(Math.floor(v * 10 ** scale) / 10 ** scale, scale));
+  const range = h("input", { type: "range", min: "0", max: "1000", value: String(Math.round(Math.min(1, d.a.value / d.held) * 1000)), "aria-label": t("Amount", "Сумма"),
+    oninput: (e) => set(d.held * Number(e.target.value) / 1000) });
+  return h("div", { class: "chat-amount" },
+    h("div", { class: "chat-amount-head" }, logo(d.a.ticker, 18),
+      h("b", { class: "num" + (d.a.value > d.held ? " loss" : "") }, `${d.a.text} ${d.a.ticker}`),
+      h("span", { class: "one-line secondary" }, t(`of ${written(d.held, 6)} on ${d.place.name}`, `из ${written(d.held, 6)} на ${d.place.name}`)),
+      h("span", { class: "spacer" }),
+      d.price ? h("span", { class: "num secondary" }, "≈ $" + (d.a.value * d.price).toFixed(2)) : null),
+    h("div", { class: "chat-amount-row" }, range,
+      [25, 50, 100].map((p) => h("button", { class: "chat-amount-pct", onclick: () => set(p === 100 ? d.held : d.held * p / 100) }, p === 100 ? "Max" : `${p}%`))),
+    h("div", { class: "small secondary" }, t("Cursor on the number: ↑ ↓ change it · Return sends", "Курсор на числе: ↑ ↓ меняют сумму · Return — отправить")));
+}
+
+/** The draft is a top-up of the automation wallet: its amount (the Mac's topUpDraft). */
+function topUpDraft() {
+  const w = ui.state.automation;
+  const m = w && ui.composerText.trim().match(/^send\s+(\d+(?:\.\d+)?)\s+USDC\s+to\s+(.+?)(?:\s+on\s+solana)?(?:,\s*then\s+send\s+[\d.]+\s+SOL\s+to\s+.+)?$/i);
+  return m && m[2].toLowerCase() === (w.label || "").toLowerCase() ? Number(m[1]) : null;
+}
+
+/** Where the money comes from and the budget, each now → after, while the field holds a top-up (TopUpBalances). */
+function topUpBalances(amount) {
+  const s = ui.state;
+  const solana = heldRow("USDC", "solana")?.value ?? null, budget = s.automationBudget?.total ?? null;
+  const elsewhere = (s.portfolio.networks || []).filter((n) => n.key !== "solana").map((n) => ({ n, r: heldRow("USDC", n.key) })).filter((x) => x.r && x.r.value >= 0.01)
+    .map((x) => `${x.n.name} ${written(x.r.value, 2)}`);
+  const row = (ico, name, now, after) => h("div", { class: "chat-topup-row" }, ico, h("b", {}, name), h("span", { class: "spacer" }),
+    h("span", { class: "num" + (after !== null && after < 0 ? " loss" : "") }, now === null ? "…" : `${written(now, 2)} → ${after === null ? "…" : written(Math.max(0, after), 2)} USDC`));
+  return h("div", { class: "chat-amount" },
+    h("div", { class: "eyebrow" }, t("Top up the automation wallet", "Пополнить кошелёк автоматизации")),
+    row(logo("sol", 16), t("Your wallet · Solana", "Твой кошелёк · Solana"), solana, solana === null ? null : solana - amount),
+    row(icon("clock.arrow", 14), t("Automation budget", "Бюджет автоматизации"), budget, budget === null ? null : budget + amount),
+    solana !== null && solana < amount ? h("div", { class: "chat-topup-short" }, t(`Solana has ${written(solana, 2)} USDC, ${written(amount - solana, 2)} short.`, `На Solana ${written(solana, 2)} USDC, не хватает ${written(amount - solana, 2)}.`)
+      + (elsewhere.length ? t(` There’s USDC on ${elsewhere.join(", ")}: move it to Solana first.`, ` Есть USDC в ${elsewhere.join(", ")}: сначала перенеси их на Solana.`) : "")) : null,
+    h("div", { class: "small secondary" }, t(`Type another amount if you like, then Return. Confirm and ${presence()} come after.`, `Можно ввести другую сумму, потом Return. «Подтвердить» и ${presence()} — после.`)));
+}
+
+// MARK: «/» blocks, «@» names, «$» tokens
+
+/** The word at the caret when it starts with «/», «@» or «$», with where it starts and ends. */
 function wordAtCaret(el) {
   const at = el.selectionStart ?? el.value.length;
-  const before = el.value.slice(0, at);
-  const m = before.match(/(^|\s)([/@$])([^\s/@$]*)$/);
-  return m ? { sign: m[2], word: m[3].toLowerCase(), start: at - m[3].length - 1, end: at } : null;
+  const text = el.value;
+  let start = at;
+  while (start > 0 && !/\s/.test(text[start - 1])) start--;
+  let end = at;
+  while (end < text.length && !/\s/.test(text[end])) end++;
+  const word = text.slice(start, end);
+  return /^[/@$]/.test(word) ? { sign: word[0], word: word.slice(1), start, end, before: text.slice(0, start), after: text.slice(end) } : null;
+}
+
+const isAddress = (x) => /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(x);
+
+function lookUp(address) {
+  if (lookups.has(address)) return;
+  lookups.set(address, "pending");
+  engine("lookUpContract", { address }).then((r) => {
+    let rows = [];
+    try { rows = JSON.parse(r?.list || "[]"); } catch {}
+    lookups.set(address, rows);
+    const f = document.getElementById("composer");
+    if (f) refreshSuggestions(f);
+    if (document.querySelector(".chat-token-chip")) render();
+  }).catch(() => lookups.set(address, []));
+}
+
+function loadCatalog() {
+  if (catalogRows) return;
+  catalogRows = [];
+  engine("blockCatalog").then((r) => {
+    try { catalogRows = JSON.parse(r?.list || "[]"); } catch { catalogRows = []; }
+    const f = document.getElementById("composer");
+    if (f) refreshSuggestions(f);
+  }).catch(() => { catalogRows = null; });
+}
+
+/** The «$» list's tokens, each once: SOL and USDC on Solana, the tokens shown by value, the usual ones, the favorites. */
+function tokenList() {
+  const s = ui.state, seen = new Set(), out = [];
+  const add = (symbol, detail, image) => { if (!symbol || symbol.length > 12 || seen.has(symbol.toUpperCase())) return; seen.add(symbol.toUpperCase()); out.push({ symbol, detail, image }); };
+  const sol = (s.portfolio.networks || []).find((n) => n.key === "solana");
+  if (sol) for (const sym of ["SOL", "USDC"]) { const r = sol.rows.find((x) => x.symbol === sym); if (r) add(sym, `Solana · ${r.amount} ${sym}`, r.icon); }
+  const rows = (s.portfolio.networks || []).flatMap((n) => n.rows.filter((r) => r.section !== "defi").map((r) => ({ r, n }))).sort((a, b) => (b.r.usd || 0) - (a.r.usd || 0));
+  for (const { r, n } of rows) add(r.symbol, `${n.name} · ${r.usd !== null && r.usd !== undefined ? "$" + Number(r.usd).toFixed(2) : r.amount}`, r.icon);
+  for (const [sym, name] of [["SOL", "Solana"], ["USDC", "USD Coin"], ["ETH", "Ether"], ["BTC", "Bitcoin"], ["HYPE", "Hyperliquid"], ["NEAR", "NEAR"], ["USDT", "Tether"], ["JUP", "Jupiter"]]) add(sym, name);
+  for (const f of s.favorites || []) add(f.symbol, `${f.name} · ${f.chain}`, f.image);
+  return out;
 }
 
 function suggestionRows(el) {
@@ -593,19 +981,33 @@ function suggestionRows(el) {
   const w = wordAtCaret(el);
   if (!w) return [];
   const s = ui.state;
-  const hit = (x) => x.toLowerCase().includes(w.word);
+  const q = w.word.toLowerCase();
+  // A pick replaces the word; the rest of the text stays, the caret after what went in.
+  const row = (r, put, space = false) => ({ ...r, put, space });
   if (w.sign === "/") {
-    return blockKinds.filter(([kind, en, ru]) => hit(kind) || hit(en) || hit(ru)).map(([kind, en, ru, detail]) => ({ icon: "square.grid", title: t(en, ru), detail, block: kind }));
+    loadCatalog();
+    return (catalogRows || []).filter((b) => !q || `${b.title} ${b.group} ${b.example}`.toLowerCase().includes(q))
+      .map((b) => row({ icon: "square.grid", logo: b.logo || null, title: b.title, detail: b.example }, b.example));
   }
-  if (w.sign === "@") {
-    const names = s.book.filter((e) => hit(e.name)).map((e) => ({ icon: "person", title: e.name, detail: e.network, insert: e.name }));
-    const favs = s.favorites.filter((f) => hit(f.symbol)).map((f) => ({ logo: f.symbol, src: f.image, title: f.symbol, detail: f.name + " · " + f.chain, insert: f.symbol }));
-    return [...names, ...favs].slice(0, 30);
+  // A contract or mint after «@» or «$»: one row per network it trades on.
+  if (isAddress(w.word)) {
+    const dollar = w.sign === "$", put = (dollar ? "$" : "") + w.word, short = `${w.word.slice(0, 6)}…${w.word.slice(-4)}`;
+    lookUp(w.word);
+    const found = lookups.get(w.word);
+    if (found === "pending") return [row({ icon: "magnifyingglass", title: short, detail: t("looking it up…", "ищу…") }, put, dollar)];
+    if (!found.length) return [row({ icon: "questionmark.circle", title: short, detail: t("no market knows it", "ни один рынок его не знает") }, put, dollar)];
+    return found.map((f) => row({ icon: "circle.dotted", logo: f.symbol, src: f.image, title: f.symbol,
+      detail: [f.name, f.chain, f.price, f.liquidity ? t(`liquidity ${f.liquidity}`, `ликвидность ${f.liquidity}`) : null].filter(Boolean).join(" · ") }, (dollar ? "$" : "") + f.address, dollar));
   }
-  const held = new Map();
-  for (const n of s.portfolio.networks) for (const r of n.rows) if (r.section !== "defi" && !held.has(r.symbol) && hit(r.symbol)) held.set(r.symbol, { logo: r.symbol, src: r.icon, title: r.symbol, detail: `${r.amount} · ${n.name}`, insert: r.symbol });
-  for (const f of s.favorites) if (!held.has(f.symbol) && hit(f.symbol)) held.set(f.symbol, { logo: f.symbol, src: f.image, title: f.symbol, detail: f.name, insert: f.symbol });
-  return [...held.values()].slice(0, 30);
+  // «$» lists the tokens; «$5» is dollars.
+  if (w.sign === "$") {
+    if (/^\d/.test(w.word)) return [];
+    return tokenList().filter((x) => !q || x.symbol.toLowerCase().startsWith(q) || x.detail.toLowerCase().includes(q)).slice(0, 40)
+      .map((x) => row({ icon: "dollarsign.circle", logo: x.symbol, src: x.image, title: x.symbol, detail: x.detail }, "$" + x.symbol, true));
+  }
+  const names = s.book.map((e) => row({ icon: "person", title: e.name, detail: e.network }, e.name));
+  const favs = (s.favorites || []).map((f) => row({ logo: f.symbol, src: f.image, title: f.symbol, detail: f.name + " · " + f.chain }, f.symbol));
+  return [...names, ...favs].filter((r) => !q || r.title.toLowerCase().includes(q)).slice(0, 30);
 }
 
 function refreshSuggestions(el) { pick = 0; drawSuggestions(suggestionRows(el)); }
@@ -622,23 +1024,19 @@ function drawSuggestions(rows) {
   slot.querySelector(".chat-suggest-row.chat-lit")?.scrollIntoView({ block: "nearest" });
 }
 
+/** A pick: its text in the word's place, a space after it unless it stands alone (a «$» chip is closed by its space). */
 function choose(row, el) {
   const w = wordAtCaret(el);
   if (!w) return;
-  const text = el.value;
-  if (row.block) {
-    // A block goes straight onto the canvas; its «/word» leaves the field.
-    ui.composerText = (text.slice(0, w.start) + text.slice(w.end)).replace(/\s{2,}/g, " ");
-    act("addBoard", { name: row.block });
-  } else {
-    ui.composerText = text.slice(0, w.start) + row.insert + " " + text.slice(w.end).replace(/^\s+/, "");
-  }
+  const alone = !w.before && !w.after;
+  const head = w.before + row.put + (alone && !row.space ? "" : " ");
+  ui.composerText = head + w.after.replace(/^ /, "");
   el.value = ui.composerText;
-  const caret = row.block ? w.start : w.start + row.insert.length + 1;
-  el.setSelectionRange(caret, caret);
+  el.setSelectionRange(head.length, head.length);
   autosize(el, 140);
   sendLit();
   drawSuggestions([]);
+  drawHelpers();
 }
 
 function templatesMenu(anchor) {
@@ -687,6 +1085,7 @@ function modelChip(s) {
 /** Two columns, so nothing moves under the pointer: the companies, then the chosen one's ways in and models. */
 function modelMenu(anchor) {
   const s = ui.state;
+  const m = s.models || {};
   let shown = companyOf(s.model.provider)?.name || companies[0].name;
   const right = h("div", { class: "chat-ways-col" });
   const left = h("div", { class: "chat-companies-col" });
@@ -708,53 +1107,81 @@ function modelMenu(anchor) {
     const c = list.find((x) => x.name === shown) || list[0];
     right.replaceChildren(h("div", { class: "chat-caption" }, c.name), ...s.providers.filter((p) => c.ids.includes(p.id)).map(way).flat(Infinity));
   };
+  const close = () => { document.querySelector(".menu")?.remove(); act("refreshModels"); };
+  const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
   const way = (p) => {
     const kindIcon = p.kind === "subscription" ? "person.circle" : p.kind === "local" ? "desktop" : "key";
-    const current = p.id === s.model.provider;
-    if (current && s.model.connected) {
-      const models = s.model.models.includes(s.model.model) || !s.model.model ? s.model.models : [...s.model.models, s.model.model];
-      return [h("div", { class: "chat-way-head" }, icon(kindIcon, 13), h("b", {}, p.name), h("span", { class: "spacer" }), h("span", {}, t("connected", "подключено"))),
-        models.map((id) => h("button", { class: "chat-model-row", onclick: () => { document.querySelector(".menu")?.remove(); act("setModel", { model: id }); } },
-          h("span", { class: "one-line" }, modelName(id)), id === s.model.model ? icon("check", 13) : null))];
+    const models = p.connected && !p.unavailable ? (p.models || []) : [];
+    if (!models.length) {
+      // Nothing to choose inside it: the way in is the choice, or its sign-in.
+      const detail = p.unavailable ? t("not open to apps yet — use the API key", "пока закрыто для приложений — используй API-ключ")
+        : p.connected ? t("connected", "подключено") + (p.existingLogin ? " · " + p.existingLogin : "") : t("sign-in needed", "нужен вход");
+      return h("button", { class: "chat-model-row chat-way", disabled: !!p.unavailable, title: p.unavailable || p.note || "",
+        onclick: () => { close(); p.connected ? act("connectModel", { provider: p.id }) : openSettings(); } },
+      icon(kindIcon, 13), h("span", { class: "chat-way-text" }, h("b", {}, p.name), h("span", { class: "small secondary" }, detail)), p.id === s.model.provider ? icon("check", 13) : null);
     }
-    // Another way in: a connected one (its key or login already saved, a model on this PC) switches here; one not yet
-    // connected goes to Settings, where the key is pasted.
-    const quick = p.connected;
-    const detail = p.unavailable ? t("not open to apps yet", "пока закрыто для приложений")
-      : p.connected ? t("connected", "подключено") + (p.existingLogin ? " · " + p.existingLogin : "") : t("sign-in needed", "нужен вход");
-    return h("button", { class: "chat-model-row chat-way", disabled: !!p.unavailable, title: p.unavailable || p.note || "",
-      onclick: () => { document.querySelector(".menu")?.remove(); quick ? act("connectModel", { provider: p.id }) : openSettings(); } },
-    icon(kindIcon, 13), h("span", { class: "chat-way-text" }, h("b", {}, p.name), h("span", { class: "small secondary" }, detail)));
+    const local = p.kind === "local";
+    const live = m.live?.[p.id];
+    const head = h("div", { class: "chat-way-head" + (p.kind === "subscription" ? " chat-sub" : "") }, icon(kindIcon, 13), h("b", {}, p.name), h("span", { class: "spacer" }),
+      h("span", {}, local ? t(`this PC · ${m.memoryGB || "?"} GB memory`, `этот ПК · ${m.memoryGB || "?"} ГБ памяти`) : t("connected", "подключено")));
+    const rows = [head];
+    // Ollama that didn't answer: open it, or get it — models on this PC need it running.
+    if (p.id === "ollama" && m.servers?.ollama === false) {
+      rows.push(m.installed
+        ? h("button", { class: "chat-model-row chat-sub-row", onclick: () => act("startOllama") }, icon("exclamationmark.triangle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Ollama isn't running", "Ollama не запущена")), h("span", { class: "small secondary" }, t("start it, then open this menu again", "запусти её и открой меню снова"))))
+        : h("button", { class: "chat-model-row chat-sub-row", onclick: () => act("getOllama") }, icon("arrow.down.circle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Get Ollama", "Скачать Ollama")), h("span", { class: "small secondary" }, t("free · then a model that fits this PC", "бесплатно · потом модель под этот ПК")))));
+    }
+    for (const id of models) {
+      const off = m.refusals?.[id], absent = local && live && !live.includes(id);
+      const loading = m.downloads?.[id], size = m.sizes?.[id];
+      const pullable = absent && p.id === "ollama" && m.servers?.ollama === true;
+      const tooBig = pullable && size !== undefined && !fits(size);
+      const detail = loading !== undefined ? t(`downloading · ${Math.round(loading * 100)}%`, `скачиваю · ${Math.round(loading * 100)}%`)
+        : tooBig ? t(`≈ ${size.toFixed(1)} GB · too big for this PC`, `≈ ${size.toFixed(1)} ГБ · слишком велика для этого ПК`)
+        : pullable ? t(`Download · ${size !== undefined ? `≈ ${size.toFixed(1)} GB` : "not on this PC yet"}`, `Скачать · ${size !== undefined ? `≈ ${size.toFixed(1)} ГБ` : "пока не на этом ПК"}`)
+        : absent ? t("not downloaded", "не скачана") : off ? t("too small for the chat", "слишком мала для чата")
+        : [id === m.recommended?.[p.id] ? t("recommended", "рекомендую") : null, local && size !== undefined ? t(`≈ ${Math.round(size * 1.2)} GB memory`, `≈ ${Math.round(size * 1.2)} ГБ памяти`) : null].filter(Boolean).join(" · ");
+      const chosen = p.id === s.model.provider && id === s.model.model;
+      const disabled = !!off || (absent && (!pullable || tooBig || loading !== undefined));
+      rows.push(h("button", { class: "chat-model-row chat-sub-row" + (absent ? " chat-absent" : "") + (disabled ? " chat-faded" : ""), disabled,
+        title: tooBig ? t(`Needs about ${Math.round(size * 1.2)} GB of memory; this PC has ${m.memoryGB} GB.`, `Нужно около ${Math.round(size * 1.2)} ГБ памяти; у этого ПК ${m.memoryGB} ГБ.`)
+          : pullable ? t(`Downloads ${id} into Ollama on this PC; then pick it here.`, `Скачает ${id} в Ollama на этом ПК; потом выбери её здесь.`) : off || id,
+        onclick: () => { if (pullable) { act("downloadModel", { model: id }); return; } close(); act(p.id === s.model.provider ? "setModel" : "connectModel", p.id === s.model.provider ? { model: id } : { provider: p.id, model: id }); } },
+      pullable && loading === undefined && !tooBig ? icon("arrow.down.circle", 12) : null,
+      h("span", { class: "chat-way-text" }, h("span", { class: "one-line" }, modelName(id)), detail ? h("span", { class: "small secondary" }, detail) : null),
+      chosen ? icon("check", 13) : null));
+    }
+    return rows;
   };
   draw();
   popover(anchor, h("div", { class: "chat-model-menu" },
     h("div", { class: "chat-model-cols" }, left, right),
     h("div", { class: "chat-model-foot" }, icon("lock.shield", 12), h("span", {}, t("The model never sees your wallet key.", "Модель никогда не видит ключ кошелька.")),
-      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: openSettings }, t("Sign-ins…", "Входы…")))), "up");
+      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings() }, t("Sign-ins…", "Входы…")))), "up", () => act("refreshModels"));
 }
 
-/** The networks the assistant works on, as on the Mac: three logos and «+N»; a click lists what it does on each. */
-const networkList = [
-  ["Solana", "sol", "Jupiter swaps · Jupiter Lend · Kamino · JitoSOL"],
-  ["Hyperliquid", "hype", "Perps · oil and stocks (xyz) · HLP vault"],
-  ["Base", "base", "Aave · Morpho · USDC"],
-  ["NEAR", "near", "NEAR Intents swaps · 1Click"],
-  ["Arbitrum", "arb", "Aave · Morpho · USDC in and out"],
-  ["Robinhood", "robinhood", "Stock tokens · USDG · Uniswap"],
-  ["Polygon", "pol", "Aave · USDC"],
-  ["Ethereum", "eth", "Aave · Morpho · mainnet gas varies"],
-  ["Tempo", "tempo", "USDC transfers · pay for services (MPP) · fees in USDC"],
-  ["HyperEVM", "hyperevm", "USDC in and out · HYPE for gas"],
-  ["Optimism", "op", "USDC in and out · Circle's CCTP"],
-  ["BNB Chain", "bnb", "USDC in and out · BNB for gas · swaps"],
-];
+/** The networks the assistant may use, as on the Mac (NetworksChip): those switched on, three logos and «+N»; the menu
+ *  switches each one, and says that money there still shows. */
 function networksChip() {
-  const chip = h("button", { class: "chat-chip-btn", title: t("Networks the assistant works on: ", "Сети, где работает ассистент: ") + networkList.map((n) => n[0]).join(", "),
-    onclick: () => popover(chip, h("div", { class: "chat-networks-menu" },
-      h("div", { class: "chat-caption chat-split" }, h("span", {}, t("Networks", "Сети")), h("span", {}, `${networkList.length}`)),
-      networkList.map(([name, file, uses]) => h("div", { class: "chat-network-row" }, logo(file, 28), h("div", {}, h("b", {}, name), h("div", { class: "small secondary" }, uses))))), "up") },
-  h("span", { class: "chat-logo-stack" }, networkList.slice(0, 3).map(([, file]) => logo(file, 20))), h("b", { class: "secondary" }, "+" + (networkList.length - 3)), icon("chevron.down", 9));
+  const all = ui.state.modules?.networks || [];
+  const on = all.filter((n) => n.on);
+  const chip = h("button", { class: "chat-chip-btn", title: t("Networks the assistant may use: ", "Сети, где работает ассистент: ") + on.map((n) => n.name).join(", "),
+    onclick: () => popover(chip, networksMenu(), "up") },
+  on.length ? [h("span", { class: "chat-logo-stack" }, on.slice(0, 3).map((n) => logo(n.logo, 20))), on.length > 3 ? h("b", { class: "secondary" }, "+" + (on.length - 3)) : null]
+    : h("b", { class: "chat-no-nets" }, t("No networks", "Нет сетей")),
+  icon("chevron.down", 9));
   return chip;
+}
+
+function networksMenu() {
+  const all = ui.state.modules?.networks || [];
+  return h("div", { class: "chat-networks-menu" },
+    h("div", { class: "chat-caption chat-split" }, h("span", {}, t("Networks", "Сети")), h("span", {}, t(`${all.filter((n) => n.on).length} of ${all.length} on`, `включено ${all.filter((n) => n.on).length} из ${all.length}`))),
+    all.map((n) => h("div", { class: "chat-network-row" }, logo(n.logo, 28),
+      h("div", { class: "chat-network-text" }, h("b", {}, n.name), h("div", { class: "small secondary" }, n.uses || n.users || "")),
+      h("label", { class: "chat-switch" }, h("input", { type: "checkbox", id: "chat-net-" + n.id, checked: n.on, onchange: (e) => act("module", { name: n.id, test: e.target.checked }) }), h("span", {})))),
+    h("div", { class: "chat-networks-note small secondary" }, t("Off: the assistant won’t plan moves there. Money on that network still shows on the canvas.", "Выключено: ассистент не будет планировать там действия. Деньги в этой сети по-прежнему видны на холсте.")),
+    h("button", { class: "link-btn chat-networks-link", onclick: () => openSettings("modules") }, t("DeFi, perps, protocols: Settings › Modules", "DeFi, перпы, протоколы: Настройки › Модули")));
 }
 
 /** «950», «9.6k», «22k», «1M»: tokens as the Mac's ContextMeter.short writes them. */
@@ -766,30 +1193,48 @@ function short(n) {
   return String(n);
 }
 
-/** How much of the model's window the chat fills (ContextChip), after the first answer. */
+/** «$1.24», «$0.04», «$0.004»; under a tenth of a cent «<$0.001». */
+const dollars = (v) => (v >= 0.0095 ? "$" + v.toFixed(2) : v >= 0.00095 ? "$" + v.toFixed(3) : v > 0 ? "<$0.001" : "$0");
+
+/** How much of the model's window the chat fills, or what a key paid for its answers (ContextChip); a click opens its parts. */
 function contextChip(s) {
   const c = s.context;
   if (!c || !c.used) return null;
   const share = c.window ? Math.min(1, c.used / c.window) : null;
   const tight = (share || 0) >= 0.8;
+  const paid = s.providers.find((p) => p.id === s.model.provider)?.kind === "apiKey" && c.spent > 0;
   const r = 6.5, len = 2 * Math.PI * r;
   const ring = share === null ? null : svg("svg", { viewBox: "0 0 18 18", class: "chat-ring" },
     svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-back" }),
     svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-fill", "stroke-linecap": "round",
       "stroke-dasharray": `${Math.max(0.5, share * len)} ${len}`, transform: "rotate(-90 9 9)" }));
+  const rest = Math.max(0, c.used - (c.instructions || 0) - (c.chat || 0));
+  const part = (cls, n) => n > 0 && c.window ? h("span", { class: cls, style: `width:${Math.max(2, (n / c.window) * 100)}%` }) : null;
+  const line = (cls, name, value) => h("div", { class: "chat-context-line" }, cls ? h("i", { class: "chat-dot " + cls }) : null, h("span", { class: "one-line" }, name), h("span", { class: "spacer" }), h("b", {}, value));
   const chip = h("button", { class: "chat-chip-btn chat-ctx" + (tight ? " chat-near" : ""),
-    title: t("What the model read with your last message, of what its window holds.", "Что модель прочитала с последним сообщением — из того, что вмещает её окно."),
+    title: paid ? t(`This chat's answers cost ${dollars(c.spent)} so far. Click for the context they read.`, `Ответы этого чата уже стоили ${dollars(c.spent)}. Нажми, чтобы увидеть, что они читали.`)
+      : t("What the model read with your last message, of what its window holds.", "Что модель прочитала с последним сообщением — из того, что вмещает её окно."),
     onclick: () => popover(chip, h("div", { class: "chat-context-pop" },
       h("div", { class: "chat-caption chat-split" }, h("span", {}, t("Context", "Контекст")), share === null ? null : h("span", {}, share < 0.01 ? t("under 1%", "меньше 1%") : Math.round(share * 100) + "%")),
       h("div", { class: "chat-context-big" }, h("b", {}, short(c.used)), h("span", { class: "secondary" }, c.window ? t(`of ${short(c.window)} tokens`, `из ${short(c.window)} токенов`) : t("tokens", "токенов"))),
-      share === null ? null : h("div", { class: "chat-context-bar" }, h("span", { style: `width:${Math.max(2, share * 100)}%` })),
-      h("div", { class: "small secondary" }, t("The whole chat of this canvas goes with each message. A new canvas starts it empty.", "С каждым сообщением уходит весь чат этого холста. Новый холст начинает его с нуля."))), "up") },
-  ring, h("span", {}, short(c.used)), c.window ? h("span", { class: "secondary" }, "/ " + short(c.window)) : null);
+      c.window ? h("div", { class: "chat-context-bar chat-split-bar" }, part("chat-part-brief", c.instructions || 0), part("chat-part-chat", c.chat || 0), part("chat-part-rest", rest)) : null,
+      h("div", { class: "chat-context-lines" },
+        line("chat-part-brief", t("Instructions", "Инструкции"), short(c.instructions || 0)),
+        line("chat-part-chat", c.sent < c.lines ? t(`This chat · the last ${c.sent} of ${c.lines} messages`, `Этот чат · последние ${c.sent} из ${c.lines} сообщений`) : t(`This chat · ${c.lines || 0} messages`, `Этот чат · сообщений: ${c.lines || 0}`), short(c.chat || 0)),
+        line("chat-part-rest", t("Canvas, balances, your message", "Холст, балансы, твоё сообщение"), short(rest))),
+      c.spent > 0 ? [h("div", { class: "menu-divider" }),
+        h("div", { class: "chat-context-lines" }, line(null, t("This chat’s answers", "Ответы этого чата"), dollars(c.spent)), c.last !== null && c.last !== undefined ? line(null, t("The last one", "Последний"), dollars(c.last)) : null),
+        h("div", { class: "small secondary" }, c.billed ? t("As OpenRouter charged it.", "Как списал OpenRouter.") : t("Tokens at the service’s list price; its own invoice is the final word.", "Токены по прейскуранту сервиса; окончательная сумма — в его счёте."))] : null,
+      h("div", { class: "menu-divider" }),
+      h("div", { class: "small secondary" }, c.sent < c.lines
+        ? t("This chat is long: only its newest messages go with each request, so it never runs out of room.", "Чат длинный: с каждым запросом уходят только его новые сообщения, поэтому место не кончается.")
+        : t("Each message goes with the chat so far. A long chat sends only its newest messages, so it never runs out of room.", "Каждое сообщение уходит вместе с чатом. Длинный чат отправляет только новые сообщения, поэтому место не кончается."))), "up") },
+  ring, paid ? h("span", {}, dollars(c.spent)) : [h("span", {}, short(c.used)), c.window ? h("span", { class: "secondary" }, "/ " + short(c.window)) : null]);
   return chip;
 }
 
 /** A card of our own beside an anchor, above it by default, kept in the window; Escape or a click outside closes it. */
-function popover(anchor, content, side = "up") {
+function popover(anchor, content, side = "up", onClose) {
   document.querySelector(".menu")?.remove();
   const pop = h("div", { class: "menu chat-pop" }, content);
   pop.addEventListener("click", (e) => e.stopPropagation());
@@ -799,35 +1244,59 @@ function popover(anchor, content, side = "up") {
   const top = side === "up" && a.top - hgt - 8 > 8 ? a.top - hgt - 8 : Math.min(a.bottom + 8, window.innerHeight - hgt - 8);
   pop.style.left = left + "px";
   pop.style.top = Math.max(8, top) + "px";
-  setTimeout(() => document.addEventListener("click", function off(ev) { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", off); } }), 0);
+  setTimeout(() => document.addEventListener("click", function off(ev) { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", off); onClose?.(); } }), 0);
   return pop;
 }
 
 // MARK: The voice
 
-/** Windows' recognizer listens until a pause; the words go into the field, never sent by themselves. */
+/** Speaking into the field: what Windows hears shows as it goes (the settled words in ink, the rest grey); Done puts it in
+ *  the field, Cancel drops it; nothing is sent by itself. A build whose window has no live recognizer listens to a pause. */
+const voice = { on: false, heard: "", started: 0, timer: null, unlisten: null };
+
 async function speak() {
-  listening = true;
-  listenStart = Date.now();
-  clearInterval(listenTimer);
-  listenTimer = setInterval(() => {
+  Object.assign(voice, { on: true, heard: "", started: Date.now() });
+  clearInterval(voice.timer);
+  voice.timer = setInterval(() => {
     const el = document.getElementById("voice-time");
-    const sec = Math.floor((Date.now() - listenStart) / 1000);
+    const sec = Math.floor((Date.now() - voice.started) / 1000);
     if (el) el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
   }, 1000);
   render();
   try {
-    const text = (await invoke("listen")).trim();
-    if (text) ui.composerText = ui.composerText ? ui.composerText.trimEnd() + " " + text : text;
+    voice.unlisten = await window.__TAURI__.event.listen("voice", (e) => {
+      voice.heard = String(e.payload || "");
+      const el = document.getElementById("voice-heard");
+      if (el) { el.textContent = voice.heard ? voice.heard + "…" : t("Say what to do…", "Скажи, что сделать…"); el.classList.toggle("secondary", !voice.heard); }
+    });
+  } catch {}
+  let text = "";
+  try {
+    text = (await invoke("listen_live")).trim();
   } catch (e) {
-    toast(String(e));
+    // No live recognizer in this build: the one that listens to a pause.
+    if (/not found|unknown|not allowed|undefined/i.test(String(e))) {
+      try { text = (await invoke("listen")).trim(); } catch (x) { toast(String(x)); }
+    } else toast(String(e));
   } finally {
-    listening = false;
-    clearInterval(listenTimer);
+    voice.unlisten?.();
+    voice.unlisten = null;
+    voice.on = false;
+    clearInterval(voice.timer);
+    if (text) ui.composerText = ui.composerText ? ui.composerText.trimEnd() + " " + text : text;
     render();
     document.getElementById("composer")?.focus();
   }
 }
+
+function stopVoice(done) { invoke("listen_stop", { done }).catch(() => {}); }
+
+// Esc cancels and Return finishes while listening, as on the Mac.
+document.addEventListener("keydown", (e) => {
+  if (!voice.on) return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); stopVoice(false); }
+  if (e.key === "Enter") { e.preventDefault(); stopVoice(true); }
+}, true);
 
 function listeningRow() {
   return h("div", { class: "chat-listening-row" }, h("span", { class: "chat-rec-dot" }), h("b", {}, t("Listening", "Слушаю")),
@@ -836,8 +1305,16 @@ function listeningRow() {
 
 function voicePanel() {
   return h("div", { class: "chat-voice" },
-    h("div", { class: "chat-voice-heard secondary" }, t("Say what to do… it stops at a pause.", "Скажи, что сделать… остановится на паузе.")),
+    h("div", { id: "voice-heard", class: "chat-voice-heard" + (voice.heard ? "" : " secondary") }, voice.heard ? voice.heard + "…" : t("Say what to do…", "Скажи, что сделать…")),
     h("div", { class: "chat-voice-row" },
       h("div", { class: "chat-voice-bars", "aria-hidden": "true" }, Array.from({ length: 24 }, (_, i) => h("span", { style: `animation-delay:${(i * 0.07).toFixed(2)}s` }))),
-      h("span", { id: "voice-time", class: "num secondary" }, "0:00")));
+      h("span", { id: "voice-time", class: "num secondary" }, "0:00"),
+      h("button", { class: "chat-round-btn chat-glassy", title: t("Cancel · Esc", "Отмена · Esc"), onclick: () => stopVoice(false) }, icon("xmark", 13)),
+      h("button", { class: "chat-round-btn chat-send chat-lit", title: t("Done: put the words in the field · Return", "Готово: слова в поле · Return"), onclick: () => stopVoice(true) }, icon("check", 13))));
 }
+
+// For the preview (preview/index.html «&call=chat.…»): a menu open, or a draft in the field.
+export function openModelMenu() { document.querySelector(".chat-model")?.click(); }
+export function openNetworksMenu() { document.querySelectorAll(".chat-chips .chat-chip-btn")[1]?.click(); }
+export function openContextMenu() { document.querySelector(".chat-ctx")?.click(); }
+export function showDraft() { suggest("send 120 USDC to Mom"); drawHelpers(); }

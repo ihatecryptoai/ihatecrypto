@@ -264,3 +264,103 @@
 /* A narrow chat keeps the model's whole name: the context chip drops its «/ 1M» first. */
 .chat-panel .chat-composer { container-type: inline-size; }
 @container (max-width: 400px) { .chat-panel .chat-chip-btn.chat-ctx > .secondary { display: none; } }
+
+/* Wave 2: Stop, the price on a waiting swap, the thinking step. */
+.chat-panel .chat-round-btn.chat-stop { background: var(--accent); color: var(--on-accent); }
+.chat-panel .chat-round-btn.chat-stop.chat-off { background: var(--fill-strong); color: var(--tertiary); cursor: default; }
+.chat-panel .chat-pill-quiet { height: 32px; padding: 0 14px; border-radius: 999px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px;
+  background: var(--fill-strong); color: var(--secondary); white-space: nowrap; }
+.chat-panel .chat-dots-row { display: flex; align-items: center; gap: 8px; align-self: flex-start; min-width: 0; max-width: 100%; }
+.chat-panel .chat-dots-step { font-size: 12px; color: var(--secondary); }
+
+/* Cards offered earlier: faded, not pickable; the pick keeps its check. */
+.chat-panel .chat-option.chat-past { opacity: 0.45; cursor: default; }
+.chat-panel .chat-option.chat-past:hover { transform: none; box-shadow: none; }
+.chat-panel .chat-option.chat-picked { opacity: 1; }
+.chat-panel .chat-option.chat-picked .chat-option-icon { background: color-mix(in srgb, var(--profit) 16%, transparent); color: var(--profit); }
+
+/* A plan checked item by item, and a service's JSON folded. */
+.chat-panel .chat-checklist { display: flex; flex-direction: column; gap: 8px; }
+.chat-panel .chat-checklist-box { display: flex; flex-direction: column; gap: 7px; padding: 12px; border-radius: 12px; background: var(--fill); }
+.chat-panel .chat-check-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; line-height: 1.4; }
+.chat-panel .chat-check-mark { flex: none; width: 14px; display: inline-flex; justify-content: center; }
+.chat-panel .chat-check-mark .ico { width: 12px; height: 12px; stroke-width: 2.8; }
+.chat-panel .chat-check-mark.chat-ok { color: var(--profit); }
+.chat-panel .chat-check-mark.chat-no { color: var(--loss); }
+.chat-panel .chat-check-mark.chat-warn { color: #f59e0b; }
+.chat-panel .chat-check-mark.chat-opt { color: var(--secondary); }
+.chat-panel .chat-check-next { font-size: 13px; font-weight: 600; }
+.chat-panel .chat-data-card { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border-radius: 12px; background: var(--fill); }
+.chat-panel .chat-data-head { display: flex; align-items: center; gap: 6px; color: var(--tertiary); }
+.chat-panel .chat-data-head .link-btn { display: inline-flex; align-items: center; gap: 4px; }
+.chat-panel .chat-data-row { font-size: 12.5px; font-weight: 600; display: flex; flex-direction: column; gap: 1px; }
+.chat-panel .chat-data-host { font-weight: 400; color: var(--relay, #4615c8); }
+.chat-panel .chat-data-json { max-height: 220px; overflow: auto; margin: 0; font: 10.5px/1.45 var(--mono); color: var(--secondary); white-space: pre-wrap; }
+
+/* «$SOL» in a sent message: the token's chip. */
+.chat-panel .chat-token-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px 0 3px; margin: 0 1px; border-radius: 6px; vertical-align: -3px;
+  height: 20px; font-weight: 600; font-size: 13px; background: var(--glass-fill); box-shadow: inset 0 0 0 1px var(--glass-rim); }
+.chat-panel .chat-token-chip .logo { border-radius: 50%; }
+
+/* What a message went with: one chip each; only a block's name went: said in orange. */
+.chat-panel .chat-context-row { flex-wrap: wrap; justify-content: flex-end; }
+.chat-panel .chat-context-chip.chat-bare-chip .ico:last-child { color: #f59e0b; }
+.chat-pop .chat-bare { font-size: 11px; font-weight: 600; color: #c2410c; white-space: normal; }
+.chat-panel .chat-attached-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Over the field: the amount the draft says, a top-up of the automation wallet. */
+.chat-panel .chat-helper-slot:empty { display: none; }
+.chat-panel .chat-amount { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--glass-fill); border: 1px solid var(--glass-rim); }
+.chat-panel .chat-amount-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.chat-panel .chat-amount-head b { font-size: 13px; }
+.chat-panel .chat-amount-head .logo { border-radius: 50%; }
+.chat-panel .chat-amount-row { display: flex; align-items: center; gap: 6px; }
+.chat-panel .chat-amount-row input[type="range"] { flex: 1; min-width: 0; padding: 0; background: none; accent-color: var(--accent); }
+.chat-panel .chat-amount-pct { height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--card-border); background: none; font-size: 11px; font-weight: 600; }
+.chat-panel .chat-amount-pct:hover { border-color: var(--accent); }
+.chat-panel .chat-topup-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.chat-panel .chat-topup-row .logo { border-radius: 50%; }
+.chat-panel .chat-topup-short { font-size: 11px; font-weight: 600; color: var(--jev-ink); }
+
+/* An open position's usual changes, under the chat. */
+.chat-panel .chat-position-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.chat-panel .chat-pos-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px; flex: none; font-size: 12px;
+  background: var(--glass-fill); border: 1px solid var(--glass-rim); }
+.chat-panel .chat-pos-chip.loss { color: var(--loss); }
+.chat-panel .chat-way-chip.chat-accent { background: var(--accent); color: var(--on-accent); border-color: transparent; padding: 0 10px; font-weight: 600; }
+.chat-panel .chat-way-chip:disabled { opacity: 0.6; cursor: default; }
+
+/* The model menu's models under each way in: recommended, downloads, too big or small, not on this PC. */
+.chat-pop .chat-model-row.chat-sub-row { padding-left: 28px; }
+.chat-pop .chat-model-row.chat-absent { color: var(--secondary); }
+.chat-pop .chat-model-row.chat-faded { opacity: 0.5; }
+.chat-pop .chat-way-head.chat-sub > .ico { color: #1f7a4a; }
+
+/* The networks chip: switched off ones out of the stack, a switch per row in its menu. */
+.chat-panel .chat-no-nets { color: #f59e0b; font-size: 12px; }
+.chat-pop .chat-network-text { flex: 1; min-width: 0; }
+.chat-pop .chat-switch { position: relative; flex: none; width: 36px; height: 22px; }
+.chat-pop .chat-switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.chat-pop .chat-switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--fill-strong); transition: background 0.15s; pointer-events: none; }
+.chat-pop .chat-switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+.chat-pop .chat-switch input:checked + span { background: var(--accent); }
+.chat-pop .chat-switch input:checked + span::after { transform: translateX(14px); }
+.chat-pop .chat-switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-pop .chat-networks-note { padding: 8px 10px 4px; border-top: 1px solid var(--separator); margin-top: 4px; }
+.chat-pop .chat-networks-link { padding: 2px 10px 6px; text-align: left; text-decoration: underline; }
+
+/* The context's parts: instructions, the chat, the rest; dollars an API key paid. */
+.chat-pop .chat-split-bar { display: flex; gap: 1px; }
+.chat-pop .chat-split-bar span { flex: none; }
+.chat-pop .chat-part-brief, .chat-pop .chat-dot.chat-part-brief { background: var(--secondary); }
+.chat-pop .chat-part-chat, .chat-pop .chat-dot.chat-part-chat { background: var(--accent); }
+.chat-pop .chat-part-rest, .chat-pop .chat-dot.chat-part-rest { background: var(--profit); }
+.chat-pop .chat-context-lines { display: flex; flex-direction: column; gap: 6px; }
+.chat-pop .chat-context-line { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.chat-pop .chat-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.chat-pop .menu-divider { margin: 2px 0; }
+
+/* Listening: what was heard as it goes, Cancel and Done. */
+.chat-panel .chat-voice-row .chat-round-btn { width: 30px; height: 30px; }
+.chat-pop .chat-networks-menu { max-height: calc(100vh - 48px); overflow-y: auto; }

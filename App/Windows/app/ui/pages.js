@@ -2,10 +2,11 @@
 // sidebar of tabs, each a column of sections with rows), History (HistoryView.swift) and Top up (ReceiveBoard in
 // Receive.swift). Settings cover the chat while open; History and Top up keep it floating, as the canvas does.
 
-import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode, usd } from "./core.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel } from "./chat.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
+import { codeMaker, lockAfterPicker } from "./lock.js";
 
 const back = () => { ui.view = "canvas"; render(); };
 
@@ -122,14 +123,20 @@ function general(s) {
       group(row({ label: t("Theme", "Тема"), ico: "eye" }, segmented([["system", t("System", "Системная")], ["light", t("Light", "Светлая")], ["dark", t("Dark", "Тёмная")]],
         theme, (v) => { store("theme", v); applyTheme(); render(); }, "pg-set-seg")))),
     section("globe", t("Language", "Язык"), t("The app's own texts, and the chat's replies.", "Тексты приложения и ответы чата."),
-      group(row({ label: t("Language", "Язык"), ico: "globe", about: t("Auto answers in the language you write in. Tickers, amounts and addresses stay as they are.", "«Как я пишу» отвечает на языке твоего сообщения. Тикеры, суммы и адреса остаются как есть.") },
-        h("select", { onchange: (e) => act("language", { language: e.target.value }) },
-          [["auto", t("Auto — your language", "Авто — твой язык")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: s.language === v }, l)))))),
+      group(
+        row({ label: t("App language", "Язык приложения"), ico: "character.book", about: t("Menus, buttons and the app's texts. System follows Windows' language. Many texts are still English only; more are translated with updates.",
+          "Меню, кнопки и тексты приложения. «Системный» — как язык Windows. Часть текстов пока только на английском; переводы добавляются с обновлениями.") },
+          h("select", { id: "set-app-language", onchange: (e) => act("appLanguage", { language: e.target.value }) },
+            [["system", t("System", "Системный")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: (s.appLanguage || "system") === v }, l)))),
+        row({ label: t("Reply language", "Язык ответов"), ico: "text.bubble", about: t("Auto answers in the language you write in. Tickers, amounts and addresses stay as they are.", "«Авто» отвечает на языке твоего сообщения. Тикеры, суммы и адреса остаются как есть.") },
+          h("select", { id: "set-reply-language", onchange: (e) => act("language", { language: e.target.value }) },
+            [["auto", t("Auto — your language", "Авто — твой язык")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: s.language === v }, l)))))),
     section("square.and.pencil", t("Chat", "Чат"), t("What this canvas's chat keeps.", "Что хранит чат этого холста."),
       group(row({ label: t("This canvas's chat", "Чат этого холста"), ico: "square.and.pencil", about: t("Clears the messages of the open canvas. Its blocks, the history and the wallet stay.", "Стирает сообщения открытого холста. Его блоки, история и кошелёк остаются.") },
         h("button", { class: "btn small", onclick: () => act("clearChat") }, t("Clear", "Очистить"))))),
+    noticeSection(s),
     section("power", t("Background", "Фон"), t("Alerts and scheduled tasks with the window closed.", "Оповещения и задачи по расписанию при закрытом окне."),
-      group(row({ label: t("Closing the window", "Закрытие окна"), ico: "power", about: t("ihatecrypto stays in the tray: price alerts, balances and scheduled tasks go on. Quit from the tray icon's menu ends it.", "ihatecrypto остаётся в трее: оповещения, балансы и задачи продолжают работать. «Выход» в меню значка в трее закрывает его совсем.") },
+      group(loginRow(s), row({ label: t("Closing the window", "Закрытие окна"), ico: "power", about: t("ihatecrypto stays in the tray: price alerts, balances and scheduled tasks go on. Quit from the tray icon's menu ends it.", "ihatecrypto остаётся в трее: оповещения, балансы и задачи продолжают работать. «Выход» в меню значка в трее закрывает его совсем.") },
         h("span", { class: "secondary" }, t("Keeps it in the tray", "Оставляет в трее"))))),
     s.nodes ? nodesSection(s.nodes) : null,
     s.nodes ? oneClickSection(s.nodes) : null,
@@ -137,6 +144,32 @@ function general(s) {
       group(row({ label: t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle" },
         h("button", { class: "btn small", onclick: checkUpdate }, t("Check for updates", "Проверить обновления"))))),
   ];
+}
+
+// Notifications (the Mac's NoticeSettings) and Open at login: the system part's rows (Notices.swift, system.rs).
+
+const NOTICE_ICONS = { incoming: "arrow.down.circle", positions: "chart.line", orders: "checkmark.circle", alerts: "bell", moves: "arrow.left.arrow.right",
+  hlp: "lock.open", signature: "lock", confirm: "hand.raised", update: "arrow.clockwise" };
+const noticeList = { open: false };
+function noticeSection(s) {
+  const list = s.notices || [];
+  const on = list.filter((n) => n.on).length;
+  return section("bell", t("Notifications", "Уведомления"), t("When the assistant taps you, even with the window closed.", "Когда ассистент зовёт тебя, даже при закрытом окне."),
+    group(
+      row({ label: t("Notifications", "Уведомления"), ico: "bell", about: t("They show while the window is in the tray or behind others; click one to come back to it. Windows decides whether they can appear at all: Settings › System › Notifications › ihatecrypto.",
+          "Они появляются, когда окно в трее или за другими; нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows: «Параметры › Система › Уведомления › ihatecrypto».") },
+        h("button", { class: "btn small", onclick: () => act("noticeTest") }, t("Send a test", "Отправить тест")),
+        h("button", { class: "btn small", onclick: () => invoke("open_notification_settings").catch((x) => toast(String(x))) }, t("Windows settings…", "Настройки Windows…"))),
+      row({ label: t("Which events", "Какие события"), ico: "bell" },
+        h("button", { class: "btn small", onclick: () => { noticeList.open = !noticeList.open; render(); } }, t(`${on} of ${list.length}`, `${on} из ${list.length}`), icon(noticeList.open ? "chevron.up" : "chevron.down", 10))),
+      noticeList.open ? list.map((n) => row({ label: n.title, ico: NOTICE_ICONS[n.id] || "bell" }, toggle("notice-" + n.id, n.on, (v) => act("notice", { name: n.id, test: v })))) : null));
+}
+
+/** Open at login (the engine's `openAtLogin`; main.rs sets the registry's Run key and says back how Windows has it). */
+function loginRow(s) {
+  return row({ label: t("Open at login", "Открывать при входе"), ico: "power", about: t("Starts ihatecrypto in the tray when you log in to Windows, its window closed: the schedule, alerts and stops go on. Stop and take-profit orders already on the exchange keep working either way.",
+      "Запускает ihatecrypto в трее при входе в Windows, с закрытым окном: расписание, оповещения и стопы продолжают работать. Стоп и тейк, уже стоящие на бирже, работают в любом случае.") },
+    toggle("open-at-login", s.openAtLogin === true, (v) => act("openAtLogin", { test: v }), s.openAtLogin === undefined));
 }
 
 // Your own nodes and the NEAR Intents key (Nodes.swift): what's typed is checked by the engine before it's kept; only a
@@ -375,12 +408,34 @@ function walletTab(s) {
           h("button", { class: "btn small", onclick: () => act("lock") }, t("Lock", "Заблокировать"))),
         s.signer.notes.map((n) => row({ label: n, ico: "checkmark.seal", cls: "wrap note" })),
         s.signer.error ? row({ label: s.signer.error, ico: "exclamationmark.triangle", cls: "wrap loss" }) : null)),
+    s.lock ? passcodeSection(s.lock) : null,
     s.trading?.key?.possible ? hyperliquidSection(s) : null,
     watched ? section("eye", t("Addresses for balances", "Адреса для балансов"), t("Read-only wallets. Never paste a recovery phrase or key.", "Кошельки только для просмотра. Никогда не вставляй фразу восстановления или ключ."),
       group(h("div", { class: "pg-set-panel" }, watched.fields,
         h("div", { class: "btns" }, h("button", { class: "btn primary", onclick: watched.save }, t("Watch", "Смотреть")),
           watched.stop ? h("button", { class: "btn", onclick: watched.stop }, t("Stop watching", "Перестать смотреть")) : null)))) : null,
   ];
+}
+
+/** Settings › Wallet › Passcode (the Mac's PasscodeSettings): make, change or turn off the code; how soon it locks; lock now. */
+const passcode = { making: false, offered: false };
+function passcodeSection(l) {
+  if (l.offerNewCode && !passcode.offered) Object.assign(passcode, { making: true, offered: true });
+  const made = () => { passcode.making = false; render(); };
+  return section("lock", t("Passcode", "Код"), t("Opens ihatecrypto: balances, chat and history stay hidden until then.", "Открывает ihatecrypto: балансы, чат и история скрыты до этого."),
+    group(
+      row({ label: t("Passcode", "Код"), ico: "lock", about: t("6 digits, checked by the separate signer: five wrong in a row turn it off, and then only Windows Hello opens the app. Windows Hello opens it too; moves still sign with Windows Hello.",
+        "6 цифр, их проверяет отдельный подписант: после пяти неверных подряд код выключается, и тогда приложение открывает только Windows Hello. Windows Hello открывает и так; движения по-прежнему подписываются Windows Hello.") },
+        l.codeSet ? h("span", { class: "secondary" }, t("On", "Включён")) : null,
+        h("button", { class: "btn small", onclick: () => { passcode.making = !passcode.making; render(); } },
+          passcode.making ? t("Cancel", "Отмена") : l.codeSet ? t("Change…", "Изменить…") : t("Make a code…", "Задать код…")),
+        l.codeSet ? h("button", { class: "btn small", onclick: () => act("clearCode") }, t("Turn off", "Выключить")) : null),
+      passcode.making ? codeMaker(l, made) : null,
+      l.codeSet ? row({ label: t("Lock after", "Блокировать через"), ico: "clock", about: t("Minutes without touching the PC's keyboard or mouse. Sleep and a locked screen lock it at once.",
+        "Минуты, когда никто не трогает клавиатуру и мышь компьютера. Сон и блокировка экрана закрывают сразу.") }, lockAfterPicker(l)) : null,
+      l.codeSet ? row({ label: t("Lock the app now", "Заблокировать сейчас"), ico: "lock", about: t("Hides everything until the code or Windows Hello, and ends the signing session. Ctrl+L does the same.",
+        "Скрывает всё до кода или Windows Hello и заканчивает сессию подписи. То же делает Ctrl+L.") },
+        h("button", { class: "btn small", onclick: () => act("lockApp") }, t("Lock now", "Заблокировать"))) : null));
 }
 
 function walletRow(w, s) {
@@ -596,126 +651,351 @@ function pageHeader(title, controls) {
 }
 const empty = (text) => h("div", { class: "page-empty" }, text);
 
+// MARK: History — the Mac's HistoryView: Agent, Positions, All (HistoryTabs.swift reads them when the page opens)
+
+addIcons({
+  "arrow.up.right.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 15l6-6M10 9h5v5",
+  "arrow.down.left.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15 9l-6 6M14 15H9v-5",
+  "arrow.up.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 16.5v-9M8.5 11 12 7.5l3.5 3.5",
+  "xmark.octagon": "M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM9 9l6 6M15 9l-6 6",
+  hourglass: "M6.5 3h11M6.5 21h11M7.5 3c0 5 9 5 9 9s-9 4-9 9M16.5 3c0 5-9 5-9 9s9 4 9 9",
+  "character.bubble": "M4 5h16v11H9l-5 4zM9.5 13l2.5-6 2.5 6M10.3 11.2h3.4",
+  "arrow.up.forward.app": "M10 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14M14 4h6v6M20 4l-9 9",
+  "text.bubble": "M4 5h16v11H9l-5 4zM8 9h8M8 12.5h5",
+  "character.book": "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v16H6.5A1.5 1.5 0 0 0 5 20.5zM9.5 14l2.5-7 2.5 7M10.3 12h3.4",
+  qrcode: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2M14 18h2v2M18 18h2v2h-2zM6.5 6.5h1v1h-1zM16.5 6.5h1v1h-1zM6.5 16.5h1v1h-1z",
+});
+
+/** A page's data read again when it opens: `leave` runs once the window shows something else. */
+const shownPoll = {};
+function whileShown(view, leave) {
+  if (shownPoll[view]) return;
+  shownPoll[view] = setInterval(() => {
+    if (ui.view === view) return;
+    clearInterval(shownPoll[view]);
+    delete shownPoll[view];
+    leave();
+  }, 800);
+}
+
+const history = { data: null, loading: false, stale: true, open: new Set() };
+async function loadHistory() {
+  if (history.loading) return;
+  history.loading = true;
+  history.stale = false;
+  render();
+  const r = await act("historyTabs");
+  history.loading = false;
+  if (r && r.json) { try { history.data = JSON.parse(r.json); } catch {} }
+  render();
+}
+
+const toneClass = { accent: "accent-ink", profit: "profit", loss: "loss", secondary: "secondary" };
+const signedMoney = (v) => (Number(v) < 0 ? "−" + usd(Math.abs(Number(v))) : "+" + usd(Number(v)));
+const dayTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+
+/** A card of the canvas frozen in time: its label, title and two lines. */
+function historyBubble(b) {
+  return h("div", { class: "page-hb page-hb-" + b.status },
+    h("div", { class: "eyebrow one-line" }, b.label),
+    h("b", { class: "page-hb-title" }, b.title),
+    (b.lines || []).slice(0, 2).map((l) => h("div", { class: "page-hb-line secondary" }, l)));
+}
+
+function activityCard(a, key) {
+  const open = history.open.has(key);
+  const ico = a.kind === "execution" ? "signature" : a.kind === "automatic" ? "gear" : "text.bubble";
+  const lines = open ? a.lines : a.lines.slice(-2);
+  return h("div", { class: "page-act card" },
+    h("div", { class: "page-act-head" }, h("span", { class: a.failed ? "loss" : "accent-ink" }, icon(ico, 16)),
+      h("b", { class: "one-line" }, a.title || (a.kind === "request" ? t("Request", "Запрос") : "ihatecrypto")),
+      h("span", { class: "spacer" }), h("span", { class: "secondary small num" }, when(a.at))),
+    a.request ? h("div", { class: "page-act-ask selectable" }, a.request) : null,
+    a.understood ? h("div", { class: "page-act-read secondary" }, icon("character.bubble", 12), t(`understood as “${a.understood}”`, `понял как «${a.understood}»`)) : null,
+    a.bubbles.length ? h("div", { class: "page-act-bubbles" }, a.bubbles.map(historyBubble)) : null,
+    lines.map((l) => h("div", { class: "page-act-line secondary selectable" }, l)),
+    a.lines.length > 2 ? h("button", { class: "link-btn", onclick: () => { open ? history.open.delete(key) : history.open.add(key); render(); } },
+      open ? t("Less", "Меньше") : t(`All ${a.lines.length} lines`, `Все строки: ${a.lines.length}`)) : null);
+}
+
+function storyCard(st) {
+  const span = st.closed ? `${when(st.opened)} → ${sameDay(st.opened, st.closed) ? dayTime(st.closed) : when(st.closed)}` : `${when(st.opened)} · ${t("open", "открыта")}`;
+  return h("div", { class: "page-story card" },
+    h("div", { class: "page-story-head" }, logo(st.coin, 34),
+      h("div", { class: "page-story-name" }, h("b", {}, `${st.long ? t("Long", "Лонг") : t("Short", "Шорт")} ${st.coin}`), h("div", { class: "secondary small" }, span)),
+      h("span", { class: "spacer" }),
+      st.open ? h("span", { class: "page-story-chip" }, t("open", "открыта"))
+        : h("b", { class: "page-story-pnl num " + (Number(st.realized) < 0 ? "loss" : "profit") }, signedMoney(st.realized))),
+    h("div", { class: "page-story-events" }, st.events.map((e, i) => [
+      i > 0 ? h("span", { class: "page-story-step tertiary" }, icon("chevron.right", 12)) : null,
+      h("div", { class: "page-hb page-hb-" + e.kind }, h("div", { class: "eyebrow one-line" }, e.label), h("b", { class: "page-hb-title" }, e.title),
+        h("div", { class: "page-hb-line secondary" }, when(e.at)), (e.lines || []).map((l) => h("div", { class: "page-hb-line secondary" }, l)))])),
+    st.open ? null : h("div", { class: "secondary small" },
+      t(`Realized ${signedMoney(st.realized)} after ${usd(st.fees)} in fees · peak size ${st.peak}`,
+        `Итог ${signedMoney(st.realized)} после комиссий ${usd(st.fees)} · наибольший размер ${st.peak}`)));
+}
+
 export function historyPage() {
-  const s = ui.state;
-  const tab = store("historyTab") === "positions" ? "positions" : "all";
-  const kind = { signed: t("Signed", "Подписано"), confirmed: t("Confirmed", "Подтверждено"), settled: t("Settled", "Завершено"), failed: t("Failed", "Не вышло"), expired: t("Expired", "Истекло") };
-  const glyph = (k) => k === "failed" || k === "expired" ? "xmark" : k === "settled" || k === "confirmed" ? "check" : "pencil";
-  const chain = (c) => c.charAt(0).toUpperCase() + c.slice(1);
-  const all = s.history.length ? s.history.map((e) => h("div", { class: "page-hist-row" },
-    h("span", { class: "page-hist-at secondary num" }, when(e.at)),
-    h("span", { class: "page-hist-ico " + (e.kind === "failed" ? "loss" : "secondary") }, icon(glyph(e.kind), 15)),
-    h("div", { class: "page-hist-text" }, h("div", {}, `${kind[e.kind] || e.kind} · ${chain(e.chain)}: ${e.note}`)),
-    e.link ? link(e.link, icon("arrow.up.right.square", 15)) : null))
-    : [empty(t("Nothing signed yet. Every signature from now on is listed here.", "Пока ничего не подписано. Каждая подпись с этого момента будет здесь."))];
-  const positions = s.positions.length ? s.positions.map((p) => h("div", { class: "page-story card" },
-    h("div", { class: "page-story-head" }, logo(p.coin, 34),
-      h("div", {}, h("b", {}, `${p.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${p.coin}`), h("div", { class: "secondary small" }, `${p.size} @ ${p.entry}` + (p.liquidation ? t(` · liquidation ${p.liquidation}`, ` · ликвидация ${p.liquidation}`) : ""))),
-      h("span", { class: "spacer" }), h("span", { class: "page-story-chip" }, t("open", "открыта")),
-      h("b", { class: "page-story-pnl num " + (p.pnl.startsWith("-") || p.pnl.startsWith("−") ? "loss" : "profit") }, p.pnl))))
-    : [empty(t("No open positions on Hyperliquid.", "Открытых позиций на Hyperliquid нет."))];
+  const tab = ["agent", "positions", "all"].includes(store("historyTab")) ? store("historyTab") : "agent";
+  whileShown("history", () => { history.stale = true; });
+  if (history.stale && !history.loading) setTimeout(loadHistory);
+  const d = history.data;
+  let body;
+  if (!d) {
+    body = [empty(t("Reading the history…", "Читаю историю…"))];
+  } else if (tab === "positions") {
+    body = d.stories.length ? d.stories.map(storyCard)
+      : [empty(!d.hyperliquid ? t("No Hyperliquid address yet.", "Адреса Hyperliquid пока нет.") : t("No trades on Hyperliquid yet.", "Сделок на Hyperliquid пока нет."))];
+  } else if (tab === "all") {
+    body = d.rows.length ? d.rows.map((r) => h("div", { class: "page-hist-row" },
+      h("span", { class: "page-hist-at secondary num" }, when(r.at)),
+      h("span", { class: "page-hist-ico " + (toneClass[r.tone] || "secondary") }, icon(r.icon, 15)),
+      h("div", { class: "page-hist-text selectable" }, h("div", {}, r.text), r.detail ? h("div", { class: "secondary small" }, r.detail) : null),
+      r.link ? link(r.link, icon("arrow.up.right.square", 15)) : null))
+      : [empty(t("Nothing yet.", "Пока ничего."))];
+  } else {
+    body = [
+      !d.agent.length && !d.earlier.length ? empty(t("Nothing yet. Every request from now on is kept here with the cards it had on the canvas.",
+        "Пока ничего. Каждый запрос с этого момента сохраняется здесь вместе с карточками, которые были на холсте.")) : null,
+      d.agent.map((a, i) => activityCard(a, "a" + i + a.at)),
+      d.earlier.length ? h("div", { class: "page-act-earlier secondary small" }, icon("clock.arrow", 12),
+        t("Earlier — from the signature journal. The chat of that time wasn’t kept; from now on every request is.",
+          "Раньше — из журнала подписей. Чат того времени не сохранился; теперь сохраняется каждый запрос.")) : null,
+      d.earlier.map((a, i) => activityCard(a, "e" + i + a.at)),
+    ];
+  }
   return h("div", { class: "page-pane", style: `left:${railEdge()}px` },
     h("div", { class: "page-scroll", "data-keep": "history-" + tab },
       pageHeader(t("History", "История"), [
-        segmented([["all", t("All", "Всё")], ["positions", t("Positions", "Позиции")]], tab, (v) => { store("historyTab", v); render(); }),
-        h("button", { class: "icon-btn", title: t("Refresh", "Обновить"), onclick: () => act("refresh") }, icon("arrow.clockwise", 15))]),
-      h("div", { class: "page-body" }, tab === "positions" ? positions : all)),
+        segmented([["agent", t("Agent", "Агент")], ["positions", t("Positions", "Позиции")], ["all", t("All", "Всё")]], tab, (v) => { store("historyTab", v); render(); }),
+        history.loading ? h("span", { class: "page-spin" }) : null,
+        h("button", { class: "icon-btn", title: t("Refresh", "Обновить"), onclick: loadHistory }, icon("arrow.clockwise", 15))]),
+      d && d.error ? h("div", { class: "page-hist-error loss small" }, d.error) : null,
+      h("div", { class: "page-body" }, body)),
     chatPanel());
 }
 
-// MARK: Top up
+// MARK: Top up — the Mac's ReceiveBoard: what lands, on which network, three ways to send it, and the money watched for
 
-/** Where money can come in, as the Mac's top-up lists them: Solana first (the cheapest, where ihatecrypto trades from),
- * then the EVM networks with Ethereum last. Hyperliquid is reached through ihatecrypto, not by sending to it. */
-const topUpNetworks = [
-  { key: "solana", title: "Solana", coin: "SOL", logo: "sol", usdc: "USDC" },
-  { key: "base", title: "Base", coin: "ETH", logo: "base", chain: 8453 },
-  { key: "arbitrum", title: "Arbitrum", coin: "ETH", logo: "arb", chain: 42161 },
-  { key: "optimism", title: "Optimism", coin: "ETH", logo: "op", chain: 10 },
-  { key: "polygon", title: "Polygon", coin: "POL", logo: "pol", chain: 137 },
-  { key: "bnb", title: "BNB Chain", coin: "BNB", logo: "bnb", chain: 56 },
-  { key: "hyperevm", title: "HyperEVM", coin: "HYPE", logo: "hyperevm", chain: 999 },
-  { key: "robinhood", title: "Robinhood Chain", coin: "ETH", logo: "robinhood", chain: 4663, usdc: "USDG" },
-  { key: "tempo", title: "Tempo", coin: null, logo: "tempo", chain: 4217 },
-  { key: "ethereum", title: "Ethereum", coin: "ETH", logo: "eth", chain: 1, cost: () => t("fee 1–20¢ · lands in ~15 s", "комиссия 1–20¢ · дойдёт за ~15 с") },
-];
-const solanaUSDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const topUpLogos = { solana: "sol", base: "base", arbitrum: "arb", optimism: "op", polygon: "pol", bnb: "bnb", hyperevm: "hyperevm",
+  robinhood: "robinhood", tempo: "tempo", ethereum: "eth" };
+/** Quick amounts in a coin (nil: the network's dollar): a few dollars' worth of gas, more of the cheaper coins. */
+const presets = (coin) => ({ USDC: ["20", "50", "100", "500"], SOL: ["0.02", "0.1", "0.5"], HYPE: ["0.02", "0.1", "0.5"], ETH: ["0.002", "0.01", "0.05"],
+  BNB: ["0.005", "0.02", "0.1"], POL: ["5", "20", "100"] })[coin || "USDC"] || [];
+const solanaFeeTopUp = "0.01";
+const gaslessSwapUSD = 5;
+const gasUSD = (key) => (key === "ethereum" ? 3 : 1);
 
-export function topUpPage() {
-  const s = ui.state;
-  const nets = topUpNetworks.filter((n) => (n.key === "solana" ? s.addresses.solana : s.addresses.evm));
-  if (!nets.length) {
-    return h("div", { class: "page-pane", style: `left:${railEdge()}px` }, h("div", { class: "page-scroll" },
-      pageHeader(t("Top up", "Пополнить")), h("div", { class: "page-body" }, empty(t("Add a wallet first: Settings › Wallet.", "Сначала добавь кошелёк: Настройки › Кошелёк.")))));
+/** The order as TopUpOrder has it: the coin's symbol and digits, its smallest units (null: any coin or amount, or a
+ * typo) and the link a phone wallet's camera takes (Solana Pay or EIP-681). */
+function topUpOrder(net, coin, amount) {
+  const typed = (amount || "").replace(",", ".").trim();
+  const symbol = coin === "usdc" ? net.usdcSymbol : coin === "native" ? net.coin : t("any coin", "любая монета");
+  const decimals = coin === "usdc" ? net.usdcDecimals : net.chainId == null ? 9 : 18;
+  let units = null;
+  const m = /^(\d*)(?:\.(\d*))?$/.exec(typed);
+  if (coin !== "any" && typed && m && (m[1] || m[2]) && (m[2] || "").length <= decimals) {
+    const v = BigInt((m[1] || "0") + (m[2] || "").padEnd(decimals, "0"));
+    if (v > 0n && v <= 1000000n * 10n ** BigInt(decimals)) units = v.toString();
   }
-  const net = nets.find((n) => n.key === store("topUpNetwork")) || nets[0];
-  const way = store("topUpWay") === "exchange" ? "exchange" : "phone";
+  const shown = typed.startsWith(".") ? "0" + typed : typed;
+  let payLink = null;
+  if (coin === "any" || !typed || units) {
+    if (net.chainId == null) payLink = `solana:${net.recipient}?` + (units ? `amount=${shown}&` : "") + (coin === "usdc" ? `spl-token=${net.usdc}&` : "") + "label=ihatecrypto&message=Top%20up";
+    else if (coin === "usdc") payLink = `ethereum:${net.usdc}@${net.chainId}/transfer?address=${net.recipient}` + (units ? `&uint256=${units}` : "");
+    else if (coin === "native") payLink = `ethereum:${net.recipient}@${net.chainId}` + (units ? `?value=${units}` : "");
+    else payLink = `ethereum:${net.recipient}@${net.chainId}`;
+  }
+  return { symbol, decimals, units, payLink, amount: shown, typed };
+}
+
+let topUpAsked = "";
+let topUpOpening = false;
+let topUpProblem = null;
+let topUpHeard = null;
+let topUpPoll = null;
+const num = (v, digits) => Number(v).toLocaleString(ui.state.russian ? "ru-RU" : "en-US", { maximumFractionDigits: digits });
+
+/** The Top up page: the panel in its card, with its title and close. */
+export function topUpPage() {
+  return h("div", { class: "page-pane", style: `left:${railEdge()}px` },
+    h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, h("div", { class: "page-topup card" },
+      h("div", { class: "page-tu-head" }, h("span", { class: "accent-ink" }, icon("arrow.down.circle", 20)), h("b", {}, t("Top up ihatecrypto", "Пополнить ihatecrypto")),
+        h("span", { class: "spacer" }), h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: back }, icon("xmark", 14))),
+      topUpPanel()))), chatPanel());
+}
+
+/** Top up's panel (ReceiveBoard): the amount, the network, the three ways, the QR and address, the gas line and the
+ * money watched for. `embedded`: inside another card (the onboarding's Top up step), with no frame of its own;
+ * `landed(text)` hears once what arrived. While the panel is on screen the engine watches; once it's gone, it stops. */
+export function topUpPanel({ embedded = false, landed } = {}) {
+  const s = ui.state;
+  const v = s.topUp;
+  const way = ["browser", "phone", "exchange"].includes(store("topUpWay")) ? store("topUpWay") : "browser";
+  const nets = v ? v.networks : [];
+  const wanted = store("topUpNetwork") || "solana";
+  const net = nets.find((n) => n.key === wanted) || nets[0];
   let coin = store("topUpCoin") || "usdc";
-  if (coin === "native" && !net.coin) coin = "usdc";
-  const usdcSymbol = net.usdc || "USDC", symbol = coin === "usdc" ? usdcSymbol : coin === "native" ? net.coin : null;
-  const solana = net.key === "solana";
-  const recipient = solana ? s.addresses.solana : s.addresses.evm;
-  const cost = net.cost ? net.cost() : t("fee under 1¢ · lands in seconds", "комиссия меньше 1¢ · дойдёт за секунды");
-  // What the wallet holds there now, from the portfolio's last read.
-  const here = s.portfolio.networks.find((n) => n.key === net.key);
-  const held = (sym) => here?.rows.find((r) => r.symbol === sym);
-  const gasRow = net.coin ? held(net.coin) : null;
-  const gasShort = coin === "usdc" && net.coin && (!gasRow || (gasRow.usd ?? 0) < 0.1);
-  // A phone wallet's camera takes a link with the wallet and, on Solana, the coin filled in; an exchange wants the bare address.
-  const qrText = way === "exchange" ? recipient : solana
-    ? `solana:${recipient}?` + (coin === "usdc" ? `spl-token=${solanaUSDC}&` : "") + "label=ihatecrypto&message=Top%20up"
-    : `ethereum:${recipient}@${net.chain}`;
-  const pickCoin = (c) => { store("topUpCoin", c); render(); };
-  const chip = (label, on, run) => h("button", { class: "page-tu-chip" + (on ? " on" : ""), onclick: run }, label);
-  const tileWay = (id, ico, title, detail, price) => h("button", { class: "page-tu-way" + (way === id ? " on" : ""), onclick: () => { store("topUpWay", id); render(); } },
-    h("div", { class: "page-tu-way-top" }, icon(ico, 15), h("b", {}, title)),
-    h("div", { class: "secondary one-line" }, detail), h("div", { class: "one-line " + (id === "exchange" ? "secondary" : "profit") }, price));
-  const [title, detail] = way === "exchange"
-    ? [t(`Withdraw to this address on ${net.title}`, `Выведи на этот адрес в сети ${net.title}`),
-      solana ? t("USDC, SOL or any Solana token (SPL). USDC is what ihatecrypto trades with; keep ≈ 0.02 SOL for fees.", "USDC, SOL или любой токен Solana (SPL). ihatecrypto торгует на USDC; держи ≈ 0,02 SOL на комиссии.")
-        : t(`${usdcSymbol}${net.coin ? ", " + net.coin : ""} or any token on ${net.title}. The same 0x address is this wallet on every EVM network ihatecrypto uses.`,
-          `${usdcSymbol}${net.coin ? ", " + net.coin : ""} или любой токен в ${net.title}. Тот же 0x-адрес — этот кошелёк во всех EVM-сетях ihatecrypto.`)]
-    : [t("Scan with your phone's wallet", "Отсканируй кошельком в телефоне"),
-      (solana ? "Phantom, Solflare, Backpack: " : "MetaMask, Rainbow, Coinbase Wallet: ")
-        + (solana && symbol ? t(`${symbol} to this wallet on ${net.title} is filled in, the wallet asks how much.`, `${symbol} на этот кошелёк в ${net.title} уже подставлен, сколько — спросит кошелёк.`)
-          : t(`this wallet on ${net.title} is filled in, you pick the coin and the amount.`, `этот кошелёк в ${net.title} уже подставлен, монету и сумму выбираешь ты.`))];
-  const now = symbol && held(symbol);
-  const card = h("div", { class: "page-topup card" },
-    h("div", { class: "page-tu-head" }, h("span", { class: "accent-ink" }, icon("arrow.down.circle", 20)), h("b", {}, t("Top up ihatecrypto", "Пополнить ihatecrypto")),
-      h("span", { class: "spacer" }), h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: back }, icon("xmark", 14))),
+  if (net && coin === "native" && !net.coin) coin = "usdc";
+  // The engine reads what's there and, once a way is used (anything but the browser's page), watches for it.
+  const watch = way !== "browser" || (v && v.waiting && v.network === net?.key && v.coin === coin);
+  const key = `${net ? net.key : wanted}|${coin}|${watch}`;
+  if (topUpAsked !== key) { topUpAsked = key; setTimeout(() => act("topUp", { network: net ? net.key : wanted, text: coin, test: watch })); }
+  // Gone from the window (another page, the onboarding's next step): the engine stops watching and closes the page.
+  if (!topUpPoll) {
+    topUpPoll = setInterval(() => {
+      if (document.querySelector(".page-tu-live")) return;
+      clearInterval(topUpPoll);
+      topUpPoll = null;
+      topUpAsked = "";
+      topUpProblem = null;
+      engine("topUpStop").catch(() => {});
+    }, 800);
+  }
+  const frame = (...content) => h("div", { class: "page-tu-panel page-tu-live" + (embedded ? " embedded" : "") }, ...content);
+  if (!s.addresses.solana && !s.addresses.evm) return frame(empty(t("Add a wallet first: Settings › Wallet.", "Сначала добавь кошелёк: Настройки › Кошелёк.")));
+  if (!net) return frame(empty(t("Reading the networks…", "Читаю сети…")));
+  const amount = coin === "any" ? "" : (store("topUpAmount") ?? "20");
+  const o = topUpOrder(net, coin, amount);
+  const solana = net.chainId == null;
+  const here = v && v.network === net.key && v.coin === coin ? v : null;
+  const digits = coin === "usdc" ? 2 : 6;
+  const setAmount = (a) => { store("topUpAmount", a); render(); };
+  const pickCoin = (c) => {
+    store("topUpCoin", c);
+    if (c === "usdc") store("topUpAmount", "20");
+    else if (c === "native") store("topUpAmount", presets(net.coin)[0] || "");
+    render();
+  };
+  const pickNet = (n) => {
+    store("topUpNetwork", n.key);
+    if (coin === "native") { if (n.coin) store("topUpAmount", presets(n.coin)[0] || ""); else { store("topUpCoin", "usdc"); store("topUpAmount", "20"); } }
+    render();
+  };
+  const chip = (label, on, run, title) => h("button", { class: "page-tu-chip" + (on ? " on" : ""), title: title || "", onclick: run }, label);
+  const best = () => h("span", { class: "page-tu-best" }, "BEST");
+
+  // The amount: a field (or «Other token»), the coin's chips, quick amounts and the balance now → after.
+  const quick = presets(coin === "usdc" ? null : net.coin);
+  const now = here && here.held[o.symbol];
+  const amountRow = h("div", { class: "page-tu-amount" },
     h("div", { class: "page-tu-coins" },
-      h("span", { class: "page-tu-symbol" }, symbol || t("Other token", "Другой токен")),
+      coin === "any" ? h("span", { class: "page-tu-symbol" }, t("Other token", "Другой токен"))
+        : [h("input", { id: "topup-amount", class: "page-tu-field num", inputmode: "decimal", autocomplete: "off", value: amount, placeholder: "0", "aria-label": t("Amount", "Сумма"),
+            oninput: (e) => { store("topUpAmount", e.target.value); render(); } }),
+          h("span", { class: "page-tu-unit" }, o.symbol)],
       h("span", { class: "spacer" }),
-      chip(usdcSymbol, coin === "usdc", () => pickCoin("usdc")),
+      chip(net.usdcSymbol, coin === "usdc", () => pickCoin("usdc")),
       net.coin ? chip(net.coin, coin === "native", () => pickCoin("native")) : null,
-      chip(t("Other", "Другой"), coin === "any", () => pickCoin("any"))),
-    h("div", { class: "secondary small" }, coin === "any"
-      ? t(`Any token on ${net.title} lands at this wallet's address: ${usdcSymbol}, ${net.coin || "stablecoins"}, memecoins…`, `Любой токен в ${net.title} приходит на адрес этого кошелька: ${usdcSymbol}, ${net.coin || "стейблкоины"}, мемкоины…`)
-      : now ? t(`${now.amount} ${symbol} on ${net.title} now`, `Сейчас ${now.amount} ${symbol} в ${net.title}`) : t(`No ${symbol} on ${net.title} yet`, `${symbol} в ${net.title} пока нет`)),
-    h("div", { class: "page-tu-nets", "data-keep": "page-topup-nets" }, nets.map((n) => h("button", { class: "page-tu-net" + (n === net ? " on" : ""), title: n.key === "solana" ? t("Recommended: the cheapest and fastest to top up, and where ihatecrypto trades from", "Рекомендую: дешевле и быстрее всего, и отсюда ihatecrypto торгует") : "",
-      onclick: () => { store("topUpNetwork", n.key); render(); } }, logo(n.logo, 16), n.title, n.key === "solana" ? h("span", { class: "page-tu-best" }, "BEST") : null))),
+      chip(t("Other", "Другой"), coin === "any", () => pickCoin("any"), t("Other token", "Другой токен"))),
+    coin === "any"
+      ? h("div", { class: "secondary small" }, t(`Any token on ${net.title} lands at this wallet's address: ${net.usdcSymbol}, ${net.coin || "stablecoins"}, memecoins…`,
+          `Любой токен в ${net.title} приходит на адрес этого кошелька: ${net.usdcSymbol}, ${net.coin || "стейблкоины"}, мемкоины…`))
+      : h("div", { class: "page-tu-presets" },
+          quick.map((p) => chip(p, amount === p, () => setAmount(p))),
+          chip(t("Custom", "Своя"), !quick.includes(amount), () => { store("topUpAmount", ""); render(); setTimeout(() => document.getElementById("topup-amount")?.focus()); }, t("Custom amount", "Своя сумма")),
+          h("span", { class: "spacer" }),
+          now != null ? h("span", { class: "secondary small num", title: t(`What this wallet holds on ${net.title} now → after the top-up`, `Сколько на этом кошельке в ${net.title} сейчас → после пополнения`) },
+            o.units ? `${num(now, digits)} → ${num(Number(now) + Number(o.amount), digits)} ${o.symbol}` : t(`${num(now, digits)} ${o.symbol} now`, `сейчас ${num(now, digits)} ${o.symbol}`)) : null),
+    coin !== "any" && o.typed && !o.units
+      ? h("div", { class: "loss small" }, t(`Type an amount above zero, with at most ${o.decimals} digits after the point.`, `Введи сумму больше нуля, не больше ${o.decimals} знаков после точки.`)) : null);
+
+  const netRow = h("div", { class: "page-tu-nets", "data-keep": "page-topup-nets" }, nets.map((n) => h("button", { class: "page-tu-net" + (n === net ? " on" : ""),
+    title: n.chainId == null ? t("Recommended: the cheapest and fastest to top up, and where ihatecrypto trades from", "Рекомендую: дешевле и быстрее всего, и отсюда ihatecrypto торгует") : "",
+    onclick: () => pickNet(n) }, logo(topUpLogos[n.key] || n.key, 16), n.title, n.chainId == null ? best() : null)));
+
+  // The three ways, each saying what it costs.
+  const cost = net.key === "ethereum" ? t("fee 1–20¢ · lands in ~15 s", "комиссия 1–20¢ · дойдёт за ~15 с") : t("fee under 1¢ · lands in seconds", "комиссия меньше 1¢ · дойдёт за секунды");
+  const browserNeeds = coin === "any" ? t(`pick ${net.usdcSymbol}${net.coin ? " or " + net.coin : ""} above`, `выбери ${net.usdcSymbol}${net.coin ? " или " + net.coin : ""} выше`)
+    : !o.typed ? t("pick an amount above", "выбери сумму выше") : null;
+  const tile = (id, ico, title, detail, price) => h("button", { class: "page-tu-way" + (way === id ? " on" : ""), onclick: () => { store("topUpWay", id); topUpProblem = null; render(); } },
+    h("div", { class: "page-tu-way-top" }, icon(ico, 15), h("b", {}, title), h("span", { class: "spacer" }), id === "browser" ? best() : null),
+    h("div", { class: "secondary one-line" }, detail), h("div", { class: "one-line " + (id === "exchange" ? "secondary" : "profit") }, price));
+  const ways = h("div", { class: "page-tu-ways3" },
+    tile("browser", "macwindow", t("Browser wallet", "Кошелёк в браузере"),
+      browserNeeds ? t(`Needs a coin and an amount: ${browserNeeds}`, `Нужны монета и сумма: ${browserNeeds}`) : solana ? "Phantom, Solflare, Backpack" : "MetaMask, Rabby, Phantom", cost),
     h("div", { class: "page-tu-ways" },
-      tileWay("phone", "macwindow", t("Phone wallet", "Кошелёк в телефоне"), t("scan, the wallet asks how much", "сканируй, сумму спросит кошелёк"), cost),
-      tileWay("exchange", "globe", t("Exchange", "Биржа"), t("Binance, OKX, Bybit… by address", "Binance, OKX, Bybit… по адресу"), t("the exchange's withdrawal fee", "комиссия биржи за вывод"))),
+      tile("phone", "qrcode", t("Phone wallet", "Кошелёк в телефоне"), o.units ? t("scan, the amount is filled in", "сканируй, сумма уже подставлена") : t("scan, the wallet asks how much", "сканируй, сумму спросит кошелёк"), cost),
+      tile("exchange", "building.columns", t("Exchange", "Биржа"), t("Binance, OKX, Bybit… by address", "Binance, OKX, Bybit… по адресу"), t("the exchange's withdrawal fee", "комиссия биржи за вывод"))));
+
+  // One block for all three: the QR, what this way does, and the whole address with Copy.
+  const qrText = way === "exchange" ? net.recipient : o.payLink || net.recipient;
+  const [title, detail] = way === "browser"
+    ? [t("Approve in your browser wallet", "Подтверди в кошельке браузера"),
+      browserNeeds ? t(`A browser wallet is asked for one transfer: ${browserNeeds}. For any coin or amount, scan with your phone or send from an exchange.`,
+          `Кошелёк в браузере просят об одном переводе: ${browserNeeds}. Для любой монеты или суммы отсканируй телефоном или отправь с биржи.`)
+        : t(`Your browser opens a page served by this PC. Pick your wallet there and approve ${o.amount} ${o.symbol} on ${net.title}: the address is put in by ihatecrypto, so no website can swap it.`,
+          `Браузер откроет страницу, которую отдаёт этот компьютер. Выбери там свой кошелёк и подтверди ${o.amount} ${o.symbol} в ${net.title}: адрес подставляет ihatecrypto, поэтому никакой сайт его не подменит.`)]
+    : way === "phone"
+      ? [t("Scan with your phone's wallet", "Отсканируй кошельком в телефоне"),
+        (solana ? "Phantom, Solflare, Backpack: " : "MetaMask, Rainbow, Coinbase Wallet: ")
+          + (coin === "any" ? t(`this wallet on ${net.title} is filled in, you pick the coin and the amount.`, `этот кошелёк в ${net.title} уже подставлен, монету и сумму выбираешь ты.`)
+            : o.units ? t(`${o.amount} ${o.symbol} to this wallet on ${net.title} is filled in, you only approve.`, `${o.amount} ${o.symbol} на этот кошелёк в ${net.title} уже подставлено, остаётся подтвердить.`)
+            : t(`${o.symbol} to this wallet on ${net.title} is filled in, the wallet asks how much.`, `${o.symbol} на этот кошелёк в ${net.title} уже подставлен, сколько — спросит кошелёк.`))]
+      : [t(`Withdraw to this address on ${net.title}`, `Выведи на этот адрес в сети ${net.title}`),
+        solana ? t("USDC, SOL or any Solana token (SPL). USDC is what ihatecrypto trades with; keep ≈ 0.02 SOL for fees.", "USDC, SOL или любой токен Solana (SPL). ihatecrypto торгует на USDC; держи ≈ 0,02 SOL на комиссии.")
+          : t(`${net.usdcSymbol}${net.coin ? ", " + net.coin : ""} or any token on ${net.title}. The same 0x address is this wallet on every EVM network ihatecrypto uses.`,
+            `${net.usdcSymbol}${net.coin ? ", " + net.coin : ""} или любой токен в ${net.title}. Тот же 0x-адрес — этот кошелёк во всех EVM-сетях ihatecrypto.`)];
+  const openPage = async () => {
+    topUpOpening = true;
+    topUpProblem = null;
+    render();
+    try {
+      const r = await engine("topUpOpen", { network: net.key, text: coin, label: o.amount });
+      await invoke("open_link", { url: r.url });
+    } catch (e) {
+      topUpProblem = t("The page didn't open: ", "Страница не открылась: ") + (e.message || String(e));
+    }
+    topUpOpening = false;
+    render();
+  };
+  const wayBody = h("div", { class: "page-tu-wayblock" },
     h("div", { class: "page-tu-body" },
-      h("div", { class: "page-tu-qr", title: way === "exchange" ? t("Scan with the exchange's app", "Сканируй приложением биржи") : t("Scan with your phone's wallet", "Сканируй кошельком в телефоне") },
-        qrCode(qrText, "page-qr"), h("span", { class: "page-tu-qr-logo" }, logo(net.logo, 26))),
-      h("div", { class: "page-tu-text" }, h("b", {}, title), h("div", { class: "small" }, detail), addressLines(recipient))),
+      h("div", { class: "page-tu-qr", title: way === "exchange" ? t("Scan with the exchange's app", "Сканируй приложением биржи") : t("Scan with your phone's wallet", "Сканируй кошельком в телефоне"),
+        "aria-label": qrText !== net.recipient && o.units ? t(`QR code to top up ${o.amount} ${o.symbol}`, `QR-код, чтобы пополнить ${o.amount} ${o.symbol}`) : t(`QR code of this wallet on ${net.title}`, `QR-код этого кошелька в ${net.title}`) },
+        qrCode(qrText, "page-qr"), h("span", { class: "page-tu-qr-logo" }, logo(topUpLogos[net.key] || net.key, 26))),
+      h("div", { class: "page-tu-text" }, h("b", {}, title), h("div", { class: "small" }, detail), addressLines(net.recipient))),
+    way === "browser" ? h("button", { class: "btn primary page-tu-go", disabled: !o.units || topUpOpening, onclick: openPage }, icon("arrow.up.forward.app", 15),
+      topUpOpening ? t("Opening…", "Открываю…") : !browserNeeds ? t(`Top up ${o.amount} ${o.symbol} from a browser wallet`, `Пополнить ${o.amount} ${o.symbol} из кошелька в браузере`)
+        : t("Top up from a browser wallet", "Пополнить из кошелька в браузере")) : null,
     way === "exchange" ? h("div", { class: "page-tu-warn pg-jev-ink" }, icon("exclamationmark.triangle", 13),
       h("span", {}, t(`Pick the network exactly: ${solana ? "Solana (SPL)" : net.title}. Sent on another network, money can get stuck. Many exchanges withdraw USDC on Solana or Base for well under a dollar.`,
         `Выбери сеть точно: ${solana ? "Solana (SPL)" : net.title}. Отправленные в другой сети деньги могут застрять. Многие биржи выводят USDC в Solana или Base гораздо дешевле доллара.`))) : null,
     way === "exchange" && !solana ? h("div", { class: "page-tu-warn secondary" }, icon("questionmark.circle", 13),
       h("span", {}, t("Hyperliquid uses the same 0x address, but money gets there through ihatecrypto. Never send to Hyperliquid's old bridge contract.",
-        "У Hyperliquid тот же 0x-адрес, но деньги туда попадают через ihatecrypto. Никогда не отправляй на старый бридж-контракт Hyperliquid."))) : null,
-    gasShort ? h("div", { class: "page-tu-gas" }, h("span", { class: "accent-ink" }, icon("exclamationmark.triangle", 13)),
-      h("span", {}, solana ? t("Send ≈ $1 of SOL too: every move on Solana pays its fee in SOL. Without it, from $5 of USDC the chat swaps a part for SOL, Jupiter paying that one fee.",
-        "Отправь ещё ≈ $1 в SOL: каждое движение в Solana платит комиссию в SOL. Без него от $5 в USDC чат поменяет часть на SOL, и эту одну комиссию заплатит Jupiter.")
-        : t(`Send ≈ $1 of ${net.coin} too: moves on ${net.title} pay their fee in ${net.coin}, so ${usdcSymbol} alone can't move there.`,
-          `Отправь ещё ≈ $1 в ${net.coin}: движения в ${net.title} платят комиссию в ${net.coin}, одни ${usdcSymbol} там не сдвинутся.`)),
-      h("span", { class: "spacer" }), h("button", { class: "btn small", onclick: () => pickCoin("native") }, t(`Top up ${net.coin}`, `Пополнить ${net.coin}`))) : null,
+        "У Hyperliquid тот же 0x-адрес, но деньги туда попадают через ihatecrypto. Никогда не отправляй на старый бридж-контракт Hyperliquid."))) : null);
+
+  // What's happening with the money: sent from the page, landed, or watched for.
+  // Each landing heard once, by its words.
+  if (landed && here && here.arrived && topUpHeard !== here.arrived) { topUpHeard = here.arrived; setTimeout(() => landed(here.arrived)); }
+  const status = here && here.sent && !here.arrived
+    ? h("div", { class: "page-tu-status profit" }, icon("paperplane", 13), h("span", {}, t("Sent from your wallet — it shows here the moment it lands.", "Отправлено из кошелька — появится здесь, как только дойдёт.")),
+        here.sent.link ? link(here.sent.link, t("See it", "Посмотреть")) : null)
+    : here && here.arrived ? h("div", { class: "page-tu-status profit" }, icon("checkmark.circle", 13), h("span", {}, here.arrived))
+    : here && here.waiting ? h("div", { class: "page-tu-status secondary" }, icon("hourglass", 13),
+        h("span", {}, t(`Waiting for ${o.units ? `${o.amount} ${o.symbol}` : coin === "any" ? "money" : o.symbol} on ${net.title}…`,
+          `Жду ${o.units ? `${o.amount} ${o.symbol}` : coin === "any" ? "деньги" : o.symbol} в ${net.title}…`)))
+    : null;
+
+  // Dollars alone are a dead end where fees are paid in another coin: said before they're sent. A browser wallet on
+  // Solana brings the SOL along in the same approval; the other ways get a button for the coin.
+  const gas = coin === "usdc" && here && here.gasShort && here.gasShort === net.coin ? here.gasShort : null;
+  const bundled = solana && way === "browser";
+  const gasLine = gas ? h("div", { class: "page-tu-gas" }, h("span", { class: bundled ? "profit" : "accent-ink" }, icon(bundled ? "fuelpump" : "exclamationmark.triangle", 13)),
+    h("span", {}, bundled ? t(`+ ${solanaFeeTopUp} SOL for fees goes along, in the same approval: on Solana, USDC alone can't move.`, `+ ${solanaFeeTopUp} SOL на комиссии уйдёт вместе, в том же подтверждении: в Solana одни USDC не сдвинутся.`)
+      : solana ? t(`Send ≈ $${gasUSD(net.key)} of SOL too: every move on Solana pays its fee in SOL. Without it, from $${gaslessSwapUSD} of USDC the chat swaps a part for SOL, Jupiter paying that one fee.`,
+          `Отправь ещё ≈ $${gasUSD(net.key)} в SOL: каждое движение в Solana платит комиссию в SOL. Без него от $${gaslessSwapUSD} в USDC чат поменяет часть на SOL, и эту одну комиссию заплатит Jupiter.`)
+      : net.bySignature ? t(`Send ≈ $${gasUSD(net.key)} of ${gas} too: moves on ${net.title} pay their fee in ${gas}. Without it the ${net.usdcSymbol} still goes to another network by signature, Relay paying the gas.`,
+          `Отправь ещё ≈ $${gasUSD(net.key)} в ${gas}: движения в ${net.title} платят комиссию в ${gas}. Без него ${net.usdcSymbol} всё равно уйдут в другую сеть по подписи, газ заплатит Relay.`)
+      : t(`Send ≈ $${gasUSD(net.key)} of ${gas} too: every move on ${net.title} pays its fee in ${gas}, so ${net.usdcSymbol} alone can't move there.`,
+          `Отправь ещё ≈ $${gasUSD(net.key)} в ${gas}: каждое движение в ${net.title} платит комиссию в ${gas}, одни ${net.usdcSymbol} там не сдвинутся.`)),
+    h("span", { class: "spacer" }), bundled ? null : h("button", { class: "btn small", onclick: () => pickCoin("native") }, t(`Top up ${gas}`, `Пополнить ${gas}`))) : null;
+
+  return frame(amountRow, netRow, ways, wayBody, status, gasLine,
+    topUpProblem ? h("div", { class: "loss small" }, topUpProblem) : null,
     h("div", { class: "secondary small" }, s.portfolio.updatedAt ? t("Balances read ", "Балансы прочитаны ") + when(s.portfolio.updatedAt) + " · " : "",
       h("button", { class: "link-btn", onclick: () => act("refresh") }, t("Refresh", "Обновить"))));
-  return h("div", { class: "page-pane", style: `left:${railEdge()}px` }, h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, card)), chatPanel());
 }
 
 /** An address as it's checked by eye: the whole of it as an even block (lines of the same length, never a half that

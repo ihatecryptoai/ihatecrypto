@@ -23,6 +23,9 @@ nonisolated struct ProviderView: Encodable {
     var note: String
     var unavailable: String?
     var connected: Bool
+    /// Its models for the menu (Engine.models(of:)) and the one it starts with.
+    var models: [String] = []
+    var defaultModel: String = ""
 }
 
 /// The chat's model: the same providers as the Mac (LLMCatalog), keys kept with DPAPI. A browser sign-in (ChatGPT,
@@ -40,23 +43,33 @@ extension Engine {
         let id = p.info.id, credential = Store.credentials()[id]
         guard credential != nil || p.info.kind == .local, let client = try? p.client(credential, save: { Store.setCredential($0, for: id) }) else { return nil }
         // Every answer says what it read: the chip over the chat's field, as the Mac's ContextMeter.
+        // ponytail: counted on the canvas open when the answer ends; a scheduled check answering in the background counts there too.
         return MeteredClient(client) { [weak self] usage, request in
-            guard ChatRouter.reads(request) else { return }
-            Task { @MainActor in self?.counted(usage, provider: id) }
+            Task { @MainActor in await self?.counted(usage, request: request, provider: id) }
         }
     }
 
-    /// The chat's reading of a message fills the window: kept for the canvas open now.
-    // ponytail: counted on the canvas open when the answer ends; a scheduled check answering in the background counts there too.
-    func counted(_ usage: LLMUsage, provider id: String) {
-        meters[canvasID] = .init(used: usage.input, window: usage.window ?? LLMCatalog.window(provider: id) ?? meters[canvasID]?.window)
-        changed()
+    /// A model that reads the chat: connected, big enough for its brief, and, on this PC, its server answering with the
+    /// model downloaded (the Mac's hasModel).
+    var hasModel: Bool {
+        guard let p = provider(providerID), llmClient() != nil, LLMCatalog.chatRefusal(model: model) == nil else { return false }
+        guard p.info.kind == .local else { return true }
+        return localServers[p.info.id] != false && liveModels[p.info.id].map { $0.contains(model) } != false
     }
 
     var modelView: ModelView {
         let p = provider(providerID)
-        return ModelView(provider: p?.info.id, name: p?.info.name, model: model.isEmpty ? nil : model, connected: llmClient() != nil,
-                         models: p?.info.models ?? [])
+        return ModelView(provider: p?.info.id, name: p?.info.name, model: model.isEmpty ? nil : model, connected: hasModel,
+                         models: models(of: p?.info.id ?? ""))
+    }
+
+    /// A way in's models for the menu: the live list where there is one (a subscription now, what a server here has, the
+    /// suggested ones it hasn't after it), else the checked list; the model in use last when neither lists it.
+    func models(of id: String) -> [String] {
+        guard let info = provider(id)?.info else { return [] }
+        var listed = liveModels[id] ?? info.models
+        if info.kind == .local, liveModels[id] != nil { listed += info.models.filter { !listed.contains($0) } }
+        return id == providerID && !model.isEmpty && !listed.contains(model) ? listed + [model] : listed
     }
 
     var providerViews: [ProviderView] {
@@ -66,7 +79,8 @@ extension Engine {
             ProviderView(id: p.info.id, name: p.info.name.replacingOccurrences(of: "this Mac", with: "this PC"), kind: "\(p.info.kind)", takesKey: p.info.takesKey,
                          existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, signIn: p.info.signInLabel,
                          note: p.info.note.replacingOccurrences(of: "this Mac", with: "this PC"),
-                         unavailable: p.info.unavailable, connected: saved[p.info.id] != nil || p.info.kind == .local)
+                         unavailable: p.info.unavailable, connected: saved[p.info.id] != nil || p.info.kind == .local,
+                         models: models(of: p.info.id), defaultModel: p.info.defaultModel)
         }
     }
 

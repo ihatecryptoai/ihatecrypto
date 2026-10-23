@@ -165,6 +165,8 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     window.add_child(header, tauri::LogicalPosition::new(bar[0], bar[1]), tauri::LogicalSize::new(bar[2], bar[3])).map_err(|e| e.to_string())?;
     let (loads, titles, opens) = (app.clone(), app.clone(), app.clone());
     let page = tauri::webview::WebviewBuilder::new(PANEL, tauri::WebviewUrl::External(url))
+        // Its one command: the keyboard on a click (capabilities/browser-panel-page.json).
+        .initialization_script("addEventListener('pointerdown', () => { if (!document.hasFocus()) window.__TAURI_INTERNALS__.invoke('focus_me').catch(() => {}); }, true);")
         .on_navigation(|u| matches!(u.scheme(), "http" | "https" | "about" | "blob" | "data"))
         // A link that asks for a new window opens here instead.
         .on_new_window(move |u, _| {

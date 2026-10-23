@@ -23,7 +23,7 @@ extension Engine {
                 let low = candles.map(\.low).min() ?? last.close, high = candles.map(\.high).max() ?? last.close
                 var m = Message(fromUser: false, text: "\(IntentParser.pretty(coin)) · \(range.title): \(Fmt.price(first.close)) → \(Fmt.price(last.close)) (\(signed(change)))",
                                 note: note ?? "Hyperliquid")
-                let line = ChartLine(title: "\(IntentParser.pretty(coin)) · \(range.title)", closes: closes, low: Fmt.price(low), high: Fmt.price(high), change: signed(change))
+                let line = ChartLine(title: "\(IntentParser.pretty(coin)) · \(range.title)", closes: closes, low: Fmt.price(low), high: Fmt.price(high), change: signed(change), coin: coin)
                 pin("chart", line.title, chart: line)
                 m.text += say(" — the chart is on the canvas.", " — график на холсте.")
                 messages.append(m)

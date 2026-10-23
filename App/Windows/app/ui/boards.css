@@ -71,6 +71,7 @@
 .route-rc-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fill-strong); border-top-color: var(--secondary); animation: route-spin 0.8s linear infinite; flex: none; }
 @keyframes route-spin { to { transform: rotate(360deg); } }
 .route-outcome { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.route-outcome .route-retry { margin-left: 6px; color: var(--text); }
 .route-outcome.secondary { color: var(--secondary); }
 .route-mark { width: 15px; height: 15px; flex: none; }
 .route-mark .route-mark-bg { fill: currentColor; }
@@ -347,3 +348,37 @@
 .route-way-text span { font-size: 11px; color: var(--secondary); }
 .route-way-badge { flex: none; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .route-edit-problem { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+
+/* A trade plan drawn on its coin's chart (PlanChartBoard): as wide as its route, the header on top. */
+.route-plan-chart { width: auto; align-self: stretch; min-width: 470px; }
+.route-plan-chart .route-move-head { min-height: 34px; }
+.route-chart-area { position: relative; }
+.route-chart-area .route-chart-plot { height: 190px; }
+.route-zone { fill-opacity: 0.1; }
+.route-zone.route-loss { fill: var(--loss); }
+.route-zone.route-profit { fill: var(--profit); }
+.route-level { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.route-level.route-dashed { stroke-dasharray: 5 4; }
+.route-level.route-entry { stroke: var(--accent); }
+.route-level.route-loss { stroke: var(--loss); }
+.route-level.route-profit { stroke: var(--profit); }
+.route-level.route-alert { stroke: #ff9500; }
+.route-level-label { position: absolute; left: 4px; font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+.route-level-label.route-entry { color: var(--accent-ink); }
+.route-level-label.route-loss { color: var(--loss); }
+.route-level-label.route-profit { color: var(--profit); }
+.route-level-label.route-alert { color: #ff9500; }
+.route-tiles.route-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.route-tiles.route-five .route-tile b { font-size: 12.5px; overflow-wrap: anywhere; }
+
+/* A chart beside anything else on the canvas, so no Confirm sits above it (ChartPlace.beside). */
+.route-plan-row { display: flex; align-items: flex-start; gap: 36px; }
+.route-beside { flex: none; }
+
+/* Step details: «Open <place>», the route's note, a stock trade's ways. */
+.route-small-btn { height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+.route-details-note { margin-top: 4px; font-size: 11px; color: var(--secondary); line-height: 1.45; }
+.route-way.route-stock { cursor: default; }
+.route-way.route-stock:hover { background: none; }
+.route-way.route-stock.route-on:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.route-edit-foot { font-size: 10px; color: var(--secondary); }

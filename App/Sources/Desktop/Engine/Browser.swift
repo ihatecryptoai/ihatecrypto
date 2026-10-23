@@ -161,7 +161,7 @@ extension Engine {
         case .known, .local: break
         }
         out.event("showMain", ["why": "site"])
-        out.event("notify", ["title": host, "body": say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto.")])
+        notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."))
         return await withCheckedContinuation { c in
             show(.site(SiteAsk(c)), title: title, lines: lines, warnings: warnings)
         }

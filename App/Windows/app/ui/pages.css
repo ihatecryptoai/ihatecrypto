@@ -216,3 +216,42 @@ button.pg-set-way:hover { background: var(--fill); }
 /* Your own nodes, the NEAR Intents key: the form under the row. */
 .pg-node-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .pg-node-input { width: 100%; max-width: 460px; }
+
+/* Top up's amount (ReceiveBoard.amountRow), its ways and what the money is doing. */
+.page-tu-amount { display: flex; flex-direction: column; gap: 8px; }
+.page-tu-field { field-sizing: content; width: auto; min-width: 1.2ch; padding: 0; border: none; border-radius: 0; background: none; font-size: 30px; font-weight: 700;
+  letter-spacing: -0.4px; border-bottom: 1.5px solid transparent; }
+.page-tu-field:focus { border-color: var(--accent); }
+.page-tu-unit { font-size: 18px; font-weight: 700; color: var(--secondary); }
+.page-tu-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.page-tu-ways3 { display: flex; flex-direction: column; gap: 8px; }
+.page-tu-wayblock { display: flex; flex-direction: column; gap: 10px; }
+.page-tu-go { height: 38px; width: 100%; font-size: 13px; }
+.page-tu-status { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; }
+.page-tu-status .ico { flex: none; }
+.page-tu-status a { color: inherit; font-weight: 500; }
+
+/* History: an activity (ActivityCard), a card frozen in time (HistoryBubble), a position (StoryCard). */
+.page-act { padding: 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+.page-act-head { display: flex; align-items: center; gap: 8px; }
+.page-act-head > span:first-child { display: inline-flex; }
+.page-act-head b { font-size: 14px; font-weight: 600; }
+.page-act-ask { align-self: flex-start; max-width: 100%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--accent); color: var(--on-accent);
+  font-size: 13px; overflow-wrap: anywhere; }
+.page-act-read { display: flex; align-items: center; gap: 5px; font-size: 10px; }
+.page-act-bubbles, .page-story-events { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.page-act-line { font-size: 10px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.page-act-earlier { display: flex; align-items: center; gap: 6px; padding: 6px 0 12px; }
+.page-hb { width: 210px; display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 18px; background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--card-border); }
+.page-hb-title { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.page-hb-line { font-size: 10px; overflow-wrap: anywhere; }
+.page-hb-blocked { box-shadow: inset 0 0 0 1.5px var(--loss); }
+.page-hb-open { background: rgba(255, 122, 47, 0.1); }
+.page-story { display: flex; flex-direction: column; gap: 12px; }
+.page-story-name { min-width: 0; }
+.page-story-step { display: inline-flex; align-self: center; }
+.page-hist-error { padding: 0 28px 8px; }
+.page-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fill-strong); border-top-color: var(--accent); animation: page-spin 0.8s linear infinite; }
+@keyframes page-spin { to { transform: rotate(360deg); } }
+.page-tu-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }

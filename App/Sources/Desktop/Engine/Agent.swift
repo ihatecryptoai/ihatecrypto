@@ -11,6 +11,8 @@ struct AgentGoal {
     let mark: Int
     let round: Int
     var since = Date()
+    /// What the model said it will do after this step: on the card waiting for Confirm («NEXT · AFTER THIS»).
+    var next: String?
 }
 
 extension Engine {

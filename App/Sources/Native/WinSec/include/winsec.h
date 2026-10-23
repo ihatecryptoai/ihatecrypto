@@ -43,6 +43,11 @@ int32_t winsec_write(intptr_t handle, const uint8_t *buf, size_t len);
 void winsec_close(intptr_t handle);
 int32_t winsec_allow_foreground(uint32_t pid);
 
+/// Milliseconds since the last keyboard or mouse input anywhere in this Windows session (the app's lock after time away).
+uint32_t winsec_idle_ms(void);
+/// 1 while this Windows session is locked (Win+L, the lock screen after sleep), 0 otherwise.
+int32_t winsec_session_locked(void);
+
 /// A Ledger over USB HID (vendor 0x2c97, usage page 0xffa0), for one exchange: an opaque handle, NULL when none is
 /// plugged in or another program holds it. The packets are Ledger's 64-byte HID frames (LedgerFraming).
 void *winsec_ledger_open(void);

@@ -1,0 +1,26 @@
+/* The tray's panel: the Mac's menu-bar popover, 300 wide with 10-point gaps, on the canvas's colour. */
+html, body { height: auto; }
+body { background: var(--canvas); overflow: hidden; }
+#tray { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.tray-head, .tray-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tray-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; text-align: left; }
+.tray-title .secondary { font-size: 10px; }
+.tray-brand { font-family: "DynaPuff", "Onest", sans-serif; font-size: 15px; font-weight: 600; }
+.tray-money { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.tray-money b { font-size: 14px; font-weight: 800; }
+.tray-pnl { font-size: 10px; font-weight: 600; }
+.tray-skeleton { width: 70px; height: 14px; border-radius: 5px; background: var(--fill-strong); }
+.tray-position { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 14px; background: var(--hl); color: #fff; }
+.tray-position .tray-pos-pnl.profit { color: var(--hl-mint); }
+.tray-position .tray-pos-pnl.loss { color: #ff9c8f; }
+.tray-pos-line { font-size: 10px; color: var(--hl-soft); }
+.tray-line { display: flex; align-items: center; gap: 6px; font-size: 10px; }
+.tray-line .ico { width: 12px; height: 12px; color: var(--secondary); }
+.tray-eyebrow { font-size: 9px; letter-spacing: 1.1px; }
+.tray-task { display: flex; align-items: flex-start; gap: 8px; border: none; background: none; padding: 2px 0; text-align: left; color: inherit; min-width: 0; }
+.tray-task .ico { width: 12px; height: 12px; margin-top: 2px; color: var(--secondary); flex: none; }
+.tray-task b { font-size: 11px; font-weight: 600; }
+.tray-task:hover b { color: var(--accent-ink); }
+.tray-more { font-size: 10px; }
+.tray-divider { height: 1px; background: var(--separator); }
+.tray-note { font-size: 10px; line-height: 1.4; }

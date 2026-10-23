@@ -296,7 +296,11 @@ enum CodeStore {
 
     static var isSet: Bool { stored(checkAccount) != nil }
     /// With Touch ID the sensor stays the way to sign; the code signs only on a Mac without it.
-    static var signs: Bool { !Presence.touchID && isSet }
+    static var signs: Bool { canSign && isSet }
+    /// Whether a code set here would sign moves: on a Mac without Touch ID.
+    static var canSign: Bool { !Presence.touchID }
+    /// What opens the app without the code (five wrong ones, or a forgotten code).
+    static let fallback = "your Mac password"
     static func sealed(_ id: String) -> (data: Data, tag: Data)? { stored(sealAccount(id)) }
 
     /// A context that carries the code and never shows a prompt of its own: a wrong code fails, it doesn't ask.

@@ -79,6 +79,10 @@
 .pos-gain { color: var(--hl-mint); }
 .pos-loss { color: #ff9c8f; }
 .pf-position-line { font-size: 10px; color: var(--hl-soft); }
+/* What the guardian does for the position (ExitRules.duties), in the account's mint. */
+.pf-guardian { display: flex; gap: 5px; align-items: flex-start; font-size: 10px; line-height: 1.35; color: var(--hl-mint); }
+.pf-guardian .ico { flex: none; margin-top: 1px; }
+.pf-d-key { display: flex; gap: 6px; align-items: center; }
 
 /* «Other networks», the automation wallet, a multisig: outlined rows. */
 .pf-other, .pf-plain { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 16px; border: 1px solid var(--card-border);

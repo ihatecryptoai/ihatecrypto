@@ -128,6 +128,10 @@ int32_t winsec_write(intptr_t handle, const uint8_t *buf, size_t len) {
 void winsec_close(intptr_t handle) { close((int)handle); }
 int32_t winsec_allow_foreground(uint32_t pid) { (void)pid; return WINSEC_OK; }
 
+// No session to watch off Windows: never away, never locked.
+uint32_t winsec_idle_ms(void) { return 0; }
+int32_t winsec_session_locked(void) { return 0; }
+
 // No Ledger off Windows: the Mac's app has its own USB transport (IOKit).
 void *winsec_ledger_open(void) { return NULL; }
 int32_t winsec_ledger_product(uint8_t *out, int32_t cap) { (void)out; (void)cap; return 0; }

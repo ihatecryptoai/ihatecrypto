@@ -98,6 +98,7 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
             // The toolbar shows the active wallet and, after a Confirm on the canvas, that the site is connected: each
             // state tells it to look again. Anywhere in the line: the engine's encoder on Windows needn't put «event» first.
             if line.contains("\"event\":\"state\"") {
+                system::state_line(&handle, &line);
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if let Some(engine) = handle.try_state::<Engine>() {
                         if let Ok(mut page) = engine.browser.lock() {
@@ -118,6 +119,12 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                     tauri::async_runtime::spawn(open_browser(handle.clone(), url));
                 }
             }
+            // The lock: the browser and the page panel close behind it.
+            if line.contains("\"event\":\"locked\"") { system::locked(&handle); }
+            // Settings or the onboarding turned Open at login on or off.
+            if line.contains("\"event\":\"openAtLogin\"") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) { system::set_login(&handle, &v); }
+            }
             // A site's request is on the canvas: the main window comes forward to show it.
             if line.contains("\"event\":\"showMain\"") { show(&handle); }
             // The signer is about to ask Windows Hello: only the window in front may let it come forward.
@@ -131,16 +138,18 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
             // Money that arrived, a price alert, a scheduled move waiting for Confirm: a Windows notification too,
             // since the window may be in the tray.
             if line.contains("\"event\":\"notify\"") {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                    use tauri_plugin_notification::NotificationExt;
-                    let (title, body) = (v["data"]["title"].as_str().unwrap_or("ihatecrypto"), v["data"]["body"].as_str().unwrap_or(""));
-                    let _ = handle.notification().builder().title(title).body(body).show();
-                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) { system::notify(&handle, &v); }
             }
             // Only to the main window: a page in the browser never hears the engine.
             let _ = handle.emit_to("main", "engine", line);
         }
         let _ = handle.emit_to("main", "engine", "{\"event\":\"engineStopped\",\"data\":{}}");
+        // Not on the way out: kept for the chat's line at the next launch.
+        if !system::QUITTING.load(Ordering::SeqCst) {
+            let code = handle.try_state::<Engine>().and_then(|e| e.child.lock().ok().and_then(|mut c| c.try_wait().ok().flatten()))
+                .and_then(|status| status.code()).map(|c| format!(" (exit code {c:#x})")).unwrap_or_default();
+            system::write_crash(&handle, "engine", &format!("the engine stopped{code}"));
+        }
     });
     Ok(Engine { input: Mutex::new(input), child: Mutex::new(child), dapp: Mutex::new(HashMap::new()), next: AtomicI64::new(DAPP_IDS),
                 browser: Mutex::new(BrowserPage { bar: BAR_HEIGHT, ..Default::default() }), side: Mutex::new(BrowserPage::default()),
@@ -252,6 +261,7 @@ fn bring_hello_forward() {
 #[cfg(not(windows))]
 fn bring_hello_forward() {}
 
+mod system;
 mod voice;
 mod web;
 
@@ -259,6 +269,24 @@ mod web;
 #[tauri::command]
 async fn listen() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(voice::listen).await.map_err(|e| e.to_string())?
+}
+
+/// The chat's mic with the words as they're heard (the Mac's live transcript): each partial text goes to the main page
+/// as a «voice» event; the answer is the final text. Only the main window's own page may listen.
+#[tauri::command]
+async fn listen_live(webview: tauri::Webview) -> Result<String, String> {
+    if webview.label() != "main" { return Err("only the main window".into()) }
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || voice::listen_live(move |text| { let _ = app.emit_to(EventTarget::webview("main"), "voice", text); }))
+        .await.map_err(|e| e.to_string())?
+}
+
+/// Cancel (Esc) or Done (Return) on the live listening.
+#[tauri::command]
+fn listen_stop(webview: tauri::Webview, done: bool) -> Result<(), String> {
+    if webview.label() != "main" { return Err("only the main window".into()) }
+    voice::stop(done);
+    Ok(())
 }
 
 #[tauri::command]
@@ -451,6 +479,8 @@ fn browser_layout(webview: tauri::Webview, state: tauri::State<'_, Engine>, heig
 #[tauri::command]
 async fn dapp_call(webview: tauri::Webview, state: tauri::State<'_, Engine>, method: String, params: serde_json::Value) -> Result<String, String> {
     if webview.label() != SITE { return Err("only the browser's pages".into()) }
+    // A click in the page while the toolbar had the keyboard (provider.js): answered here, never by the engine.
+    if method == "focus" { webview.set_focus().map_err(|e| e.to_string())?; return Ok("null".into()) }
     const METHODS: [&str; 6] = ["connect", "disconnect", "signMessage", "signTransaction", "signAndSendTransaction", "eth"];
     if !METHODS.contains(&method.as_str()) { return Err(format!("ihatecrypto doesn't support {method}.")) }
     let origin = origin_of(&webview.url().map_err(|e| e.to_string())?).ok_or("only https sites get the wallet")?;
@@ -464,17 +494,48 @@ async fn dapp_call(webview: tauri::Webview, state: tauri::State<'_, Engine>, met
     }
 }
 
+/// `http://127.0.0.1:<port>/<32 lowercase hex>` and nothing else: the Top up page the engine serves on loopback for a
+/// browser wallet (TopUp.swift), under a one-time token. Safe to hand to the person's browser: this machine only, no
+/// other host, no query, no path beyond the token — a shell or the browser can read nothing more into it.
+fn loopback_top_up(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://127.0.0.1:") else { return false };
+    let Some((port, token)) = rest.split_once('/') else { return false };
+    let port_ok = !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) && !port.starts_with('0')
+        && port.parse::<u32>().is_ok_and(|p| p <= 65535);
+    port_ok && token.len() == 32 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loopback_top_up;
+
+    #[test]
+    fn only_the_top_up_page_on_loopback_passes() {
+        let token = "0123456789abcdef0123456789abcdef";
+        assert!(loopback_top_up(&format!("http://127.0.0.1:51123/{token}")));
+        for bad in [
+            format!("http://127.0.0.1:51123/{token}/"), format!("http://127.0.0.1:51123/{token}?x=1"), format!("http://127.0.0.1:51123/{token}0"),
+            format!("http://127.0.0.1:51123/{}", token.to_uppercase()), format!("http://localhost:51123/{token}"), format!("http://127.0.0.2:51123/{token}"),
+            format!("http://127.0.0.1/{token}"), format!("http://127.0.0.1:0/{token}"), format!("http://127.0.0.1:70000/{token}"),
+            format!("http://127.0.0.1:51123@evil.com/{token}"), format!("https://127.0.0.1:51123/{token}"), format!("http://127.0.0.1:51123/../{token}"),
+        ] {
+            assert!(!loopback_top_up(&bad), "{bad}");
+        }
+    }
+}
+
 /// While the recovery phrase is on screen the window is left out of screenshots and screen sharing.
 #[tauri::command]
 fn protect(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
     window.set_content_protected(on).map_err(|e| e.to_string())
 }
 
-/// An explorer link in the default browser: https only, nothing that a shell could read as more than a link.
+/// An explorer link in the default browser: https only, nothing that a shell could read as more than a link — and the
+/// engine's one-time Top up page for a browser wallet (`loopback_top_up`).
 #[tauri::command]
 fn open_link(url: String) -> Result<(), String> {
     let plain = url.starts_with("https://") && url.len() < 512 && url.chars().all(|c| c.is_ascii_graphic() && !"\"'`<>|^%&".contains(c));
-    if !plain { return Err("not a plain https link".into()) }
+    if !plain && !loopback_top_up(&url) { return Err("not a plain https link".into()) }
     #[cfg(windows)]
     {
         use windows::Win32::UI::Shell::ShellExecuteW;
@@ -563,6 +624,16 @@ fn ui_eval(app: &tauri::AppHandle) {
             for line in text.lines().skip(done) {
                 // «browser:» lines go to the site's page instead, «bar:» to the browser's toolbar, «panel:» and
                 // «panelbar:» to the page beside the canvas and its header; «show:<label>» brings that window forward.
+                // «tray:x,y» opens the tray's panel as a click on an icon at that point would (physical pixels).
+                if let Some(at) = line.strip_prefix("tray:") {
+                    let xy: Vec<f64> = at.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                    let rect = tauri::Rect { position: tauri::PhysicalPosition::new(*xy.first().unwrap_or(&1000.0), *xy.get(1).unwrap_or(&0.0)).into(),
+                                             size: tauri::PhysicalSize::new(44.0, 44.0).into() };
+                    let app = handle.clone();
+                    let _ = handle.run_on_main_thread(move || system::toggle_panel(&app, rect));
+                    done += 1;
+                    continue;
+                }
                 if let Some(label) = line.strip_prefix("show:") {
                     if let Some(window) = handle.get_window(label) { let _ = window.show(); let _ = window.set_focus(); }
                     done += 1;
@@ -593,6 +664,7 @@ async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
     let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(()) };
     update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    system::QUITTING.store(true, Ordering::SeqCst);
     app.restart()
 }
 
@@ -610,16 +682,16 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
     let open = MenuItem::with_id(app, "open", "Open ihatecrypto", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit ihatecrypto", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Completely", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
     let mut builder = TrayIconBuilder::new().tooltip("ihatecrypto").menu(&menu).show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show(app),
-            "quit" => app.exit(0),
+            "quit" => system::quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event { show(tray.app_handle()) }
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event { system::toggle_panel(tray.app_handle(), rect) }
         });
     if let Some(icon) = app.default_window_icon() { builder = builder.icon(icon.clone()); }
     builder.build(app)?;
@@ -628,12 +700,22 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
 
 fn main() {
     tauri::Builder::default()
+        // One copy only, as on the Mac: a second one would run the schedule and the stops twice. Starting it again (a
+        // notification in the Action Center, the Start menu) brings this one's window back.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show(app)))
+        // Settings › Background › Open at login: the registry's Run key, starting in the tray.
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            system::keep_panics(app.handle());
             let engine = start_engine(app.handle())?;
             app.manage(engine);
+            system::on_notification_click(app.handle());
+            system::report_crash(app.handle());
+            system::report_login(app.handle());
+            system::watch_updates(app.handle());
             #[cfg(debug_assertions)]
             ui_eval(app.handle());
             tray(app)?;
@@ -641,6 +723,8 @@ fn main() {
             // the taskbar.
             if let Some(window) = app.get_webview_window("main") {
                 if !has_room(&window.as_ref().window(), 1320.0, 860.0) { let _ = window.maximize(); }
+                // Started at login it waits in the tray, its window closed (tauri.conf keeps it hidden until here).
+                if !system::started_hidden() { let _ = window.show(); let _ = window.set_focus(); }
             }
             Ok(())
         })
@@ -650,17 +734,21 @@ fn main() {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            tauri::WindowEvent::Focused(false) if window.label() == system::TRAY => system::panel_blurred(window),
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == BROWSER_WINDOW => layout_browser(window),
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == "main" => web::layout_panel(window.app_handle()),
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen, open_browser, dapp_call,
-            browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout])
+            browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout,
+            system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::hide_main, system::quit_app,
+            system::open_notification_settings, system::focus_me, listen_live, listen_stop])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {
             // The engine ends when its input closes; it is stopped outright when the app quits.
             if let tauri::RunEvent::Exit = event {
+                system::QUITTING.store(true, Ordering::SeqCst);
                 if let Some(engine) = app.try_state::<Engine>() {
                     if let Ok(mut child) = engine.child.lock() { let _ = child.kill(); }
                 }

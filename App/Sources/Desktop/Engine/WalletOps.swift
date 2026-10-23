@@ -1,6 +1,8 @@
 import Foundation
+import HyperliquidSigning
 import IhatecryptoCore
 import SignerAPI
+import TradeExecution
 import WalletCore
 
 /// Wallets and the address book: everything here is the signer's, read and changed only through it. The engine keeps
@@ -20,6 +22,7 @@ extension Engine {
             let reply = try await SignerLink.shared.send(.status)
             guard reply.ok else { throw WalletError(LinkTradeSigner.reason(reply)) }
             status = reply
+            lockHeard(codeSet: reply.codeSet == true)
             signerError = nil
             await readLedgerAgent()
         } catch {
@@ -56,10 +59,36 @@ extension Engine {
         phrase = words
     }
 
-    func importPhrase(_ text: String) async throws {
+    /// A phrase, with its BIP-39 passphrase if the wallet has one (taken as typed: spaces count), goes to the signer; the
+    /// answer carries the first addresses it makes, to compare with the wallet it came from (the Mac's ImportWalletView).
+    func importPhrase(_ text: String, passphrase: String = "") async throws -> [String: String] {
         let words = text.lowercased().split { !$0.isLetter }.joined(separator: " ")
         _ = try Mnemonic.validate(words)
-        try await signerCall(.importMnemonic(phrase: words, passphrase: "", requirePresence: true))
+        try await signerCall(.importMnemonic(phrase: words, passphrase: passphrase, requirePresence: true))
+        let accounts = try Self.firstAccounts(words, passphrase: passphrase)
+        return ["accounts": String(data: try JSONSerialization.data(withJSONObject: accounts), encoding: .utf8) ?? "[]"]
+    }
+
+    /// The first `count` EVM (m/44'/60'/0'/0/i) and Solana (m/44'/501'/i'/0') addresses a phrase makes, as MetaMask and
+    /// Phantom list them.
+    nonisolated static func firstAccounts(_ words: String, passphrase: String, count: Int = 3) throws -> [[String: String]] {
+        let seed = try Mnemonic.seed(words, passphrase: passphrase)
+        return try (0..<count).map { i in
+            ["evm": try EVMAccount.address(privateKey: Derivation.secp256k1(seed: seed, path: WalletPath.evm(i))),
+             "solana": try SolanaAccount.address(privateKey: Derivation.ed25519(seed: seed, path: WalletPath.solana(i)))]
+        }
+    }
+
+    /// Whether the wallet's Hyperliquid account has had a deposit: only then does Hyperliquid take a trading key, so the
+    /// onboarding shows its trading steps only then (the Mac's hlFunded). Empty when it can't be read.
+    func hlFunded() async -> [String: String] {
+        guard !watching, let evm = activeWallet?.evm, let new = try? await Hyperliquid.isNewAccount(evm) else { return ["funded": ""] }
+        return ["funded": new ? "false" : "true"]
+    }
+
+    /// Dollars where the fee coin is missing (GasWays.swift), for the onboarding's Top up: the first move there would stop.
+    var stuckView: [StuckView] {
+        stuckDollars.map { StuckView(network: $0.network, key: $0.key, coin: $0.coin, usd: $0.usd, usdc: $0.usdc, ways: $0.ways.count) }
     }
 
     func importKey(_ key: String) async throws {
@@ -84,4 +113,15 @@ extension Engine {
         book.first { $0.name.lowercased() == name.lowercased() && (network == nil || $0.network == network) }
             ?? book.first { $0.name.lowercased() == name.lowercased() }
     }
+}
+
+nonisolated struct StuckView: Encodable, Equatable {
+    var network: String
+    var key: String
+    var coin: String
+    /// What to add of the coin, in dollars, and the dollars there.
+    var usd: Decimal
+    var usdc: Decimal
+    /// Cards the chat offers to move them without the coin; 0: only adding it works there.
+    var ways: Int
 }

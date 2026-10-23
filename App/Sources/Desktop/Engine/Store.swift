@@ -72,6 +72,8 @@ nonisolated enum Store {
 nonisolated struct Settings: Codable, Equatable {
     /// «en», «ru» or «es»; nil: the system's.
     var language: String?
+    /// The window's own texts: «en» or «ru»; nil: Windows' language (Engine.appRussian).
+    var appLanguage: String?
     var provider: String?
     var model: String?
     /// The second check (on unless turned off, as on the Mac): the model reads every command again, and a trade plan
@@ -99,4 +101,13 @@ nonisolated struct Settings: Codable, Equatable {
     var tradingKeyOffered: [String]?
     /// «Pause schedule»: nothing scheduled runs until it's resumed.
     var schedulePaused: Bool?
+    /// The app's lock (Lock.swift): a code is set (the signer's last word, so a launch is locked before it answers), five
+    /// wrong codes turned it off (only Windows Hello opens the app), and the minutes away before it locks.
+    var codeSet: Bool?
+    var codeOff: Bool?
+    var lockAfter: Int?
+    /// Settings › General › Notifications: the kinds turned off (Notice.rawValue); none: every kind on (Notices.swift).
+    var noticesOff: [String]?
+    /// Settings › Background › Open at login, as Windows has it (main.rs sets the registry's Run key and says back how it is).
+    var openAtLogin: Bool?
 }

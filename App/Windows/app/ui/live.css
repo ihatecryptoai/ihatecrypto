@@ -310,3 +310,33 @@
 .live-gas-text .small { white-space: pre-line; }
 .live-place-row .live-place-text { flex: 1; }
 .live-place-usd { font-size: 12.5px; flex: none; }
+
+/* The History block: the day's sum, then each move opening the request it came from (the Mac's HistoryBoard). */
+.live-hist-summary { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 22px; background: var(--card); border: 1px solid var(--card-border); }
+.live-hist-day { font-size: 11px; font-weight: 700; color: var(--secondary); }
+.live-hist-summary > b { font-size: 14px; }
+.live-hist-ask { align-self: flex-start; margin-top: 2px; }
+.live-hist-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: none; background: none; text-align: left; color: inherit; }
+.live-hist-amount { flex: none; font-size: 12px; white-space: nowrap; }
+.live-hist-request { display: flex; flex-direction: column; gap: 8px; margin: 2px 8px 8px 44px; padding: 10px 12px; border-radius: 14px; background: var(--fill); }
+.live-hist-asked { align-self: flex-end; max-width: 85%; padding: 7px 11px; border-radius: 14px 14px 4px 14px; background: var(--accent); color: var(--on-accent); font-size: 12.5px; }
+.live-hist-reply { white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
+
+/* A schedule row opens its own canvas, lit while that canvas is open; open positions sit among the tasks. */
+.live-task-row { cursor: pointer; }
+.live-task-row.lit { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.live-pos-row { width: 100%; border: none; text-align: left; color: inherit; font: inherit; }
+.live-pos-row .live-pos-pnl { flex: none; font-size: 12.5px; font-weight: 700; }
+.live-item-runs .live-run-time { width: auto; min-width: 118px; }
+
+/* A scheduled item's own block (ScheduleItemBoard). */
+.live-item-head { display: flex; align-items: center; gap: 10px; }
+.live-item-icon { flex: none; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--accent-ink); background: rgba(255, 122, 47, 0.14); }
+.live-item-title { flex: 1; min-width: 0; font-size: 18px; line-height: 1.25; }
+.live-item-next { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 16px; background: var(--fill); border: 1px solid var(--card-border); }
+.live-item-next.dim { opacity: 0.55; }
+.live-item-when { font-size: 16px; }
+.live-item-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.live-item-fact { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--fill); min-width: 0; }
+.live-item-steps { display: flex; flex-direction: column; gap: 4px; }
+.live-item-foot { display: flex; align-items: center; gap: 8px; }

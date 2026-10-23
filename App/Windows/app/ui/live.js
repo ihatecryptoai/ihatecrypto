@@ -37,15 +37,17 @@ addIcons({
   "clock.arrow": "M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4M12 8v4.5l3 2",
   "xmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
   "minus.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12h8",
+  repeat: "M17 3l4 4-4 4M3 11V10a3 3 0 0 1 3-3h15M7 21l-4-4 4-4M21 13v1a3 3 0 0 1-3 3H3",
 });
 
-export const liveKinds = ["receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig", "ledger"];
+export const liveKinds = ["receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig", "ledger", "scheduleItem"];
 
 export function liveTitle(kind) {
   return {
     receive: t("Receive", "Получить"), addresses: t("Address book", "Адресная книга"), history: t("History · latest", "История · последнее"),
     favorites: t("Favorites", "Избранное"), alerts: t("Price alerts", "Ценовые оповещения"), schedule: t("Schedule", "Расписание"),
     positions: t("Open positions", "Открытые позиции"), multisig: t("Multisig", "Мультисиг"), ledger: "Ledger",
+    scheduleItem: t("Scheduled task", "Задача по расписанию"),
   }[kind] || kind;
 }
 
@@ -54,15 +56,17 @@ const frames = {
   receive: { width: 470, icon: "arrow.down.circle" }, addresses: { width: 470, icon: "person" }, history: { width: 470, icon: "clock.arrow" },
   favorites: { width: 470, icon: "star" }, alerts: { width: 470, icon: "bell" }, schedule: { width: 320, icon: "calendar" },
   positions: { width: 492, icon: "chart.line" }, multisig: { width: 492, icon: "key" }, ledger: { width: 470, icon: "drive" },
+  scheduleItem: { width: 500, icon: "calendar" },
 };
 
 export function liveBlock(b) {
   const body = { receive: receiveBody, addresses: addressesBody, history: historyBody, favorites: favoritesBody, alerts: alertsBody,
-    schedule: scheduleBody, positions: positionsBody, multisig: multisigBody, ledger: ledgerBody }[b.kind];
+    schedule: scheduleBody, positions: positionsBody, multisig: multisigBody, ledger: ledgerBody, scheduleItem: scheduleItemBody }[b.kind];
   // The Ledger's frame names the model it found and spins while it connects, as the Mac's board header does.
   const c = b.kind === "ledger" ? ui.state.ledgerConnect : null;
-  const title = c?.model ? "Ledger · " + c.model : liveTitle(b.kind);
-  const extra = c?.busy ? h("span", { class: "live-spinner", "aria-label": t("Connecting", "Подключаю") }) : undefined;
+  const item = b.kind === "scheduleItem" ? scheduleItemHead(b.title) : null;
+  const title = c?.model ? "Ledger · " + c.model : item ? item.title : liveTitle(b.kind);
+  const extra = c?.busy ? h("span", { class: "live-spinner", "aria-label": t("Connecting", "Подключаю") }) : item ? item.extra : undefined;
   const el = blockFrame(b, title, h("div", { class: "live live-" + b.kind }, body ? body(b) : null), { ...(frames[b.kind] || {}), extra });
   el.classList.add("live-frame", "live-frame-" + b.kind);
   return el;
@@ -272,24 +276,67 @@ function dayName(d) {
   return same(d, today) ? t("Today", "Сегодня") : same(d, y) ? t("Yesterday", "Вчера") : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+/** The History block (the Mac's HistoryBoard): what the latest day did to the money with a question for the chat, then
+ * each move as one row, by day; a row opens to the request it came from. Nothing moved yet: the signatures as they were. */
+const openMoves = new Set();
+const moveIcon = (k) => ({ sent: "arrow.up.right", received: "arrow.down.left", swapped: "arrow.left.arrow.right", bought: "arrow.left.arrow.right",
+  sold: "arrow.left.arrow.right", moved: "arrow.right", deposited: "building", withdrew: "arrow.down.left", closed: "xmark" }[k] || "signature");
+
 function historyBody() {
-  const lines = ui.state.history.slice(0, 14);
-  const rows = [];
-  lines.forEach((e, i) => {
-    const d = new Date(e.at);
-    if (i === 0 || new Date(lines[i - 1].at).toDateString() !== d.toDateString()) rows.push(h("div", { class: "live-day-head" }, dayName(d).toUpperCase()));
-    rows.push(h("div", { class: "live-hist-row" },
-      h("span", { class: "live-hist-icon" }, icon(kindIcon(e.kind), 13)),
-      h("span", { class: "live-hist-text" },
-        h("span", { class: "live-hist-note one-line" }, e.note || netName(e.chain)),
-        h("span", { class: "live-hist-sub one-line" }, d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) + " · " + netName(e.chain) + " · " + e.kind)),
-      e.link ? h("button", { class: "icon-btn", title: t("See it on the explorer", "Открыть в обозревателе"), onclick: () => openLink(e.link) }, icon("arrow.up.right.square", 15)) : null));
-  });
-  return [
-    rows.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows)
-      : note(t("Nothing signed yet. Every move from now on is listed here.", "Пока ничего не подписано. Каждое движение отсюда и дальше будет здесь.")),
-    h("button", { class: "link-btn live-more", onclick: () => { ui.view = "history"; render(); } }, icon("clock", 12), t("All history: requests, transfers, signatures", "Вся история: запросы, переводы, подписи")),
-  ];
+  const s = ui.state, moves = s.moves || [], day = s.movesDay;
+  const time = (d) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const out = [];
+  if (day) {
+    const d = new Date(day.day), today = new Date(), y = new Date(today); y.setDate(today.getDate() - 1);
+    const when = d.toDateString() === today.toDateString() ? t("today", "сегодня") : d.toDateString() === y.toDateString() ? t("yesterday", "вчера") : dayName(d);
+    out.push(h("div", { class: "live-hist-summary" },
+      h("span", { class: "live-hist-day" }, dayName(d)),
+      day.lines.map((l) => h("b", { class: "num" }, masked(l))),
+      day.own.length ? h("span", { class: "secondary small" }, t(`${day.own.join(", ")} ${day.own.length === 1 ? "is" : "are"} your own wallet: what went there is still yours, outside the balance.`,
+        `${day.own.join(", ")} — ${day.own.length === 1 ? "твой кошелёк" : "твои кошельки"}: то, что ушло туда, по-прежнему твоё, просто вне баланса.`)) : null,
+      h("button", { class: "live-chip-btn live-hist-ask", disabled: s.thinking, onclick: () => act("send", { text: t(`Where did my money go ${when}?`, `Куда ушли деньги ${when}?`) }) },
+        icon("bubble", 12), t("Ask the chat where the money went", "Спросить в чате, куда ушли деньги"))));
+  }
+  if (moves.length) {
+    const rows = [];
+    moves.forEach((m, i) => {
+      const d = new Date(m.at), key = m.at + m.text;
+      if (i === 0 || new Date(moves[i - 1].at).toDateString() !== d.toDateString()) rows.push(h("div", { class: "live-day-head" }, dayName(d).toUpperCase()));
+      const amount = m.amount === null || m.amount === undefined ? null
+        : m.kind === "sent" ? ["−", m.own ? "secondary" : "loss"] : m.kind === "received" ? ["+", "profit"] : null;
+      const sub = [time(d), m.own ? t("your wallet", "твой кошелёк") : null, m.request && m.request.length > 6 ? `“${m.request}”` : null].filter(Boolean).join(" · ");
+      const open = openMoves.has(key);
+      rows.push(h("div", { class: "live-hist-row" },
+        h("button", { class: "live-hist-open", title: t("Open the request it came from", "Открыть запрос, из которого это"), onclick: () => { open ? openMoves.delete(key) : openMoves.add(key); render(); } },
+          h("span", { class: "live-hist-icon" }, icon(moveIcon(m.kind), 13)),
+          h("span", { class: "live-hist-text" }, h("span", { class: "live-hist-note one-line" }, m.text), h("span", { class: "live-hist-sub one-line" }, sub)),
+          amount ? h("b", { class: "live-hist-amount num " + amount[1] }, masked(`${amount[0]}${Number(m.amount).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${m.symbol || ""}`)) : null),
+        m.link ? h("button", { class: "icon-btn", title: t("See it on the explorer", "Открыть в обозревателе"), onclick: () => openLink(m.link) }, icon("arrow.up.right.square", 15)) : null));
+      // The request as it was: what was asked, what ihatecrypto said, and its canvas.
+      if (open) rows.push(h("div", { class: "live-hist-request" },
+        m.request ? h("div", { class: "live-hist-asked" }, m.request) : null,
+        h("div", { class: "live-hist-reply secondary small selectable" }, m.reply),
+        m.canvas !== ui.state.canvas ? h("button", { class: "link-btn", onclick: () => act("openCanvas", { wallet: m.canvas }) }, icon("arrow.up.right", 11), t("Open its canvas", "Открыть его холст")) : null));
+    });
+    out.push(h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows));
+  } else {
+    // Nothing moved yet: what was signed, from the journal.
+    const lines = s.history.slice(0, 14), rows = [];
+    lines.forEach((e, i) => {
+      const d = new Date(e.at);
+      if (i === 0 || new Date(lines[i - 1].at).toDateString() !== d.toDateString()) rows.push(h("div", { class: "live-day-head" }, dayName(d).toUpperCase()));
+      rows.push(h("div", { class: "live-hist-row" },
+        h("span", { class: "live-hist-icon" }, icon(kindIcon(e.kind), 13)),
+        h("span", { class: "live-hist-text" },
+          h("span", { class: "live-hist-note one-line" }, e.note || netName(e.chain)),
+          h("span", { class: "live-hist-sub one-line" }, time(d) + " · " + netName(e.chain) + " · " + e.kind)),
+        e.link ? h("button", { class: "icon-btn", title: t("See it on the explorer", "Открыть в обозревателе"), onclick: () => openLink(e.link) }, icon("arrow.up.right.square", 15)) : null));
+    });
+    out.push(rows.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows)
+      : note(t("Nothing yet. Every move from now on is listed here, with the request it came from.", "Пока ничего. Каждое движение отсюда и дальше будет здесь, с запросом, из которого оно.")));
+  }
+  out.push(h("button", { class: "link-btn live-more", onclick: () => { ui.view = "history"; render(); } }, icon("clock", 12), t("All history: requests, positions, transfers, signatures", "Вся история: запросы, позиции, переводы, подписи")));
+  return out;
 }
 
 // MARK: Favorites
@@ -551,18 +598,19 @@ function alertsBody() {
             a.now ? h("span", { class: "secondary small num" }, a.now) : null),
           h("button", { class: "icon-btn", title: t("Remove the alert", "Убрать оповещение"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("trash", 14))),
         // What it does when the price gets there, each step its own block.
-        steps.map((step) => [arrow(), h("div", { class: "live-alert-step" },
-          h("span", { class: "live-alert-badge plain" }, icon("bolt", 15)),
-          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("THEN", "ЗАТЕМ")), h("b", {}, step)))]),
+        (a.blocks || steps.map((title) => ({ plan: false, title }))).map((x) => [arrow(), h("div", { class: "live-alert-step" },
+          x.plan ? h("span", { class: "live-alert-badge" }, assetBadge(x.coin, 32)) : h("span", { class: "live-alert-badge plain" }, icon("bolt", 15)),
+          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, x.plan ? t("THEN · PLAN ON HYPERLIQUID", "ЗАТЕМ · ПЛАН НА HYPERLIQUID") : t("THEN", "ЗАТЕМ")),
+            h("b", {}, x.title), x.line ? h("span", { class: "secondary small num" }, x.line) : null))]),
         arrow(),
         h("div", { class: "live-alert-step" },
           h("span", { class: "live-alert-badge plain" }, icon("bell", 15)),
           h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("YOU · NOTIFICATION", "ТЫ · УВЕДОМЛЕНИЕ")),
             h("b", {}, steps.length ? t("A Windows notification, then your Confirm", "Уведомление Windows, потом твоё «Подтвердить»") : t("A Windows notification", "Уведомление Windows")),
-            steps.length ? h("span", { class: "secondary small" }, t(`Nothing moves without ${presence()}.`, `Без ${presence()} ничего не двигается.`)) : null)));
+            steps.length ? h("span", { class: "secondary small" }, t(`Prepared when it fires; nothing moves without ${presence()}.`, `Готовится, когда сработает; без ${presence()} ничего не двигается.`)) : null)));
     }),
-    h("div", { class: "live-hint tertiary" }, t("Checked while ihatecrypto is open or in the tray. Nothing moves until you confirm it.",
-      "Проверяется, пока ihatecrypto открыт или в трее. Ничего не двигается, пока ты не подтвердишь.")),
+    h("div", { class: "live-hint tertiary" }, t("Checked every 10 s while ihatecrypto is open or in the tray. Nothing moves until you confirm it.",
+      "Проверяется каждые 10 с, пока ihatecrypto открыт или в трее. Ничего не двигается, пока ты не подтвердишь.")),
   ];
 }
 
@@ -609,7 +657,9 @@ function taskRow(x, a) {
   const mark = x.automatic
     ? h("span", { class: "live-signer-mark", title: t("Runs by itself from ", "Идёт сама с ") + (a ? a.label : "") + t(`, no ${presence()}`, `, без ${presence()}`) }, icon("bolt", 14))
     : h("span", { class: "live-signer-mark ask", title: t("A money move waits for Confirm", "Перевод ждёт «Подтвердить»") }, icon("hand.tap", 14));
-  return h("div", { class: "live-task-row" + (x.paused ? " paused" : "") },
+  const key = "task:" + x.id;
+  return h("div", { class: "live-task-row" + (x.paused ? " paused" : "") + (ui.state.scheduleKey === key ? " lit" : ""),
+    title: t("Open it on its own canvas", "Открыть на отдельном холсте"), onclick: (e) => { if (!e.target.closest("button, label")) act("openSchedule", { name: key }); } },
     dateTile(x.paused ? null : x.next),
     h("span", { class: "live-task-text" }, h("span", { class: "live-task-title" }, title), h("span", { class: "live-task-next" }, nextLine(x))),
     // Its mark, or under the pointer (always on a paused one) Delete, in the same place: nothing shifts.
@@ -658,6 +708,7 @@ function scheduleBody() {
       title: held ? t("Everything scheduled runs again", "Всё запланированное снова пойдёт") : t("Nothing scheduled runs until you resume; stops and takes stay on the exchange", "Ничего запланированного не запустится, пока не возобновишь; стопы и тейки остаются на бирже") },
       icon(held ? "play" : "pause", 13), held ? t("Resume schedule", "Возобновить расписание") : t("Pause schedule", "Приостановить расписание")) : null,
     running.map((x) => taskRow(x, a)),
+    ui.state.positions.map(positionRow),
     !running.length ? h("div", { class: "secondary small" }, paused.length ? t("Nothing running now.", "Сейчас ничего не идёт.") : t("Nothing scheduled. Say it in the chat, in any words:", "Ничего не запланировано. Скажи в чате любыми словами:")) : null,
     h("button", { class: "live-wide-btn", title: t("Puts a start in the chat: say what to do and when", "Кладёт начало в чат: скажи, что и когда делать"), onclick: () => suggest(t("every day at 09:00: ", "каждый день в 09:00: ")) },
       icon("plus", 13), t("New schedule", "Новое расписание")),
@@ -676,6 +727,16 @@ function scheduleBody() {
     scheduleTab === "wallet" ? automationTab(a) : scheduleTab === "history" ? runsTab()
       : h("div", { class: "live-sched-tasks" + (held ? " held" : "") }, tasksTab),
   ];
+}
+
+/** An open position in the Schedule (the Mac's «perp:» entry): its stop and take are on the exchange; it opens its canvas. */
+function positionRow(p) {
+  const key = "perp:" + p.coin;
+  return h("button", { class: "live-task-row live-pos-row" + (ui.state.scheduleKey === key ? " lit" : ""), onclick: () => act("openSchedule", { name: key }) },
+    h("span", { class: "live-date-tile" }, h("span", { class: "live-date-icon" }, icon("chart.line", 13))),
+    h("span", { class: "live-task-text" }, h("span", { class: "live-task-title" }, (p.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + p.coin.split(":").pop()),
+      h("span", { class: "live-task-next" }, t("stop and take on the exchange", "стоп и тейк на бирже"))),
+    h("span", { class: "live-pos-pnl small num " + (negative(p.pnl) ? "loss" : "profit") }, masked(p.pnl)));
 }
 
 /** What each run did, by day (the Mac's History tab): its time, how it ended, what it was, and its canvas. */
@@ -724,23 +785,29 @@ function gasButton(a, bud) {
 
 function automationTab(a) {
   if (!a) return h("div", { class: "secondary small" }, t("No automation wallet yet: create it above, then its addresses show here.", "Кошелька автоматизации пока нет: создай его выше, и здесь появятся адреса."));
+  const b = ui.state.automationBudget, num = (x, max = 6) => Number(x).toLocaleString("en-US", { maximumFractionDigits: max });
+  // What the dollars on Solana are: its USDC, its other coins and the SOL its fees are paid with.
+  const solanaNote = !b ? t("USDC and a little SOL for fees", "USDC и немного SOL на комиссии")
+    : [Number(b.solana) > 0 ? masked(`${num(b.solana)} USDC`) : null, ...(b.tokens || []).map((c) => masked(`${num(c.amount)} ${c.symbol}`)),
+      b.sol !== null && b.sol !== undefined ? masked(`${num(b.sol, 4)} SOL ${t("for fees", "на комиссии")}`) : null].filter(Boolean).join(" · ");
   const places = [
-    a.solana && { key: "solana", logos: ["solana"], title: "Solana", note: t("USDC and a little SOL for fees", "USDC и немного SOL на комиссии"), address: a.solana },
-    a.evm && { key: "evm", logos: ["base", "arbitrum", "ethereum", "polygon"], title: t("EVM networks", "EVM-сети"), note: t("one address on each", "один адрес во всех"), address: a.evm },
+    a.solana && { key: "solana", logos: ["solana"], title: "Solana", note: solanaNote, address: a.solana },
+    a.evm && { key: "evm", logos: ["base", "arbitrum", "ethereum", "polygon"], title: t("EVM networks", "EVM-сети"), note: t("9 networks, one address", "9 сетей, один адрес"), address: a.evm },
+    a.near && { key: "near", logos: ["near"], title: "NEAR", note: "", address: a.near },
   ].filter(Boolean);
   const chosen = places.find((p) => p.key === walletNet) || places[0];
   return [
     h("div", { class: "secondary small" }, t("Scheduled tasks pay from this wallet. Send it USDC on any of these networks:", "Задачи по расписанию платят с этого кошелька. Отправь на него USDC в любой из этих сетей:")),
     places.map((p) => {
-      const bud = ui.state.automationBudget, money = !bud ? null : p.key === "evm" ? bud.evmUSD : bud.solanaUSD;
+      const bud = ui.state.automationBudget, money = !bud ? null : p.key === "evm" ? bud.evmUSD : p.key === "near" ? bud.near : bud.solanaUSD;
       return h("button", { class: "live-place-row" + (chosen === p ? " on" : ""), onclick: () => { walletNet = p.key; render(); } },
         h("span", { class: "live-logo-stack" }, p.logos.map((k) => netLogo(k, 18))),
-        h("span", { class: "live-place-text" }, h("b", {}, p.title), h("span", { class: "secondary small" }, p.note)),
+        h("span", { class: "live-place-text" }, h("b", {}, p.title), p.note ? h("span", { class: "secondary small" }, p.note) : null),
         h("b", { class: "live-place-usd num" }, money === null || money === undefined ? "…" : masked(usd(money))));
     }),
     chosen ? h("div", { class: "live-place-pay" },
       h("span", { class: "live-place-qr", title: t("Scan with the exchange or wallet app", "Сканируй приложением биржи или кошелька") }, qrCode(chosen.address, "live-qr-small")),
-      h("div", { class: "live-place-address" }, h("b", { class: "small" }, chosen.key === "evm" ? t("USDC on any EVM network", "USDC в любой EVM-сети") : t("USDC on Solana", "USDC в Solana")),
+      h("div", { class: "live-place-address" }, h("b", { class: "small" }, chosen.key === "evm" ? t("USDC on any EVM network", "USDC в любой EVM-сети") : t(`USDC on ${chosen.title}`, `USDC в ${chosen.title}`)),
         addressLines(chosen.address, 22), copyAddress(chosen.address))) : null,
     chosen?.key === "evm" ? h("div", { class: "secondary small" }, t("The same address on Base, Arbitrum, Ethereum, Polygon, Optimism, BNB Chain, HyperEVM, Robinhood Chain and Tempo. On Robinhood Chain it counts USDG.",
       "Один адрес в Base, Arbitrum, Ethereum, Polygon, Optimism, BNB Chain, HyperEVM, Robinhood Chain и Tempo. В Robinhood Chain считается USDG.")) : null,
@@ -748,6 +815,80 @@ function automationTab(a) {
     gasButton(a, ui.state.automationBudget),
     h("div", { class: "live-hint" }, t("It signs scheduled tasks only, with the same checks; its key stays under this computer's Windows Hello vault.",
       "Он подписывает только задачи по расписанию, с теми же проверками; его ключ остаётся в хранилище Windows Hello этого компьютера.")),
+  ];
+}
+
+// MARK: A scheduled item's own canvas
+
+/** «every day», «каждые 3 дн.»: the engine's words for how often (ScheduledTask.Every.words), said in the window's language. */
+function everyWords(w) {
+  if (!w) return t("once", "один раз");
+  const ru = { hour: "каждый час", day: "каждый день", week: "каждую неделю", month: "каждый месяц" }[w];
+  const m = w.match(/^(\d+) (hours|days|weeks|months)$/);
+  return t("every " + w, ru || (m ? `каждые ${m[1]} ${{ hours: "ч", days: "дн.", weeks: "нед.", months: "мес." }[m[2]]}` : w));
+}
+
+/** The item's frame: «SCHEDULED · EVERY 3 DAYS», and Close back to the canvas it was opened from. */
+function scheduleItemHead(key) {
+  const x = ui.state.tasks.find((k) => "task:" + k.id === key);
+  const every = key.startsWith("perp:") || !x ? null : everyWords(x.every);
+  return {
+    title: [t("SCHEDULED", "ПО РАСПИСАНИЮ"), every ? every.toUpperCase() : null].filter(Boolean).join(" · "),
+    extra: ui.state.scheduleKey === key ? h("button", { class: "btn small", title: t("Back to the canvas you came from", "Назад на холст, с которого пришёл"), onclick: () => act("closeSchedule") },
+      icon("xmark", 12), t("Close", "Закрыть")) : null,
+  };
+}
+
+/** The Mac's ScheduleItemBoard: the task with its switch and Run now, its next run as a date, who pays and who signs,
+ * its steps, its last runs; Ask in chat and Delete. An open position shows its own card: its stop and take are on the exchange. */
+function scheduleItemBody(b) {
+  const key = b.title, s = ui.state;
+  if (key.startsWith("perp:")) {
+    const p = s.positions.find((x) => x.coin === key.slice(5));
+    return p ? [positionCard(p), h("div", { class: "secondary small" }, t("Its stop and take sit on the exchange: they work with ihatecrypto closed.", "Стоп и тейк стоят на бирже: работают, даже когда ihatecrypto закрыт."))]
+      : note(t("Closed — nothing open on this market now.", "Закрыта — на этом рынке сейчас ничего не открыто."));
+  }
+  const x = s.tasks.find((k) => "task:" + k.id === key);
+  const runs = (s.scheduleRuns || []).filter((r) => r.task && "task:" + r.task === key);
+  const runRows = runs.length ? runs.map((r) => {
+    const [ic, cls, word] = r.result === "failed" ? ["xmark.circle", "loss", t("Failed", "Не вышло")] : r.result === "nothing" ? ["minus.circle", "secondary", t("Nothing to do", "Нечего делать")]
+      : ["checkmark.circle", "profit", t("Done", "Готово")];
+    return h("div", { class: "live-run-row" },
+      h("span", { class: "live-run-time secondary small num" }, `${dayName(new Date(r.at))} ${new Date(r.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`),
+      h("span", { class: "live-run-icon " + cls, title: word }, icon(ic, 14)),
+      h("span", { class: "live-run-title one-line", title: r.line || r.title }, r.line || r.title));
+  }) : [];
+  const head = h("div", { class: "live-section" }, h("span", {}, runs.length ? t(`LAST RUNS · ${runs.length}`, `ПОСЛЕДНИЕ ЗАПУСКИ · ${runs.length}`) : t("HASN'T RUN YET", "ЕЩЁ НЕ ЗАПУСКАЛАСЬ")));
+  if (!x) return [h("b", { class: "secondary" }, t("No longer scheduled — what it did is below.", "Больше не в расписании — что она сделала, ниже.")), head, h("div", { class: "live-item-runs" }, runRows)];
+  const held = s.schedulePaused === true, a = s.automation;
+  const wallet = s.wallets.find((w) => w.id === s.active)?.label || t("Your wallet", "Твой кошелёк");
+  const fact = (label, value, detail) => h("div", { class: "live-item-fact" }, h("span", { class: "live-alert-label" }, label), h("b", {}, value), detail ? h("span", { class: "secondary small" }, detail) : null);
+  const next = x.next ? new Date(x.next) : null;
+  return [
+    h("div", { class: "live-item-head" },
+      h("span", { class: "live-item-icon" }, icon(x.every ? "repeat" : "calendar", 16)),
+      h("b", { class: "live-item-title" }, x.steps.length ? x.steps.join(" → ") : x.text),
+      toggle("item-" + x.id, !x.paused, x.paused ? t("Paused: switch on to run it again", "На паузе: включи, чтобы снова шла") : t("Switch off to pause it", "Выключи, чтобы поставить на паузу"),
+        (on) => act("taskOn", { wallet: x.id, test: on })),
+      h("button", { class: "btn small", disabled: held || x.paused, title: t("Runs within the minute, here", "Запустится в течение минуты, здесь"), onclick: () => act("runNow", { name: key }) },
+        icon("play", 12), t("Run now", "Запустить"))),
+    next ? h("div", { class: "live-item-next" + (x.paused || held ? " dim" : "") },
+      dateTile(x.next),
+      h("span", { class: "live-task-text" }, h("span", { class: "live-alert-label" }, t("NEXT RUN", "СЛЕДУЮЩИЙ ЗАПУСК")),
+        h("span", { class: "live-item-when" }, nextLine(x)),
+        h("span", { class: "secondary small" }, x.paused ? t("paused — switch it on to run", "на паузе — включи, чтобы шла") : held ? t("the whole schedule is paused", "всё расписание на паузе")
+          : x.every ? t("then again ", "потом снова ") + everyWords(x.every) : t("once, then it's off the schedule", "один раз, потом уходит из расписания")))) : null,
+    h("div", { class: "live-item-facts" },
+      fact(t("PAYS FROM", "ПЛАТИТ С"), x.automatic && a ? a.label : wallet, x.automatic ? t("the automation wallet's budget", "бюджет кошелька автоматизации") : null),
+      x.automatic ? fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("By itself", "Сама"), t(`no ${presence()}`, `без ${presence()}`))
+        : fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("Your Confirm", "Твоё «Подтвердить»"), t("each move waits on its canvas", "каждое движение ждёт на холсте"))),
+    x.steps.length > 1 ? h("div", { class: "live-item-steps" }, x.steps.map((st, i) => h("div", { class: "small" }, h("b", { class: "num" }, `${i + 1}. `), st))) : null,
+    head, h("div", { class: "live-item-runs" }, runRows),
+    h("div", { class: "live-item-foot" },
+      h("button", { class: "btn small", title: t("Attaches this task to your next message: ask about it or change it in any words", "Прикрепляет задачу к следующему сообщению: спроси о ней или измени любыми словами"),
+        onclick: () => askAbout(b) }, icon("bubble", 12), t("Ask in chat", "Спросить в чате")),
+      h("span", { class: "spacer" }),
+      h("button", { class: "link-btn loss", onclick: () => act("removeTask", { wallet: x.id }) }, icon("trash", 12), t("Delete", "Удалить"))),
   ];
 }
 
@@ -768,7 +909,10 @@ function assetBadge(coin, size) {
 function positionsBody() {
   const list = ui.state.positions;
   if (!list.length) return note(t("No open positions on Hyperliquid.", "Открытых позиций на Hyperliquid нет."));
-  return list.map((x) => {
+  return list.map(positionCard);
+}
+
+function positionCard(x) {
     const name = x.coin.split(":").pop();
     const long = x.side === "long";
     const lost = negative(x.pnl);
@@ -786,7 +930,6 @@ function positionsBody() {
           h("b", {}, (long ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + name),
           h("span", { class: "live-pos-sub" }, `${masked(x.size, "•••")} ${t("at", "по")} ${x.entry}` + (x.liquidation ? ` · ${t("liq.", "ликв.")} ${x.liquidation}` : ""))),
         h("span", { class: "live-pos-pnl num " + (lost ? "loss" : "profit") }, masked(x.pnl))));
-  });
 }
 
 // MARK: Multisig

@@ -17,7 +17,10 @@ import { rail } from "./rail.js";
 import { windowControls } from "./chrome.js";
 import { canvasView } from "./canvas.js";
 import { settingsPage, historyPage, topUpPage } from "./pages.js";
-import { welcome, phraseScreen, setProtect } from "./onboarding.js";
+import { welcome, phraseScreen, setProtect, onboarding, onboardingRunning, welcomeDone } from "./onboarding.js";
+import { lockScreen } from "./lock.js";
+// Ctrl+Q to the tray, Ctrl+Shift+Q quits, Ctrl+, opens Settings.
+import "./system.js";
 
 const app = document.getElementById("app");
 
@@ -62,11 +65,19 @@ function draw() {
   const focused = active?.id;
   const selection = focused && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
   const parts = [];
-  if (ui.overlay) {
+  // Locked: the engine sent the lock alone, and nothing else is drawn.
+  const locked = lockScreen();
+  if (locked) {
+    parts.push(h("div", { class: "ground" }), locked, windowControls());
+  } else if (ui.overlay) {
     parts.push(h("div", { class: "ground" }), ui.overlay, windowControls());
   } else if (s.phrase) {
     parts.push(h("div", { class: "ground" }), phraseScreen(), windowControls());
-  } else if (!s.wallets.length && !s.watching) {
+  } else if (onboardingRunning()) {
+    // The Mac's staged first run, wallet or not: its step is kept until it's finished.
+    setProtect(false);
+    parts.push(h("div", { class: "ground" }), onboarding(), windowControls());
+  } else if (!s.wallets.length && !s.watching && !welcomeDone()) {
     setProtect(false);
     parts.push(h("div", { class: "ground" }), welcome(), windowControls());
   } else {

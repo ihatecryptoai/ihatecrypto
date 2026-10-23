@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "browser-panel-page",
+  "description": "The page beside the canvas (webview «panel», any web page, no wallet): only the keyboard on a click, which moves focus to that page itself.",
+  "webviews": [
+    "panel"
+  ],
+  "remote": {
+    "urls": [
+      "https://*",
+      "http://*"
+    ]
+  },
+  "permissions": [
+    "allow-focus-me"
+  ]
+}

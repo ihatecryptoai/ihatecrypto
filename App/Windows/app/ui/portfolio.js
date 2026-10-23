@@ -13,6 +13,8 @@ addIcons({
   "lock.square.stack": "M5 9h14v11H5zM7.5 6h9M9.5 3.5h5M9.5 13.5v-1a2.5 2.5 0 0 1 5 0v1M9 13.5h6v4H9z",
   "arrow.triangle.swap": "M4 8h13l-3.5-3.5M20 16H7l3.5 3.5",
   "arrow.up.right.square": "M5 5h6M5 5v14h14v-6M13 4h7v7M20 4l-9 9",
+  shield: "M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6zM12 3v18",
+  key: "M14.5 9.5a4 4 0 1 1-3.5 4M11 13.5l-7 7M6 18.5l2 2M8.5 16l2 2",
 });
 
 /** Each network's card fill, the line under its name, and its color on the ring (NetworkCard.style). Light, dark. */
@@ -240,7 +242,7 @@ function logoRound(name, size, src) {
 /** One network: its logo, name, what its money does, its total; then everything on it, coins first, deposits under
  * their own name. Hyperliquid's card is dark green in both appearances. */
 function networkCard(n) {
-  const defi = n.rows.filter((r) => r.section === "defi");
+  const defi = n.rows.filter((r) => r.section === "defi" && !(n.key === "hyperliquid" && r.symbol === "HLP"));
   // Hyperliquid's «Perps» row is its margin, which the note under the name already says (the Mac shows no row); it stays
   // in the network's total.
   const byUsd = (a, b) => Number(b.usd ?? 0) - Number(a.usd ?? 0);
@@ -348,7 +350,8 @@ function positions() {
     return h("div", { class: "pf-position pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => suggest(`chart ${x.coin} day`) },
       h("div", { class: "pf-row" }, h("b", { class: "one-line" }, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`), h("span", { class: "spacer" }),
         h("b", { class: "num " + (loss ? "pos-loss" : "pos-gain") }, masked(x.pnl))),
-      h("div", { class: "pf-position-line" }, `${x.size} @ ${x.entry}` + (x.liquidation ? t(` · liq. ${x.liquidation}`, ` · ликв. ${x.liquidation}`) : "")));
+      h("div", { class: "pf-position-line" }, masked(x.summary || `${x.size} @ ${x.entry}`)),
+      x.guardian ? h("div", { class: "pf-guardian" }, icon("shield", 11), h("span", {}, x.guardian)) : null);
   });
 }
 
@@ -365,10 +368,14 @@ function automationCard() {
 }
 
 function multisigCard(m) {
+  const held = ui.state.multisigHeld?.[m.address];
+  const total = held && held.every((x) => x.usd !== null && x.usd !== undefined) ? held.reduce((a, x) => a + Number(x.usd), 0) : null;
   return h("button", { class: "pf-plain pf-lit", onclick: () => act("addBoard", { name: "multisig" }) },
     h("span", { class: "pf-badge safe" }, icon("lock.square.stack", 16)),
     h("div", { class: "pf-net-name" }, h("div", { class: "pf-net-title" }, t("Multisig", "Мультисиг")),
-      h("div", { class: "pf-net-note secondary" }, t(`Safe · any ${m.threshold} of ${m.keys.length} keys · `, `Safe · любые ${m.threshold} из ${m.keys.length} ключей · `) + m.networks.join(", "))));
+      h("div", { class: "pf-net-note secondary" }, t(`Safe · any ${m.threshold} of ${m.keys.length} keys · `, `Safe · любые ${m.threshold} из ${m.keys.length} ключей · `) + m.networks.join(", "))),
+    h("span", { class: "spacer" }),
+    h("b", { class: "pf-net-usd num" }, total === null ? "…" : amount(usd(total))));
 }
 
 /** Price alerts waiting, each with a way to drop it (AlertsCard). */
@@ -447,7 +454,9 @@ const depositPlace = (symbol) => ({ "Jupiter Lend": "jupiter", "Kamino Lend": "k
 
 /** The place open in its details board, above the plan (Workspace.detail): one at a time; a second click closes it. */
 let detail = null;
-function toggleDetail(place) { detail = detail === place ? null : place; render(); }
+export function toggleDetail(place) { detail = detail === place ? null : place; render(); }
+/** Opens a place's details (the preview's `&call=portfolio.openDetail`). */
+export function openDetail(place = "hyperliquid") { detail = place; render(); }
 
 const places = {
   solana: { logo: "sol", title: () => t("Solana wallet", "Кошелёк Solana"), about: () => t("everything you hold on Solana; every move starts here", "всё, что лежит в Solana; каждый перевод начинается отсюда"),
@@ -494,19 +503,18 @@ export function placeDetail() {
   const net = nets.find((n) => n.key === detail);
   const address = { solana: s.addresses.solana, near: s.addresses.near, jupiter: null, kamino: null }[detail] ?? (["solana", "near", "jupiter", "kamino"].includes(detail) ? null : s.addresses.evm);
   const rows = [];
-  if (net) {
+  if (net && detail !== "hyperliquid") {
     const byUsd = (a, b) => Number(b.usd ?? 0) - Number(a.usd ?? 0);
     for (const r of net.rows.filter((r) => r.section !== "defi").sort(byUsd)) rows.push(detailCoin(r, net));
     for (const r of net.rows.filter((r) => r.section === "defi")) rows.push(detailDeposit(r));
   }
   if (place.deposit) for (const n of nets) for (const r of n.rows.filter((r) => r.section === "defi" && place.deposit.includes(r.symbol))) rows.push(detailDeposit(r, n));
-  if (detail === "hyperliquid") {
-    rows.push(...s.positions.map((x) => h("button", { class: "pf-d-row pf-lit", onclick: () => suggest(`chart ${x.coin} day`) },
-      logoDisc(x.coin, 24), h("div", { class: "pf-d-name" }, h("b", {}, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`),
-        h("span", { class: "secondary" }, `${x.size} @ ${x.entry}` + (x.liquidation ? t(` · liq. ${x.liquidation}`, ` · ликв. ${x.liquidation}`) : ""))),
-      h("span", { class: "spacer" }), h("b", { class: "num" }, masked(x.pnl)), icon("chevron.right", 10))));
-    if (!s.positions.length) rows.push(h("div", { class: "pf-d-note" }, t("No open positions.", "Открытых позиций нет.")));
-  }
+  if (detail === "hyperliquid") rows.push(...hyperliquidRows());
+  const rate = { kamino: s.places?.rates?.kamino, jupiter: s.places?.rates?.jupiter, aave: s.places?.rates?.aave, morpho: s.places?.rates?.morpho }[detail];
+  if (rate !== undefined && rate !== null) rows.push(h("div", { class: "pf-d-note" },
+    detail === "morpho" ? t(`≈ ${pct(rate)} a year after the vault’s fee.`, `≈ ${pct(rate)} годовых после комиссии хранилища.`)
+      : detail === "aave" ? t(`Supplied USDC earns ≈ ${pct(rate)} a year.`, `Выданные USDC приносят ≈ ${pct(rate)} годовых.`)
+      : t(`USDC rate now ≈ ${pct(rate)} a year.`, `Ставка USDC сейчас ≈ ${pct(rate)} годовых.`)));
   if (!rows.length) rows.push(h("div", { class: "pf-d-note" }, t("Nothing here yet.", "Пока пусто.")));
   const url = explorer(detail);
   return h("div", { class: "pf-detail", "data-no-pan": "" },
@@ -521,6 +529,37 @@ export function placeDetail() {
     h("div", { class: "pf-d-actions" }, place.actions().map(([label, phrase, glyph]) =>
       h("button", { class: "pf-d-action", title: phrase === "topup" ? t("Your addresses and ways to top up", "Твои адреса и способы пополнить") : t(`Puts “${phrase}” into the chat`, `Вставит в чат «${phrase}»`),
         onclick: () => { if (phrase === "topup") { ui.view = "topup"; render(); } else suggest(phrase); } }, icon(glyph, 13), label))));
+}
+
+/** Hyperliquid's account in full (PlaceDetailBoard): its value and what's free, each HIP-3 exchange, spot USDC, the HLP
+ * vault and its lock, the positions with their stops, and whether orders go through the trading key. */
+function hyperliquidRows() {
+  const s = ui.state, hl = s.places?.hyperliquid, key = s.trading?.key;
+  const fact = (title, value, sub) => h("div", { class: "pf-d-row" }, logoDisc("HYPE", 24),
+    h("div", { class: "pf-d-name" }, h("b", { class: "one-line" }, title), sub ? h("span", { class: "secondary one-line" }, sub) : null),
+    h("span", { class: "spacer" }), h("b", { class: "num" }, value));
+  const out = [];
+  if (hl) {
+    out.push(fact(t("Account value", "Стоимость счёта"), amount(usd(hl.accountValue)), amount(t(`free to withdraw ${usd(hl.withdrawable)}`, `можно вывести ${usd(hl.withdrawable)}`))));
+    for (const d of hl.dexes || []) out.push(fact(t(`${d.dex} exchange (stocks, commodities)`, `биржа ${d.dex} (акции, сырьё)`), amount(usd(d.accountValue)), amount(t(`free ${usd(d.withdrawable)}`, `свободно ${usd(d.withdrawable)}`))));
+    if (Number(hl.spotUSDC) > 0) out.push(h("div", { class: "pf-d-row" }, logo("usdc", 24),
+      h("div", { class: "pf-d-name" }, h("b", {}, t("Spot USDC", "USDC на споте")), h("span", { class: "secondary" }, t("separate from the perp margin", "отдельно от маржи фьючерсов"))),
+      h("span", { class: "spacer" }), h("b", { class: "num" }, amount(String(hl.spotUSDC)))));
+    if (Number(hl.hlpEquity) > 0) out.push(fact(t("HLP vault", "Хранилище HLP"), amount(usd(hl.hlpEquity)),
+      hl.hlpLockedUntil ? t(`locked until ${when(hl.hlpLockedUntil)} · 4 days after a deposit`, `заблокировано до ${when(hl.hlpLockedUntil)} · 4 дня после депозита`)
+        : t("earning · withdraw any time", "приносит доход · вывести можно в любой момент")));
+  }
+  for (const x of s.positions) out.push(h("button", { class: "pf-d-row pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => suggest(`chart ${x.coin} day`) },
+    logoDisc(x.coin, 24), h("div", { class: "pf-d-name" }, h("b", {}, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`),
+      h("span", { class: "secondary" }, masked(x.summary || `${x.size} @ ${x.entry}`)), x.guardian ? h("span", { class: "secondary" }, x.guardian) : null),
+    h("span", { class: "spacer" }), h("b", { class: "num" }, masked(x.pnl)), icon("chevron.right", 10)));
+  if (!s.positions.length) out.push(h("div", { class: "pf-d-note" }, t("No open positions.", "Открытых позиций нет.")));
+  if (key?.possible) out.push(h("div", { class: "pf-d-note pf-d-key" }, icon(key.active ? "key" : "lock", 11),
+    key.active ? (key.ledger ? t("Trading key on: orders skip the Ledger, withdrawals still need it", "Торговый ключ включён: ордера идут без Ledger, выводу он по-прежнему нужен")
+      : t("Trading key on: orders skip Windows Hello, withdrawals still need it", "Торговый ключ включён: ордера идут без Windows Hello, выводу он по-прежнему нужен"))
+      : key.ledger ? t("Trading key off: every order asks for the Ledger's buttons", "Торговый ключ выключен: каждый ордер ждёт кнопок Ledger")
+      : t("Trading key paused: every order asks for Windows Hello", "Торговый ключ на паузе: каждый ордер спрашивает Windows Hello")));
+  return out;
 }
 
 function detailCoin(r, n) {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-listen-stop"
+description = "Enables the listen_stop command without any pre-configured scope."
+commands.allow = ["listen_stop"]
+
+[[permission]]
+identifier = "deny-listen-stop"
+description = "Denies the listen_stop command without any pre-configured scope."
+commands.deny = ["listen_stop"]

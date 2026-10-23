@@ -1,0 +1,14 @@
+{
+ "lock": {
+  "codeSet": true,
+  "locked": true,
+  "codeOff": false,
+  "problem": "Неверный код · осталось попыток: 3",
+  "lockAfter": 5,
+  "checking": false,
+  "offerNewCode": false,
+  "tasksRun": true
+ },
+ "russian": true,
+ "language": "auto"
+}

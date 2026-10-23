@@ -292,8 +292,8 @@ export function colorFor(text) {
 
 /** «23 Oct · 00:01». */
 export function when(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " · " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(iso), locale = ui.state?.russian ? "ru-RU" : "en-US";
+  return d.toLocaleDateString(locale, { day: "numeric", month: "short" }) + " · " + d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 }
 
 /** A menu at a point; Escape or a click outside closes it. `items`: [label, run] or null for a divider. */

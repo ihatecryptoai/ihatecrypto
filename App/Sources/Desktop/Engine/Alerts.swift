@@ -2,8 +2,8 @@ import Foundation
 import IhatecryptoCore
 
 /// «Tell me when ETH is above 4000», and «when ETH is below 2,680: long ETH leverage 3x»: the level is checked against
-/// Hyperliquid's mark at every refresh while ihatecrypto is open. A plain alert says so once and is done; one with steps
-/// reads them as if typed, so a move among them becomes a card that waits for Confirm, never a signature by itself.
+/// Hyperliquid's mark every 10 s while ihatecrypto is open. A plain alert says so once and is done; one with steps
+/// runs them as a task due now, so a move among them becomes a card that waits for Confirm, never a signature by itself.
 extension Engine {
     func alertText(_ a: PriceAlert) -> String {
         "\(IntentParser.pretty(a.coin)) \(a.above ? say("above", "выше") : say("below", "ниже")) \(Fmt.price(a.price))"
@@ -34,8 +34,8 @@ extension Engine {
             }
             alerts.append(a)
             pin(Board(kind: "alerts", title: "alerts"))
-            reply(say("Set: \(alertText(a)) (now \(Fmt.price(mark))). It's checked every minute while ihatecrypto is open",
-                      "Поставил: \(alertText(a)) (сейчас \(Fmt.price(mark))). Проверяю раз в минуту, пока ihatecrypto открыт")
+            reply(say("Set: \(alertText(a)) (now \(Fmt.price(mark))). It's checked every 10 s while ihatecrypto is open",
+                      "Поставил: \(alertText(a)) (сейчас \(Fmt.price(mark))). Проверяю каждые 10 с, пока ihatecrypto открыт")
                   + (a.steps == nil ? "." : say("; when it fires, its moves come as cards for Confirm.", "; когда сработает, действия придут карточками на подтверждение.")), note: note)
         }
     }
@@ -46,11 +46,34 @@ extension Engine {
         guard !due.isEmpty else { return }
         alerts.removeAll { a in due.contains { $0.id == a.id } }
         for a in due {
+            // Its steps run as a task due now, as on the Mac: once nothing else is going on (never over a card waiting
+            // for Confirm), from the wallet that's on, each move waiting for Confirm — never off the automation wallet.
+            if let steps = a.steps {
+                var task = ScheduledTask(steps: steps, next: Date(), every: nil,
+                                         because: "\(IntentParser.pretty(a.coin)) \(a.above ? say("went above", "выше") : say("went below", "ниже")) \(Fmt.price(a.price))")
+                task.fromActive = true
+                tasks.append(task)
+                continue
+            }
             let text = "🔔 " + alertText(a) + say(" — now ", " — сейчас ") + Fmt.price(markets[a.coin]?.markPx ?? a.price)
-            out.event("notify", ["title": say("Price alert", "Ценовое оповещение"), "body": text])
-            reply(text, note: "price alert")
-            for step in a.steps ?? [] where !(await runCanonical(step, userText: step)) {
-                reply(say("“\(step)” didn't run.", "«\(step)» не выполнилось."), note: "price alert")
+            notify(.alerts, say("Price alert", "Ценовое оповещение"), text)
+            reply(text + say(" The alert is done; set another any time.", " Оповещение сработало; поставь новое, когда захочешь."), note: "price alert")
+        }
+        await runDueTasks()
+    }
+
+    /// The alerts' prices every 10 s while there are any, as the Mac checks them; the block's «now · away» follows.
+    static var watchingAlerts = false
+    func watchAlerts() {
+        guard !Self.watchingAlerts else { return }
+        Self.watchingAlerts = true
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(10))
+                guard !alerts.isEmpty, let m = try? await Hyperliquid.markets() else { continue }
+                markets = m
+                await checkAlerts()
+                changed()
             }
         }
     }

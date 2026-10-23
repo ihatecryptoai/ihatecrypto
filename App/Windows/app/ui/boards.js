@@ -5,6 +5,9 @@
 
 import { ui, act, engine, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence } from "./core.js";
 import { liveBlock, liveKinds, liveTitle } from "./live.js";
+import { isAttached } from "./chat.js";
+// A namespace, so a step's «Open <place>» shows only once portfolio.js exports toggleDetail (its place details board).
+import * as portfolio from "./portfolio.js";
 
 addIcons({
   hello: "M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M9 9.5v1M15 9.5v1M9 15c1.6 1.4 4.4 1.4 6 0",
@@ -33,14 +36,32 @@ export function planColumn() {
   const boards = ui.state.boards;
   // The newest move is shown whole, as the Mac's board of the canvas; the ones before it fold to pills.
   const newest = boards.find((b) => b.kind === "move")?.id;
-  const items = boards.length ? boards.map((b) => {
-    const el = drawBoard(b, b.id === newest);
-    if (!seen.has(b.id)) { seen.add(b.id); if (seenReady) el.classList.add("fresh"); }
-    return el;
-  }) : [starter()];
+  const { chart, plan, at } = chartPlace(boards);
+  const fade = (b, el) => { if (!seen.has(b.id)) { seen.add(b.id); if (seenReady) el.classList.add("fresh"); } return el; };
+  const items = boards.length ? boards.filter((b) => b !== chart || at === "column").map((b) =>
+    fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))) : [starter()];
   // What was on the canvas when it opened is already there; only what comes after fades in.
   setTimeout(() => { seenReady = true; }, 0);
-  return h("div", { class: "route-plan" }, items);
+  const column = h("div", { class: "route-plan" }, items);
+  return at === "beside" ? h("div", { class: "route-plan-row" }, column, h("div", { class: "route-beside" }, fade(chart, chartBlock(chart)))) : column;
+}
+
+/** Where the newest chart goes (the Mac's chartPlace, the owner's picks, 2026-10-23): a trade plan of its coin waiting or
+ * running is drawn on it («plan»); beside anything else on the canvas, so no Confirm sits above the chart; on its own,
+ * in the column. */
+function chartPlace(boards) {
+  const chart = boards.find((b) => b.kind === "chart" && b.chart);
+  if (!chart) return {};
+  const s = ui.state, live = (b) => s.card?.id === b.id || s.runningBoard === b.id;
+  const plan = boards.find((b) => b.kind === "move" && b.trade && live(b) && sameCoin(chart.chart, b.trade.coin));
+  if (plan) return { chart, plan, at: "plan" };
+  return { chart, at: boards.some((b) => b !== chart && b.kind !== "chart") ? "beside" : "column" };
+}
+
+/** A chart's coin is the plan's: by Hyperliquid's name, or for a chart drawn before it had one, by its title. */
+function sameCoin(c, coin) {
+  if (c.coin) return c.coin.toLowerCase() === coin.toLowerCase();
+  return c.title.split("·")[0].trim().split(" ")[0].toUpperCase() === coin.replace(/^.*:/, "").toUpperCase();
 }
 
 export function blockTitle(b) {
@@ -56,7 +77,7 @@ function drawBoard(b, newest) {
 
 /** A block's frame: the Mac's board card with its glyph and title, its own buttons and the close; right-click brings it into the chat. */
 export function blockFrame(b, title, body, { extra, width, tint, icon: glyph } = {}) {
-  const el = h("div", { class: "route-block" + (ui.attached === b.id ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, title) },
+  const el = h("div", { class: "route-block" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, title) },
     h("div", { class: "route-block-head" }, glyph ? h("span", { class: "route-block-icon" }, icon(glyph, 16)) : null,
       h("b", { class: "route-block-title one-line" }, title), h("span", { class: "spacer" }), extra || null,
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
@@ -69,7 +90,7 @@ export function blockFrame(b, title, body, { extra, width, tint, icon: glyph } =
 /** Right-click on any block (BlockMenu): the chat with it attached, or «What's going on here?» straight away. */
 function blockMenu(e, b, title, more = []) {
   e.preventDefault();
-  const on = ui.attached === b.id, s = ui.state;
+  const on = isAttached(b.id), s = ui.state;
   menu(e, [
     on ? [[icon("xmark.circle", 14), t("Take out of the chat", "Убрать из чата")], () => { ui.attached = null; render(); }]
       : [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attach(b)],
@@ -100,7 +121,7 @@ function fmtDate(iso) {
 
 // MARK: A move
 
-function moveBoard(b, newest) {
+function moveBoard(b, newest, onChart) {
   const s = ui.state;
   // Running wins over the board's own state and the card: the engine can send both for a moment.
   const runningHere = s.runningBoard === b.id;
@@ -120,13 +141,12 @@ function moveBoard(b, newest) {
 
   if (finished && !newest) {
     // An earlier move: its pill, and its route under it once opened.
-    return h("div", { class: "route-move" + (ui.attached === b.id ? " route-attached" : ""), oncontextmenu: menu },
+    return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
       pill(b, open, toggle), open ? route : null, open ? notes(b) : null);
   }
   const status = waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
     : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"];
-  return h("div", { class: "route-move" + (ui.attached === b.id ? " route-attached" : ""), oncontextmenu: menu },
-    h("div", { class: "route-move-head" },
+  const head = h("div", { class: "route-move-head" },
       h("span", { class: "route-move-title" }, b.title),
       h("span", { class: "route-status-chip " + status[1] }, status[0]),
       runningHere ? h("span", { class: "route-rc-spinner" }) : null,
@@ -134,7 +154,9 @@ function moveBoard(b, newest) {
       // «Add block» and Windows' caption buttons.
       waitingHere ? h("div", { class: "btns route-nowrap" },
         h("button", { class: "btn route-large", onclick: () => act("cancel") }, t("Cancel", "Отмена")),
-        h("button", { class: "btn primary route-large", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("hello"), s.card.confirm)) : null),
+        h("button", { class: "btn primary route-large", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("hello"), s.card.confirm)) : null);
+  return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
+    onChart ? planChart(b, onChart, head) : head,
     finished ? outcome(b) : null,
     draft ? multisigSetup(draft) : route,
     waitingHere && s.card.warnings.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
@@ -147,7 +169,10 @@ function moveBoard(b, newest) {
 function outcome(b) {
   const [text, cls, mark] = { done: [t("Executed", "Выполнено"), "profit", true], failed: [t("Failed", "Не вышло"), "loss", false] }[b.state]
     || [t("Not signed", "Не подписано"), "secondary", null];
-  return h("div", { class: "route-outcome " + cls }, statusMark(mark), text + " · " + fmtDate(b.at));
+  const retry = b.state === "failed" && ui.state.retryBoard === b.id
+    ? h("button", { class: "btn small route-retry", disabled: ui.state.thinking || !!ui.state.runningBoard, onclick: () => act("retry") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
+    : null;
+  return h("div", { class: "route-outcome " + cls }, statusMark(mark), text + " · " + fmtDate(b.at), retry);
 }
 
 /** The move's own lines under its route (what's signed, how it went), as the Mac's route footer. */
@@ -179,6 +204,7 @@ function moveText(b) {
 /** Where a step is: waiting for Confirm, done, the one a running move is on (or waiting for Windows Hello), still to come,
  * failed, or plain when nothing was signed. */
 function stepState(b, i, waitingHere, runningHere) {
+  if (b.steps?.[i]?.status === "then") return "next";
   if (runningHere) {
     const current = currentStep(b.steps, ui.state.running?.lines || []);
     return i < current ? "done" : i > current ? "next" : ui.state.signer.waiting ? "touch" : "now";
@@ -503,14 +529,17 @@ function stepDetails(b, steps, i, state, notch) {
       h("div", { class: "route-details-name" }, h("b", { class: "one-line" }, detailsName(step.label)),
         h("span", { class: "one-line" }, t(`Step ${i + 1} of ${steps.length} · ${step.title}`, `Шаг ${i + 1} из ${steps.length} · ${step.title}`))),
       h("span", { class: "spacer" }),
+      openPlace(step),
       steps.length > 1 ? [h("button", { class: "icon-btn", title: t("Previous step", "Предыдущий шаг"), onclick: () => go(-1) }, icon("chevron.left", 13)),
         h("button", { class: "icon-btn", title: t("Next step", "Следующий шаг"), onclick: () => go(1) }, icon("chevron.right", 13))] : null,
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: close }, icon("xmark", 13))),
     can && can.amount != null ? amountField(can, hint, save) : null,
     can && can.ways ? ways(can.quotes) : null,
+    can && can.stock ? stockWays(can.quotes) : null,
     step.money ? h("div", { class: "route-money-box route-big" }, h("div", { class: "route-money-head" }, state === "done" ? t("MONEY · WAS → NOW", "ДЕНЬГИ · БЫЛО → СТАЛО") : t("MONEY · NOW → AFTER", "ДЕНЬГИ · СЕЙЧАС → ПОСЛЕ")),
       moneyLine(step.money)) : null,
-    !can && step.lines.length ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " ")))) : null,
+    !can && (step.lines.length || b.note) ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " "))),
+      b.note ? h("div", { class: "route-details-note" }, b.note) : null) : null,
     can && edit.problem ? h("div", { class: "route-edit-problem loss" }, icon("exclamationmark.triangle", 13), edit.problem) : null,
     h("div", { class: "route-details-buttons" },
       h("button", { class: "btn route-bordered route-large route-ask", title: t("Attaches this block to your next message", "Прикрепит этот блок к следующему сообщению"), onclick: () => { close(); attach(b); } },
@@ -521,6 +550,33 @@ function stepDetails(b, steps, i, state, notch) {
         : h("button", { class: "btn route-bordered route-large", onclick: close }, t("Close", "Закрыть"))));
   el.querySelector(".route-notch").style.left = Math.min(Math.max(notch - 7, 24), 520 - 38) + "px";
   return el;
+}
+
+/** The place a step's logo names opens its own details (the Mac's Openable.place(logo:)): «Open Kamino». */
+const OPENABLE = { sol: "solana", hype: "hyperliquid", jup: "jupiter", kamino: "kamino", near: "near", robinhood: "robinhood", morpho: "morpho" };
+function openPlace(step) {
+  const where = (step.label.split("·")[1] || "").trim();
+  const place = OPENABLE[logoKey(where) || logoKey(where.split(" ")[0])];
+  if (!place || typeof portfolio.toggleDetail !== "function") return null;
+  const name = place[0].toUpperCase() + place.slice(1);
+  return h("button", { class: "btn route-bordered route-small-btn", title: t("The place's own details", "Подробности этого места"), onclick: () => portfolio.toggleDetail(place) },
+    t(`Open ${name}`, `Открыть ${name}`));
+}
+
+/** «ROUTES · BEST IS TAKEN»: a Robinhood Chain trade's ways as quoted now, the best marked, what the others leave less;
+ * Confirm takes the best. */
+function stockWays(quotes) {
+  const name = (w) => (w === "v4" ? "Uniswap v4" : w === "v3" ? "Uniswap v3" : t("Relay swap", "Обмен через Relay"));
+  return h("div", { class: "route-edit" },
+    h("div", { class: "route-edit-head" }, t("ROUTES · BEST IS TAKEN", "ПУТИ · БЕРЁМ ЛУЧШИЙ")),
+    quotes && quotes.length ? [
+      quotes.map((q, i) => h("div", { class: "route-way route-stock" + (i === 0 ? " route-on" : "") },
+        h("span", { class: "route-way-logos" }, logoRound(q.way === "relay" ? "relay" : "uni", 24)),
+        h("span", { class: "route-way-text" }, h("b", {}, name(q.way)), h("span", { class: "one-line" }, `≈ ${q.gets}` + (q.less ? t(` · ${q.less} less`, ` · на ${q.less} меньше`) : ""))),
+        h("span", { class: "spacer" }),
+        i === 0 ? h("span", { class: "route-way-badge" }, t("Best", "Лучший")) : null)),
+      h("div", { class: "route-edit-foot" }, t("Quoted again right before signing; the price must sit within 5% of the market.", "Котировка повторится перед подписью; цена должна быть не дальше 5% от рынка.")),
+    ] : h("div", { class: "route-edit-foot" }, quotes ? t("No way quotes it right now.", "Сейчас ни один путь не даёт котировку.") : t("Comparing Uniswap v4, v3 and Relay’s swap…", "Сравниваю Uniswap v4, v3 и обмен Relay…")));
 }
 
 /** «BRIDGE · RELAY» → «Bridge · Relay» (StepDetails.pretty). */
@@ -811,24 +867,34 @@ function resultBlock(b) {
 
 const RANGES = [["day", "24h"], ["week", "7d"], ["month", "30d"]];
 
-/** A coin's closes over the range, as the Mac's chart board: the price now (or under the pointer), the move, the range
- * picker, the line with its fill, the low and high. Drawn from numbers only. */
-function chartBlock(b) {
+/** A chart's moving parts (AssetPrice + AssetChart): the price now or under the pointer, the move, the range picker and
+ * the line with its fill; with a plan's levels across it and its loss and gain as bands (ChartZone), the domain
+ * stretched to show them, as the Mac's. Drawn from numbers only. */
+function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
   const c = b.chart, pts = c.closes;
   const coin = c.title.split("·")[0].trim();
-  const range = /24|day|день|сут/i.test(c.title) ? "day" : /30|month|мес/i.test(c.title) ? "month" : "week";
+  // The engine's titles: «ETH · 24 h», «ETH · 7 days», «ETH · 30 days» («7 days» has «day» in it, so day is what's left).
+  const range = /30|month|мес/i.test(c.title) ? "month" : /\b7\b|week|недел/i.test(c.title) ? "week" : "day";
   const up = !String(c.change).trim().startsWith("-") && !String(c.change).trim().startsWith("−");
-  const W = 438, H = 190;
-  const min = Math.min(...pts), max = Math.max(...pts), pad = Math.max((max - min) * 0.1, max * 0.002) || 1;
-  const lo = min - pad, span = max + pad - lo;
-  const X = (i) => (i / Math.max(pts.length - 1, 1)) * W, Y = (p) => H - ((p - lo) / span) * H;
+  const W = 438;
+  const lo0 = Math.min(...pts), hi0 = Math.max(...pts);
+  const shown = levels.filter((l) => l.price > lo0 * 0.85 && l.price < hi0 * 1.15);
+  const bottom = Math.min(lo0, ...shown.map((l) => l.price)), top = Math.max(hi0, ...shown.map((l) => l.price));
+  const pad = Math.max((top - bottom) * 0.1, top * 0.002) || 1;
+  const lo = bottom - pad, span = top + pad - lo;
+  const X = (i) => (i / Math.max(pts.length - 1, 1)) * W, Y = (p) => H - ((Math.min(Math.max(p, lo), lo + span) - lo) / span) * H;
   const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(p).toFixed(1)}`).join("");
   const gid = "fill-" + b.id;
   const dot = svg("circle", { r: 4, class: "route-chart-dot", cx: -100, cy: -100 });
   const rule = svg("path", { d: "", class: "route-chart-rule" });
   const plot = svg("svg", { class: "route-chart-plot " + (up ? "route-up" : "route-down"), "data-no-pan": "", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" },
     svg("defs", {}, svg("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, svg("stop", { offset: "0", class: "route-grad-top" }), svg("stop", { offset: "1", class: "route-grad-bottom" }))),
-    svg("path", { d: line + `L${W} ${H}L0 ${H}Z`, fill: `url(#${gid})` }), svg("path", { d: line, class: "route-chart-line" }), rule, dot);
+    // Under the price: the bands, then the line, then the levels over it.
+    zones.map((z) => { const y1 = Y(Math.max(z.from, z.to)), y2 = Y(Math.min(z.from, z.to)); return svg("rect", { x: 0, y: y1, width: W, height: Math.max(y2 - y1, 0), class: "route-zone route-" + z.tint }); }),
+    svg("path", { d: line + `L${W} ${H}L0 ${H}Z`, fill: `url(#${gid})` }), svg("path", { d: line, class: "route-chart-line" }),
+    shown.map((l) => svg("path", { d: `M0 ${Y(l.price).toFixed(1)}H${W}`, class: "route-level route-" + l.tint + (l.dashed ? " route-dashed" : "") })),
+    rule, dot);
+  plot.style.height = H + "px";
   const priceEl = h("span", { class: "route-chart-price" }, price(pts.at(-1)));
   const changeEl = h("span", { class: "route-chart-change " + (up ? "profit" : "loss") }, c.change + " · " + rangeTitle(range));
   plot.addEventListener("mousemove", (e) => {
@@ -840,20 +906,59 @@ function chartBlock(b) {
     priceEl.textContent = price(pts[i]);
   });
   plot.addEventListener("mouseleave", () => { dot.setAttribute("cx", -100); rule.setAttribute("d", ""); priceEl.textContent = price(pts.at(-1)); });
+  // A level's name and price over its line, in its color (the Mac's annotation): HTML, so the stretched drawing doesn't stretch it.
+  const area = h("div", { class: "route-chart-area" }, plot,
+    shown.map((l) => { const el = h("span", { class: "route-level-label route-" + l.tint }, `${l.label} ${price(l.price)}`); el.style.top = `calc(${(Y(l.price) / H) * 100}% - 15px)`; return el; }));
+  const pick = h("div", { class: "route-chart-range" }, RANGES.map(([key, label]) => h("button", { class: key === range ? "route-on" : "", onclick: () => key !== range && act("send", { text: `chart ${coin} ${key}` }) }, label)));
+  return { coin, range, up, area, priceEl, changeEl, pick };
+}
+
+/** A coin's closes over the range, as the Mac's chart board: the price now (or under the pointer), the move, the range
+ * picker, the line with its fill, the low and high. */
+function chartBlock(b) {
+  const c = b.chart;
+  const { coin, range, up, area, priceEl, changeEl, pick } = chartParts(b);
   const badge = logo(coin, 38);
   badge.classList.add("route-asset-badge");
-  const el = h("div", { class: "route-block route-chart-block" + (ui.attached === b.id ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
+  const el = h("div", { class: "route-block route-chart-block" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
     h("div", { class: "route-asset-head" }, badge,
       h("div", { class: "route-asset-name" }, h("b", {}, coin), h("span", {}, t("Hyperliquid chart", "График Hyperliquid") + " · " + fmtDate(b.at))),
       h("span", { class: "spacer" }),
       h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => act("send", { text: `chart ${coin} ${range}` }) }, icon("arrow.clockwise")),
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
-    h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }),
-      h("div", { class: "route-chart-range" }, RANGES.map(([key, label]) => h("button", { class: key === range ? "route-on" : "", onclick: () => key !== range && act("send", { text: `chart ${coin} ${key}` }) }, label)))),
-    plot,
+    h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick),
+    area,
     h("div", { class: "route-tiles" },
       tile(t("Low", "Минимум"), c.low), tile(t("High", "Максимум"), c.high), tile(t("Change", "Изменение"), c.change, up ? "profit" : "loss")));
   return el;
+}
+
+/** A trade plan drawn on its coin's chart (the Mac's PlanChartBoard, the owner's pick C): the plan's title with Cancel
+ * and Confirm on top, the entry, stop and take across the line with the loss and the gain between them, and the trade's
+ * numbers under it; the route cards follow under the board. */
+function planChart(b, chart, head) {
+  const p = b.trade;
+  const levels = [
+    ...p.alerts.map((price) => ({ price, label: t("Alert", "Оповещение"), tint: "alert", dashed: true })),
+    { price: p.entry, label: p.limit ? t("Limit", "Лимит") : t("Entry ≈", "Вход ≈"), tint: "entry", dashed: true },
+    { price: p.stop, label: t("Stop", "Стоп"), tint: "loss" },
+    ...(p.take != null ? [{ price: p.take, label: t("Take", "Тейк"), tint: "profit" }] : []),
+  ];
+  const zones = [{ from: p.entry, to: p.stop, tint: "loss" }, ...(p.take != null ? [{ from: p.entry, to: p.take, tint: "profit" }] : [])];
+  const { area, priceEl, changeEl, pick, coin, range } = chartParts(chart, { levels, zones, H: 250 });
+  const side = p.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт");
+  return h("div", { class: "route-block route-chart-block route-plan-chart", "data-no-pan": "" },
+    head,
+    h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick,
+      h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => act("send", { text: `chart ${coin} ${range}` }) }, icon("arrow.clockwise")),
+      h("button", { class: "icon-btn", title: t("Hide the chart; the plan stays", "Скрыть график; план останется"), onclick: () => act("closeBoard", { board: chart.id }) }, icon("xmark"))),
+    area,
+    h("div", { class: "route-tiles route-five" },
+      tile(`${side} · ${p.leverage}×`, `${p.notional} · ${p.size}`),
+      tile(t("Margin", "Маржа"), p.margin),
+      tile(t("Liquidation", "Ликвидация"), p.liquidation),
+      tile(t("At the stop", "На стопе"), p.lossAtStop + (p.lossPct ? ` · ${p.lossPct}%` : ""), "loss"),
+      tile(t("At the take", "На тейке"), p.profitAtTake, "profit")));
 }
 
 function rangeTitle(range) {

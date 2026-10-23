@@ -20,6 +20,12 @@
     "allow-update-check",
     "allow-update-install",
     "allow-listen",
-    "allow-open-browser"
+    "allow-open-browser",
+    "allow-hide-main",
+    "allow-quit-app",
+    "allow-open-notification-settings",
+    "allow-focus-me",
+    "allow-listen-live",
+    "allow-listen-stop"
   ]
 }

@@ -288,19 +288,81 @@ enum SeedStore {
     static func endSession() { Vault.endSession() }
 }
 
-/// No passcode on Windows: Windows Hello itself asks for the PIN, the face or the fingerprint.
+/// The app's 6-digit passcode, as the Mac's: it opens the lock screen. Windows Hello signs every move here, so the code
+/// never does. Kept in code.json under DPAPI: a salt, the code stretched with it (PBKDF2-HMAC-SHA256) and the wrong tries
+/// in a row. A try is counted before it is checked, so tries side by side or a signer stopped mid-try get no extra
+/// guess; the fifth wrong one in a row deletes it all, and then only Windows Hello opens the app.
+/// ponytail: a program of this Windows user can open code.json (DPAPI is the user's) and guess the 10⁶ codes offline —
+/// the code hides the window from a person at the PC, as on a Mac; a TPM key with a PIN (NCrypt's Platform Crypto
+/// Provider, the TPM's own lockout) if it must stand against such a program.
 enum CodeStore {
     static let tries = 5
-    static var isSet: Bool { false }
+    static let rounds = 20_000
+    /// Windows Hello always asks before a signature: a code set here only opens the app.
+    static var canSign: Bool { false }
     static var signs: Bool { false }
+    /// What opens the app without the code.
+    static let fallback = "Windows Hello"
     enum Entered { case right(SeedStore.Confirmation), wrong(left: Int), off, uncounted }
 
-    static func set(_ code: String, presence: SeedStore.Confirmation?) throws {
-        throw WalletError("On Windows, Windows Hello asks for your PIN, face or fingerprint: ihatecrypto keeps no passcode of its own.")
+    struct Record: Codable {
+        var salt: Data
+        var hash: Data
+        var failures: Int
     }
 
-    static func enter(_ code: String) -> Entered { .off }
-    static func clear() {}
+    /// One code operation at a time — a try, a new code, turning it off — so none sees another half done.
+    private static let entering = NSRecursiveLock()
+
+    private static func record() -> Record? {
+        guard let sealed = Vault.read("code.json"), let data = try? Vault.unprotect(sealed) else { return nil }
+        return try? JSONDecoder().decode(Record.self, from: data)
+    }
+
+    private static func save(_ record: Record) -> Bool {
+        (try? Vault.write("code.json", Vault.protect(JSONEncoder().encode(record)))) != nil
+    }
+
+    /// A damaged or unreadable file counts as no code: the lock then opens only with Windows Hello, never without it.
+    static var isSet: Bool { record() != nil }
+
+    static func stretch(_ code: String, _ salt: Data) -> Data {
+        let key = SymmetricKey(data: Data(code.utf8))
+        var u = Data(HMAC<SHA256>.authenticationCode(for: salt + Data([0, 0, 0, 1]), using: key))
+        var t = [UInt8](u)
+        for _ in 1..<rounds {
+            u = Data(HMAC<SHA256>.authenticationCode(for: u, using: key))
+            for (i, b) in u.enumerated() { t[i] ^= b }
+        }
+        return Data(t)
+    }
+
+    /// A new code in place of any earlier one (the signer asked Windows Hello first).
+    static func set(_ code: String, presence: SeedStore.Confirmation?) throws {
+        try entering.withLock {
+            var rng = SystemRandomNumberGenerator()
+            let salt = Data((0..<16).map { _ in UInt8.random(in: 0...255, using: &rng) })
+            guard save(Record(salt: salt, hash: stretch(code, salt), failures: 0)) else { throw WalletError("Windows didn't save the passcode.") }
+        }
+    }
+
+    static func enter(_ code: String) -> Entered {
+        entering.withLock {
+            guard var r = record(), r.failures < tries else { clear(); return .off }
+            r.failures += 1
+            guard save(r) else { return .uncounted }
+            let typed = Passcode.problem(code) == nil ? stretch(code, r.salt) : Data()
+            if typed.count == r.hash.count, zip(typed, r.hash).reduce(0, { $0 | ($1.0 ^ $1.1) }) == 0 {
+                r.failures = 0
+                _ = save(r)
+                return .right(SeedStore.Confirmation())
+            }
+            guard r.failures < tries else { clear(); return .off }
+            return .wrong(left: tries - r.failures)
+        }
+    }
+
+    static func clear() { entering.withLock { Vault.remove("code.json") } }
 }
 
 /// Addresses outside the wallet the user allowed money to go to, per wallet, each confirmed in person once.

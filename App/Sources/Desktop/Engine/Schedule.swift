@@ -2,6 +2,7 @@ import EVMChain
 import Foundation
 import IhatecryptoCore
 import TradeExecution
+import WalletCore
 
 /// One run of a scheduled task, for the Schedule's History tab (the Mac's activities with a schedule): when, what, how it
 /// ended and the canvas it ran on.
@@ -13,6 +14,8 @@ nonisolated struct ScheduleRun: Codable, Equatable {
     /// What it said last: the row's tooltip.
     var line: String?
     var canvas: String?
+    /// The task's id: its own canvas lists its runs (the Mac's ScheduleItemBoard «LAST RUNS»).
+    var task: String?
 }
 
 /// The automation wallet's budget as the Schedule shows it (the Mac's AutomationBudget and the numbers drawn from it):
@@ -25,6 +28,8 @@ nonisolated struct AutomationBudget: Encodable, Equatable {
     var sol: Decimal?
     var tokens: [Coin] = []
     var evm: [String: Decimal] = [:]
+    /// Circle's USDC at its NEAR account.
+    var near: Decimal?
     /// The USDC everywhere; Solana's and the EVM networks' money in dollars, for the Wallet tab's rows.
     var total: Decimal = 0
     var solanaUSD: Decimal?
@@ -110,8 +115,12 @@ extension Engine {
                 }
             }
         }
+        if let account = w.near, let usdc = Stablecoins.byNetwork["near"]?.first(where: { $0.symbol == "USDC" })?.address,
+           let held = await Holdings.near(account: account) {
+            b.near = held.first { $0.contract == usdc }?.amount ?? 0
+        }
         b.evmUSD = b.evm.values.reduce(0, +)
-        b.total = (b.solana ?? 0) + b.evmUSD
+        b.total = (b.solana ?? 0) + b.evmUSD + (b.near ?? 0)
         automationBudget = b
     }
 
@@ -173,8 +182,18 @@ extension Engine {
             let away = Fmt.num(abs(((a.price - px) / px * 100).rounded(1, .plain)))
             return say("now \(Fmt.price(px)) · \(away)% away", "сейчас \(Fmt.price(px)) · до цели \(away)%")
         }
+        // A trade plan reads as the plan it becomes («THEN · PLAN ON HYPERLIQUID»); anything else as the command it is.
+        let known = Set(markets.keys)
+        let blocks: [Snapshot.AlertStep] = (a.steps ?? []).map { step in
+            guard IntentParser.startsPlan(step, markets: known), let t = IntentParser.apply(step, to: TradeIntent(), markets: known) else {
+                return .init(plan: false, coin: nil, title: step, line: nil)
+            }
+            let rest = t.changes(from: TradeIntent()).filter { !$0.hasPrefix("market") && $0 != "long" && $0 != "short" && !$0.hasPrefix("leverage") }
+            return .init(plan: true, coin: t.asset, title: "\(t.side == .long ? say("Long", "Лонг") : say("Short", "Шорт")) \(IntentParser.pretty(t.asset))\(t.leverage.map { " ×" + Fmt.num($0) } ?? "")",
+                         line: rest.isEmpty ? nil : rest.joined(separator: " · "))
+        }
         return .init(id: a.id.uuidString, text: alertText(a), coin: a.coin,
-                     when: "\(name) \(a.above ? say("above", "выше") : say("below", "ниже")) \(Fmt.price(a.price))", now: now, steps: a.steps)
+                     when: "\(name) \(a.above ? say("above", "выше") : say("below", "ниже")) \(Fmt.price(a.price))", now: now, steps: a.steps, blocks: blocks)
     }
 
     /// «Pause schedule»: nothing scheduled runs until it's resumed; each task keeps its own switch and its next time.
@@ -188,7 +207,11 @@ extension Engine {
         guard settings.schedulePaused != true, pending == nil, running == nil, !thinking else { return }
         guard var task = tasks.first(where: { $0.paused != true && $0.next <= Date() }) else { return }
         tasks.removeAll { $0.id == task.id }
-        if task.advance() { tasks.append(task) }
+        if task.advance() {
+            // «Run now» on a repeating one keeps its next run as it was (the Mac's TaskRun.kept).
+            if let kept = Self.keptNext.removeValue(forKey: task.id.uuidString), kept > Date() { task.next = kept }
+            tasks.append(task)
+        }
         let started = Date(), mark = messages.count, canvas = canvasID
         var ran = true, stepFailed = false
         defer { logRun(task, started: started, mark: mark, canvas: canvas, ran: ran, failed: stepFailed) }
@@ -199,12 +222,13 @@ extension Engine {
             for step in task.steps { _ = await runCanonical(step, userText: step) }
             ran = !quietCheck
             if !quietCheck, let said = messages.dropFirst(mark).last(where: { !$0.fromUser }) {
-                out.event("notify", ["title": say("Check", "Проверка"), "body": String(said.text.prefix(200))])
+                notify(.alerts, say("Check", "Проверка"), String(said.text.prefix(200)))
             }
             return
         }
-        let text = "⏰ " + task.steps.joined(separator: " then ")
-        out.event("notify", ["title": say("Scheduled", "По расписанию"), "body": text])
+        // A price alert's steps come as a task due now: said with what fired it.
+        let text = (task.because.map { "🔔 \($0): " } ?? "⏰ ") + task.steps.joined(separator: " then ")
+        notify(usesAutomation(task) && automationWallet != nil && task.movesMoney ? .moves : .signature, say("Scheduled", "По расписанию"), text)
         reply(text, note: "schedule")
         if usesAutomation(task), let automation = automationWallet, task.movesMoney {
             await runOnAutomation(task, automation)
@@ -222,7 +246,76 @@ extension Engine {
         let failed = stepFailed || boards.contains { $0.kind == "move" && $0.at >= started && $0.state == "failed" }
         let line = canvas == canvasID ? messages.dropFirst(mark).last { !$0.fromUser }?.text : nil
         scheduleRuns.append(ScheduleRun(at: started, title: task.steps.joined(separator: " then "), result: failed ? "failed" : ran ? "done" : "nothing",
-                                        line: line.map { String($0.prefix(300)) }, canvas: canvas))
+                                        line: line.map { String($0.prefix(300)) }, canvas: canvas, task: task.id.uuidString))
         if scheduleRuns.count > 100 { scheduleRuns.removeFirst(scheduleRuns.count - 100) }
+    }
+}
+
+// MARK: A scheduled item's own canvas
+
+/// A task (or an open position) on a canvas of its own, as the Mac's ScheduleItemBoard: made the first time, then the
+/// same one; its block on top, the chat on it can change it; Close goes back to the canvas it was opened from.
+extension Engine {
+    /// «Run now» on a repeating task: its next run, put back after this one.
+    static var keptNext: [String: Date] = [:]
+    /// The canvas an item's canvas was opened from.
+    static var scheduleReturn: String?
+
+    /// The open canvas's item: «task:<id>» or «perp:<coin>».
+    var scheduleKey: String? { canvases.indices.contains(canvasIndex) ? canvases[canvasIndex].schedule : nil }
+
+    func scheduleTitle(_ key: String) -> String {
+        if key.hasPrefix("perp:") {
+            let coin = String(key.dropFirst(5))
+            let long = positions.first { $0.coin == coin }.map { $0.size > 0 } ?? true
+            return "\(long ? say("Long", "Лонг") : say("Short", "Шорт")) \(IntentParser.pretty(coin))"
+        }
+        return tasks.first { "task:\($0.id)" == key }?.steps.joined(separator: " → ") ?? say("Scheduled task", "Задача по расписанию")
+    }
+
+    func openSchedule(_ key: String) throws {
+        guard key.hasPrefix("task:") || key.hasPrefix("perp:") else { throw WalletError("Unknown scheduled item «\(key)».") }
+        if scheduleKey == nil { Self.scheduleReturn = canvasID }
+        if let c = canvases.first(where: { $0.schedule == key }) {
+            try openCanvas(c.id)
+        } else {
+            try newCanvas()
+            canvases[canvasIndex].title = String(scheduleTitle(key).prefix(60))
+            canvases[canvasIndex].schedule = key
+        }
+        // Its block on top, put back if it was closed.
+        if !boards.contains(where: { $0.kind == "scheduleItem" && $0.title == key }) { pin(Board(kind: "scheduleItem", title: key)) }
+    }
+
+    /// Back to the canvas it came from (or the newest other one); an item's canvas nothing was written on leaves the list.
+    func closeSchedule() throws {
+        guard let key = scheduleKey else { return }
+        let id = canvasID, written = canvases[canvasIndex].messages.contains(where: \.fromUser)
+        if let back = Self.scheduleReturn, canvases.contains(where: { $0.id == back && $0.schedule == nil }) { try openCanvas(back) }
+        else if let other = canvases.first(where: { $0.schedule == nil }) { try openCanvas(other.id) }
+        else { try newCanvas() }
+        Self.scheduleReturn = nil
+        if !written, canvases.contains(where: { $0.id == id && $0.schedule == key }) { try removeCanvas(id) }
+    }
+
+    /// «Run now»: due at once, within the minute's run (sooner if nothing else is going on).
+    func runNow(_ key: String) async {
+        guard let i = tasks.firstIndex(where: { "task:\($0.id)" == key }) else { return }
+        if tasks[i].every != nil, tasks[i].next > Date() { Self.keptNext[tasks[i].id.uuidString] = tasks[i].next }
+        tasks[i].next = Date()
+        await runDueTasks()
+    }
+
+    /// The item's block in words, for the model: what it is, when, how it signs, how its runs went.
+    func scheduleItemFacts(_ key: String) -> [String] {
+        if key.hasPrefix("perp:") {
+            let coin = String(key.dropFirst(5))
+            guard let p = positions.first(where: { $0.coin == coin }) else { return ["closed"] }
+            return ["\(p.size > 0 ? "long" : "short") \(Fmt.num(abs(p.size), maxFraction: 6)) at \(Fmt.price(p.entry)), P/L \(Fmt.usd(p.unrealizedPnl)); its stop and take are on the exchange"]
+        }
+        guard let t = tasks.first(where: { "task:\($0.id)" == key }) else { return ["no longer scheduled"] }
+        let runs = scheduleRuns.filter { $0.task == t.id.uuidString }.suffix(5).map { "\(Fmt.date($0.at)): \($0.result)" }
+        return [taskText(t), "steps: " + t.steps.joined(separator: " then "),
+                usesAutomation(t) && t.movesMoney ? "signs by itself from the automation wallet" : "each move waits for Confirm"] + runs
     }
 }

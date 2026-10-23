@@ -7,6 +7,8 @@ import { loadError } from "./browser-words.js";
 
 const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
+// WebView2 gives a page beside another webview no keyboard on a click: ask the app to move it here when it isn't.
+addEventListener("pointerdown", () => { if (!document.hasFocus()) invoke("focus_me").catch(() => {}); }, true);
 const head = document.getElementById("head");
 let s = null;
 let copied = false;

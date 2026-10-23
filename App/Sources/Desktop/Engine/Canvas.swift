@@ -12,6 +12,8 @@ nonisolated struct Board: Codable, Equatable, Identifiable {
         var title: String
         var lines: [String] = []
         var money: Money?
+        /// «then»: a step after this move, the model's next one (ChatTurns.boardsShown), drawn pale; nil for the move's own.
+        var status: String?
     }
     /// Read from the balances on screen when the route was drawn, never from the step's words.
     struct Money: Codable, Equatable {
@@ -37,6 +39,10 @@ nonisolated struct Board: Codable, Equatable, Identifiable {
     var chart: ChartLine?
     var actions: [Action]?
     var at = Date()
+    /// What the route signs and how it's checked, as the Mac's MoveRoute footer: «Why this way?» quotes it.
+    var note: String? = nil
+    /// A trade plan's levels and numbers, for drawing it on its coin's chart (RouteEdit.swift).
+    var trade: TradeView? = nil
 }
 
 /// One canvas: its own chat and its own blocks, as on the Mac.
@@ -46,6 +52,14 @@ nonisolated struct CanvasDoc: Codable, Equatable, Identifiable {
     var messages: [Message] = []
     var boards: [Board] = []
     var at = Date()
+    /// The canvas list's (Folders.swift): pinned on top since, its folder, its picture, the model it was talked through.
+    var pinnedAt: Date?
+    var folder: String?
+    var icon: CanvasIcon?
+    var provider: String?
+    var model: String?
+    /// A scheduled item's own canvas: «task:<id>» or «perp:<coin>» (Schedule.swift).
+    var schedule: String?
 }
 
 extension Engine {
@@ -123,6 +137,7 @@ extension Engine {
 
     func newCanvas() throws {
         try leaveCanvas()
+        forgetUnkept()
         let c = CanvasDoc(title: say("New canvas", "Новый холст"))
         canvases.insert(c, at: 0)
         canvasID = c.id
@@ -132,6 +147,7 @@ extension Engine {
     func openCanvas(_ id: String) throws {
         guard id != canvasID, canvases.contains(where: { $0.id == id }) else { return }
         try leaveCanvas()
+        forgetUnkept()
         canvasID = id
         afterSwitch()
     }
@@ -189,6 +205,7 @@ extension Engine {
         case "favorites": favorites.map { "\($0.symbol) on \($0.chain)" }
         case "multisig": multisigs.map { "\($0.address): any \($0.threshold) of \($0.keys.map(\.name).joined(separator: ", ")) on \($0.networks.joined(separator: ", "))" }
         case "history": history().prefix(10).map { "\($0.note) (\($0.chain))" }
+        case "scheduleItem": scheduleItemFacts(b.title)
         default: []
         }
         let steps = (b.steps ?? []).map { s in "\(s.label): \(s.title)" + (s.money.map { " (\($0.place) \($0.was) → \($0.after) \($0.symbol))" } ?? "") }

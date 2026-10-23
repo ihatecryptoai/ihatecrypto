@@ -1,0 +1,1879 @@
+{
+ "signer": {
+  "ready": true,
+  "error": null,
+  "notes": [
+   "Keys under Windows Hello with this PC's TPM",
+   "Signer checks passed"
+  ],
+  "waiting": false,
+  "sessionLength": 300,
+  "ledger": null
+ },
+ "wallets": [
+  {
+   "id": "w-main",
+   "label": "Main",
+   "kind": "phrase",
+   "solana": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+   "evm": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+  },
+  {
+   "id": "w-auto",
+   "label": "Automation",
+   "kind": "phrase",
+   "solana": null,
+   "evm": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+   "automation": true
+  }
+ ],
+ "active": "w-main",
+ "addresses": {
+  "solana": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+  "evm": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "hyperliquid": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "near": "ihatecrypto-demo.near"
+ },
+ "phrase": null,
+ "portfolio": {
+  "networks": [
+   {
+    "key": "solana",
+    "name": "Solana",
+    "usd": 787.11,
+    "note": "idle $741.30 · earning $2.51",
+    "rows": [
+     {
+      "symbol": "USDC",
+      "amount": "741.30",
+      "value": 741.3,
+      "usd": 741.3,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SPCX",
+      "amount": "0.1201",
+      "value": 0.1201,
+      "usd": 18.25,
+      "icon": null,
+      "pnl": "−$1.74 (−8.7%)",
+      "gain": -1.74,
+      "change24h": -3.7,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "HIGGS",
+      "amount": "41,250.75",
+      "value": 41250.75,
+      "usd": 3.86,
+      "icon": null,
+      "pnl": "−$125.10 (−97.4%)",
+      "gain": -125.1,
+      "change24h": -23.9,
+      "verified": false,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SOL",
+      "amount": "0.0215",
+      "value": 0.0215,
+      "usd": 2.38,
+      "icon": null,
+      "pnl": "−$0.39 (−14.2%)",
+      "gain": -0.39,
+      "change24h": 0.6,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "RAY",
+      "amount": "1.0412",
+      "value": 1.0412,
+      "usd": 1.98,
+      "icon": null,
+      "pnl": "−$0.02 (−0.9%)",
+      "gain": -0.02,
+      "change24h": -0.7,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "STONK",
+      "amount": "4.0518",
+      "value": 4.0518,
+      "usd": 0.53,
+      "icon": null,
+      "pnl": "−$0.48 (−47.5%)",
+      "gain": -0.48,
+      "change24h": 11.1,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "Kamino",
+      "amount": "2.51",
+      "value": 2.51,
+      "usd": 2.51,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "defi",
+      "note": "Allez USDC · 5.42%"
+     }
+    ]
+   },
+   {
+    "key": "hyperliquid",
+    "name": "Hyperliquid",
+    "usd": 301.45,
+    "note": "$0.01 · margin",
+    "rows": [
+     {
+      "symbol": "HYPE",
+      "amount": "3.7124",
+      "value": 3.7124,
+      "usd": 298.48,
+      "icon": null,
+      "pnl": "+$1.49 (+0.5%)",
+      "gain": 1.49,
+      "change24h": 0.4,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDC",
+      "amount": "2.871",
+      "value": 2.871,
+      "usd": 2.96,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "robinhood",
+    "name": "Robinhood",
+    "usd": 359.83,
+    "note": "idle $0.89",
+    "rows": [
+     {
+      "symbol": "AI",
+      "amount": "4,012.5",
+      "value": 4012.5,
+      "usd": 326.91,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 1.2,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SPCX",
+      "amount": "0.1287",
+      "value": 0.1287,
+      "usd": 19.69,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -3.9,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "TSLA",
+      "amount": "0.0139",
+      "value": 0.0139,
+      "usd": 5.33,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 3.1,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "MOO",
+      "amount": "1,050.2",
+      "value": 1050.2,
+      "usd": 2.54,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -10.1,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "ETH",
+      "amount": "0.00095",
+      "value": 0.00095,
+      "usd": 2.37,
+      "icon": null,
+      "pnl": "−$0.27 (−10.3%)",
+      "gain": -0.27,
+      "change24h": -0.3,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SHROOM",
+      "amount": "548.1",
+      "value": 548.1,
+      "usd": 2.1,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -18.4,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDG",
+      "amount": "0.89",
+      "value": 0.89,
+      "usd": 0.89,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "near",
+    "name": "NEAR",
+    "usd": 1196.3,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "NEAR",
+      "amount": "455.6",
+      "value": 455.6,
+      "usd": 1196.3,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 2.4,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "base",
+    "name": "Base",
+    "usd": 563.4,
+    "note": "idle $0.92",
+    "rows": [
+     {
+      "symbol": "ETH",
+      "amount": "0.2044",
+      "value": 0.2044,
+      "usd": 562.48,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -0.3,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDC",
+      "amount": "0.9017",
+      "value": 0.9017,
+      "usd": 0.92,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "arbitrum",
+    "name": "Arbitrum",
+    "usd": 99.65,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "USDT",
+      "amount": "2.39",
+      "value": 2.39,
+      "usd": 2.46,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "ARB",
+      "amount": "301.2",
+      "value": 301.2,
+      "usd": 97.19,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -1.2,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "tempo",
+    "name": "Tempo",
+    "usd": 0.12,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "USDC",
+      "amount": "0.12",
+      "value": 0.12,
+      "usd": 0.12,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   }
+  ],
+  "total": 3307.86,
+  "updatedAt": "2026-10-23T13:40:00Z",
+  "errors": [],
+  "equity": [
+   {
+    "at": "2026-10-16T13:40:00Z",
+    "usd": 3626.26
+   },
+   {
+    "at": "2026-10-16T14:40:00Z",
+    "usd": 3639.97
+   },
+   {
+    "at": "2026-10-16T15:40:00Z",
+    "usd": 3652.37
+   },
+   {
+    "at": "2026-10-16T16:40:00Z",
+    "usd": 3662.34
+   },
+   {
+    "at": "2026-10-16T17:40:00Z",
+    "usd": 3669.11
+   },
+   {
+    "at": "2026-10-16T18:40:00Z",
+    "usd": 3672.23
+   },
+   {
+    "at": "2026-10-16T19:40:00Z",
+    "usd": 3671.73
+   },
+   {
+    "at": "2026-10-16T20:40:00Z",
+    "usd": 3668.02
+   },
+   {
+    "at": "2026-10-16T21:40:00Z",
+    "usd": 3661.89
+   },
+   {
+    "at": "2026-10-16T22:40:00Z",
+    "usd": 3654.38
+   },
+   {
+    "at": "2026-10-16T23:40:00Z",
+    "usd": 3646.61
+   },
+   {
+    "at": "2026-10-17T00:40:00Z",
+    "usd": 3639.69
+   },
+   {
+    "at": "2026-10-17T01:40:00Z",
+    "usd": 3634.53
+   },
+   {
+    "at": "2026-10-17T02:40:00Z",
+    "usd": 3631.7
+   },
+   {
+    "at": "2026-10-17T03:40:00Z",
+    "usd": 3631.42
+   },
+   {
+    "at": "2026-10-17T04:40:00Z",
+    "usd": 3633.48
+   },
+   {
+    "at": "2026-10-17T05:40:00Z",
+    "usd": 3637.28
+   },
+   {
+    "at": "2026-10-17T06:40:00Z",
+    "usd": 3641.91
+   },
+   {
+    "at": "2026-10-17T07:40:00Z",
+    "usd": 3646.28
+   },
+   {
+    "at": "2026-10-17T08:40:00Z",
+    "usd": 3649.26
+   },
+   {
+    "at": "2026-10-17T09:40:00Z",
+    "usd": 3649.83
+   },
+   {
+    "at": "2026-10-17T10:40:00Z",
+    "usd": 3647.23
+   },
+   {
+    "at": "2026-10-17T11:40:00Z",
+    "usd": 3641.04
+   },
+   {
+    "at": "2026-10-17T12:40:00Z",
+    "usd": 3631.29
+   },
+   {
+    "at": "2026-10-17T13:40:00Z",
+    "usd": 3618.39
+   },
+   {
+    "at": "2026-10-17T14:40:00Z",
+    "usd": 3603.17
+   },
+   {
+    "at": "2026-10-17T15:40:00Z",
+    "usd": 3586.72
+   },
+   {
+    "at": "2026-10-17T16:40:00Z",
+    "usd": 3570.27
+   },
+   {
+    "at": "2026-10-17T17:40:00Z",
+    "usd": 3555.05
+   },
+   {
+    "at": "2026-10-17T18:40:00Z",
+    "usd": 3542.12
+   },
+   {
+    "at": "2026-10-17T19:40:00Z",
+    "usd": 3532.28
+   },
+   {
+    "at": "2026-10-17T20:40:00Z",
+    "usd": 3525.91
+   },
+   {
+    "at": "2026-10-17T21:40:00Z",
+    "usd": 3523.0
+   },
+   {
+    "at": "2026-10-17T22:40:00Z",
+    "usd": 3523.08
+   },
+   {
+    "at": "2026-10-17T23:40:00Z",
+    "usd": 3525.37
+   },
+   {
+    "at": "2026-10-18T00:40:00Z",
+    "usd": 3528.84
+   },
+   {
+    "at": "2026-10-18T01:40:00Z",
+    "usd": 3532.34
+   },
+   {
+    "at": "2026-10-18T02:40:00Z",
+    "usd": 3534.8
+   },
+   {
+    "at": "2026-10-18T03:40:00Z",
+    "usd": 3535.32
+   },
+   {
+    "at": "2026-10-18T04:40:00Z",
+    "usd": 3533.35
+   },
+   {
+    "at": "2026-10-18T05:40:00Z",
+    "usd": 3528.7
+   },
+   {
+    "at": "2026-10-18T06:40:00Z",
+    "usd": 3521.62
+   },
+   {
+    "at": "2026-10-18T07:40:00Z",
+    "usd": 3512.74
+   },
+   {
+    "at": "2026-10-18T08:40:00Z",
+    "usd": 3503.0
+   },
+   {
+    "at": "2026-10-18T09:40:00Z",
+    "usd": 3493.49
+   },
+   {
+    "at": "2026-10-18T10:40:00Z",
+    "usd": 3485.37
+   },
+   {
+    "at": "2026-10-18T11:40:00Z",
+    "usd": 3479.67
+   },
+   {
+    "at": "2026-10-18T12:40:00Z",
+    "usd": 3477.16
+   },
+   {
+    "at": "2026-10-18T13:40:00Z",
+    "usd": 3478.24
+   },
+   {
+    "at": "2026-10-18T14:40:00Z",
+    "usd": 3482.91
+   },
+   {
+    "at": "2026-10-18T15:40:00Z",
+    "usd": 3490.72
+   },
+   {
+    "at": "2026-10-18T16:40:00Z",
+    "usd": 3500.87
+   },
+   {
+    "at": "2026-10-18T17:40:00Z",
+    "usd": 3512.27
+   },
+   {
+    "at": "2026-10-18T18:40:00Z",
+    "usd": 3523.71
+   },
+   {
+    "at": "2026-10-18T19:40:00Z",
+    "usd": 3533.97
+   },
+   {
+    "at": "2026-10-18T20:40:00Z",
+    "usd": 3541.99
+   },
+   {
+    "at": "2026-10-18T21:40:00Z",
+    "usd": 3547.04
+   },
+   {
+    "at": "2026-10-18T22:40:00Z",
+    "usd": 3548.73
+   },
+   {
+    "at": "2026-10-18T23:40:00Z",
+    "usd": 3547.12
+   },
+   {
+    "at": "2026-10-19T00:40:00Z",
+    "usd": 3542.68
+   },
+   {
+    "at": "2026-10-19T01:40:00Z",
+    "usd": 3536.22
+   },
+   {
+    "at": "2026-10-19T02:40:00Z",
+    "usd": 3528.79
+   },
+   {
+    "at": "2026-10-19T03:40:00Z",
+    "usd": 3521.53
+   },
+   {
+    "at": "2026-10-19T04:40:00Z",
+    "usd": 3515.5
+   },
+   {
+    "at": "2026-10-19T05:40:00Z",
+    "usd": 3511.58
+   },
+   {
+    "at": "2026-10-19T06:40:00Z",
+    "usd": 3510.32
+   },
+   {
+    "at": "2026-10-19T07:40:00Z",
+    "usd": 3511.87
+   },
+   {
+    "at": "2026-10-19T08:40:00Z",
+    "usd": 3515.95
+   },
+   {
+    "at": "2026-10-19T09:40:00Z",
+    "usd": 3521.92
+   },
+   {
+    "at": "2026-10-19T10:40:00Z",
+    "usd": 3528.82
+   },
+   {
+    "at": "2026-10-19T11:40:00Z",
+    "usd": 3535.53
+   },
+   {
+    "at": "2026-10-19T12:40:00Z",
+    "usd": 3540.88
+   },
+   {
+    "at": "2026-10-19T13:40:00Z",
+    "usd": 3543.84
+   },
+   {
+    "at": "2026-10-19T14:40:00Z",
+    "usd": 3543.65
+   },
+   {
+    "at": "2026-10-19T15:40:00Z",
+    "usd": 3539.89
+   },
+   {
+    "at": "2026-10-19T16:40:00Z",
+    "usd": 3532.58
+   },
+   {
+    "at": "2026-10-19T17:40:00Z",
+    "usd": 3522.16
+   },
+   {
+    "at": "2026-10-19T18:40:00Z",
+    "usd": 3509.44
+   },
+   {
+    "at": "2026-10-19T19:40:00Z",
+    "usd": 3495.49
+   },
+   {
+    "at": "2026-10-19T20:40:00Z",
+    "usd": 3481.53
+   },
+   {
+    "at": "2026-10-19T21:40:00Z",
+    "usd": 3468.75
+   },
+   {
+    "at": "2026-10-19T22:40:00Z",
+    "usd": 3458.18
+   },
+   {
+    "at": "2026-10-19T23:40:00Z",
+    "usd": 3450.53
+   },
+   {
+    "at": "2026-10-20T00:40:00Z",
+    "usd": 3446.16
+   },
+   {
+    "at": "2026-10-20T01:40:00Z",
+    "usd": 3444.98
+   },
+   {
+    "at": "2026-10-20T02:40:00Z",
+    "usd": 3446.49
+   },
+   {
+    "at": "2026-10-20T03:40:00Z",
+    "usd": 3449.86
+   },
+   {
+    "at": "2026-10-20T04:40:00Z",
+    "usd": 3454.04
+   },
+   {
+    "at": "2026-10-20T05:40:00Z",
+    "usd": 3457.87
+   },
+   {
+    "at": "2026-10-20T06:40:00Z",
+    "usd": 3460.29
+   },
+   {
+    "at": "2026-10-20T07:40:00Z",
+    "usd": 3460.45
+   },
+   {
+    "at": "2026-10-20T08:40:00Z",
+    "usd": 3457.79
+   },
+   {
+    "at": "2026-10-20T09:40:00Z",
+    "usd": 3452.2
+   },
+   {
+    "at": "2026-10-20T10:40:00Z",
+    "usd": 3443.97
+   },
+   {
+    "at": "2026-10-20T11:40:00Z",
+    "usd": 3433.76
+   },
+   {
+    "at": "2026-10-20T12:40:00Z",
+    "usd": 3422.55
+   },
+   {
+    "at": "2026-10-20T13:40:00Z",
+    "usd": 3411.47
+   },
+   {
+    "at": "2026-10-20T14:40:00Z",
+    "usd": 3401.69
+   },
+   {
+    "at": "2026-10-20T15:40:00Z",
+    "usd": 3394.24
+   },
+   {
+    "at": "2026-10-20T16:40:00Z",
+    "usd": 3389.9
+   },
+   {
+    "at": "2026-10-20T17:40:00Z",
+    "usd": 3389.05
+   },
+   {
+    "at": "2026-10-20T18:40:00Z",
+    "usd": 3391.67
+   },
+   {
+    "at": "2026-10-20T19:40:00Z",
+    "usd": 3397.34
+   },
+   {
+    "at": "2026-10-20T20:40:00Z",
+    "usd": 3405.22
+   },
+   {
+    "at": "2026-10-20T21:40:00Z",
+    "usd": 3414.26
+   },
+   {
+    "at": "2026-10-20T22:40:00Z",
+    "usd": 3423.24
+   },
+   {
+    "at": "2026-10-20T23:40:00Z",
+    "usd": 3431.0
+   },
+   {
+    "at": "2026-10-21T00:40:00Z",
+    "usd": 3436.54
+   },
+   {
+    "at": "2026-10-21T01:40:00Z",
+    "usd": 3439.15
+   },
+   {
+    "at": "2026-10-21T02:40:00Z",
+    "usd": 3438.52
+   },
+   {
+    "at": "2026-10-21T03:40:00Z",
+    "usd": 3434.77
+   },
+   {
+    "at": "2026-10-21T04:40:00Z",
+    "usd": 3428.42
+   },
+   {
+    "at": "2026-10-21T05:40:00Z",
+    "usd": 3420.32
+   },
+   {
+    "at": "2026-10-21T06:40:00Z",
+    "usd": 3411.56
+   },
+   {
+    "at": "2026-10-21T07:40:00Z",
+    "usd": 3403.28
+   },
+   {
+    "at": "2026-10-21T08:40:00Z",
+    "usd": 3396.55
+   },
+   {
+    "at": "2026-10-21T09:40:00Z",
+    "usd": 3392.22
+   },
+   {
+    "at": "2026-10-21T10:40:00Z",
+    "usd": 3390.83
+   },
+   {
+    "at": "2026-10-21T11:40:00Z",
+    "usd": 3392.48
+   },
+   {
+    "at": "2026-10-21T12:40:00Z",
+    "usd": 3396.87
+   },
+   {
+    "at": "2026-10-21T13:40:00Z",
+    "usd": 3403.32
+   },
+   {
+    "at": "2026-10-21T14:40:00Z",
+    "usd": 3410.84
+   },
+   {
+    "at": "2026-10-21T15:40:00Z",
+    "usd": 3418.28
+   },
+   {
+    "at": "2026-10-21T16:40:00Z",
+    "usd": 3424.5
+   },
+   {
+    "at": "2026-10-21T17:40:00Z",
+    "usd": 3428.44
+   },
+   {
+    "at": "2026-10-21T18:40:00Z",
+    "usd": 3429.37
+   },
+   {
+    "at": "2026-10-21T19:40:00Z",
+    "usd": 3426.88
+   },
+   {
+    "at": "2026-10-21T20:40:00Z",
+    "usd": 3421.02
+   },
+   {
+    "at": "2026-10-21T21:40:00Z",
+    "usd": 3412.23
+   },
+   {
+    "at": "2026-10-21T22:40:00Z",
+    "usd": 3401.32
+   },
+   {
+    "at": "2026-10-21T23:40:00Z",
+    "usd": 3389.38
+   },
+   {
+    "at": "2026-10-22T00:40:00Z",
+    "usd": 3377.59
+   },
+   {
+    "at": "2026-10-22T01:40:00Z",
+    "usd": 3367.11
+   },
+   {
+    "at": "2026-10-22T02:40:00Z",
+    "usd": 3358.92
+   },
+   {
+    "at": "2026-10-22T03:40:00Z",
+    "usd": 3353.7
+   },
+   {
+    "at": "2026-10-22T04:40:00Z",
+    "usd": 3351.72
+   },
+   {
+    "at": "2026-10-22T05:40:00Z",
+    "usd": 3352.84
+   },
+   {
+    "at": "2026-10-22T06:40:00Z",
+    "usd": 3356.51
+   },
+   {
+    "at": "2026-10-22T07:40:00Z",
+    "usd": 3361.85
+   },
+   {
+    "at": "2026-10-22T08:40:00Z",
+    "usd": 3367.78
+   },
+   {
+    "at": "2026-10-22T09:40:00Z",
+    "usd": 3373.12
+   },
+   {
+    "at": "2026-10-22T10:40:00Z",
+    "usd": 3376.81
+   },
+   {
+    "at": "2026-10-22T11:40:00Z",
+    "usd": 3377.99
+   },
+   {
+    "at": "2026-10-22T12:40:00Z",
+    "usd": 3376.15
+   },
+   {
+    "at": "2026-10-22T13:40:00Z",
+    "usd": 3371.18
+   },
+   {
+    "at": "2026-10-22T14:40:00Z",
+    "usd": 3363.41
+   },
+   {
+    "at": "2026-10-22T15:40:00Z",
+    "usd": 3353.52
+   },
+   {
+    "at": "2026-10-22T16:40:00Z",
+    "usd": 3342.51
+   },
+   {
+    "at": "2026-10-22T17:40:00Z",
+    "usd": 3331.52
+   },
+   {
+    "at": "2026-10-22T18:40:00Z",
+    "usd": 3321.7
+   },
+   {
+    "at": "2026-10-22T19:40:00Z",
+    "usd": 3314.09
+   },
+   {
+    "at": "2026-10-22T20:40:00Z",
+    "usd": 3309.41
+   },
+   {
+    "at": "2026-10-22T21:40:00Z",
+    "usd": 3308.05
+   },
+   {
+    "at": "2026-10-22T22:40:00Z",
+    "usd": 3309.96
+   },
+   {
+    "at": "2026-10-22T23:40:00Z",
+    "usd": 3314.67
+   },
+   {
+    "at": "2026-10-23T00:40:00Z",
+    "usd": 3321.36
+   },
+   {
+    "at": "2026-10-23T01:40:00Z",
+    "usd": 3328.95
+   },
+   {
+    "at": "2026-10-23T02:40:00Z",
+    "usd": 3336.26
+   },
+   {
+    "at": "2026-10-23T03:40:00Z",
+    "usd": 3342.13
+   },
+   {
+    "at": "2026-10-23T04:40:00Z",
+    "usd": 3345.61
+   },
+   {
+    "at": "2026-10-23T05:40:00Z",
+    "usd": 3346.06
+   },
+   {
+    "at": "2026-10-23T06:40:00Z",
+    "usd": 3343.21
+   },
+   {
+    "at": "2026-10-23T07:40:00Z",
+    "usd": 3337.24
+   },
+   {
+    "at": "2026-10-23T08:40:00Z",
+    "usd": 3328.73
+   },
+   {
+    "at": "2026-10-23T09:40:00Z",
+    "usd": 3318.57
+   },
+   {
+    "at": "2026-10-23T10:40:00Z",
+    "usd": 3307.88
+   },
+   {
+    "at": "2026-10-23T11:40:00Z",
+    "usd": 3297.82
+   },
+   {
+    "at": "2026-10-23T12:40:00Z",
+    "usd": 3289.48
+   },
+   {
+    "at": "2026-10-23T13:40:00Z",
+    "usd": 3307.86
+   }
+  ],
+  "change7d": -318.4
+ },
+ "positions": [],
+ "positionsPnl": null,
+ "automationUSD": 4.24,
+ "chat": [
+  {
+   "id": "m1",
+   "fromUser": true,
+   "text": "отправь 150 USDC на HL wallet",
+   "at": "2026-10-22T22:37:00Z"
+  },
+  {
+   "id": "m2",
+   "fromUser": false,
+   "text": "Sent 150 USDC to HL wallet on Hyperliquid, plus 1 USDC Hyperliquid kept once for opening their account.",
+   "note": "transfer",
+   "at": "2026-10-22T22:40:00Z"
+  },
+  {
+   "id": "m3",
+   "fromUser": true,
+   "text": "отправь газ на хайпер 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+   "at": "2026-10-22T22:41:00Z"
+  },
+  {
+   "id": "m4",
+   "fromUser": false,
+   "text": "Торговому счёту Hyperliquid газ не нужен: переводы и сделки там идут без него, и 150 USDC на HL wallet уже дошли. Газ в HyperEVM (сеть 999) платится в HYPE. Могу докинуть на HL wallet ещё USDC: от 10 USDC на нём можно купить HYPE на споте. Что тебе нужно?",
+   "note": "claude-opus-5-5",
+   "at": "2026-10-22T22:42:00Z"
+  }
+ ],
+ "thinking": false,
+ "draft": null,
+ "card": null,
+ "options": [
+  {
+   "title": "Send 10 USDC to HL wallet",
+   "comment": "Enough for a spot HYPE buy",
+   "recommended": true
+  },
+  {
+   "title": "Nothing for now",
+   "comment": "",
+   "recommended": false
+  }
+ ],
+ "running": null,
+ "plan": null,
+ "model": {
+  "provider": "claude-code",
+  "name": "Claude (subscription via Claude Code)",
+  "model": "claude-opus-5-5",
+  "connected": true,
+  "models": [
+   "claude-opus-5-5",
+   "claude-sonnet-5-5"
+  ]
+ },
+ "providers": [
+  {
+   "id": "claude-code",
+   "name": "Claude (subscription via Claude Code)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Claude Code",
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "chatgpt",
+   "name": "ChatGPT (subscription)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Codex",
+   "signIn": "chatgpt",
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "anthropic",
+   "name": "Anthropic API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "openrouter",
+   "name": "OpenRouter",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "openai",
+   "name": "OpenAI API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama on this PC",
+   "kind": "local",
+   "takesKey": false,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  }
+ ],
+ "secondCheck": true,
+ "jevOpenRouter": false,
+ "language": "auto",
+ "russian": false,
+ "book": [
+  {
+   "name": "HL wallet",
+   "network": "hyperliquid",
+   "address": "0x3c44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+   "memo": ""
+  },
+  {
+   "name": "Mom",
+   "network": "base",
+   "address": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+   "memo": ""
+  }
+ ],
+ "history": [
+  {
+   "at": "2026-10-22T22:40:00Z",
+   "chain": "hyperliquid",
+   "kind": "transfer",
+   "note": "Sent 150 USDC to HL wallet",
+   "link": null
+  },
+  {
+   "at": "2026-10-22T13:40:00Z",
+   "chain": "solana",
+   "kind": "swap",
+   "note": "Bought SOL for 10 USDC",
+   "link": "https://solscan.io/tx/demo"
+  }
+ ],
+ "alerts": [
+  {
+   "id": "a1",
+   "text": "BTC above $120,000"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t1",
+   "text": "Every day at 9:00: buy SOL for 5 USDC",
+   "paused": true,
+   "automatic": true,
+   "next": "2026-10-24T08:40:00Z"
+  },
+  {
+   "id": "t2",
+   "text": "Every Monday: check the yields",
+   "paused": true,
+   "automatic": false,
+   "next": "2026-10-26T13:40:00Z"
+  }
+ ],
+ "automation": {
+  "id": "w-auto",
+  "label": "Automation",
+  "kind": "phrase",
+  "solana": null,
+  "evm": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "automation": true
+ },
+ "skills": [
+  {
+   "id": "trading-study",
+   "name": "Trading study",
+   "about": "Keeps a journal of your trades and studies them with you",
+   "text": "",
+   "builtIn": true,
+   "on": true
+  }
+ ],
+ "memory": [
+  "The user's HL wallet is their Hyperliquid account"
+ ],
+ "modules": {
+  "networks": [
+   {
+    "logo": "sol",
+    "users": "Used by Jupiter, Jupiter DCA, Jupiter Lend, Kamino, JitoSOL staking, Relay, NEAR Intents · 1Click",
+    "name": "Solana",
+    "uses": "Jupiter swaps · Jupiter Lend · Kamino · JitoSOL",
+    "id": "network.solana",
+    "on": true
+   },
+   {
+    "logo": "hype",
+    "users": "Used by HLP vault, Hyperliquid, Hyperliquid xyz",
+    "name": "Hyperliquid",
+    "uses": "Perps · oil and stocks (xyz) · HLP vault",
+    "id": "network.hyperliquid",
+    "on": true
+   },
+   {
+    "logo": "base",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Base",
+    "uses": "Aave · Morpho · USDC",
+    "id": "network.base",
+    "on": true
+   },
+   {
+    "logo": "near",
+    "users": "Used by NEAR Intents · 1Click",
+    "name": "NEAR",
+    "uses": "NEAR Intents swaps · 1Click",
+    "id": "network.near",
+    "on": true
+   },
+   {
+    "logo": "arb",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Arbitrum",
+    "uses": "Aave · Morpho · USDC in and out",
+    "id": "network.arbitrum",
+    "on": true
+   },
+   {
+    "logo": "robinhood",
+    "users": "Used by Uniswap, Robinhood Stock Tokens, Relay",
+    "name": "Robinhood",
+    "uses": "Stock tokens · USDG · Uniswap",
+    "id": "network.robinhood",
+    "on": true
+   },
+   {
+    "logo": "pol",
+    "users": "Used by Uniswap, Aave v3, Relay",
+    "name": "Polygon",
+    "uses": "Aave · USDC",
+    "id": "network.polygon",
+    "on": true
+   },
+   {
+    "logo": "eth",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Ethereum",
+    "uses": "Aave · Morpho · mainnet gas varies",
+    "id": "network.ethereum",
+    "on": true
+   },
+   {
+    "logo": "tempo",
+    "users": "Used by Relay, MPP · x402",
+    "name": "Tempo",
+    "uses": "USDC transfers · pay for services (MPP) · fees in USDC",
+    "id": "network.tempo",
+    "on": true
+   },
+   {
+    "logo": "hyperevm",
+    "users": "Used by Relay",
+    "name": "HyperEVM",
+    "uses": "USDC in and out · HYPE for gas",
+    "id": "network.hyperevm",
+    "on": true
+   },
+   {
+    "logo": "op",
+    "users": "Used by Uniswap, Relay",
+    "name": "Optimism",
+    "uses": "USDC in and out · Circle's CCTP",
+    "id": "network.optimism",
+    "on": true
+   },
+   {
+    "logo": "bnb",
+    "users": "Used by Uniswap, Relay",
+    "name": "BNB Chain",
+    "uses": "USDC in and out · BNB for gas · swaps",
+    "id": "network.bnb",
+    "on": true
+   }
+  ],
+  "kinds": [
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter",
+      "id": "protocol.jupiter",
+      "logo": "jup",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter DCA",
+      "id": "protocol.jupiterDCA",
+      "logo": "jup",
+      "line": "Solana · on-chain buys over time, from 100 USDC",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Uniswap",
+      "id": "protocol.uniswap",
+      "logo": "uni",
+      "line": "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · Robinhood",
+      "on": true
+     }
+    ],
+    "key": "swaps",
+    "name": "Swaps",
+    "on": true,
+    "id": "kind.swaps",
+    "line": "Trade one token for another"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter Lend",
+      "id": "protocol.jupiterLend",
+      "logo": "jup",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Kamino",
+      "id": "protocol.kamino",
+      "logo": "kamino",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "JitoSOL staking",
+      "id": "protocol.jitoSOL",
+      "logo": "jitosol",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Aave v3",
+      "id": "protocol.aave",
+      "logo": "aave",
+      "line": "Base · Arbitrum · Polygon · Ethereum",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Morpho",
+      "id": "protocol.morpho",
+      "logo": "morpho",
+      "line": "Base · Arbitrum · Ethereum",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "HLP vault",
+      "id": "protocol.hlp",
+      "logo": "hype",
+      "line": "Hyperliquid",
+      "on": true
+     }
+    ],
+    "key": "earn",
+    "name": "Earn · DeFi",
+    "on": true,
+    "id": "kind.earn",
+    "line": "Lend and stake idle money"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Hyperliquid",
+      "id": "protocol.hlPerps",
+      "logo": "hype",
+      "line": "BTC, ETH, SOL and more",
+      "on": true
+     }
+    ],
+    "key": "perps",
+    "name": "Perps",
+    "on": true,
+    "id": "kind.perps",
+    "line": "Long or short with leverage"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Hyperliquid xyz",
+      "id": "protocol.xyz",
+      "logo": "hype",
+      "line": "Oil, metals, stocks",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Robinhood Stock Tokens",
+      "id": "protocol.robinhoodStocks",
+      "logo": "robinhood",
+      "line": "Robinhood",
+      "on": true
+     }
+    ],
+    "key": "stocks",
+    "name": "Stocks & oil",
+    "on": true,
+    "id": "kind.stocks",
+    "line": "Commodities and tokenized shares"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Relay",
+      "id": "protocol.relay",
+      "logo": "relay",
+      "line": "Solana ⇄ Base · Arbitrum · Polygon · Ethereum · Robinhood · Tempo · HyperEVM · Optimism · BNB Chain",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "NEAR Intents · 1Click",
+      "id": "protocol.oneClick",
+      "logo": "near",
+      "line": "NEAR ⇄ Solana",
+      "on": true
+     }
+    ],
+    "key": "bridges",
+    "name": "Bridges",
+    "on": true,
+    "id": "kind.bridges",
+    "line": "Move money between networks"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "MPP · x402",
+      "id": "protocol.mpp",
+      "logo": "tempo",
+      "line": "APIs, email, calls, letters · USDC on Tempo",
+      "on": true
+     }
+    ],
+    "key": "payments",
+    "name": "Payments",
+    "on": true,
+    "id": "kind.payments",
+    "line": "Pay for services per request"
+   }
+  ]
+ },
+ "trading": {
+  "policy": {
+   "atrStopMultiple": 1.5,
+   "minRewardRisk": 1.5,
+   "maxRiskPct": 2,
+   "defaultRiskPct": 1,
+   "defaultRewardRisk": 2,
+   "maxOpenRiskPct": 6,
+   "maxLeverage": 5
+  },
+  "styles": [
+   {
+    "policy": {
+     "minRewardRisk": 2,
+     "atrStopMultiple": 2,
+     "defaultRewardRisk": 2.5,
+     "defaultRiskPct": 0.5,
+     "maxRiskPct": 1,
+     "maxOpenRiskPct": 3,
+     "maxLeverage": 2
+    },
+    "id": "careful"
+   },
+   {
+    "policy": {
+     "minRewardRisk": 1.5,
+     "atrStopMultiple": 1.5,
+     "defaultRewardRisk": 2,
+     "defaultRiskPct": 1,
+     "maxRiskPct": 2,
+     "maxOpenRiskPct": 6,
+     "maxLeverage": 5
+    },
+    "id": "balanced"
+   },
+   {
+    "policy": {
+     "minRewardRisk": 1.2,
+     "atrStopMultiple": 1,
+     "defaultRewardRisk": 1.5,
+     "defaultRiskPct": 2,
+     "maxRiskPct": 3,
+     "maxOpenRiskPct": 10,
+     "maxLeverage": 10
+    },
+    "id": "bold"
+   }
+  ],
+  "safeSearch": true,
+  "contractCap": 50,
+  "key": {
+   "paused": false,
+   "ledger": false,
+   "referral": "IHATECRYPTO",
+   "active": false,
+   "feeRate": "0.05%",
+   "possible": false
+  },
+  "batches": false
+ },
+ "nodes": {
+  "nodes": [
+   {
+    "example": "https://mainnet.helius-rpc.com/?api-key=…",
+    "provider": "Helius",
+    "title": "Solana",
+    "logo": "sol",
+    "id": "solana",
+    "site": "https://www.helius.dev"
+   },
+   {
+    "example": "https://base-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Base",
+    "logo": "base",
+    "id": "base",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://arb-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Arbitrum",
+    "logo": "arb",
+    "id": "arbitrum",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://eth-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Ethereum",
+    "logo": "eth",
+    "id": "ethereum",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://polygon-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Polygon",
+    "logo": "pol",
+    "id": "polygon",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://…",
+    "provider": "Alchemy",
+    "title": "Robinhood",
+    "logo": "robinhood",
+    "id": "robinhood",
+    "site": "https://www.alchemy.com"
+   }
+  ],
+  "oneClickKey": false
+ },
+ "favorites": [
+  {
+   "chain": "solana",
+   "address": "DoVAVzViX8Bjy3r15nwikSaSbzE6dV4ovd28aWpJpump",
+   "name": "Higgs",
+   "symbol": "HIGGS",
+   "image": null,
+   "price": 8.66e-05,
+   "change24h": -23.9,
+   "liquidity": 51000
+  }
+ ],
+ "canvases": [
+  {
+   "id": "c1",
+   "title": "Withdraw · 23 USDC to Solana",
+   "at": "2026-10-23T12:40:00Z"
+  },
+  {
+   "id": "c2",
+   "title": "Send 150 USDC to HL wallet",
+   "at": "2026-10-22T22:40:00Z"
+  },
+  {
+   "id": "c3",
+   "title": "Gas · $1.00 of BNB on BNB Chain",
+   "at": "2026-10-21T13:40:00Z"
+  }
+ ],
+ "canvas": "c2",
+ "boards": [
+  {
+   "id": "b-chart-eth",
+   "kind": "chart",
+   "title": "ETH · 7 days",
+   "at": "2026-10-23T13:30:00Z",
+   "lines": [],
+   "chart": {
+    "title": "ETH · 7 days",
+    "closes": [
+     3380.0,
+     3390.1401198857775,
+     3399.923825403889,
+     3409.0089113027766,
+     3417.081024090479,
+     3423.866194316355,
+     3429.141758868525,
+     3432.745237849481,
+     3434.5808121368677,
+     3434.623143389519,
+     3432.9183842071557,
+     3429.5823381718815,
+     3424.795843124802,
+     3418.7975617319657,
+     3411.874466757016,
+     3404.350400362694,
+     3396.5731635457587,
+     3388.900650408793,
+     3381.6865800517317,
+     3375.2663949075777,
+     3369.9438877111434,
+     3365.9790902413883,
+     3363.577906674972,
+     3362.883904836494,
+     3363.9725926023875,
+     3366.8484076401587,
+     3371.4445404925928,
+     3377.625598059981,
+     3385.1930012957455,
+     3393.892901926381,
+     3403.4263025810483,
+     3413.4609768732125,
+     3423.6447142182724,
+     3433.6193613581017,
+     3443.0351008012376,
+     3451.5643969423454,
+     3458.9150538732115,
+     3464.8418643115233,
+     3469.156385241417,
+     3471.7344505418573,
+     3472.5211210980524,
+     3471.5328750505896,
+     3468.8569508639725,
+     3464.647869404335,
+     3459.1212736801294,
+     3452.545331835879,
+     3445.2300461345108,
+     3437.5148941454013,
+     3429.7552948449656,
+     3422.3084391836633,
+     3415.5190500099784,
+     3409.70563905829,
+     3405.147808891146,
+     3402.0751060274238,
+     3400.6578696470083,
+     3401.0004407052184,
+     3403.1370021881903,
+     3407.0302163450897,
+     3412.572713226408,
+     3419.59137118503,
+     3427.8542186899804,
+     3437.0796822993425,
+     3446.947812104826,
+     3457.113037124951,
+     3467.2179421295696,
+     3476.907516657199,
+     3485.843308161825,
+     3493.7169150478603,
+     3500.262281668542,
+     3505.2663051249847,
+     3508.577331006269,
+     3510.111199372236,
+     3509.8545999447174,
+     3507.8656027463226,
+     3504.2713430318895,
+     3499.26295280707,
+     3493.087940998421,
+     3486.040326053557,
+     3478.4489143534747,
+     3470.6641917397546,
+     3463.044350750072,
+     3455.941010612069,
+     3449.6851992943425,
+     3444.5741564659565,
+     3440.8594834888327,
+     3438.73711286542,
+     3438.339497028128,
+     3439.7303278788218,
+     3442.9019975936844,
+     3447.775901923149,
+     3454.2055738952745,
+     3461.982522991717,
+     3470.8445470067645,
+     3480.486185221852,
+     3490.5708961604737,
+     3500.7444744348327
+    ],
+    "low": "$3,322.10",
+    "high": "$3,531.40",
+    "change": "+2.4%",
+    "coin": "ETH"
+   }
+  },
+  {
+   "id": "b-move",
+   "kind": "move",
+   "title": "Send 150 USDC to HL wallet",
+   "state": "done",
+   "at": "2026-10-22T22:40:00Z",
+   "lines": [],
+   "steps": [
+    {
+     "label": "FROM · Hyperliquid",
+     "title": "150 USDC",
+     "lines": [
+      "146.04 USDC short: it comes from Solana first",
+      "Fee 1 USDC: Hyperliquid's once for opening the account"
+     ],
+     "money": {
+      "place": "Solana",
+      "symbol": "USDC",
+      "was": "890.4",
+      "after": "744.36"
+     }
+    },
+    {
+     "label": "TO · Saved Address",
+     "title": "HL wallet",
+     "lines": [
+      "0x3c44…93BC",
+      "Saved Oct 22 with Windows Hello"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "b-p1",
+   "kind": "move",
+   "title": "Send 150 USDC to HL wallet",
+   "state": "failed",
+   "at": "2026-10-22T20:40:00Z",
+   "lines": [],
+   "steps": []
+  },
+  {
+   "id": "b-p2",
+   "kind": "move",
+   "title": "Save “HL wallet” to Addresses",
+   "state": "done",
+   "at": "2026-10-22T20:39:00Z",
+   "lines": [],
+   "steps": []
+  }
+ ],
+ "runningBoard": null,
+ "multisigs": [],
+ "multisigDraft": null,
+ "candidates": [],
+ "ledgerConnect": null,
+ "starred": [],
+ "watching": false,
+ "watched": {},
+ "context": {
+  "used": 21380,
+  "window": 1000000
+ }
+}

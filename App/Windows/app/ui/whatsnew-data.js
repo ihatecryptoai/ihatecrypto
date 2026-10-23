@@ -1,0 +1,962 @@
+// What's New, from the Mac's WhatsNew/whatsnew.json (newest first), its Mac words said for this PC. Written by
+// App/Windows/whatsnew.py at release; edit the Mac's file, not this one.
+export const releases = [
+ {
+  "version": "0.7.6",
+  "date": "2026-10-24",
+  "stories": [
+   {
+    "title": "Every signature read closer",
+    "text": "Windows Hello for a new address now says what the move does, amount included. A contract the signer can't read asks you once, whoever calls it. Kamino, Jupiter Lend and Jupiter DCA are read by the signer itself: only what pays you, on your own position. A site's signature that names someone else beside an amount is refused, and a private key pasted into the chat never reaches the model.",
+    "symbol": "checkmark.shield.fill",
+    "color": "30D158"
+   },
+   {
+    "title": "The trading key, a week at a time",
+    "text": "The Hyperliquid trading key opens positions for 7 days after your last Windows Hello for it; stops, takes and closes always go. Then the next new position asks Windows Hello once and renews the week. A Solana swap won't go for more than 1% under its card, a paid service sees your request only after Confirm, and making an automation wallet pauses the tasks that would spend from it.",
+    "symbol": "key.fill",
+    "color": "FF9F0A"
+   },
+   {
+    "title": "Dollars leave BNB Chain without BNB",
+    "text": "USDC on BNB Chain with no BNB beside it now moves out: BNB Chain's own paymaster, MegaFuel, pays the gas for its transfer to Relay.",
+    "symbol": "fuelpump.fill",
+    "color": "FFD60A",
+    "try": "show where to top up"
+   }
+  ]
+ },
+ {
+  "version": "0.7.5",
+  "date": "2026-10-23",
+  "stories": [
+   {
+    "title": "Dollars move without gas",
+    "text": "USDC with no SOL beside it still swaps for SOL: Jupiter pays that one swap's fee, from $5. USDC on Base, Arbitrum, Optimism, Polygon, Ethereum or Robinhood Chain with none of the network's coin goes to Solana or Hyperliquid by a signature, Relay paying the gas, and gas for that network comes back over Solana. Gas for BNB Chain and HyperEVM can come from your Hyperliquid balance. When dollars land where they can't move, the chat says so once and offers the way out.",
+    "symbol": "fuelpump.fill",
+    "color": "30D158",
+    "try": "show where to top up"
+   }
+  ]
+ },
+ {
+  "version": "0.7.4",
+  "date": "2026-10-23",
+  "stories": [
+   {
+    "title": "Your trade on its chart",
+    "text": "With a coin's chart on the canvas, a long or short on that coin is drawn right on it: the entry, the stop and the take across the candles, the loss and the gain between them, and Cancel and Confirm on top. A buy, a send or a plan on another coin puts the chart beside its card, never above its buttons.",
+    "symbol": "chart.xyaxis.line",
+    "color": "0A84FF",
+    "try": "chart HYPE"
+   }
+  ]
+ },
+ {
+  "version": "0.7.3",
+  "date": "2026-10-23",
+  "stories": [
+   {
+    "title": "A shorter start",
+    "text": "Setting up no longer stops to test the model: you pick it from the account's list. Top up is the app's own Top up — every network, a wallet in the browser, your phone or an exchange — and sees money land wherever it does. Skip it and the canvas opens at once; the Hyperliquid trading key comes only when Hyperliquid already holds your money.",
+    "symbol": "sparkles",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Hyperliquid from the chat",
+    "text": "«Move 11 USDC from Solana to Hyperliquid» opens your Hyperliquid account: about $1 of the first deposit pays its opening fee, and its smallest order is $10. Once money is there, the chat offers to turn on the trading key, and «turn on the trading key» does it.",
+    "symbol": "bolt.fill",
+    "color": "34C759"
+   },
+   {
+    "title": "Small safety fixes",
+    "text": "A site's call to a contract ihatecrypto can't read is allowed once as a call, never as a place money may go; a scheduled buy waiting for Windows Hello no longer holds up alerts and refreshes; and if your second check used OpenRouter before 0.7.0, the chat asks once whether to keep it.",
+    "symbol": "checkmark.shield.fill",
+    "color": "5856D6"
+   }
+  ]
+ },
+ {
+  "version": "0.7.2",
+  "date": "2026-10-23",
+  "stories": [
+   {
+    "title": "The fee's settings, named right",
+    "text": "The fee's approval on a trade plan and What's New now point to Settings › Wallet › Hyperliquid, where ihatecrypto's fee shows with its Revoke button, and a Ledger names the referral code when it signs it. Every release also rebuilds byte for byte on GitHub's Mac now, not only on ours.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "5856D6"
+   }
+  ]
+ },
+ {
+  "version": "0.7.1",
+  "date": "2026-10-22",
+  "stories": [
+   {
+    "title": "ihatecrypto's fee on Hyperliquid",
+    "text": "Trades on Hyperliquid placed in ihatecrypto carry a 0.05% fee for ihatecrypto, on top of the exchange's own: perps both ways, spot only when selling. The first trade you confirm asks you to approve it once, every plan shows it in the fees, and Settings › Wallet › Hyperliquid can take the approval back.",
+    "symbol": "percent",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "4% off Hyperliquid's fees",
+    "text": "A Hyperliquid account without a referral code gets ihatecrypto's, IHATECRYPTO, on its first trade here: the exchange then takes 4% less of its own fee. The trading key signs it, with no prompt.",
+    "symbol": "tag.fill",
+    "color": "34C759"
+   }
+  ]
+ },
+ {
+  "version": "0.7.0",
+  "date": "2026-10-22",
+  "stories": [
+   {
+    "title": "Sends that find the money",
+    "text": "A send to a saved address on Hyperliquid brings what Hyperliquid lacks from Solana first — or straight from the network that holds it — in the same Confirm, and its card says how much comes over. A send no balance can cover is said at once, before any card.",
+    "symbol": "arrow.triangle.branch",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "When something fails, a way that works",
+    "text": "If a move, a trade or a close doesn't go through, or can't be prepared, the assistant says why in plain words and offers what would work as cards — nothing runs until you press one and Confirm. A stop by the guard, the signer or a scam check is never routed around.",
+    "symbol": "lightbulb.fill",
+    "color": "34C759"
+   },
+   {
+    "title": "Nothing moves without your click",
+    "text": "The first recurring buy is a card to confirm, scheduled buys ask you to approve again, a stop or take the assistant suggests on an open trade waits for Confirm, an alert's moves wait for Confirm, and tasks that move money from the automation wallet start paused.",
+    "symbol": "hand.raised.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Updates wait for you",
+    "text": "A new version shows a small window — Install Update, Remind Me Later or Skip This Version. Nothing downloads or installs until you press Install.",
+    "symbol": "arrow.down.circle.fill",
+    "color": "5856D6"
+   },
+   {
+    "title": "Open source, rebuilt byte for byte",
+    "text": "ihatecrypto's code is public under GPL-3.0, and every release rebuilds from its tag byte for byte apart from the signatures, so anyone can check the app is that code. The signer now proves each of your own addresses with the key at every signature, checks what Uniswap and Jupiter pay out, and caps leverage.",
+    "symbol": "checkmark.seal.fill",
+    "color": "34C759"
+   },
+   {
+    "title": "Swaps to ETH finish unwrapping",
+    "text": "After a one-signature approve and swap on an EVM network, the next transaction no longer gets «nonce too low», and a swap to ETH waits for its WETH before unwrapping it, so none is left behind.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "5856D6"
+   }
+  ]
+ },
+ {
+  "version": "0.6.9",
+  "date": "2026-10-20",
+  "stories": [
+   {
+    "title": "Your wallets and their addresses",
+    "text": "Click the wallet's name by the balance. Your wallets are on the left; click one to see its address on every network — Solana, EVM (the same address on all nine), Hyperliquid and NEAR — whole, each with Copy, and «Switch to …». A multisig shows its address, the networks it's on and its keys.",
+    "symbol": "wallet.bifold.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "A balance that doesn't jump",
+    "text": "The balance no longer shows zeros while it loads: you see the last one, faded, until every network is read — and the sidebar, the portfolio and the tray now show the same total, Automation included.",
+    "symbol": "dollarsign.circle.fill",
+    "color": "34C759"
+   },
+   {
+    "title": "Top up gas from the Schedule",
+    "text": "The Schedule's Tasks and Wallet tabs have «Top up gas». It works out how much SOL the automation wallet's tasks need for the next 4 weeks, and the gas coin on each network where it holds USDC, and types the send into the chat with the amount ready to change — nothing goes until you send it, then Confirm.",
+    "symbol": "fuelpump.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Adding an AI account keeps your chat",
+    "text": "Adding an account in Settings › AI model no longer switches the chat to it — press Switch when you want it.",
+    "symbol": "person.crop.circle.badge.checkmark",
+    "color": "5856D6"
+   }
+  ]
+ },
+ {
+  "version": "0.6.8",
+  "date": "2026-10-20",
+  "stories": [
+   {
+    "title": "HYPE is verified",
+    "text": "HYPE on the Hyperliquid card has a check mark, like ETH on its networks. Other coins on Hyperliquid's spot side no longer say «unverified»: a name there belongs to one token, so none of them can be a look-alike.",
+    "symbol": "checkmark.seal.fill",
+    "color": "34C759"
+   }
+  ]
+ },
+ {
+  "version": "0.6.7",
+  "date": "2026-10-20",
+  "stories": [
+   {
+    "title": "Lock the app with a passcode",
+    "text": "Set a 6-digit code when you set up or in Settings › Wallet › Passcode. The app locks when it opens, after the time away you pick, when the PC sleeps, on «lock» and on Ctrl+L. Open it with the code, Windows Hello or your PC password. Five wrong codes turn the code off. Scheduled tasks, stops and alerts keep running while it's locked.",
+    "symbol": "lock.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "A chat that's easier to read",
+    "text": "Long replies come as paragraphs and lists under the model's logo and the time. A slider over the field picks 25%, 50% or Max. Right-click any block on the canvas and choose «Ask or act in chat» to send what it shows.",
+    "symbol": "text.bubble.fill",
+    "color": "5856D6"
+   },
+   {
+    "title": "Smaller things",
+    "text": "The top 300 coins' logos come with the app, so tokens such as HYPE and USDC on the Hyperliquid card show their logos instead of a letter. The icon picker for canvases, folders and addresses is one scroll with Logos, Symbols, Emoji and Picture buttons. On a PC without Windows Hello, prompts say «your PC password».",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.6",
+  "date": "2026-10-18",
+  "stories": [
+   {
+    "title": "Your accounts in the profile menu",
+    "text": "The profile menu lists the AI accounts you've connected, such as a subscription, an API key or a model on this PC, each with its logo. Click one to switch the chat to it. «…» signs out of just that account. Settings, Browser and What's new sit right below.",
+    "symbol": "person.crop.circle.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Modules at a glance",
+    "text": "Settings › Modules is a list on the left that shows how many of each kind are on. The chosen kind's protocols or networks are on the right, each with its own switch.",
+    "symbol": "switch.2",
+    "color": "5856D6"
+   },
+   {
+    "title": "Smaller things",
+    "text": "Addresses show as an even block of equal lines, never with half of one wrapped on its own. A trading key paused by «lock» resumes from Settings › Wallet › Hyperliquid. The rail's ticker reads right in the light look.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.5",
+  "date": "2026-10-16",
+  "stories": [
+   {
+    "title": "Send more from the top-up page",
+    "text": "After a top-up arrives, «Send more» lets you pick another amount. The page shows both wallets' balances now → after, and your wallet asks to confirm again.",
+    "symbol": "arrow.up.circle.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "Favorites: tokens and wallets",
+    "text": "Favorites has two tabs. Tokens is a table with price, 24h, liquidity and what you hold; a token's board opens beside the list. Wallets lists your wallets and saved addresses. Paste anything into «+» and it tells a token from a wallet.",
+    "symbol": "star.fill",
+    "color": "FFB800"
+   },
+   {
+    "title": "Ideas to start a chat",
+    "text": "The chat offers 22 starting points, four at a time, and ↻ brings four more. Each one says what it does in plain words.",
+    "symbol": "lightbulb.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Smaller things",
+    "text": "The Schedule stays smooth with many tasks open: it no longer re-reads every step on each redraw. Portfolio rows no longer say «gas» or «not earning».",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.4",
+  "date": "2026-10-16",
+  "stories": [
+   {
+    "title": "Scheduled buys land on your main wallet",
+    "text": "What a task buys with the automation wallet is sent on to your main wallet after each run. A sale always waits for your Confirm and Windows Hello. When the week's buys need more than Automation holds, the Schedule says how much to top up, a day ahead.",
+    "symbol": "arrow.down.to.line.circle.fill",
+    "color": "9945FF"
+   },
+   {
+    "title": "A clearer Schedule",
+    "text": "Paused tasks fold away under «Paused», each with Delete. «New schedule» starts one in the chat. A run with nothing to do now says so instead of looking done, and each task shows which wallet it pays from — you can switch it. «Ask in chat» on a task gives the chat its details and last runs.",
+    "symbol": "calendar.badge.clock",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Skills and a trading study",
+    "text": "Settings › Skills lists what the chat can follow, with a switch each, and takes your own .md or .txt. The built-in «Trading study» measures any Hyperliquid account's closed trades after fees and funding, keeps a journal of why you entered, and writes down what works for you. No money moves.",
+    "symbol": "graduationcap.fill",
+    "color": "26A17B"
+   },
+   {
+    "title": "Smoother canvas",
+    "text": "Pinch and Ctrl+-scroll zoom stay at full frame rate. The glowing edge of a busy canvas breathes a few times and then stays lit, and the coin's face is played as a film, so the PC does far less work while the chat thinks.",
+    "symbol": "gauge.with.dots.needle.67percent",
+    "color": "5856D6"
+   },
+   {
+    "title": "Smaller things",
+    "text": "Schedule › Wallet shows what's on each network in dollars, with the whole address and Copy.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.3",
+  "date": "2026-10-16",
+  "stories": [
+   {
+    "title": "The chat asks when it's unsure",
+    "text": "When it isn't clear which coin, how much, which network or who gets it, the chat asks one question with answers as cards right under it. Click one, or press ↑ and pick with the arrows and Return. «Swap USDC to USDT and send it to Bybit» now does exactly that, never a trade.",
+    "symbol": "questionmark.bubble.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "P/L on every coin",
+    "text": "Every coin shows how it did since you got it, gas coins too: what you paid comes from the wallet's own history, even for coins bought outside the app. A coin that came in by a transfer or a bridge is counted at its price that day.",
+    "symbol": "chart.line.uptrend.xyaxis",
+    "color": "26A17B"
+   },
+   {
+    "title": "Hide your balance",
+    "text": "The eye next to «Balance» hides the amounts: in the sidebar, the portfolio, the coin cards, positions and P/L. Percentages stay. What you confirm is always shown in full.",
+    "symbol": "eye.slash.fill",
+    "color": "5856D6"
+   },
+   {
+    "title": "Top up, one look",
+    "text": "Browser wallet, Phone wallet and Exchange show the same block: the QR, what to do, and the whole address with Copy. «Other» picks another token, «Custom» types your own amount.",
+    "symbol": "qrcode",
+    "color": "2775CA"
+   },
+   {
+    "title": "Smaller things",
+    "text": "In the canvas list each canvas has its AI company's logo and the full date and time; a long name scrolls when you point at it.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.2",
+  "date": "2026-10-15",
+  "stories": [
+   {
+    "title": "Top up from any network",
+    "text": "Top up lists every network the app works on, in one row. Pick the coin and the amount, or «Any» for either, and the way: a browser wallet like Phantom or MetaMask on a page the app opens, a phone by its QR and the address, or an exchange. When the money lands, Top up says how much arrived and where.",
+    "symbol": "arrow.down.circle.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Where the money went",
+    "text": "History opens on what moved: the day summed up («−25 USDT sent to Automation · 5 sends»), then each move with where it went, the amount and a link to the explorer. Or ask the chat: «where did the money go today?»",
+    "symbol": "clock.arrow.circlepath",
+    "color": "2775CA"
+   },
+   {
+    "title": "The Schedule by date",
+    "text": "Each run is a date tile with its time and who signs it: the automation wallet by itself, or you with Windows Hello. A task opens to its whole card. «Run now» keeps the next run where it was.",
+    "symbol": "calendar",
+    "color": "5856D6"
+   },
+   {
+    "title": "Your automation wallet, counted",
+    "text": "The balance in the sidebar is both wallets, with the split under it: Main and Automation. The portfolio has the Automation card, and the Schedule shows its money in dollars. With no SOL for fees, one button sends it 0.01 SOL, and a top-up from the Schedule brings the fee along.",
+    "symbol": "dollarsign.circle.fill",
+    "color": "26A17B"
+   },
+   {
+    "title": "Smaller things",
+    "text": "A transfer and a saved address are drawn as route cards. Buttons and switches are in the app's orange instead of the system's blue. The second check understands what a command means and reads what a lookup brings back before the chat does.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.1",
+  "date": "2026-10-13",
+  "stories": [
+   {
+    "title": "A multisig in one move",
+    "text": "Say «make a multisig»: a card with its keys — this PC's, your Ledger's, any saved address, as many as you want — how many of them must sign, and the networks you pick. One Confirm makes it at the same address on each; then pay from it in the chat.",
+    "symbol": "key.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "What every bridge costs",
+    "text": "A move between networks lists each bridge that can make it — Relay, Circle's CCTP, NEAR Intents, LayerZero — with what it costs and how long it takes, on the bridge's own step. The one the move goes by comes first.",
+    "symbol": "arrow.left.arrow.right.circle.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "USDT over Tether's own bridge",
+    "text": "«Move 50 USDT from Arbitrum to Polygon via LayerZero» sends it over USDT0: the same amount arrives, for cents of gas, between Ethereum, Arbitrum, Optimism, Polygon and HyperEVM. It takes minutes to hours, so the card says the wait and the portfolio shows it in transit.",
+    "symbol": "point.3.connected.trianglepath.dotted",
+    "color": "26A17B"
+   },
+   {
+    "title": "How full the chat is",
+    "text": "A chip beside the model's name shows how much of its window the chat fills — «21k / 1M» — or, when an API key pays, what the answers cost. Click it for what it's made of: the instructions, the chat, the canvas and your balances.",
+    "symbol": "cpu",
+    "color": "5856D6"
+   },
+   {
+    "title": "A chat that keeps the thread",
+    "text": "Each message now goes with the canvas's chat from its start — its newest part once it grows long — not just the last few lines, so «as usual» still means what you said it means. And the newest block is always on top: finished moves sit under the current one, newest first.",
+    "symbol": "bubble.left.and.text.bubble.right.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Smaller things",
+    "text": "A small first Kamino deposit asks «Send anyway?» with its rent in numbers instead of refusing. Jupiter is asked again when it's busy, and its errors read as a sentence. The window's buttons stay in their corner after a relaunch.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.6.0",
+  "date": "2026-10-09",
+  "stories": [
+   {
+    "title": "Every step says what it does",
+    "text": "Each card of a move shows its state in words on its picture — Ready, Now, Done, Windows Hello — then what it does and with which protocol, with that protocol's logo. Click a card for the rest; ✕, Close or Esc closes it.",
+    "symbol": "rectangle.stack",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Your money now → after",
+    "text": "Every step that moves money shows the balances it changes: «Solana 26.65 → 24.65 USDC», «Kamino Lend 0 → 2 USDC». Once it's done, it reads was → now.",
+    "symbol": "arrow.left.arrow.right",
+    "color": "26A17B"
+   },
+   {
+    "title": "Coins open like tokens",
+    "text": "SOL, ETH and NEAR open where your tokens do, on the same card: price with 24h, 7d and 30d, the chart, the day's numbers, what you hold, Ask in chat, Buy and Sell.",
+    "symbol": "chart.xyaxis.line",
+    "color": "9945FF"
+   },
+   {
+    "title": "The chat calls any contract",
+    "text": "Ask for anything a contract does on nine networks: the chat writes the call, checks the contract and simulates it before a card with Confirm. It says its next step out loud, remembers what you tell it to, and can watch things in the background.",
+    "symbol": "curlybraces",
+    "color": "5856D6"
+   },
+   {
+    "title": "Calls that can't trick you",
+    "text": "A call that would hand over rights to your coins is refused. A protocol ihatecrypto doesn't know has to pass its checks, and at most $50 rides on it. Deposits into any vault show in your portfolio.",
+    "symbol": "checkmark.shield",
+    "color": "2775CA"
+   },
+   {
+    "title": "Stop",
+    "text": "While the chat is answering, the send button turns into Stop (Esc does it too): nothing it was about to do runs.",
+    "symbol": "stop.circle",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.5.8",
+  "date": "2026-10-08",
+  "stories": [
+   {
+    "title": "The chat looks things up itself",
+    "text": "Ask about anything on-chain — your Aave health factor, a pool's rate on DefiLlama, your past Hyperliquid fills — and the chat reads the contract, the network or the public data itself, with no feature built for it first.",
+    "symbol": "magnifyingglass",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "It carries on after a move",
+    "text": "Ask for something that depends on how a move goes — «buy SOL for $1, then an alert 5% under my price» — and after your Confirm the chat takes the next step from what actually happened.",
+    "symbol": "arrow.turn.down.right",
+    "color": "5856D6"
+   },
+   {
+    "title": "Every big stablecoin, everywhere",
+    "text": "USDT, USDC, USDS, USDe and DAI by their names on every network they're on — swap one for another, send them, move them across networks. They count as dollars in your portfolio, «not earning» like USDC.",
+    "symbol": "dollarsign.circle",
+    "color": "26A17B"
+   },
+   {
+    "title": "The amount, not «all»",
+    "text": "A card that moves all of a coin shows how much that is, with «all available» under it.",
+    "symbol": "number",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Open Hyperliquid your way",
+    "text": "Your first trade asks how to open the account: Relay in seconds with Hyperliquid's $1.20 opening fee, or NEAR Intents in 2–4 minutes without it.",
+    "symbol": "arrow.triangle.branch",
+    "color": "2775CA"
+   },
+   {
+    "title": "New networks wait for you",
+    "text": "Networks and protocols a later version brings arrive switched off and ask once whether to turn them on.",
+    "symbol": "switch.2",
+    "color": "8E8E93"
+   }
+  ]
+ },
+ {
+  "version": "0.5.7",
+  "date": "2026-10-08",
+  "stories": [
+   {
+    "title": "Quit to the tray",
+    "text": "Ctrl+Q now keeps ihatecrypto in the tray: your schedule, alerts and stops go on, and the window no longer pops back on its own. Ctrl+Shift+Q — or Quit Completely in the tray — quits for real.",
+    "symbol": "menubar.rectangle",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Your schedule in the tray",
+    "text": "Click the coin to see what runs next — tasks and recurring buys — and how each one's last run went. A click opens it.",
+    "symbol": "calendar.badge.clock",
+    "color": "2775CA"
+   }
+  ]
+ },
+ {
+  "version": "0.5.6",
+  "date": "2026-10-08",
+  "stories": [
+   {
+    "title": "BNB Chain",
+    "text": "USDC to BNB Chain and back from Solana or any network, BNB for its gas coming along, sends to saved addresses, and its tokens in the portfolio. «move 5 USDC from Solana to BNB», «buy CAKE on bnb for 5 USDC».",
+    "symbol": "hexagon.fill",
+    "color": "F0B90B"
+   },
+   {
+    "title": "Any token for any other",
+    "text": "On every network: «swap 0.1 SOL for BONK on solana», «swap 1 TSLA for NVDA on robinhood», «swap 1 HYPE for PURR on hyperliquid spot», «swap 1 NEAR for AURORA on near» through NEAR Intents, and across networks — SOL for CAKE on BNB Chain, NEAR for SOL.",
+    "symbol": "arrow.left.arrow.right",
+    "color": "2775CA"
+   },
+   {
+    "title": "Buy and Sell on every coin",
+    "text": "SOL, ETH, BNB, HYPE, POL and NEAR open with Buy and Sell like any token, on their chart and in the right-click menu. No token hides its buttons: if a move can't go, it says why when you send it.",
+    "symbol": "cart.fill",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Send anyway?",
+    "text": "A move that would lose more than usual to fees no longer just stops: it says how much — «Relay keeps ≈ $0.23 of $2.00» — and asks. Send anyway, or cancel. A swap's card warns when fees take more than a tenth.",
+    "symbol": "exclamationmark.triangle.fill",
+    "color": "FF7A2F"
+   }
+  ]
+ },
+ {
+  "version": "0.5.5",
+  "date": "2026-10-08",
+  "stories": [
+   {
+    "title": "Every coin opens",
+    "text": "Each row of a network's card opens: a token its board, SOL or ETH its chart, idle USDC its own page with Buy and Sell, a deposit its details. Coins and deposits sit apart, the amount under the name, the day's move beside the dollars.",
+    "symbol": "hand.tap.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Profit and loss on every token",
+    "text": "A token bought in the app shows what it made or lost next to its amount, and its board says it in dollars with what it cost. One that came from elsewhere shows today's move.",
+    "symbol": "chart.line.uptrend.xyaxis",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Swaps on Optimism and HyperEVM",
+    "text": "«swap 0.001 ETH for OP on optimism» goes through Uniswap there; on HyperEVM, where the money isn't in Uniswap's pools, «swap 5 USDC for HYPE on hyperevm» or for UBTC, UETH, USOL and kHYPE goes through Relay's swap.",
+    "symbol": "arrow.triangle.2.circlepath",
+    "color": "FF0420"
+   },
+   {
+    "title": "Prompts typed out",
+    "text": "A button that puts a phrase into the chat types it in, so you see where to look before you send it.",
+    "symbol": "keyboard",
+    "color": "2775CA"
+   },
+   {
+    "title": "Small fixes",
+    "text": "What's New scrolls its list of versions; the canvas no longer lights up cards under the chat or a panel; a typo of a folder's name means that folder; a move to a network ihatecrypto doesn't have is no longer read as a trade.",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "9945FF"
+   }
+  ]
+ },
+ {
+  "version": "0.5.3",
+  "date": "2026-10-07",
+  "stories": [
+   {
+    "title": "A canvas that keeps up",
+    "text": "Dragging the canvas, with two fingers or the mouse, now moves it whole: the frames don't drop, even with a move waiting for Confirm. A card waiting, a model answering and the first seconds after launch take a fraction of what they did.",
+    "symbol": "hand.draw.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "What you get, on the card",
+    "text": "A swap's card says what arrives, as quoted now: «≈ 0.0083 SOL», «≈ 1.8 UNI», «≈ 0.11 HYPE». Jupiter, Relay, Hyperliquid's spot book and Robinhood's stock tokens.",
+    "symbol": "arrow.triangle.2.circlepath",
+    "color": "2775CA"
+   },
+   {
+    "title": "Asked for more than you have",
+    "text": "«Buy SOL for 150» with 100 on Solana no longer starts a chain of moves: the chat says what's there, and the canvas offers the ways on — bring the rest from another network first, take all there is, or top up.",
+    "symbol": "exclamationmark.bubble.fill",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Think before answering",
+    "text": "Settings › Models has a switch for the model to reason before it answers: steadier on a muddled request, a few seconds slower. Off by default.",
+    "symbol": "brain",
+    "color": "9945FF"
+   }
+  ]
+ },
+ {
+  "version": "0.5.2",
+  "date": "2026-10-06",
+  "stories": [
+   {
+    "title": "The best model your PC can run",
+    "text": "«On this PC» picks by your PC's memory: Gemma 4 12B on 16–24 GB, Gemma 4 26B on 32 GB — 9 of 10 in the chat's exam at 5.4 seconds an answer — Gemma 4 31B from 36 GB, and NVIDIA's Nemotron 3 Super from 192 GB. The model menu marks the one that fits yours.",
+    "symbol": "cpu",
+    "color": "0B7A55"
+   }
+  ]
+ },
+ {
+  "version": "0.5.1",
+  "date": "2026-10-06",
+  "stories": [
+   {
+    "title": "The rate before you swap",
+    "text": "A swap waiting for Confirm says what you get and at what rate — «You get ≈ 23 SPX · 1 SPX ≈ $0.43» — Solana buys through Jupiter too. Confirm holds 15 seconds after the price; then Refresh asks for a fresh one.",
+    "try": "buy $SOL for 2 USDC",
+    "symbol": "arrow.triangle.2.circlepath",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Tokens stay tokens",
+    "text": "A message with $SPX or $ and a contract shows the token's chip in the chat too, not a long address, and «understood as» names the token. The model still gets the exact address.",
+    "symbol": "dollarsign.circle.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "Models on this PC, ten times faster",
+    "text": "A model on this PC no longer thinks to itself before every answer: Gemma 4 12B answers the chat in about 8 seconds instead of two minutes.",
+    "symbol": "bolt.fill",
+    "color": "0B7A55"
+   }
+  ]
+ },
+ {
+  "version": "0.5",
+  "date": "2026-10-06",
+  "stories": [
+   {
+    "title": "Tokens in the chat",
+    "text": "Type $ to pick a token: $SOL shows as its logo, and $ with a contract or a mint shows that token with its picture, so you see what you'll buy before you send. While a card waits, its Cancel and Confirm sit right in the field.",
+    "try": "buy $SOL for 2 USDC",
+    "symbol": "dollarsign.circle.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Swap across networks",
+    "text": "Any token on one network for any token on another, in one signature: SOL on Solana for ETH on Arbitrum. Every USDC bridge weighs Relay against NEAR Intents, and Circle's CCTP when it lands more or when you ask for it.",
+    "try": "swap 0.1 SOL on Solana for ETH on Arbitrum",
+    "symbol": "arrow.left.arrow.right",
+    "color": "4615C8"
+   },
+   {
+    "title": "Send to Bitcoin, TRON, XRP and more",
+    "text": "Through NEAR Intents, money goes to a saved Bitcoin, TRON, XRP, Dogecoin, Zcash or Sui address — an exchange's deposit, say — and comes in from them: «receive» shows an address and a QR. NEAR sells for USDC on Base, Arbitrum or Ethereum.",
+    "try": "receive 20 USDC from Sui",
+    "symbol": "paperplane.fill",
+    "color": "00C08B"
+   },
+   {
+    "title": "Borrow on Aave",
+    "text": "Supply ETH or USDC, then borrow USDC against it on Base, Arbitrum, Polygon or Ethereum. The card shows the health factor before and after and the ETH price at which it would be liquidated; ihatecrypto never borrows below 1.5.",
+    "try": "borrow 10 USDC on Aave",
+    "symbol": "building.columns.fill",
+    "color": "B6509E"
+   },
+   {
+    "title": "HyperEVM, Optimism and Tempo swaps",
+    "text": "Two new networks: USDC in and out with gas brought along, their cards in the portfolio and their switches in Settings › Modules. On Tempo, stablecoins swap on its own exchange for a basis point or two.",
+    "try": "move 5 USDC from Solana to HyperEVM",
+    "symbol": "point.3.connected.trianglepath.dotted",
+    "color": "FF0420"
+   },
+   {
+    "title": "Money in transit",
+    "text": "A bridge that left and hasn't landed shows above the network cards; a click opens the bridge's own word on it, the transaction and the address. The legs of a move from several networks travel together, as fast as the slowest.",
+    "symbol": "clock.arrow.2.circlepath",
+    "color": "2775CA"
+   },
+   {
+    "title": "Approvals and dust",
+    "text": "«show my approvals» lists every allowance your wallet gave, unlimited ones first, each with Revoke. «sweep dust» turns small leftovers into USDC. Bridged USDC.e is named as such, one click from Circle's USDC.",
+    "try": "show my approvals",
+    "symbol": "checkmark.shield.fill",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Answers as they're written",
+    "text": "Every model's reply shows as it's written, and a model on this PC reads the whole prompt. Claude Code installs from Settings › Models; a NEAR Intents key in Settings › General lowers 1Click's fees. Hyperliquid spot buys and sells too.",
+    "symbol": "text.bubble.fill",
+    "color": "9945FF"
+   }
+  ]
+ },
+ {
+  "version": "0.4.4",
+  "date": "2026-10-05",
+  "stories": [
+   {
+    "title": "Confirm is a button",
+    "text": "A card waiting for Confirm goes ahead only when you press Confirm. A typed «yes», «do it» or «да» is answered, never signed — so text from a site, a note or a pasted message can't agree for you.",
+    "symbol": "hand.tap.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Money from anywhere",
+    "text": "A buy or a deposit brings the money from wherever it lies — Base, Arbitrum, Ethereum, Hyperliquid, NEAR — in legs under one Confirm, and its card names where each dollar really comes from. NEAR can be bought straight from Base, Arbitrum or Ethereum.",
+    "try": "buy NEAR for 5 USDC",
+    "symbol": "arrow.triangle.merge",
+    "color": "2775CA"
+   },
+   {
+    "title": "Uniswap v4 everywhere",
+    "text": "On Base, Arbitrum, Ethereum and Polygon every swap takes the better of Uniswap v3 and v4, the card shows the price impact, and a deep pool trades within half a percent of its quote. Ethereum's swaps go through MEV Blocker, out of the public mempool.",
+    "symbol": "arrow.left.arrow.right.circle.fill",
+    "color": "FF007A"
+   },
+   {
+    "title": "Buy over time",
+    "text": "Jupiter DCA buys a coin in parts on-chain, with the app closed. Asked to buy over time, the chat offers both ways — Jupiter DCA or the app's own regular buys — each said in a line.",
+    "try": "buy SOL for 100 USDC every week",
+    "symbol": "calendar.badge.clock",
+    "color": "0B7A55"
+   },
+   {
+    "title": "A model on this PC, in one click",
+    "text": "«On this PC» installs or updates Ollama, picks a model that fits your PC's memory, downloads it and starts it. The model menu shows what's already downloaded first.",
+    "symbol": "desktopcomputer",
+    "color": "4615C8"
+   },
+   {
+    "title": "Your own nodes",
+    "text": "Settings › General › Your own nodes: a free node of your own for Solana (Helius) or an EVM network (Alchemy), with the steps to get one. Yours goes first, the built-in nodes stay behind it, and the key stays in this PC's Keychain.",
+    "symbol": "server.rack",
+    "color": "9945FF"
+   },
+   {
+    "title": "One Windows Hello for approve and swap",
+    "text": "Off unless you turn it on, in Settings › Wallet: an approve and the swap, deposit or bridge that spends it go as one transaction (EIP-7702). Your wallet on that network then runs an audited account contract; the switch's ⓘ says what that means.",
+    "symbol": "square.stack.3d.up.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Small things",
+    "text": "«save vitalik.eth as Vitalik» or «save toly.sol as Toly» saves the address the name points at. ↑ and ↓ in the chat walk everything you sent. A Jupiter route that fails before signing gives way to another. Robinhood is just «Robinhood».",
+    "try": "save vitalik.eth as Vitalik",
+    "symbol": "checkmark.seal.fill",
+    "color": "2775CA"
+   }
+  ]
+ },
+ {
+  "version": "0.4.3",
+  "date": "2026-10-04",
+  "stories": [
+   {
+    "title": "The chat sees your canvas",
+    "text": "Ask about anything on the canvas — a token's card, a chart, a position, the P/L, a service's answer — and the answer comes from the numbers you see there, in the range the chart shows.",
+    "try": "what did the chart do today?",
+    "symbol": "eye.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "A token's month, free",
+    "text": "Looking a token up now brings its pool's last 30 days: the low, the high and a close a day. «Where should I buy?» gets a range from the chart, not an offer to pay for history.",
+    "symbol": "chart.xyaxis.line",
+    "color": "2775CA"
+   }
+  ]
+ },
+ {
+  "version": "0.4.2",
+  "date": "2026-10-04",
+  "stories": [
+   {
+    "title": "Orders keep their price",
+    "text": "«limit 2650.» and «stop at 2650.» no longer lose the price to the full stop, so a limit stays a limit. «Brent oil» is Brent, not WTI. 26,617 ways to write a command were checked; all read right.",
+    "symbol": "scope",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "A yes is a yes",
+    "text": "«yeah right» or «ну да, конечно» can be sarcasm: they go to the model instead of signing the waiting card. A plain yes still signs at once, and no change ever does.",
+    "symbol": "hand.thumbsup.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "The chat never freezes",
+    "text": "A Claude Code reply can't hang the chat after it ends, and Claude Code updating itself no longer breaks answers for a minute.",
+    "symbol": "bolt.horizontal.circle.fill",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Small things",
+    "text": "A note that mentions an alert or a chart stays a note. «save 0x… as Mom on tempo» saves «Mom» on Tempo. «Sell all JUP» shows how much «all» is.",
+    "symbol": "checkmark.seal.fill",
+    "color": "4615C8"
+   }
+  ]
+ },
+ {
+  "version": "0.4.1",
+  "date": "2026-10-04",
+  "stories": [
+   {
+    "title": "New Settings",
+    "text": "Sorted into General (theme, app language, notifications, background), Trading agent — Careful, Balanced or Bold, and every limit yours to change — AI model, and Wallet with all your wallets in one place. One calm column, an icon on every row.",
+    "symbol": "gearshape.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Works without a model",
+    "text": "No subscription? Typed commands like «long ETH risk $5» or «send 5 USDC to Bybit» still work, and nothing moves without Confirm and Windows Hello. Sign-ins says so, and the empty canvas offers «Connect a model».",
+    "try": "long ETH risk $5",
+    "symbol": "text.bubble.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "Folders with icons",
+    "text": "«Change icon…» on a folder in the sidebar: a token logo, a symbol, an emoji or your own picture.",
+    "symbol": "folder.fill",
+    "color": "0B7A55"
+   }
+  ]
+ },
+ {
+  "version": "0.4",
+  "date": "2026-10-03",
+  "stories": [
+   {
+    "title": "Safer signatures",
+    "text": "A site can't get a signature that moves money off Hyperliquid or sends USDC on its own; coins, NFTs and spending rights go only to addresses you approved, with the amount and the network fee on the prompt.",
+    "symbol": "lock.shield.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Understands you better",
+    "text": "«2,500» is two and a half thousand, «sell SOL for $10» never sells it all, «ok?» is a question and not a yes, and an answer in the wrong unit is asked again.",
+    "symbol": "text.bubble.fill",
+    "color": "2775CA"
+   },
+   {
+    "title": "Trades keep their stop",
+    "text": "«cancel the limit» removes only the entries still waiting; the position, its stop and its take stay. A limit on a pullback brings enough margin to be placed.",
+    "symbol": "chart.line.uptrend.xyaxis",
+    "color": "0B7A55"
+   },
+   {
+    "title": "Steadier everywhere",
+    "text": "Withdrawing from Aave or Morpho brings back only what came out, switching wallets drops cards made for the other one, and a hung model can't freeze the chat.",
+    "symbol": "checkmark.seal.fill",
+    "color": "4615C8"
+   }
+  ]
+ },
+ {
+  "version": "0.3.1",
+  "date": "2026-10-03",
+  "stories": [
+   {
+    "title": "Updates come by themselves",
+    "text": "This copy looks at updates.ihatecrypto.ai once a day. A new version downloads in the background and goes in at «Restart to update»; the wallet, settings and canvases stay.",
+    "try": "check for updates",
+    "symbol": "arrow.down.circle.fill",
+    "color": "FF7A2F"
+   }
+  ]
+ },
+ {
+  "version": "0.3",
+  "date": "2026-10-03",
+  "stories": [
+   {
+    "title": "Ask it anything",
+    "text": "Questions about the app, your quota or life get a straight answer, and a line on what the canvas could keep for them. Asking about the system prompt is no longer stopped as an attack.",
+    "try": "what is the canvas for?",
+    "symbol": "bubble.left.and.text.bubble.right.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "Shift-Return for a new line",
+    "text": "Shift-Return breaks the line in the chat field; Return still sends.",
+    "symbol": "return",
+    "color": "2775CA"
+   },
+   {
+    "title": "The trading key waits for a deposit",
+    "text": "Hyperliquid takes a trading key once the account has had a deposit. Until then the first steps don't ask for Windows Hello; afterwards Settings › Wallet › Key and signing has the button.",
+    "symbol": "key.fill",
+    "color": "072723"
+   }
+  ]
+ },
+ {
+  "version": "0.2",
+  "date": "2026-10-01",
+  "stories": [
+   {
+    "title": "Updates by themselves",
+    "text": "ihatecrypto looks for a new version once a day. When one is ready you get a notification; Install shows what changed first.",
+    "try": "check for updates",
+    "symbol": "arrow.down.circle.fill",
+    "color": "FF7A2F"
+   },
+   {
+    "title": "A sound for each thing",
+    "text": "A coin rings when money arrives or a move finishes, a soft chime when something wants a look, a low knock when a move fails.",
+    "symbol": "bell.badge.fill",
+    "color": "4615C8"
+   },
+   {
+    "title": "The real token wears a badge",
+    "text": "A token shows by its ticker, and the verified one has a blue rosette. «buy STONK» takes the real STONK, not a copy with a fake pool; what you bought here shows its profit next to the amount.",
+    "try": "show token STONK",
+    "symbol": "checkmark.seal.fill",
+    "color": "1D9BF0"
+   },
+   {
+    "title": "Any site, with your wallet",
+    "text": "«open kamino.com» opens the site beside the chat with your wallet, and every signature shows first. Drag the panel anywhere. Sites on MetaMask's phishing list don't open.",
+    "try": "open kamino.com",
+    "symbol": "globe",
+    "color": "072723"
+   },
+   {
+    "title": "Rewards sell themselves",
+    "text": "«every hour: sweep rewards over $10 into USDC» claims what Merkl owes once it's worth $10 and sells it for USDC; under $5 nothing is signed. From the automation wallet it runs without Windows Hello.",
+    "try": "every hour: sweep rewards over $10 into USDC",
+    "symbol": "arrow.triangle.2.circlepath",
+    "color": "2E57D8"
+   },
+   {
+    "title": "/ and @ in the chat",
+    "text": "Type / for the blocks you can add, with an example to finish. Type @ for names from your address book and favorite tokens.",
+    "try": "/",
+    "symbol": "command",
+    "color": "2775CA"
+   }
+  ]
+ }
+];

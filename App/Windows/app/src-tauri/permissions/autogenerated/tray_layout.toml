@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tray-layout"
+description = "Enables the tray_layout command without any pre-configured scope."
+commands.allow = ["tray_layout"]
+
+[[permission]]
+identifier = "deny-tray-layout"
+description = "Denies the tray_layout command without any pre-configured scope."
+commands.deny = ["tray_layout"]

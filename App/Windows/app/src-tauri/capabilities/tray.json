@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray",
+  "description": "The tray's panel, our own small page by the tray icon: it reads the engine's last state, hears new ones, sizes itself, opens the main window and quits. Nothing of the engine's requests.",
+  "webviews": [
+    "tray"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-tray-layout",
+    "allow-tray-state",
+    "allow-tray-open",
+    "allow-tray-quit"
+  ]
+}

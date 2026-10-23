@@ -1673,6 +1673,112 @@
   ],
   "oneClickKey": false
  },
+ "modelRunning": false,
+ "agentStep": null,
+ "optionsMessage": null,
+ "retryBoard": null,
+ "quote": null,
+ "models": {
+  "live": {
+   "claude-code": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5"
+   ]
+  },
+  "servers": {},
+  "installed": false,
+  "sizes": {},
+  "downloads": {},
+  "memoryGB": 16,
+  "recommended": null,
+  "refusals": {}
+ },
+ "lock": {
+  "codeSet": false,
+  "locked": false,
+  "codeOff": false,
+  "problem": null,
+  "lockAfter": 5,
+  "checking": false,
+  "offerNewCode": false,
+  "tasksRun": true
+ },
+ "folders": [],
+ "stuck": [],
+ "moves": [],
+ "movesDay": null,
+ "scheduleRuns": [],
+ "schedulePaused": false,
+ "scheduleKey": null,
+ "stepEdit": null,
+ "multisigHeld": {},
+ "appLanguage": "system",
+ "topUp": {
+  "networks": [
+   {
+    "key": "solana",
+    "title": "Solana",
+    "chainId": null,
+    "usdc": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "usdcSymbol": "USDC",
+    "usdcDecimals": 6,
+    "coin": "SOL",
+    "recipient": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+    "bySignature": false
+   },
+   {
+    "key": "base",
+    "title": "Base",
+    "chainId": 8453,
+    "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "usdcSymbol": "USDC",
+    "usdcDecimals": 6,
+    "coin": "ETH",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "bySignature": true
+   },
+   {
+    "key": "arbitrum",
+    "title": "Arbitrum",
+    "chainId": 42161,
+    "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    "usdcSymbol": "USDC",
+    "usdcDecimals": 6,
+    "coin": "ETH",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "bySignature": true
+   },
+   {
+    "key": "bnb",
+    "title": "BNB Chain",
+    "chainId": 56,
+    "usdc": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "usdcSymbol": "USDC",
+    "usdcDecimals": 18,
+    "coin": "BNB",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "bySignature": false
+   },
+   {
+    "key": "ethereum",
+    "title": "Ethereum",
+    "chainId": 1,
+    "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "usdcSymbol": "USDC",
+    "usdcDecimals": 6,
+    "coin": "ETH",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "bySignature": true
+   }
+  ],
+  "network": "solana",
+  "coin": "usdc",
+  "held": {
+   "USDC": 741.3
+  },
+  "gasShort": "SOL",
+  "waiting": false
+ },
  "favorites": [
   {
    "chain": "solana",

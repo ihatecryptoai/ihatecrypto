@@ -704,3 +704,27 @@ pub extern "C" fn winsec_close(handle: isize) { let _ = unsafe { CloseHandle(HAN
 pub extern "C" fn winsec_allow_foreground(pid: u32) -> i32 {
     if unsafe { AllowSetForegroundWindow(pid) }.is_ok() { OK } else { FAILED }
 }
+
+// MARK: The session, for the app's lock
+
+/// Milliseconds since the last input anywhere in this session, as the Mac's CGEventSource.secondsSinceLastEventType.
+#[unsafe(no_mangle)]
+pub extern "C" fn winsec_idle_ms() -> u32 {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() { return 0 }
+    // Both in the same 32-bit tick count, so the difference is right across its wrap every 49.7 days.
+    unsafe { windows::Win32::System::SystemInformation::GetTickCount() }.wrapping_sub(info.dwTime)
+}
+
+/// 1 while the session is locked: the input desktop is then Winlogon's, which a user's process can't open. No window or
+/// message loop needed, so the engine asks it on its own timer.
+#[unsafe(no_mangle)]
+pub extern "C" fn winsec_session_locked() -> i32 {
+    use windows::Win32::System::StationsAndDesktops::{CloseDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS, OpenInputDesktop};
+    const DESKTOP_SWITCHDESKTOP: u32 = 0x0100;
+    match unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(DESKTOP_SWITCHDESKTOP)) } {
+        Ok(desk) => { let _ = unsafe { CloseDesktop(desk) }; 0 }
+        Err(_) => 1,
+    }
+}

@@ -71,11 +71,14 @@ extension Engine {
         async let marketsRead = try? Hyperliquid.markets()
         // A wallet of one chain (a key, a watched address) has nothing to read on the other.
         async let solanaRead = me.solana.isEmpty ? .success(nil) : Self.solana(me.solana)
-        async let hlRead = me.evm.isEmpty ? .success(nil) : Self.hyperliquid(me.evm)
+        async let hlRead: (Read, PlaceFacts.HL?) = me.evm.isEmpty ? (.success(nil), nil) : Self.hyperliquid(me.evm)
         async let evmRead = me.evm.isEmpty ? [] : Self.evm(me.evm)
         async let nearRead = Self.near(near)
         if let m = await marketsRead { markets = m }
-        let parts = [await solanaRead, await hlRead] + (await evmRead) + [await nearRead]
+        let (hlPart, hlFacts) = await hlRead
+        // A read that failed keeps what the details board showed.
+        if hlFacts != nil || me.evm.isEmpty { placeFacts.hyperliquid = hlFacts }
+        let parts = [await solanaRead, hlPart] + (await evmRead) + [await nearRead]
         let last = Dictionary(uniqueKeysWithValues: portfolio.networks.map { ($0.key, $0) })
         var networks: [PortfolioView.Network] = [], errors: [String] = []
         for part in parts {
@@ -96,6 +99,7 @@ extension Engine {
         let next = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
         // Another wallet since the last read: its balances aren't money that arrived.
         let owner = me.solana + me.evm
+        let sameWallet = portfolioOwner == owner
         if portfolio.updatedAt != nil, portfolioOwner == owner { announceIncoming(from: portfolio, to: next) }
         portfolio = withProfit(next)
         portfolioOwner = owner
@@ -104,9 +108,20 @@ extension Engine {
         loadEquity()
         // A read that failed keeps the last one: read as it came, the balance would drop by Automation's money.
         if automationWallet == nil { automationUSD = nil } else if let m = await automationRead { automationUSD = m.dollars + m.sol * (markets["SOL"]?.markPx ?? 0) }
-        if !me.evm.isEmpty { positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions }
+        if !me.evm.isEmpty {
+            // A request that failed keeps what was read before: read as «none», a position would look closed by its stop.
+            async let ordersRead = try? HyperliquidAccount.openOrders(me.evm)
+            let before = positions.map(\.coin)
+            positions = (try? await HyperliquidAccount.positions(me.evm))?.filter { $0.size != 0 } ?? positions
+            hlOrders = await ordersRead ?? hlOrders
+            // Another wallet since the last read: its positions aren't this one's, closed.
+            if sameWallet { await noteClosedPositions(before: before) }
+            await guardPositions()
+        }
+        await refreshRates()
         await refreshFavorites()
         await checkAlerts()
+        await noticeHyperliquid()
         await readTransit()
         // Every network's gas coin is known now: dollars without it get their way out offered (once a network).
         offerGasWays()
@@ -137,7 +152,7 @@ extension Engine {
             recordFlow(usd, "\(parts[1]) in on \(parts[0])")
         }
         let text = say("💸 Received ", "💸 Пришло ") + lines.joined(separator: ", ") + "."
-        out.event("notify", ["title": say("Money arrived", "Пришли деньги"), "body": text])
+        notify(.incoming, say("Money arrived", "Пришли деньги"), text)
         reply(text, note: "incoming")
     }
 
@@ -168,7 +183,9 @@ extension Engine {
     /// what's idle (dollars and the big stablecoins) and what's earning (deposits), the bigger first; nil when neither.
     nonisolated static func note(_ n: PortfolioView.Network, russian: Bool = false) -> String? {
         switch n.key {
-        case "hyperliquid": return "\(Fmt.usd(n.rows.first { $0.symbol == "Perps" }?.usd ?? 0)) · " + (russian ? "маржа" : "margin")
+        case "hyperliquid":
+            let hlp = n.rows.first { $0.symbol == "HLP" }?.usd ?? 0
+            return "\(Fmt.usd(n.rows.first { $0.symbol == "Perps" }?.usd ?? 0)) · " + (russian ? "маржа" : "margin") + (hlp > 0 ? " · HLP \(Fmt.usd(hlp))" : "")
         case "tempo": return russian ? "USDC для платных сервисов" : "USDC for paid services"
         default:
             // Dollars carry no cost key (Engine.row): USDC, USDG and the genuine stablecoins.
@@ -258,19 +275,6 @@ extension Engine {
             return .success(.init(key: "solana", name: "Solana", usd: 0, rows: rows))
         } catch {
             return .failure("solana", "Solana: \(error.localizedDescription)")
-        }
-    }
-
-    nonisolated static func hyperliquid(_ user: String) async -> Read {
-        do {
-            let b = try await Hyperliquid.balance(user: user)
-            var rows: [PortfolioView.Row] = []
-            if b.accountValue > 0 { rows.append(row("Perps", b.accountValue, usd: b.accountValue)) }
-            if b.spotUSDC > 0 { rows.append(row("USDC", b.spotUSDC, usd: b.spotUSDC)) }
-            rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" }.map(row)
-            return .success(.init(key: "hyperliquid", name: "Hyperliquid", usd: 0, rows: rows))
-        } catch {
-            return .failure("hyperliquid", "Hyperliquid: \(error.localizedDescription)")
         }
     }
 

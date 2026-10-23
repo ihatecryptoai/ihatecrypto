@@ -79,9 +79,12 @@ extension Engine {
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
         pin(Board(id: id, kind: "move", title: title, lines: warnings.map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
         jupiterShown = nil
+        noticeCard(title)
         if case .wallet(let command) = pending { Task { await quoteCard(command, board: id) } }
-        // A Base or Arbitrum trade's two ways, for its step's way picker (RouteEdit.swift).
-        if case .wallet(let c) = pending, RouteEdit.wayKey(c) != nil { Task { await quoteWays(c) } }
+        // A Base or Arbitrum trade's two ways for its step's way picker, a Robinhood Chain trade's to take the best;
+        // the route's note for «Why this way?» (RouteEdit.swift).
+        if case .wallet(let c) = pending, RouteEdit.quoted(c) { Task { await quoteWays(c) } }
+        noteRoute(id, pending)
     }
 
     func cancelPending() {
@@ -419,6 +422,7 @@ extension Engine {
             if warnings.isEmpty, secondCheck, let review = await reviewPlan(next, p) { warnings.append(review) }
             show(.trade(p), title: "\(next.side == .long ? "Long" : "Short") \(IntentParser.pretty(next.asset))",
                  lines: p.steps + p.changes, warnings: warnings)
+            drawTrade(card?.id, resolved.intent, evaluation.sizing, market: resolved.market)
             reply((said.isEmpty ? "" : said + "\n") + say("The trade is on the card with every signature in order. Press Confirm, or change it in words.",
                                                           "Сделка на карточке, все подписи по порядку. Нажми «Подтвердить» или измени её словами."), note: note)
         } catch {
@@ -480,6 +484,7 @@ extension Engine {
     /// The Confirm button: the one way a move starts.
     func confirm() async {
         guard let waiting = pending, let title = card?.title else { return }
+        retry = nil
         // A site's request: Confirm lets it through; the browser's handler signs it, with the signer's own checks.
         if case .site(let ask) = waiting {
             updateBoard(card?.id) { $0.state = "done" }
@@ -516,6 +521,9 @@ extension Engine {
                 if let outcome { b.lines.append(String(outcome.prefix(400))) }
                 lastMove = (Date(), b.state ?? "done")
             }
+            noticeMove(title, state: lastMove?.state)
+            // Its steps stay in the chat as one card, before what it ended with (ChatTurns.keepSteps).
+            keepSteps(at: said)
             runningBoard = nil
             running = nil; lastOwnMove = Date(); changed(); Task { await refresh() }
             // The request this move was a step of goes on, with how it went.
@@ -528,6 +536,8 @@ extension Engine {
             case .transfer(let entry, let amount):
                 reply(try await transfer(amount, to: entry), note: "transfer")
                 recordFlow(-amount, "sent to \(entry.name)")
+            // A trailing stop is the guardian's to keep (PositionGuard.swift); the exchange holds no such order.
+            case .position(.trail(let pct), let coin): reply(trail(coin, pct), note: "Hyperliquid")
             case .position(let command, let coin): reply(try await executor().manage(command, asset: coin, policy: policy, equity: ruleEquity), note: "Hyperliquid")
             case .trade(let p):
                 guard p.isFresh else {
@@ -536,6 +546,7 @@ extension Engine {
                     return
                 }
                 let opened = try await executor().execute(p)
+                keepExitRules(opened, intent: p.intent)
                 intent = TradeIntent()
                 reply(say("Opened: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))",
                           "Открыто: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) по \(Fmt.price(opened.entry)), стоп \(Fmt.price(opened.stop))")
@@ -580,6 +591,8 @@ extension Engine {
                 ]
             } else if sent.isEmpty {
                 reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
+                // Nothing went out: the same move can be laid out again with fresh quotes («Try again» on its block).
+                noteRetry(waiting)
                 // A stop by the guard, the signer or a scam check is never routed around; anything else gets a way that works.
                 // With a request the model carries on with, it hears the failure there instead.
                 if !(error is GuardStop), agentGoal == nil { await explainFailure(title, why: error.localizedDescription) }

@@ -19,6 +19,14 @@ nonisolated struct Message: Codable, Equatable, Identifiable {
     var chart: ChartLine?
     /// What a block the person pointed at told the model with this message, shown over it.
     var context: String?
+    /// The form the chat's model read a request as (the History's «understood as»).
+    var understood: String?
+    /// The cards this reply offered and the one picked, a move's steps kept as one card, the blocks a message went with
+    /// (ChatTurns.swift).
+    var options: [OfferView]?
+    var picked: Int?
+    var steps: [String]?
+    var contexts: [SentContext]?
 }
 
 /// A market's closes over a range, for the window to draw as a line.
@@ -28,6 +36,8 @@ nonisolated struct ChartLine: Codable, Equatable {
     var low: String
     var high: String
     var change: String
+    /// Hyperliquid's name of the coin («ETH», «xyz:TSLA»): a trade plan of it is drawn on this chart (RouteEdit.swift).
+    var coin: String? = nil
 }
 
 /// What waits for the Confirm button. Only the button carries one out (`confirm`): a typed «yes» never does.
@@ -89,6 +99,13 @@ final class Engine {
     var markets: [String: Market] = [:]
     var portfolio = PortfolioView()
     var positions: [HyperliquidAccount.Position] = []
+    /// Hyperliquid's open orders: the positions' stops and takes, a limit waiting (PositionGuard.swift).
+    var hlOrders: [HyperliquidAccount.Order] = []
+    /// A place's details beyond the portfolio's rows (PlaceFacts.swift).
+    var placeFacts = PlaceFacts()
+    var ratesAt: Date?
+    var guarding = false
+    var ledgerGuardSaid = false
     /// What the automation wallet holds, in dollars, read with the balances; nil without it.
     var automationUSD: Decimal?
     /// What each canvas's chat filled of its model's window with its last message (the Mac's ContextMeter), this run.
@@ -120,6 +137,8 @@ final class Engine {
 
     // Canvases: each has its own chat and blocks.
     lazy var canvases: [CanvasDoc] = Self.loadCanvases()
+    /// The canvas list's folders and their pictures (Folders.swift).
+    var folderStore = Store.load(FolderStore.self, "folders.json") ?? FolderStore() { didSet { Store.save(folderStore, "folders.json"); changed() } }
     lazy var canvasID: String = settings.canvas.flatMap { id in canvases.contains { $0.id == id } ? id : nil } ?? canvases[0].id
     var messages: [Message] {
         get { canvases[canvasIndex].messages }
@@ -132,8 +151,27 @@ final class Engine {
     var pending: Pending?
     var card: Card?
     /// A Solana swap's output as its card showed it, in the token's units (Quotes.swift).
-    var jupiterShown: (command: WalletCommand, out: UInt64)?
-    var options: [ChatRouter.Option] = []
+    var jupiterShown: (command: WalletCommand, out: UInt64)? { didSet { if jupiterShown != nil { quotedAt = Date() } } }
+    var options: [ChatRouter.Option] = [] { didSet { pinOptions() } }
+    /// The chat's turn (ChatTurns.swift): the model call Stop can cancel, the lookup under way, the reply the live cards
+    /// belong to, the failed move «Try again» lays out, when the waiting swap was priced, the other blocks a message goes with.
+    var modelRunning = false
+    var stopRequested = false
+    var cancelModel: (() -> Void)?
+    var agentStep: String?
+    var optionsMessage: String?
+    var retry: (board: String, command: WalletCommand)?
+    var quotedAt: Date?
+    var alsoAttached: [Board] = []
+    /// The model menu's lists: a subscription's and the local servers' models, whether those answer, sizes, downloads.
+    var liveModels: [String: [String]] = Store.load([String: [String]].self, "live-models.json") ?? [:] {
+        didSet { Store.save(liveModels, "live-models.json") }
+    }
+    var localServers: [String: Bool] = [:]
+    var modelSizes: [String: Double] = [:]
+    var modelDownloads: [String: Double] = [:]
+    var modelFacts: [String: ModelFacts] = [:]
+    var modelFactsAsked = Date.distantPast
     var running: (title: String, lines: [String])?
     /// The block of the move that runs now.
     var runningBoard: String?
@@ -162,7 +200,7 @@ final class Engine {
     /// The way picked in a route step's details for the waiting trade (RouteEdit), taken at its Confirm.
     var routeWay: (key: String, way: String)?
     /// Both ways of the waiting EVM trade as quoted for its step's details (RouteEdit.quoteWays), the better first.
-    var wayQuotes: (command: WalletCommand, ways: [RouteEdit.Way])?
+    var wayQuotes: (command: WalletCommand, ways: [RouteEdit.Way])? { didSet { if wayQuotes?.ways.isEmpty == false { quotedAt = Date() } } }
     /// The Ledger's Hyperliquid trading key, and whether the account approved ihatecrypto's fee (TradingKey.swift).
     var ledgerAgent: SignerReply?
     var feeApproved: Bool?
@@ -188,8 +226,11 @@ final class Engine {
     var multisigHeld: [String: [MultisigNetHolding]] = [:]
     /// The automation wallet's money as last read, for the Schedule's budget.
     var automationBudget: AutomationBudget?
+    /// The app's lock (Lock.swift), and whether the signer has said if a code is set since launch.
+    var lock = LockView()
+    var lockHeardSigner = false
 
-    init(out: Outbox) { self.out = out; settings.mirror(); Self.applyNodes() }
+    init(out: Outbox) { self.out = out; settings.mirror(); Self.applyNodes(); lockAtLaunch() }
 
     // MARK: State to the window
 
@@ -202,7 +243,8 @@ final class Engine {
         Task { @MainActor in
             await Task.yield()
             pushQueued = false
-            out.event("state", snapshot())
+            // Locked: the window gets the lock alone, never the balances, the chat or the history.
+            if lock.locked { out.event("state", lockedSnapshot) } else { out.event("state", snapshot()) }
         }
     }
 
@@ -252,6 +294,16 @@ final class Engine {
 
     func say(_ english: String, _ russian: String) -> String { self.russian ? russian : english }
 
+    /// The window's own texts (Settings › General › App language), apart from the replies' language: System follows
+    /// Windows' language, as the Mac's follows the Mac's.
+    var appRussian: Bool {
+        switch settings.appLanguage {
+        case "ru": true
+        case "en": false
+        default: (Locale.preferredLanguages.first ?? "").lowercased().hasPrefix("ru")
+        }
+    }
+
     var replyLanguage: String {
         switch settings.language {
         case "ru": "Russian"
@@ -284,6 +336,11 @@ final class Engine {
             var id: String; var text: String
             /// The block's parts (AlertsBoard): the coin, «BTC above $120,000», «now $98,000 · 22.4% away», its THEN steps.
             var coin: String? = nil; var when: String? = nil; var now: String? = nil; var steps: [String]? = nil
+            /// Each step as its block draws it: a trade plan («THEN · PLAN ON HYPERLIQUID», Long ETH ×3) or a command.
+            var blocks: [AlertStep]? = nil
+        }
+        struct AlertStep: Encodable {
+            var plan: Bool; var coin: String?; var title: String; var line: String?
         }
         struct SkillView: Encodable { var id: String; var name: String; var about: String; var text: String; var builtIn: Bool; var on: Bool }
         struct Running: Encodable { var title: String; var lines: [String] }
@@ -294,6 +351,9 @@ final class Engine {
             var entry: String
             var pnl: String
             var liquidation: String?
+            /// «0.05 at $2,412.50 · stop $2,300 · take $2,600» and the guardian's line (PositionGuard.swift).
+            var summary: String? = nil
+            var guardian: String? = nil
         }
         var signer: Signer
         var wallets: [SignerWallet]
@@ -318,16 +378,32 @@ final class Engine {
         var book: [SignerAddress]
         var history: [HistoryLine]
         var alerts: [Alert]
-        struct TaskView: Encodable { var id: String; var text: String; var paused: Bool; var automatic: Bool; var next: Date? }
+        struct TaskView: Encodable {
+            var id: String; var text: String; var paused: Bool; var automatic: Bool; var next: Date?
+            /// Its steps one by one, and how often («3 days»; nil: once), for its own canvas's block.
+            var steps: [String] = []; var every: String? = nil
+        }
         /// Tokens the model read with the canvas's last message, and its window when the service or the catalog says.
-        struct Context: Encodable, Equatable { var used: Int; var window: Int? }
+        /// Of `used`: the instructions and the chat's lines; how many lines went of how many; dollars an API key paid.
+        struct Context: Encodable, Equatable {
+            var used: Int; var window: Int?
+            var instructions = 0, chat = 0, sent = 0, lines = 0
+            var spent = 0.0, last: Double? = nil, billed = false
+        }
         var tasks: [TaskView]
         var automation: SignerWallet?
         var skills: [SkillView]
         var memory: [String]
         var favorites: [FavoriteToken]
-        struct CanvasRow: Encodable { var id: String; var title: String; var at: Date }
+        struct CanvasRow: Encodable {
+            var id: String; var title: String; var at: Date
+            var pinnedAt: Date?; var folder: String?; var icon: CanvasIcon?; var provider: String?; var model: String?
+            /// Nothing on it yet: the list shows it as the new canvas, kept once written on. `blocks`: something on its canvas.
+            var empty = false
+            var blocks = false
+        }
         var canvases: [CanvasRow]
+        var folders: [FolderView]
         var canvas: String
         var boards: [Board]
         var runningBoard: String?
@@ -344,6 +420,14 @@ final class Engine {
         /// Bridge orders signed and not landed yet (HiddenTokens.swift).
         var inTransit: [TransitView]
         var context: Context?
+        var modelRunning: Bool
+        var agentStep: String?
+        var optionsMessage: String?
+        var retryBoard: String?
+        var quote: QuoteView?
+        var models: ModelsView
+        /// The app's lock (Lock.swift): whether a code is set, how soon it locks, a new code to offer.
+        var lock: LockView
         /// Settings › Modules and Settings › Trading agent (Modules.swift, TradingAgent.swift).
         var modules: ModulesView
         var trading: TradingView
@@ -353,7 +437,23 @@ final class Engine {
         var schedulePaused: Bool
         var scheduleRuns: [ScheduleRun]
         var multisigHeld: [String: [MultisigNetHolding]]
+        /// The open canvas's scheduled item («task:<id>», «perp:<coin>»), when it's that item's own canvas.
+        var scheduleKey: String?
+        /// The History block's moves, newest first, and what the latest day did to the money (HistoryMoves.swift).
+        var moves: [MoveRow]
+        var movesDay: MovesDay?
         var automationBudget: AutomationBudget?
+        /// Dollars without the fee coin (WalletOps.swift), for the onboarding's Top up.
+        var stuck: [StuckView]
+        /// A place's details board beyond the rows: Hyperliquid in full, the deposits' rates (PlaceFacts.swift).
+        var places: PlaceFacts
+        /// Settings › General › Notifications: each kind and whether it's on (Notices.swift).
+        var notices: [NoticeView]
+        /// Settings › Background and the onboarding's «Stay in touch»: ihatecrypto starts in the tray at login (Notices.swift).
+        var openAtLogin: Bool
+        /// Top up's balance, gas and the money it watches for (TopUp.swift); Settings › General › App language.
+        var topUp: TopUpView?
+        var appLanguage: String
     }
 
     func snapshot() -> Snapshot {
@@ -367,32 +467,36 @@ final class Engine {
             wallets: (status?.wallets ?? []) + (ledger?.evm != nil ? [ledger!.wallet] : []), active: ledgerActive ? LedgerAccount.id : status?.activeWallet,
             addresses: addresses, phrase: phrase,
             portfolio: portfolio,
-            positions: positions.map { p in
-                .init(coin: IntentParser.pretty(p.coin), side: p.size > 0 ? "long" : "short", size: Fmt.num(abs(p.size), maxFraction: 6),
-                      entry: Fmt.price(p.entry), pnl: Fmt.usd(p.unrealizedPnl), liquidation: p.liquidation.map(Fmt.price))
-            },
+            positions: positionViews(),
             chat: messages, thinking: thinking, draft: draft, card: card,
             options: options.map { .init(title: $0.title, comment: $0.comment, recommended: $0.recommended) },
             running: running.map { .init(title: $0.title, lines: $0.lines) },
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
-            language: settings.language ?? "auto", russian: russian, book: book, history: history(),
+            language: settings.language ?? "auto", russian: appRussian, book: book, history: history(),
             alerts: alerts.map(alertView),
-            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next) },
+            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next,
+                                                                steps: $0.steps, every: $0.every?.words) },
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
-            canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
+            canvases: canvasRows, folders: folderViews, canvas: canvasID, boards: boardsShown,
             runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted(),
             watching: watching, watched: ["solana": settings.watchSolana, "evm": settings.watchEVM].compactMapValues { $0 },
             automationUSD: automationWallet == nil ? nil : automationUSD,
             positionsPnl: positions.isEmpty ? nil : positions.reduce(0) { $0 + $1.unrealizedPnl },
             inTransit: inTransit,
             context: meters[canvasID],
+            modelRunning: modelRunning, agentStep: thinking ? agentStep : nil, optionsMessage: optionsMessage, retryBoard: retry?.board,
+            quote: quoteView, models: modelsView,
+            lock: lockView,
             modules: modulesView(), trading: tradingView(), nodes: nodesView(),
             stepEdit: stepEdit,
             schedulePaused: settings.schedulePaused == true, scheduleRuns: recentRuns, multisigHeld: multisigHeld,
-            automationBudget: automationBudgetNow)
+            scheduleKey: scheduleKey, moves: historyMoves, movesDay: movesDay,
+            automationBudget: automationBudgetNow,
+            stuck: stuckView, places: placeFacts, notices: noticeViews, openAtLogin: settings.openAtLogin == true,
+            topUp: TopUpPage.shared.view, appLanguage: settings.appLanguage ?? "system")
     }
 
     // MARK: Requests from the window
@@ -404,6 +508,8 @@ final class Engine {
         var index: Int?
         var test: Bool?
         var phrase: String?
+        /// A recovery phrase's BIP-39 passphrase, if its wallet has one.
+        var passphrase: String?
         var key: String?
         var provider: String?
         var model: String?
@@ -419,6 +525,8 @@ final class Engine {
         var threshold: Int?
         var solana: String?
         var evm: String?
+        /// Every block the message is about, the newest last (the chat's chips).
+        var boards: [String]?
         /// Settings › Trading agent's rules, and a number (the contract cap in dollars).
         var policy: RiskPolicy?
         var value: Double?
@@ -435,11 +543,19 @@ final class Engine {
     }
 
     private func run(_ r: Request) async throws -> [String: String] {
+        if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }
         switch r.op {
+        case "unlock": await unlock(code: r.text ?? "")
+        case "unlockHello": await unlockWithHello()
+        case "lockApp": await lockApp()
+        case "setCode": try await makeCode(r.text ?? "")
+        case "clearCode": try await turnCodeOff()
+        case "lockAfter": setLockAfter((r.seconds ?? 300) / 60)
         case "hello":
             await startSigner()
             if !refreshingEveryMinute {
                 offerNewModules()
+                watchAlerts()
                 // The balances follow the chain while the window is open, as on the Mac (there every 30 s).
                 refreshingEveryMinute = true
                 Task {
@@ -453,11 +569,25 @@ final class Engine {
                 }
             }
             return [:]
-        case "send": await send(r.text ?? "", about: r.board)
+        case "send":
+            alsoAttached = (r.boards ?? []).filter { $0 != r.board }.compactMap { id in boards.first { $0.id == id } }
+            // The model and the parsers read «SOL»: the «$» only made the chip; the chat shows it as typed (the Mac's send).
+            let typed = r.text ?? "", plain = TokenMentions.plain(typed)
+            await send(plain, shown: plain == typed ? nil : typed, about: r.board)
+        case "stopModel": stopModel()
+        case "retry": await retryMove()
+        case "requote": requote()
+        case "refreshModels": await refreshModels()
+        case "downloadModel": Task { await downloadModel(r.model ?? "") }
+        case "startOllama": startOllama()
+        case "getOllama": getOllama()
+        case "lookUpContract": return await lookUpContract(r.address ?? "")
+        case "blockCatalog": return blockCatalog()
         case "confirm": await confirm()
         case "cancel": cancelPending()
         case "pick":
             guard let i = r.index, options.indices.contains(i) else { return [:] }
+            markPicked(i)
             let o = options[i]
             options = []
             if answerNewModules(o.command) { return [:] }
@@ -468,7 +598,8 @@ final class Engine {
         case "refresh": await refresh()
         case "createWallet": try await createWallet(test: r.test == true)
         case "phraseSaved": phrase = nil
-        case "importPhrase": try await importPhrase(r.phrase ?? "")
+        case "importPhrase": return try await importPhrase(r.phrase ?? "", passphrase: r.passphrase ?? "")
+        case "hlFunded": return await hlFunded()
         case "importKey": try await importKey(r.key ?? "")
         case "switchWallet":
             if r.wallet == LedgerAccount.id { useLedger(true) } else {
@@ -500,6 +631,16 @@ final class Engine {
         case "lookToken": return await lookToken(r.address ?? "")
         case "addFavorite": await tokenCommand(.favorite(address: r.address ?? "", chain: r.network), note: nil)
         case "schedulePause": pauseSchedule(r.test == true)
+        case "notice": setNotice(r.name ?? "", on: r.test == true)
+        case "noticeTest": noticeTest()
+        case "openAtLogin": setOpenAtLogin(r.test == true)
+        // main.rs, at launch and after each change: how Windows has it now.
+        case "loginState": settings.openAtLogin = r.test == true
+        case "updateReady": updateReady(r.text ?? "")
+        case "crashed": crashed(at: r.name ?? "", summary: r.text ?? "", folder: r.address ?? "")
+        case "openSchedule": try openSchedule(r.name ?? "")
+        case "closeSchedule": try closeSchedule()
+        case "runNow": await runNow(r.name ?? "")
         case "star":
             guard let e = book.first(where: { $0.name == r.name && $0.network == r.network }) else { return [:] }
             star(e, r.test == true)
@@ -529,6 +670,7 @@ final class Engine {
         case "openCanvas": try openCanvas(r.wallet ?? "")
         case "renameCanvas": renameCanvas(r.wallet ?? "", r.label ?? "")
         case "removeCanvas": try removeCanvas(r.wallet ?? "")
+        case "pinCanvas", "moveCanvas", "createFolder", "renameFolder", "deleteFolder", "newCanvasIn", "setIcon", "siteIcon": return try await folderOp(r)
         case "addBoard":
             guard let kind = r.name, Self.liveBoards.contains(kind) else { throw WalletError("Unknown block «\(r.name ?? "")».") }
             pin(Board(kind: kind, title: kind))
@@ -549,6 +691,11 @@ final class Engine {
             cancelPending()
             intent = TradeIntent()
             saveChat()
+        case "topUp": try topUp(network: r.network, coin: r.text, watch: r.test == true)
+        case "topUpOpen": return ["url": try await topUpOpen(network: r.network, coin: r.text, amount: r.label)]
+        case "topUpStop": topUpStop()
+        case "historyTabs": return ["json": await historyTabs()]
+        case "appLanguage": settings.appLanguage = r.language == "system" ? nil : r.language
         case "signerPid":
             // The window lets the signer come forward when Windows Hello asks; only the window may hand that on.
             return ["pid": (await SignerLink.shared.pid).map(String.init) ?? ""]

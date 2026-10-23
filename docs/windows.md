@@ -158,6 +158,18 @@ network and protocol, «off» refused before a card), the Hyperliquid trading ke
 paused by lock, a key of its own for a Ledger), own nodes and the NEAR Intents key (DPAPI); dollars without gas moving
 by signature or with Jupiter paying, offered once a network.
 
+Then the rest of the Mac: the lock screen with a 6-digit code (kept and checked by the signer, PBKDF2 under DPAPI;
+locks at launch, after 1/5/15/60 minutes away, on Win+L, after sleep, on Ctrl+L; five wrong codes leave Windows Hello
+only); the staged first run (Model › Wallet › Secure › Networks › Top up › Trading), Welcome's demo and languages, and
+importing with a BIP-39 passphrase with the first addresses compared; the chat's Stop (Esc), its thinking step, a
+priced swap's 15-second countdown and Refresh, the amount slider, «/», «@» and «$» lookups, several attachments,
+offer cards kept with their reply, «Executed · N steps», checklist and service cards, the live voice transcript, the
+model menu's and the context meter's states; canvas pins, folders and icons; the History board's day and the History
+page's Agent, Positions and All tabs; Top up's browser-wallet way (a one-time page on 127.0.0.1), amounts, QR codes
+with the amount and «Landed on …»; price alerts every 10 s with their THEN steps; a Schedule row's own canvas; a trade
+plan drawn on its chart; Robinhood's stock routes; the Hyperliquid details (HIP-3 exchanges, HLP and its lock) and the
+position guardian (the half at 1R, the stop to breakeven after the first take, trailing stops).
+
 Everything the Mac's window does is in the Windows app; what only a Windows machine can check is listed below.
 
 ## Checking on a Windows machine

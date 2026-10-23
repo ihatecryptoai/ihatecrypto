@@ -112,6 +112,14 @@ def state(**over):
         "memory": ["The user's HL wallet is their Hyperliquid account"],
         # Settings › Modules, Trading agent and own nodes, as the engine sends them (taken from a run: settings2-default.json).
         **{k: json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "settings2-default.json")))[k] for k in ("modules", "trading", "nodes")},
+        # Wave 2's fields at rest: nothing locked, no model running, nothing quoted, no folders or runs yet.
+        "modelRunning": False, "agentStep": None, "optionsMessage": None, "retryBoard": None, "quote": None,
+        "models": {"live": {"claude-code": ["claude-opus-5-5", "claude-sonnet-5-5"]}, "servers": {}, "installed": False, "sizes": {}, "downloads": {},
+                   "memoryGB": 16, "recommended": None, "refusals": {}},
+        "lock": {"codeSet": False, "locked": False, "codeOff": False, "problem": None, "lockAfter": 5, "checking": False, "offerNewCode": False, "tasksRun": True},
+        "folders": [], "stuck": [], "moves": [], "movesDay": None, "scheduleRuns": [], "schedulePaused": False, "scheduleKey": None,
+        "stepEdit": None, "multisigHeld": {}, "appLanguage": "system",
+        "topUp": json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "money3-topup.json")))["topUp"],
         "favorites": [{"chain": "solana", "address": "DoVAVzViX8Bjy3r15nwikSaSbzE6dV4ovd28aWpJpump", "name": "Higgs", "symbol": "HIGGS", "image": None, "price": 0.0000866, "change24h": -23.9, "liquidity": 51000}],
         "canvases": [{"id": "c1", "title": "Withdraw · 23 USDC to Solana", "at": iso(now - dt.timedelta(hours=1))},
                      {"id": "c2", "title": "Send 150 USDC to HL wallet", "at": iso(now - dt.timedelta(hours=15))},
