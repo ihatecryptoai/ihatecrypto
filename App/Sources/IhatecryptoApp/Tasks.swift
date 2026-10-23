@@ -484,6 +484,9 @@ extension Workspace {
             let r = try await SignerClient().send(.createAutomationWallet)
             guard r.ok, let w = r.wallets?.first(where: \.isAutomation) else { throw WalletError(r.error ?? "The signer refused.") }
             await loadSigner()
+            // A task made before this wallet would now spend from it by itself: each waits for its switch, as a new one does.
+            let held = tasks.indices.filter { tasks[$0].paused != true && waitsForSwitch(tasks[$0]) }
+            for i in held { tasks[i].paused = true }
             for (address, network) in [(w.solana, AddressCheck.Network.solana), (w.evm, .base)] {
                 guard let address, !addressBook.contains(where: { $0.address == address && $0.network == network }) else { continue }
                 addressBook.append(SavedAddress(name: w.label, address: address, network: network, category: "Your wallet",
@@ -492,7 +495,10 @@ extension Workspace {
             reply(say("The automation wallet is made: scheduled tasks now spend only from it, without \(Presence.name). Put their budget on it — "
                       + "keep only that there; if this Mac's keychain is lost, so is what's on it.",
                       "Кошелёк автоматизации создан: задачи по расписанию тратят только с него, без \(Presence.ruGen). Положи туда их бюджет — "
-                      + "и только его: если связка ключей этого Мака пропадёт, пропадёт и то, что на нём."), note: note)
+                      + "и только его: если связка ключей этого Мака пропадёт, пропадёт и то, что на нём.")
+                  + (held.isEmpty ? "" : say(" Tasks made before it would now spend from it by themselves, so they’re paused (\(held.count)): each starts only when you switch it on in the Schedule.",
+                                             " Задачи, созданные раньше, теперь тратили бы с него сами, поэтому они на паузе (\(held.count)): каждая начнёт работать, только когда ты включишь её в Schedule.")),
+                  note: note)
             offerCards([
                 ChatRouter.Option(title: say("Top up 20 USDC", "Пополнить на 20 USDC"),
                                   comment: say("From your wallet on Solana: \(Presence.short) once for the new address.", "С твоего кошелька на Solana: \(Presence.ru) один раз на новый адрес."),

@@ -63,6 +63,41 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         return signature
     }
 
+    func signSolanaSponsored(_ wire: Data, accounts: [String], tokenOwners: [String: String], sponsor: String) async throws -> Data {
+        let reply = try await Self.signing {
+            try await send(.signSolana(wire: wire, accounts: accounts, recipients: [], tokenOwners: tokenOwners, sponsor: sponsor))
+        }
+        guard reply.ok, let signed = reply.signedWire else { throw GuardStop(Self.reason(reply)) }
+        return signed
+    }
+
+    func signSponsoredTransfer(_ t: SponsoredTransfer, recipients: [String]) async throws -> Data {
+        let reply = try await Self.signing {
+            try await send(.signSponsoredTransfer(chainId: t.chainId, nonce: t.nonce, gasLimit: t.gasLimit, token: t.token, to: t.to, amount: t.amount,
+                                                  recipients: recipients))
+        }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
+        return raw
+    }
+
+    func signRelayMulticallPermit(_ m: RelayMulticallPermit) async throws -> [EVMSignature] {
+        let reply = try await Self.signing {
+            try await send(.signRelayMulticallPermit(chainId: m.chainId, token: m.token, value: m.value, validBefore: m.validBefore, relayer: m.relayer,
+                                                     refundTo: m.refundTo, nftRecipient: m.nftRecipient, metadata: m.metadata,
+                                                     calls: m.calls.map { SignerCall3(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, data: $0.callData) }))
+        }
+        guard reply.ok, let signatures = reply.signatures, signatures.count == 2 else { throw GuardStop(Self.reason(reply)) }
+        return signatures
+    }
+
+    func signReceiveAuthorization(_ p: Permit3009) async throws -> EVMSignature {
+        let reply = try await Self.signing {
+            try await send(.signReceiveAuthorization(chainId: p.chainId, token: p.token, to: p.to, value: p.value, validBefore: p.validBefore, nonce: p.nonce))
+        }
+        guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }
+        return signature
+    }
+
     func signEVM(chainId: UInt64, nonce: UInt64, maxPriorityFee: UInt64, maxFee: UInt64, gasLimit: UInt64,
                  to: String, data: Data, recipients: [String]) async throws -> Data {
         let reply = try await Self.signing { try await send(.signEVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee,
@@ -538,7 +573,8 @@ extension Workspace {
                 guard let a = await solanaAsset(from, note: nil), let b = await solanaAsset(to, note: nil) else {
                     throw ExecutionError("Jupiter couldn't name both tokens of this swap. Nothing was signed.")
                 }
-                reply(try await e.convert(from: a, to: b, amount: amount), note: "Solana · Jupiter")
+                let shown = jupiterShown.flatMap { $0.command == command ? $0.out : nil }
+                reply(try await e.convert(from: a, to: b, amount: amount, shown: shown), note: "Solana · Jupiter")
             case .swapOn("near", let from, let to, let amount):
                 guard let account = try await SignerClient().send(.nearAddress).nearAddress else { throw ExecutionError("The signer has no NEAR address.") }
                 nearAddress = account
@@ -666,7 +702,7 @@ extension Workspace {
                 schedules = []
                 reply(n == 0 ? "There were no scheduled purchases." : "Scheduled purchases stopped (\(n)).")
                 return
-            case .buy(let asset, let usdc): _ = try await e.swap(asset, buy: true, amount: usdc, equity: equity)
+            case .buy(let asset, let usdc): _ = try await e.swap(asset, buy: true, amount: usdc, equity: equity, shown: jupiterShown.flatMap { $0.command == command ? $0.out : nil })
             case .jupiterDCA(let asset, let usdc, let orders, let every):
                 _ = try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every)
                 jupiterDCAs = try? await e.jupiterDCAOrders()
@@ -679,7 +715,7 @@ extension Workspace {
                 reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
                       : say("Running Jupiter DCA: \(orders.count). They're on the canvas.", "Запущено Jupiter DCA: \(orders.count). Они на холсте."))
                 return
-            case .sell(let asset, let amount): _ = try await e.swap(asset, buy: false, amount: amount)
+            case .sell(let asset, let amount): _ = try await e.swap(asset, buy: false, amount: amount, shown: jupiterShown.flatMap { $0.command == command ? $0.out : nil })
             }
             finish(true)
         } catch {
@@ -971,8 +1007,8 @@ extension Workspace {
         let key = "tradingKeyOffered-" + evm.lowercased()
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
-        reply(say("Hyperliquid is open on this wallet. Turn on its trading key? Orders, stops and closes then go without \(ledgerActive ? "the Ledger's buttons" : Presence.name); the key can't withdraw.",
-                  "Hyperliquid на этом кошельке открыт. Включить торговый ключ? Тогда ордера, стопы и закрытия идут без \(ledgerActive ? "кнопок Ledger" : Presence.ruGen); вывести деньги ключ не может."))
+        reply(say("Hyperliquid is open on this wallet. Turn on its trading key? Orders, stops and closes then go without \(ledgerActive ? "the Ledger's buttons" : Presence.name) — new positions for 7 days, then one \(Presence.short) renews them; the key can't withdraw.",
+                  "Hyperliquid на этом кошельке открыт. Включить торговый ключ? Тогда ордера, стопы и закрытия идут без \(ledgerActive ? "кнопок Ledger" : Presence.ruGen) — новые позиции 7 дней, потом одно подтверждение продлевает; вывести деньги ключ не может."))
         offerCards([
             ChatRouter.Option(title: say("Turn on the trading key", "Включить торговый ключ"),
                               comment: say("One \(ledgerActive ? "approval on the Ledger" : Presence.name); it can't withdraw", "Одно подтверждение \(ledgerActive ? "на Ledger" : Presence.ruIns); вывести не может"),
@@ -986,7 +1022,7 @@ extension Workspace {
         do {
             let r = try await SignerClient().send(ledgerActive ? .setLedgerAgentActive(owner: hlAddress, active: true) : .setAgentActive(true))
             await loadSigner()
-            reply(r.ok && r.agentActive == true ? "Trading key on again: orders skip \(Presence.name), withdrawals still need it." : "The trading key stayed off.")
+            reply(r.ok && r.agentActive == true ? "Trading key on again for 7 days: orders skip \(Presence.name), withdrawals still need it." : "The trading key stayed off.")
         } catch {
             reply("The trading key stayed off: \(error.localizedDescription)")
         }

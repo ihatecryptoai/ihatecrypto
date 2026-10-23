@@ -115,7 +115,12 @@ Answer for yourself:
 - [ ] `ReceiveBoard.gasShort` / `gasLine` read the network's fee coin and floor: Top up says «send ≈ $1 of <coin> too»
   before USDC goes, and its button switches to the coin. A screenshot of Top up on the network with no gas.
 - [ ] `Workspace.stuckDollars` lists the network when it holds dollars and not its fee coin (and Solana can't bring
-  it); onboarding's «Money landed» shows it.
+  it); onboarding's «Money landed» shows it, and the chat offers the way out once (`offerGasWays`).
+- [ ] Payment by signature: ask Relay's `/quote/v2` with `usePermit: true` for the network's dollar to Solana. One
+  `authorize1` item with `ReceiveWithAuthorization` means its solver pays the gas: add the token to `Permit3009.tokens`
+  with its EIP-712 name and version, and its `DOMAIN_SEPARATOR()` to `dollarDomainsMatchTheContracts` (GaslessTests).
+  Then `bridge` moves it out with no gas (`bridgeByPermit`) and `topUpGas` brings gas over Solana. An `approve` step
+  first (Permit2: BNB Chain, HyperEVM) means no: write that down.
 - [ ] Live, on the Dev test wallet: USDC there with no gas coin, then the first move (a swap or a move back to Solana)
   — it must work, or the app must say plainly what to add and offer it.
 

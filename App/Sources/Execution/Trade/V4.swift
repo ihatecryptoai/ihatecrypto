@@ -141,8 +141,7 @@ extension Executor {
                            ("topic0_1_opr", "and")].map { URLQueryItem(name: $0.0, value: $0.1) }
         guard let link = url?.url else { return nil }
         var request = URLRequest(url: link, timeoutInterval: 20)
-        // Blockscout turns away clients that don't look like a browser.
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+        request.setValue(Holdings.browser["User-Agent"], forHTTPHeaderField: "User-Agent")
         var answer: Data?
         for attempt in 0..<3 {
             guard let (data, response) = try? await URLSession.shared.data(for: request) else { return nil }

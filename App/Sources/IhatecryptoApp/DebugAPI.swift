@@ -384,7 +384,10 @@ final class DebugAPI {
                           "unrealized": NSDecimalNumber(decimal: r.unrealized).stringValue,
                           "change": r.change.map { NSDecimalNumber(decimal: $0).stringValue } ?? NSNull()] as [String: Any]
         }
-        if let c = ws.chart { out["chart"] = ["coin": c.coin, "range": c.range.rawValue, "candles": c.candles.count, "error": c.error ?? NSNull()] as [String: Any] }
+        if let c = ws.chart {
+            out["chart"] = ["coin": c.coin, "range": c.range.rawValue, "candles": c.candles.count, "error": c.error ?? NSNull(),
+                            "place": ws.chartPlace(tradePlan: ws.intent != TradeIntent() && !ws.managesPosition)?.rawValue ?? NSNull()] as [String: Any]
+        }
         if let d = ws.detail { out["detail"] = d }
         if let n = ws.nextSteps { out["nextSteps"] = n.options.map { ["title": $0.title, "command": $0.command, "recommended": $0.recommended] as [String: Any] } }
         if let a = ws.allocationPreview {

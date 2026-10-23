@@ -124,7 +124,7 @@ struct SettingsView: View {
         case .modules: ModulesSettings()
         case .general: SettingsPage(title: "General", line: "How the app talks to you and keeps running.") { general }
         case .agent: SettingsPage(title: "Trading agent", line: "How the assistant trades for you. Code checks every plan against these rules.") { agent }
-        case .signIns: SettingsPage(title: "AI model", line: "What reads your chat: a subscription, an API key, or a free model on this Mac.") { ModelSection() }
+        case .signIns: SettingsPage(title: "AI model", line: "What reads your chat: a subscription, an API key, or a free model on this Mac. It reads your messages with your balances, positions and address book names, never your keys; a model on this Mac keeps all of it here.") { ModelSection() }
         case .wallet: SettingsPage(title: "Wallet", line: "Your wallets, the key that signs and \(Presence.name).") { wallet }
         case .skills: SettingsPage(title: "Skills", line: "Instructions the assistant follows for one kind of work. Switch them on and off, or add your own from a file.") { SkillsSettings() }
         #if DEBUG_API
@@ -472,7 +472,7 @@ struct SettingsView: View {
         SettingsSection(icon: "bolt", title: "Hyperliquid", line: "A trading key places orders. It cannot withdraw money.") {
             SettingsGroup {
                 SettingsRow("Trading key", icon: "key", logo: "hype", info: ws.agentActive
-                            ? "Approved once for Hyperliquid orders. The key cannot withdraw money."
+                            ? "Opens positions without \(Presence.name) for 7 days after your last \(Presence.short) for it; stops and closes go on after that. It cannot withdraw money."
                             : ws.ledgerActive ? "Without a trading key, every order asks for the Ledger's buttons. Hyperliquid accepts the key after the account has had a deposit."
                             : "Without a trading key, every order asks for \(Presence.name). Hyperliquid accepts the key after the account has had a deposit.") {
                     SettingsPill(text: ws.agentActive ? "On" : "Off", good: ws.agentActive)

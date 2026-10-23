@@ -297,10 +297,12 @@ struct TokenBoard: View {
 
 extension View {
     /// The asset card's frame. Always its full height: squeezed, the price (the one text allowed to shrink) went half size.
-    func assetCard() -> some View {
+    /// `width` nil: as wide as the column it stands in (a plan drawn on its chart, PlanChartBoard).
+    func assetCard(width: CGFloat? = 470) -> some View {
         fixedSize(horizontal: false, vertical: true)
             .padding(16)
-            .frame(width: 470, alignment: .leading)
+            .frame(width: width, alignment: .leading)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 24).fill(Brand.card).shadow(color: .black.opacity(0.06), radius: 14, y: 8))
             .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Brand.accent.opacity(0.4), lineWidth: 1.5))
             .transition(.opacity)
@@ -367,12 +369,22 @@ struct ChartLevel: Identifiable {
     let dashed: Bool
 }
 
+/// A band across the chart between two prices: what a plan loses from its entry to the stop, or makes to the take.
+struct ChartZone: Identifiable {
+    let id: String
+    let from: Double
+    let to: Double
+    let color: Color
+}
+
 /// The price over the range, green up and red down, with its levels; the point under the pointer shows in the price above.
 struct AssetChart: View {
     let points: [TokenMarket.Point]
     let range: ChartCommand.Range
     let pointer: ChartPointer
     var levels: [ChartLevel] = []
+    var zones: [ChartZone] = []
+    var height: CGFloat = 190
     var error: String?
 
     var body: some View {
@@ -382,7 +394,13 @@ struct AssetChart: View {
             let bottom = min(lo, levels.map(\.price).min() ?? lo), top = max(hi, levels.map(\.price).max() ?? hi)
             let pad = max((top - bottom) * 0.1, top * 0.002)
             let tint = last < first ? Brand.loss : Brand.profit
+            let lowest = bottom - pad, highest = top + pad
             Chart {
+                // Under the price, inside the chart's range.
+                ForEach(zones) { z in
+                    RectangleMark(yStart: .value("From", min(max(z.from, lowest), highest)), yEnd: .value("To", min(max(z.to, lowest), highest)))
+                        .foregroundStyle(z.color.opacity(0.1))
+                }
                 ForEach(points, id: \.time) { p in
                     AreaMark(x: .value("Time", p.time), yStart: .value("Base", bottom - pad), yEnd: .value("Price", NSDecimalNumber(decimal: p.close).doubleValue))
                         .foregroundStyle(LinearGradient(colors: [tint.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom))
@@ -402,40 +420,43 @@ struct AssetChart: View {
             .chartYScale(domain: (bottom - pad)...(top + pad))
             .priceAxes(range)
             .chartOverlay { proxy in TokenChartHover(proxy: proxy, points: points, pointer: pointer, tint: tint) }
-            .frame(height: 190)
+            .frame(height: height)
             // A point from the previous range or load isn't on this chart: the price above goes back to the price now.
             .onChange(of: points) { pointer.point = nil }
         } else if let error {
             Label(error, systemImage: "chart.xyaxis.line").font(.ui(10)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 120)
         } else {
-            ProgressView().frame(maxWidth: .infinity, minHeight: 190)
+            ProgressView().frame(maxWidth: .infinity, minHeight: height)
         }
     }
 }
 
-/// The moves as chips («24h +1.2%»), then the market's numbers in tiles, three a row.
+/// The moves as chips («24h +1.2%»), then the market's numbers in tiles, three a row (`perRow`).
 struct AssetStats: View {
     let changes: [(String, Decimal)]
     let tiles: [(String, String?)]
+    var perRow = 3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Flow(spacing: 6) {
-                ForEach(changes, id: \.0) { title, c in
-                    HStack(spacing: 4) {
-                        Text(title).foregroundStyle(.secondary)
-                        Text(signedPct(c)).foregroundStyle(c < 0 ? Brand.loss : Brand.profit)
+            if !changes.isEmpty {
+                Flow(spacing: 6) {
+                    ForEach(changes, id: \.0) { title, c in
+                        HStack(spacing: 4) {
+                            Text(title).foregroundStyle(.secondary)
+                            Text(signedPct(c)).foregroundStyle(c < 0 ? Brand.loss : Brand.profit)
+                        }
+                        .font(.ui(11, .semibold)).monospacedDigit()
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.primary.opacity(0.05)))
                     }
-                    .font(.ui(11, .semibold)).monospacedDigit()
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(Color.primary.opacity(0.05)))
                 }
             }
             Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-                ForEach(Array(stride(from: 0, to: tiles.count, by: 3)), id: \.self) { row in
+                ForEach(Array(stride(from: 0, to: tiles.count, by: perRow)), id: \.self) { row in
                     GridRow {
-                        ForEach(tiles[row..<min(row + 3, tiles.count)], id: \.0) { title, value in tile(title, value) }
+                        ForEach(tiles[row..<min(row + perRow, tiles.count)], id: \.0) { title, value in tile(title, value) }
                     }
                 }
             }

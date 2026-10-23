@@ -377,7 +377,10 @@ struct ReceiveBoard: View {
             Image(systemName: bundled ? "fuelpump.fill" : "exclamationmark.triangle.fill").font(.system(size: 12))
                 .foregroundStyle(bundled ? Brand.profit : Brand.accentInk)
             Text(bundled ? "+ \(Fmt.num(Decimal(TopUpOrder.solanaFeeTopUp) / 1_000_000_000)) SOL for fees goes along, in the same approval: on Solana, USDC alone can't move."
-                         : "Send ≈ \(Fmt.usd(Self.gasUSD(o.network.key))) of \(gas) too: every move on \(o.network.title) pays its fee in \(gas), so \(o.network.usdcSymbol) alone can't move there.")
+                 : o.network.chainId == nil ? "Send ≈ \(Fmt.usd(Self.gasUSD(o.network.key))) of SOL too: every move on Solana pays its fee in SOL. Without it, from \(Fmt.usd(Workspace.gaslessSwapUSD)) of USDC the chat swaps a part for SOL, Jupiter paying that one fee."
+                 : o.network.chainId.map({ Permit3009.supports(chainId: $0, token: o.network.usdc) }) == true
+                 ? "Send ≈ \(Fmt.usd(Self.gasUSD(o.network.key))) of \(gas) too: moves on \(o.network.title) pay their fee in \(gas). Without it the \(o.network.usdcSymbol) still goes to another network by signature, Relay paying the gas."
+                 : "Send ≈ \(Fmt.usd(Self.gasUSD(o.network.key))) of \(gas) too: every move on \(o.network.title) pays its fee in \(gas), so \(o.network.usdcSymbol) alone can't move there.")
                 .font(.ui(11.5)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 6)
             if !bundled {
@@ -565,21 +568,96 @@ extension Workspace {
     }
 }
 
+/// Dollars on a network where the coin its fees are paid in is missing, and the ways out by chat card.
+struct StuckDollars {
+    let network: String
+    let key: String
+    let coin: String
+    /// What to add of the coin, in dollars.
+    let usd: Decimal
+    /// The dollars there.
+    let usdc: Decimal
+    /// Cards that get the dollars moving without adding the coin first; empty: only adding it works there.
+    let ways: [ChatRouter.Option]
+}
+
 extension Workspace {
+    /// The least USDC Jupiter's wallet pays a swap's fee for (gasless, for a wallet that can't pay): $5, at 0.19% then and
+    /// 0.03% from $10 (measured 2026-10-23).
+    nonisolated static let gaslessSwapUSD: Decimal = 5
+
     /// Where the wallet holds dollars but not the coin fees are paid in, so a first move there would stop: Solana without
     /// SOL; an EVM network without its gas coin when Solana can't bring it either (topUpGas buys it with Solana's USDC,
-    /// which takes SOL there). The owner (2026-10-23): the first move must work, not «надо было ещё и газ».
-    var stuckDollars: [(network: String, coin: String, usd: Decimal)] {
-        let usd = solana?.usdc ?? 0, solanaPays = (solana?.sol ?? 0) >= Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
-        var out: [(network: String, coin: String, usd: Decimal)] = []
-        if usd >= 1, !solanaPays { out.append(("Solana", "SOL", 1)) }
-        guard !(solanaPays && usd >= 2) else { return out }
-        for n in EVMNetwork.searched where n.feeToken == nil {
-            guard (usdc(on: n.key) ?? 0) >= 1 else { continue }
+    /// which takes SOL there; Hyperliquid's balance brings it too). The owner (2026-10-23): the first move must work, not «надо
+    /// было ещё и газ». The ways out:
+    /// on Solana Jupiter's gasless swap for SOL; where the dollar pays by signature (Permit3009), the USDC goes to Solana or
+    /// brings its own gas with Relay paying (Executor.bridgeByPermit, topUpGas).
+    var stuckDollars: [StuckDollars] {
+        let ru = say("en", "ru") == "ru"
+        return Self.stuck(solanaUSDC: solana?.usdc ?? 0, solanaSOL: solana?.sol ?? 0, hyperliquidFree: hl?.withdrawable ?? 0, say: { ru ? $1 : $0 }) { n in
             let gas = n.key == "base" ? base?.eth ?? 0 : n.key == "robinhood" ? robinhood?.eth ?? 0
                 : (holdings + otherTokens).first { $0.chain == n.key && $0.native }?.amount ?? 0
-            if gas < Decimal(n.gasFloor) / 1_000_000_000_000_000_000 { out.append((n.name, n.gasCoin, ReceiveBoard.gasUSD(n.key))) }
+            return (usdc(on: n.key) ?? 0, gas)
+        }
+    }
+
+    /// The same from plain numbers: Solana's USDC and SOL, Hyperliquid's withdrawable, and each EVM network's dollars and gas
+    /// coin (`held`). `say` picks the chat's language.
+    nonisolated static func stuck(solanaUSDC usd: Decimal, solanaSOL: Decimal, hyperliquidFree: Decimal, say: (String, String) -> String,
+                                  held: (EVMNetwork) -> (usdc: Decimal, gas: Decimal)) -> [StuckDollars] {
+        let solanaPays = solanaSOL >= Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+        var out: [StuckDollars] = []
+        if usd >= 1, !solanaPays {
+            let swap = gaslessSwapUSD
+            out.append(StuckDollars(network: "Solana", key: "solana", coin: "SOL", usd: 1, usdc: usd, ways: usd >= swap ? [
+                ChatRouter.Option(title: say("Swap \(Fmt.num(swap)) USDC for SOL", "Обменять \(Fmt.num(swap)) USDC на SOL"),
+                                  comment: say("Jupiter pays this swap's fee; then SOL pays the rest", "Комиссию этого обмена платит Jupiter, дальше платит SOL"),
+                                  command: "buy SOL for \(Fmt.num(swap)) USDC", recommended: true),
+            ] : []))
+        }
+        // Gas comes over by itself where Solana (USDC and SOL) or Hyperliquid can bring it (Executor.topUpGas): not stuck.
+        guard !(solanaPays && usd >= 2), hyperliquidFree < 2 else { return out }
+        for n in EVMNetwork.searched where n.feeToken == nil {
+            let (there, gas) = held(n)
+            guard there >= 1, gas < Decimal(n.gasFloor) / 1_000_000_000_000_000_000 else { continue }
+            let stable = EVMRPC.dollars[n.usdc] ?? "USDC", all = Fmt.num(there.rounded(2, .down))
+            let signs = Permit3009.supports(chainId: n.rpc.chainId, token: n.usdc), sponsored = SponsoredTransfer.supports(chainId: n.rpc.chainId, token: n.usdc)
+            let bySignature = signs || sponsored ? [
+                ChatRouter.Option(title: say("Move \(all) \(stable) to Solana", "Перевести \(all) \(stable) на Solana"),
+                                  comment: signs ? say("By signature: Relay pays the gas on \(n.name)", "По подписи: газ на \(n.name) платит Relay")
+                                                 : say("BNB Chain pays the gas for this transfer", "Газ за этот перевод платит BNB Chain"),
+                                  command: "move \(all) USDC from \(n.key) to Solana", recommended: true),
+                ChatRouter.Option(title: say("Get \(n.gasCoin) for gas on \(n.name)", "Взять \(n.gasCoin) на газ в \(n.name)"),
+                                  comment: say("Out of these \(stable), over Solana", "Из этих \(stable), через Solana"),
+                                  command: "add \(Fmt.usd(ReceiveBoard.gasUSD(n.key))) of gas on \(n.key)"),
+            ] : []
+            out.append(StuckDollars(network: n.name, key: n.key, coin: n.gasCoin, usd: ReceiveBoard.gasUSD(n.key), usdc: there, ways: bySignature))
         }
         return out
+    }
+
+    /// Dollars that landed where the fee coin is missing: the chat says so once per wallet and network, with the ways out as
+    /// cards (the owner, 2026-10-23: «делай так чтобы это работало и предлагало если нету газа»).
+    func offerGasWays() {
+        guard (UserDefaults.standard.string(forKey: "onboardingStep") ?? "").isEmpty, liveSteps == nil, pendingAction == nil, !executing, !busy,
+              !solanaAddress.isEmpty else { return }
+        let key = { (s: StuckDollars) in "gasWayOffered-\(self.solanaAddress)-\(s.key)" }
+        guard let stuck = stuckDollars.first(where: { !UserDefaults.standard.bool(forKey: key($0)) }) else { return }
+        UserDefaults.standard.set(true, forKey: key(stuck))
+        let dollars = Fmt.num(stuck.usdc.rounded(2, .down)), add = Fmt.usd(stuck.usd)
+        reply(stuck.ways.isEmpty
+              ? say("\(dollars) USDC on \(stuck.network) can't move yet: every move there pays its fee in \(stuck.coin), and the wallet has none. Add ≈ \(add) of \(stuck.coin).",
+                    "\(dollars) USDC на \(stuck.network) пока не сдвинуть: каждое действие там платит комиссию в \(stuck.coin), а его на кошельке нет. Добавьте ≈ \(add) \(stuck.coin).")
+              : stuck.key == "solana"
+              ? say("\(dollars) USDC on Solana, and no SOL for network fees. Swap a part for SOL: Jupiter pays that one swap's fee, and the SOL pays every move after it.",
+                    "\(dollars) USDC на Solana, а SOL на комиссии нет. Обменяйте часть на SOL: комиссию этого обмена платит Jupiter, а дальше все действия оплачивает SOL.")
+              : stuck.key == "bnb"
+              ? say("\(dollars) USDC on BNB Chain, and no BNB for gas. It can still move: BNB Chain pays the gas for a dollar transfer, so it goes to Solana that way, or brings BNB for gas back from there.",
+                    "\(dollars) USDC на BNB Chain, а BNB на газ нет. Сдвинуть их всё равно можно: газ за перевод долларов платит сама BNB Chain. Так они уйдут на Solana или вернут оттуда BNB на газ.")
+              : say("\(dollars) USDC on \(stuck.network), and no \(stuck.coin) for gas. It can still move by signature, with Relay paying the gas: bring it to Solana, or take \(stuck.coin) for \(stuck.network) out of it.",
+                    "\(dollars) USDC на \(stuck.network), а \(stuck.coin) на газ нет. Сдвинуть их можно и так, по подписи, газ заплатит Relay: перевести на Solana или взять из них \(stuck.coin) для \(stuck.network)."))
+        offerCards(stuck.ways + [ChatRouter.Option(title: say("Top up \(stuck.coin)", "Пополнить \(stuck.coin)"),
+                                                   comment: say("≈ \(add) from a browser wallet, your phone or an exchange", "≈ \(add) из кошелька в браузере, с телефона или с биржи"),
+                                                   command: WalletCommand.receive.summary, recommended: stuck.ways.isEmpty)])
     }
 }

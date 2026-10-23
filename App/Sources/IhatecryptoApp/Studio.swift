@@ -1287,13 +1287,17 @@ struct StudioCanvas: View {
     var body: some View {
         // The plan once per pass: the blocks, the status and the lines all read it.
         let nodes = nodes
+        let chartAt = ws.chartPlace(tradePlan: !nodes.isEmpty)
         HStack(alignment: .top, spacing: 36) {
             // Right-click on any block: the chat with it attached (BlockMenu); several blocks can go into one message.
             StudioPortfolio().blockMenu("Portfolio", radius: 26)
             // The rail's Schedule button puts it here, beside the portfolio; a row opens its page.
             if ws.showSchedule { ScheduleFrame().blockMenu("Schedule", radius: 26).transition(.opacity) }
-            plan(nodes).frame(width: max(470, routeWidth), alignment: .topLeading)
+            plan(nodes, chartAt: chartAt).frame(width: max(470, routeWidth), alignment: .topLeading)
                 .onPreferenceChange(RouteWidth.self) { width in MainActor.assumeIsolated { routeWidth = width } }
+            if chartAt == .beside, let chart = ws.chart {
+                ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))")
+            }
         }
         .padding(.leading, 28).padding(.top, 24)
         // Full height even when the canvas is shorter: blocks never squeeze their text; drag to see the rest.
@@ -1310,7 +1314,7 @@ struct StudioCanvas: View {
     /// Once the plan is on the exchange, the canvas shows the position itself instead of the old route.
     private var nodes: [StudioNode] { hasRoute && !ws.managesPosition ? StudioNode.build(ws) : [] }
 
-    private func plan(_ nodes: [StudioNode]) -> some View {
+    private func plan(_ nodes: [StudioNode], chartAt: ChartPlace?) -> some View {
         // A watched token opened from Favorites sits to the right of the list, not above it (the owner, 2026-10-16:
         // «открывай справа сбоку, а не снизу»).
         let beside = ws.showFavorites ? ws.detail.flatMap { place in
@@ -1319,7 +1323,8 @@ struct StudioCanvas: View {
         return VStack(alignment: .leading, spacing: 14) {
             // A place opened from the rail is its own block above the plan or the position: outside their frame,
             // covering nothing.
-            if let place = ws.detail, place != beside {
+            // A coin's chart opened from its row goes where any chart goes (chartPlace).
+            if let place = ws.detail, place != beside, place != "chart" || chartAt == .column {
                 PlaceDetailBoard(place: place)
                     .blockMenu(ws.placeTitle(place))
                     .padding(.bottom, 10)
@@ -1342,37 +1347,17 @@ struct StudioCanvas: View {
             }
             if ws.showHistory { HistoryBoard().blockMenu("History", radius: 22).transition(.opacity) }
             // A move waiting for its signature or running has its own title and status: no «Plan · waiting» over it.
-            if hasRoute || ws.allocationPreview != nil || (ws.pendingAction == nil && !ws.moveRunning && ws.currentScheduleKey == nil) {
-                HStack(spacing: 8) {
-                    Text(ws.allocationPreview.map { "Plan · spread \($0.asset) across the best rates" }
-                         ?? (hasRoute ? "\(ws.managesPosition ? "Position" : "Plan") · \(ws.intent.side == .long ? "long" : "short") \(IntentParser.pretty(ws.intent.asset))" : board.map { ws.readable($0.title) } ?? "Plan"))
-                        .font(.ui(14, .semibold))
-                    if ws.assembling { AssemblyCount(chip: true) } else { StatusChip(text: statusText(nodes), tint: statusTint(nodes)) }
-                    // An open position is on its market for good: nothing to pick until it closes.
-                    if hasRoute, !ws.managesPosition { MarketPicker() }
-                    Spacer(minLength: 12)
-                    // Top right: a live plan's Cancel and Confirm; a board shown as it was (its move gone stale) only Refresh.
-                    if hasRoute, !ws.managesPosition {
-                        PlanButtons()
-                    } else if ws.allocationPreview != nil, ws.pendingAllocation != nil {
-                        // A spread waiting to be signed: its Confirm on the canvas too, not only under the chat.
-                        PendingButtons()
-                    } else if !hasRoute, let b = board, b.outcome == nil,
-                              // The request that drew it, not a «cancel» or a «да» said after (Refresh asked «cancel» again).
-                              let request = b.messages.last(where: { $0.fromUser && !ChatWords.confirms($0.text) && !ChatWords.declines($0.text) })?.text {
-                        Button { Task { await ws.send(request) } } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise").font(.ui(13, .semibold)).padding(.horizontal, 6)
-                        }
-                        .buttonStyle(.bordered).controlSize(.large).disabled(ws.busy)
-                        .help("Asks “\(request)” again for fresh numbers")
-                    }
-                }
+            if chartAt == .plan, let chart = ws.chart {
+                // A trade plan of the chart's coin is drawn on its chart, its Cancel and Confirm on top (the owner's pick C).
+                PlanChartBoard(state: chart) { planHeader(nodes) }.blockMenu("Chart · \(IntentParser.pretty(chart.coin))")
+            } else if hasRoute || ws.allocationPreview != nil || (ws.pendingAction == nil && !ws.moveRunning && ws.currentScheduleKey == nil) {
+                planHeader(nodes)
             }
             // Only this canvas's own position, or one the user tapped (a tap opens its chart), not every open one:
-            // its board with the controls first, the chart under it.
+            // its board with the controls first, the chart beside it (chartPlace).
             let positions = nodes.isEmpty ? ws.positions.filter { $0.coin == ws.chart?.coin || (ws.managesPosition && $0.coin == ws.intent.asset) } : []
             ForEach(positions, id: \.coin) { PositionBoard(position: $0).blockMenu("Position · \(IntentParser.pretty($0.coin))", radius: 22) }
-            if let chart = ws.chart, ws.detail != "chart" { ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))") }
+            if chartAt == .column, let chart = ws.chart, ws.detail != "chart" { ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))") }
             PnLBoard().blockMenu("Profit and loss", radius: 20)
             if ws.showMovers { MoversBoard().blockMenu("Movers") }
             if ws.showAlerts, !ws.alerts.isEmpty { AlertsBoard().blockMenu("Price alerts") }
@@ -1476,6 +1461,34 @@ struct StudioCanvas: View {
             }
         }
         .frame(width: 470, alignment: .leading)
+    }
+
+    /// The plan's title, its status and its buttons: over the route cards, or on top of the chart it is drawn on.
+    private func planHeader(_ nodes: [StudioNode]) -> some View {
+        HStack(spacing: 8) {
+            Text(ws.allocationPreview.map { "Plan · spread \($0.asset) across the best rates" }
+                 ?? (hasRoute ? "\(ws.managesPosition ? "Position" : "Plan") · \(ws.intent.side == .long ? "long" : "short") \(IntentParser.pretty(ws.intent.asset))" : board.map { ws.readable($0.title) } ?? "Plan"))
+                .font(.ui(14, .semibold))
+            if ws.assembling { AssemblyCount(chip: true) } else { StatusChip(text: statusText(nodes), tint: statusTint(nodes)) }
+            // An open position is on its market for good: nothing to pick until it closes.
+            if hasRoute, !ws.managesPosition { MarketPicker() }
+            Spacer(minLength: 12)
+            // Top right: a live plan's Cancel and Confirm; a board shown as it was (its move gone stale) only Refresh.
+            if hasRoute, !ws.managesPosition {
+                PlanButtons()
+            } else if ws.allocationPreview != nil, ws.pendingAllocation != nil {
+                // A spread waiting to be signed: its Confirm on the canvas too, not only under the chat.
+                PendingButtons()
+            } else if !hasRoute, let b = board, b.outcome == nil,
+                      // The request that drew it, not a «cancel» or a «да» said after (Refresh asked «cancel» again).
+                      let request = b.messages.last(where: { $0.fromUser && !ChatWords.confirms($0.text) && !ChatWords.declines($0.text) })?.text {
+                Button { Task { await ws.send(request) } } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise").font(.ui(13, .semibold)).padding(.horizontal, 6)
+                }
+                .buttonStyle(.bordered).controlSize(.large).disabled(ws.busy)
+                .help("Asks “\(request)” again for fresh numbers")
+            }
+        }
     }
 
     private func statusText(_ nodes: [StudioNode]) -> String {

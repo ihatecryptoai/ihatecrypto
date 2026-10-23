@@ -181,6 +181,12 @@ public struct LedgerSigner: TradeSigner {
         return try await typed(try HLSigner.relayNonceMappingTyped(wallet: w, depositor: depositor, id: id, nonce: nonce), "link a withdrawal to a Relay order")
     }
 
+    /// The same rules as the signing process (Permit3009.refusal); the Ledger shows each field of the typed data.
+    public func signReceiveAuthorization(_ permit: Permit3009) async throws -> EVMSignature {
+        if let refusal = permit.refusal(owner: wallet.evm, now: UInt64(Date().timeIntervalSince1970)) { throw ExecutionError(refusal) }
+        return try await typed(try permit.typed(), permit.summary)
+    }
+
     public func signNearIntentDeposit(amount: UInt128, depositAddress: String, nonce: UInt64, blockHash: Data) async throws -> Data {
         throw ExecutionError("NEAR isn't signed on a Ledger in ihatecrypto yet: switch to one of ihatecrypto's own wallets for NEAR.")
     }

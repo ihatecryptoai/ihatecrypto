@@ -345,7 +345,7 @@ private struct ModelStep: View {
     // A model is required: without one the chat could only guess at words, and people took that for the product.
     var body: some View {
         OnboardingCard(mood: .tuning, title: "What does the chat think with?",
-                       subtitle: "The chat needs a model to understand you: one you already pay for, an API key, or a free one on this Mac. It reads your words and the plan, never your keys.",
+                       subtitle: "The chat needs a model to understand you: one you already pay for, an API key, or a free one on this Mac. It reads your words, the plan and your balances, never your keys; a model on this Mac keeps them all here.",
                        primary: "Continue", busy: ws.llmBusy, enabled: ws.hasModel, action: next) {
             VStack(spacing: 10) {
                 way("chatgpt", "ChatGPT subscription", "Plus or Pro: sign in once in the browser", logo: "llm-openai")
@@ -1185,8 +1185,10 @@ private struct MoneyStep: View {
                 Tile {
                     Image(systemName: "fuelpump.fill").font(.system(size: 18)).foregroundStyle(Brand.accentInk).frame(width: 26)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Add \(stuck.coin) for fees on \(stuck.network)").font(.ui(14, .bold))
-                        Text("The dollars there can't move until ≈ \(Fmt.usd(stuck.usd)) of \(stuck.coin) pays the network's fees. Top up \(stuck.coin) the same way.")
+                        Text(stuck.ways.isEmpty ? "Add \(stuck.coin) for fees on \(stuck.network)" : "No \(stuck.coin) for fees on \(stuck.network)").font(.ui(14, .bold))
+                        Text(stuck.ways.isEmpty ? "The dollars there can't move until ≈ \(Fmt.usd(stuck.usd)) of \(stuck.coin) pays the network's fees. Top up \(stuck.coin) the same way."
+                             : stuck.key == "solana" ? "The chat offers to swap \(Fmt.num(Workspace.gaslessSwapUSD)) USDC for SOL, Jupiter paying that fee. Or top up ≈ \(Fmt.usd(stuck.usd)) of SOL."
+                             : "The chat offers to move them by signature, Relay paying the gas. Or top up ≈ \(Fmt.usd(stuck.usd)) of \(stuck.coin).")
                             .font(.ui(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)

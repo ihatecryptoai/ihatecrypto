@@ -20,7 +20,7 @@ public enum SPL {
     }
 
     /// Solana's find_program_address: the first bump from 255 down whose hash is not a curve point.
-    static func programAddress(seeds: [Data], program: Data) throws -> Data {
+    public static func programAddress(seeds: [Data], program: Data) throws -> Data {
         for bump in (0...255).reversed() {
             var input = Data()
             for seed in seeds { input += seed }

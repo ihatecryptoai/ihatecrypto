@@ -75,6 +75,8 @@ def check(expect, state, replies):
             why.append(f"chart {text(b.get('chart'))}, expected {want}")
         elif key == "chart_range" and (b.get("chart") or {}).get("range") != want:
             why.append(f"chart range {text(b.get('chart'))}, expected {want}")
+        elif key == "chart_place" and (b.get("chart") or {}).get("place") != want:
+            why.append(f"the chart is {(b.get('chart') or {}).get('place')} on the canvas, expected {want}")
         elif key == "yields" and not b.get("yields"):
             why.append("no rate bubbles")
         elif key == "pnl_period" and (b.get("pnl") or {}).get("period") != want:

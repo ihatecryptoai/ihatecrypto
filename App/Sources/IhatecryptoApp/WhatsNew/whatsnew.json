@@ -1,5 +1,56 @@
 [
   {
+    "version": "0.7.6",
+    "date": "2026-10-24",
+    "stories": [
+      {
+        "title": "Every signature read closer",
+        "text": "Touch ID for a new address now says what the move does, amount included. A contract the signer can't read asks you once, whoever calls it. Kamino, Jupiter Lend and Jupiter DCA are read by the signer itself: only what pays you, on your own position. A site's signature that names someone else beside an amount is refused, and a private key pasted into the chat never reaches the model.",
+        "symbol": "checkmark.shield.fill",
+        "color": "30D158"
+      },
+      {
+        "title": "The trading key, a week at a time",
+        "text": "The Hyperliquid trading key opens positions for 7 days after your last Touch ID for it; stops, takes and closes always go. Then the next new position asks Touch ID once and renews the week. A Solana swap won't go for more than 1% under its card, a paid service sees your request only after Confirm, and making an automation wallet pauses the tasks that would spend from it.",
+        "symbol": "key.fill",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "Dollars leave BNB Chain without BNB",
+        "text": "USDC on BNB Chain with no BNB beside it now moves out: BNB Chain's own paymaster, MegaFuel, pays the gas for its transfer to Relay.",
+        "symbol": "fuelpump.fill",
+        "color": "FFD60A",
+        "try": "show where to top up"
+      }
+    ]
+  },
+  {
+    "version": "0.7.5",
+    "date": "2026-10-23",
+    "stories": [
+      {
+        "title": "Dollars move without gas",
+        "text": "USDC with no SOL beside it still swaps for SOL: Jupiter pays that one swap's fee, from $5. USDC on Base, Arbitrum, Optimism, Polygon, Ethereum or Robinhood Chain with none of the network's coin goes to Solana or Hyperliquid by a signature, Relay paying the gas, and gas for that network comes back over Solana. Gas for BNB Chain and HyperEVM can come from your Hyperliquid balance. When dollars land where they can't move, the chat says so once and offers the way out.",
+        "symbol": "fuelpump.fill",
+        "color": "30D158",
+        "try": "show where to top up"
+      }
+    ]
+  },
+  {
+    "version": "0.7.4",
+    "date": "2026-10-23",
+    "stories": [
+      {
+        "title": "Your trade on its chart",
+        "text": "With a coin's chart on the canvas, a long or short on that coin is drawn right on it: the entry, the stop and the take across the candles, the loss and the gain between them, and Cancel and Confirm on top. A buy, a send or a plan on another coin puts the chart beside its card, never above its buttons.",
+        "symbol": "chart.xyaxis.line",
+        "color": "0A84FF",
+        "try": "chart HYPE"
+      }
+    ]
+  },
+  {
     "version": "0.7.3",
     "date": "2026-10-23",
     "stories": [

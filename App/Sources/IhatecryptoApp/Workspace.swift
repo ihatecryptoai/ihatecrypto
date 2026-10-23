@@ -417,6 +417,8 @@ final class Workspace {
     var swapQuotedAt: Date?
     /// The swap whose card shows a price (Workspace.quoteSwap): the one Confirm waits on a fresh quote for.
     var pricedCommand: WalletCommand?
+    /// A Solana swap's output as its card showed it, in the token's units: the swap won't go for 1% less (Executor.convert).
+    var jupiterShown: (command: WalletCommand, out: UInt64)?
     /// Bumped by Refresh: the waiting card's quote starts over.
     var quoteRound = 0
     static let quoteLife: TimeInterval = 15
@@ -1006,6 +1008,11 @@ final class Workspace {
         if SeedGuard.containsMnemonic(text) {
             reply(say("That looks like a recovery phrase. I don’t show it, store it or send it anywhere. Import a phrase in its own window.",
                       "Похоже на фразу восстановления. Я её не показываю, не храню и никуда не отправляю. Импортируй фразу в отдельном окне."))
+            return
+        }
+        if SeedGuard.containsPrivateKey(text) {
+            reply(say("That looks like a private key. I don’t show it, store it or send it anywhere. Import a key in its own window.",
+                      "Похоже на приватный ключ. Я его не показываю, не храню и никуда не отправляю. Импортируй ключ в отдельном окне. Если это хеш транзакции, напиши его с «0x»."))
             return
         }
         // A step handed over from its card: the message is about it, and a move waiting for Confirm keeps waiting.
@@ -1993,6 +2000,8 @@ final class Workspace {
         if found != otherTokens { otherTokens = found }
         if !holdingsLoaded { holdingsLoaded = true }
         rememberBalance()
+        // Every network's gas coin is known now: dollars without it get their way out offered (once a network).
+        offerGasWays()
     }
 
     /// Base balances at our EVM address and Aave's rate; quiet on errors (the rest of the portfolio still shows).

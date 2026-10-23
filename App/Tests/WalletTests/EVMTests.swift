@@ -318,6 +318,7 @@ import WalletCore
     let own: [(UInt64, String)] = [(8453, AaveV3.basePool), (42161, AaveV3.arbitrum.pool), (8453, MorphoVault.base.address),
                                    (8453, UniswapV3.on(8453)!.router), (4663, UniswapV3.robinhoodRouter), (4663, UniswapV4.permit2),
                                    (137, "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be"), (4217, "0x4cd00e387622c35bddb9b4c962c136462338bc31"),
+                                   (8453, "0x5567954cd026cebfe486062cb75848e0f1c12e58"),
                                    (10, UniswapV4.on(10)!.router), (10, UniswapV3.on(10)!.router), (999, UniswapV2.on(999)!.router), (999, UniswapV4.permit2)]
     for (chain, spender) in own {
         #expect(EVMCall.decode(try ERC20.approve(spender: spender, amount: 1)).payees(to: EVMRPC.baseUSDC, value: 0, chainId: chain).isEmpty, "\(spender)")
@@ -550,4 +551,42 @@ import WalletCore
     let lying = call("b858183f", [ABI.uint(96), ABI.uint(0), try ABI.address(me), ABI.uint(160), try ABI.address(thief), ABI.uint(5_000_000), ABI.uint(1),
                                   ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
     #expect(EVMCall.decode(lying) == .contract(selector: "0xb858183f"))
+}
+
+/// A call the decoder can't read is asked about in person once, whoever sends it — except to the contracts ihatecrypto's own
+/// moves call that way (Relay, Tempo, Safe's factory). Uniswap's routers and Permit2 hold approvals: an unread call there asks.
+@Test func unreadContractCallsAreAskedAboutOnce() throws {
+    let unread = EVMCall.decode(Data([0xde, 0xad, 0xbe, 0xef]) + Data(count: 32))
+    let site = "0x1111111111111111111111111111111111111111"
+    #expect(unread.unreadTarget(to: site, value: 0, chainId: 8453) == site)
+    // Coins sent with it make the contract a recipient instead: asked about as one, not as a call.
+    #expect(unread.unreadTarget(to: site, value: 1, chainId: 8453) == nil)
+    #expect(unread.unreadTarget(to: "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be", value: 0, chainId: 8453) == nil)   // Relay's approval proxy
+    #expect(unread.unreadTarget(to: Safe.factory, value: 0, chainId: 8453) == nil)
+    let router = try #require(UniswapV4.on(8453)).router
+    #expect(unread.unreadTarget(to: router, value: 0, chainId: 8453) == router.lowercased())
+    #expect(unread.unreadTarget(to: UniswapV4.permit2, value: 0, chainId: 8453) == UniswapV4.permit2.lowercased())
+    // A call it reads is held to its own rules instead.
+    let transfer = try ERC20.transfer(to: site, units: 1)
+    #expect(EVMCall.decode(transfer).unreadTarget(to: site, value: 0, chainId: 8453) == nil)
+}
+
+/// A flat order that calls its payee something else («taker») still names someone else's address beside an amount:
+/// refused for a site by its values. A login that names only this wallet, and a vote with no amount, still sign.
+@Test func typedDataNamingAnotherAddressBesideAnAmountIsRefused() throws {
+    func typed(_ primary: String, _ fields: [(String, String, String)]) throws -> TypedData {
+        let types = fields.map { #"{"name":"\#($0.0)","type":"\#($0.1)"}"# }.joined(separator: ",")
+        let message = fields.map { #""\#($0.0)":\#($0.2)"# }.joined(separator: ",")
+        return try TypedData.parse(Data(#"{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"chainId","type":"uint256"}],"\#(primary)":[\#(types)]},"primaryType":"\#(primary)","domain":{"name":"Some DEX","chainId":42161},"message":{\#(message)}}"#.utf8))
+    }
+    let me = "0x1111111111111111111111111111111111111111", thief = #""0x000000000000000000000000000000000000dead""#
+    let order = try typed("Order", [("maker", "address", #""\#(me)""#), ("taker", "address", thief), ("makerAmount", "uint256", "1000000"), ("nonce", "uint256", "1")])
+    #expect(order.refusal == nil)                      // its names alone pass
+    #expect(order.refusal(owner: me) != nil)           // its values don't
+    let open = try typed("Order", [("maker", "address", #""\#(me)""#), ("taker", "address", #""0x0000000000000000000000000000000000000000""#), ("makerAmount", "uint256", "1")])
+    #expect(open.refusal(owner: me) == nil)            // the zero address is nobody
+    let login = try typed("Login", [("wallet", "address", #""\#(me)""#), ("nonce", "uint256", "7")])
+    #expect(login.refusal(owner: me) == nil)
+    let vote = try typed("Vote", [("from", "address", #""\#(me)""#), ("delegate", "address", thief), ("choice", "uint32", "1")])
+    #expect(vote.refusal(owner: me) == nil)
 }

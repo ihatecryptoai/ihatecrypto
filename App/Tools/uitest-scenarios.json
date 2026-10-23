@@ -71,7 +71,46 @@
     "expect": {
       "chart": "ETH",
       "chart_range": "week",
+      "no_pending": true,
+      "chart_place": "column"
+    }
+  },
+  {
+    "name": "a short planned with its coin's chart open is drawn on that chart, Confirm on top",
+    "send": [
+      "чарт HYPE",
+      "построй мне шорт по HYPE на 10 долларов"
+    ],
+    "expect": {
+      "chart": "HYPE",
+      "plan": "HYPE",
+      "chart_place": "plan",
       "no_pending": true
+    }
+  },
+  {
+    "name": "a long on another coin than the chart's → the chart beside the plan",
+    "send": [
+      "chart SOL",
+      "long ETH risk $0.3 stop 3% take 6% leverage 2x"
+    ],
+    "expect": {
+      "chart": "SOL",
+      "plan": "ETH",
+      "chart_place": "beside",
+      "no_pending": true
+    }
+  },
+  {
+    "name": "a chart with a buy waiting for Confirm → the chart beside the buy's card",
+    "send": [
+      "chart SOL",
+      "купи SOL на 2 USDC"
+    ],
+    "expect": {
+      "chart": "SOL",
+      "pending_kind": "wallet",
+      "chart_place": "beside"
     }
   },
   {

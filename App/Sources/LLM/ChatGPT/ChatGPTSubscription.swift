@@ -1,7 +1,8 @@
 import Foundation
 import LLMCore
 
-/// ChatGPT Plus/Pro through the Codex backend: the sign-in OpenClaw and OpenCode use.
+/// ChatGPT Plus/Pro through the Codex backend: the sign-in OpenClaw and OpenCode use. Its OAuth client is Codex CLI's (no
+/// other is offered), so the sign-in says so; the requests themselves name ihatecrypto as their originator.
 /// Calls count against the user's ChatGPT plan, not API credits. OpenAI tolerates this publicly,
 /// but it is not in their terms, so the OpenRouter or API-key options must keep working without it.
 public struct ChatGPTSubscription: LLMProvider {
@@ -17,7 +18,7 @@ public struct ChatGPTSubscription: LLMProvider {
     public var info: ProviderInfo {
         ProviderInfo(
             id: "chatgpt", name: "ChatGPT (subscription)", kind: .subscription, defaultModel: "gpt-6.1-sol",
-            note: "Plus or Pro. Same sign-in as Codex CLI, OpenClaw and OpenCode; usage counts against the subscription limits.",
+            note: "Plus or Pro. Signs in through OpenAI's Codex CLI sign-in, as OpenClaw and OpenCode do; OpenAI doesn't officially allow other apps to use it — a gray area. Usage counts against the subscription limits.",
             signInLabel: "Sign in with ChatGPT", existingLoginLabel: "Use the Codex CLI login",
             // All answer through this sign-in (checked 2026-09-30). 6.1 Sol read 1,000 test messages as well as 6 Sol, as fast.
             // Without a paid plan Codex lists only gpt-6-luna and 5.6 (2026-10-08): Workspace.model stands in with those.
@@ -35,7 +36,7 @@ public struct ChatGPTSubscription: LLMProvider {
         default: access = nil
         }
         guard let access, let data = try? await HTTP.get(Self.models + "?client_version=0.200.0", headers: [
-            "Authorization": "Bearer \(access.token)", "chatgpt-account-id": access.account, "originator": "codex_cli_rs",
+            "Authorization": "Bearer \(access.token)", "chatgpt-account-id": access.account, "originator": "ihatecrypto",
         ]) else { return info.models }
         // The same list says each model's context window: kept for the client, which reports it with an answer.
         for (model, window) in Self.windows(data) { ModelWindows.told[model] = window }
@@ -156,7 +157,7 @@ actor ChatGPTClient: LLMClient {
             body: try JSONSerialization.data(withJSONObject: Self.body(r)), contentType: "application/json",
             headers: [
                 "Authorization": "Bearer \(token)", "chatgpt-account-id": account,
-                "OpenAI-Beta": "responses=experimental", "originator": "codex_cli_rs",
+                "OpenAI-Beta": "responses=experimental", "originator": "ihatecrypto",
                 "session_id": Self.session, "Accept": "text/event-stream",
             ],
             timeout: 120

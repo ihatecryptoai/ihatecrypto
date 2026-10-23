@@ -233,7 +233,7 @@ final class Browser {
             let body: Data = if let s = args[1] as? String { Data(s.utf8) } else { try JSONSerialization.data(withJSONObject: args[1]) }
             let typed: TypedData
             do { typed = try TypedData.parse(body) } catch { throw SiteError("4200|\(error.localizedDescription)") }
-            if let refusal = typed.refusal {
+            if let refusal = typed.refusal(owner: address) {
                 workspace?.reply("Site \(origin) asked for a “\(typed.primaryType)” signature. Declined — \(refusal)", note: "browser")
                 throw SiteError("4001|" + refusal)
             }
@@ -305,7 +305,7 @@ final class Browser {
         // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
         // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
-        if case .contract = call, !EVMCall.knownSpenders(chainId: rpc.chainId).contains(to.lowercased()) { payees.append(to) }
+        if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
         let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
         func token(_ to: String) async -> (symbol: String, decimals: Int) {

@@ -2408,6 +2408,7 @@ extension Workspace {
             guard !Task.isCancelled else { return }
             if let q {
                 let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
+                jupiterShown = (command, q.outAmount)
                 swapQuote = (command, [("Jupiter", "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)", 0)])
                 return
             }
