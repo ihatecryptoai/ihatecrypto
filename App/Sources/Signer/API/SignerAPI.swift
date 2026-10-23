@@ -70,6 +70,10 @@ public enum SignerRequest: Codable, Sendable {
     case signHyperliquidUser(action: MsgPack, mainnet: Bool, recipients: [String])
     /// Relay's binding of our Hyperliquid deposit to an order; the signer requires wallet and depositor to be ours.
     case signRelayNonceMapping(wallet: String, depositor: String, id: Data, nonce: UInt64)
+    /// A Relay order (its quote's protocol.v2.orderData, JSON) for the signer to check before a deposit names it: the
+    /// signer recomputes its id (EVMChain's RelayOrder), holds its refunds to this wallet and its payee to an address
+    /// approved in person, and only then signs a deposit — Solana, EVM, a v3.2 permit or a Hyperliquid mapping — for that id.
+    case relayOrder(order: Data)
     /// Dollars Relay's approval proxy takes by signature (EIP-3009 ReceiveWithAuthorization) and its solver pays the network
     /// fee for: the way out of a network where the wallet has USDC and no gas. The signer builds the typed data itself
     /// (EVMChain's Permit3009): only USDC or USDG it knows by their own domain, from this wallet, to Relay's proxy, valid

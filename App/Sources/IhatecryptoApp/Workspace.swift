@@ -497,9 +497,11 @@ final class Workspace {
     /// The recurring buy the two ways were offered for: picking «in the app» brings it back and it goes ahead.
     @ObservationIgnored var dcaChoice: WalletCommand?
     /// Commands scheduled for later or on repeat («in 1 week: rebalance USDC»), per wallet; `watch` runs them (Tasks.swift).
-    var tasks: [ScheduledTask] = (UserDefaults.standard.data(forKey: Workspace.scoped("tasks")).flatMap { try? JSONDecoder().decode([ScheduledTask].self, from: $0) }) ?? [] {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(tasks), forKey: Workspace.scoped("tasks", activeWalletID)) }
+    var tasks: [ScheduledTask] = TaskSeal.tasks(forKey: Workspace.scoped("tasks")).tasks {
+        didSet { TaskSeal.save(try? JSONEncoder().encode(tasks), forKey: Workspace.scoped("tasks", activeWalletID)) }
     }
+    /// The tasks were changed outside ihatecrypto (TaskSeal) and loaded paused: said once in the chat.
+    @ObservationIgnored var tasksTampered = TaskSeal.tasks(forKey: Workspace.scoped("tasks")).tampered
     /// A running task's steps after one that waits for Confirm, and the canvas it runs on: they go when that move is done.
     /// `brought`: networks the steps before delivered USDC to, so a step there waits for the money (runSteps).
     var taskQueue: (canvas: UUID?, steps: [String], since: Date, brought: Set<String>)?
@@ -2228,6 +2230,11 @@ final class Workspace {
     func loadSigner() async {
         guard SignerClient.isAvailable, let status = try? await SignerClient().send(.status) else { return }
         AppLock.shared.update(codeSet: status.codeSet == true)
+        if tasksTampered {
+            tasksTampered = false
+            reply(say("The scheduled tasks were changed outside ihatecrypto, so every one is paused. Check them in the Schedule and switch on only the ones you made.",
+                      "Задачи по расписанию изменили вне ihatecrypto, поэтому все они на паузе. Проверь их в Schedule и включи только свои."))
+        }
         // The switch first, before anything can wait: the old wallet's card, rules and positions go at once.
         // A connected Ledger is one more wallet in the list; while it is the active one, its addresses are «ours» and
         // every move is signed on it (Ledger.swift). The signer's own choice stays as it was underneath.

@@ -54,10 +54,14 @@ public protocol TradeSigner: Sendable {
     func signRelayMulticallPermit(_ m: RelayMulticallPermit) async throws -> [EVMSignature]
     /// A zero-fee dollar transfer BNB Chain's paymaster pays the gas for; `to` among `recipients`. The raw transaction.
     func signSponsoredTransfer(_ t: SponsoredTransfer, recipients: [String]) async throws -> Data
+    /// A Relay order handed to the signer before the deposit that names it: the signer checks whom it pays.
+    func registerRelayOrder(_ order: Data) async throws
 }
 
 extension TradeSigner {
     public var signsBatches: Bool { false }
+    /// A signer that signs on its own screen (a Ledger) or in a test has nothing to check ahead.
+    public func registerRelayOrder(_ order: Data) async throws {}
     public func signSolanaSponsored(_ wire: Data, accounts: [String], tokenOwners: [String: String], sponsor: String) async throws -> Data {
         throw ExecutionError("This signer doesn't sign a transaction someone else pays for: add a little SOL instead.")
     }
@@ -849,6 +853,19 @@ public actor Executor {
     /// The bridge transaction and the balance lines its simulation gives. `decimals` are the destination's;
     /// `topupGasUSD` adds that much native coin for gas on an EVM destination.
     /// `swap`: the destination is another token (Relay swaps on the way), so the cost is judged by USD in against USD out.
+    /// Relay's quote for a move that's about to run, its order handed to the signer: a deposit naming that order signs only
+    /// once the signer has checked whom it pays (Relay.Quote.order, SignerRequest.relayOrder).
+    func relayQuote(user: String, recipient: String, originChain: UInt64, destinationChain: UInt64, originCurrency: String,
+                    destinationCurrency: String, amount: UInt64, exactOutput: Bool = false, topupGasUSD: Decimal? = nil, units: String? = nil,
+                    usePermit: Bool = false, useDepositAddress: Bool = false, refundTo: String? = nil) async throws -> Relay.Quote {
+        let quote = try await Relay.quote(user: user, recipient: recipient, originChain: originChain, destinationChain: destinationChain,
+                                          originCurrency: originCurrency, destinationCurrency: destinationCurrency, amount: amount,
+                                          exactOutput: exactOutput, topupGasUSD: topupGasUSD, units: units, usePermit: usePermit,
+                                          useDepositAddress: useDepositAddress, refundTo: refundTo)
+        if let order = quote.order { try await signer.registerRelayOrder(order) }
+        return quote
+    }
+
     func prepareBridge(_ amount: Bridge.Amount, to chain: UInt64 = Relay.Chain.hyperliquid, currency: String = Relay.Currency.hyperliquidUSDC,
                        decimals: Int = 8, topupGasUSD: Decimal? = nil, swap: Bool = false) async throws -> (step: BridgeStep, changes: [String]) {
         let usdcMint = Relay.Currency.solanaUSDC
@@ -856,7 +873,7 @@ public actor Executor {
         case .arrive(let v): (NSDecimalNumber(decimal: (v * Decimal(sign: .plus, exponent: decimals, significand: 1)).rounded(0, .up)).uint64Value, true)
         case .send(let v): (NSDecimalNumber(decimal: (v * 1_000_000).rounded(0, .down)).uint64Value, false)
         }
-        let quote = try await Relay.quote(user: wallet.solana, recipient: wallet.evm, originChain: Relay.Chain.solana,
+        let quote = try await relayQuote(user: wallet.solana, recipient: wallet.evm, originChain: Relay.Chain.solana,
                                           destinationChain: chain, originCurrency: usdcMint,
                                           destinationCurrency: currency, amount: units, exactOutput: exactOutput, topupGasUSD: topupGasUSD)
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],

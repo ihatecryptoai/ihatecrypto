@@ -76,6 +76,7 @@ public enum Batch7702 {
             if Data(hex: c.to)?.count != 20 { out.append("Not an address: \(c.to).") }
             if let why = selfCall(to: c.to, data: c.data, owner: owner) { out.append(why) }
             if let why = EVMCall.decode(c.data).refusal(sender: owner, chainId: chainId) { out.append(why) }
+            if let why = EVMCall.targetRefusal(to: c.to, data: c.data, sender: owner) { out.append(why) }
         }
         return out
     }

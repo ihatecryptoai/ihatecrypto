@@ -31,7 +31,7 @@ extension Executor {
         let usdc = (requested ?? free).rounded(2, .down)
         guard usdc > 0, usdc <= free else { throw ExecutionError("\(Fmt.usd(free)) free on Hyperliquid; can't withdraw \(Fmt.num(usdc)).") }
         let units = NSDecimalNumber(decimal: usdc * 100_000_000).uint64Value // Hyperliquid perp USDC: 8 decimals in Relay
-        let quote = try await Relay.quote(user: wallet.evm, recipient: wallet.solana, originChain: Relay.Chain.hyperliquid,
+        let quote = try await relayQuote(user: wallet.evm, recipient: wallet.solana, originChain: Relay.Chain.hyperliquid,
                                           destinationChain: Relay.Chain.solana, originCurrency: Relay.Currency.hyperliquidUSDC,
                                           destinationCurrency: Relay.Currency.solanaUSDC, amount: units)
         let arriving = Decimal(string: quote.amountOutFormatted) ?? 0
@@ -91,7 +91,7 @@ extension Executor {
         let usdc = usd.rounded(2, .up), units = NSDecimalNumber(decimal: usdc * 100_000_000).uint64Value
         let free = try await Hyperliquid.balance(user: wallet.evm).withdrawable
         guard usdc <= free else { throw ExecutionError("\(Fmt.usd(free)) free on Hyperliquid; gas for \(net.name) needs \(Fmt.usd(usdc)).") }
-        let quote = try await Relay.quote(user: wallet.evm, recipient: wallet.evm, originChain: Relay.Chain.hyperliquid, destinationChain: net.relayChain,
+        let quote = try await relayQuote(user: wallet.evm, recipient: wallet.evm, originChain: Relay.Chain.hyperliquid, destinationChain: net.relayChain,
                                           originCurrency: Relay.Currency.hyperliquidUSDC, destinationCurrency: "0x0000000000000000000000000000000000000000",
                                           amount: units)
         let worth = Decimal(string: quote.amountOutUSD) ?? 0

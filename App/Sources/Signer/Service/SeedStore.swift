@@ -163,6 +163,7 @@ enum SeedStore {
             }
             if let sealed = sealed(account(id)) { return try open(sealed, context: context) }
             guard id == SignerWallet.firstID, let seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
+            sealLegacy(seed, id: id)
             return seed
         } catch {
             // A cancelled or failed prompt must not be reused; a code session stays when only another wallet's prompt failed.
@@ -175,7 +176,14 @@ enum SeedStore {
     static func openSeed(id: String, context: LAContext) throws -> Data {
         if let sealed = sealed(account(id)) { return try open(sealed, context: context) }
         guard id == SignerWallet.firstID, let seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
+        sealLegacy(seed, id: id)
         return seed
+    }
+
+    /// A seed kept from before sealing (until 2026-09-28) is sealed to the Secure Enclave the first time it opens, as every
+    /// wallet is; save writes the seal first and only then removes the unsealed item, so a failure leaves the old one.
+    private static func sealLegacy(_ seed: Data, id: String) {
+        try? save(seed, requirePresence: true, id: id)
     }
 
     /// A wallet's seed opened with no prompt, or nil: only one sealed without Touch ID (a test or the automation wallet)

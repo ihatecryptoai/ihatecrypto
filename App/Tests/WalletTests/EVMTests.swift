@@ -584,9 +584,51 @@ import WalletCore
     #expect(order.refusal == nil)                      // its names alone pass
     #expect(order.refusal(owner: me) != nil)           // its values don't
     let open = try typed("Order", [("maker", "address", #""\#(me)""#), ("taker", "address", #""0x0000000000000000000000000000000000000000""#), ("makerAmount", "uint256", "1")])
-    #expect(open.refusal(owner: me) == nil)            // the zero address is nobody
+    #expect(open.refusal(owner: me) != nil)            // the zero address is anyone: an open order
+    // Any number beside someone else's address, whatever it's called; a meta-transaction's bytes; a nonce and a time pass.
+    #expect(try typed("Payout", [("dst", "address", thief), ("total", "uint256", "5")]).refusal(owner: me) != nil)
+    #expect(try typed("MetaTransaction", [("nonce", "uint256", "1"), ("from", "address", #""\#(me)""#), ("functionSignature", "bytes", #""0xa9059cbb""#)]).refusal(owner: me) != nil)
+    #expect(try typed("Delegation", [("delegatee", "address", thief), ("nonce", "uint256", "1"), ("expiry", "uint256", "9")]).refusal(owner: me) == nil)
     let login = try typed("Login", [("wallet", "address", #""\#(me)""#), ("nonce", "uint256", "7")])
     #expect(login.refusal(owner: me) == nil)
     let vote = try typed("Vote", [("from", "address", #""\#(me)""#), ("delegate", "address", thief), ("choice", "uint32", "1")])
     #expect(vote.refusal(owner: me) == nil)
+}
+
+/// The 2026-10-24 review's EVM gaps, each held by the signer's own reading of the call.
+@Test func callsTheReviewFoundArePayeesOrRefused() throws {
+    let me = "0x1111111111111111111111111111111111111111", thief = "0x9999999999999999999999999999999999999999"
+    let usdc = EVMRPC.baseUSDC
+    func word(_ a: String) throws -> Data { try ABI.address(a) }
+    // transferFrom out of someone else's allowance to this wallet: whoever receives is a payee.
+    let pull = Data(hex: "23b872dd")! + (try word(thief)) + (try word(thief)) + ABI.uint(5)
+    #expect(EVMCall.decode(pull).payees(to: usdc, value: 0, chainId: 8453) == [thief])
+    // Calldata shorter than a selector runs a fallback: an unread call, not a plain send.
+    #expect(EVMCall.decode(Data([0x01])).unreadTarget(to: thief, value: 0, chainId: 8453) == thief)
+    #expect(EVMCall.decode(Data()) == .plain)
+    // A swap selector at a contract that isn't the protocol's: asked about like an unread call.
+    let swapHere = Data(hex: "04e45aaf")! + (try word(usdc)) + (try word(usdc)) + ABI.uint(500) + (try word(me)) + ABI.uint(1) + ABI.uint(1) + ABI.uint(0)
+    if case .swap = EVMCall.decode(swapHere) {
+        #expect(EVMCall.decode(swapHere).unreadTarget(to: thief, value: 0, chainId: 8453) == thief)
+        #expect(EVMCall.decode(swapHere).unreadTarget(to: try #require(UniswapV3.on(8453)).router, value: 0, chainId: 8453) == nil)
+    }
+    // Relay's depository: only a deposit naming this wallet as the depositor; its order id is the last word.
+    let depository = RelayMulticallPermit.depository, id = Data(repeating: 7, count: 32)
+    let erc20 = Keccak.hash256(Data("depositErc20(address,address,uint256,bytes32)".utf8)).prefix(4)
+    let mine = Data(erc20) + (try word(me)) + (try word(usdc)) + ABI.uint(5) + id
+    #expect(EVMCall.targetRefusal(to: depository, data: mine, sender: me) == nil)
+    #expect(EVMCall.relayDepositID(to: depository, data: mine) == id)
+    let theirs = Data(erc20) + (try word(thief)) + (try word(usdc)) + ABI.uint(5) + id
+    #expect(EVMCall.targetRefusal(to: depository, data: theirs, sender: me) != nil)
+    #expect(EVMCall.targetRefusal(to: depository, data: Data(hex: "deadbeef")!, sender: me) != nil)
+    // A Safe's execTransaction sent from this wallet: a payout passes; a call into the multisig itself or a gas refund doesn't.
+    let safe = "0x" + String(repeating: "ab", count: 20)
+    let pay = Safe.Move(chainId: 8453, safe: safe, to: usdc, value: 0, data: try ERC20.transfer(to: me, amount: 5), nonce: 0)
+    let sig = EVMSignature(r: Data(repeating: 1, count: 32), s: Data(repeating: 2, count: 32), v: 27)
+    #expect(Safe.execRefusal(try pay.exec([(me, sig)]), safe: safe) == nil)
+    let selfCall = Safe.Move(chainId: 8453, safe: safe, to: safe, value: 0, data: Data(hex: "0d582f13")! + (try word(thief)) + ABI.uint(1), nonce: 0)
+    #expect(Safe.execRefusal(try selfCall.exec([(me, sig)]), safe: safe) != nil)
+    var refund = try pay.exec([(me, sig)])
+    refund.replaceSubrange((4 + 6 * 32)..<(4 + 7 * 32), with: ABI.uint(1))   // gasPrice 1
+    #expect(Safe.execRefusal(refund, safe: safe) != nil)
 }

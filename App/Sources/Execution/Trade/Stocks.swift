@@ -177,7 +177,7 @@ extension Executor {
         guard let proxy = try await Relay.approvalProxy(chainId: chain)?.lowercased() else { throw ExecutionError("Relay publishes no approval proxy for Robinhood Chain.") }
         /// Relay's quote with every check: from and to this wallet, its call to the proxy after an exact approve, the price.
         func checked() async throws -> (quote: Relay.Quote, call: Relay.EVMStep, price: Decimal, out: Decimal) {
-            let quote = try await Relay.quote(user: me, recipient: me, originChain: chain, destinationChain: chain,
+            let quote = try await relayQuote(user: me, recipient: me, originChain: chain, destinationChain: chain,
                                               originCurrency: tokenIn, destinationCurrency: tokenOut, amount: 0, units: "\(units)")
             let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                              expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")

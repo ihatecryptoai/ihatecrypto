@@ -27,15 +27,17 @@ provider, attacks that need root or a disabled SIP, and losses from trades the u
 
 **Separate signing process.** Keys live in `Signer.xpc`, an XPC service inside the app. It is sandboxed and has no
 network entitlement. It accepts connections only from the app it is built into, signed by the same team. The app
-sends a JSON request and gets back a signature; it never sees a private key, and sees a recovery phrase only twice: one
-being imported passes through its window on the way in, and a new wallet's phrase comes back once for the user to write
-down (secure fields, a window hidden from screen capture, a copy wiped from the clipboard after 60 s, never logged).
+sends a JSON request and gets back a signature; it never sees a stored seed or a derived key. A secret passes through
+it only twice: a recovery phrase or private key being imported, on its way in through the app's window, and a new
+wallet's phrase, once, for the user to write down (secure fields, a window hidden from screen capture, a copy wiped
+from the clipboard after 60 s, never logged).
 Release builds have no
 `get-task-allow`, so no debugger can attach to either process, and launch flags that drive the app are Debug-only.
 
 **Seed storage.** The seed is encrypted to a Secure Enclave key and the ciphertext sits in the data-protection
 Keychain, this device only, never synced, in the signer's own access group. Opening it takes Touch ID or the Mac
-password. On a Mac without Touch ID the app's 6-digit passcode can sign instead; it is mixed into its own Secure
+password; a seed kept from before sealing is sealed the first time it opens. On a Mac without Touch ID the app's 6-digit
+passcode can sign instead; it is mixed into its own Secure
 Enclave key, and five wrong codes in a row delete it. After each signature the seed and the derived key are
 overwritten in memory.
 
@@ -47,14 +49,20 @@ included (a test wallet skips the last one). A call to a contract whose calldata
 the chat's `call` — is allowed in person once per contract, whether or not the app asks for that, and kept apart from
 payment recipients: it doesn't make that contract a place money or a spending right may go without asking. Only the
 contracts ihatecrypto's own moves call that way go without it: Relay's depository and approval proxies, Tempo's
-exchange and fee manager, Safe's factory. The prompt shows the amounts and addresses the signer parsed itself, so an
-app that lies about a transaction is visible there.
+exchange and fee manager, Safe's factory. A call read by its selector alone (a swap, a vault, a claim) is that protocol's
+only at that protocol's own contract; elsewhere it is asked about like an unread call. Some acts ask in person afresh
+whatever session is open: running a Solana program not on the signer's list (a site's), turning the Hyperliquid
+trading key on or renewing its 7 days, approving ihatecrypto's Hyperliquid fee, a deposit into a Hyperliquid vault,
+and Relay's v3 payment by signature. The prompt shows the amounts and addresses the signer parsed itself (token
+transfers with their amount, Hyperliquid orders and transfers with theirs), so an app that lies about a transaction is
+visible there.
 
 **What signs without Touch ID.** Only what the user turns on: a test wallet made fresh in the app (it pays new
 addresses without asking too: keep a few dollars on it), an automation wallet that signs only scheduled tasks' moves,
 and the Hyperliquid trading key. The automation wallet can spend what is on it and no more; a task that would spend from
 it, one made before the wallet included, waits until the user switches it on in the Schedule, and a new recipient still
-asks in person. The trading key can place and cancel orders, set leverage up to 20× and bind ihatecrypto's referral
+asks in person. Its tasks are kept with a tag only this app can make: a list changed outside ihatecrypto loads paused. The
+trading key can place and cancel orders, set leverage up to 20× and bind ihatecrypto's referral
 code; it can't withdraw or transfer. The signer has no network, so it can't see market prices and doesn't limit an
 order's market, price or size: a program that took over the app could trade the account down. So the key opens or adds
 to positions only for 7 days after the user's last Touch ID for it (turning it on, or an order the main key signed in
@@ -65,10 +73,12 @@ Hyperliquid what you trade with. Turning each one on asks in person.
 **The Guard.** Plain code checks every transaction before it is signed, and the signer runs the checks again itself:
 
 - Solana: only programs on a fixed list run (System, SPL Token, Jupiter, Relay Depository, Kamino and a few more).
-  Money goes only to the user's own accounts or to an address bound to a quote they approved. Token approvals, owner
-  changes and other fee payers are refused, and the priority fee has a cap. The one other fee payer is Jupiter's wallet
-  on its gasless swap, for a wallet with no SOL: it signs first, the user's wallet is the only other signer, and every
-  instruction is checked the same; SOL may go elsewhere only out of the fee payer's own account.
+  Money goes only to the user's own accounts or to an address approved in person, named in the transaction itself: an
+  entry a lookup table names is never taken for anyone's address, since the signer can't read tables and the app could
+  name this wallet there. Token approvals and owner changes are refused, and the priority fee has a cap. The one other
+  fee payer is a gasless swap's (Jupiter's wallet, for a wallet with no SOL): it signs first, the user's wallet is the
+  only other signer, every instruction is checked the same, and since it may get its rent back, it is approved in person
+  once like any payee. Every Jupiter swap form must pay the user's own account; any other Jupiter instruction is refused.
 - Solana protocols, read by the signer itself: Kamino runs only the instructions ihatecrypto's deposits and withdrawals
   use, each one its program pays out only to the signer (read in Kamino's verified source), and only on the user's own
   position on Kamino's main market; anything else (a deposit minting to another account, repaying someone else's
@@ -76,16 +86,25 @@ Hyperliquid what you trade with. Turning each one on asks in person.
   orders must pay the signer's own token accounts.
 - Simulation: the app runs the transaction on the network first, and the balances after must match what the user
   approved. The signer has no network, so this check is the app's alone: for how much a swap or a protocol pays out,
-  for Jupiter's other swap forms and a program allowed for one site, and for whether a Relay quote pays the user back.
-- Bridges: a 1Click deposit address must be bound by 1Click to the user's recipient, refund address, assets and
-  amount. A Relay deposit must come from the user's wallet and name them as sender and recipient.
+  and for what a program allowed for one site does.
+- Bridges: a Relay deposit (Solana, EVM, a v3.2 payment by signature, a Hyperliquid withdrawal's mapping) names its order
+  by a 32-byte id, which is the hash of the order. The app hands the signer the order from Relay's quote; the signer
+  recomputes the id, checks the order refunds only the user, runs no calls and takes no fees, and signs a deposit only
+  for an order it checked, with the user's wallet as the depositor; the order's payee is the user's own address or one
+  approved in person with the deposit. A 1Click deposit address must be bound by 1Click to the user's recipient, refund
+  address, assets and amount (checked in the app).
 - Hyperliquid: orders stay inside the account; transfers out go only to an approved address. An order may pay
   ihatecrypto's fee (a 0.05% builder fee), only to ihatecrypto's own address and at no more than that rate, and only after
   the user approved that fee once in person; a fee approval for any other address or rate, and any referral code but
   ihatecrypto's, are refused.
 - EVM: the signer decodes calldata itself and refuses unlimited approvals, `setApprovalForAll`, permits, Permit2 for
-  longer than a day and `transferFrom` out of the user's wallet. Typed data with Permit or nested types, and a bare
-  hash to sign, are refused. The one payment by signature it makes is its own: an EIP-3009 authorization it builds
+  longer than a day and `transferFrom` out of the user's wallet; whoever a `transferFrom` or an `approve` names (an
+  approve of zero may hand over an NFT) is a payee. A multicall paying two different addresses, a LayerZero send with
+  options, a call to Relay's depository that isn't a deposit for the user, and a multisig's `execTransaction` that calls
+  into the multisig, calls a contract the signer can't read or pays a gas refund are refused. A site's typed data with
+  Permit or nested types, with bytes to run as the wallet, or with any address but the wallet's (the zero address
+  included: an open order) beside a number that isn't a nonce or a time, is refused; so is a 32-byte message or a bare
+  hash to sign. The one payment by signature it makes is its own: an EIP-3009 authorization it builds
   itself, for USDC (or Robinhood Chain's USDG) by the token's own domain, from the user's wallet, to Relay's approval
   proxy only, valid an hour at most. Relay's solver pays the gas, so dollars on a network with no gas coin can still
   move out. On Relay's v3.2 proxy the payment comes with a second signature over the calls the proxy runs with the
@@ -129,13 +148,17 @@ unpaid, as the protocol has it). Address book icons come from each entry's own s
 ## Known limits
 
 - The app tells the signer the approved recipients and Solana lookup-table contents, since the signer has no network.
-  New recipients still need Touch ID.
+  New recipients still need Touch ID, and no money goes to an account only a lookup table names.
+- Relay's approval proxy runs Relay's own calls with the exact amount approved to it (a same-network swap, a token sold
+  through Relay): the signer can't read those calls, so what such a swap pays out rests on Relay and the app's
+  simulation. Relay's v3 payment by signature names no order either (v3.2's does); it asks in person every time.
+- A transfer to a Relay or 1Click deposit address is a plain transfer to a new address: it asks in person with that
+  address, and what the deposit address does after is the bridge's.
 - A Solana or EVM key is in the signer's memory while it signs. Copies inside the derivation and secp256k1 code can't
   be wiped from Swift.
 - Chats, canvases and settings are owner-only files in `~/Library/Application Support`, not encrypted.
-- A site's typed data is refused by kind (permits, payments, Safe and user-operation messages, nested types) and by its
-  values: a struct that names any address but this wallet's beside an amount, whatever its fields are called. What
-  passes (a login, a vote) is shown field by field, and the prompt says ihatecrypto can't tell what it allows.
+- A site's typed data is refused by kind and by its values (see the Guard). What passes (a login, a vote, a delegation
+  with no amount) is shown field by field, and the prompt says ihatecrypto can't tell what it allows.
 - On a Mac without Touch ID the passcode is typed into ihatecrypto's own window, not a macOS dialog; it signs moves to
   addresses already approved, and a new address still asks for the Mac's password.
 - Nobody outside the project has audited this code.

@@ -115,6 +115,13 @@ public struct RelayMulticallPermit: Codable, Sendable, Equatable {
     }
 
     /// Why the signer won't sign it, or nil.
+    /// The Relay order id its deposit names: depositAll's last word, inside the router's one call (refusal reads the shape).
+    public var depositID: Data? {
+        guard let call = calls.first, let datas = ABI.bytesArray(Data(call.callData.dropFirst(4)), at: 64), let deposit = datas.first,
+              deposit.count == 4 + 96 else { return nil }
+        return Data(deposit.suffix(32))
+    }
+
     public func refusal(owner: String, now: UInt64) -> String? {
         if let refusal = (try? permit())?.refusal(owner: owner, now: now) { return refusal }
         // What the proxy has left after the calls goes to refundTo: this wallet, or the relayer that sends it (bound by the

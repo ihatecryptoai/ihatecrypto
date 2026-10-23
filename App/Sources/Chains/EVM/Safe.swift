@@ -131,6 +131,20 @@ public enum Safe {
         return (to, Data(args.subdata(in: 32..<64)), Data(args.subdata(in: start..<(start + Int(length)))), UInt8(op))
     }
 
+    /// An execTransaction this wallet sends itself (signEVMTransaction, not signSafeMove), held to the same rules: no call
+    /// into the multisig (its keys, modules, guard), no contract call the signer can't read, and no gas refund paid out of
+    /// it (gasPrice 0) — a refund goes to a receiver the move doesn't name. nil: not an execTransaction, or a plain payout.
+    public static func execRefusal(_ calldata: Data, safe: String) -> String? {
+        guard let e = readExec(calldata) else { return nil }
+        let args = Data(Data(calldata).dropFirst(4))
+        if args.count >= 7 * 32, args.subdata(in: 192..<224).contains(where: { $0 != 0 }) {
+            return "The multisig move pays a gas refund to an address it doesn't show. ihatecrypto doesn't sign that."
+        }
+        if e.to.lowercased() == safe.lowercased() { return "The move changes the multisig itself (its keys, modules or guard). ihatecrypto doesn't sign that." }
+        if case .contract = EVMCall.decode(e.data) { return "The multisig move calls a contract ihatecrypto can't read. It signs only the multisig's payouts." }
+        return nil
+    }
+
     /// getOwners()'s answer: a dynamic address array.
     public static func owners(in data: Data) -> [String]? {
         let d = Data(data)

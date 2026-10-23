@@ -99,12 +99,15 @@ enum Signer {
             let agent = try EVMAccount.address(privateKey: agentKey!)
             guard agent.lowercased() != owner.lowercased() else { throw WalletError("The agent key matches the main key.") }
             let nonce = UInt64(Date().timeIntervalSince1970 * 1000)
+            // In person every time: an open Touch ID session from another move doesn't turn the key on (the 2026-10-24 review).
+            try confirmAfresh("approve a Hyperliquid trading key: orders without \(Presence.name) for 7 days; it can't withdraw money")
             let (action, signature) = try withKey("evm", reason: "approve a trading key: orders without \(Presence.name); it can't withdraw money") {
                 try HLSigner.approveAgent(agent: agent, name: "ihatecrypto", nonce: nonce, privateKey: $0, mainnet: true)
             }
             // Kept only once its approval is signed: a Touch ID turned down leaves no key that Settings would call paused.
             if made { try AgentStore.save(agentKey!) }
             renewAgent(agentRenewedKey)
+            SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
             var r = SignerReply(ok: true)
             r.agentAddress = agent
             r.action = action
@@ -117,7 +120,8 @@ enum Signer {
             // Resuming a paused trading key is the user's decision: it asks for Touch ID like a signature.
             // So does one whose week is over (agentWeek): the app can't keep it going by turning it on again.
             if on, !defaults.bool(forKey: agentActiveKey) || !agentFresh(agentRenewedKey), AgentStore.load() != nil {
-                try withKey("evm", reason: "turn the Hyperliquid trading key on for 7 days: orders without \(Presence.name); it can't withdraw money") { _ in }
+                // A fresh prompt, not an open session's: SeedStore.confirm always asks.
+                try confirmAfresh("turn the Hyperliquid trading key on for 7 days: orders without \(Presence.name); it can't withdraw money")
                 SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
                 renewAgent(agentRenewedKey)
             }
@@ -149,7 +153,8 @@ enum Signer {
             }
             switch inner {
             case .signSolana, .signEVMTransaction, .signEVMBatch, .signHyperliquidL1, .signHyperliquidUser, .signRelayNonceMapping,
-                 .signReceiveAuthorization, .signRelayMulticallPermit, .signSponsoredTransfer, .signNearIntentDeposit, .signNearTransfer: break
+                 .signReceiveAuthorization, .signRelayMulticallPermit, .signSponsoredTransfer, .signNearIntentDeposit, .signNearTransfer,
+                 .relayOrder: break
             default: throw WalletError("The automation wallet signs only a task's moves.")
             }
             return try Wallets.$signing.withValue(wallet) { try handle(inner) }
@@ -209,6 +214,8 @@ enum Signer {
 
         case .setActiveWallet(let id):
             guard let wallet = Wallets.all.first(where: { $0.id == id }) else { throw WalletError("No such wallet.") }
+            // The automation wallet signs only a task's moves, through asWallet: on, it would sign any request directly.
+            guard !wallet.isAutomation else { throw WalletError("The automation wallet signs only scheduled tasks' moves; it can't be the wallet that's on.") }
             // Which wallet signs, and whose addresses ihatecrypto shows for deposits, is the user's call in person.
             if wallet.id != Wallets.active?.id {
                 try confirmInPerson("sign with the wallet «\(wallet.label)» from now on:\n\(addresses(wallet))")
@@ -397,7 +404,7 @@ enum Signer {
             return r
 
         case .signPersonal(let message):
-            guard !PersonalMessage.isBlindHash(message) else {
+            guard !PersonalMessage.isBlindHash(message), message.count != 32 else {
                 var v = Verdict()
                 v.problems.append("The site asks to sign a hash, not text: such a signature could authorize anything.")
                 return refused(v)
@@ -431,7 +438,10 @@ enum Signer {
                                     gasLimit: gasLimit, to: to, value: value, data: data)
             if !EVMRPC.signable.contains(chainId) { v.problems.append("ihatecrypto doesn't sign for network \(chainId).") }
             if let refusal = call.refusal(sender: owner, chainId: chainId) { v.problems.append(refusal) }
+            if let refusal = EVMCall.targetRefusal(to: to, data: data, sender: owner) { v.problems.append(refusal) }
             if let refusal = Batch7702.selfCall(to: to, data: data, owner: owner) { v.problems.append(refusal) }
+            let relayPayees = EVMCall.relayDepositID(to: to, data: data).map { RelayOrders.order($0).map { [$0.recipient] } } ?? []
+            if relayPayees == nil { v.problems.append(RelayOrders.unchecked) }
             if let fee = tx.feeProblem { v.problems.append(fee) }
             // Coins (calldata or not), tokens, NFTs and spending rights go only to this wallet or an address approved in person.
             for payee in call.payees(to: to, value: value, chainId: chainId) where !approved.contains(payee.lowercased()) {
@@ -442,7 +452,7 @@ enum Signer {
             // allowed as a call, apart from money recipients (a site's contract comes as a recipient only to be asked about).
             let doing = call.summary(chainId: chainId, to: to, value: value) + "\nnetwork fee " + tx.feeText
             let target = call.unreadTarget(to: to, value: value, chainId: chainId)
-            try approve(recipients.filter { RecipientStore.key($0) != target }, doing: doing)
+            try approve(recipients.filter { RecipientStore.key($0) != target } + (relayPayees ?? []), doing: doing)
             if let target { try approve([target], calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -475,9 +485,13 @@ enum Signer {
                                      gasLimit: gasLimit, to: owner, value: 0, data: Data())
             if let problem = fee.feeProblem { v.problems.append(problem) }
             let approved = Set(recipients.map { $0.lowercased() } + [owner.lowercased()])
+            var relayPayees: [String] = []
             for c in calls {
                 for payee in EVMCall.decode(c.data).payees(to: c.to, value: 0, chainId: chainId) where !approved.contains(payee.lowercased()) {
                     v.problems.append("Money or the right to spend it goes to an unapproved address \(payee).")
+                }
+                if let id = EVMCall.relayDepositID(to: c.to, data: c.data) {
+                    if let order = RelayOrders.order(id) { relayPayees.append(order.recipient) } else { v.problems.append(RelayOrders.unchecked) }
                 }
             }
             guard v.ok else { return refused(v) }
@@ -490,7 +504,7 @@ enum Signer {
             // for the chat's `call`) is a money recipient, and that approval covers its call too.
             let targets = calls.compactMap { EVMCall.decode($0.data).unreadTarget(to: $0.to, value: 0, chainId: chainId) }
             let payees = Set(calls.flatMap { EVMCall.decode($0.data).payees(to: $0.to, value: 0, chainId: chainId) }.map(RecipientStore.key))
-            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) }, doing: doing)
+            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayPayees, doing: doing)
             if !targets.isEmpty { try approve(targets, calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -519,12 +533,17 @@ enum Signer {
                                                                  sponsor: sponsor),
                                             tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
             guard verdict.ok else { return refused(verdict) }
+            let relayPayees = try SolanaGuard.relayDepositIDs(message).map { try RelayOrders.require($0).recipient }
             // The programs the user allowed for this one transaction are named in full: they run with the wallet's authority.
             let extra = extraPrograms.filter { SolanaGuard.knownPrograms[$0] == nil && (try? Base58.decode($0))?.count == 32 }
                 .map { "runs \($0), not on ihatecrypto's list" }
             let payer = sponsor.map { ["the network fee is paid by \($0.prefix(4))…\($0.suffix(4)), not by you"] } ?? []
             let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n")
-            try approve(recipients, doing: doing)
+            // The fee payer may get rent back from this wallet: it's a payee like any other, allowed in person once.
+            try approve(recipients + (sponsor.map { [$0] } ?? []) + relayPayees, doing: doing)
+            // A program not on the list runs with this wallet's authority and the signer can't read what it does: every
+            // such transaction asks in person afresh, whatever session is open (the 2026-10-24 review).
+            if !extra.isEmpty { try confirmAfresh(doing + "\nit can move anything in this wallet: sign only if you trust this site") }
             var r = SignerReply(ok: true)
             r.signedWire = try withKey("solana", reason: doing) {
                 try SolanaTransaction.sign(wire, privateKey: $0, sponsor: sponsorKey).wire
@@ -540,6 +559,9 @@ enum Signer {
                 return refused(v)
             }
             let digest = try permit.typed().parts().digest
+            // Relay's v3 proxy: nothing this signature covers names the order, so whom Relay pays is only its quote's word,
+            // which the signer can't check here (v3.2's MulticallAuthorization binds it). Never inside an open session.
+            try confirmAfresh(permit.summary + "\nwhom Relay pays it to is set by its quote, which the signer can't check on this kind of payment")
             var r = SignerReply(ok: true)
             r.signature = try withKey("evm", reason: permit.summary) { try EVMSigner.sign(digest: digest, privateKey: $0) }
             r.checks = ["The signer built the payment by signature itself: a dollar it knows, from this wallet, to Relay's approval proxy, valid under an hour."]
@@ -565,6 +587,9 @@ enum Signer {
             let m = RelayMulticallPermit(chainId: chainId, token: token, from: owner, value: value, validBefore: validBefore, relayer: relayer,
                                          refundTo: refundTo, nftRecipient: nftRecipient, metadata: metadata,
                                          calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
+            guard let id = m.depositID else { throw WalletError(RelayOrders.unchecked) }
+            let order = try RelayOrders.require(id)
+            try approve([order.recipient], doing: order.summary)
             if let refusal = m.refusal(owner: owner, now: UInt64(Date().timeIntervalSince1970)) {
                 var v = Verdict()
                 v.problems.append(refusal)
@@ -594,8 +619,13 @@ enum Signer {
                 r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: mainnet)
             } else {
                 let stale = agentOn && AgentStore.load() != nil
-                let what = HLAction.type(action) == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
+                let type = HLAction.type(action)
+                let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
+                    : type == "vaultTransfer" ? "move money between your Hyperliquid account and a vault"
                     : stale ? "sign a Hyperliquid order: the trading key's 7 days are over, and this renews them" : "sign a Hyperliquid order"
+                // Renewing the trading key's week, and a vault deposit (money locked for days), ask in person afresh.
+                let deposit = type == "vaultTransfer" && { if case .map(let p) = action { p.contains { $0.0 == "isDeposit" && $0.1 == .bool(true) } } else { false } }()
+                if stale || deposit { try confirmAfresh(prompt(what, verdict)) }
                 r.signature = try withKey("evm", reason: prompt(what, verdict)) {
                     try HLSigner.signL1(action, privateKey: $0, nonce: nonce, mainnet: mainnet)
                 }
@@ -604,7 +634,18 @@ enum Signer {
             r.checks = verdict.checks
             return r
 
+        case .relayOrder(let json):
+            let order = try RelayOrder.read(json, evm: try? address("evm"), solana: try? address("solana"), now: UInt64(Date().timeIntervalSince1970))
+            // Held, not yet approved: its payee is asked about (when it isn't this wallet's or already allowed) with the
+            // deposit that names it, after Confirm — never while a card is being prepared.
+            RelayOrders.add(order)
+            var r = SignerReply(ok: true)
+            r.checks = ["Relay order checked by the signer: it pays \(order.recipient) on \(order.outputChain); refunds come back to this wallet."]
+            return r
+
         case .signRelayNonceMapping(let wallet, let depositor, let id, let nonce):
+            let order = try RelayOrders.require(id)
+            try approve([order.recipient], doing: order.summary)
             let owner = try address("evm").lowercased()
             guard wallet.lowercased() == owner, depositor.lowercased() == owner else {
                 var v = Verdict()
@@ -624,6 +665,8 @@ enum Signer {
             let what = type != "ApproveBuilderFee" ? "sign a Hyperliquid transfer"
                 : HLAction.text(action, "maxFeeRate") == HLBuilder.revoke ? "take back ihatecrypto's fee approval" : "approve ihatecrypto's fee on your Hyperliquid trades"
             try approve(recipients, doing: prompt(what, verdict))
+            // Approving ihatecrypto's fee is the user's own opt-in: a fresh prompt, never an open session (a revoke needs none).
+            if type == "ApproveBuilderFee", HLAction.text(action, "maxFeeRate") != HLBuilder.revoke { try confirmAfresh(prompt(what, verdict)) }
             var r = SignerReply(ok: true)
             r.signature = try withKey("evm", reason: prompt(what, verdict)) {
                 try HLSigner.signUserAction(type, fields: fields, privateKey: $0, mainnet: mainnet)
@@ -688,6 +731,25 @@ enum Signer {
         let rest = Wallets.all.filter { $0.id != wallet.id }
         Wallets.save(rest)
         if wasActive { Wallets.activate(rest.first) }
+    }
+
+    /// Relay orders this signer checked (relayOrder), by id, until their deadline: a deposit naming any other id isn't
+    /// signed, so whom a bridge pays is never only the app's word (the 2026-10-24 review).
+    enum RelayOrders {
+        static let lock = NSLock()
+        nonisolated(unsafe) static var held: [Data: RelayOrder] = [:]
+        static let unchecked = "A Relay deposit for an order the signer hasn't checked: nothing was signed."
+        static func add(_ order: RelayOrder) {
+            let now = UInt64(Date().timeIntervalSince1970)
+            lock.withLock { held = held.filter { $0.value.deadline > now }; held[order.id] = order }
+        }
+        static func order(_ id: Data) -> RelayOrder? {
+            lock.withLock { held[id].flatMap { $0.deadline > UInt64(Date().timeIntervalSince1970) ? $0 : nil } }
+        }
+        static func require(_ id: Data) throws -> RelayOrder {
+            guard let o = order(id) else { throw WalletError(unchecked) }
+            return o
+        }
     }
 
     static var agentActiveKey: String { Wallets.scoped("agentActive") }
@@ -790,6 +852,15 @@ enum Signer {
     static func confirmInPerson(_ reason: String) throws {
         guard !Wallets.all.isEmpty, !holdsPublicTestWallet else { return }
         try SeedStore.confirm(reason)
+    }
+
+    /// An act that asks in person afresh, whatever Touch ID session is open (a site's program, the trading key's week, a
+    /// vault deposit, a fee opt-in, Relay's v3 payment by signature). A test wallet asks nothing, as with new addresses;
+    /// the automation wallet's prompt closes by itself after a minute, as its others do.
+    static func confirmAfresh(_ reason: String) throws {
+        if holdsPublicTestWallet { return }
+        if let wallet = Wallets.active, wallet.isTest, !wallet.isAutomation, Wallets.signing == nil, signsWithoutPrompt(wallet) { return }
+        try SeedStore.confirm(reason, within: Wallets.signing == nil ? nil : 60)
     }
 
     /// Money to an address outside the wallet: each new address is confirmed in person once, with the address on

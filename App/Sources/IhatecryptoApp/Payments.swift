@@ -45,15 +45,22 @@ extension Workspace {
         }
         agentStep = say("Asking \(host) for its price", "Спрашиваю цену у \(host)")
         let ask = messages.last(where: \.fromUser)?.text ?? ""
+        // Asking a price is a request: only to a service Tempo's directory lists, or a site the user named themselves — so
+        // text a lookup slipped into the chat can't have the model send the user's numbers to an address of its choosing.
+        let listed = await MPP.serviceName(url)
+        guard listed != nil || ask.lowercased().contains(host.lowercased()) else {
+            reply(say("\(host) isn't in Tempo's directory of paid services and isn't in your message, so ihatecrypto doesn't call it. Write its address yourself to use it.",
+                      "\(host) нет в каталоге платных сервисов Tempo и нет в твоём сообщении, поэтому ihatecrypto его не вызывает. Напиши его адрес сам, чтобы воспользоваться."), note: note)
+            return
+        }
         do {
-            async let named = MPP.serviceName(url)
             var probed = !(body ?? "").isEmpty && !Self.pricedWithContent.contains(url)
             var (status, headers, data) = try await MPP.call(method, url, probed ? nil : body)
             if probed, status != 402 {
                 probed = false
                 (status, headers, data) = try await MPP.call(method, url, body)
             }
-            let service = await named ?? host
+            let service = listed ?? host
             guard status == 402 else {
                 if (200..<300).contains(status) {
                     reply(await answered(ask, service: service, data: data, usdc: nil, proof: nil), note: note)

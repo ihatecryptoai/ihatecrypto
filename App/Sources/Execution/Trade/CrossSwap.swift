@@ -73,7 +73,7 @@ extension Executor {
             throw ExecutionError("\(Fmt.num(held / scale, maxFraction: 8)) \(origin.symbol) on \(WalletCommand.placeName(from)); \(Fmt.num(amount, maxFraction: 8)) is more. Nothing was signed.")
         }
         let me = from == "solana" ? wallet.solana : wallet.evm, recipient = to == "solana" ? wallet.solana : wallet.evm
-        let quote = try await Relay.quote(user: me, recipient: recipient, originChain: origin.chain, destinationChain: destination.chain,
+        let quote = try await relayQuote(user: me, recipient: recipient, originChain: origin.chain, destinationChain: destination.chain,
                                           originCurrency: origin.currency, destinationCurrency: destination.currency, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],
                                          expected: ["sender": me, "recipient": recipient], subject: "Relay quote")

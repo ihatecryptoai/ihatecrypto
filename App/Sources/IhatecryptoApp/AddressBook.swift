@@ -156,6 +156,11 @@ enum AddressIcons {
         }
     }
 
+    /// Exchanges whose logo a saved name brings, by the name's first word: their own sites, nobody else's.
+    static let exchanges = ["binance": "binance.com", "bybit": "bybit.com", "okx": "okx.com", "coinbase": "coinbase.com",
+                            "kraken": "kraken.com", "kucoin": "kucoin.com", "bitget": "bitget.com", "mexc": "mexc.com",
+                            "gate": "gate.io", "htx": "htx.com", "bitfinex": "bitfinex.com", "gemini": "gemini.com"]
+
     /// The site's own icon, by its domain («bybit.com»), asked of the site itself: a favicon service (Google's) would learn
     /// which exchanges the address book names. The touch icon first (180 px), then the favicon, if it has 32 px or more.
     static func logo(domain: String) async -> NSImage? {
@@ -985,10 +990,11 @@ extension Workspace {
             reply(say("Check it on the canvas: \(network.title), starts \(ends.start), ends \(ends.end) — exactly as in your message. Confirm to save.",
                       "Сверь на холсте: \(network.title), начало \(ends.start), конец \(ends.end) — как в твоём сообщении. Подтверди, чтобы сохранить."), note: note)
         }
-        // A logo for a known exchange name, fetched in the background; the entry works without it.
-        if domain == nil, let site, site.count > 2 {
+        // A logo for a known exchange's name, fetched from its own site in the background; the entry works without it.
+        // Only these: a first word guessed into «<word>.com» (Mom → mom.com) told a stranger's site about the save.
+        if domain == nil, let site, let known = AddressIcons.exchanges[site] {
             Task {
-                guard let image = await AddressIcons.logo(domain: site + ".com"), let file = AddressIcons.save(image),
+                guard let image = await AddressIcons.logo(domain: known), let file = AddressIcons.save(image),
                       case .address(var entry)? = pendingAction, entry.address == address else { return }
                 entry.icon = .image(file)
                 pendingAction = .address(entry)

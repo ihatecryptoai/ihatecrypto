@@ -38,14 +38,26 @@ public struct TypedData: Sendable {
     /// address that is this wallet's, the zero address or the verifying contract isn't someone else.
     public func refusal(owner: String?) -> String? {
         if let refusal { return refusal }
+        // Bytes signed to run as this wallet (a meta-transaction's functionSignature, a forwarded call's data) can be any call.
+        if let call = fields.first(where: { $0.type == "bytes" }) {
+            return "\(primaryType) carries «\(call.name)», data to run as this wallet. ihatecrypto doesn't sign that for a site."
+        }
+        guard fields.count <= Self.shownFields else { return "\(primaryType) has \(fields.count) fields, more than the prompt can show. ihatecrypto doesn't sign it." }
         guard let owner = owner?.lowercased() else { return nil }
-        let zero = "0x" + String(repeating: "0", count: 40)
-        let others = fields.filter { $0.type == "address" && ![owner, zero, verifyingContract].contains($0.value.lowercased()) }
-        let amountWords = ["amount", "value", "wad", "qty", "quantity", "size", "price", "sum", "balance", "shares", "tokens", "units"]
-        let amount = fields.first { f in f.type.hasPrefix("uint") && amountWords.contains { f.name.lowercased().contains($0) } }
+        // Someone else: any address but this wallet's and the verifying contract's — the zero address too, which is anyone
+        // (an open order). Beside it, any number that isn't a nonce, a time or a choice may be the amount (the 2026-10-24
+        // review: «total», «amt» and «num» passed a list of amount words).
+        let others = fields.filter { $0.type == "address" && ![owner, verifyingContract].contains($0.value.lowercased()) }
+        let notAmounts = ["nonce", "deadline", "expir", "valid", "time", "chainid", "salt", "version", "choice"]
+        let amount = fields.first { f in
+            f.type.hasPrefix("uint") && f.value != "0" && !notAmounts.contains { f.name.lowercased().contains($0) }
+        }
         guard let other = others.first, let amount else { return nil }
-        return "\(primaryType) names \(other.value) («\(other.name)») beside an amount («\(amount.name)»): a signature like that can move money. ihatecrypto doesn't sign it for a site."
+        return "\(primaryType) names \(other.value) («\(other.name)») beside a number («\(amount.name)»): a signature like that can move money. ihatecrypto doesn't sign it for a site."
     }
+
+    /// The prompt shows every field; one with more than this many is refused rather than half shown.
+    static let shownFields = 16
 
     public var refusal: String? {
         // ERC-4337's EntryPoints (v0.6, v0.7, v0.8; Batch7702.entryPoints, which this module can't import): a wallet
@@ -84,7 +96,7 @@ public struct TypedData: Sendable {
         // What passed `refusal` is still a kind ihatecrypto can't read: the site's own word for it is all there is.
         return (["sign \(plain(primaryType, 60)) for «\(plain(domainName, 60))»",
                  "ihatecrypto can't tell what this signature allows. Sign only if you trust this site."]
-                + fields.prefix(8).map { "\(plain($0.name, 30)): \(plain($0.value, 70))" })
+                + fields.prefix(Self.shownFields).map { "\(plain($0.name, 30)): \(plain($0.value, 70))" })
             .joined(separator: "\n")
     }
 
@@ -142,7 +154,7 @@ public struct TypedData: Sendable {
     }
 
     /// An unsigned integer as a 32-byte big-endian word, from a JSON number, decimal or 0x-hex string.
-    static func word(_ v: Any?) throws -> Data {
+    public static func word(_ v: Any?) throws -> Data {
         var text = (v as? String) ?? (v as? NSNumber)?.stringValue ?? ""
         if text.hasPrefix("0x") {
             text.removeFirst(2)

@@ -164,11 +164,13 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     let relay = SolanaGuard.relayDepository
     let depositToken: [UInt8] = [0x0b, 0x9c, 0x60, 0xda, 0x27, 0xa3, 0xb4, 0x13] + withUnsafeBytes(of: UInt64(2_000_000).littleEndian, Array.init) + Array(repeating: 1, count: 32)
     let withdraw: [UInt8] = [0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0] + Array(repeating: 0, count: 8)
-    let ok = try message([me, relay], [(1, [0], depositToken)])
+    // depository, sender, depositor: this wallet both times (a recovered deposit is refunded to the depositor).
+    let ok = try message([me, relay], [(1, [1, 0, 0], depositToken)])
     #expect(SolanaGuard.check(ok.0, accounts: ok.1, policy: policy, tokenOwners: [:]).ok)
-    let other = try message([me, relay], [(1, [0], withdraw)])
+    #expect(SolanaGuard.relayDepositIDs(ok.0) == [Data(repeating: 1, count: 32)])
+    let other = try message([me, relay], [(1, [1, 0, 0], withdraw)])
     #expect(!SolanaGuard.check(other.0, accounts: other.1, policy: policy, tokenOwners: [:]).ok)
-    let notOurs = try message([me, scam, relay], [(2, [1], depositToken)])
+    let notOurs = try message([me, scam, relay], [(2, [2, 0, 1], depositToken)])
     #expect(!SolanaGuard.check(notOurs.0, accounts: notOurs.1, policy: policy, tokenOwners: [:]).ok)
 }
 
@@ -254,9 +256,15 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap → your account (SOL). The balance simulation checks the amount."))
     let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 4, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507))])
     #expect(!SolanaGuard.check(sTheirs, accounts: sTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
-    // Another of Jupiter's forms is left to the balance simulation, as before.
-    let (exactOut, exactOutAccounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c] + tail(quoted: 1))])
-    #expect(SolanaGuard.check(exactOut, accounts: exactOutAccounts, policy: policy, tokenOwners: [:]).checks.contains("Calls Jupiter Swap. The balance simulation checks the result."))
+    // Every other swap form is held to its own output account too (exact_out_route: user destination 3, destination mint 6),
+    // and an instruction that isn't a swap is refused.
+    let exactOutRoute: [UInt8] = [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c]
+    let (exactOut, exactOutAccounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 5, 6, 4], exactOutRoute + tail(quoted: 1))])
+    #expect(SolanaGuard.check(exactOut, accounts: exactOutAccounts, policy: policy, tokenOwners: [:]).ok)
+    let (exactTheirs, exactTheirsAccounts) = try message(keys, [(4, [1, 0, 2, 7, 4, 5, 5, 6, 4], exactOutRoute + tail(quoted: 1))])
+    #expect(!SolanaGuard.check(exactTheirs, accounts: exactTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
+    let (claim, claimAccounts) = try message(keys, [(4, [0, 7, 4], [0x3e, 0xc6, 0xd6, 0xc1, 0xa6, 0x13, 0x6f, 0xd2])])
+    #expect(!SolanaGuard.check(claim, accounts: claimAccounts, policy: policy, tokenOwners: [:]).ok)
 }
 
 /// Past its 7 days the trading key still signs what can't open or add to a position: cancels and reduce-only orders.

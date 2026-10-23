@@ -658,7 +658,8 @@ public enum EVMCall: Equatable, Sendable {
     case contract(selector: String)
 
     public static func decode(_ data: Data) -> EVMCall {
-        guard data.count >= 4 else { return .plain }
+        // Calldata shorter than a selector still runs a contract's fallback: only none at all is a plain send.
+        guard data.count >= 4 else { return data.isEmpty ? .plain : .contract(selector: "0x" + data.hex) }
         if let e = Safe.readExec(data) { return .multisigExec(to: e.to, value: e.value, data: e.data, operation: e.operation) }
         let selector = data.prefix(4).hex
         let args = data.dropFirst(4)
@@ -751,7 +752,11 @@ public enum EVMCall: Equatable, Sendable {
                 payees.append(r)
             }
         }
-        return payees.first { $0.lowercased() != msgSender } ?? msgSender
+        // Read whole (the 2026-10-24 review): a multicall paying this wallet in one swap and someone else in the next names
+        // two payees besides the caller, and comes back as «several payees» — never this wallet — so the swap check refuses it.
+        let named = Set(payees.map { $0.lowercased() }).subtracting([msgSender])
+        if named.count > 1 { return "several payees" }
+        return named.first ?? msgSender
     }
 
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:
@@ -836,10 +841,47 @@ public enum EVMCall: Equatable, Sendable {
     /// `call`): nil when the call is read, pays that contract (then it's a recipient), or is one of ihatecrypto's own.
     public func unreadTarget(to: String, value: UInt64, chainId: UInt64) -> String? {
         let target = to.lowercased()
-        guard case .contract = self, !Self.ownUnreadCallees.contains(target),
-              !payees(to: to, value: value, chainId: chainId).contains(where: { $0.lowercased() == target }) else { return nil }
+        guard !payees(to: to, value: value, chainId: chainId).contains(where: { $0.lowercased() == target }) else { return nil }
+        // A protocol's call read by its selector alone (a swap, a vault, a claim…) is that protocol's only at its own
+        // contract: at another, the selector is the contract's word for whatever it does — asked about like an unread call.
+        let byProtocol = switch self {
+        case .swap, .v4Swap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
+        default: false
+        }
+        if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
+        guard case .contract = self, !Self.ownUnreadCallees.contains(target) else { return nil }
         return target
     }
+
+    /// The contracts whose calls ihatecrypto reads by protocol: its known spenders (routers, pools, vaults, CCTP, Permit2),
+    /// Merkl's distributor and USDT0's own OFT.
+    static func protocolContracts(chainId: UInt64) -> Set<String> {
+        knownSpenders(chainId: chainId).union([Merkl.distributor.lowercased()]).union([USDT0.on(chainId)?.oft].compactMap { $0?.lowercased() })
+    }
+
+    /// What the contract called makes wrong with this call, beyond the call itself: Relay's depository takes only deposits
+    /// naming this wallet as the depositor (depositNative, depositErc20 with or without an amount), and a Safe's
+    /// execTransaction must be a plain payout (Safe.execRefusal) — the 2026-10-24 review.
+    public static func targetRefusal(to: String, data: Data, sender: String) -> String? {
+        if to.lowercased() == RelayMulticallPermit.depository {
+            let selector = data.prefix(4).hex
+            guard relayDeposits.contains(selector) else { return "A call to Relay's depository that isn't a deposit. ihatecrypto only deposits there." }
+            guard ABI.address(in: Data(data.dropFirst(4)), word: 0)?.lowercased() == sender.lowercased() else {
+                return "The Relay deposit names someone else as the depositor."
+            }
+        }
+        return Safe.execRefusal(data, safe: to)
+    }
+
+    /// The Relay order id a call into Relay's depository deposits for: its last word (depositNative, both depositErc20).
+    public static func relayDepositID(to: String, data: Data) -> Data? {
+        guard to.lowercased() == RelayMulticallPermit.depository, relayDeposits.contains(data.prefix(4).hex), data.count >= 4 + 64,
+              (data.count - 4) % 32 == 0 else { return nil }
+        return Data(data.suffix(32))
+    }
+
+    static let relayDeposits: Set<String> = Set(["depositNative(address,bytes32)", "depositErc20(address,address,uint256,bytes32)",
+                                                 "depositErc20(address,address,bytes32)"].map { Keccak.hash256(Data($0.utf8)).prefix(4).hex })
 
     /// Who gets money, or the right to spend it, from this call: `to` when it carries coins (unless they come straight back,
     /// `returnsCoins`), a token's or NFT's recipient, and a spender that isn't one of `knownSpenders`. The signer signs only
@@ -848,6 +890,8 @@ public enum EVMCall: Equatable, Sendable {
         var out = value > 0 && !returnsCoins(to: to, value: value, chainId: chainId) ? [to] : []
         switch self {
         case .transfer(let r, _), .nftTransfer(_, let r): out.append(r)
+        // Someone else's tokens this wallet may spend, sent on: whoever gets them is a payee too.
+        case .transferFrom(_, let r, _): out.append(r)
         // What CCTP mints goes to its recipient: this wallet, or an address allowed in person.
         case .cctpBurn(let r?, _, _): out.append(r)
         // What an OFT sends goes to its recipient on the other network, and the fee it didn't need to `refund`.
@@ -857,8 +901,12 @@ public enum EVMCall: Equatable, Sendable {
             let coins = ABI.uint(in: v, word: 0)
             if coins != 0 { out.append(target) }
             out += EVMCall.decode(d).payees(to: target, value: 0, chainId: chainId)
-        // An approve of zero — a revoke — gives nobody anything: no one to allow for it.
-        case .approve(let s, let a), .increaseAllowance(let s, let a), .permit2Approve(_, let s, let a, _):
+        // approve(spender, 0) is an ERC-20 revoke, or an NFT's token id 0 handed over (ERC-721 shares the selector): its
+        // spender is always one to allow, unless it's nobody (the zero address clears an NFT's approval).
+        case .approve(let s, _):
+            if s.lowercased() != "0x" + String(repeating: "0", count: 40), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
+        // An increase or a Permit2 allowance of zero gives nobody anything: no one to allow for it.
+        case .increaseAllowance(let s, let a), .permit2Approve(_, let s, let a, _):
             if a.contains(where: { $0 != 0 }), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
         default: break
         }
@@ -896,6 +944,7 @@ public enum EVMCall: Equatable, Sendable {
         }
         if case .cctpBurn(nil, _, _) = self { return "The CCTP burn mints to an account that isn't an EVM address. ihatecrypto mints only to EVM addresses." }
         if case .oftSend(nil, _, _, _, _) = self { return "The LayerZero send can't be read, or pays an account that isn't an EVM address. ihatecrypto sends only to EVM addresses." }
+        if case .oftSend(_, _, _, false, _) = self { return "The LayerZero send carries options or a message, which can pay someone else on the other network. ihatecrypto sends only plain ones." }
         if case .borrow(_, _, let owner) = self, owner.lowercased() != sender.lowercased() { return "The borrow would put the debt on \(owner), not this wallet." }
         if case .repay(_, _, let owner) = self, owner.lowercased() != sender.lowercased() { return "The repay would pay \(owner)'s debt, not this wallet's." }
         if case .permit2Approve(_, _, let amount, let expiration) = self {

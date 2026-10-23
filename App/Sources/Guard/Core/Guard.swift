@@ -90,6 +90,24 @@ public enum SolanaGuard {
     static let kaminoFarmsAllowed: Set<String> = ["5a5f6b2acd7c32e1", "2466bb31dc248443", "44c8e4e9b820e2bc", "d6838ab790c2ac2a", "01870c3ef38c4d6c",
                                                   "6f11b9fa3c7a26fe"]
 
+    /// The Relay order ids the transaction's depository deposits name (bytes 16..<48 of each one's data).
+    public static func relayDepositIDs(_ m: SolanaMessage) -> [Data] {
+        m.instructions.compactMap { ix in
+            guard ix.programIndex < m.staticKeys.count, m.staticKeys[ix.programIndex] == relayDepository, ix.data.count >= 48 else { return nil }
+            return Data(ix.data.dropFirst(16).prefix(32))
+        }
+    }
+
+    /// Jupiter's swap forms (its IDL, 2026-10-24) by discriminator: the account the output lands in, the one that replaces
+    /// it when set, and the output mint. Plain and token-ledger routes, exact-out, their shared-accounts kinds and the v2
+    /// forms the gasless /order builds.
+    static let jupiterRoutes: [String: (to: Int, instead: Int?, mint: Int)] = [
+        "e517cb977ae3ad2a": (3, 4, 5), "96564774a75d0e68": (3, 4, 5), "d033ef977b2bed5c": (3, 4, 6),   // route, route_with_token_ledger, exact_out_route
+        "c1209b3341d69c81": (6, nil, 8), "e6798f50779f6aaa": (6, nil, 8), "b0d169a89a7d453e": (6, nil, 8), // shared_accounts_ the same three
+        "bb64facc31c4af14": (2, 7, 4), "9d8ab85215f4f324": (2, 7, 4),                                   // route_v2, exact_out_route_v2
+        "d19853937cfed8e9": (5, nil, 7), "3560e5cad8bbfa18": (5, nil, 7),                               // shared_accounts_route_v2, …exact_out_route_v2
+    ]
+
     /// Jupiter Lend Earn (Fluid's lending program): its deposits mint fTokens to account 2, the signer's own account for
     /// the fToken mint (account 6); its withdrawals and redemptions pay account 2, the signer's own account for the token
     /// (account 5). The program requires both today (token::authority = signer, Instadapp/fluid-solana-programs
@@ -129,8 +147,6 @@ public enum SolanaGuard {
     static let relayDepositNative = Data([0x0d, 0x9e, 0x0d, 0xdf, 0x5f, 0xd5, 0x1c, 0x06])
     /// Jupiter's route and shared_accounts_route, the two its swap API builds for an exact-in swap (read 2026-10-21 from
     /// lite-api's /swap): sha256("global:route")[0..<8], sha256("global:shared_accounts_route")[0..<8].
-    static let jupiterRoute = Data([0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a])
-    static let jupiterSharedRoute = Data([0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81])
     /// What the Touch ID prompt names a swap's output in; another mint shows its raw units.
     static let mintNames: [String: (symbol: String, decimals: Int)] = [
         "So11111111111111111111111111111111111111112": ("SOL", 9),
@@ -142,6 +158,11 @@ public enum SolanaGuard {
     /// `tokenOwners`: token account → its owner wallet, for the owner's and the allowed recipients' accounts.
     public static func check(_ m: SolanaMessage, accounts: [String], policy: SolanaPolicy, tokenOwners: [String: String]) -> Verdict {
         var v = Verdict()
+        // An entry a lookup table names is whatever the app says it is: the signer can't read tables. Unless it trusts the
+        // app with them, such an entry is never taken for any address — a lying app could name this wallet there while
+        // the table on chain holds someone else's, and a payee checked by its text would pass (the 2026-10-24 review).
+        let accounts = policy.trustLookupTables || accounts.count <= m.staticKeys.count ? accounts
+            : m.staticKeys + (m.staticKeys.count..<accounts.count).map { "lookup-table entry \($0 - m.staticKeys.count + 1)" }
         if let sponsor = policy.sponsor {
             guard sponsor != policy.owner, m.requiredSignatures == 2, accounts.count > 1, accounts[0] == sponsor, accounts[1] == policy.owner else {
                 v.problems.append("Only \(sponsor.prefix(6))… may pay the fee, and your wallet must be the only other signer.")
@@ -218,8 +239,12 @@ public enum SolanaGuard {
             case SPL.tokenProgram, SPL.token2022Program:
                 switch tag {
                 case 3, 12: // Transfer(source, dest, authority), TransferChecked(source, mint, dest, authority)
-                    guard let to = account(tag == 3 ? 1 : 2) else { v.problems.append("Instruction \(n + 1): incomplete token transfer."); continue }
-                    if allowed(to) { v.checks.append("Tokens → \(name(to)).") } else { v.problems.append("Tokens go to someone else's account \(to).") }
+                    guard let to = account(tag == 3 ? 1 : 2), ix.data.count >= (tag == 3 ? 9 : 10) else { v.problems.append("Instruction \(n + 1): incomplete token transfer."); continue }
+                    // The amount the instruction moves, for the prompt: by its mint where the signer knows it, else raw units.
+                    let units = le64(ix.data, 1)
+                    let known = tag == 12 ? account(1).flatMap { mintNames[$0] } : nil
+                    let amount = known.map { "\(Decimal(units) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(units) units of a token"
+                    if allowed(to) { v.checks.append("\(amount) → \(name(to)).") } else { v.problems.append("\(amount) go to someone else's account \(to).") }
                 case 9: // CloseAccount(account, destination, owner): the rent must come back to us
                     if let to = account(1), mine(to), policy.trustLookupTables || staticKeys.contains(to) { v.checks.append("Temporary account closes, remainder → \(name(to)).") }
                     else { v.problems.append("Closing the account sends the remainder to someone else's address.") }
@@ -241,15 +266,18 @@ public enum SolanaGuard {
                 v.checks.append(tag == 0 ? "Creates your lookup table (rent in SOL)." : "Extends your lookup table.")
             case relayDepository:
                 // Only deposits, with our wallet as the depositor; the amount goes into the envelope check too.
+                // deposit_token/deposit_native(amount, id): data 8 + 8 + 32, accounts depository, sender, depositor, …
+                // The depositor (account 2, a static key) is this wallet: a recovered deposit is refunded to it. Whom the
+                // order pays is checked by the signer from the order itself (RelayOrder, relayDepositIDs).
                 let kind = ix.data.prefix(8)
-                guard kind == relayDepositToken || kind == relayDepositNative, ix.data.count >= 16 else {
+                guard kind == relayDepositToken || kind == relayDepositNative, ix.data.count >= 48 else {
                     v.problems.append("Instruction \(n + 1): only deposits are allowed on Relay.")
                     continue
                 }
-                if ix.accounts.contains(where: { $0 < accounts.count && accounts[$0] == policy.owner }) {
-                    v.checks.append("Relay deposit: \(le64(ix.data, 8)) units from your wallet. The quote sets the recipient.")
+                if account(2) == policy.owner, account(1) == policy.owner {
+                    v.checks.append("Relay deposit: \(le64(ix.data, 8)) units from your wallet, for the order the signer checked.")
                 } else {
-                    v.problems.append("Relay deposit is not from your wallet.")
+                    v.problems.append("Relay deposit is not from your wallet, or names someone else as the depositor.")
                 }
             case jupiterLend:
                 let kind = ix.data.prefix(8).hex, deposit = jupiterLendDeposits.contains(kind)
@@ -298,14 +326,12 @@ public enum SolanaGuard {
                 }
                 v.checks.append("Calls \(programName): an instruction that pays only you. The balance simulation checks the amount.")
             case jupiterSwap:
-                // route: the output to account 3, or to account 4 when it's set (the program's own id when not), mint 5;
-                // shared_accounts_route: to account 6, mint 8. Its other forms are left to the simulation, as before.
-                // The amounts aren't read: they end the data, and the program ignores bytes after them, so a site could
-                // append a made-up quote and slippage (the 2026-10-22 review). The simulation checks what arrives.
-                let kind = ix.data.prefix(8)
-                let layout: (to: Int, instead: Int?, mint: Int)? = kind == jupiterRoute ? (3, 4, 5) : kind == jupiterSharedRoute ? (6, nil, 8) : nil
-                guard let layout, var to = account(layout.to), let mint = account(layout.mint) else {
-                    v.checks.append("Calls Jupiter Swap. The balance simulation checks the result.")
+                // Every swap form's output account (its «instead» one when set: the program's own id when not) must be this
+                // wallet's own; any other Jupiter instruction is refused (the 2026-10-24 review: the gasless path's route_v2
+                // went unchecked). The amounts aren't read: they end the data, and the program ignores bytes after them,
+                // so a site could append a made-up quote and slippage (the 2026-10-22 review). The simulation checks what arrives.
+                guard let layout = jupiterRoutes[ix.data.prefix(8).hex], var to = account(layout.to), let mint = account(layout.mint) else {
+                    v.problems.append("Instruction \(n + 1): a Jupiter instruction that isn't one of its swaps (\(ix.data.prefix(8).hex)).")
                     continue
                 }
                 if let instead = layout.instead.flatMap(account), instead != jupiterSwap { to = instead }
@@ -384,6 +410,16 @@ public enum HLGuard {
             }
             v.checks.append("Leverage \(leverage)× inside your account.")
         case "order":
+            // What each order does, for a prompt when the main key signs it: side, size, limit price, market (by index).
+            if case .array(let orders)? = pairs.first(where: { $0.0 == "orders" })?.1 {
+                for case .map(let o) in orders {
+                    func field(_ k: String) -> MsgPack? { o.first(where: { $0.0 == k })?.1 }
+                    let side = field("b") == .bool(true) ? "buy" : "sell"
+                    let size = if case .string(let s)? = field("s") { s } else { "?" }, price = if case .string(let p)? = field("p") { p } else { "?" }
+                    let market = if case .uint(let a)? = field("a") { "market #\(a)" } else { "a market" }
+                    v.checks.append("\(side) \(size) on \(market) at \(price)\(field("r") == .bool(true) ? ", only reducing a position" : "") → your account")
+                }
+            }
             // The trading key signs orders without Touch ID: an order's fee may go to ihatecrypto, at its rate, and nowhere else.
             guard let builder = pairs.first(where: { $0.0 == "builder" })?.1 else { v.checks.append("Trading action inside your account."); break }
             guard case .map(let b) = builder, b.count == 2, b.first(where: { $0.0 == "b" })?.1 == .string(HLBuilder.address),
@@ -408,12 +444,20 @@ public enum HLGuard {
             v.checks.append("Transfer between your spot and perp balances.")
         case "spotSend", "withdraw3", "usdSend", "sendAsset":
             let to = text("destination")?.lowercased() ?? ""
-            if allowed.contains(to) { v.checks.append("Funds → approved address \(to.prefix(8))….") }
-            else { v.problems.append("Funds go to someone else's address \(to).") }
+            // What moves, for the prompt: the amount and, where it says, the token (a spot token is «NAME:0x…»).
+            let token = text("token").map { String($0.split(separator: ":").first ?? "") } ?? "USDC"
+            let amount = "\(text("amount") ?? "?") \(token)"
+            if allowed.contains(to) { v.checks.append("\(amount) → \(to.prefix(6))…\(to.suffix(4)).") }
+            else { v.problems.append("\(amount) go to someone else's address \(to).") }
         case "vaultTransfer":
             let vault = text("vaultAddress")?.lowercased() ?? ""
-            if vault == hlpVault || allowed.contains(vault) { v.checks.append("Transfer between your account and the HLP vault.") }
-            else { v.problems.append("Transfer to an unknown vault \(vault).") }
+            // usd: micro-dollars (6 decimals); isDeposit: into the vault, else out of it.
+            let deposit = pairs.first(where: { $0.0 == "isDeposit" })?.1 == .bool(true)
+            let usd: Decimal = if case .uint(let u)? = pairs.first(where: { $0.0 == "usd" })?.1 { Decimal(u) / 1_000_000 } else { 0 }
+            let named = vault == hlpVault ? "the HLP vault" : "the vault \(vault.prefix(6))…\(vault.suffix(4))"
+            if vault == hlpVault || allowed.contains(vault) {
+                v.checks.append(deposit ? "$\(usd) → \(named) (locked for days)." : "$\(usd) out of \(named) → your account.")
+            } else { v.problems.append("Transfer to an unknown vault \(vault).") }
         case "approveAgent":
             if let agent, text("agentAddress")?.lowercased() == agent.lowercased() { v.checks.append("Approves your agent key.") }
             else { v.problems.append("Approves an unknown agent \(text("agentAddress") ?? "?").") }

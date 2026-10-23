@@ -570,7 +570,7 @@ extension Executor {
     /// `capped` false: for the card, which shows what it costs instead of stopping at it.
     func relayPairQuote(_ net: EVMNetwork, from: String, to: String, units: Decimal, capped: Bool = true) async throws -> (quote: Relay.Quote, call: Relay.EVMStep, proxy: String, out: Decimal) {
         let me = wallet.evm
-        let quote = try await Relay.quote(user: me, recipient: me, originChain: net.relayChain, destinationChain: net.relayChain,
+        let quote = try await relayQuote(user: me, recipient: me, originChain: net.relayChain, destinationChain: net.relayChain,
                                           originCurrency: from, destinationCurrency: to, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                          expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")
@@ -683,7 +683,7 @@ extension Executor {
     /// that chain, then its call, which must go to that same proxy. The quote must be from this wallet to our Solana address.
     private func relaySell(_ net: EVMNetwork, token: EVMTokens.Token, units: Decimal) async throws -> String {
         let me = wallet.evm, scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1)
-        let quote = try await Relay.quote(user: me, recipient: wallet.solana, originChain: net.relayChain, destinationChain: Relay.Chain.solana,
+        let quote = try await relayQuote(user: me, recipient: wallet.solana, originChain: net.relayChain, destinationChain: Relay.Chain.solana,
                                           originCurrency: token.address, destinationCurrency: Relay.Currency.solanaUSDC, amount: 0, units: "\(units)")
         let binding = BindingGuard.check(["sender": quote.sender, "recipient": quote.recipient],
                                          expected: ["sender": me, "recipient": wallet.solana], subject: "Relay quote")

@@ -300,7 +300,7 @@ final class Browser {
     /// Decodes, names the token, simulates the balance changes and estimates gas. Problems mean «do not sign».
     func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> EVMReview {
         let call = EVMCall.decode(data)
-        var problems = call.refusal(sender: from, chainId: rpc.chainId).map { [$0] } ?? []
+        var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
         var lines: [String] = []
         // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
         // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.

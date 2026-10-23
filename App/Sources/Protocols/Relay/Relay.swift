@@ -62,6 +62,8 @@ public enum Relay {
         public var permit: Permit?
         /// On Relay's v3.2 proxy: the MulticallAuthorization to sign first, with the EIP-3009 item it binds.
         public var multicall: MulticallPermit?
+        /// The order a deposit names (protocol.v2.orderData, as JSON): the signer checks it before it signs the deposit.
+        public var order: Data?
         /// With `useDepositAddress`: where a plain transfer of the origin token starts the order.
         public var depositAddress: String?
     }
@@ -260,6 +262,7 @@ public enum Relay {
             solanaInstructions: instructions, hyperliquid: hyperliquid
         )
         quote.evm = evm
+        quote.order = ((j["protocol"] as? [String: Any])?["v2"] as? [String: Any])?["orderData"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         quote.relayerGasUSD = ((j["fees"] as? [String: Any])?["relayerGas"] as? [String: Any])?["amountUsd"] as? String ?? ""
         quote.amountOut = amounts("currencyOut")["amount"] as? String ?? ""
         quote.amountInUSD = amounts("currencyIn")["amountUsd"] as? String ?? ""

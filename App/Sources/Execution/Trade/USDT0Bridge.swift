@@ -146,7 +146,7 @@ extension Executor {
         let sent = Decimal(units) / 1_000_000, stable = dest.key == "robinhood" ? "USDG" : "USDC"
         var topup: Decimal?
         if dest.feeToken == nil, try await dest.rpc.balance(me) < dest.gasFloor { topup = dest.topupUSD }
-        let quote = try await Relay.quote(user: me, recipient: me, originChain: net.relayChain, destinationChain: dest.relayChain, originCurrency: net.usdc,
+        let quote = try await relayQuote(user: me, recipient: me, originChain: net.relayChain, destinationChain: dest.relayChain, originCurrency: net.usdc,
                                           destinationCurrency: dest.usdc, amount: units, topupGasUSD: topup, units: "\(net.raw(units))")
         let relayOut = Decimal(string: quote.amountOutFormatted) ?? 0
         let relay: BridgeWay = ("relay", "≈ \(Fmt.num(relayOut, maxFraction: 4)) \(stable) · \(Self.cost(sent - relayOut - (topup ?? 0))) · ≈ \(max(quote.seconds, 1)) s"

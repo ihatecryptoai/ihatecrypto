@@ -57,6 +57,11 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         return signature
     }
 
+    func registerRelayOrder(_ order: Data) async throws {
+        let reply = try await Self.signing { try await send(.relayOrder(order: order)) }
+        guard reply.ok else { throw GuardStop(Self.reason(reply)) }
+    }
+
     func signRelayMapping(wallet: String, depositor: String, id: Data, nonce: UInt64) async throws -> EVMSignature {
         let reply = try await Self.signing { try await send(.signRelayNonceMapping(wallet: wallet, depositor: depositor, id: id, nonce: nonce)) }
         guard reply.ok, let signature = reply.signature else { throw GuardStop(Self.reason(reply)) }

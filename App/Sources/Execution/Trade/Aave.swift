@@ -278,7 +278,7 @@ extension Executor {
         }
 
         let recipient = toSolana ? wallet.solana : me
-        let quote = try await Relay.quote(user: me, recipient: recipient, originChain: chain,
+        let quote = try await relayQuote(user: me, recipient: recipient, originChain: chain,
                                           destinationChain: hyperliquid ? Relay.Chain.hyperliquid : dest?.relayChain ?? Relay.Chain.solana, originCurrency: usdc,
                                           destinationCurrency: hyperliquid ? Relay.Currency.hyperliquidUSDC : dest?.usdc ?? Relay.Currency.solanaUSDC,
                                           amount: amount, topupGasUSD: topup, units: "\(net.raw(amount))")
@@ -381,7 +381,7 @@ extension Executor {
         func show(_ u: UInt64) -> String { Fmt.num(Decimal(u) / 1_000_000, maxFraction: 6) }
         let there = hyperliquid ? "Hyperliquid" : dest?.name ?? "Solana", stable = sol ? "SOL" : dest?.key == "robinhood" ? "USDG" : "USDC"
         let recipient = toSolana ? wallet.solana : me
-        let quote = try await Relay.quote(user: me, recipient: recipient, originChain: chain,
+        let quote = try await relayQuote(user: me, recipient: recipient, originChain: chain,
                                           destinationChain: hyperliquid ? Relay.Chain.hyperliquid : dest?.relayChain ?? Relay.Chain.solana, originCurrency: net.usdc,
                                           destinationCurrency: sol ? Relay.Currency.solanaSOL : hyperliquid ? Relay.Currency.hyperliquidUSDC : dest?.usdc ?? Relay.Currency.solanaUSDC,
                                           amount: amount, topupGasUSD: topup, units: "\(net.raw(amount))", usePermit: true)
@@ -463,7 +463,7 @@ extension Executor {
         func show(_ u: UInt64) -> String { Fmt.num(Decimal(u) / 1_000_000, maxFraction: 6) }
         let there = hyperliquid ? "Hyperliquid" : dest?.name ?? "Solana", stable = sol ? "SOL" : dest?.key == "robinhood" ? "USDG" : "USDC"
         let recipient = toSolana ? wallet.solana : me
-        let quote = try await Relay.quote(user: me, recipient: recipient, originChain: chain,
+        let quote = try await relayQuote(user: me, recipient: recipient, originChain: chain,
                                           destinationChain: hyperliquid ? Relay.Chain.hyperliquid : dest?.relayChain ?? Relay.Chain.solana, originCurrency: net.usdc,
                                           destinationCurrency: sol ? Relay.Currency.solanaSOL : hyperliquid ? Relay.Currency.hyperliquidUSDC : dest?.usdc ?? Relay.Currency.solanaUSDC,
                                           amount: amount, topupGasUSD: topup, units: "\(net.raw(amount))", useDepositAddress: true, refundTo: me)
@@ -718,7 +718,7 @@ extension Executor {
         guard let proxy = try await Relay.approvalProxy(chainId: chain)?.lowercased() else { throw ExecutionError("Relay publishes no approval proxy for \(net.name).") }
         /// Relay's quote with every check: from and to this wallet, its call to the proxy after an exact approve, what it gives.
         func checked() async throws -> Relay.EVMStep {
-            let quote = try await Relay.quote(user: me, recipient: me, originChain: chain, destinationChain: chain, originCurrency: net.usdc,
+            let quote = try await relayQuote(user: me, recipient: me, originChain: chain, destinationChain: chain, originCurrency: net.usdc,
                                               destinationCurrency: "0x0000000000000000000000000000000000000000", amount: units, units: "\(net.raw(units))")
             let binding = BindingGuard.check(["sender": quote.sender.lowercased(), "recipient": quote.recipient.lowercased()],
                                              expected: ["sender": me.lowercased(), "recipient": me.lowercased()], subject: "Relay quote")

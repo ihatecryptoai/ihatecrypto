@@ -157,9 +157,12 @@ func bridgedUSDCSwapsForCirclesOnUniswap() async throws {
 
 /// A revoke — an approve of zero, the token's or Permit2's — gives nobody anything: the signer asks no one to be allowed for it;
 /// anything above zero to an unknown spender still needs that.
+/// approve(spender, 0) is an ERC-20 revoke or an NFT's token id 0 handed over (ERC-721 shares the selector): its spender is
+/// asked about like any other (once; a known spender or one already allowed passes). A Permit2 allowance of zero gives nobody anything.
 @Test func signerLetsARevokeGoWithoutAnApproval() throws {
     let stranger = "0x1111111111111111111111111111111111111111"
-    #expect(EVMCall.decode(try ERC20.approve(spender: stranger, units: 0)).payees(to: baseUSDC, value: 0, chainId: 8453).isEmpty)
+    #expect(EVMCall.decode(try ERC20.approve(spender: stranger, units: 0)).payees(to: baseUSDC, value: 0, chainId: 8453) == [stranger])
+    #expect(EVMCall.decode(try ERC20.approve(spender: "0x" + String(repeating: "0", count: 40), units: 0)).payees(to: baseUSDC, value: 0, chainId: 8453).isEmpty)
     #expect(EVMCall.decode(try ERC20.approve(spender: stranger, units: 1)).payees(to: baseUSDC, value: 0, chainId: 8453) == [stranger])
     let p2zero = try UniswapV4.permit2Approve(token: baseUSDC, spender: stranger, amount: 0, expiration: 0)
     #expect(EVMCall.decode(p2zero).payees(to: UniswapV4.permit2, value: 0, chainId: 8453).isEmpty)
