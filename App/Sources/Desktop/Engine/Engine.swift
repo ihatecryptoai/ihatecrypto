@@ -131,6 +131,8 @@ final class Engine {
     var draft: String?
     var pending: Pending?
     var card: Card?
+    /// A Solana swap's output as its card showed it, in the token's units (Quotes.swift).
+    var jupiterShown: (command: WalletCommand, out: UInt64)?
     var options: [ChatRouter.Option] = []
     var running: (title: String, lines: [String])?
     /// The block of the move that runs now.

@@ -213,7 +213,7 @@ extension Engine {
             let body: Data = if let s = args[1] as? String { Data(s.utf8) } else { try JSONSerialization.data(withJSONObject: args[1]) }
             let typed: TypedData
             do { typed = try TypedData.parse(body) } catch { throw SiteError("4200|\(error.localizedDescription)") }
-            if let refusal = typed.refusal {
+            if let refusal = typed.refusal(owner: evmAddress) {
                 reply("Site \(host) asked for a “\(typed.primaryType)” signature. Declined — \(refusal)", note: "browser")
                 throw SiteError("4001|" + refusal)
             }
@@ -295,7 +295,7 @@ extension Engine {
         let call = EVMCall.decode(data)
         var problems = call.refusal(sender: from, chainId: rpc.chainId).map { [$0] } ?? []
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
-        if case .contract = call, !EVMCall.knownSpenders(chainId: rpc.chainId).contains(to.lowercased()) { payees.append(to) }
+        if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
         let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         let native = EVMNetwork.all.first { $0.rpc.chainId == rpc.chainId }?.gasCoin ?? "coins"
         func token(_ address: String) async -> (symbol: String, decimals: Int) {

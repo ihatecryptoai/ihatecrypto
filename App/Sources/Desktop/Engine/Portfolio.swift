@@ -94,6 +94,8 @@ extension Engine {
         if !me.evm.isEmpty { positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions }
         await refreshFavorites()
         await checkAlerts()
+        // Every network's gas coin is known now: dollars without it get their way out offered (once a network).
+        offerGasWays()
         changed()
     }
 

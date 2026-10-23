@@ -46,7 +46,7 @@ extension Engine {
 
     /// Its moves would go with no one at the computer: a new one starts paused, and only its switch in the window — a
     /// click, never a chat message — turns it on.
-    func waitsForSwitch(_ t: ScheduledTask) -> Bool { usesAutomation(t) && t.movesMoney }
+    func waitsForSwitch(_ t: ScheduledTask) -> Bool { usesAutomation(t) && (t.movesMoney || t.steps.contains { PositionCommand.parse($0) != nil }) }
 
     func createAutomationWallet(note: String? = nil) async {
         guard automationWallet == nil else {
@@ -55,9 +55,15 @@ extension Engine {
         }
         do {
             try await signerCall(.createAutomationWallet)
+            // A task made before this wallet would now spend from it by itself: each waits for its switch, as a new one does.
+            let held = tasks.indices.filter { tasks[$0].paused != true && waitsForSwitch(tasks[$0]) }
+            for i in held { tasks[i].paused = true }
             pin(Board(kind: "schedule", title: "schedule"))
             reply(say("Made «\(automationWallet?.label ?? "Automation")»: scheduled tasks spend from it without Windows Hello. Keep only their budget there — send it USDC and a little SOL (its address is on the Schedule block).",
-                      "Создан «\(automationWallet?.label ?? "Automation")»: задачи по расписанию тратят с него без Windows Hello. Держи там только их бюджет — отправь на него USDC и немного SOL (адрес на блоке «Расписание»)."), note: note)
+                      "Создан «\(automationWallet?.label ?? "Automation")»: задачи по расписанию тратят с него без Windows Hello. Держи там только их бюджет — отправь на него USDC и немного SOL (адрес на блоке «Расписание»).")
+                  + (held.isEmpty ? "" : say(" Tasks made before it would now spend from it by themselves, so they’re paused (\(held.count)): each starts only when you switch it on in the Schedule.",
+                                             " Задачи, созданные раньше, теперь тратили бы с него сами, поэтому они на паузе (\(held.count)): каждая начнёт работать, только когда ты включишь её в «Расписании».")),
+                  note: note)
         } catch {
             reply(say("No automation wallet: ", "Кошелёк автоматизации не создан: ") + error.localizedDescription, note: note)
         }
