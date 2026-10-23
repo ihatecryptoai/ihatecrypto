@@ -1,0 +1,103 @@
+/* The first run and the sheets (Welcome.swift, Onboarding.swift): the onboarding card on the dotted ground. */
+
+/* Sheets: the card centered in a scrolling page, the logo at the top left as on the Mac's onboarding. */
+.ob-page { position: absolute; inset: 0; overflow-y: auto; z-index: 5; }
+.ob-brand { position: absolute; left: 28px; top: 28px; display: flex; align-items: center; gap: 9px;
+  font: 700 21px "DynaPuff", "Onest", sans-serif; }
+.ob-column { max-width: 660px; margin: 0 auto; padding: 104px 24px 40px; }
+
+.ob-card { background: var(--card); border: 1px solid var(--card-border); border-radius: 22px; padding: 28px;
+  display: flex; flex-direction: column; gap: 20px; box-shadow: 0 12px 24px rgba(0, 0, 0, 0.07); user-select: text; }
+.ob-head { display: flex; align-items: center; gap: 16px; }
+.ob-title { font-size: 25px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.2; }
+.ob-sub { font-size: 13.5px; color: var(--secondary); margin-top: 4px; }
+.ob-content { display: flex; flex-direction: column; gap: 12px; }
+.ob-foot { display: flex; align-items: center; gap: 18px; padding-top: 4px; }
+.ob-primary { height: 44px; padding: 0 24px; border-radius: 12px; border: none; background: var(--accent); color: var(--on-accent);
+  font-size: 15px; font-weight: 600; }
+.ob-primary:hover { filter: brightness(1.04); box-shadow: 0 0 0 2px rgba(255, 122, 47, 0.35); }
+.ob-primary:disabled { opacity: 0.45; cursor: default; filter: none; box-shadow: none; }
+.ob-secondary { height: 44px; padding: 0 22px; border-radius: 12px; border: 1px solid var(--card-border); background: var(--card);
+  font-size: 15px; font-weight: 600; }
+.ob-secondary:hover { border-color: var(--accent); }
+.ob-quiet { background: none; border: none; padding: 0; font-size: 14px; font-weight: 600; color: var(--secondary); }
+.ob-quiet:hover { color: var(--text); }
+.ob-field { width: 100%; font-size: 13px; }
+.ob-field.secret { resize: none; -webkit-text-security: disc; }
+.ob-status { display: flex; gap: 7px; align-items: flex-start; font-size: 12.5px; }
+.ob-status .ico { margin-top: 2px; }
+.ob-tile { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px; background: var(--fill); }
+.ob-fact { display: flex; gap: 14px; align-items: flex-start; }
+.ob-fact b { font-size: 14.5px; }
+.ob-fact .secondary { font-size: 12.5px; }
+.ob-fact-ico { width: 36px; height: 36px; border-radius: 10px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255, 122, 47, 0.12); color: var(--accent-ink); }
+
+/* Drawn segments (the Mac's pickers): the accent on the chosen one. */
+.ob-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--fill); }
+.ob-seg.wide { display: flex; }
+.ob-seg.wide button { flex: 1; }
+.ob-seg button { border: none; background: none; border-radius: 6px; padding: 6px 12px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.ob-seg button:hover:not(.on) { background: var(--fill); }
+.ob-seg button.on { background: var(--accent); color: var(--on-accent); }
+
+/* The accent switch. */
+.ob-switch { position: relative; display: inline-block; width: 38px; height: 22px; flex: none; cursor: pointer; }
+.ob-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ob-switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--fill-strong); transition: background 0.15s; }
+.ob-switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+.ob-switch input:checked + span { background: var(--accent); }
+.ob-switch input:checked + span::after { transform: translateX(16px); }
+.ob-switch input:focus-visible + span { box-shadow: 0 0 0 2px rgba(255, 122, 47, 0.5); }
+.ob-switch.off { opacity: 0.45; cursor: default; }
+
+/* The recovery words: four columns, numbered, not selectable. */
+.ob-words { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; user-select: none; }
+.ob-word { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px; border-radius: 10px; background: var(--fill); }
+.ob-word .ob-n { width: 18px; text-align: right; font-size: 11.5px; font-weight: 600; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.ob-word b { font: 600 14.5px var(--mono); }
+@media (max-width: 620px) { .ob-words { grid-template-columns: repeat(3, 1fr); } }
+.ob-check-word { display: flex; flex-direction: column; gap: 7px; }
+.ob-check-word .btn { font-family: var(--mono); }
+.ob-watch { display: flex; flex-direction: column; }
+.ob-watch .field input { width: 100%; }
+
+.ob-site-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ob-site-chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 9px;
+  border: 1px solid var(--card-border); background: var(--card); font-size: 12.5px; font-weight: 600; }
+.ob-site-chip:hover { border-color: var(--accent); }
+
+/* The first screen (C01): the logo, the slogan, a request and the route it becomes, the two ways in. */
+.ob-welcome { position: absolute; inset: 0; overflow-y: auto; z-index: 5; }
+.ob-welcome-look { position: absolute; right: 160px; top: 26px; background: none; border: none; color: var(--accent-ink); font-size: 13px; font-weight: 600; }
+.ob-welcome-look:hover { text-decoration: underline; }
+.ob-welcome-column { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 64px 24px 32px; }
+.ob-welcome-logo { display: flex; align-items: center; gap: 18px; font: 700 60px "DynaPuff", "Onest", sans-serif; letter-spacing: -0.5px; }
+.ob-welcome-slogan { font-size: 22px; font-weight: 700; margin-top: -6px; }
+.ob-welcome-input { width: min(640px, 100%); height: 56px; border-radius: 16px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px;
+  font-size: 17px; font-weight: 500; color: var(--secondary); }
+.ob-welcome-input .one-line { color: var(--text); }
+.ob-welcome-input .ob-caret { width: 2px; height: 20px; background: var(--accent); margin-left: -8px; animation: ob-blink 1.1s steps(2, start) infinite; }
+@keyframes ob-blink { to { visibility: hidden; } }
+.ob-welcome-send { width: 40px; height: 40px; border-radius: 11px; background: var(--accent); color: var(--on-accent); display: inline-flex;
+  align-items: center; justify-content: center; flex: none; }
+.ob-welcome-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: -8px; }
+.ob-welcome-chips button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; background: var(--card);
+  border: 1.5px solid var(--card-border); font-size: 12.5px; font-weight: 600; color: var(--secondary); }
+.ob-welcome-chips button.on { border-color: var(--accent); color: var(--text); }
+.ob-welcome-chips button:hover { border-color: var(--accent); }
+.ob-welcome-route { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; flex-wrap: wrap; justify-content: center; }
+.ob-welcome-arrow { color: var(--tertiary); }
+.ob-welcome-step { width: 190px; border-radius: 16px; overflow: hidden; background: var(--card); border: 1px solid var(--card-border); }
+.ob-welcome-step-pic { height: 64px; display: flex; align-items: center; justify-content: flex-end; padding-right: 16px; }
+.ob-welcome-step-body { padding: 9px 12px 11px; display: flex; flex-direction: column; gap: 3px; }
+.ob-welcome-step-body b { font-size: 14px; }
+.ob-fill-base .ob-welcome-step-pic { background: #0052ff; }
+.ob-fill-relay .ob-welcome-step-pic { background: #4615c8; }
+.ob-fill-robinhood .ob-welcome-step-pic { background: #c6f432; }
+.ob-fill-solana .ob-welcome-step-pic { background: linear-gradient(120deg, #9945ff, #14f195); }
+.ob-fill-hyperliquid .ob-welcome-step-pic { background: #072723; }
+.ob-fill-check .ob-welcome-step-pic { background: var(--fill-strong); }
+.ob-welcome-buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.ob-welcome-lock { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }

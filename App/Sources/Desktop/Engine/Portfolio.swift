@@ -1,6 +1,9 @@
+import DeFiJupiterLend
+import DeFiKamino
 import EVMChain
 import Foundation
 import IhatecryptoCore
+import SignerAPI
 import TradeExecution
 import WalletCore
 
@@ -19,17 +22,32 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         /// «+$1.20 (+5.0%)» against what it cost, when known.
         var pnl: String?
         var gain: Decimal?
+        /// How far the price moved in 24 hours, in %, where its market says; nil for dollars.
+        var change24h: Decimal?
+        /// A market list vouches for it (true), or nothing does (false: «unverified»); nil for dollars and gas.
+        var verified: Bool?
+        /// «tokens», or «defi» for money put in somewhere (Jupiter Lend, Kamino, Aave, Morpho).
+        var section = "tokens"
+        /// Under a deposit's name: «earning», «Allez USDC · 5.42%».
+        var note: String?
     }
     struct Network: Encodable, Equatable {
         var key: String
         var name: String
         var usd: Decimal
         var rows: [Row]
+        /// What its money does, as the Mac's network card says it: «idle $757.59 · earning $2.51», «$0.01 · margin».
+        var note: String?
     }
+    struct Point: Encodable, Equatable { var at: Date; var usd: Decimal }
     var networks: [Network] = []
     var total: Decimal = 0
     var updatedAt: Date?
     var errors: [String] = []
+    /// The wallet's value over the last 7 days, oldest first, the last point now: the sparkline.
+    var equity: [Point] = []
+    /// Its change over those days; nil with fewer than three points, as the Mac draws no line then.
+    var change7d: Decimal?
 }
 
 extension Engine {
@@ -39,6 +57,7 @@ extension Engine {
         refreshing = true
         defer { refreshing = false }
         let near = nearAddress
+        async let automationRead = Self.automationMoney(automationWallet)
         async let marketsRead = try? Hyperliquid.markets()
         // A wallet of one chain (a key, a watched address) has nothing to read on the other.
         async let solanaRead = me.solana.isEmpty ? .success(nil) : Self.solana(me.solana)
@@ -51,7 +70,7 @@ extension Engine {
         var networks: [PortfolioView.Network] = [], errors: [String] = []
         for part in parts {
             switch part {
-            case .success(let n?): if !n.rows.isEmpty { networks.append(priced(n)) }
+            case .success(let n?): if !n.rows.isEmpty { networks.append(noted(priced(n))) }
             case .success(nil): break
             case .failure(let key, let why):
                 errors.append(why)
@@ -69,6 +88,9 @@ extension Engine {
         portfolioOwner = owner
         Task { await loadCosts() }
         if errors.isEmpty { recordEquity(next.total, wallet: me.solana.isEmpty ? me.evm : me.solana) }
+        loadEquity()
+        // A read that failed keeps the last one: read as it came, the balance would drop by Automation's money.
+        if automationWallet == nil { automationUSD = nil } else if let m = await automationRead { automationUSD = m.dollars + m.sol * (markets["SOL"]?.markPx ?? 0) }
         if !me.evm.isEmpty { positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions }
         await refreshFavorites()
         await checkAlerts()
@@ -103,16 +125,60 @@ extension Engine {
         reply(text, note: "incoming")
     }
 
-    /// Coins with no price of their own take Hyperliquid's mark for the same coin (SOL, ETH, HYPE…).
+    /// Coins with no price of their own take Hyperliquid's mark for the same coin (SOL, ETH, HYPE…), and its day's move.
     private func priced(_ n: PortfolioView.Network) -> PortfolioView.Network {
         var n = n
         n.rows = n.rows.map { r in
             var r = r
-            if r.usd == nil, let mark = markets[r.symbol]?.markPx { r.usd = mark * r.value }
+            if r.usd == nil, let market = markets[r.symbol] {
+                r.usd = market.markPx * r.value
+                r.change24h = r.change24h ?? market.change24h
+            }
             return r
         }
         n.usd = n.rows.reduce(0) { $0 + ($1.usd ?? 0) }
         return n
+    }
+
+    private func noted(_ n: PortfolioView.Network) -> PortfolioView.Network {
+        var n = n
+        n.note = Self.note(n, russian: russian)
+        // A deposit's «earning» in the window's language; a vault's own name and rate stay as they are.
+        if russian { n.rows = n.rows.map { r in var r = r; if r.note == "earning" { r.note = "приносит доход" }; return r } }
+        return n
+    }
+
+    /// The line under a network's name, as the Mac's NetworkCard writes it: Hyperliquid's margin, Tempo's purpose, else
+    /// what's idle (dollars and the big stablecoins) and what's earning (deposits), the bigger first; nil when neither.
+    nonisolated static func note(_ n: PortfolioView.Network, russian: Bool = false) -> String? {
+        switch n.key {
+        case "hyperliquid": return "\(Fmt.usd(n.rows.first { $0.symbol == "Perps" }?.usd ?? 0)) · " + (russian ? "маржа" : "margin")
+        case "tempo": return russian ? "USDC для платных сервисов" : "USDC for paid services"
+        default:
+            // Dollars carry no cost key (Engine.row): USDC, USDG and the genuine stablecoins.
+            let idle = n.rows.filter { $0.section == "tokens" && $0.key == nil }.reduce(Decimal(0)) { $0 + ($1.usd ?? 0) }
+            let earning = n.rows.filter { $0.section == "defi" }.reduce(Decimal(0)) { $0 + ($1.usd ?? 0) }
+            let sums = [(russian ? "в работе" : "earning", earning), (russian ? "свободно" : "idle", idle)].filter { $0.1 >= Decimal(string: "0.01")! }.sorted { $0.1 > $1.1 }
+            return sums.isEmpty ? nil : sums.map { "\($0.0) \(Fmt.usd($0.1))" }.joined(separator: " · ")
+        }
+    }
+
+    /// The automation wallet's money, as the Mac counts it beside the balance: its Solana USDC and tokens and its USDC on
+    /// every EVM network in dollars, and its SOL (priced by the caller). nil without the wallet, or when Solana didn't
+    /// answer or came unpriced.
+    nonisolated static func automationMoney(_ wallet: SignerWallet?) async -> (dollars: Decimal, sol: Decimal)? {
+        guard let wallet else { return nil }
+        async let evm: Decimal = withTaskGroup(of: Decimal.self) { group in
+            guard let owner = wallet.evm else { return 0 }
+            for net in EVMNetwork.all { group.addTask { Decimal((try? await net.usdcBalance(owner)) ?? 0) / 1_000_000 } }
+            return await group.reduce(0, +)
+        }
+        var solana: (dollars: Decimal, sol: Decimal) = (0, 0)
+        if let owner = wallet.solana {
+            guard let b = try? await Solana.balance(owner: owner), !b.unpriced else { return nil }
+            solana = (b.usdc + b.tokens.filter(\.looksReal).reduce(0) { $0 + ($1.usd ?? 0) }, b.sol)
+        }
+        return (solana.dollars + (await evm), solana.sol)
     }
 
     nonisolated enum Read: Sendable {
@@ -121,7 +187,8 @@ extension Engine {
     }
 
     /// `chain` and `contract` for a coin whose P/L counts (not a dollar, not the perps' margin).
-    nonisolated static func row(_ symbol: String, _ amount: Decimal, usd: Decimal? = nil, icon: URL? = nil, chain: String? = nil, contract: String? = nil) -> PortfolioView.Row {
+    nonisolated static func row(_ symbol: String, _ amount: Decimal, usd: Decimal? = nil, icon: URL? = nil, chain: String? = nil, contract: String? = nil,
+                                change24h: Decimal? = nil, verified: Bool? = nil) -> PortfolioView.Row {
         var key: String?
         if let chain, let contract, !Stablecoins.isGenuine(contract, on: chain) {
             key = switch chain {
@@ -130,17 +197,45 @@ extension Engine {
             default: "\(chain):\(contract.lowercased())"
             }
         }
+        // A dollar has no day's move to show.
         return .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), value: amount, usd: usd, icon: icon?.absoluteString,
-                     key: key, contract: key == nil ? nil : contract)
+                     key: key, contract: key == nil ? nil : contract, change24h: key == nil ? nil : change24h, verified: verified)
+    }
+
+    /// A token found by listing the address, with its day's move and whether a market list vouches for it.
+    nonisolated static func row(_ h: Holding) -> PortfolioView.Row {
+        // As the Mac marks it: verified, or «unverified» — never on Hyperliquid's spot book, where a name is one token.
+        row(h.symbol, h.amount, usd: h.usd, icon: h.icon, chain: h.chain, contract: h.contract, change24h: h.change24h,
+            verified: h.verified ? true : h.unverified ? false : nil)
+    }
+
+    /// A deposit in the DeFi section: its dollars, and what it does under its name.
+    nonisolated static func deposit(_ name: String, usd: Decimal, note: String) -> PortfolioView.Row {
+        var r = row(name, usd, usd: usd)
+        r.section = "defi"
+        r.note = note
+        return r
     }
 
     nonisolated static func solana(_ owner: String) async -> Read {
         do {
+            async let lendRead = try? JupiterLend.positions(user: owner)
+            async let kaminoRead = try? Kamino.positions(wallet: owner)
+            async let vaultsRead = try? Kamino.vaultPositions(wallet: owner)
             let b = try await Solana.balance(owner: owner)
             var rows: [PortfolioView.Row] = []
             if b.usdc > 0 { rows.append(row("USDC", b.usdc, usd: b.usdc)) }
             if b.sol > 0 { rows.append(row("SOL", b.sol, chain: "solana", contract: CostBasis.wsol)) }
-            rows += b.tokens.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "solana", contract: $0.contract) }
+            rows += b.tokens.filter(\.looksReal).map(row)
+            // What's put in, as the Mac's DeFi lines: Jupiter Lend and Kamino Lend earning, Kamino's vaults by name and rate.
+            let cent = Decimal(string: "0.01")!
+            let lend = ((await lendRead) ?? []).reduce(Decimal(0)) { $0 + Decimal($1.assets) / 1_000_000 }
+            if lend >= cent { rows.append(deposit("Jupiter Lend", usd: lend, note: "earning")) }
+            let kamino = ((await kaminoRead) ?? []).reduce(Decimal(0)) { $0 + $1.valueUSD }
+            if kamino >= cent { rows.append(deposit("Kamino Lend", usd: kamino, note: "earning")) }
+            for v in (await vaultsRead) ?? [] where v.valueUSD >= cent {
+                rows.append(deposit("Kamino", usd: v.valueUSD, note: "\(v.name) · \(Fmt.num(v.apy.rounded(2, .plain)))%"))
+            }
             return .success(.init(key: "solana", name: "Solana", usd: 0, rows: rows))
         } catch {
             return .failure("solana", "Solana: \(error.localizedDescription)")
@@ -153,8 +248,7 @@ extension Engine {
             var rows: [PortfolioView.Row] = []
             if b.accountValue > 0 { rows.append(row("Perps", b.accountValue, usd: b.accountValue)) }
             if b.spotUSDC > 0 { rows.append(row("USDC", b.spotUSDC, usd: b.spotUSDC)) }
-            rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" && $0.looksReal }
-                .map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "hyperliquid", contract: $0.contract) }
+            rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" && $0.looksReal }.map(row)
             return .success(.init(key: "hyperliquid", name: "Hyperliquid", usd: 0, rows: rows))
         } catch {
             return .failure("hyperliquid", "Hyperliquid: \(error.localizedDescription)")
@@ -175,7 +269,18 @@ extension Engine {
                         if usd > 0 { rows.append(row(net.key == "robinhood" ? "USDG" : "USDC", usd, usd: usd)) }
                         if coin > 0 { rows.append(row(net.gasCoin, coin, chain: net.key, contract: "native")) }
                         let others = (await Holdings.evm(net.key, address: owner, native: false, skip: [net.usdc.lowercased()])) ?? []
-                        rows += others.filter(\.looksReal).map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: net.key, contract: $0.contract) }
+                        rows += others.filter(\.looksReal).map(row)
+                        // USDC lent on Aave or in Morpho's vault here; a market that doesn't answer shows nothing this time.
+                        for m in AaveV3.markets where m.chain == net.key {
+                            if let raw = try? await m.rpc.tokenBalance(m.aUSDC, owner: owner), raw >= 10_000 {
+                                rows.append(deposit("Aave", usd: Decimal(raw) / 1_000_000, note: "earning"))
+                            }
+                        }
+                        for v in MorphoVault.vaults where v.chain == net.key {
+                            if let raw = try? await MorphoVault.value(owner, v), raw >= 10_000 {
+                                rows.append(deposit("Morpho", usd: Decimal(raw) / 1_000_000, note: "earning"))
+                            }
+                        }
                         return (i, .success(.init(key: net.key, name: net.name, usd: 0, rows: rows)))
                     } catch {
                         return (i, .failure(net.key, "\(net.name): \(error.localizedDescription)"))
@@ -194,8 +299,7 @@ extension Engine {
             let b = try await Near.balance(account: account)
             let total = b.near + b.wrapped
             var rows = total > 0 ? [row("NEAR", total)] : []
-            rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" && $0.looksReal }
-                .map { row($0.symbol, $0.amount, usd: $0.usd, icon: $0.icon, chain: "near", contract: $0.contract) }
+            rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" && $0.looksReal }.map(row)
             return .success(.init(key: "near", name: "NEAR", usd: 0, rows: rows))
         } catch {
             return .failure("near", "NEAR: \(error.localizedDescription)")

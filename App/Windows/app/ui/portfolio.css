@@ -1,0 +1,121 @@
+/* The portfolio frame (StudioPortfolio): 270 wide, 14 inside, radius 26, a soft shadow. */
+.portfolio { width: 270px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); border-radius: 26px;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.08); cursor: default; flex: none; }
+.pf-stack { display: flex; flex-direction: column; gap: 10px; }
+.pf-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; }
+.pf-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.pf-total { font-size: 20px; font-weight: 800; letter-spacing: -0.2px; line-height: 1.25; }
+.pf-change { font-size: 10px; font-weight: 600; }
+.pf-chip { font-size: 10px; font-weight: 700; padding: 4px 9px; border-radius: 999px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.pf-spark { display: block; width: 100%; height: 30px; overflow: visible; }
+.pf-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pf-errors { font-size: 10px; color: var(--secondary); }
+.pf-nothing { font-size: 12px; color: var(--secondary); padding: 6px 2px; }
+
+/* The ring and its shares */
+.pf-ring { display: flex; align-items: center; gap: 12px; }
+.pf-donut { width: 58px; height: 58px; flex: none; }
+.pf-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pf-share { display: flex; align-items: center; gap: 6px; font-size: 11px; min-width: 0; }
+.pf-share b { font-weight: 600; }
+.pf-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+/* SCHEDULE: the next three runs */
+.pf-schedule { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 16px; border: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--text) 3%, transparent); }
+.pf-mini-btn { width: 22px; height: 22px; }
+.pf-all { width: auto; height: 22px; padding: 0 6px; gap: 2px; font-size: 10.5px; font-weight: 600; }
+.pf-empty { font-size: 11px; color: var(--secondary); }
+.pf-task { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin: 0 -2px; border-radius: 10px; cursor: pointer; }
+.pf-task-text { flex: 1; min-width: 0; }
+.pf-task-title { font-size: 12.5px; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pf-task-next { font-size: 11px; color: var(--secondary); }
+.pf-mark { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.pf-mark.auto { color: var(--accent-ink); }
+.pf-mark.hello { color: var(--secondary); }
+.pf-legend-marks { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; padding: 4px 8px 0; }
+
+/* DateTile: the month on a dark strip (orange today), the day under it. */
+.pf-date-tile { width: 36px; height: 40px; flex: none; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;
+  background: #fff; border: 1px solid #d3d7de; }
+.pf-date-month { height: 14px; flex: none; background: #3a3e47; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.8px;
+  display: flex; align-items: center; justify-content: center; }
+.pf-date-month.today { background: var(--accent); color: var(--on-accent); }
+.pf-date-day { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; color: #15171c; }
+.pf-date-icon { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--secondary); }
+
+/* Network cards (NetworkCard): 11 inside, radius 16, each network's own fill. */
+.pf-cards { display: flex; flex-direction: column; gap: 10px; }
+.pf-net { display: flex; flex-direction: column; gap: 8px; padding: 11px; border-radius: 16px; background: var(--tint); }
+.pf-net-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pf-net-head > .logo { border-radius: 28%; }
+.pf-net-name { min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.pf-net-title { font-size: 14px; font-weight: 600; line-height: 1.2; }
+.pf-net-note { font-size: 10px; color: var(--ink); line-height: 1.25; }
+.pf-net-usd { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.pf-section { font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--secondary); }
+.pf-divider { height: 1px; background: color-mix(in srgb, var(--text) 10%, transparent); margin-top: 2px; }
+/* Hyperliquid's card is dark green in both appearances: its text reads as on a dark page. */
+.pf-net.dark { --text: #f2f3f5; --secondary: rgba(242, 243, 245, 0.6); --profit: #6ff0b4; --loss: #ff9c8f; color: var(--text); }
+.pf-net.dark .pf-lit:hover { background: rgba(255, 255, 255, 0.07); }
+
+/* A coin: logo, symbol over amount (and P/L), dollars over the day's move (HoldingRow, CoinName, CoinValue). */
+.pf-coin { display: flex; align-items: center; gap: 8px; padding: 3px 5px; margin: -3px -5px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.pf-coin.dim { opacity: 0.6; }
+.pf-coin-name { min-width: 0; display: flex; flex-direction: column; }
+.pf-coin-symbol { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; min-width: 0; }
+.pf-coin-amount { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-coin-value { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pf-24h { font-size: 9px; font-weight: 600; }
+.pf-usdc { display: inline-flex; align-items: center; gap: 3px; }
+.pf-verified { display: inline-flex; color: #1d9bf0; }
+.pf-unverified { font-size: 9px; font-weight: 400; color: var(--secondary); white-space: nowrap; }
+.pf-tucked { align-self: flex-start; background: none; border: none; padding: 0; font-size: 10px; font-weight: 600; color: var(--secondary); }
+.pf-tucked:hover { color: var(--text); }
+
+/* Hyperliquid's positions on its card */
+.pf-position { display: flex; flex-direction: column; gap: 4px; padding: 9px; border-radius: 12px; background: var(--hl-chip); cursor: pointer; }
+.pf-position b { font-size: 13px; }
+.pos-gain { color: var(--hl-mint); }
+.pos-loss { color: #ff9c8f; }
+.pf-position-line { font-size: 10px; color: var(--hl-soft); }
+
+/* «Other networks», the automation wallet, a multisig: outlined rows. */
+.pf-other, .pf-plain { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 16px; border: 1px solid var(--card-border);
+  background: none; text-align: left; color: inherit; }
+.pf-plain { padding: 11px; }
+.pf-other-name { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pf-other-logos { display: flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; }
+.pf-other b { font-size: 12px; }
+.pf-other > .ico { width: 11px; height: 11px; color: var(--secondary); }
+.pf-badge { width: 34px; height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.pf-badge.auto { border-radius: 50%; color: var(--accent-ink); background: rgba(255, 122, 47, 0.12); }
+.pf-badge.safe { border-radius: 10px; color: #12ff80; background: #121312; }
+
+/* A round logo on Hyperliquid's tile is a disc too (TokenLogo round). */
+.logo.round.logo-on-hl { border-radius: 50%; }
+
+/* Price alerts */
+.pf-alerts { display: flex; flex-direction: column; gap: 6px; padding: 11px; border-radius: 16px; border: 1px solid var(--card-border); }
+.pf-alerts-title { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; }
+.pf-alert-text { font-size: 10px; font-weight: 600; }
+
+/* Anything clickable: a soft wash and the accent edge under the pointer; nothing moves (HoverLift). */
+.pf-lit { position: relative; }
+.pf-lit:hover { background: color-mix(in srgb, var(--text) 7%, transparent); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+
+/* Where a number is about to appear: a grey block with a slow light sweep (Skeleton). */
+.pf-skeleton { border-radius: 6px; height: 12px; background: linear-gradient(100deg, var(--fill) 30%, var(--fill-strong) 50%, var(--fill) 70%);
+  background-size: 300% 100%; animation: pf-sweep 1.6s linear infinite; }
+@keyframes pf-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pf-net { background: var(--tint-dark); }
+  :root:not([data-theme="light"]) .pf-net-note { color: var(--ink-dark); }
+  :root:not([data-theme="light"]) .pf-date-tile { background: #23262d; border-color: #2c3038; }
+  :root:not([data-theme="light"]) .pf-date-day { color: #f2f3f5; }
+}
+:root[data-theme="dark"] .pf-net { background: var(--tint-dark); }
+:root[data-theme="dark"] .pf-net-note { color: var(--ink-dark); }
+:root[data-theme="dark"] .pf-date-tile { background: #23262d; border-color: #2c3038; }
+:root[data-theme="dark"] .pf-date-day { color: #f2f3f5; }

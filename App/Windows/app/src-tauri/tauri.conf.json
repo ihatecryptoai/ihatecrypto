@@ -12,11 +12,13 @@
       {
         "label": "main",
         "title": "ihatecrypto",
-        "width": 1180,
-        "height": 780,
+        "width": 1320,
+        "height": 860,
         "minWidth": 380,
         "minHeight": 560,
-        "center": true
+        "center": true,
+        "decorations": false,
+        "shadow": true
       }
     ],
     "security": {

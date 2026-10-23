@@ -89,6 +89,10 @@ final class Engine {
     var markets: [String: Market] = [:]
     var portfolio = PortfolioView()
     var positions: [HyperliquidAccount.Position] = []
+    /// What the automation wallet holds, in dollars, read with the balances; nil without it.
+    var automationUSD: Decimal?
+    /// What each canvas's chat filled of its model's window with its last message (the Mac's ContextMeter), this run.
+    var meters: [String: Snapshot.Context] = [:]
     var refreshing = false
     var refreshingEveryMinute = false
     /// When the user's last move ran: the balance change it made isn't announced as money arriving.
@@ -215,6 +219,7 @@ final class Engine {
         settings.watchEVM = e.isEmpty ? nil : e
         portfolio = PortfolioView()
         positions = []
+        loadEquity()
         Task { await refresh() }
     }
 
@@ -290,7 +295,9 @@ final class Engine {
         var book: [SignerAddress]
         var history: [HistoryLine]
         var alerts: [Alert]
-        struct TaskView: Encodable { var id: String; var text: String; var paused: Bool; var automatic: Bool }
+        struct TaskView: Encodable { var id: String; var text: String; var paused: Bool; var automatic: Bool; var next: Date? }
+        /// Tokens the model read with the canvas's last message, and its window when the service or the catalog says.
+        struct Context: Encodable, Equatable { var used: Int; var window: Int? }
         var tasks: [TaskView]
         var automation: SignerWallet?
         var skills: [SkillView]
@@ -308,6 +315,10 @@ final class Engine {
         var starred: [String]
         var watching: Bool
         var watched: [String: String]
+        var automationUSD: Decimal?
+        /// The open positions' unrealized P/L together; nil with none open.
+        var positionsPnl: Decimal?
+        var context: Context?
     }
 
     func snapshot() -> Snapshot {
@@ -332,13 +343,16 @@ final class Engine {
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
             alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
-            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney) },
+            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next) },
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
             canvases: canvases.map { .init(id: $0.id, title: $0.title, at: $0.messages.last?.at ?? $0.at) }, canvas: canvasID, boards: boards,
             runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted(),
-            watching: watching, watched: ["solana": settings.watchSolana, "evm": settings.watchEVM].compactMapValues { $0 })
+            watching: watching, watched: ["solana": settings.watchSolana, "evm": settings.watchEVM].compactMapValues { $0 },
+            automationUSD: automationWallet == nil ? nil : automationUSD,
+            positionsPnl: positions.isEmpty ? nil : positions.reduce(0) { $0 + $1.unrealizedPnl },
+            context: meters[canvasID])
     }
 
     // MARK: Requests from the window
@@ -447,6 +461,7 @@ final class Engine {
         case "dapp":
             // From the window's browser, which read the origin from the webview itself.
             return ["json": try await dapp(r.name ?? "", params: r.text ?? "{}", origin: r.address ?? "")]
+        case "siteState": return await siteState(r.address ?? "")
         case "newCanvas": try newCanvas()
         case "openCanvas": try openCanvas(r.wallet ?? "")
         case "renameCanvas": renameCanvas(r.wallet ?? "", r.label ?? "")

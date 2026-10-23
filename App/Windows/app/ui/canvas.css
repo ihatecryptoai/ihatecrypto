@@ -1,0 +1,68 @@
+/* The canvas: the whole window under the rail; the ground (dots) is app.js's, under the rail too. */
+.canvas { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: default; --check-fill: #f7f7f8; }
+.canvas.grabbing, .canvas.grabbing * { cursor: grabbing !important; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.world-row { display: flex; align-items: flex-start; gap: 36px; padding: 24px 0 0 28px; width: max-content; }
+
+/* − 80% + Fit (CanvasHost's zoom bar): a glass capsule at the bottom left, beside the rail. */
+.zoom-pill { position: absolute; bottom: 18px; z-index: 6; display: flex; align-items: center; gap: 4px; height: 34px;
+  padding: 0 12px 0 6px; border-radius: 999px; }
+.zoom-glyph { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: none;
+  color: var(--accent-ink); border-radius: 50%; padding: 0; }
+.zoom-glyph:hover { background: rgba(255, 122, 47, 0.13); }
+.zoom-percent { width: 44px; text-align: center; font-size: 12px; font-weight: 600; }
+.zoom-fit { border: none; background: none; padding: 0 2px; font-size: 13px; font-weight: 500; color: var(--accent-ink); }
+.zoom-fit:hover { text-decoration: underline; }
+
+/* «Add block»: a glass capsule at the top right, left of the window's caption buttons. */
+.add-block { position: absolute; top: 16px; z-index: 29; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px;
+  border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text); }
+.add-block:hover { box-shadow: var(--glass-shadow), inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+
+/* The block library (BlocksPanel): three small cards a row, a card's fill and border, sliding in from its side. */
+.blocks-panel { position: absolute; top: 62px; right: 16px; z-index: 30; width: min(730px, calc(100vw - 48px)); max-height: calc(100vh - 78px);
+  display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--card-border); border-radius: 24px; overflow: hidden;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18); animation: blocks-in 0.22s ease-out; }
+.blocks-panel.left { top: 16px; right: auto; max-height: calc(100vh - 32px); animation-name: blocks-in-left; }
+@keyframes blocks-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes blocks-in-left { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+.blocks-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid var(--separator); }
+.blocks-head > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.blocks-title { font-size: 17px; font-weight: 700; }
+.blocks-about { font-size: 12px; color: var(--secondary); }
+.blocks-scroll { overflow-y: auto; padding: 8px 16px 16px; scrollbar-width: thin; }
+.blocks-group { font-size: 10px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--secondary); padding: 16px 0 10px; }
+.blocks-grid { display: grid; grid-template-columns: repeat(auto-fill, 220px); gap: 12px; }
+
+/* A block as a small route card (RouteCard, compact): its fill with the coin, then label, title, its form in a box. */
+.blk-tile { width: 220px; display: flex; flex-direction: column; padding: 0; border-radius: 16px; overflow: hidden; background: var(--card);
+  text-align: left; color: inherit; border: none; box-shadow: inset 0 0 0 1px var(--card-border); position: relative; }
+.blk-tile.plain { box-shadow: inset 0 0 0 1.5px var(--card-border); }
+.blk-tile.pick { cursor: pointer; }
+.blk-tile.pick:hover::after { content: ""; position: absolute; inset: 0; border-radius: 16px; box-shadow: inset 0 0 0 2px rgba(255, 122, 47, 0.7); pointer-events: none; }
+.blk-pic { height: 84px; position: relative; display: flex; align-items: flex-end; padding: 0 0 10px 18px; }
+.blk-pic .mascot { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.18)); }
+.blk-badge { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.92); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); }
+.blk-badge.glyph { color: #3a3e47; }
+.blk-badge .logo { border-radius: 8px; }
+.blk-info { display: flex; flex-direction: column; gap: 6px; padding: 9px 12px 8px; flex: 1; min-height: 0; }
+.blk-label { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.blk-label b { font-size: 9.5px; font-weight: 800; letter-spacing: 0.7px; }
+.blk-label i { width: 3px; height: 3px; border-radius: 50%; background: var(--tertiary); flex: none; }
+.blk-label span { font-size: 11px; font-weight: 600; }
+.blk-title { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.blk-box { display: flex; flex-direction: column; gap: 4px; padding: 7px 10px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4.5%, transparent); }
+.blk-row { font-size: 10.5px; color: var(--secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.blk-foot { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--separator); font-size: 10px; color: var(--secondary); }
+
+/* The Portfolio button with the portfolio already in place: one orange beat around the window's edge (EdgePulse). */
+.edge-pulse { position: fixed; inset: 0; z-index: 100; pointer-events: none; border-radius: 8px; animation: edge-pulse 1s ease-out forwards; }
+@keyframes edge-pulse {
+  0% { box-shadow: inset 0 0 0 3px rgba(255, 122, 47, 0), inset 0 0 8px 4px rgba(255, 122, 47, 0); }
+  25% { box-shadow: inset 0 0 0 3px rgba(255, 122, 47, 0.8), inset 0 0 14px 7px rgba(255, 122, 47, 0.32); }
+  100% { box-shadow: inset 0 0 0 3px rgba(255, 122, 47, 0), inset 0 0 20px 10px rgba(255, 122, 47, 0); }
+}
+
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .canvas { --check-fill: #26262b; } }
+:root[data-theme="dark"] .canvas { --check-fill: #26262b; }

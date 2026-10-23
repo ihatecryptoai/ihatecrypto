@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-browser-nav"
+description = "Enables the browser_nav command without any pre-configured scope."
+commands.allow = ["browser_nav"]
+
+[[permission]]
+identifier = "deny-browser-nav"
+description = "Denies the browser_nav command without any pre-configured scope."
+commands.deny = ["browser_nav"]

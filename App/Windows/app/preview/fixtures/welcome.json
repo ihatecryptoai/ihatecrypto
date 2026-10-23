@@ -1,0 +1,233 @@
+{
+ "signer": {
+  "ready": true,
+  "error": null,
+  "notes": [
+   "Keys under Windows Hello with this PC's TPM",
+   "Signer checks passed"
+  ],
+  "waiting": false,
+  "sessionLength": 300,
+  "ledger": null
+ },
+ "wallets": [],
+ "active": null,
+ "addresses": {},
+ "phrase": null,
+ "portfolio": {
+  "networks": [],
+  "total": 0,
+  "updatedAt": null,
+  "errors": [],
+  "equity": [],
+  "change7d": null
+ },
+ "positions": [],
+ "positionsPnl": null,
+ "automationUSD": 4.24,
+ "chat": [],
+ "thinking": false,
+ "draft": null,
+ "card": null,
+ "options": [],
+ "running": null,
+ "plan": null,
+ "model": {
+  "provider": "claude-code",
+  "name": "Claude (subscription via Claude Code)",
+  "model": "claude-opus-5-5",
+  "connected": true,
+  "models": [
+   "claude-opus-5-5",
+   "claude-sonnet-5-5"
+  ]
+ },
+ "providers": [
+  {
+   "id": "claude-code",
+   "name": "Claude (subscription via Claude Code)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Claude Code",
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "chatgpt",
+   "name": "ChatGPT (subscription)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Codex",
+   "signIn": "chatgpt",
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "anthropic",
+   "name": "Anthropic API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "openrouter",
+   "name": "OpenRouter",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "openai",
+   "name": "OpenAI API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama on this PC",
+   "kind": "local",
+   "takesKey": false,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  }
+ ],
+ "secondCheck": true,
+ "jevOpenRouter": false,
+ "language": "auto",
+ "russian": false,
+ "book": [
+  {
+   "name": "HL wallet",
+   "network": "hyperliquid",
+   "address": "0x3c44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+   "memo": ""
+  },
+  {
+   "name": "Mom",
+   "network": "base",
+   "address": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+   "memo": ""
+  }
+ ],
+ "history": [
+  {
+   "at": "2026-10-22T22:40:00Z",
+   "chain": "hyperliquid",
+   "kind": "transfer",
+   "note": "Sent 150 USDC to HL wallet",
+   "link": null
+  },
+  {
+   "at": "2026-10-22T13:40:00Z",
+   "chain": "solana",
+   "kind": "swap",
+   "note": "Bought SOL for 10 USDC",
+   "link": "https://solscan.io/tx/demo"
+  }
+ ],
+ "alerts": [
+  {
+   "id": "a1",
+   "text": "BTC above $120,000"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t1",
+   "text": "Every day at 9:00: buy SOL for 5 USDC",
+   "paused": true,
+   "automatic": true,
+   "next": "2026-10-24T08:40:00Z"
+  },
+  {
+   "id": "t2",
+   "text": "Every Monday: check the yields",
+   "paused": true,
+   "automatic": false,
+   "next": "2026-10-26T13:40:00Z"
+  }
+ ],
+ "automation": {
+  "id": "w-auto",
+  "label": "Automation",
+  "kind": "phrase",
+  "solana": null,
+  "evm": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "automation": true
+ },
+ "skills": [
+  {
+   "id": "trading-study",
+   "name": "Trading study",
+   "about": "Keeps a journal of your trades and studies them with you",
+   "text": "",
+   "builtIn": true,
+   "on": true
+  }
+ ],
+ "memory": [
+  "The user's HL wallet is their Hyperliquid account"
+ ],
+ "favorites": [
+  {
+   "chain": "solana",
+   "address": "DoVAVzViX8Bjy3r15nwikSaSbzE6dV4ovd28aWpJpump",
+   "name": "Higgs",
+   "symbol": "HIGGS",
+   "image": null,
+   "price": 8.66e-05,
+   "change24h": -23.9,
+   "liquidity": 51000
+  }
+ ],
+ "canvases": [
+  {
+   "id": "c1",
+   "title": "Withdraw · 23 USDC to Solana",
+   "at": "2026-10-23T12:40:00Z"
+  },
+  {
+   "id": "c2",
+   "title": "Send 150 USDC to HL wallet",
+   "at": "2026-10-22T22:40:00Z"
+  },
+  {
+   "id": "c3",
+   "title": "Gas · $1.00 of BNB on BNB Chain",
+   "at": "2026-10-21T13:40:00Z"
+  }
+ ],
+ "canvas": "c2",
+ "boards": [],
+ "runningBoard": null,
+ "multisigs": [],
+ "multisigDraft": null,
+ "candidates": [],
+ "ledgerConnect": null,
+ "starred": [],
+ "watching": false,
+ "watched": {},
+ "context": {
+  "used": 21380,
+  "window": 1000000
+ }
+}

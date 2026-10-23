@@ -1,4 +1,5 @@
 import Foundation
+import IhatecryptoCore
 import LLMCatalog
 import LLMCore
 import WalletCore
@@ -37,8 +38,19 @@ extension Engine {
     func llmClient() -> (any LLMClient)? {
         guard let p = provider(providerID), p.info.unavailable == nil else { return nil }
         let id = p.info.id, credential = Store.credentials()[id]
-        guard credential != nil || p.info.kind == .local else { return nil }
-        return try? p.client(credential, save: { Store.setCredential($0, for: id) })
+        guard credential != nil || p.info.kind == .local, let client = try? p.client(credential, save: { Store.setCredential($0, for: id) }) else { return nil }
+        // Every answer says what it read: the chip over the chat's field, as the Mac's ContextMeter.
+        return MeteredClient(client) { [weak self] usage, request in
+            guard ChatRouter.reads(request) else { return }
+            Task { @MainActor in self?.counted(usage, provider: id) }
+        }
+    }
+
+    /// The chat's reading of a message fills the window: kept for the canvas open now.
+    // ponytail: counted on the canvas open when the answer ends; a scheduled check answering in the background counts there too.
+    func counted(_ usage: LLMUsage, provider id: String) {
+        meters[canvasID] = .init(used: usage.input, window: usage.window ?? LLMCatalog.window(provider: id) ?? meters[canvasID]?.window)
+        changed()
     }
 
     var modelView: ModelView {
@@ -50,19 +62,29 @@ extension Engine {
     var providerViews: [ProviderView] {
         let saved = Store.credentials()
         return LLMCatalog.all.filter { $0.info.id != "apple" }.map { p in
-            ProviderView(id: p.info.id, name: p.info.name, kind: "\(p.info.kind)", takesKey: p.info.takesKey,
-                         existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, signIn: p.info.signInLabel, note: p.info.note,
+            // The catalog is the Mac's: «Ollama on this Mac» runs on this PC here.
+            ProviderView(id: p.info.id, name: p.info.name.replacingOccurrences(of: "this Mac", with: "this PC"), kind: "\(p.info.kind)", takesKey: p.info.takesKey,
+                         existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, signIn: p.info.signInLabel,
+                         note: p.info.note.replacingOccurrences(of: "this Mac", with: "this PC"),
                          unavailable: p.info.unavailable, connected: saved[p.info.id] != nil || p.info.kind == .local)
         }
     }
 
     /// A key typed in the window, or a login another tool already has (Claude Code, Codex) when no key is given.
+    /// Without a key, an account connected before is switched to as it is: «Switch to OpenRouter» sends the provider only.
     func connect(provider id: String, key: String?, model: String?) async throws {
         guard let p = provider(id) else { throw WalletError("No model provider «\(id)».") }
         if let why = p.info.unavailable { throw WalletError(why) }
+        let typed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Checked with its one short answer when it was kept: switching back asks the model nothing.
+        if typed.isEmpty, Store.credentials()[id] != nil {
+            settings.provider = id
+            settings.model = model ?? p.info.defaultModel
+            return
+        }
         let credential: Credential?
-        if let key = key?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
-            credential = .apiKey(key)
+        if !typed.isEmpty {
+            credential = .apiKey(typed)
         } else if let existing = p.existingLogin() {
             credential = existing
         } else if p.info.kind == .local {

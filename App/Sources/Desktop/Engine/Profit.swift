@@ -16,6 +16,26 @@ extension Engine {
         Store.save(points, "equity.json")
     }
 
+    /// The week the sparkline draws, for the wallet on screen: its points of the last 7 days, at most 200 (the oldest
+    /// kept), and the value now when the balances are in. A watched or newly opened wallet gets its own line at once.
+    func loadEquity() {
+        guard let me = readWallet else { portfolio.equity = []; portfolio.change7d = nil; return }
+        let wallet = me.solana.isEmpty ? me.evm : me.solana
+        let since = Date().addingTimeInterval(-7 * 86_400)
+        let week = (Store.load([EquityPoint].self, "equity.json") ?? []).filter { $0.wallet == wallet && $0.at >= since }.sorted { $0.at < $1.at }
+        var points = Self.thinned(week.map { PortfolioView.Point(at: $0.at, usd: $0.usd) }, to: portfolio.updatedAt == nil ? 200 : 199)
+        if let now = portfolio.updatedAt { points.append(.init(at: now, usd: portfolio.total)) }
+        portfolio.equity = points
+        portfolio.change7d = points.count > 2 ? points[points.count - 1].usd - points[0].usd : nil
+    }
+
+    /// Every n-th point so that at most `limit` are left, the first always among them.
+    nonisolated static func thinned<T>(_ points: [T], to limit: Int) -> [T] {
+        guard points.count > limit, limit > 0 else { return points }
+        let step = Int((Double(points.count) / Double(limit)).rounded(.up))
+        return stride(from: 0, to: points.count, by: step).map { points[$0] }
+    }
+
     /// Money that came in (+) or went out (−), so the portfolio's change counts only what prices and trading did.
     func recordFlow(_ usd: Decimal, _ note: String) {
         guard let wallet = solanaAddress, usd != 0 else { return }

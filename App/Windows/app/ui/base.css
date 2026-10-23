@@ -1,0 +1,210 @@
+/* The Mac's look (Studio.swift, Brand): its colors for light and dark, Onest for the interface, DynaPuff only for the
+   logo, glass panels floating over a dotted canvas. Each part of the window has its own file; this one holds what they
+   share. */
+
+@font-face { font-family: "Onest"; src: url("fonts/Onest.ttf") format("truetype"); font-weight: 100 900; }
+@font-face { font-family: "DynaPuff"; src: url("fonts/DynaPuff.ttf") format("truetype"); font-weight: 400 700; }
+
+:root {
+  --accent: #ff7a2f;
+  --accent-ink: #b8480c;
+  --on-accent: #111111;
+  --canvas: #eef0f3;
+  --dots: #d3d7dc;
+  --card: #ffffff;
+  --card-border: #e1e4ec;
+  --text: #15171c;
+  --secondary: rgba(21, 23, 28, 0.56);
+  --tertiary: rgba(21, 23, 28, 0.34);
+  --fill: rgba(21, 23, 28, 0.06);
+  --fill-strong: rgba(21, 23, 28, 0.1);
+  --separator: rgba(21, 23, 28, 0.1);
+  --glass-tint: rgba(255, 255, 255, 0.42);
+  --glass-fill: rgba(255, 255, 255, 0.72);
+  --glass-rim: rgba(255, 255, 255, 0.95);
+  --glass-selected: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 10px 34px rgba(16, 20, 32, 0.12), 0 1px 3px rgba(16, 20, 32, 0.08);
+  --solana-tint: #f4ecff;
+  --solana-ink: #5b3aa8;
+  --hl: #072723;
+  --hl-chip: #0d3b35;
+  --hl-mint: #97fce4;
+  --hl-soft: #b6e8dc;
+  --robinhood-tint: #f1fbd2;
+  --robinhood-ink: #3d5a05;
+  --jupiter-tint: #eef8e0;
+  --jupiter-ink: #3d6b12;
+  --relay: #4615c8;
+  --blocked-tint: #fdecea;
+  --blocked-ink: #b42318;
+  --jev-tint: #fff7e6;
+  --jev-ink: #7a4a0c;
+  --profit: #0b7a55;
+  --loss: #b42318;
+  --outcome: #0f1222;
+  --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent-ink: #ff9a5c;
+    --canvas: #0e0f12;
+    --dots: #26282d;
+    --card: #1b1e24;
+    --card-border: #2c3038;
+    --text: #f2f3f5;
+    --secondary: rgba(242, 243, 245, 0.58);
+    --tertiary: rgba(242, 243, 245, 0.34);
+    --fill: rgba(255, 255, 255, 0.07);
+    --fill-strong: rgba(255, 255, 255, 0.12);
+    --separator: rgba(255, 255, 255, 0.1);
+    --glass-tint: rgba(21, 23, 28, 0.55);
+    --glass-fill: rgba(255, 255, 255, 0.08);
+    --glass-rim: rgba(255, 255, 255, 0.12);
+    --glass-selected: rgba(255, 255, 255, 0.14);
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+    --solana-tint: #2a2140;
+    --solana-ink: #c9b3ff;
+    --robinhood-tint: #24300c;
+    --robinhood-ink: #d6f57a;
+    --jupiter-tint: #1e2a16;
+    --jupiter-ink: #c7f284;
+    --blocked-tint: #3a1d1a;
+    --blocked-ink: #ff9c8f;
+    --jev-tint: #33290f;
+    --jev-ink: #f5c451;
+    --profit: #6ff0b4;
+    --loss: #ff9c8f;
+    --outcome: #2a2e3a;
+    color-scheme: dark;
+  }
+}
+/* The same dark values when the page is told to be dark (the preview, a setting). */
+:root[data-theme="dark"] {
+  --accent-ink: #ff9a5c;
+  --canvas: #0e0f12;
+  --dots: #26282d;
+  --card: #1b1e24;
+  --card-border: #2c3038;
+  --text: #f2f3f5;
+  --secondary: rgba(242, 243, 245, 0.58);
+  --tertiary: rgba(242, 243, 245, 0.34);
+  --fill: rgba(255, 255, 255, 0.07);
+  --fill-strong: rgba(255, 255, 255, 0.12);
+  --separator: rgba(255, 255, 255, 0.1);
+  --glass-tint: rgba(21, 23, 28, 0.55);
+  --glass-fill: rgba(255, 255, 255, 0.08);
+  --glass-rim: rgba(255, 255, 255, 0.12);
+  --glass-selected: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --solana-tint: #2a2140;
+  --solana-ink: #c9b3ff;
+  --robinhood-tint: #24300c;
+  --robinhood-ink: #d6f57a;
+  --jupiter-tint: #1e2a16;
+  --jupiter-ink: #c7f284;
+  --blocked-tint: #3a1d1a;
+  --blocked-ink: #ff9c8f;
+  --jev-tint: #33290f;
+  --jev-ink: #f5c451;
+  --profit: #6ff0b4;
+  --loss: #ff9c8f;
+  --outcome: #2a2e3a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--canvas); color: var(--text);
+  font: 13px/1.4 "Onest", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; overflow: hidden; user-select: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+::selection { background: rgba(255, 122, 47, 0.3); }
+#app { position: relative; height: 100vh; overflow: hidden; }
+
+/* The ground under everything: the canvas color with its dot grid (DotGrid). */
+.ground { position: absolute; inset: 0; background-color: var(--canvas);
+  background-image: radial-gradient(circle, var(--dots) 1.1px, transparent 1.3px); background-size: 20px 20px; }
+
+/* Liquid Glass, as near as a web page gets: a blurred, tinted panel with a light rim. */
+.glass {
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7); backdrop-filter: blur(28px) saturate(1.7);
+  border: 1px solid var(--glass-rim);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Text */
+.secondary { color: var(--secondary); }
+.tertiary { color: var(--tertiary); }
+.small { font-size: 11px; }
+.num { font-variant-numeric: tabular-nums; }
+.profit { color: var(--profit); }
+.loss { color: var(--loss); }
+.accent-ink { color: var(--accent-ink); }
+.one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--secondary); }
+.address { font-family: var(--mono); font-size: 12px; word-break: break-all; user-select: text; }
+.selectable { user-select: text; }
+.spacer { flex: 1; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px;
+  border-radius: 10px; border: none; background: var(--fill); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.btn:hover { background: var(--fill-strong); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { filter: brightness(1.04); }
+.btn.capsule { border-radius: 999px; }
+.btn.small { height: 26px; padding: 0 10px; font-size: 11.5px; border-radius: 8px; }
+.btn.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.btn.dashed { background: none; box-shadow: inset 0 0 0 1px var(--separator); }
+.btn:disabled { opacity: 0.45; cursor: default; filter: none; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ico { width: 16px; height: 16px; flex: none; }
+/* HoverIconStyle: a bare glyph that gets a soft disc under the pointer. */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px;
+  border: none; background: none; color: var(--secondary); flex: none; padding: 0; }
+.icon-btn:hover { background: var(--fill); color: var(--text); }
+.icon-btn:disabled { opacity: 0.35; background: none; }
+.link-btn { background: none; border: none; padding: 0; color: var(--secondary); font-size: 11px; font-weight: 600; }
+.link-btn:hover { color: var(--text); }
+
+/* Fields */
+input, select, textarea { background: var(--fill); border: 1px solid transparent; border-radius: 10px; padding: 8px 11px; outline: none; user-select: text; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field label { font-size: 11px; color: var(--secondary); font-weight: 600; }
+
+/* A card on the canvas (Brand.card + cardBorder). */
+.card { background: var(--card); border: 1px solid var(--card-border); border-radius: 22px; }
+
+/* The logos: a disc or rounded square cut to its picture; a letter when there's no file. */
+.logo { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 28%; overflow: hidden; }
+.logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.logo.round { border-radius: 50%; background: #fff; }
+.logo.letter { border-radius: 50%; background: var(--fill-strong); font-weight: 700; color: var(--secondary); }
+.logo.logo-on-hl { background: var(--hl); border-radius: 30%; }
+.logo.logo-on-hl img { width: 72%; height: 72%; }
+.logo.logo-on-white { background: #fff; border-radius: 50%; }
+.logo.logo-on-white img { width: 74%; height: 74%; }
+.mascot { flex: none; display: block; }
+
+/* Menus and the toast */
+.menu { position: fixed; z-index: 50; min-width: 220px; padding: 6px; border-radius: 14px; background: var(--card);
+  border: 1px solid var(--card-border); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.18); }
+.menu .item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 8px; border: none;
+  background: none; text-align: left; font-size: 12.5px; }
+.menu .item:hover { background: var(--fill); }
+.menu-divider { height: 1px; background: var(--separator); margin: 5px 6px; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 60; max-width: min(560px, 90vw);
+  padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--canvas); font-weight: 500;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+
+.fresh { animation: appear 0.25s ease-out; }
+@keyframes appear { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

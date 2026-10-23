@@ -1,0 +1,28 @@
+/* The browser's toolbar, as the Mac's BrowserView: back, forward, reload, the address with the site's check, the
+   connection, and the wallet the site would get. Its own page over the site; the site can't draw on it. */
+body { background: var(--card); }
+#bar { border-bottom: 1px solid var(--card-border); }
+.bar-row { display: flex; align-items: center; gap: 6px; height: 51px; padding: 0 12px 0 8px; }
+.address-pill { flex: 1; min-width: 120px; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 10px;
+  border-radius: 10px; background: var(--fill); border: 1px solid transparent; margin-left: 4px; }
+.address-pill:focus-within { border-color: var(--accent); background: var(--card); }
+.address-pill input { flex: 1; min-width: 0; height: 30px; padding: 0; border: none; background: none; font-size: 12.5px; }
+.address-pill input:focus { border: none; }
+.badge { display: inline-flex; flex: none; }
+.badge.known { color: #22a05a; }
+.badge.lookalike { color: #e5372a; }
+.badge.unknown { color: var(--accent); }
+.badge.local { color: var(--secondary); }
+.connected { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: none; border-radius: 8px;
+  background: none; color: var(--profit); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.connected:hover { background: var(--fill); }
+.with-wallet { display: flex; align-items: center; gap: 8px; max-width: 290px; min-width: 0; padding-left: 6px; }
+.with-wallet .ico { color: var(--accent-ink); }
+.with-wallet b { display: block; font-size: 12px; font-weight: 600; }
+.with-wallet span { display: block; font-size: 10px; color: var(--secondary); }
+.blocked { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; background: var(--blocked-tint); color: var(--blocked-ink);
+  font-size: 12px; font-weight: 600; }
+.blocked .ico { margin-top: 1px; }
+.load-error { padding: 0 14px 6px; font-size: 10px; color: var(--loss); }
+@media (max-width: 760px) { .with-wallet span { display: none; } }
+@media (max-width: 620px) { .with-wallet { display: none; } }

@@ -290,6 +290,7 @@ extension Engine {
         ledger = account
         cancelPending()
         portfolio = PortfolioView()
+        loadEquity()
         Task { await refresh() }
     }
 

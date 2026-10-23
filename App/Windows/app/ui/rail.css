@@ -1,0 +1,241 @@
+/* The wallet rail (StudioRail): a glass panel 10 pt from the window's edges, 280 wide or a 92-wide strip, radius 24.
+   Sizes, fonts and colors are the Mac's. */
+
+.rail-host { position: absolute; left: 10px; top: 10px; bottom: 10px; z-index: 20;
+  transition: width 0.42s cubic-bezier(0.3, 1.12, 0.45, 1); }
+.rail-host.no-slide { transition: none; }
+.rail { position: absolute; inset: 0; border-radius: 24px; overflow: hidden; }
+.rail.fading .rail-wide { animation: rail-in 0.25s ease-out 0.08s both; }
+.rail.fading .rail-narrow { animation: rail-strip-in 0.3s ease-out both; }
+@keyframes rail-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rail-strip-in { from { opacity: 0; transform: scale(0.9); transform-origin: left center; } to { opacity: 1; transform: none; } }
+
+/* The edge: rail-drag to fold or unfold; the accent capsule shows under the pointer. */
+.rail-edge { position: absolute; top: 0; bottom: 0; right: -12px; width: 12px; cursor: ew-resize; display: flex; align-items: center; justify-content: center; }
+.rail-edge span { width: 3px; height: 56px; border-radius: 2px; background: transparent; }
+.rail-edge:hover span, .rail-edge.dragging span { background: rgba(255, 122, 47, 0.8); }
+
+.rail .rail-drag { flex: 1; align-self: stretch; }
+.rail-label { font-size: 12px; }
+
+/* HoverIconStyle: the bare glyph gets a soft accent wash under the pointer. */
+.rail-hover-icon { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 18px; height: 18px; padding: 0 2px;
+  border: none; border-radius: 6px; background: none; color: var(--secondary); flex: none; }
+.rail-hover-icon:hover:not(:disabled) { background: rgba(255, 122, 47, 0.13); color: var(--accent-ink); }
+.rail-hover-icon:active:not(:disabled) { background: rgba(255, 122, 47, 0.24); }
+.rail-hover-icon.spinning .ico { animation: rail-spin 0.9s linear infinite; }
+@keyframes rail-spin { to { transform: rotate(360deg); } }
+
+/* MARK: Wide */
+.rail-wide { position: absolute; top: 0; left: 0; bottom: 0; width: 280px; display: flex; flex-direction: column; gap: 16px;
+  padding: 6px 14px 12px; }
+.rail-lights { display: flex; align-items: center; height: 28px; flex: none; }
+.rail-lights .icon-btn { width: 28px; height: 28px; }
+.rail-lights .icon-btn:hover { background: rgba(255, 122, 47, 0.13); color: var(--accent-ink); }
+.rail-brand { display: flex; align-items: center; gap: 8px; height: 30px; flex: none; }
+.rail-wordmark { font-family: "DynaPuff", "Onest", sans-serif; font-weight: 700; font-size: 19px; line-height: 1; letter-spacing: -0.1px; white-space: nowrap; }
+
+.rail-balance { display: flex; flex-direction: column; gap: 2px; padding: 0 4px; flex: none; }
+.rail-balance-top { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.rail-fresh { font-size: 10px; color: var(--secondary); white-space: nowrap; opacity: 0; transition: opacity 0.2s; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rail-balance.hover .rail-fresh { opacity: 1; }
+.rail-amount { font-size: 32px; font-weight: 600; letter-spacing: -0.6px; line-height: 1.15; white-space: nowrap; }
+.rail-positions { font-size: 12px; font-weight: 600; }
+
+.rail-skeleton { display: inline-block; position: relative; overflow: hidden; background: var(--fill); }
+.rail-skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent); animation: rail-sweep 1.4s ease-in-out infinite; }
+@keyframes rail-sweep { to { transform: translateX(100%); } }
+
+/* The two wallets' share: a black and an orange capsule, and their amounts. */
+.rail-split { display: flex; flex-direction: column; gap: 5px; padding: 3px 0 0; border: none; background: none; text-align: left; width: 100%; color: inherit; }
+.rail-split-bar { display: flex; gap: 2px; height: 5px; width: 100%; }
+.rail-split-bar span { border-radius: 3px; min-width: 4px; }
+.rail-split-bar .main { background: var(--text); }
+.rail-split-bar .auto { background: var(--accent); }
+.rail-split-legend { display: flex; align-items: center; gap: 3px; font-size: 10px; white-space: nowrap; }
+.rail-split-legend b { font-weight: 700; flex: none; }
+.rail-split-legend .spacer { min-width: 4px; }
+.rail-split-legend .rail-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.rail-split-legend .rail-dot.main { background: var(--text); }
+.rail-split-legend .rail-dot.auto { background: var(--accent); }
+
+/* The wallet chip: a small glass capsule; orange for a test wallet. */
+.rail-wallet-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; max-width: 150px; flex: none;
+  border-radius: 11px; border: 1px solid var(--glass-rim); background: var(--glass-fill); color: var(--text);
+  font-size: 11px; font-weight: 600; opacity: 0.9; }
+.rail-wallet-chip .ico:last-child { color: var(--secondary); }
+.rail-wallet-chip.test { color: #ff9500; background: rgba(255, 149, 0, 0.14); border-color: rgba(255, 149, 0, 0.45); opacity: 1; }
+.rail-wallet-chip:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+.rail-wallet-chip.compact { height: 18px; padding: 0 6px; font-size: 9px; gap: 3px; max-width: 76px; }
+
+/* RailActions: Top up across, then four glass capsules. */
+.rail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: none; }
+.rail-tile { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 10px; min-width: 0;
+  border-radius: 19px; border: 1px solid var(--glass-rim); background: var(--glass-fill); color: var(--text);
+  font-size: 13px; font-weight: 600; }
+.rail-tile.wide { grid-column: span 2; }
+.rail-tile.accent { background: var(--accent); color: var(--on-accent); border-color: rgba(255, 255, 255, 0.35); }
+.rail-tile.on { background: rgba(255, 122, 47, 0.16); color: var(--accent-ink); border-color: rgba(255, 122, 47, 0.6); }
+/* Top up while its page is open: the white rim of the Mac's lit accent button, and an accent halo so it reads on orange. */
+.rail-tile.accent.on { background: var(--accent); color: var(--on-accent); border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.9), 0 0 0 3px rgba(255, 122, 47, 0.35); }
+.rail-tile:hover { background-image: linear-gradient(var(--fill), var(--fill)); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+.rail-tile.accent:hover { background-image: linear-gradient(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.06)); }
+
+/* The canvases: the only part that scrolls. */
+.rail-canvases { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+.rail-canvases-head { display: flex; align-items: center; padding-left: 4px; }
+.rail-canvases-head .new { font-size: 10px; font-weight: 600; height: 22px; padding: 0 8px; margin-right: -8px; }
+.rail-canvas-rows { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; scrollbar-width: none; }
+.rail-canvas-rows::-webkit-scrollbar { display: none; }
+.rail-crow { position: relative; display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 12px; border: 1px solid transparent; flex: none; }
+.rail-crow:hover { background: color-mix(in srgb, var(--glass-fill) 60%, transparent); }
+.rail-crow.current { background: var(--glass-selected); border-color: var(--glass-rim); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.rail-crow.pulsing { animation: rail-breathe 1.8s ease-in-out 2.5 forwards; }
+@keyframes rail-breathe { 0%, 100% { border-color: rgba(255, 122, 47, 0.2); } 50% { border-color: rgba(255, 122, 47, 0.8); } }
+.rail-crow-open { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 0; border: none; background: none; text-align: left; color: inherit; }
+.rail-crow-icon { width: 26px; height: 26px; border-radius: 8px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--glass-fill); border: 1px solid var(--glass-rim); color: var(--secondary); }
+.rail-crow-icon .ico { stroke-width: 2.2; }
+.rail-crow-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rail-crow-title { font-size: 13px; font-weight: 500; }
+.rail-crow.current .rail-crow-title { font-weight: 600; }
+.rail-crow-at { font-size: 11px; }
+.rail-crow-more { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border: none; border-radius: 6px; background: none; color: var(--secondary); opacity: 0; }
+.rail-crow:hover .rail-crow-more { opacity: 1; }
+.rail-crow-more:hover { color: var(--text); background: var(--fill); }
+
+/* The profile row at the rail's foot: the accounts' logos, the one in use, how many. */
+.rail-profile { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 16px; flex: none; width: 100%; text-align: left;
+  border: 1px solid var(--glass-rim); background: var(--glass-fill); color: var(--text); }
+.rail-profile:hover { background-image: linear-gradient(var(--fill), var(--fill)); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+.rail-profile > .ico { color: var(--secondary); }
+.rail-profile-logos { display: flex; padding-left: 1px; flex: none; }
+.rail-profile-logos .rail-company { box-shadow: 0 0 0 2px var(--card); border-radius: 50% !important; }
+.rail-profile-logos .rail-company + .rail-company { margin-left: -8px; }
+.rail-profile-none { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--glass-fill); border: 1px solid var(--glass-rim); color: var(--secondary); flex: none; }
+.rail-profile-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.rail-profile-text b { font-size: 13px; font-weight: 600; }
+.rail-profile-text span { font-size: 12px; }
+
+.rail-company { display: inline-flex; align-items: center; justify-content: center; flex: none; overflow: hidden;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12); color: #fff; font-weight: 700; }
+.rail-company img { display: block; object-fit: contain; }
+.rail-company-glyph { display: block; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; }
+
+/* MARK: Popovers from the rail */
+.menu.rail-popover { padding: 12px; border-radius: 16px; min-width: 0; }
+.rail-profile-pop { width: 336px; }
+.rail-profile-menu { display: flex; flex-direction: column; gap: 6px; }
+.rail-pm-title { font-size: 15px; font-weight: 700; padding: 4px 6px 2px; }
+.rail-pm-note { margin: 0 6px 6px; font-size: 12px; line-height: 1.4; }
+.rail-profile-menu .btns { padding: 0 6px 4px; }
+.btn.rail-danger { background: #c42b1c; color: #fff; }
+.rail-pm-account { display: flex; flex-wrap: wrap; align-items: center; border-radius: 12px; padding-right: 8px; }
+.rail-pm-account:hover { background: var(--fill); }
+.rail-pm-account.in-use { background: rgba(255, 122, 47, 0.08); }
+.rail-pm-use { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 9px 0 9px 10px; border: none; background: none; text-align: left; color: inherit; }
+.rail-pm-use:disabled { cursor: default; opacity: 1; }
+.rail-pm-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.rail-pm-text b { font-size: 13.5px; font-weight: 600; }
+.rail-pm-text span { font-size: 11.5px; }
+.rail-pm-check { color: var(--accent); display: inline-flex; }
+.rail-pm-check .ico { stroke-width: 2.6; }
+.rail-pm-more { width: 28px; height: 28px; border: none; background: none; color: var(--secondary); border-radius: 8px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; opacity: 0; }
+.rail-pm-account:hover .rail-pm-more, .rail-pm-account:has(.rail-pm-actions) .rail-pm-more { opacity: 1; }
+.rail-pm-more:hover { color: var(--text); background: var(--fill); }
+.rail-pm-actions { flex-basis: 100%; display: flex; flex-direction: column; padding: 0 0 6px 54px; }
+.rail-pm-actions button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; background: none; border-radius: 8px; text-align: left; font-size: 12.5px; color: inherit; }
+.rail-pm-actions button:hover { background: var(--fill); }
+.rail-pm-add { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: none; background: none; border-radius: 12px; text-align: left; color: inherit; }
+.rail-pm-add:hover { background: rgba(255, 122, 47, 0.08); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+.rail-pm-add-box { width: 32px; height: 32px; border-radius: 9px; border: 1px dashed var(--tertiary); display: inline-flex; align-items: center; justify-content: center; color: var(--secondary); }
+.rail-pm-add b { font-size: 13px; font-weight: 600; }
+.rail-pm-apps { display: flex; gap: 6px; }
+.rail-pm-app { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 11px;
+  background: var(--fill); border: 1px solid var(--separator); color: var(--text); font-size: 12px; font-weight: 600; }
+.rail-pm-app .ico { color: var(--secondary); }
+.rail-pm-app:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+
+/* The wallet menu: the wallets on the left, the one picked on the right. */
+.rail-wallet-pop { max-width: calc(100vw - 20px); }
+.rail-wallet-menu { display: flex; gap: 12px; align-items: stretch; }
+.rail-wm-list { width: 230px; display: flex; flex-direction: column; gap: 2px; flex: none; }
+.rail-wm-head { display: flex; align-items: center; padding: 0 0 4px 8px; }
+.rail-wm-head b { font-size: 15px; font-weight: 700; }
+.rail-wm-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 11px; border: 1px solid transparent; background: none; text-align: left; color: inherit; }
+.rail-wm-row:hover { background: var(--fill); }
+.rail-wm-row.on { background: var(--fill-strong); border-color: rgba(255, 122, 47, 0.55); }
+.rail-wm-icon { width: 30px; height: 30px; border-radius: 8px; background: var(--fill); display: inline-flex; align-items: center; justify-content: center; color: var(--secondary); flex: none; }
+.rail-wm-icon.test { color: #ff9500; }
+.rail-wm-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.rail-wm-text b { font-size: 13px; font-weight: 600; }
+.rail-wm-text span { font-size: 11px; }
+.rail-wm-empty { padding: 4px 8px; }
+.rail-wm-list .spacer { min-height: 14px; }
+.rail-wm-action { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: none; background: none; border-radius: 9px; text-align: left; font-size: 12.5px; font-weight: 600; color: inherit; }
+.rail-wm-action:hover { background: var(--fill); }
+.rail-wm-detail { width: 500px; max-width: calc(100vw - 300px); padding: 16px; border-radius: 14px; background: var(--fill); border: 1px solid var(--separator); opacity: 1; }
+.rail-wm-detail-head { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 12px; }
+.rail-wm-title { display: flex; align-items: center; gap: 4px; }
+.rail-wm-title b { font-size: 17px; font-weight: 700; }
+.rail-wm-rename { font-size: 13px; padding: 4px 8px; width: 220px; }
+.rail-wm-how { font-size: 12px; margin-top: 2px; }
+.rail-wm-net { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--separator); }
+.rail-wm-net.missing { opacity: 0.6; }
+.rail-wm-net-name { display: flex; align-items: center; gap: 8px; width: 118px; flex: none; }
+.rail-wm-net-name .logo { border-radius: 50%; }
+.rail-wm-net-name > span { display: flex; flex-direction: column; }
+.rail-wm-net-name b { font-size: 12.5px; font-weight: 600; }
+.rail-wm-address { flex: 1; font-size: 12px; }
+
+/* MARK: Folded */
+.rail-narrow { position: absolute; top: 0; left: 0; bottom: 0; width: 92px; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 6px 0 12px; overflow-y: auto; scrollbar-width: none; }
+.rail-narrow::-webkit-scrollbar { display: none; }
+.rail-narrow > .rail-lights { width: 100%; flex: none; }
+.rail-coin { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 76px; padding: 6px 0; flex: none;
+  border: none; border-radius: 14px; background: none; color: inherit; }
+.rail-coin:hover { background: var(--fill); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.7); }
+.rail-coin:active { background: rgba(255, 122, 47, 0.2); }
+.rail-coin:disabled { cursor: default; }
+.rail-coin-amount { display: flex; flex-direction: column; align-items: center; gap: 1px; transition: opacity 0.2s; }
+.rail-coin.refreshing .rail-coin-amount { opacity: 0.4; }
+.rail-mini { font-size: 11px; font-weight: 600; white-space: nowrap; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
+.rail-mini-pnl { font-size: 10px; font-weight: 600; }
+.rail-divider { width: 32px; height: 1px; background: var(--separator); flex: none; }
+.rail-round-stack { display: flex; flex-direction: column; gap: 6px; align-items: center; flex: none; }
+
+/* RailRound: a 42-point glass circle with its name under it. */
+.rail-round { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 60px; max-width: 84px; padding: 0; border: none; background: none; color: var(--text); flex: none; }
+.rail-round .disc { width: 42px; height: 42px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--glass-fill); box-shadow: inset 0 0 0 1px var(--glass-rim); color: var(--text); opacity: 1; }
+.rail-round .disc .ico { opacity: 0.8; }
+.rail-round-title { font-size: 10px; font-weight: 500; color: var(--secondary); max-width: 84px; }
+.rail-round:hover .disc { background: var(--glass-selected); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.9); color: var(--accent-ink); }
+.rail-round:hover .disc .ico, .rail-round.on .disc .ico { opacity: 1; }
+.rail-round:hover .rail-round-title, .rail-round.on .rail-round-title { color: var(--accent-ink); }
+.rail-round:active .disc { background: rgba(255, 122, 47, 0.26); }
+.rail-round.on .disc { background: rgba(255, 122, 47, 0.16); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.6); color: var(--accent-ink); }
+.rail-round.accent .disc { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+.rail-round.accent .disc .ico { opacity: 1; }
+.rail-round.accent:hover .disc, .rail-round.accent.on .disc { color: var(--on-accent); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); }
+.rail-round.accent.on .disc { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 3px rgba(255, 122, 47, 0.35); }
+.rail-round.dashed .disc { background: none; box-shadow: none; border: 1.2px dashed color-mix(in srgb, var(--secondary) 90%, transparent); }
+.rail-round.dashed:hover .disc { border-color: var(--accent); background: none; box-shadow: none; }
+.rail-round.plain .disc { background: none; box-shadow: none; }
+.rail-round.plain:hover .disc { background: var(--glass-selected); box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.9); }
+
+.rail-canvases-pop { width: 308px; }
+.rail-canvases-panel { width: 280px; height: 380px; display: flex; flex-direction: column; }
+.rail-canvases-panel .rail-crow.current { background: var(--fill-strong); }
+/* A short window: the strip's names go (they stay as tooltips), so every button still fits. */
+@media (max-height: 820px) {
+  .rail-narrow .rail-round-title { display: none; }
+  .rail-narrow { gap: 6px; }
+}

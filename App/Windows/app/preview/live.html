@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- The live blocks alone (live.js), each in its frame, for working on them while the canvas is being built:
+       ?fixture=live-all|live-ledger|live-empty&theme=dark&only=schedule,ledger&click=.live-addr-main;.live-seg:nth-child(2) -->
+  <base href="../ui/">
+  <title>ihatecrypto · live blocks</title>
+  <script src="../preview/mock.js"></script>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="boards.css">
+  <link rel="stylesheet" href="live.css">
+  <style>
+    body { overflow: auto; user-select: auto; }
+    #app { height: auto; min-height: 100vh; overflow: visible; }
+    .live-column { position: relative; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; padding: 24px; }
+  </style>
+  <script type="module">
+    import { ui, setRoot, render, engine, answered, h } from "./core.js";
+    import { liveBlock, liveKinds } from "./live.js";
+    const only = new URLSearchParams(location.search).get("only");
+    window.__TAURI__.event.listen("engine", (e) => {
+      const msg = JSON.parse(e.payload);
+      if (msg.event === "state") { ui.state = msg.data; render(); } else answered(msg);
+    });
+    setRoot(() => document.getElementById("app").replaceChildren(h("div", { class: "ground" }),
+      h("div", { class: "live-column" }, ui.state.boards.filter((b) => liveKinds.includes(b.kind) && (!only || only.split(",").includes(b.kind))).map(liveBlock))));
+    engine("hello");
+    // &click=<selector>;<selector>: presses those after the first draw (a row opened, a tab picked) for a picture.
+    const clicks = (new URLSearchParams(location.search).get("click") || "").split(";").filter(Boolean);
+    setTimeout(async () => { for (const sel of clicks) { document.querySelector(sel)?.click(); await new Promise((r) => setTimeout(r, 50)); } }, 300);
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

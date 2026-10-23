@@ -16,7 +16,8 @@ import Testing
         let arrived = DispatchSemaphore(value: 0)
         var nextID = 1
 
-        init() throws {
+        /// `seed`: files the engine finds in its folder at start (equity.json…).
+        init(seed: [String: Data] = [:]) throws {
             // The programs are built next to the tests: beside the .xctest bundle on a Mac, the test program elsewhere.
             let tests = Bundle(for: Engine.self).bundleURL
             let products = tests.pathExtension == "xctest" ? tests.deletingLastPathComponent() : tests
@@ -31,6 +32,9 @@ import Testing
             env["IHATECRYPTO_SIGNER_DIR"] = dir.appendingPathComponent("signer").path
             env["WINSEC_FAKE_HELLO"] = "1"
             process.environment = env
+            let folder = dir.appendingPathComponent("engine")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for (name, data) in seed { try data.write(to: folder.appendingPathComponent(name)) }
             process.standardInput = input
             process.standardOutput = output
             try process.run()
@@ -216,6 +220,65 @@ import Testing
         let stopped = try engine.call("watch", ["solana": "", "evm": ""])
         #expect(stopped.state?["watching"] as? Bool == false)
         #expect((stopped.state?["addresses"] as? [String: String])?.isEmpty == true)
+    }
+
+    /// The sparkline's week: only the wallet on screen, only 7 days, at most 200 points with the oldest kept, and the
+    /// change from that first point to the last.
+    @Test(.enabled(if: winsec_is_stub() == 1)) func theWeekOfTheWalletOnScreenIsThinnedTo200Points() throws {
+        let evm = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        let now = Date().timeIntervalSinceReferenceDate
+        // Every 10 minutes for 8 days, rising a dollar a point; another wallet's points far above.
+        var points: [[String: Any]] = (0..<1152).map { i in ["at": now - Double(1152 - i) * 600, "usd": 100 + i, "wallet": evm] }
+        points += (0..<10).map { i in ["at": now - Double(i) * 3600, "usd": 1_000_000, "wallet": "someone else"] }
+        let engine = try Engine(seed: ["equity.json": try JSONSerialization.data(withJSONObject: points)])
+        try engine.call("hello")
+        let watched = try engine.call("watch", ["solana": "", "evm": evm])
+        let portfolio = try #require(watched.state?["portfolio"] as? [String: Any])
+        let week = try #require(portfolio["equity"] as? [[String: Any]])
+        // A refresh that lands in time adds the value now as one more point.
+        #expect((150...201).contains(week.count), "\(week.count)")
+        let stamps = week.compactMap { ($0["at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } }
+        #expect(stamps.count == week.count)
+        #expect(stamps == stamps.sorted())
+        #expect(stamps.first.map { Date().timeIntervalSince($0) <= 7 * 86_400 + 60 } == true)
+        let values = week.compactMap { ($0["usd"] as? NSNumber)?.doubleValue }
+        #expect(values.allSatisfy { $0 < 1_000_000 })
+        // The oldest point of the week: 8 days of points, the first 144 fall out.
+        #expect(values.first.map { (244...246).contains($0) } == true, "\(values.first ?? 0)")
+        let change = try #require((portfolio["change7d"] as? NSNumber)?.doubleValue)
+        #expect(abs(change - ((values.last ?? 0) - (values.first ?? 0))) < 0.001)
+    }
+
+    /// «Switch to OpenRouter» sends the provider alone: an account connected before is switched to with its saved key,
+    /// not asked for the key again.
+    @Test(.enabled(if: winsec_is_stub() == 1)) func aSavedAccountIsSwitchedToWithoutItsKey() throws {
+        // The stand-in's «DPAPI» is a XOR with 0x5A.
+        let plain = try JSONEncoder().encode(["openrouter": ["apiKey": ["_0": "sk-or-test"]]])
+        let engine = try Engine(seed: ["credentials.bin": Data(plain.map { $0 ^ 0x5A })])
+        try engine.call("hello")
+        let switched = try engine.call("connectModel", ["provider": "openrouter"])
+        #expect(switched.answer["ok"] as? Bool == true, "\(switched.answer)")
+        let model = try #require(switched.state?["model"] as? [String: Any])
+        #expect(model["provider"] as? String == "openrouter")
+        #expect(model["connected"] as? Bool == true)
+        let unsaved = try engine.call("connectModel", ["provider": "anthropic"])
+        #expect((unsaved.answer["error"] as? String)?.contains("Paste the key") == true, "\(unsaved.answer)")
+    }
+
+    /// The browser's bar asks what the page open in it is: known, a lookalike of a known one, and not connected before.
+    @Test func theBrowserBarHearsWhatTheSiteIs() throws {
+        let engine = try Engine()
+        try engine.call("hello")
+        let known = try engine.call("siteState", ["address": "https://jup.ag"])
+        let result = try #require(known.answer["result"] as? [String: String])
+        #expect(result["check"] == "known")
+        #expect(result["connected"] == "false")
+        #expect(result["blocked"] == "false")
+        let fake = try #require(try engine.call("siteState", ["address": "https://jupp.ag"]).answer["result"] as? [String: String])
+        #expect(fake["check"] == "lookalike")
+        #expect(fake["real"] == "jup.ag")
+        let other = try #require(try engine.call("siteState", ["address": "https://example.com"]).answer["result"] as? [String: String])
+        #expect(other["check"] == "unknown")
     }
 
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {

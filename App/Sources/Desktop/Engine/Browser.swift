@@ -99,6 +99,12 @@ extension Engine {
             return try json(["address": owner, "publicKey": try Base58.decode(owner).base64EncodedString()])
         case "disconnect":
             sites.solana.remove(origin)
+            // The bar's Disconnect takes the wallet away from the site on every chain, as the Mac's disconnectHere; a
+            // page's own Solana disconnect leaves its EVM connection alone. Either only takes access away.
+            if params["everywhere"] as? Bool == true {
+                sites.evm.remove(origin)
+                sites.chain[origin] = nil
+            }
             return "null"
         case "signMessage":
             guard sites.solana.contains(origin), let b64 = params["message"] as? String, let bytes = Data(base64Encoded: b64) else { throw SiteError("Connect the site first.") }
@@ -402,6 +408,24 @@ extension Engine {
                   let info = ((((item["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
                   let mint = info["mint"] as? String, let amount = info["tokenAmount"] as? [String: Any] else { continue }
             out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0)
+        }
+        return out
+    }
+}
+
+extension Engine {
+    /// What the browser's bar shows for the page open in it: whether this run connected it, how ihatecrypto knows the
+    /// site («known», «lookalike» of `real`, «unknown», «local»), and whether MetaMask's list names it as phishing.
+    /// Strings, as every answer: «true» or «false».
+    func siteState(_ origin: String) async -> [String: String] {
+        guard let url = URL(string: origin), let host = url.host() else { return ["connected": "false", "check": "unknown", "blocked": "false"] }
+        let connected = sites.solana.contains(origin) || sites.evm.contains(origin)
+        var out = ["connected": String(connected), "blocked": String(await PhishingList.shared.contains(host))]
+        switch SiteCheck.check(host: host) {
+        case .known: out["check"] = "known"
+        case .lookalike(let real): out["check"] = "lookalike"; out["real"] = real
+        case .unknown: out["check"] = "unknown"
+        case .local: out["check"] = "local"
         }
         return out
     }

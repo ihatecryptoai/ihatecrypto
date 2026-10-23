@@ -1,0 +1,12 @@
+/* The window's title strip: Windows 11's caption buttons at the top right (46 × 32, the close one red under the
+   pointer), over everything; a thin drag strip along the top edge where nothing else is. */
+.chrome-root { position: absolute; top: 0; left: 0; right: 0; height: 0; z-index: 40; }
+.chrome-drag { position: absolute; top: 0; left: 0; right: 138px; height: 10px; }
+.chrome-caption { position: absolute; top: 0; right: 0; display: flex; }
+.chrome-btn { width: 46px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: none;
+  background: transparent; color: var(--text); padding: 0; cursor: default; border-radius: 0; }
+.chrome-btn:hover { background: var(--fill-strong); }
+.chrome-btn:active { background: var(--fill); }
+.chrome-btn.close:hover { background: #c42b1c; color: #fff; }
+.chrome-btn.close:active { background: #c84031; color: #fff; }
+.chrome-btn:last-child { border-top-right-radius: 8px; }

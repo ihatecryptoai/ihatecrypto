@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "browser-bar",
+  "description": "The browser's toolbar, our own page over the site: it moves the site back, forward, reloads it, opens an address and disconnects it, reads what to show, and hears that something changed. Nothing of the engine's or the main window's.",
+  "webviews": [
+    "browser-bar"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-browser-nav",
+    "allow-browser-state",
+    "allow-browser-layout"
+  ]
+}

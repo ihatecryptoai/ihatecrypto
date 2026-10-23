@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-browser-layout"
+description = "Enables the browser_layout command without any pre-configured scope."
+commands.allow = ["browser_layout"]
+
+[[permission]]
+identifier = "deny-browser-layout"
+description = "Denies the browser_layout command without any pre-configured scope."
+commands.deny = ["browser_layout"]

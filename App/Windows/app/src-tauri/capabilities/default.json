@@ -8,6 +8,10 @@
   "permissions": [
     "core:event:default",
     "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
     "updater:default",
     "allow-engine-send",
     "allow-protect",

@@ -69,6 +69,10 @@ WINSEC_FAKE_HELLO=1 IHATECRYPTO_SIGNER_DIR=/tmp/s IHATECRYPTO_ENGINE_DIR=/tmp/e 
   IHATECRYPTO_ENGINE=$PWD/bin/ihatecrypto-engine target/debug/ihatecrypto
 ```
 
+To look at the window without the engine, `App/Windows/app/preview/shot.sh out.png "fixture=main&theme=dark"` draws
+a state from `preview/fixtures` (demo balances on the public test addresses; `make-fixtures.py` writes the main ones) in
+headless Chrome, which is what WebView2 is; `&view=settings` opens a page, `&store={"railCollapsed":true}` folds the rail.
+
 A debug build also runs lines of JS appended to `IHATECRYPTO_UI_EVAL` in the page, so a test can press buttons with
 the window in the background. On Linux the core, the signer and the engine build in the `swift:6.2` container.
 
@@ -93,6 +97,13 @@ to `windows` and keeps the installer as an artifact for two weeks.
 
 ## What the Windows app has, and what it doesn't yet
 
+The window is the Mac's Studio, with the Mac's colors, fonts and logos in light and dark: the wallet rail floating
+over the dotted canvas as a glass panel (balance, Top up, Portfolio, History, Favorites, Schedule, the canvases, the model
+accounts) that folds to a strip by its button or on its own in a narrow window; the canvas with the portfolio's frame,
+pan, zoom and «Add block»; the chat floating over it. Windows has no traffic lights, so the window draws its own
+minimize, maximize and close at the top right and is dragged by its empty top strip; Windows Hello stands where the Mac
+says Touch ID.
+
 Has: canvases as on the Mac (each with its own chat and blocks: the portfolio framed on the left, a move as its route's
 cards with the balance it spends now → after, results the chat makes — a chart, the rates, approvals, P/L, a token, a
 service's answer — and blocks added by hand, the newest on top; nothing leaves a canvas unless the person closes it;
@@ -101,11 +112,13 @@ keyboard layout's language; the words go into the field, never sent by themselve
 (winsec.dll's HID and WinRT GATT calls under the Mac's Ledger module: «connect my Ledger» reads one address from its Ethereum app and one from its Solana
 app, «use my Ledger» makes it sign every move on its screen with the same guard first, «show on the Ledger» to compare
 an address, and it can be a key of a multisig), the dApp browser
-(a window of its own for https sites with ihatecrypto as a Solana Wallet Standard wallet and an EIP-1193/EIP-6963
-provider; each connect, message, typed data or transaction is a card on the canvas — the Solana guard and simulation,
+(a window of its own for https sites, the Mac's toolbar across its top — back, forward, reload, the address with the
+site's check (known, a lookalike of which, unknown), «Connected · Disconnect», the wallet the site would get — as our own
+page in a webview of its own above the site's, with ihatecrypto as a Solana Wallet Standard wallet and an
+EIP-1193/EIP-6963 provider in the site; each connect, message, typed data or transaction is a card on the canvas — the Solana guard and simulation,
 the EVM call decoded and simulated, the site checked against MetaMask's phishing list and for lookalikes — and nothing
-is signed before Confirm; a site's page may call only the wallet command, never the engine, links or events, and its
-origin is read from the window, not from the page), a Safe
+is signed before Confirm; a site's page may call only the wallet command, never the engine, the toolbar's commands,
+links or events, and its origin is read from its webview, not from the page), a Safe
 multisig (made from a card where its keys, how many sign and its networks change before Confirm; paid out of when this
 computer's key is enough), wallets (create with the phrase shown once, import a phrase or a key, switch, rename, remove, a test wallet; or, with none, addresses only watched for their balances, as the Mac's «Addresses for balances»: nothing signs or connects for them),
 Receive, the address book, the portfolio on Solana, Hyperliquid, every EVM network and NEAR, the chat with a model
@@ -151,7 +164,8 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
 8. The mic in the chat field: Windows asks for the microphone once; Russian words with the Russian layout on, English
    with the English one; with Settings › Privacy & security › Speech › Online speech recognition off it says so.
 9. The browser: open jup.ag, connect, and a swap's card comes to the canvas with its simulated balances; on a site's
-   page, `__TAURI_INTERNALS__.invoke('engine_send', …)` in DevTools is refused.
+   page, `__TAURI_INTERNALS__.invoke('engine_send', …)` (or `browser_nav`, `browser_state`) in DevTools is refused; the
+   toolbar's Disconnect takes the address away and reloads the page.
 10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it

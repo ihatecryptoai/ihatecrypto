@@ -1,0 +1,664 @@
+// The live blocks on the canvas: what they show is read from the state each time. They follow the Mac's boards:
+// Receive's address cards (Receive.swift), Favorites with Tokens | Wallets (AddressBook.swift, TokensUI.swift), the
+// History board (HistoryView.swift), price alerts as a chain (Alerts.swift), the Schedule frame with its date tiles
+// and the automation wallet (ScheduleFrame.swift), positions (Studio.swift PositionBoard), the multisig
+// (Multisig.swift) and the Ledger's connect board (Ledger.swift). A button here never moves money: it puts the command
+// in the chat field (`suggest`), and the chat's card waits for Confirm.
+
+import { ui, act, render, t, h, svg, icon, addIcons, logo, usd, masked, popup, suggest, store, presence, invoke, toast } from "./core.js";
+import { blockFrame } from "./boards.js";
+
+addIcons({
+  bell: "M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
+  "arrow.down": "M12 5v14M6 13l6 6 6-6",
+  paperplane: "M21 3 3 10.5l7 3 3 7zM10 13.5 21 3",
+  bubble: "M4 5h16v11H9l-5 4z",
+  "shield.check": "M12 3l7.5 3v5.5c0 4.5-3.2 8.2-7.5 9.5-4.3-1.3-7.5-5-7.5-9.5V6zM8.8 12l2.2 2.2 4.4-4.4",
+  "shield.exclam": "M12 3l7.5 3v5.5c0 4.5-3.2 8.2-7.5 9.5-4.3-1.3-7.5-5-7.5-9.5V6zM12 8v5M12 16v.5",
+  "hand.tap": "M9 11V5.5a1.5 1.5 0 0 1 3 0V11M12 10.5V9a1.5 1.5 0 0 1 3 0v2M15 10.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.6-2.2l-2.4-3.3a1.5 1.5 0 0 1 2.3-1.9L9 16",
+  "checkmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12.5l3 3 5-6",
+  "circle.dotted": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
+  laptop: "M5 6h14v9H5zM3 18h18",
+  iphone: "M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2",
+  drive: "M3 9h18v6H3zM6.5 12h5M16.5 12h.01",
+  fuelpump: "M5 20V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v15M4 20h11M5 10h9M14 8l3 2.5V17a1.5 1.5 0 0 0 3 0V9l-2.5-2.5",
+  "arrow.up.right.square": "M11 5H5v14h14v-6M13 5h6v6M19 5l-8 8",
+  "arrow.left.arrow.right": "M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4",
+  "arrow.up.right": "M7 17 17 7M9 7h8v8",
+  "arrow.down.left": "M17 7 7 17M15 17H7V9",
+  "arrow.up": "M12 19V5M6 11l6-6 6 6",
+  play: "M8 5l11 7-11 7z",
+  pause: "M8 5v14M16 5v14",
+  signature: "M3 17c3-1 5-9 7-9s-1 9 1 9 3-4 4-4 1 3 3 3M3 20.5h18",
+  key: "M15 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM11 13 3.5 20.5M6.5 17.5 9 20",
+  "chart.line": "M4 18l5-6 4 3 7-8",
+  building: "M4 20h16M5 10h14L12 4zM7 10v8M12 10v8M17 10v8",
+  wrench: "M14.5 5.5a4 4 0 0 0 4.8 5.2L12 18l-2.5.5L10 16l7.3-7.3a4 4 0 0 0-2.8-3.2z",
+  "clock.arrow": "M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4M12 8v4.5l3 2",
+});
+
+export const liveKinds = ["receive", "addresses", "history", "favorites", "alerts", "schedule", "positions", "multisig", "ledger"];
+
+export function liveTitle(kind) {
+  return {
+    receive: t("Receive", "Получить"), addresses: t("Address book", "Адресная книга"), history: t("History · latest", "История · последнее"),
+    favorites: t("Favorites", "Избранное"), alerts: t("Price alerts", "Ценовые оповещения"), schedule: t("Schedule", "Расписание"),
+    positions: t("Open positions", "Открытые позиции"), multisig: t("Multisig", "Мультисиг"), ledger: "Ledger",
+  }[kind] || kind;
+}
+
+/** Each block's width and header icon, as the Mac's boards have them (470, the Schedule 320, the multisig 492). */
+const frames = {
+  receive: { width: 470, icon: "arrow.down.circle" }, addresses: { width: 470, icon: "person" }, history: { width: 470, icon: "clock.arrow" },
+  favorites: { width: 470, icon: "star" }, alerts: { width: 470, icon: "bell" }, schedule: { width: 320, icon: "calendar" },
+  positions: { width: 492, icon: "chart.line" }, multisig: { width: 492, icon: "key" }, ledger: { width: 470, icon: "drive" },
+};
+
+export function liveBlock(b) {
+  const body = { receive: receiveBody, addresses: addressesBody, history: historyBody, favorites: favoritesBody, alerts: alertsBody,
+    schedule: scheduleBody, positions: positionsBody, multisig: multisigBody, ledger: ledgerBody }[b.kind];
+  // The Ledger's frame names the model it found and spins while it connects, as the Mac's board header does.
+  const c = b.kind === "ledger" ? ui.state.ledgerConnect : null;
+  const title = c?.model ? "Ledger · " + c.model : liveTitle(b.kind);
+  const extra = c?.busy ? h("span", { class: "live-spinner", "aria-label": t("Connecting", "Подключаю") }) : undefined;
+  const el = blockFrame(b, title, h("div", { class: "live live-" + b.kind }, body ? body(b) : null), { ...(frames[b.kind] || {}), extra });
+  el.classList.add("live-frame", "live-frame-" + b.kind);
+  return el;
+}
+
+// MARK: Pieces the blocks share
+
+/** A network's logo file and name. */
+const nets = {
+  solana: ["sol", "Solana"], base: ["base", "Base"], arbitrum: ["arb", "Arbitrum"], ethereum: ["eth", "Ethereum"], polygon: ["pol", "Polygon"],
+  optimism: ["op", "Optimism"], bnb: ["bnb", "BNB Chain"], hyperliquid: ["hype", "Hyperliquid"], hyperevm: ["hyperevm", "HyperEVM"],
+  robinhood: ["robinhood", "Robinhood Chain"], tempo: ["tempo", "Tempo"], near: ["near", "NEAR"], bitcoin: ["btc", "Bitcoin"],
+  tron: ["trx", "Tron"], xrp: ["xrp", "XRP"], dogecoin: ["doge", "Dogecoin"], zcash: ["zec", "Zcash"], sui: ["sui", "Sui"],
+};
+const netLogo = (key, size) => logo(nets[key]?.[0] || key, size);
+const netName = (key) => nets[key]?.[1] || key;
+
+/** An address as it's checked by eye (AddressLines): the whole of it in even lines, its ends in bold. */
+function addressLines(address, maxChars = 30) {
+  const counts = [2, 3, 4, 5, 6].sort((a, b) => (address.length % a ? 1 : 0) - (address.length % b ? 1 : 0) || a - b);
+  const n = address.length <= maxChars ? 1 : counts.find((c) => Math.ceil(address.length / c) <= maxChars) || 6;
+  const head = Math.min(8, Math.floor(address.length / 2)), tail = address.length - head;
+  const starts = Array.from({ length: n + 1 }, (_, i) => i * Math.floor(address.length / n) + Math.min(i, address.length % n));
+  const part = (a, b) => (a < b ? address.slice(a, b) : "");
+  return h("div", { class: "live-addr-lines selectable", title: address },
+    starts.slice(0, n).map((a, i) => {
+      const b = starts[i + 1];
+      return h("div", {}, h("b", {}, part(a, Math.min(b, head))), h("span", { class: "secondary" }, part(Math.max(a, head), Math.min(b, tail))), h("b", {}, part(Math.max(a, tail), b)));
+    }));
+}
+
+/** «Copy address»: the label turns to «Copied» for a moment, in place (CopyButton). */
+function copyAddress(text, label = t("Copy address", "Скопировать адрес")) {
+  const face = (ic, words) => [icon(ic, 12), h("span", {}, words)];
+  const btn = h("button", { class: "live-copy-btn", title: t("Copy the whole address", "Скопировать весь адрес") }, face("copy", label));
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.classList.add("copied");
+      btn.replaceChildren(...face("check", t("Copied", "Скопировано")));
+      setTimeout(() => { btn.classList.remove("copied"); btn.replaceChildren(...face("copy", label)); }, 1500);
+    } catch { toast(t("Couldn't copy.", "Не скопировалось.")); }
+  });
+  return btn;
+}
+
+/** The empty state: a quiet line in a dashed frame. */
+const note = (text) => h("div", { class: "live-note" }, text);
+const section = (text, trailing) => h("div", { class: "live-section" }, h("span", {}, text), trailing || null);
+const hint = (text, ic) => h("div", { class: "live-hint" }, ic ? icon(ic, 12) : null, h("span", {}, text));
+
+/** The next message is about this block: it goes with the message (right-click › Ask in chat does the same). */
+function askAbout(b) {
+  ui.attached = b.id;
+  render();
+  document.getElementById("composer")?.focus();
+}
+
+/** A pasted-in URL opens in the user's browser. */
+const openLink = (url) => invoke("open_link", { url }).catch((x) => toast(String(x)));
+
+/** A compact dollar amount: $18.4M, $51K. */
+function compact(n) {
+  const v = Number(n);
+  if (!isFinite(v)) return "—";
+  if (v >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
+  if (v >= 1e6) return "$" + (v / 1e6).toFixed(1) + "M";
+  if (v >= 1e3) return "$" + Math.round(v / 1e3) + "K";
+  return usd(v);
+}
+/** A token's price: cents above a dollar, three significant digits under it. */
+const price = (p) => (p === null || p === undefined ? "—" : Number(p) >= 1 ? usd(p) : "$" + Number(p).toLocaleString("en-US", { maximumSignificantDigits: 3 }));
+const signedPct = (n) => (Number(n) < 0 ? "−" : "+") + Math.abs(Number(n)).toFixed(1) + "%";
+const negative = (text) => /^\s*[−-]/.test(text || "");
+
+// MARK: Receive
+
+function receiveBody() {
+  const a = ui.state.addresses;
+  const cards = [
+    a.solana && { logos: ["solana"], title: "Solana", badge: t("Recommended", "Рекомендую"), address: a.solana, tint: "solana",
+      what: t("USDC and SOL, and any Solana token. Every move starts here.", "USDC и SOL и любые токены Solana. С них начинается каждый перевод.") },
+    a.evm && { logos: ["base", "arbitrum", "ethereum", "polygon", "hyperliquid"], title: t("EVM networks", "EVM-сети"), address: a.evm, tint: "evm",
+      what: t("Base · Arbitrum · Ethereum · Polygon · Optimism · BNB · Hyperliquid: the same address on each. Send on the network you mean.",
+        "Base · Arbitrum · Ethereum · Polygon · Optimism · BNB · Hyperliquid: один адрес во всех. Отправляй в той сети, которую имеешь в виду.") },
+    a.near && { logos: ["near"], title: "NEAR", address: a.near, tint: "plain", what: t("Native NEAR on the NEAR chain.", "NEAR в сети NEAR.") },
+  ].filter(Boolean);
+  return [
+    h("p", { class: "live-lead" }, t("ihatecrypto can't pull money in: send it here from an exchange or another wallet, on that network.",
+      "ihatecrypto не может сам забрать деньги: отправь их сюда с биржи или другого кошелька, именно в этой сети.")),
+    cards.length ? cards.map((c) => h("div", { class: "live-receive-card tint-" + c.tint },
+      h("div", { class: "live-receive-head" },
+        h("span", { class: "live-logo-stack" }, c.logos.map((k) => netLogo(k, 20))),
+        h("b", {}, c.title),
+        c.badge ? h("span", { class: "live-badge" }, c.badge) : null),
+      h("div", { class: "live-receive-what" }, c.what),
+      addressLines(c.address, 26),
+      copyAddress(c.address)))
+      : note(t("No wallet on this computer yet: add one in Settings › Wallets.", "На этом компьютере пока нет кошелька: добавь его в Настройках › Кошельки.")),
+    h("button", { class: "link-btn live-more", onclick: () => { ui.view = "topup"; render(); } }, icon("arrow.down.circle", 12), t("Top up: amounts, a wallet app or an exchange", "Пополнить: сумма, кошелёк или биржа")),
+  ];
+}
+
+// MARK: Saved addresses (the address book and the Wallets tab)
+
+/** Rows opened in place, by block, name and network. */
+const openRows = new Set();
+const bookKey = (e) => e.network + ":" + e.address.toLowerCase();
+
+/** An address as a row (AddressCard): its picture, name and network; a click opens the whole address with Copy and
+ * what to do with it. `own`: one of the wallet's own addresses, read-only. */
+function addressCard(e, b, { own = false } = {}) {
+  const key = b.id + ":" + (own ? "own:" : "") + e.network + ":" + e.name;
+  const open = openRows.has(key);
+  const starred = !own && ui.state.starred.includes(bookKey(e));
+  const toggle = () => { open ? openRows.delete(key) : openRows.add(key); render(); };
+  const sendPhrase = `send 10 USDC to ${e.name}` + (e.address.startsWith("0x") ? ` on ${e.network}` : "");
+  const menu = (ev) => {
+    ev.preventDefault();
+    popup(ev, [
+      ...(own ? [] : [[t("Send…", "Отправить…"), () => suggest(sendPhrase)]]),
+      [t("Ask in chat", "Спросить в чате"), () => askAbout(b)],
+      [t("Copy address", "Скопировать адрес"), () => navigator.clipboard.writeText(e.address).catch(() => {})],
+      ...(own ? [] : [null,
+        [starred ? t("Unpin from the top", "Открепить") : t("Pin to the top", "Закрепить наверху"), () => act("star", { name: e.name, network: e.network, test: !starred })],
+        [t("Delete", "Удалить"), () => act("removeAddress", { name: e.name, network: e.network })]]),
+    ]);
+  };
+  return h("div", { class: "live-addr-card" + (open ? " open" : ""), oncontextmenu: menu },
+    h("div", { class: "live-addr-row" },
+      h("button", { class: "live-addr-main", onclick: toggle, "aria-expanded": open ? "true" : "false" },
+        h("span", { class: "live-addr-pic" },
+          own ? netLogo(e.network, 30) : h("span", { class: "live-letter-disc" }, (e.name || "?").slice(0, 1).toUpperCase()),
+          own ? null : h("span", { class: "live-addr-net" }, netLogo(e.network, 14))),
+        h("span", { class: "live-addr-text" },
+          h("span", { class: "live-addr-name one-line" }, e.name),
+          h("span", { class: "live-addr-sub one-line" }, own ? t("Your wallet", "Твой кошелёк") + " · " + netName(e.network) : netName(e.network) + (e.memo ? " · memo" : ""))),
+        own ? null : h("span", { class: "live-addr-shield", title: t(`Saved with ${presence()}`, `Сохранён через ${presence()}`) }, icon("shield.check", 13)),
+        h("span", { class: "live-addr-chevron" }, icon(open ? "chevron.up" : "chevron.down", 11))),
+      own ? null : h("button", { class: "icon-btn live-star-btn" + (starred ? " on" : ""), title: starred ? t("Unpin from the top", "Открепить") : t("Pin to the top", "Закрепить наверху"),
+        onclick: () => act("star", { name: e.name, network: e.network, test: !starred }) }, icon("star", 15))),
+    open ? h("div", { class: "live-addr-details" },
+      addressLines(e.address, 32),
+      copyAddress(e.address),
+      e.memo ? h("div", { class: "live-addr-memo" }, "# ", t("Memo / tag: ", "Memo / тег: "), h("span", { class: "selectable" }, e.memo)) : null,
+      own ? null : h("div", { class: "live-addr-ok" }, icon("shield.check", 12),
+        t(`Saved with ${presence()}: money goes only to this address`, `Сохранён через ${presence()}: деньги уходят только на этот адрес`)),
+      h("div", { class: "btns" },
+        own ? h("button", { class: "btn primary small", onclick: () => { ui.view = "topup"; render(); } }, icon("arrow.down.circle", 13), t("Top up", "Пополнить"))
+          : h("button", { class: "btn primary small", title: t(`Puts «${sendPhrase}» in the chat, the amount selected`, `Кладёт «${sendPhrase}» в чат, сумма выделена`), onclick: () => suggest(sendPhrase) },
+            icon("paperplane", 13), t("Send", "Отправить")),
+        h("button", { class: "btn small", onclick: () => askAbout(b) }, icon("bubble", 13), t("Ask in chat", "Спросить в чате")),
+        own ? null : h("button", { class: "btn small live-danger", onclick: () => act("removeAddress", { name: e.name, network: e.network }) }, icon("trash", 13), t("Delete", "Удалить")))) : null);
+}
+
+/** Rows in one frame, a line between them. */
+const list = (rows) => h("div", { class: "live-list" }, rows);
+
+const networks = ["solana", "base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperliquid", "hyperevm", "robinhood", "tempo", "near",
+  "bitcoin", "tron", "xrp", "dogecoin", "zcash", "sui"];
+/** Kept across redraws while the person types; cleared after a save. */
+const addressForm = { name: "", network: "solana", address: "", memo: "" };
+
+function addressesBody(b) {
+  const form = addressForm;
+  const starred = new Set(ui.state.starred);
+  const saved = [...ui.state.book].sort((x, y) => (starred.has(bookKey(y)) - starred.has(bookKey(x))) || x.name.localeCompare(y.name));
+  return [
+    h("p", { class: "live-lead" }, t(`Money goes only to saved addresses. Saving one asks ${presence()} with the whole address on its window: check every character.`,
+      `Деньги уходят только на сохранённые адреса. Сохранение спрашивает ${presence()}, и в его окне весь адрес — сверь каждый символ.`)),
+    saved.length ? list(saved.map((e) => addressCard(e, b)))
+      : note(t("No saved addresses yet. Save an exchange's deposit address, another wallet or a friend's — with a name, so you never paste a wrong one.",
+        "Сохранённых адресов пока нет. Сохрани адрес пополнения биржи, другой кошелёк или адрес друга — с именем, чтобы никогда не вставить чужой.")),
+    section(t("Add an address", "Добавить адрес")),
+    h("div", { class: "live-addr-form" },
+      h("div", { class: "live-field-row" },
+        h("div", { class: "field" }, h("label", { for: "book-name" }, t("Name", "Имя")),
+          h("input", { id: "book-name", value: form.name, placeholder: "Bybit", oninput: (e) => (form.name = e.target.value) })),
+        h("div", { class: "field" }, h("label", { for: "book-network" }, t("Network", "Сеть")),
+          h("select", { id: "book-network", onchange: (e) => (form.network = e.target.value) }, networks.map((n) => h("option", { value: n, selected: n === form.network }, netName(n)))))),
+      h("div", { class: "field" }, h("label", { for: "book-address" }, t("Address", "Адрес")),
+        h("input", { id: "book-address", class: "address", value: form.address, autocomplete: "off", spellcheck: "false", oninput: (e) => (form.address = e.target.value.trim()) })),
+      h("div", { class: "field" }, h("label", { for: "book-memo" }, t("Memo / tag (exchanges)", "Memo / тег (для бирж)")),
+        h("input", { id: "book-memo", value: form.memo, oninput: (e) => (form.memo = e.target.value.trim()) })),
+      h("button", { class: "btn primary", onclick: async () => {
+        if (await act("saveAddress", { ...form }) !== null) {
+          Object.assign(addressForm, { name: "", address: "", memo: "" });
+          toast(t("Saved.", "Сохранено."));
+          render();
+        }
+      } }, icon("shield.check", 14), t(`Save with ${presence()}`, `Сохранить через ${presence()}`))),
+  ];
+}
+
+// MARK: History
+
+const kindIcon = (k) => ({ transfer: "arrow.up.right", send: "arrow.up.right", receive: "arrow.down.left", swap: "arrow.left.arrow.right", buy: "arrow.left.arrow.right",
+  sell: "arrow.left.arrow.right", bridge: "arrow.left.arrow.right", deposit: "building", withdraw: "arrow.down.left", order: "chart.line", sign: "signature" }[k] || "signature");
+
+function dayName(d) {
+  const today = new Date(), y = new Date(today); y.setDate(today.getDate() - 1);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  return same(d, today) ? t("Today", "Сегодня") : same(d, y) ? t("Yesterday", "Вчера") : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function historyBody() {
+  const lines = ui.state.history.slice(0, 14);
+  const rows = [];
+  lines.forEach((e, i) => {
+    const d = new Date(e.at);
+    if (i === 0 || new Date(lines[i - 1].at).toDateString() !== d.toDateString()) rows.push(h("div", { class: "live-day-head" }, dayName(d).toUpperCase()));
+    rows.push(h("div", { class: "live-hist-row" },
+      h("span", { class: "live-hist-icon" }, icon(kindIcon(e.kind), 13)),
+      h("span", { class: "live-hist-text" },
+        h("span", { class: "live-hist-note one-line" }, e.note || netName(e.chain)),
+        h("span", { class: "live-hist-sub one-line" }, d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) + " · " + netName(e.chain) + " · " + e.kind)),
+      e.link ? h("button", { class: "icon-btn", title: t("See it on the explorer", "Открыть в обозревателе"), onclick: () => openLink(e.link) }, icon("arrow.up.right.square", 15)) : null));
+  });
+  return [
+    rows.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows)
+      : note(t("Nothing signed yet. Every move from now on is listed here.", "Пока ничего не подписано. Каждое движение отсюда и дальше будет здесь.")),
+    h("button", { class: "link-btn live-more", onclick: () => { ui.view = "history"; render(); } }, icon("clock", 12), t("All history: requests, transfers, signatures", "Вся история: запросы, переводы, подписи")),
+  ];
+}
+
+// MARK: Favorites
+
+let favTab = store("favTab") || "tokens";
+let favSearch = "";
+let tokenSort = store("tokenSort") || "change";
+let tokenUp = store("tokenSortUp") === true;
+
+function favoritesBody(b) {
+  const tab = (id, ic, label) => h("button", { class: "live-seg" + (favTab === id ? " on" : ""), onclick: () => { favTab = id; store("favTab", id); render(); } }, icon(ic, 13), label);
+  return [
+    h("div", { class: "live-fav-bar" },
+      h("div", { class: "live-segmented" }, tab("tokens", "star", t("Tokens", "Токены")), tab("wallets", "wallet.pass", t("Wallets", "Кошельки"))),
+      h("input", { id: "fav-search", class: "live-search", value: favSearch, placeholder: favTab === "wallets" ? t("Search wallets", "Поиск кошельков") : t("Search tokens", "Поиск токенов"),
+        oninput: (e) => { favSearch = e.target.value; render(); } })),
+    favTab === "wallets" ? walletsTab(b) : tokensTab(b),
+  ];
+}
+
+function tokensTab(b) {
+  const q = favSearch.trim().toLowerCase();
+  const held = (f) => {
+    const n = ui.state.portfolio.networks.find((x) => x.key === f.chain);
+    const r = n?.rows.find((x) => x.symbol.toUpperCase() === f.symbol.toUpperCase());
+    return r && r.usd !== null && r.usd !== undefined ? Number(r.usd) : null;
+  };
+  const rows = ui.state.favorites.filter((f) => !q || [f.name, f.symbol, f.address, netName(f.chain)].some((x) => (x || "").toLowerCase().includes(q)))
+    .map((f) => ({ f, held: held(f) }));
+  const keyOf = (r) => ({ price: r.f.price, liquidity: r.f.liquidity, held: r.held, change: r.f.change24h }[tokenSort]);
+  if (tokenSort === "name") rows.sort((a, c) => (a.f.symbol.localeCompare(c.f.symbol)) * (tokenUp ? 1 : -1));
+  else rows.sort((a, c) => {
+    const x = keyOf(a), y = keyOf(c);
+    if (x === null || x === undefined) return 1;
+    if (y === null || y === undefined) return -1;
+    return tokenUp ? x - y : y - x;
+  });
+  if (!rows.length) {
+    return note(q ? t(`Nothing matches “${favSearch}”.`, `Ничего не нашлось по «${favSearch}».`)
+      : t("No tokens yet. Tell the chat «add 0x… to favorites»: each shows its price, its day and what you hold.",
+        "Токенов пока нет. Скажи в чате «добавь 0x… в избранное»: у каждого будет цена, изменение за день и сколько у тебя."));
+  }
+  const col = (title, key, cls) => h("button", { class: "live-col " + cls + (tokenSort === key ? " on" : ""), onclick: () => {
+    if (tokenSort === key) tokenUp = !tokenUp; else { tokenSort = key; tokenUp = key === "name"; }
+    store("tokenSort", tokenSort); store("tokenSortUp", tokenUp); render();
+  } }, title, tokenSort === key ? icon(tokenUp ? "arrow.up" : "arrow.down", 8) : null);
+  const heldSum = rows.map((r) => r.held).filter((x) => x > 0);
+  const actions = (ev, f) => popup(ev, [
+    [t(`Buy ${f.symbol}…`, `Купить ${f.symbol}…`), () => suggest(`buy 10 USDC of ${f.symbol} on ${f.chain}`)],
+    [t(`Sell ${f.symbol}…`, `Продать ${f.symbol}…`), () => suggest(`sell all ${f.symbol} on ${f.chain}`)],
+    [t("Ask in chat", "Спросить в чате"), () => suggest(t(`What about ${f.symbol} (${f.address} on ${f.chain})?`, `Что с ${f.symbol} (${f.address} в ${f.chain})?`))],
+    null,
+    [t("Copy contract", "Скопировать контракт"), () => navigator.clipboard.writeText(f.address).catch(() => {})],
+    [t("Remove from favorites", "Убрать из избранного"), () => act("removeFavorite", { wallet: f.chain + ":" + f.address.toLowerCase() })],
+  ]);
+  return [
+    h("div", { class: "live-token-table" },
+      h("div", { class: "live-token-head" }, col(t("TOKEN", "ТОКЕН"), "name", "live-c-name"), col(t("PRICE", "ЦЕНА"), "price", "live-c-price"), col(t("24 H", "24 Ч"), "change", "live-c-change"),
+        col(t("LIQUIDITY", "ЛИКВИДН."), "liquidity", "live-c-liq"), col(t("YOU HOLD", "У ТЕБЯ"), "held", "live-c-held")),
+      rows.map(({ f, held }) => h("button", { class: "live-token-row", title: `${f.name} · ${netName(f.chain)}`, onclick: (ev) => actions(ev, f), oncontextmenu: (ev) => { ev.preventDefault(); actions(ev, f); } },
+        h("span", { class: "live-c-name" }, logo(f.symbol, 26, f.image || undefined),
+          h("span", { class: "live-tok-text" }, h("b", { class: "one-line" }, f.symbol), h("span", { class: "secondary small one-line" }, netName(f.chain)))),
+        h("span", { class: "live-c-price num" }, price(f.price)),
+        h("span", { class: "live-c-change num " + (f.change24h === null || f.change24h === undefined ? "secondary" : f.change24h < 0 ? "loss" : "profit") },
+          f.change24h === null || f.change24h === undefined ? "—" : signedPct(f.change24h)),
+        h("span", { class: "live-c-liq num secondary" }, f.liquidity ? compact(f.liquidity) : "—"),
+        h("span", { class: "live-c-held num" + (held > 0 ? "" : " tertiary") }, held > 0 ? masked(usd(held)) : "—"))),
+      heldSum.length ? h("div", { class: "live-token-foot" }, h("span", { class: "secondary" }, t(`Held in ${heldSum.length} of ${rows.length}`, `Есть ${heldSum.length} из ${rows.length}`)),
+        h("b", { class: "num" }, masked(usd(heldSum.reduce((a, c) => a + c, 0))))) : null),
+    hint(t("A row: Buy, Sell, Ask in chat, Copy contract, Remove.", "Строка: купить, продать, спросить в чате, скопировать контракт, убрать."), "hand.tap"),
+  ];
+}
+
+function walletsTab(b) {
+  const a = ui.state.addresses;
+  const q = favSearch.trim().toLowerCase();
+  const starred = new Set(ui.state.starred);
+  const saved = ui.state.book.filter((e) => !q || [e.name, e.address, netName(e.network), e.memo].some((x) => (x || "").toLowerCase().includes(q)))
+    .sort((x, y) => (starred.has(bookKey(y)) - starred.has(bookKey(x))) || x.name.localeCompare(y.name));
+  const own = [
+    a.solana && { name: t("Solana · USDC and SOL", "Solana · USDC и SOL"), network: "solana", address: a.solana },
+    a.evm && { name: t("Base · USDC and ETH (same 0x as Hyperliquid)", "Base · USDC и ETH (тот же 0x, что у Hyperliquid)"), network: "base", address: a.evm },
+  ].filter(Boolean);
+  return [
+    own.length && !q ? [section(t("Your wallets · send money here to top up", "Твои кошельки · сюда отправлять пополнение")), list(own.map((e) => addressCard(e, b, { own: true })))] : null,
+    section(t("Saved addresses", "Сохранённые адреса")),
+    saved.length ? list(saved.map((e) => addressCard(e, b)))
+      : note(q ? t(`Nothing matches “${favSearch}”.`, `Ничего не нашлось по «${favSearch}».`)
+        : t("Save an exchange's deposit address, another wallet or a friend's — with a name, so you never paste a wrong one: the Address book block, or «save <address> as Bybit on base» in the chat.",
+          "Сохрани адрес пополнения биржи, другой кошелёк или адрес друга — с именем, чтобы никогда не вставить чужой: блок «Адресная книга» или «сохрани <адрес> как Bybit на base» в чате.")),
+    hint(t(`Every saved address is confirmed with ${presence()}, the whole address on the prompt, and money goes to a name only at that address — never to an address from a chat, a site or a model.`,
+      `Каждый сохранённый адрес подтверждается через ${presence()}, весь адрес в окне, и деньги уходят по имени только на этот адрес — никогда на адрес из чата, сайта или от модели.`), "lock"),
+  ];
+}
+
+// MARK: Price alerts
+
+function alertsBody() {
+  const alerts = ui.state.alerts;
+  if (!alerts.length) return note(t("No alerts: «tell me when BTC is above 120000».", "Оповещений нет: «скажи, когда BTC выше 120000»."));
+  return [
+    alerts.map((a) => {
+      const coin = (a.text.match(/^[A-Za-z0-9:]+/) || [""])[0];
+      return h("div", { class: "live-alert-chain" },
+        h("div", { class: "live-alert-step first" },
+          h("span", { class: "live-alert-badge" }, coin ? logo(coin, 32) : icon("bell", 15)),
+          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("WHEN · PRICE", "КОГДА · ЦЕНА")), h("b", {}, a.text)),
+          h("button", { class: "icon-btn", title: t("Remove the alert", "Убрать оповещение"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("trash", 14))),
+        h("div", { class: "live-alert-arrow" }, icon("arrow.down", 13)),
+        h("div", { class: "live-alert-step" },
+          h("span", { class: "live-alert-badge plain" }, icon("bell", 15)),
+          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("YOU · NOTIFICATION", "ТЫ · УВЕДОМЛЕНИЕ")), h("b", {}, t("A Windows notification", "Уведомление Windows")))));
+    }),
+    h("div", { class: "live-hint tertiary" }, t("Checked while ihatecrypto is open or in the tray. Nothing moves until you confirm it.",
+      "Проверяется, пока ihatecrypto открыт или в трее. Ничего не двигается, пока ты не подтвердишь.")),
+  ];
+}
+
+// MARK: Schedule
+
+let scheduleTab = "tasks";
+let showPaused = false;
+let walletNet = "solana";
+
+/** A run's day as a calendar leaf (DateTile): the month on a strip, orange when it's today, the day under it. */
+function dateTile(iso) {
+  if (!iso) return h("span", { class: "live-date-tile" }, h("span", { class: "live-date-icon" }, icon("calendar", 13)));
+  const d = new Date(iso), now = new Date();
+  const today = d <= now || d.toDateString() === now.toDateString();
+  return h("span", { class: "live-date-tile" },
+    h("span", { class: "live-date-month" + (today ? " today" : "") }, d.toLocaleDateString(undefined, { month: "short" }).replace(".", "").toUpperCase()),
+    h("span", { class: "live-date-day num" }, String(d.getDate())));
+}
+
+/** When it runs next, and how long until it within a day (NextLine). */
+function nextLine(x) {
+  if (x.paused) return t("paused", "на паузе");
+  if (!x.next) return "";
+  const d = new Date(x.next), now = new Date();
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+  const day = d.toDateString() === now.toDateString() ? t("Today", "Сегодня") : d.toDateString() === tomorrow.toDateString() ? t("Tomorrow", "Завтра")
+    : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const left = d - now;
+  const tail = left <= 0 ? t("any moment", "вот-вот") : left < 86_400_000
+    ? (left < 3_600_000 ? t(`in ${Math.max(1, Math.round(left / 60_000))} min`, `через ${Math.max(1, Math.round(left / 60_000))} мин`)
+      : t(`in ${Math.round(left / 3_600_000)} h`, `через ${Math.round(left / 3_600_000)} ч`)) : "";
+  return [h("b", {}, `${day} ${time}`), tail ? " · " + tail : ""];
+}
+
+/** A switch, as the Mac's mini toggle: a click only — a task that pays by itself never starts from a chat message. */
+function toggle(id, on, label, change) {
+  return h("label", { class: "live-switch", title: label },
+    h("input", { type: "checkbox", id, checked: on, "aria-label": label, onchange: (e) => change(e.target.checked) }), h("span", { class: "live-switch-track" }));
+}
+
+function taskRow(x, a) {
+  const title = x.text.replace(/ · (paused|на паузе)$/, "");
+  const mark = x.automatic
+    ? h("span", { class: "live-signer-mark", title: t("Runs by itself from ", "Идёт сама с ") + (a ? a.label : "") + t(`, no ${presence()}`, `, без ${presence()}`) }, icon("bolt", 14))
+    : h("span", { class: "live-signer-mark ask", title: t("A money move waits for Confirm", "Перевод ждёт «Подтвердить»") }, icon("hand.tap", 14));
+  return h("div", { class: "live-task-row" + (x.paused ? " paused" : "") },
+    dateTile(x.paused ? null : x.next),
+    h("span", { class: "live-task-text" }, h("span", { class: "live-task-title" }, title), h("span", { class: "live-task-next" }, nextLine(x))),
+    // Its mark, or under the pointer (always on a paused one) Delete, in the same place: nothing shifts.
+    h("span", { class: "live-task-mark" }, mark,
+      h("button", { class: "icon-btn live-task-delete", title: t("Delete it: off the schedule for good", "Удалить: из расписания насовсем"), onclick: () => act("removeTask", { wallet: x.id }) }, icon("trash", 14))),
+    toggle("task-" + x.id, !x.paused, x.paused ? t("Paused: switch on to run it again", "На паузе: включи, чтобы снова шла") : t("Switch off to pause it", "Выключи, чтобы поставить на паузу"),
+      (on) => act("taskOn", { wallet: x.id, test: on })));
+}
+
+function scheduleBody() {
+  const a = ui.state.automation;
+  const tasks = ui.state.tasks;
+  const running = tasks.filter((x) => !x.paused), paused = tasks.filter((x) => x.paused);
+  const tab = (id, label) => h("button", { class: "live-seg" + (scheduleTab === id ? " on" : ""), onclick: () => { scheduleTab = id; render(); } }, label);
+  const budget = a
+    ? h("div", { class: "live-budget" },
+      h("div", { class: "live-budget-line" }, h("span", { class: "live-budget-usd num" }, ui.state.automationUSD === null || ui.state.automationUSD === undefined ? "…" : masked(usd(ui.state.automationUSD))),
+        h("span", { class: "secondary small" }, t("budget", "бюджет"))),
+      h("div", { class: "secondary small" }, t(`${a.label} · tasks you switch on spend from it without ${presence()}, only to your own wallets and saved addresses.`,
+        `${a.label} · включённые задачи тратят с него без ${presence()}, только на твои кошельки и сохранённые адреса.`)))
+    : h("div", { class: "live-budget-ask" },
+      h("b", {}, t(`Run tasks by themselves, without ${presence()}?`, `Запускать задачи самим, без ${presence()}?`)),
+      h("span", { class: "secondary small" }, t(`An automation wallet holds the Schedule's budget and signs its tasks. Your main wallet still asks for ${presence()}.`,
+        `Кошелёк автоматизации держит бюджет расписания и подписывает его задачи. Основной кошелёк по-прежнему спрашивает ${presence()}.`)),
+      h("button", { class: "btn primary small", onclick: () => act("createAutomationWallet") }, icon("plus", 13), t("Create an automation wallet", "Создать кошелёк автоматизации")));
+  const tasksTab = [
+    running.map((x) => taskRow(x, a)),
+    !running.length ? h("div", { class: "secondary small" }, paused.length ? t("Nothing running now.", "Сейчас ничего не идёт.") : t("Nothing scheduled. Say it in the chat, in any words:", "Ничего не запланировано. Скажи в чате любыми словами:")) : null,
+    h("button", { class: "live-wide-btn", title: t("Puts a start in the chat: say what to do and when", "Кладёт начало в чат: скажи, что и когда делать"), onclick: () => suggest(t("every day at 09:00: ", "каждый день в 09:00: ")) },
+      icon("plus", 13), t("New schedule", "Новое расписание")),
+    paused.length ? [
+      h("button", { class: "live-paused-head", onclick: () => { showPaused = !showPaused; render(); } },
+        h("span", {}, t(`PAUSED · ${paused.length}`, `НА ПАУЗЕ · ${paused.length}`)), icon(showPaused ? "chevron.up" : "chevron.down", 11)),
+      showPaused ? paused.map((x) => taskRow(x, a)) : null] : null,
+    h("div", { class: "live-chips" }, [t("every week: rebalance USDC", "каждую неделю: перераспредели USDC"), t("every day at 09:00: what's moving", "каждый день в 09:00: что растёт")]
+      .map((e) => h("button", { class: "live-chip-btn", title: t("Put it in the chat", "Положить в чат"), onclick: () => suggest(e) }, icon("bubble", 11), e))),
+  ];
+  return [
+    h("div", { class: "live-sched-status secondary small" }, t("while ihatecrypto runs, in the tray too", "пока ihatecrypto работает, в трее тоже")),
+    budget,
+    h("div", { class: "live-segmented full" }, tab("tasks", t("Tasks", "Задачи")), tab("wallet", t("Wallet", "Кошелёк"))),
+    scheduleTab === "wallet" ? automationTab(a) : tasksTab,
+  ];
+}
+
+function automationTab(a) {
+  if (!a) return h("div", { class: "secondary small" }, t("No automation wallet yet: create it above, then its addresses show here.", "Кошелька автоматизации пока нет: создай его выше, и здесь появятся адреса."));
+  const places = [
+    a.solana && { key: "solana", logos: ["solana"], title: "Solana", note: t("USDC and a little SOL for fees", "USDC и немного SOL на комиссии"), address: a.solana },
+    a.evm && { key: "evm", logos: ["base", "arbitrum", "ethereum", "polygon"], title: t("EVM networks", "EVM-сети"), note: t("one address on each", "один адрес во всех"), address: a.evm },
+  ].filter(Boolean);
+  const chosen = places.find((p) => p.key === walletNet) || places[0];
+  return [
+    h("div", { class: "secondary small" }, t("Scheduled tasks pay from this wallet. Send it USDC on any of these networks:", "Задачи по расписанию платят с этого кошелька. Отправь на него USDC в любой из этих сетей:")),
+    places.map((p) => h("button", { class: "live-place-row" + (chosen === p ? " on" : ""), onclick: () => { walletNet = p.key; render(); } },
+      h("span", { class: "live-logo-stack" }, p.logos.map((k) => netLogo(k, 18))),
+      h("span", { class: "live-place-text" }, h("b", {}, p.title), h("span", { class: "secondary small" }, p.note)))),
+    chosen ? h("div", { class: "live-place-address" }, h("b", { class: "small" }, chosen.key === "evm" ? t("USDC on any EVM network", "USDC в любой EVM-сети") : t("USDC on Solana", "USDC в Solana")),
+      addressLines(chosen.address, 22), copyAddress(chosen.address)) : null,
+    h("button", { class: "live-wide-btn accent", onclick: () => suggest(`send 10 USDC to ${a.label}`) }, icon("fuelpump", 13), t("Top it up", "Пополнить")),
+    h("div", { class: "live-hint" }, t("It signs scheduled tasks only, with the same checks; its key stays under this computer's Windows Hello vault.",
+      "Он подписывает только задачи по расписанию, с теми же проверками; его ключ остаётся в хранилище Windows Hello этого компьютера.")),
+  ];
+}
+
+// MARK: Positions
+
+/** The asset's logo, or a drawn sign for markets without one (AssetBadge). */
+function assetBadge(coin, size) {
+  const ticker = coin.split(":").pop().toLowerCase();
+  const el = logo(ticker, size);
+  if (el.classList.contains("letter")) {
+    el.className = "logo live-asset-sign";
+    el.style.cssText = `width:${size}px;height:${size}px`;
+    el.replaceChildren(icon("chart.line", Math.round(size * 0.5)));
+  }
+  return el;
+}
+
+function positionsBody() {
+  const list = ui.state.positions;
+  if (!list.length) return note(t("No open positions on Hyperliquid.", "Открытых позиций на Hyperliquid нет."));
+  return list.map((x) => {
+    const name = x.coin.split(":").pop();
+    const long = x.side === "long";
+    const lost = negative(x.pnl);
+    const chip = (label, ic, phrase, cls = "") => h("button", { class: "live-pos-chip " + cls, title: t("Puts it in the chat; the chat's card waits for Confirm", "Кладёт в чат; карточка ждёт «Подтвердить»"),
+      onclick: () => suggest(phrase) }, icon(ic, 12), label);
+    return h("div", { class: "live-position" },
+      h("div", { class: "live-pos-actions" },
+        chip(t("Stop to breakeven", "Стоп в безубыток"), "shield.check", `move stop to breakeven on ${name}`, "lead"),
+        chip(t("Trailing 2%", "Трейлинг 2%"), "arrow.up.right", `trail 2% on ${name}`),
+        chip(t("Close ½", "Закрыть ½"), "minus", `close half ${name}`),
+        chip(t("Close", "Закрыть"), "xmark", `close ${name}`, "close")),
+      h("div", { class: "live-pos-card" },
+        assetBadge(x.coin, 40),
+        h("span", { class: "live-pos-text" },
+          h("b", {}, (long ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + name),
+          h("span", { class: "live-pos-sub" }, `${masked(x.size, "•••")} ${t("at", "по")} ${x.entry}` + (x.liquidation ? ` · ${t("liq.", "ликв.")} ${x.liquidation}` : ""))),
+        h("span", { class: "live-pos-pnl num " + (lost ? "loss" : "profit") }, masked(x.pnl))));
+  });
+}
+
+// MARK: Multisig
+
+/** The keyholes picture (KeyholesPicture): a lock with a hole per key, the ones that must sign lit. */
+function keyholes(total, lit, chip, done) {
+  const n = Math.max(1, Math.min(total, 8)), sp = n <= 4 ? 36 : 28, w = sp * n + 36, hgt = 66, x = 480 - w - 26, y = (100 - hgt) / 2 + 6;
+  const holes = Array.from({ length: n }, (_, i) => {
+    const cx = x + 18 + sp / 2 + sp * i;
+    const d = `M${cx - 6} ${y + 22}a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M${cx - 4} ${y + 25}L${cx + 4} ${y + 25}L${cx + 6} ${y + 44}L${cx - 6} ${y + 44}Z`;
+    return svg("path", i < lit ? { d, fill: "#12FF80" } : { d, fill: "none", stroke: "#fff", "stroke-width": "1.8" });
+  });
+  return h("div", { class: "live-keyholes" },
+    svg("svg", { viewBox: "0 0 480 100", preserveAspectRatio: "xMaxYMid meet", "aria-hidden": "true" },
+      svg("rect", { x, y, width: w, height: hgt, rx: 10, fill: "#1E211F", stroke: "#fff", "stroke-width": "2.5" }), holes),
+    h("span", { class: "live-keyholes-chip" + (done ? " done" : "") }, chip));
+}
+
+const safePrefix = (k) => ({ base: "base", arbitrum: "arb1", optimism: "oeth", ethereum: "eth", polygon: "matic", bnb: "bnb", hyperevm: "hyper", robinhood: "robinhood", tempo: "tempo" }[k] || k);
+const explorers = { base: "https://basescan.org", arbitrum: "https://arbiscan.io", ethereum: "https://etherscan.io", optimism: "https://optimistic.etherscan.io",
+  polygon: "https://polygonscan.com", bnb: "https://bscscan.com" };
+
+function keyRow(k) {
+  const where = k.kind === "pc" ? presence() : k.kind === "ledger" ? t("the Ledger's buttons", "кнопки Ledger") : t("signs in Safe's app", "подписывает в приложении Safe");
+  const here = k.kind !== "address";
+  return h("div", { class: "live-key-row" },
+    h("span", { class: "live-key-icon" }, icon(k.kind === "pc" ? "laptop" : k.kind === "ledger" ? "drive" : "iphone", 15)),
+    h("span", { class: "live-key-text" }, h("b", { class: "one-line" }, k.name), h("span", { class: "secondary small one-line" }, `${k.address.slice(0, 6)}…${k.address.slice(-4)} · ${where}`)),
+    h("span", { class: "live-key-role" + (here ? " here" : "") }, here ? t("signs here", "подписывает здесь") : t("elsewhere", "в другом месте")));
+}
+
+function multisigBody() {
+  const all = ui.state.multisigs;
+  if (!all.length) {
+    return [
+      keyholes(2, 0, t("No multisig yet", "Мультисига пока нет"), false),
+      h("p", { class: "live-lead" }, t("Its money moves only when enough of its keys sign: this computer's and your phone's or a person's.",
+        "Его деньги двигаются, только когда подпишет достаточно ключей: этого компьютера и твоего телефона или другого человека.")),
+      h("button", { class: "btn primary", onclick: () => suggest("make a multisig 2 of 2 with Phone on base") }, icon("plus", 13), t("Make a multisig", "Сделать мультисиг")),
+    ];
+  }
+  return all.map((m) => {
+    const net = m.networks[0] || "base";
+    return h("div", { class: "live-msig" },
+      keyholes(m.keys.length, m.threshold, t("Ready", "Готов"), true),
+      h("div", { class: "live-msig-body" },
+        h("div", { class: "live-msig-heading" }, h("span", { class: "live-verb" }, "MULTISIG"), h("span", { class: "live-dot" }), h("span", { class: "live-safe-s" }, "S"),
+          h("b", {}, t(`Safe · any ${m.threshold} of ${m.keys.length} keys`, `Safe · любые ${m.threshold} из ${m.keys.length} ключей`))),
+        addressLines(m.address, 22), copyAddress(m.address),
+        section(t("By network · same address", "По сетям · один адрес")),
+        m.networks.map((k) => h("div", { class: "live-net-row" }, netLogo(k, 22), h("b", {}, netName(k)), h("span", { class: "spacer" }),
+          explorers[k] ? h("button", { class: "icon-btn", title: t("Its history on the explorer", "История в обозревателе"), onclick: () => openLink(`${explorers[k]}/address/${m.address}`) }, icon("arrow.up.right.square", 14)) : null)),
+        section(t(`Keys · any ${m.threshold} of ${m.keys.length} move money`, `Ключи · любые ${m.threshold} из ${m.keys.length} двигают деньги`)),
+        m.keys.map(keyRow),
+        h("div", { class: "btns" },
+          h("button", { class: "btn live-dark", onclick: () => suggest(`send 1 USDC from the multisig to Alex on ${net}`) }, icon("arrow.up", 13), t("Send", "Отправить")),
+          h("button", { class: "btn", onclick: () => suggest(`send 10 USDC on ${net} to Multisig`) }, icon("arrow.down", 13), t("Put money in", "Положить деньги")),
+          h("button", { class: "btn", onclick: () => openLink(`https://app.safe.global/home?safe=${safePrefix(net)}:${m.address}`) }, icon("arrow.up.right.square", 13), t("Open in Safe", "Открыть в Safe"))),
+        h("div", { class: "live-hint" }, t("Its keys and how many must sign change only with that many signatures, in Safe's own app for now.",
+          "Ключи и сколько должно подписать меняются только таким же числом подписей, пока в приложении Safe."))));
+  });
+}
+
+// MARK: Ledger
+
+/** The Ledger drawn small (LedgerGlyph). */
+function ledgerGlyph(size = 30) {
+  return svg("svg", { viewBox: "0 0 30 15", width: size, height: size / 2, class: "live-ledger-glyph", "aria-hidden": "true" },
+    svg("rect", { x: 0, y: 1.2, width: 30, height: 12.6, rx: 4.8, fill: "currentColor" }),
+    svg("rect", { x: 3, y: 4.5, width: 12.6, height: 6, rx: 1.5, fill: "#FF7A2F" }),
+    svg("circle", { cx: 23.7, cy: 7.5, r: 4.4, fill: "none", stroke: "var(--card)", "stroke-opacity": "0.5", "stroke-width": "1.5" }));
+}
+
+function ledgerBody() {
+  const c = ui.state.ledgerConnect;
+  const w = ui.state.wallets.find((x) => x.kind === "ledger");
+  const on = ui.state.active === "ledger";
+  const busy = c?.busy === true;
+  const evm = c?.evm || w?.evm, solana = c?.solana || w?.solana;
+  const step = (label, value, done, solanaApp) => h("div", { class: "live-ledger-step" + (done ? " done" : "") },
+    icon(done ? "checkmark.circle" : "circle.dotted", 17),
+    h("span", { class: "live-ledger-step-text" }, h("span", { class: "live-alert-label" }, label),
+      value ? (solanaApp === undefined ? h("b", {}, value) : addressLines(value, 26)) : h("span", { class: "secondary" }, "—"),
+      done && solanaApp !== undefined && !busy ? h("div", { class: "btns" }, copyAddress(value),
+        h("button", { class: "btn small", title: t("The Ledger shows this address on its own screen, to compare", "Ledger покажет этот адрес на своём экране — сверь"),
+          onclick: () => act("showOnLedger", { test: solanaApp }) }, t("Show on Ledger", "Показать на Ledger"))) : null));
+  if (!c && !w) {
+    return [
+      h("div", { class: "live-ledger-title" }, ledgerGlyph(34)),
+      h("p", { class: "live-lead" }, t("Plug it in over USB or turn on Bluetooth, and unlock it. ihatecrypto reads one address from its Ethereum app and one from its Solana app; every move is then shown on its screen and approved with its buttons.",
+        "Подключи его по USB или включи Bluetooth и разблокируй. ihatecrypto прочитает по адресу из приложений Ethereum и Solana; дальше каждое движение показывается на его экране и подтверждается его кнопками.")),
+      h("button", { class: "btn primary", onclick: () => act("connectLedger") }, t("Connect a Ledger", "Подключить Ledger")),
+      ledgerFoot(),
+    ];
+  }
+  return [
+    step(t("USB OR BLUETOOTH", "USB ИЛИ BLUETOOTH"), c?.model ? t(`${c.model} found`, `${c.model} найден`) : w ? t("Saved", "Сохранён") : null, !!(c?.model || w)),
+    step(t("ETHEREUM APP · EVM", "ПРИЛОЖЕНИЕ ETHEREUM · EVM"), evm, !!evm, false),
+    step(t("SOLANA APP", "ПРИЛОЖЕНИЕ SOLANA"), solana, !!solana, true),
+    c ? h("div", { class: "live-ledger-status" + (busy ? "" : " done") }, icon(busy ? "hand.tap" : "checkmark.seal", 14), h("span", {}, ui.state.signer.ledger || c.status)) : null,
+    c?.problem ? h("div", { class: "live-ledger-problem" }, icon("exclamationmark.triangle", 14), h("span", {}, c.problem),
+      h("button", { class: "btn small", onclick: () => act("connectLedger") }, t("Try again", "Ещё раз"))) : null,
+    (c?.notes || []).map((n) => h("div", { class: "live-ledger-note" }, icon("gear", 13), h("span", {}, n))),
+    w && !busy ? h("div", { class: "btns" },
+      on ? h("span", { class: "live-ledger-on" }, icon("check", 13), t("It signs every move now", "Подписывает каждое движение"))
+        : h("button", { class: "btn primary", onclick: () => act("switchWallet", { wallet: "ledger" }) }, icon("signature", 14), t("Sign with Ledger", "Подписывать через Ledger")),
+      h("button", { class: "btn", onclick: () => act("connectLedger") }, t("Connect again", "Подключить снова")),
+      h("button", { class: "btn", onclick: () => act("removeWallet", { wallet: "ledger" }) }, t("Forget", "Забыть"))) : null,
+    ledgerFoot(),
+  ];
+}
+
+const ledgerFoot = () => h("div", { class: "live-hint" }, t("The keys never leave the Ledger. ihatecrypto checks every move first — only your own addresses, no unlimited approvals — then the Ledger shows it, and nothing is signed until you approve it on the device.",
+  "Ключи никогда не покидают Ledger. ihatecrypto сначала проверяет каждое движение — только твои адреса, никаких безлимитных разрешений, — потом Ledger показывает его, и ничего не подписывается, пока ты не подтвердишь на устройстве."));
