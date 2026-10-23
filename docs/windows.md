@@ -183,3 +183,10 @@ the key can't be shown to be in the TPM: a software TPM can't attest it, a real 
 Hello's dialog opening behind the window, the signer's details covering the dialog's title or cut short, a white browser
 window, a window taller than a small screen, a false «threads' rule» note. Still to check on a real PC: a move (5), the
 mic (8), a site's page refused `engine_send` (9), a Ledger (10) and the automation wallet (11).
+
+The Studio window on the same machine, 2026-10-23: WebView2 draws it as the preview does (the glass, the dots, Onest,
+the logos); the caption buttons minimize, maximize and restore, a double click on the top strip maximizes; on its
+800×600 screen the rail folds by itself and the window and the browser open maximized; the browser's toolbar shows the
+site's check and the wallet over app.hyperliquid.xyz. What that run fixed: the folded rail's Profile below a short
+window's edge, the toolbar never hearing a state (it looked for «event» at the start of the line, where Windows'
+encoder needn't put it), and the toolbar's address empty while a page is still loading.

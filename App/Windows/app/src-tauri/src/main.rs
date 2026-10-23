@@ -33,6 +33,9 @@ struct BrowserPage {
     bar: f64,
     wallet: Option<String>,
     russian: bool,
+    /// The address last opened: what the toolbar shows while WebView2 still says about:blank (loading, or a site that
+    /// doesn't answer).
+    asked: Option<tauri::Url>,
 }
 
 /// The browser: one window, our toolbar page on top (webview «browser-bar») and the site under it (webview «browser»).
@@ -81,8 +84,8 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                 }
             }
             // The toolbar shows the active wallet and, after a Confirm on the canvas, that the site is connected: each
-            // state tells it to look again.
-            if line.starts_with("{\"event\":\"state\"") {
+            // state tells it to look again. Anywhere in the line: the engine's encoder on Windows needn't put «event» first.
+            if line.contains("\"event\":\"state\"") {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if let Some(engine) = handle.try_state::<Engine>() {
                         if let Ok(mut page) = engine.browser.lock() {
@@ -99,7 +102,7 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
             // A site's request is on the canvas: the main window comes forward to show it.
             if line.contains("\"event\":\"showMain\"") { show(&handle); }
             // The signer is about to ask Windows Hello: only the window in front may let it come forward.
-            if line.starts_with("{\"event\":\"signerForeground\"") || line.contains("\"event\":\"signerForeground\"") {
+            if line.contains("\"event\":\"signerForeground\"") {
                 if let Some(pid) = serde_json::from_str::<serde_json::Value>(&line).ok()
                     .and_then(|v| v["data"]["pid"].as_str().and_then(|p| p.parse::<u32>().ok())) {
                     allow_foreground(pid);
@@ -217,6 +220,9 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
 #[tauri::command]
 async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
     let url = site_url(&url)?;
+    if let Some(engine) = app.try_state::<Engine>() {
+        if let Ok(mut page) = engine.browser.lock() { page.asked = Some(url.clone()); }
+    }
     if let Some(site) = app.get_webview(SITE) {
         // The same page again only comes forward; another one opens in it.
         if site.url().map(|u| u != url).unwrap_or(true) { site.navigate(url).map_err(|e| e.to_string())?; }
@@ -236,6 +242,7 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
         .min_inner_size(640.0, 420.0)
         .build()
         .map_err(|e| e.to_string())?;
+    if !has_room(&window, 1180.0, 800.0) { let _ = window.maximize(); }
     let size = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(window.scale_factor().map_err(|e| e.to_string())?);
     let bar = tauri::webview::WebviewBuilder::new(BAR, tauri::WebviewUrl::App("browser-bar.html".into()));
     window.add_child(bar, tauri::LogicalPosition::new(0.0, TOP), tauri::LogicalSize::new(size.width, BAR_HEIGHT)).map_err(|e| e.to_string())?;
@@ -261,6 +268,13 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Whether the window's screen fits it with the taskbar and some margin; a small laptop or a VM opens it maximized.
+fn has_room(window: &tauri::Window, width: f64, height: f64) -> bool {
+    let Ok(Some(monitor)) = window.current_monitor() else { return true };
+    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    size.width >= width + 80.0 && size.height >= height + 80.0
+}
+
 /// The toolbar across the top at its own height, the site in the rest: on every resize and change of scale.
 fn layout_browser(window: &tauri::Window) {
     let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
@@ -283,7 +297,11 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
         "forward" => site.eval("history.forward()"),
         "reload" => site.reload(),
         "stop" => site.eval("window.stop()"),
-        "open" => site.navigate(site_url(url.as_deref().unwrap_or(""))?),
+        "open" => {
+            let url = site_url(url.as_deref().unwrap_or(""))?;
+            if let Ok(mut page) = state.browser.lock() { page.asked = Some(url.clone()); }
+            site.navigate(url)
+        }
         "disconnect" => {
             let origin = origin_of(&site.url().map_err(|e| e.to_string())?).ok_or("Not an https site.")?;
             let line = serde_json::json!({ "op": "dapp", "name": "disconnect", "text": "{\"everywhere\":true}", "address": origin });
@@ -301,9 +319,10 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
 async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>) -> Result<serde_json::Value, String> {
     if webview.label() != BAR { return Err("only the browser's toolbar".into()) }
     let site = webview.app_handle().get_webview(SITE).ok_or("No page is open.")?;
-    let url = site.url().map_err(|e| e.to_string())?;
+    let mut url = site.url().map_err(|e| e.to_string())?;
     let mut out = {
         let page = state.browser.lock().map_err(|_| "the engine is gone")?;
+        if url.scheme() != "https" { if let Some(asked) = &page.asked { url = asked.clone(); } }
         serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "russian": page.russian,
                             "connected": false, "check": "local", "real": null, "blocked": false })
     };
@@ -526,10 +545,7 @@ fn main() {
             // The Mac's size (1320×860). A screen without room for it (a small laptop, a VM): it opens maximized instead of reaching under
             // the taskbar.
             if let Some(window) = app.get_webview_window("main") {
-                if let Ok(Some(monitor)) = window.current_monitor() {
-                    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-                    if size.width < 1400.0 || size.height < 940.0 { let _ = window.maximize(); }
-                }
+                if !has_room(&window.as_ref().window(), 1320.0, 860.0) { let _ = window.maximize(); }
             }
             Ok(())
         })

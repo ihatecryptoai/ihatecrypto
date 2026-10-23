@@ -239,3 +239,11 @@
   .rail-narrow .rail-round-title { display: none; }
   .rail-narrow { gap: 6px; }
 }
+/* A very short window (a small laptop at 150%, a VM): smaller discs and gaps, so Profile at the bottom still shows. */
+@media (max-height: 660px) {
+  .rail-narrow { gap: 4px; padding-bottom: 8px; }
+  .rail-narrow .rail-round .disc { width: 36px; height: 36px; }
+  .rail-narrow .rail-round-stack { gap: 4px; }
+  .rail-coin { gap: 4px; padding: 2px 0; }
+  .rail-coin .mascot { width: 28px; height: 28px; }
+}
