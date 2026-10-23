@@ -10,7 +10,6 @@
     "core:event:allow-unlisten",
     "allow-page-nav",
     "allow-page-state",
-    "allow-page-layout",
-    "allow-focus-me"
+    "allow-page-layout"
   ]
 }

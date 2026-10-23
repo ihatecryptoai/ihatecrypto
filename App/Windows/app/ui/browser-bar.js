@@ -12,7 +12,6 @@ addIcons({
 const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 // WebView2 gives a page beside another webview no keyboard on a click: ask the app to move it here when it isn't.
-addEventListener("pointerdown", () => { if (!document.hasFocus()) invoke("focus_me").catch(() => {}); }, true);
 const bar = document.getElementById("bar");
 
 /** The toolbar's last answer from the app, and the address being typed (kept while the field has focus). */
@@ -25,8 +24,10 @@ const field = h("input", {
     if (e.key === "Enter" && field.value.trim()) go("open", field.value.trim());
     if (e.key === "Escape") { field.value = s?.url || ""; field.blur(); }
   },
-  onfocus: () => field.select(),
+  // A redraw puts the focus back (below): only a real click selects the whole address.
+  onfocus: () => { if (!refocusing) field.select(); },
 });
+let refocusing = false;
 
 async function go(action, url) {
   error = "";
@@ -49,6 +50,9 @@ function badge(check, real) {
 }
 
 function draw() {
+  // The field moves into the new row below, and moving it out of the page drops its focus: a redraw while typing (a
+  // site's loads and titles come often) would lose what's typed. Read it before anything moves, put it back after.
+  const typing = document.activeElement === field, from = field.selectionStart, to = field.selectionEnd;
   const host = s?.blockedHost || (() => { try { return new URL(s.url).host; } catch { return ""; } })();
   if (s && document.activeElement !== field) field.value = s.url === "about:blank" ? "" : s.url;
   field.placeholder = t("Site address", "Адрес сайта");
@@ -77,6 +81,12 @@ function draw() {
       `${host} в списке фишинговых сайтов MetaMask, поэтому ihatecrypto его не открыл и не даёт ему кошелёк. Если ты вводил адрес сам, сверь его по буквам.`)) : null;
   const problem = error || (s?.blocked ? "" : loadError(s?.error));
   bar.replaceChildren(...[row, blocked, problem ? h("div", { class: "load-error" }, problem) : null].filter(Boolean));
+  if (typing && document.activeElement !== field) {
+    refocusing = true;
+    field.focus({ preventScroll: true });
+    try { field.setSelectionRange(from, to); } catch {}
+    refocusing = false;
+  }
 }
 
 let timer = null;

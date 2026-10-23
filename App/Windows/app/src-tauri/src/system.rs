@@ -261,14 +261,6 @@ pub fn open_notification_settings(webview: tauri::Webview) -> Result<(), String>
 /// Started at login (`--hidden`): the window stays in the tray until it's opened.
 pub fn started_hidden() -> bool { std::env::args().any(|a| a == "--hidden") }
 
-/// A click in one of the pages added beside another webview (the browser's toolbar, the panel's header and page, the
-/// main page under them): WebView2 doesn't move the keyboard to a child webview by itself. Only that page, itself.
-#[tauri::command]
-pub fn focus_me(webview: tauri::Webview) -> Result<(), String> {
-    if ![crate::BAR, crate::web::PANEL_BAR, crate::web::PANEL, "main"].contains(&webview.label()) { return Err("not one of ihatecrypto's pages".into()) }
-    webview.set_focus().map_err(|e| e.to_string())
-}
-
 /// The lock came down (the engine's `locked`): the dApp browser and the page beside the chat close, as the Mac closes
 /// its browser and import windows on lock — nothing of the wallet stays on screen behind the lock.
 pub fn locked(app: &tauri::AppHandle) {

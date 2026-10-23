@@ -76,7 +76,9 @@ function frame(pull = { x: 0, y: 0 }, width = place.width) {
   const r = room();
   const w = Math.min(width, maxWidth());
   const full = Math.max(200, r.h - 16 - TOP);
-  const small = Math.min(full, Math.max(260, r.h * 0.5));
+  // The Mac's half of the canvas, but never so short that the field and its chips fall off a small screen (a 768-line
+  // laptop at 150%, a VM): the Mac's window is never that short.
+  const small = Math.min(full, Math.max(360, r.h * 0.5));
   const hgt = place.full ? full : small;
   const clamp = (v, span) => Math.min(0, Math.max(-span, v));
   const x = clamp(place.x + pull.x, Math.max(0, r.w - w - 32));

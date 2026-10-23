@@ -539,8 +539,12 @@ final class Engine {
         } catch {
             out.answer(r.id, ok: false, error: error.localizedDescription)
         }
-        changed()
+        // A question that only reads changes nothing: a new state after it would make the browser's toolbar ask again
+        // (each state redraws it, and a redraw asks siteState), six times a second, dropping what's being typed.
+        if !Self.answersOnly.contains(r.op) { changed() }
     }
+
+    static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded"]
 
     private func run(_ r: Request) async throws -> [String: String] {
         if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }

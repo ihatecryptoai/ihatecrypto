@@ -10,7 +10,6 @@
     "core:event:allow-unlisten",
     "allow-browser-nav",
     "allow-browser-state",
-    "allow-browser-layout",
-    "allow-focus-me"
+    "allow-browser-layout"
   ]
 }

@@ -24,7 +24,6 @@
     "allow-hide-main",
     "allow-quit-app",
     "allow-open-notification-settings",
-    "allow-focus-me",
     "allow-listen-live",
     "allow-listen-stop"
   ]

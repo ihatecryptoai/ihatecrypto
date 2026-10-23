@@ -9,7 +9,6 @@
     return method === 'eth' ? r : JSON.parse(r);
   };
   // WebView2 gives a page beside another webview no keyboard on a click: the app moves it here when it isn't.
-  addEventListener('pointerdown', () => { if (!document.hasFocus()) window.__TAURI_INTERNALS__.invoke('dapp_call', { method: 'focus', params: null }).catch(() => {}); }, true);
   const toB64 = (bytes) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); };
   const fromB64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
   const listeners = { change: [] };

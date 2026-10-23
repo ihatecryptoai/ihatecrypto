@@ -18,4 +18,3 @@ document.addEventListener("keydown", (e) => {
 });
 
 // With the page panel open beside the chat, the keyboard stays in it until moved back (WebView2's child webviews).
-addEventListener("pointerdown", () => { if (!document.hasFocus()) invoke("focus_me").catch(() => {}); }, true);

@@ -480,7 +480,6 @@ fn browser_layout(webview: tauri::Webview, state: tauri::State<'_, Engine>, heig
 async fn dapp_call(webview: tauri::Webview, state: tauri::State<'_, Engine>, method: String, params: serde_json::Value) -> Result<String, String> {
     if webview.label() != SITE { return Err("only the browser's pages".into()) }
     // A click in the page while the toolbar had the keyboard (provider.js): answered here, never by the engine.
-    if method == "focus" { webview.set_focus().map_err(|e| e.to_string())?; return Ok("null".into()) }
     const METHODS: [&str; 6] = ["connect", "disconnect", "signMessage", "signTransaction", "signAndSendTransaction", "eth"];
     if !METHODS.contains(&method.as_str()) { return Err(format!("ihatecrypto doesn't support {method}.")) }
     let origin = origin_of(&webview.url().map_err(|e| e.to_string())?).ok_or("only https sites get the wallet")?;
@@ -742,7 +741,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen, open_browser, dapp_call,
             browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout,
             system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::hide_main, system::quit_app,
-            system::open_notification_settings, system::focus_me, listen_live, listen_stop])
+            system::open_notification_settings, listen_live, listen_stop])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {
