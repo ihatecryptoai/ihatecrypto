@@ -3,7 +3,7 @@
 // the wheel (or a pinch) to zoom about the pointer; the zoom pill at the bottom left, «Add block» at the top right.
 
 import { ui, h, act, icon, addIcons, t, store, render, suggest, logo, mascot } from "./core.js";
-import { portfolioFrame } from "./portfolio.js";
+import { portfolioFrame, placeDetail } from "./portfolio.js";
 import { planColumn } from "./boards.js";
 import { chatPanel } from "./chat.js";
 import { railEdge } from "./rail.js";
@@ -93,7 +93,8 @@ let listening = false;
 
 export function canvasView() {
   camera();
-  world = h("div", { class: "world" }, h("div", { class: "world-row" }, portfolioFrame(), planColumn()));
+  // A place opened from the portfolio is its own block above the plan, covering nothing (StudioCanvas.plan).
+  world = h("div", { class: "world" }, h("div", { class: "world-row" }, portfolioFrame(), h("div", { class: "cv-plan" }, placeDetail(), planColumn())));
   percent = h("span", { class: "zoom-percent num" });
   const surface = h("div", { class: "canvas" },
     world,
@@ -119,20 +120,52 @@ export function canvasView() {
 /** − 80% + Fit, in a glass capsule beside the rail (CanvasHost's zoom bar). A step, not animated. */
 function zoomPill() {
   return h("div", { class: "zoom-pill glass", style: `left:${railEdge() + 18}px` },
-    h("button", { class: "zoom-glyph", title: t("Zoom out · or Ctrl + wheel", "Отдалить · или Ctrl + колесо"), onclick: () => setZoom(cam.z - 0.1) }, icon("minus", 13)),
+    h("button", { class: "zoom-glyph", title: t("Zoom out · or pinch, or Ctrl + wheel", "Отдалить · или щипок, или Ctrl + колесо"), onclick: () => setZoom(cam.z - 0.1) }, icon("minus", 13)),
     percent,
-    h("button", { class: "zoom-glyph", title: t("Zoom in · or Ctrl + wheel", "Приблизить · или Ctrl + колесо"), onclick: () => setZoom(cam.z + 0.1) }, icon("plus", 13)),
+    h("button", { class: "zoom-glyph", title: t("Zoom in · or pinch, or Ctrl + wheel", "Приблизить · или щипок, или Ctrl + колесо"), onclick: () => setZoom(cam.z + 0.1) }, icon("plus", 13)),
     h("button", { class: "zoom-fit", title: t("100 % and back to the start", "100 % и к началу"), onclick: fitHome }, t("Fit", "Вписать")));
 }
 
 /** Drag anywhere that isn't a control to move the canvas (past 6 points, so a click stays a click); the wheel moves it,
  * Ctrl + wheel and a touchpad's pinch zoom about the pointer. What scrolls by itself (the chat, a long list) keeps its wheel. */
 function wire(surface) {
+  const touches = new Map();
+  let pinch = null;
+  const middle = () => { const [a, b] = [...touches.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) }; };
+  surface.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { pinch = middle(); ui.dragging = true; }
+  });
+  // On the surface, not the window: a touch is captured by where it began, so its moves come here, and a redraw drops
+  // these with the old surface instead of piling them up.
+  surface.addEventListener("pointermove", (e) => {
+    if (!touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch || touches.size !== 2) return;
+    const now = middle(), r = surface.getBoundingClientRect();
+    cam.x += now.x - pinch.x;
+    cam.y += now.y - pinch.y;
+    if (pinch.d > 0 && now.d > 0) zoomAbout(now.x - r.left - railEdge(), now.y - r.top, now.d / pinch.d);
+    else place();
+    pinch = now;
+  });
+  const lift = (e) => {
+    if (!touches.delete(e.pointerId) || touches.size >= 2 || !pinch) return;
+    pinch = null;
+    ui.dragging = false;
+    saveCam();
+    if (ui.renderWaiting) { ui.renderWaiting = false; render(); }
+  };
+  surface.addEventListener("pointerup", lift);
+  surface.addEventListener("pointercancel", lift);
   surface.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || e.target.closest("button, a, input, textarea, select, label, [contenteditable], .chat-panel, .blocks-panel, .zoom-pill, .add-block, .selectable, .address, [data-no-pan]")) return;
     const start = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
     let panning = false;
     const move = (ev) => {
+      // A second finger makes it a pinch, which moves the canvas itself.
+      if (pinch) return;
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!panning) {
         if (Math.hypot(dx, dy) < 6) return;
@@ -164,7 +197,8 @@ function wire(surface) {
     window.addEventListener("pointercancel", up);
   });
   surface.addEventListener("wheel", (e) => {
-    if (e.target.closest(".chat-panel, .blocks-panel") || scrollsItself(e.target, surface, e)) return;
+    if (e.ctrlKey && e.target.closest(".chat-panel, .blocks-panel")) { e.preventDefault(); return; }
+    if (!e.ctrlKey && (e.target.closest(".chat-panel, .blocks-panel") || scrollsItself(e.target, surface, e))) return;
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
     if (e.ctrlKey || e.metaKey) {

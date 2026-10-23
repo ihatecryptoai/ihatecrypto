@@ -225,9 +225,10 @@ extension Engine {
             reply(say("Jupiter doesn’t know the token \(mint), so there’s no route to trade it — nothing moved.", "Jupiter не знает токен \(mint) — ничего не ушло."), note: note)
             return nil
         }
-        // Safe search stays on in the Windows app: Jupiter-verified tokens only.
-        guard t.verified else {
-            reply(say("Jupiter hasn’t verified \(t.name) (\(t.symbol)), so ihatecrypto won’t buy it.", "Jupiter не проверял \(t.name) (\(t.symbol)), поэтому ihatecrypto его не купит."), note: note)
+        // Safe search on (Settings › Trading agent): Jupiter-verified tokens only.
+        guard !safeSearch || t.verified else {
+            reply(say("Safe search is on, and Jupiter hasn’t verified \(t.name) (\(t.symbol)), so ihatecrypto won’t buy it. To trade an unverified token by its mint, turn Safe search off in Settings › Trading agent.",
+                      "Включён безопасный поиск, а Jupiter не проверял \(t.name) (\(t.symbol)), поэтому ihatecrypto его не купит. Чтобы торговать непроверенным токеном по mint-адресу, выключи безопасный поиск в Настройках › Торговый агент."), note: note)
             return nil
         }
         let warnings = t.warnings(russian: russian)
@@ -397,7 +398,9 @@ extension Engine {
         intent = next
         if markets.isEmpty { markets = (try? await Hyperliquid.markets()) ?? [:] }
         let market = markets[next.asset]
-        let evaluation = Plan.evaluate(next, market: market)
+        // What «by the book» leaves to the rules is filled in first (Settings › Trading agent), as the Mac plans it.
+        let resolved = await resolved(next, market: market)
+        let evaluation = Plan.evaluate(resolved.intent, market: resolved.market)
         if let problem = evaluation.problem { reply((said.isEmpty ? "" : said + " ") + problem, note: note); return }
         if !evaluation.missing.isEmpty {
             reply((said.isEmpty ? "" : said + " ") + say("The plan needs: ", "Для плана нужно: ") + evaluation.missing.joined(separator: ", ") + ".", note: note)
@@ -408,7 +411,7 @@ extension Engine {
         var warnings: [String] = []
         if let market, let sizing = evaluation.sizing, let why = Plan.moneyProblem(named: next, sizing: sizing, market: market) { warnings.append(why) }
         do {
-            let p = try await executor().prepare(next)
+            let p = try await executor().prepare(next, policy: policy)
             if warnings.isEmpty, secondCheck, let review = await reviewPlan(next, p) { warnings.append(review) }
             show(.trade(p), title: "\(next.side == .long ? "Long" : "Short") \(IntentParser.pretty(next.asset))",
                  lines: p.steps + p.changes, warnings: warnings)
@@ -521,7 +524,7 @@ extension Engine {
             case .transfer(let entry, let amount):
                 reply(try await transfer(amount, to: entry), note: "transfer")
                 recordFlow(-amount, "sent to \(entry.name)")
-            case .position(let command, let coin): reply(try await executor().manage(command, asset: coin), note: "Hyperliquid")
+            case .position(let command, let coin): reply(try await executor().manage(command, asset: coin, policy: policy, equity: ruleEquity), note: "Hyperliquid")
             case .trade(let p):
                 guard p.isFresh else {
                     // The bridge transaction's blockhash is about to expire: fresh numbers, asked again.
@@ -678,8 +681,8 @@ extension Engine {
         case .solanaTo(let place, let amount): reply(try await e.solanaToEVM(try net(place), usdc: amount ?? 0), note: "Relay · Solana → \(place)")
         case .buyStock(let symbol, let usdc): reply(try await e.buyStock(symbol, usdc: usdc ?? 0), note: "Robinhood Chain · Uniswap")
         case .sellStock(let symbol, let amount): reply(try await e.sellStock(symbol, amount: amount), note: "Robinhood Chain · Uniswap")
-        case .buyOn(let place, let token, let usdc, let from): reply(try await e.buyOn(try net(place), token, usdc: usdc ?? 0, from: from), note: place)
-        case .sellOn(let place, let token, let amount, let keep): reply(try await e.sellOn(try net(place), token, amount: amount, keep: keep), note: place)
+        case .buyOn(let place, let token, let usdc, let from): reply(try await e.buyOn(try net(place), token, usdc: usdc ?? 0, prefer: takeWay(place, token), from: from), note: place)
+        case .sellOn(let place, let token, let amount, let keep): reply(try await e.sellOn(try net(place), token, amount: amount, prefer: takeWay(place, token), keep: keep), note: place)
         case .hlSpotBuy(let symbol, let usdc): reply(try await e.hlSpot(buy: true, symbol: symbol, usdc: usdc, amount: nil), note: "Hyperliquid · spot")
         case .hlSpotSell(let symbol, let amount): reply(try await e.hlSpot(buy: false, symbol: symbol, usdc: nil, amount: amount), note: "Hyperliquid · spot")
         case .revokeApproval(let place, let token, let spender, let permit2):

@@ -21,6 +21,7 @@ extension Engine {
             guard reply.ok else { throw WalletError(LinkTradeSigner.reason(reply)) }
             status = reply
             signerError = nil
+            await readLedgerAgent()
         } catch {
             signerError = error.localizedDescription
         }

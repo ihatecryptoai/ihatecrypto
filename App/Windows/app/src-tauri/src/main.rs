@@ -6,7 +6,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc;
@@ -20,6 +20,9 @@ struct Engine {
     dapp: Mutex<HashMap<i64, mpsc::Sender<String>>>,
     next: AtomicI64,
     browser: Mutex<BrowserPage>,
+    /// The page beside the canvas (web.rs), and where its panel sits.
+    side: Mutex<BrowserPage>,
+    panel: Mutex<web::PanelPlace>,
 }
 
 const DAPP_IDS: i64 = 1_000_000_000;
@@ -36,6 +39,15 @@ struct BrowserPage {
     /// The address last opened: what the toolbar shows while WebView2 still says about:blank (loading, or a site that
     /// doesn't answer).
     asked: Option<tauri::Url>,
+    /// WebView2's own word on the history, a page's pushState included (web.rs); off Windows both stay on, as the Mac's
+    /// Back is.
+    back: bool,
+    forward: bool,
+    /// Why the last page didn't load («timeout», «name», «connect», «certificate», «crashed», «other:N»).
+    error: Option<String>,
+    /// A host on MetaMask's phishing list the browser didn't open, and the hosts it has refused this run.
+    blocked: Option<String>,
+    refused: HashSet<String>,
 }
 
 /// The browser: one window, our toolbar page on top (webview «browser-bar») and the site under it (webview «browser»).
@@ -95,9 +107,16 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                                 else { a["solana"].as_str().or(a["evm"].as_str()).map(short) };
                             page.russian = v["data"]["russian"].as_bool() == Some(true);
                         }
+                        if let Ok(mut side) = engine.side.lock() { side.russian = v["data"]["russian"].as_bool() == Some(true); }
                     }
                 }
                 if handle.get_webview(BAR).is_some() { let _ = handle.emit_to(EventTarget::webview(BAR), "browser", ()); }
+            }
+            // «open jup.ag» in the chat: the site in the browser, as the Mac's chat opens it.
+            if line.contains("\"event\":\"openSite\"") {
+                if let Some(url) = serde_json::from_str::<serde_json::Value>(&line).ok().and_then(|v| v["data"]["url"].as_str().map(String::from)) {
+                    tauri::async_runtime::spawn(open_browser(handle.clone(), url));
+                }
             }
             // A site's request is on the canvas: the main window comes forward to show it.
             if line.contains("\"event\":\"showMain\"") { show(&handle); }
@@ -124,7 +143,8 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
         let _ = handle.emit_to("main", "engine", "{\"event\":\"engineStopped\",\"data\":{}}");
     });
     Ok(Engine { input: Mutex::new(input), child: Mutex::new(child), dapp: Mutex::new(HashMap::new()), next: AtomicI64::new(DAPP_IDS),
-                browser: Mutex::new(BrowserPage { bar: BAR_HEIGHT, ..Default::default() }) })
+                browser: Mutex::new(BrowserPage { bar: BAR_HEIGHT, ..Default::default() }), side: Mutex::new(BrowserPage::default()),
+                panel: Mutex::new(web::PanelPlace::default()) })
 }
 
 /// «HAgk…Kpqk».
@@ -135,21 +155,57 @@ fn short(address: &str) -> String {
 }
 
 /// A request of the app's own to the engine (the browser's, never a page's line), answered by its id.
-async fn engine_call(state: &Engine, mut request: serde_json::Value, wait: std::time::Duration) -> Result<serde_json::Value, String> {
+async fn engine_call(state: &Engine, request: serde_json::Value, wait: std::time::Duration) -> Result<serde_json::Value, String> {
+    let (id, rx) = engine_ask(state, request)?;
+    let answer = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(wait)).await.map_err(|e| e.to_string())?;
+    engine_answer(state, id, answer.ok())
+}
+
+/// The same, waiting on this thread: only for a short wait (the browser asks before a page starts).
+fn engine_call_now(state: &Engine, request: serde_json::Value, wait: std::time::Duration) -> Result<serde_json::Value, String> {
+    let (id, rx) = engine_ask(state, request)?;
+    engine_answer(state, id, rx.recv_timeout(wait).ok())
+}
+
+fn engine_ask(state: &Engine, mut request: serde_json::Value) -> Result<(i64, mpsc::Receiver<String>), String> {
     let id = state.next.fetch_add(1, Ordering::SeqCst);
     request["id"] = id.into();
     let (tx, rx) = mpsc::channel();
     state.dapp.lock().map_err(|_| "the engine is gone")?.insert(id, tx);
-    {
-        let mut input = state.input.lock().map_err(|_| "the engine is gone")?;
-        writeln!(input, "{request}").and_then(|_| input.flush()).map_err(|e| format!("the engine stopped: {e}"))?;
-    }
-    let answer = tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(wait)).await.map_err(|e| e.to_string())?;
-    let Ok(answer) = answer else {
+    let mut input = state.input.lock().map_err(|_| "the engine is gone")?;
+    writeln!(input, "{request}").and_then(|_| input.flush()).map_err(|e| format!("the engine stopped: {e}"))?;
+    Ok((id, rx))
+}
+
+fn engine_answer(state: &Engine, id: i64, answer: Option<String>) -> Result<serde_json::Value, String> {
+    let Some(answer) = answer else {
         if let Ok(mut waiting) = state.dapp.lock() { waiting.remove(&id); }
         return Err("No answer: the request timed out.".into())
     };
     serde_json::from_str(&answer).map_err(|e| e.to_string())
+}
+
+/// Whether the browser may go to `url`: https (or a blank page), and not a host on MetaMask's phishing list, which never
+/// loads, as on the Mac. The engine has the list; asked here before the page starts, briefly, and a slow answer lets it
+/// start: the check when it finishes loading turns it back.
+fn site_allowed(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
+    if url.as_str() == "about:blank" { return true }
+    let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else { return false };
+    let Some(engine) = app.try_state::<Engine>() else { return true };
+    let known = engine.browser.lock().map(|p| p.refused.contains(host)).unwrap_or(false);
+    let listed = known || engine_call_now(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_millis(400))
+        .map(|v| v["result"]["blocked"] == "true" || v["result"]["blocked"] == true).unwrap_or(false);
+    if let Ok(mut page) = engine.browser.lock() {
+        if listed {
+            page.blocked = Some(host.to_string());
+            page.refused.insert(host.to_string());
+            page.asked = Some(url.clone());
+        } else {
+            page.blocked = None;
+        }
+    }
+    if listed { let _ = app.emit_to(EventTarget::webview(BAR), "browser", ()); }
+    !listed
 }
 
 /// The origin a page's calls are for, from its webview's own address: https only.
@@ -196,8 +252,8 @@ fn bring_hello_forward() {
 #[cfg(not(windows))]
 fn bring_hello_forward() {}
 
-/// One request line to the engine.
 mod voice;
+mod web;
 
 /// The mic: off the main thread, since it waits until the person stops speaking.
 #[tauri::command]
@@ -246,14 +302,31 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
     let size = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(window.scale_factor().map_err(|e| e.to_string())?);
     let bar = tauri::webview::WebviewBuilder::new(BAR, tauri::WebviewUrl::App("browser-bar.html".into()));
     window.add_child(bar, tauri::LogicalPosition::new(0.0, TOP), tauri::LogicalSize::new(size.width, BAR_HEIGHT)).map_err(|e| e.to_string())?;
-    let (loads, titles) = (app.clone(), app.clone());
+    let (loads, titles, goes) = (app.clone(), app.clone(), app.clone());
     let site = tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
         .initialization_script(include_str!("provider.js"))
-        // Pages stay on https; anything else (a file, a custom scheme) isn't opened here.
-        .on_navigation(|u| u.scheme() == "https" || u.as_str() == "about:blank")
-        .on_page_load(move |_, payload| {
+        // Pages stay on https; anything else (a file, a custom scheme) isn't opened here, nor a phishing site.
+        .on_navigation(move |u| site_allowed(&goes, u))
+        // A link for a new window: an https page goes to the person's own browser; the browser stays one page, as the
+        // Mac's, which opens no second window either.
+        .on_new_window(|u, _| {
+            if u.scheme() == "https" { let _ = open_link(u.to_string()); }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .on_page_load(move |site, payload| {
+            let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
             if let Some(engine) = loads.try_state::<Engine>() {
-                if let Ok(mut page) = engine.browser.lock() { page.loading = matches!(payload.event(), tauri::webview::PageLoadEvent::Started); }
+                if let Ok(mut page) = engine.browser.lock() {
+                    page.loading = started;
+                    if started { page.error = None; }
+                }
+            }
+            // A page the quick check let through while the engine was slow: looked at again once it's loaded.
+            if !started {
+                let (app, url) = (loads.clone(), payload.url().clone());
+                tauri::async_runtime::spawn(async move {
+                    if !site_allowed_late(&app, &url).await { let _ = site.navigate("about:blank".parse().expect("blank")); }
+                });
             }
             let _ = loads.emit_to(EventTarget::webview(BAR), "browser", ());
         })
@@ -263,9 +336,27 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
             }
             let _ = titles.emit_to(EventTarget::webview(BAR), "browser", ());
         });
-    window.add_child(site, tauri::LogicalPosition::new(0.0, TOP + BAR_HEIGHT), tauri::LogicalSize::new(size.width, (size.height - TOP - BAR_HEIGHT).max(0.0)))
+    let site = window.add_child(site, tauri::LogicalPosition::new(0.0, TOP + BAR_HEIGHT), tauri::LogicalSize::new(size.width, (size.height - TOP - BAR_HEIGHT).max(0.0)))
         .map_err(|e| e.to_string())?;
+    web::watch(&site, &app);
     Ok(())
+}
+
+/// The check after a page loaded, with all the time the engine needs.
+async fn site_allowed_late(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
+    let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else { return true };
+    let Some(engine) = app.try_state::<Engine>() else { return true };
+    let listed = engine_call(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_secs(20)).await
+        .map(|v| v["result"]["blocked"] == "true" || v["result"]["blocked"] == true).unwrap_or(false);
+    if listed {
+        if let Ok(mut page) = engine.browser.lock() {
+            page.blocked = Some(host.to_string());
+            page.refused.insert(host.to_string());
+            page.asked = Some(url.clone());
+        }
+        let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+    }
+    !listed
 }
 
 /// Whether the window's screen fits it with the taskbar and some margin; a small laptop or a VM opens it maximized.
@@ -293,8 +384,8 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
     if webview.label() != BAR { return Err("only the browser's toolbar".into()) }
     let site = webview.app_handle().get_webview(SITE).ok_or("No page is open.")?;
     let done = match action.as_str() {
-        "back" => site.eval("history.back()"),
-        "forward" => site.eval("history.forward()"),
+        "back" => web::go(&site, true),
+        "forward" => web::go(&site, false),
         "reload" => site.reload(),
         "stop" => site.eval("window.stop()"),
         "open" => {
@@ -322,9 +413,11 @@ async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>)
     let mut url = site.url().map_err(|e| e.to_string())?;
     let mut out = {
         let page = state.browser.lock().map_err(|_| "the engine is gone")?;
-        if url.scheme() != "https" { if let Some(asked) = &page.asked { url = asked.clone(); } }
+        // While WebView2 says about:blank, and after a refused phishing page (the last one stays, the field shows what was asked).
+        if url.scheme() != "https" || page.blocked.is_some() { if let Some(asked) = &page.asked { url = asked.clone(); } }
         serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "russian": page.russian,
-                            "connected": false, "check": "local", "real": null, "blocked": false })
+                            "connected": false, "check": "local", "real": null, "blocked": page.blocked.is_some(), "blockedHost": page.blocked,
+                            "back": page.back || !web::NATIVE_HISTORY, "forward": page.forward || !web::NATIVE_HISTORY, "error": page.error })
     };
     if let Some(origin) = origin_of(&url) {
         out["check"] = "unknown".into();
@@ -335,7 +428,7 @@ async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>)
                 // The engine answers in strings («true»); only a plain yes counts.
                 let r = &v["result"];
                 out["connected"] = (r["connected"] == true || r["connected"] == "true").into();
-                out["blocked"] = (r["blocked"] == true || r["blocked"] == "true").into();
+                if r["blocked"] == true || r["blocked"] == "true" { out["blocked"] = true.into(); }
                 if let Some(check) = r["check"].as_str() { out["check"] = check.into(); }
                 if let Some(real) = r["real"].as_str() { out["real"] = real.into(); }
             }
@@ -468,15 +561,17 @@ fn ui_eval(app: &tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
             for line in text.lines().skip(done) {
-                // «browser:» lines go to the site's page instead, «bar:» to the browser's toolbar; «show:<label>» brings
-                // that window forward.
+                // «browser:» lines go to the site's page instead, «bar:» to the browser's toolbar, «panel:» and
+                // «panelbar:» to the page beside the canvas and its header; «show:<label>» brings that window forward.
                 if let Some(label) = line.strip_prefix("show:") {
                     if let Some(window) = handle.get_window(label) { let _ = window.show(); let _ = window.set_focus(); }
                     done += 1;
                     continue;
                 }
                 let (label, js) = line.strip_prefix("browser:").map(|js| (SITE, js))
-                    .or_else(|| line.strip_prefix("bar:").map(|js| (BAR, js))).unwrap_or(("main", line));
+                    .or_else(|| line.strip_prefix("bar:").map(|js| (BAR, js)))
+                    .or_else(|| line.strip_prefix("panel:").map(|js| (web::PANEL, js)))
+                    .or_else(|| line.strip_prefix("panelbar:").map(|js| (web::PANEL_BAR, js))).unwrap_or(("main", line));
                 if let Some(webview) = handle.get_webview(label) { let _ = webview.eval(js); }
                 done += 1;
             }
@@ -556,10 +651,11 @@ fn main() {
                 let _ = window.hide();
             }
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == BROWSER_WINDOW => layout_browser(window),
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == "main" => web::layout_panel(window.app_handle()),
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen, open_browser, dapp_call,
-            browser_nav, browser_state, browser_layout])
+            browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {

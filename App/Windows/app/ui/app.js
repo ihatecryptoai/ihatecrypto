@@ -86,6 +86,9 @@ function draw() {
 }
 setRoot(draw);
 
+// A pinch (Ctrl+wheel in WebView2) zooms the canvas only, never the whole page.
+document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (document.querySelector(".menu")) { document.querySelector(".menu").remove(); return; }

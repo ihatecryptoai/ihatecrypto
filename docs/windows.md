@@ -146,6 +146,18 @@ Mac: the model reads every command and trade plan again, Jev through OpenRouter 
 plan holds no more money or risk than named), history from the journal, lock and the session
 length, signed updates.
 
+Since 2026-10-24 also, as on the Mac: a route step's menu («Why this way?», «Edit step…» with the amount and, for a
+Base/Arbitrum trade, the way with both ways quoted, «Send to chat», «Copy details»); a Solana swap's card quoted by
+Jupiter and held to it; Favorites' «+» that tells a token from a wallet; the Schedule's History tab, its pause for all
+tasks and the automation wallet's budget; a multisig's money per network; tokens hidden and shown in the portfolio;
+pinch zoom on a touchpad or a touch screen; «In transit» and a place's details board; Receive's QR codes; the dApp
+browser's Back and Forward enabled only when there is somewhere to go (WebView2's own history), a page that fails to
+load said under the toolbar, phishing hosts never loaded, «open jup.ag» from the chat, and links opening beside the
+chat in a page panel (the Mac's WebPanel); Settings › Trading agent (styles, limits, rules, safe search), Modules (every
+network and protocol, «off» refused before a card), the Hyperliquid trading key (offered after the first money there,
+paused by lock, a key of its own for a Ledger), own nodes and the NEAR Intents key (DPAPI); dollars without gas moving
+by signature or with Jupiter paying, offered once a network.
+
 Everything the Mac's window does is in the Windows app; what only a Windows machine can check is listed below.
 
 ## Checking on a Windows machine
@@ -165,7 +177,10 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
    with the English one; with Settings › Privacy & security › Speech › Online speech recognition off it says so.
 9. The browser: open jup.ag, connect, and a swap's card comes to the canvas with its simulated balances; on a site's
    page, `__TAURI_INTERNALS__.invoke('engine_send', …)` (or `browser_nav`, `browser_state`) in DevTools is refused; the
-   toolbar's Disconnect takes the address away and reloads the page.
+   toolbar's Disconnect takes the address away and reloads the page. Back and Forward turn on after a link and after a
+   single-page app's route change; an unreachable site (jup.ag times out on some networks) shows the red line; a host on
+   MetaMask's phishing list doesn't load; a block's link opens beside the chat, and that panel's page is refused our
+   commands too.
 10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it

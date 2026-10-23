@@ -1,5 +1,6 @@
 import CWinSec
 import Foundation
+import HyperliquidSigning
 import IhatecryptoCore
 import Ledger
 import SignerAPI
@@ -180,8 +181,15 @@ extension Engine {
     /// device shows it and waits for its buttons. What the device waits for shows on the running move.
     func ledgerSigner(_ wallet: TradeWallet) -> LedgerSigner {
         let account = ledger ?? LedgerAccount()
+        // Orders, cancels and leverage through the trading key the Ledger approved (TradingKey.swift): no device buttons.
+        let owner = wallet.evm
+        let agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature)? = agentActive ? { @Sendable action, nonce in
+            let r = try await SignerLink.shared.send(.signLedgerAgentL1(owner: owner, action: action, nonce: nonce))
+            guard r.ok, let signature = r.signature else { throw GuardStop(LinkTradeSigner.reason(r)) }
+            return signature
+        } : nil
         return LedgerSigner(device: LedgerDevice(account.transport), wallet: wallet, evmPath: account.evmPath, solanaPath: account.solanaPath, model: account.model,
-                            prompt: { [weak self] text in
+                            agent: agent, prompt: { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
                 self.ledgerPrompt = text

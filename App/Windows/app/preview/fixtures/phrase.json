@@ -1279,6 +1279,410 @@
  "memory": [
   "The user's HL wallet is their Hyperliquid account"
  ],
+ "modules": {
+  "networks": [
+   {
+    "logo": "sol",
+    "users": "Used by Jupiter, Jupiter DCA, Jupiter Lend, Kamino, JitoSOL staking, Relay, NEAR Intents · 1Click",
+    "name": "Solana",
+    "uses": "Jupiter swaps · Jupiter Lend · Kamino · JitoSOL",
+    "id": "network.solana",
+    "on": true
+   },
+   {
+    "logo": "hype",
+    "users": "Used by HLP vault, Hyperliquid, Hyperliquid xyz",
+    "name": "Hyperliquid",
+    "uses": "Perps · oil and stocks (xyz) · HLP vault",
+    "id": "network.hyperliquid",
+    "on": true
+   },
+   {
+    "logo": "base",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Base",
+    "uses": "Aave · Morpho · USDC",
+    "id": "network.base",
+    "on": true
+   },
+   {
+    "logo": "near",
+    "users": "Used by NEAR Intents · 1Click",
+    "name": "NEAR",
+    "uses": "NEAR Intents swaps · 1Click",
+    "id": "network.near",
+    "on": true
+   },
+   {
+    "logo": "arb",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Arbitrum",
+    "uses": "Aave · Morpho · USDC in and out",
+    "id": "network.arbitrum",
+    "on": true
+   },
+   {
+    "logo": "robinhood",
+    "users": "Used by Uniswap, Robinhood Stock Tokens, Relay",
+    "name": "Robinhood",
+    "uses": "Stock tokens · USDG · Uniswap",
+    "id": "network.robinhood",
+    "on": true
+   },
+   {
+    "logo": "pol",
+    "users": "Used by Uniswap, Aave v3, Relay",
+    "name": "Polygon",
+    "uses": "Aave · USDC",
+    "id": "network.polygon",
+    "on": true
+   },
+   {
+    "logo": "eth",
+    "users": "Used by Uniswap, Aave v3, Morpho, Relay",
+    "name": "Ethereum",
+    "uses": "Aave · Morpho · mainnet gas varies",
+    "id": "network.ethereum",
+    "on": true
+   },
+   {
+    "logo": "tempo",
+    "users": "Used by Relay, MPP · x402",
+    "name": "Tempo",
+    "uses": "USDC transfers · pay for services (MPP) · fees in USDC",
+    "id": "network.tempo",
+    "on": true
+   },
+   {
+    "logo": "hyperevm",
+    "users": "Used by Relay",
+    "name": "HyperEVM",
+    "uses": "USDC in and out · HYPE for gas",
+    "id": "network.hyperevm",
+    "on": true
+   },
+   {
+    "logo": "op",
+    "users": "Used by Uniswap, Relay",
+    "name": "Optimism",
+    "uses": "USDC in and out · Circle's CCTP",
+    "id": "network.optimism",
+    "on": true
+   },
+   {
+    "logo": "bnb",
+    "users": "Used by Uniswap, Relay",
+    "name": "BNB Chain",
+    "uses": "USDC in and out · BNB for gas · swaps",
+    "id": "network.bnb",
+    "on": true
+   }
+  ],
+  "kinds": [
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter",
+      "id": "protocol.jupiter",
+      "logo": "jup",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter DCA",
+      "id": "protocol.jupiterDCA",
+      "logo": "jup",
+      "line": "Solana · on-chain buys over time, from 100 USDC",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Uniswap",
+      "id": "protocol.uniswap",
+      "logo": "uni",
+      "line": "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · Robinhood",
+      "on": true
+     }
+    ],
+    "key": "swaps",
+    "name": "Swaps",
+    "on": true,
+    "id": "kind.swaps",
+    "line": "Trade one token for another"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Jupiter Lend",
+      "id": "protocol.jupiterLend",
+      "logo": "jup",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Kamino",
+      "id": "protocol.kamino",
+      "logo": "kamino",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "JitoSOL staking",
+      "id": "protocol.jitoSOL",
+      "logo": "jitosol",
+      "line": "Solana",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Aave v3",
+      "id": "protocol.aave",
+      "logo": "aave",
+      "line": "Base · Arbitrum · Polygon · Ethereum",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Morpho",
+      "id": "protocol.morpho",
+      "logo": "morpho",
+      "line": "Base · Arbitrum · Ethereum",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "HLP vault",
+      "id": "protocol.hlp",
+      "logo": "hype",
+      "line": "Hyperliquid",
+      "on": true
+     }
+    ],
+    "key": "earn",
+    "name": "Earn · DeFi",
+    "on": true,
+    "id": "kind.earn",
+    "line": "Lend and stake idle money"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Hyperliquid",
+      "id": "protocol.hlPerps",
+      "logo": "hype",
+      "line": "BTC, ETH, SOL and more",
+      "on": true
+     }
+    ],
+    "key": "perps",
+    "name": "Perps",
+    "on": true,
+    "id": "kind.perps",
+    "line": "Long or short with leverage"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Hyperliquid xyz",
+      "id": "protocol.xyz",
+      "logo": "hype",
+      "line": "Oil, metals, stocks",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Robinhood Stock Tokens",
+      "id": "protocol.robinhoodStocks",
+      "logo": "robinhood",
+      "line": "Robinhood",
+      "on": true
+     }
+    ],
+    "key": "stocks",
+    "name": "Stocks & oil",
+    "on": true,
+    "id": "kind.stocks",
+    "line": "Commodities and tokenized shares"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "Relay",
+      "id": "protocol.relay",
+      "logo": "relay",
+      "line": "Solana ⇄ Base · Arbitrum · Polygon · Ethereum · Robinhood · Tempo · HyperEVM · Optimism · BNB Chain",
+      "on": true
+     },
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "NEAR Intents · 1Click",
+      "id": "protocol.oneClick",
+      "logo": "near",
+      "line": "NEAR ⇄ Solana",
+      "on": true
+     }
+    ],
+    "key": "bridges",
+    "name": "Bridges",
+    "on": true,
+    "id": "kind.bridges",
+    "line": "Move money between networks"
+   },
+   {
+    "protocols": [
+     {
+      "allowed": true,
+      "networksOff": false,
+      "name": "MPP · x402",
+      "id": "protocol.mpp",
+      "logo": "tempo",
+      "line": "APIs, email, calls, letters · USDC on Tempo",
+      "on": true
+     }
+    ],
+    "key": "payments",
+    "name": "Payments",
+    "on": true,
+    "id": "kind.payments",
+    "line": "Pay for services per request"
+   }
+  ]
+ },
+ "trading": {
+  "policy": {
+   "atrStopMultiple": 1.5,
+   "minRewardRisk": 1.5,
+   "maxRiskPct": 2,
+   "defaultRiskPct": 1,
+   "defaultRewardRisk": 2,
+   "maxOpenRiskPct": 6,
+   "maxLeverage": 5
+  },
+  "styles": [
+   {
+    "policy": {
+     "minRewardRisk": 2,
+     "atrStopMultiple": 2,
+     "defaultRewardRisk": 2.5,
+     "defaultRiskPct": 0.5,
+     "maxRiskPct": 1,
+     "maxOpenRiskPct": 3,
+     "maxLeverage": 2
+    },
+    "id": "careful"
+   },
+   {
+    "policy": {
+     "minRewardRisk": 1.5,
+     "atrStopMultiple": 1.5,
+     "defaultRewardRisk": 2,
+     "defaultRiskPct": 1,
+     "maxRiskPct": 2,
+     "maxOpenRiskPct": 6,
+     "maxLeverage": 5
+    },
+    "id": "balanced"
+   },
+   {
+    "policy": {
+     "minRewardRisk": 1.2,
+     "atrStopMultiple": 1,
+     "defaultRewardRisk": 1.5,
+     "defaultRiskPct": 2,
+     "maxRiskPct": 3,
+     "maxOpenRiskPct": 10,
+     "maxLeverage": 10
+    },
+    "id": "bold"
+   }
+  ],
+  "safeSearch": true,
+  "contractCap": 50,
+  "key": {
+   "paused": false,
+   "ledger": false,
+   "referral": "IHATECRYPTO",
+   "active": false,
+   "feeRate": "0.05%",
+   "possible": false
+  },
+  "batches": false
+ },
+ "nodes": {
+  "nodes": [
+   {
+    "example": "https://mainnet.helius-rpc.com/?api-key=…",
+    "provider": "Helius",
+    "title": "Solana",
+    "logo": "sol",
+    "id": "solana",
+    "site": "https://www.helius.dev"
+   },
+   {
+    "example": "https://base-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Base",
+    "logo": "base",
+    "id": "base",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://arb-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Arbitrum",
+    "logo": "arb",
+    "id": "arbitrum",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://eth-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Ethereum",
+    "logo": "eth",
+    "id": "ethereum",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://polygon-mainnet.g.alchemy.com/v2/…",
+    "provider": "Alchemy",
+    "title": "Polygon",
+    "logo": "pol",
+    "id": "polygon",
+    "site": "https://www.alchemy.com"
+   },
+   {
+    "example": "https://…",
+    "provider": "Alchemy",
+    "title": "Robinhood",
+    "logo": "robinhood",
+    "id": "robinhood",
+    "site": "https://www.alchemy.com"
+   }
+  ],
+  "oneClickKey": false
+ },
  "favorites": [
   {
    "chain": "solana",

@@ -116,6 +116,8 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+/* Two fingers off the canvas don't zoom the page on a touch screen; the canvas has its own pinch. */
+html { touch-action: pan-x pan-y; }
 body {
   background: var(--canvas); color: var(--text);
   font: 13px/1.4 "Onest", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;

@@ -3,7 +3,7 @@
 // step's face, the state in words on it, the balance it changes — with Cancel and Confirm while it waits; an earlier move
 // folded to a one-line pill. Live blocks (receive, schedule, favorites…) are live.js's, in this file's frame.
 
-import { ui, act, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence } from "./core.js";
+import { ui, act, engine, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence } from "./core.js";
 import { liveBlock, liveKinds, liveTitle } from "./live.js";
 
 addIcons({
@@ -18,6 +18,9 @@ addIcons({
   iphone: "M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM11 18h2",
   ledger: "M4 6h7v12H4zM11 6h9v5h-9M15 14h5v4h-5",
   "info.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5.5M12 7.5v.5",
+  "bubble.left": "M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z",
+  "questionmark.bubble": "M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM10 9a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.4M12 13.8v.2",
+  "xmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
 });
 
 // MARK: The column
@@ -66,13 +69,21 @@ export function blockFrame(b, title, body, { extra, width, tint, icon: glyph } =
 /** Right-click on any block (BlockMenu): the chat with it attached, or «What's going on here?» straight away. */
 function blockMenu(e, b, title, more = []) {
   e.preventDefault();
-  const on = ui.attached === b.id;
-  popup(e, [
-    on ? [t("Take out of the chat", "Убрать из чата"), () => { ui.attached = null; render(); }]
-      : [t("Ask or act in chat", "Спросить или поручить в чате"), () => attach(b)],
-    [t("What's going on here?", "Что здесь происходит?"), () => act("send", { text: t(`What's going on in «${title}»?`, `Что происходит в «${title}»?`), board: b.id })],
-    ...more,
+  const on = ui.attached === b.id, s = ui.state;
+  menu(e, [
+    on ? [[icon("xmark.circle", 14), t("Take out of the chat", "Убрать из чата")], () => { ui.attached = null; render(); }]
+      : [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attach(b)],
+    [[icon("questionmark.bubble", 14), t("What's going on here?", "Что здесь происходит?")],
+      () => act("send", { text: t(`What's going on in «${title}»?`, `Что происходит в «${title}»?`), board: b.id }), !s.thinking && !!s.model?.connected],
+    ...(more.length ? [null, ...more] : []),
   ]);
+}
+
+/** popup() with a third, optional element per item: false greys it out, as the Mac's .disabled. */
+function menu(e, items) {
+  const el = popup(e, items.map((it) => it && [it[0], it[1]]), "route-menu");
+  const buttons = el.querySelectorAll(".item");
+  items.filter(Boolean).forEach((it, n) => { if (it[2] === false) buttons[n].disabled = true; });
 }
 
 function attach(b) {
@@ -361,14 +372,36 @@ function stepCard(b, step, i, state, compact, isOpen) {
   };
   return h("div", {
     class: cls, "data-no-pan": "", title: t("Details · right-click for more", "Подробности · правый клик — ещё"), onclick: toggle,
-    oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); popup(e, [
-      [t("Ask in chat", "Спросить в чате"), () => attach(b)],
-      [t("Copy details", "Скопировать подробности"), () => copy(stepText(step, i))],
+    oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); menu(e, [
+      [[icon("questionmark.circle", 14), t("Why this way?", "Почему так?")], () => act("whyStep", { board: b.id, index: i })],
+      [[icon("pencil", 14), t("Edit step…", "Изменить шаг…")], () => openStep(b, i, true), !!editOf(b, state)],
+      [[mascot(14, "idle"), t("Send to chat", "Отправить в чат")], () => { closeStep(b, i); attach(b); }],
+      null,
+      [[icon("copy", 14), t("Copy details", "Скопировать подробности")], () => copy(stepText(step, i))],
     ]); },
   },
     h("div", { class: "route-step-pic" }, scene(kind, state, step, w), state !== "plain" && kind !== "result" ? stateChip(state, compact) : null),
     stepInfo(step, state, kind, place, compact, isOpen),
     state === "now" || state === "touch" ? h("span", { class: "route-ring" + (state === "touch" ? " route-touch" : "") }) : null);
+}
+
+/** Opens a step's details, as its click does; by default the first step of the move waiting for Confirm. */
+export function openStep(b = ui.state.boards.find((x) => x.id === ui.state.card?.id), i = 0, focus = false) {
+  if (!b) return;
+  for (const k of [...ui.opened]) if (k.startsWith("step:" + b.id + ":")) ui.opened.delete(k);
+  ui.opened.add("step:" + b.id + ":" + i);
+  render();
+  if (focus) setTimeout(() => document.getElementById("route-amount")?.focus(), 0);
+}
+
+function closeStep(b, i) {
+  if (ui.opened.delete("step:" + b.id + ":" + i)) render();
+}
+
+/** What the waiting move lets change in this step (the engine's stepEdit): only a ready step of the move on its card. */
+function editOf(b, state) {
+  const e = ui.state.stepEdit;
+  return state === "ready" && e && e.board === b.id ? e : null;
 }
 
 function stepText(step, i) {
@@ -439,33 +472,99 @@ function stepLine(line, alert) {
   return h("div", { class: "route-step-row" }, h("span", { class: "one-line" }, label), h("b", { class: tint }, value));
 }
 
-/** The opened step, under its route: what it is, its money and lines, «Ask in chat», Close; the notch points at its card. */
+/** What's typed in an opened step's details, kept across the redraws a new state makes: its key, the amount, the way. */
+let edit = null;
+
+/** The opened step, under its route: what it is, its money and lines, «Ask in chat», Close; the notch points at its card.
+ * A step of the move waiting for Confirm that can change (StepDetails) gets the amount and, for a trade on an EVM
+ * network, the way; Save makes it a new plan through the same checks and the same Confirm. */
 function stepDetails(b, steps, i, state, notch) {
   const step = steps[i];
-  const go = (d) => { const next = (i + d + steps.length) % steps.length; ui.opened.delete("step:" + b.id + ":" + i); ui.opened.add("step:" + b.id + ":" + next); render(); };
-  const close = () => { ui.opened.delete("step:" + b.id + ":" + i); render(); };
+  const stepKey = "step:" + b.id + ":" + i;
+  const can = editOf(b, state);
+  if (can && edit?.key !== stepKey) edit = { key: stepKey, amount: can.amount ?? "", way: can.way ?? null, problem: null };
+  const go = (d) => { const next = (i + d + steps.length) % steps.length; ui.opened.delete(stepKey); ui.opened.add("step:" + b.id + ":" + next); render(); };
+  const close = () => { ui.opened.delete(stepKey); if (edit?.key === stepKey) edit = null; render(); };
+  const save = async () => {
+    try {
+      await engine("editStep", { board: b.id, ...(can.amount != null ? { text: edit.amount } : {}), ...(can.ways ? { name: edit.way || "" } : {}) });
+      ui.opened.delete(stepKey);
+      edit = null;
+      render();
+    } catch (e) { edit.problem = e.message; render(); }
+  };
+  const hint = steps.flatMap((x) => x.lines).find((l) => l.startsWith("free"));
   const place = (step.label.split("·")[1] || "").trim();
   const key = logoKey(place);
   const el = h("div", { class: "route-step-details", "data-no-pan": "" },
     h("span", { class: "route-notch" }),
     h("div", { class: "route-details-head" },
       key ? placeLogo(key, 40) : h("span", { class: "route-details-glyph" }, mascot(30, "idle")),
-      h("div", { class: "route-details-name" }, h("b", { class: "one-line" }, pretty(step.label.replace(/\s*·\s*/g, " · ").toUpperCase())),
+      h("div", { class: "route-details-name" }, h("b", { class: "one-line" }, detailsName(step.label)),
         h("span", { class: "one-line" }, t(`Step ${i + 1} of ${steps.length} · ${step.title}`, `Шаг ${i + 1} из ${steps.length} · ${step.title}`))),
       h("span", { class: "spacer" }),
       steps.length > 1 ? [h("button", { class: "icon-btn", title: t("Previous step", "Предыдущий шаг"), onclick: () => go(-1) }, icon("chevron.left", 13)),
         h("button", { class: "icon-btn", title: t("Next step", "Следующий шаг"), onclick: () => go(1) }, icon("chevron.right", 13))] : null,
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: close }, icon("xmark", 13))),
+    can && can.amount != null ? amountField(can, hint, save) : null,
+    can && can.ways ? ways(can.quotes) : null,
     step.money ? h("div", { class: "route-money-box route-big" }, h("div", { class: "route-money-head" }, state === "done" ? t("MONEY · WAS → NOW", "ДЕНЬГИ · БЫЛО → СТАЛО") : t("MONEY · NOW → AFTER", "ДЕНЬГИ · СЕЙЧАС → ПОСЛЕ")),
       moneyLine(step.money)) : null,
-    step.lines.length ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " ")))) : null,
+    !can && step.lines.length ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " ")))) : null,
+    can && edit.problem ? h("div", { class: "route-edit-problem loss" }, icon("exclamationmark.triangle", 13), edit.problem) : null,
     h("div", { class: "route-details-buttons" },
-      h("button", { class: "btn route-bordered route-large route-ask", title: t("Attaches this block to your next message", "Прикрепит этот блок к следующему сообщению"), onclick: () => attach(b) },
+      h("button", { class: "btn route-bordered route-large route-ask", title: t("Attaches this block to your next message", "Прикрепит этот блок к следующему сообщению"), onclick: () => { close(); attach(b); } },
         mascot(20, "waiting"), t("Ask in chat", "Спросить в чате")),
       h("span", { class: "spacer" }),
-      h("button", { class: "btn route-bordered route-large", onclick: close }, t("Close", "Закрыть"))));
+      can ? [h("button", { class: "btn route-bordered route-large", onclick: close }, t("Cancel", "Отмена")),
+        h("button", { class: "btn primary route-large", disabled: !!ui.state.thinking, onclick: save }, t("Save", "Сохранить"))]
+        : h("button", { class: "btn route-bordered route-large", onclick: close }, t("Close", "Закрыть"))));
   el.querySelector(".route-notch").style.left = Math.min(Math.max(notch - 7, 24), 520 - 38) + "px";
   return el;
+}
+
+/** «BRIDGE · RELAY» → «Bridge · Relay» (StepDetails.pretty). */
+function detailsName(label) {
+  return label.replace(/\s*·\s*/g, " · ").toLowerCase().replace(/(^|[\s·(-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
+    .replace(/ Or /g, " or ").replace(/Usdc/g, "USDC").replace(/Jitosol/g, "JitoSOL").replace(/Hlp/g, "HLP").replace(/V3/g, "v3")
+    .replace(/Layerzero/g, "LayerZero").replace(/Cctp/g, "CCTP");
+}
+
+/** «YOU SEND»: the amount as one number, in what the move spends; Enter saves. */
+function amountField(can, hint, save) {
+  const key = logoKey(can.unit);
+  return h("div", { class: "route-edit" },
+    h("div", { class: "route-edit-head" }, t("YOU SEND", "ОТПРАВЛЯЕШЬ")),
+    h("label", { class: "route-amount" },
+      key ? logoRound(key, 24) : null,
+      h("input", { id: "route-amount", class: "num", value: edit.amount, inputmode: "decimal", autocomplete: "off", spellcheck: "false", "aria-label": t("Amount", "Сумма"),
+        oninput: (e) => { edit.amount = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } } }),
+      h("span", { class: "route-amount-unit" }, can.unit),
+      h("span", { class: "spacer" }),
+      hint ? h("span", { class: "route-amount-hint one-line" }, hint) : null));
+}
+
+/** «ROUTE»: the best of both (quoted again before signing), Relay's swap, or Relay's bridge + Uniswap; each with what it
+ * gets now once the engine has quoted them (the better first). */
+function ways(quotes) {
+  const name = (w) => (w === "relay" ? t("Relay swap", "обмен через Relay") : "Relay + Uniswap");
+  const quoted = (w) => { const q = quotes?.find((x) => x.way === w); return q && t(`≈ ${q.gets} · ${q.worth} after gas`, `≈ ${q.gets} · ${q.worth} после газа`); };
+  const best = quotes?.[0];
+  const row = (value, title, detail, logos, recommended) => h("button", {
+    class: "route-way" + (edit.way === value ? " route-on" : ""), "aria-pressed": String(edit.way === value),
+    onclick: () => { edit.way = value; render(); },
+  },
+    h("span", { class: "route-radio" }),
+    h("span", { class: "route-way-logos" }, logos.map((k) => logoRound(k, 24))),
+    h("span", { class: "route-way-text" }, h("b", {}, title), h("span", { class: "one-line" }, detail)),
+    h("span", { class: "spacer" }),
+    recommended ? h("span", { class: "route-way-badge" }, t("Recommended", "Рекомендую")) : null);
+  return h("div", { class: "route-edit" },
+    h("div", { class: "route-edit-head" }, t("ROUTE", "ПУТЬ")),
+    row(null, t("The best one", "Лучший"), best ? t(`now ${name(best.way)}, ≈ ${best.gets} · checked again before signing`, `сейчас ${name(best.way)}, ≈ ${best.gets} · проверим ещё раз перед подписью`)
+      : t("both quoted, gas counted · checked again before signing", "оба пути посчитаны с газом · проверим ещё раз перед подписью"), ["relay", "uni"], true),
+    row("relay", t("Relay swap", "Обмен через Relay"), quoted("relay") || t("one Solana signature, Relay swaps on the way", "одна подпись в Solana, Relay обменяет по пути"), ["relay"]),
+    row("uniswap", t("Relay bridge + Uniswap", "Мост Relay + Uniswap"), quoted("uniswap") || t("USDC over the bridge, then Uniswap with an exact approve", "USDC по мосту, потом Uniswap с точным разрешением"), ["relay", "uni"]));
 }
 
 // MARK: The drawing

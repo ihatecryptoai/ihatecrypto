@@ -1,5 +1,6 @@
 import CWinSec
 import Foundation
+import IhatecryptoCore
 import LLMCore
 
 /// The engine's own files, beside the signer's: %LOCALAPPDATA%\ihatecrypto\engine on Windows. Settings and the chat as
@@ -54,8 +55,8 @@ nonisolated enum Store {
         try? blob.write(to: url("credentials.bin"), options: .atomic)
     }
 
-    private static func protect(_ data: Data) -> Data? { transform(data, winsec_protect) }
-    private static func unprotect(_ data: Data) -> Data? { transform(data, winsec_unprotect) }
+    static func protect(_ data: Data) -> Data? { transform(data, winsec_protect) }
+    static func unprotect(_ data: Data) -> Data? { transform(data, winsec_unprotect) }
 
     private static func transform(_ data: Data, _ call: (UnsafePointer<UInt8>?, Int, UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>?, UnsafeMutablePointer<Int>?) -> Int32) -> Data? {
         var out: UnsafeMutablePointer<UInt8>?
@@ -83,4 +84,19 @@ nonisolated struct Settings: Codable, Equatable {
     /// «Addresses for balances», as on the Mac: read-only addresses whose balances show while no wallet is here.
     var watchSolana: String?
     var watchEVM: String?
+    /// The person's say on single tokens, by Holding.id: true shows one, false hides it; none follows looksReal.
+    var tokenChoices: [String: Bool]?
+    /// Settings › Modules: «protocol.kamino=0,network.base=1» (Modules.stored), and the modules met so far (Modules.swift).
+    var modules: String?
+    var modulesKnown: [String]?
+    /// Settings › Trading agent: the risk rules (nil: Balanced) and Safe search (nil: on) (TradingAgent.swift).
+    var policy: RiskPolicy?
+    var safeSearch: Bool?
+    /// Settings › Wallet: EIP-7702 batches (nil: off) and the cap for unknown protocols in dollars (nil: $50).
+    var batches: Bool?
+    var contractCap: Double?
+    /// The addresses whose Hyperliquid trading key the chat already offered (TradingKey.offerTradingKey).
+    var tradingKeyOffered: [String]?
+    /// «Pause schedule»: nothing scheduled runs until it's resumed.
+    var schedulePaused: Bool?
 }

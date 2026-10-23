@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "browser-open-page",
+  "description": "The main window opens a web page beside the canvas (a link on a block or in the chat), as the Mac's WebPanel; open_page itself takes only the main window's own page.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-open-page"
+  ]
+}

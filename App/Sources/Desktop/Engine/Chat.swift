@@ -80,7 +80,9 @@ extension Engine {
             catch { reply(error.localizedDescription) }
             return
         }
+        if await tradingKeyCommand(text) { return }
         if await ledgerCommand(text) { return }
+        if openSiteCommand(text) { return }
         if let client = llmClient() {
             await routeWithModel(text, client: client)
             return
@@ -373,6 +375,7 @@ extension Engine {
         c.capital = Fmt.usd(portfolio.total)
         c.replyLanguage = replyLanguage
         c.off = Modules.current.offSummary
+        c.safeSearch = safeSearch
         c.memory = memory
         c.favorites = favorites.map { "\($0.name) (\($0.symbol)) = \($0.address) on \($0.chain)" + ($0.price.map { ", \(Fmt.price($0))" } ?? "") }
         c.skills = skillsOn.map { "\($0.id) — \($0.name): \($0.about)" }

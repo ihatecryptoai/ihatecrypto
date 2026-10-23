@@ -119,3 +119,52 @@
 :root[data-theme="dark"] .pf-net-note { color: var(--ink-dark); }
 :root[data-theme="dark"] .pf-date-tile { background: #23262d; border-color: #2c3038; }
 :root[data-theme="dark"] .pf-date-day { color: #f2f3f5; }
+
+/* The eye on a token (HoldingRow): under the pointer on a shown one, always on a tucked one. */
+.pf-eye { width: 20px; height: 20px; border-radius: 6px; display: none; flex: none; color: var(--secondary); }
+.pf-coin:hover .pf-eye, .pf-eye.on, .pf-eye:focus-visible { display: inline-flex; }
+.pf-net.dark .pf-eye:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+
+/* A card that opens its place's details (Openable): an accent edge under the pointer, a stronger one while open. */
+.pf-net.pf-opens { cursor: pointer; box-shadow: inset 0 0 0 1.5px transparent; }
+.pf-net.pf-opens:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.6); }
+.pf-net.pf-opens.open { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* In transit: each bridge order on its way, its details opened in place. */
+.pf-transit { display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; border-radius: 16px; border: 1px solid rgba(255, 122, 47, 0.5); }
+.pf-transit-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.pf-transit-item { display: flex; flex-direction: column; gap: 6px; }
+.pf-transit-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; text-align: left; min-width: 0; }
+.pf-transit-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 11.5px; }
+.pf-transit-text .secondary { font-size: 10.5px; }
+.pf-transit-row > .ico:last-child { width: 9px; height: 9px; color: var(--secondary); flex: none; }
+.pf-transit-details { display: flex; flex-direction: column; gap: 5px; padding-left: 26px; font-size: 10.5px; }
+.pf-transit-line { display: grid; grid-template-columns: 70px 1fr; gap: 6px; }
+.pf-transit-line .secondary { font-size: 10px; }
+.pf-transit-details .address { font-size: 10px; }
+.pf-transit-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.pf-transit-links a { color: var(--accent-ink); }
+
+/* A place's details board, above the plan (PlaceDetailBoard): 470 wide, an accent edge. */
+.pf-detail { width: 470px; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 24px; background: var(--card);
+  border: 1.5px solid rgba(255, 122, 47, 0.4); box-shadow: 0 8px 14px rgba(0, 0, 0, 0.06); cursor: default; user-select: text; }
+.pf-d-head { display: flex; align-items: center; gap: 10px; }
+.pf-d-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-d-title b { font-size: 16px; }
+.pf-d-title .secondary { font-size: 10px; }
+.pf-d-address { display: flex; align-items: center; gap: 6px; }
+.pf-d-address .address { font-weight: 600; }
+.pf-d-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px; border-radius: 12px; border: none; background: var(--fill); text-align: left; color: inherit; min-width: 0; }
+button.pf-d-row:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.6); }
+.pf-d-row > .ico:last-child { width: 10px; height: 10px; color: var(--tertiary); flex: none; }
+.pf-d-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-d-name b { font-size: 13px; }
+.pf-d-name .secondary { font-size: 10px; }
+.pf-d-row > b.num { font-size: 13px; white-space: nowrap; }
+.pf-d-note { font-size: 10px; color: var(--secondary); }
+.pf-d-link { display: flex; align-items: center; gap: 5px; font-size: 10px; }
+.pf-d-link a { color: var(--accent-ink); }
+.pf-d-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-d-action { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: none;
+  background: rgba(255, 122, 47, 0.1); color: var(--accent-ink); font-size: 12px; font-weight: 600; }
+.pf-d-action:hover { background: rgba(255, 122, 47, 0.18); }

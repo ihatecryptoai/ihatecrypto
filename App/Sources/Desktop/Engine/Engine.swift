@@ -74,7 +74,7 @@ nonisolated struct Card: Encodable, Equatable {
 final class Engine {
     let out: Outbox
     var settings = Store.load(Settings.self, "settings.json") ?? Settings() {
-        didSet { Store.save(settings, "settings.json"); changed() }
+        didSet { Store.save(settings, "settings.json"); settings.mirror(); changed() }
     }
 
     // Signer
@@ -157,8 +157,17 @@ final class Engine {
     var ledgerConnect: LedgerConnect?
     var ledgerPrompt: String?
     var awaitingAmount: WalletCommand?
+    /// The way picked in a route step's details for the waiting trade (RouteEdit), taken at its Confirm.
+    var routeWay: (key: String, way: String)?
+    /// Both ways of the waiting EVM trade as quoted for its step's details (RouteEdit.quoteWays), the better first.
+    var wayQuotes: (command: WalletCommand, ways: [RouteEdit.Way])?
+    /// The Ledger's Hyperliquid trading key, and whether the account approved ihatecrypto's fee (TradingKey.swift).
+    var ledgerAgent: SignerReply?
+    var feeApproved: Bool?
     /// A move the loss cap stopped (CostlyMove): offered again with that loss accepted («Send anyway»), never by itself.
     var costly: (pending: Pending, title: String, lost: Decimal)?
+    /// Bridge orders on their way, read with the balances (HiddenTokens.swift).
+    var inTransit: [TransitView] = []
     /// The trade plan the chat is building: a perp on Hyperliquid.
     var intent = TradeIntent()
     /// Price alerts, checked against Hyperliquid's marks at every refresh while the app is open.
@@ -169,8 +178,16 @@ final class Engine {
     var tasks: [ScheduledTask] = Store.load([ScheduledTask].self, "tasks.json") ?? [] {
         didSet { Store.save(tasks, "tasks.json") }
     }
+    /// What each scheduled run did, for the Schedule's History tab.
+    var scheduleRuns: [ScheduleRun] = Store.load([ScheduleRun].self, "schedule-runs.json") ?? [] {
+        didSet { Store.save(scheduleRuns, "schedule-runs.json") }
+    }
+    /// Each multisig's money by network (address → networks), read with the balances.
+    var multisigHeld: [String: [MultisigNetHolding]] = [:]
+    /// The automation wallet's money as last read, for the Schedule's budget.
+    var automationBudget: AutomationBudget?
 
-    init(out: Outbox) { self.out = out }
+    init(out: Outbox) { self.out = out; settings.mirror(); Self.applyNodes() }
 
     // MARK: State to the window
 
@@ -261,7 +278,11 @@ final class Engine {
             var ledger: String?
         }
         struct Option: Encodable { var title: String; var comment: String; var recommended: Bool }
-        struct Alert: Encodable { var id: String; var text: String }
+        struct Alert: Encodable {
+            var id: String; var text: String
+            /// The block's parts (AlertsBoard): the coin, «BTC above $120,000», «now $98,000 · 22.4% away», its THEN steps.
+            var coin: String? = nil; var when: String? = nil; var now: String? = nil; var steps: [String]? = nil
+        }
         struct SkillView: Encodable { var id: String; var name: String; var about: String; var text: String; var builtIn: Bool; var on: Bool }
         struct Running: Encodable { var title: String; var lines: [String] }
         struct Position: Encodable {
@@ -318,7 +339,19 @@ final class Engine {
         var automationUSD: Decimal?
         /// The open positions' unrealized P/L together; nil with none open.
         var positionsPnl: Decimal?
+        /// Bridge orders signed and not landed yet (HiddenTokens.swift).
+        var inTransit: [TransitView]
         var context: Context?
+        /// Settings › Modules and Settings › Trading agent (Modules.swift, TradingAgent.swift).
+        var modules: ModulesView
+        var trading: TradingView
+        var nodes: NodesView
+        /// What the waiting move's step lets change (RouteEdit.Edit); nil when nothing can.
+        var stepEdit: RouteEdit.Edit?
+        var schedulePaused: Bool
+        var scheduleRuns: [ScheduleRun]
+        var multisigHeld: [String: [MultisigNetHolding]]
+        var automationBudget: AutomationBudget?
     }
 
     func snapshot() -> Snapshot {
@@ -342,7 +375,7 @@ final class Engine {
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: russian, book: book, history: history(),
-            alerts: alerts.map { .init(id: $0.id.uuidString, text: alertText($0)) },
+            alerts: alerts.map(alertView),
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next) },
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
@@ -352,7 +385,12 @@ final class Engine {
             watching: watching, watched: ["solana": settings.watchSolana, "evm": settings.watchEVM].compactMapValues { $0 },
             automationUSD: automationWallet == nil ? nil : automationUSD,
             positionsPnl: positions.isEmpty ? nil : positions.reduce(0) { $0 + $1.unrealizedPnl },
-            context: meters[canvasID])
+            inTransit: inTransit,
+            context: meters[canvasID],
+            modules: modulesView(), trading: tradingView(), nodes: nodesView(),
+            stepEdit: stepEdit,
+            schedulePaused: settings.schedulePaused == true, scheduleRuns: recentRuns, multisigHeld: multisigHeld,
+            automationBudget: automationBudgetNow)
     }
 
     // MARK: Requests from the window
@@ -379,6 +417,9 @@ final class Engine {
         var threshold: Int?
         var solana: String?
         var evm: String?
+        /// Settings › Trading agent's rules, and a number (the contract cap in dollars).
+        var policy: RiskPolicy?
+        var value: Double?
     }
 
     func handle(_ r: Request) async {
@@ -396,11 +437,14 @@ final class Engine {
         case "hello":
             await startSigner()
             if !refreshingEveryMinute {
+                offerNewModules()
                 // The balances follow the chain while the window is open, as on the Mac (there every 30 s).
                 refreshingEveryMinute = true
                 Task {
                     while true {
                         await refresh()
+                        offerTradingKey()
+                        await refreshLive()
                         await runDueTasks()
                         try? await Task.sleep(for: .seconds(60))
                     }
@@ -414,6 +458,8 @@ final class Engine {
             guard let i = r.index, options.indices.contains(i) else { return [:] }
             let o = options[i]
             options = []
+            if answerNewModules(o.command) { return [:] }
+            if await answerTradingKey(o.command) { return [:] }
             if o.command == Self.sendAnyway { await sendAnyway(); return [:] }
             if o.command == Self.leaveCostly { costly = nil; reply(say("Left as it was: nothing was signed.", "Оставил как есть: ничего не подписано.")); return [:] }
             await send(o.command.isEmpty ? o.title : o.command, shown: o.title)
@@ -447,6 +493,11 @@ final class Engine {
             if r.test == true { skillsOff.remove(r.wallet ?? "") } else { skillsOff.insert(r.wallet ?? "") }
         case "forget": memory.removeAll { $0 == r.text }
         case "removeFavorite": favorites.removeAll { $0.id == r.wallet }
+        case "showToken": showToken(r.address ?? "", shown: r.test == true)
+        case "transitState": return ["state": await transitState(chain: r.name ?? "", id: r.address ?? "")]
+        case "lookToken": return await lookToken(r.address ?? "")
+        case "addFavorite": await tokenCommand(.favorite(address: r.address ?? "", chain: r.network), note: nil)
+        case "schedulePause": pauseSchedule(r.test == true)
         case "star":
             guard let e = book.first(where: { $0.name == r.name && $0.network == r.network }) else { return [:] }
             star(e, r.test == true)
@@ -457,6 +508,16 @@ final class Engine {
         case "language": settings.language = r.language == "auto" ? nil : r.language
         case "secondCheck": settings.secondCheck = r.test ?? true
         case "jevOpenRouter": settings.jevOpenRouter = r.test ?? false
+        case "module": try setModule(r.name, on: r.test == true)
+        case "policy": try setPolicy(r.policy)
+        case "safeSearch": settings.safeSearch = r.test == false ? false : nil
+        case "batches": settings.batches = r.test == true ? true : nil
+        case "contractCap": try setContractCap(r.value)
+        case "tradingKey": Task { await turnOnTradingKey() }
+        case "revokeFee": Task { await revokeFee() }
+        case "readFee": await readFeeApproval()
+        case "node": try await setNode(r.network, address: r.address)
+        case "oneClickKey": try await setOneClickKey(r.key)
         case "watch": try watch(solana: r.solana, evm: r.evm)
         case "dapp":
             // From the window's browser, which read the origin from the webview itself.
@@ -469,6 +530,8 @@ final class Engine {
         case "addBoard":
             guard let kind = r.name, Self.liveBoards.contains(kind) else { throw WalletError("Unknown block «\(r.name ?? "")».") }
             pin(Board(kind: kind, title: kind))
+        case "editStep": try await editStep(board: r.board, amount: r.text, way: r.name)
+        case "whyStep": try whyStep(board: r.board, index: r.index)
         case "closeBoard":
             guard r.board != card?.id, r.board != runningBoard else { throw WalletError(say("Confirm or cancel the move first.", "Сначала подтверди или отмени перевод.")) }
             boards.removeAll { $0.id == r.board }

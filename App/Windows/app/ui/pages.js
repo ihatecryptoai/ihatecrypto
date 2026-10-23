@@ -2,7 +2,7 @@
 // sidebar of tabs, each a column of sections with rows), History (HistoryView.swift) and Top up (ReceiveBoard in
 // Receive.swift). Settings cover the chat while open; History and Top up keep it floating, as the canvas does.
 
-import { ui, act, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode } from "./core.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel } from "./chat.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
@@ -15,6 +15,25 @@ addIcons({
   creditcard: "M3.5 6h17v12h-17zM3.5 10h17M7 14.5h4",
   wand: "M4 20L15 9M13.5 4.5v2M17.5 8.5h2M16.3 5.7l1.4-1.4M19.5 4.5l-1.2 1.2M12.5 7l4.5 4.5",
   "arrow.up.right.square": "M5 5h14v14H5zM10 14l5-5M10.5 9H15v4.5",
+  key: "M8 15a4 4 0 1 1 3.5-6H21v3h-2v2h-2v-2h-5.5A4 4 0 0 1 8 15zM7 11h.01",
+  server: "M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01",
+  circle: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z",
+  dial: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 12l4-4M12 5.5v1.5M5.5 12H7M17 12h1.5",
+  "gauge.0": "M4 16a8 8 0 0 1 16 0M12 16l-5.2-3",
+  "gauge.50": "M4 16a8 8 0 0 1 16 0M12 16V9.5",
+  "gauge.100": "M4 16a8 8 0 0 1 16 0M12 16l5.2-3",
+  shield: "M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6zM12 3v18",
+  book: "M5 4.5A1.5 1.5 0 0 1 6.5 3H19v16H6.5A1.5 1.5 0 0 0 5 20.5zM5 20.5A1.5 1.5 0 0 0 6.5 22H19",
+  "chart.bar": "M5 20v-8M10 20V5M15 20v-6M20 20V9",
+  "square.stack": "M4 9l8-4 8 4-8 4zM4 13l8 4 8-4M4 17l8 4 8-4",
+  "arrow.up.right": "M7 17L17 7M9 7h8v8",
+  multiply: "M7 7l10 10M17 7L7 17",
+  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
+  "hand.raised": "M8 13V6.5a1.5 1.5 0 0 1 3 0V11M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.5 7-6 7-2.8 0-4.3-1.7-5.6-4L3.6 13a1.5 1.5 0 0 1 2.5-1.6L8 13",
+  percent: "M19 5L5 19M7 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  "arrow.left.arrow.right": "M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4",
+  "chart.line": "M3 17l6-6 4 4 8-8M15 7h6v6",
+  bridge: "M5 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM19 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM7 6c9 0 1 12 10 12",
 });
 
 // MARK: Appearance — kept in this window's storage, applied as the page loads
@@ -62,8 +81,10 @@ const copyShort = (address, what) => h("button", { class: "btn small", title: t(
 
 const tabs = [
   ["general", "gear", () => t("General", "Основные")],
+  ["agent", "chart.line", () => t("Trading agent", "Торговый агент")],
   ["model", "sparkles", () => t("AI model", "Модель ИИ")],
   ["wallet", "creditcard", () => t("Wallet", "Кошелёк")],
+  ["modules", "square.grid", () => t("Modules", "Модули")],
   ["skills", "wand", () => t("Skills", "Навыки")],
 ];
 
@@ -73,6 +94,8 @@ export function settingsPage() {
   const s = ui.state;
   const [title, line, body] = {
     general: [t("General", "Основные"), t("How the app talks to you and keeps running.", "Как приложение говорит с тобой и работает в фоне."), general],
+    agent: [t("Trading agent", "Торговый агент"), t("How the assistant trades for you. Code checks every plan against these rules.", "Как ассистент торгует за тебя. Код проверяет каждый план по этим правилам."), agentTab],
+    modules: [t("Modules", "Модули"), t("What the assistant may use. Off means it never plans a move there. Money already there still shows on the canvas.", "Чем ассистенту можно пользоваться. Выключено — он никогда не планирует там движений. Деньги, которые там уже есть, по-прежнему видны на холсте."), modulesTab],
     model: [t("AI model", "Модель ИИ"), t("What reads your chat: a subscription, an API key, or a free model on this PC.", "Что читает твой чат: подписка, API-ключ или бесплатная модель на этом компьютере."), modelTab],
     wallet: [t("Wallet", "Кошелёк"), t(`Your wallets, the key that signs and ${presence()}.`, `Твои кошельки, ключ, который подписывает, и ${presence()}.`), walletTab],
     skills: [t("Skills", "Навыки"), t("Instructions the assistant follows for one kind of work. Switch them on and off, or add your own from a file.", "Инструкции, которым ассистент следует в одном виде работы. Включай и выключай их или добавь свой из файла."), skillsTab],
@@ -87,7 +110,7 @@ export function settingsPage() {
         tabs.map(([id, ico, name]) => h("button", { class: "pg-settings-tab" + (id === tab ? " on" : ""), onclick: () => { store("settingsTab", id); render(); } },
           tile(ico, 24, id === tab), name()))),
       h("div", { class: "pg-settings-scroll", "data-keep": "settings-" + tab },
-        h("div", { class: "pg-set-page" }, h("div", { class: "pg-set-page-head" }, h("h1", {}, title), h("div", { class: "secondary" }, line)), body(s)))));
+        h("div", { class: "pg-set-page" + (tab === "modules" ? " pg-set-wide" : "") }, h("div", { class: "pg-set-page-head" }, h("h1", {}, title), h("div", { class: "secondary" }, line)), body(s)))));
 }
 
 // General: appearance, language, the chat, updates.
@@ -108,10 +131,80 @@ function general(s) {
     section("power", t("Background", "Фон"), t("Alerts and scheduled tasks with the window closed.", "Оповещения и задачи по расписанию при закрытом окне."),
       group(row({ label: t("Closing the window", "Закрытие окна"), ico: "power", about: t("ihatecrypto stays in the tray: price alerts, balances and scheduled tasks go on. Quit from the tray icon's menu ends it.", "ihatecrypto остаётся в трее: оповещения, балансы и задачи продолжают работать. «Выход» в меню значка в трее закрывает его совсем.") },
         h("span", { class: "secondary" }, t("Keeps it in the tray", "Оставляет в трее"))))),
+    s.nodes ? nodesSection(s.nodes) : null,
+    s.nodes ? oneClickSection(s.nodes) : null,
     section("arrow.down.circle", t("About", "О приложении"), t("An update installs only when its signature matches ihatecrypto's key.", "Обновление ставится, только если его подпись совпадает с ключом ihatecrypto."),
       group(row({ label: t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle" },
         h("button", { class: "btn small", onclick: checkUpdate }, t("Check for updates", "Проверить обновления"))))),
   ];
+}
+
+// Your own nodes and the NEAR Intents key (Nodes.swift): what's typed is checked by the engine before it's kept; only a
+// node's host comes back.
+
+const secretForm = { open: null, text: "", problem: null, checking: false };
+function openSecret(id) { Object.assign(secretForm, { open: secretForm.open === id ? null : id, text: "", problem: null, checking: false }); render(); }
+async function saveSecret(op, args) {
+  secretForm.checking = true; secretForm.problem = null; render();
+  try { await engine(op, args); Object.assign(secretForm, { open: null, text: "", checking: false }); }
+  catch (e) { secretForm.problem = e.message; secretForm.checking = false; }
+  render();
+}
+function secretPanel(id, why, steps, site, placeholder, save, password) {
+  return h("div", { class: "pg-set-panel" },
+    why.map((x) => h("div", { class: "secondary small" }, x)),
+    h("ol", { class: "pg-node-steps small" }, steps.map((x) => h("li", { class: "selectable" }, x))),
+    site ? h("div", { class: "small" }, link(site[0], site[1])) : null,
+    h("input", { id: "secret-" + id, class: "pg-set-input pg-node-input address", type: password ? "password" : "text", placeholder, value: secretForm.text, autocomplete: "off", spellcheck: "false",
+      oninput: (e) => (secretForm.text = e.target.value), onkeydown: (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") openSecret(null); } }),
+    secretForm.problem ? h("div", { class: "small loss" }, icon("exclamationmark.triangle", 12), " ", secretForm.problem) : null,
+    h("div", { class: "btns" }, h("button", { class: "btn", onclick: () => openSecret(null) }, t("Cancel", "Отмена")),
+      h("button", { class: "btn primary", disabled: secretForm.checking || !secretForm.text.trim(), onclick: save }, secretForm.checking ? t("Checking…", "Проверяю…") : t("Check and save", "Проверить и сохранить"))));
+}
+
+function nodesSection(v) {
+  return section("server", t("Your own nodes", "Свои ноды"), t("Where the app reads each network and sends its transactions.", "Где приложение читает каждую сеть и отправляет её транзакции."),
+    group(v.nodes.map((n) => {
+      const sol = n.id === "solana";
+      const label = n.host ? `${n.title}: ${n.host}` : `${n.title}: ${sol ? t("Solana's public node", "публичная нода Solana") : t("built-in free nodes", "встроенные бесплатные ноды")}`;
+      const about = n.host
+        ? t(`Your node is asked first; the ${sol ? "public node takes" : "built-in nodes take"} over when yours doesn't answer, refuses its key or lacks a call.`,
+          `Сначала спрашивается твоя нода; ${sol ? "публичная подхватывает" : "встроенные подхватывают"}, если твоя не отвечает, отказывает по ключу или не умеет нужный вызов.`)
+        : t(`Free public nodes are shared by everyone: they limit how often anyone may ask, so at a busy moment a balance or a move can fail${sol ? ", and Solana's has no free backup" : ""}. A node of your own (free at ${n.provider}) takes that away.`,
+          `Бесплатные публичные ноды общие для всех: они ограничивают, как часто можно спрашивать, поэтому в час пик баланс или перевод могут не пройти${sol ? ", а у Solana нет бесплатной запасной" : ""}. Своя нода (бесплатно у ${n.provider}) это убирает.`);
+      const save = () => saveSecret("node", { network: n.id, address: secretForm.text });
+      return [row({ label, mark: logo(n.logo, 26), about },
+        n.host ? h("button", { class: "btn small", onclick: () => saveSecret("node", { network: n.id, address: "" }) }, t("Remove", "Убрать")) : null,
+        h("button", { class: "btn small", onclick: () => openSecret("node-" + n.id) }, n.host ? t("Change…", "Изменить…") : t("Add your own…", "Добавить свою…"))),
+        secretForm.open === "node-" + n.id ? secretPanel("node-" + n.id,
+          [t(`A node only reads the chain and passes on transactions already signed on this PC: it never sees your keys and can't move money. It does see your addresses. Its address carries your key, so it's kept encrypted for your Windows user and shown only by its host.${n.id === "ethereum" ? " Ethereum's transactions still go out through MEV Blocker, out of the public mempool." : ""}`,
+            `Нода только читает сеть и передаёт транзакции, уже подписанные на этом компьютере: ключей она не видит и двигать деньги не может. Твои адреса она видит. В её адресе лежит твой ключ, поэтому он хранится зашифрованным для твоего пользователя Windows и показывается только хостом.${n.id === "ethereum" ? " Транзакции Ethereum по-прежнему уходят через MEV Blocker, мимо публичного мемпула." : ""}`)],
+          sol ? [t("Open helius.dev and sign up — the free plan, no card.", "Открой helius.dev и зарегистрируйся — бесплатный план, без карты."),
+            t(`In the dashboard, open RPCs (Endpoints) and copy the Mainnet URL: ${n.example}`, `В панели открой RPCs (Endpoints) и скопируй адрес Mainnet: ${n.example}`),
+            t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")]
+            : [t("Open alchemy.com and sign up — the free plan, no card.", "Открой alchemy.com и зарегистрируйся — бесплатный план, без карты."),
+              t(`Create an app, pick ${n.title} Mainnet, and copy its HTTPS URL: ${n.example}`, `Создай приложение, выбери ${n.title} Mainnet и скопируй его адрес HTTPS: ${n.example}`),
+              t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
+          [n.site, t(`Open ${n.site.replace("https://www.", "")}`, `Открыть ${n.site.replace("https://www.", "")}`)], n.example, save, false) : null];
+    })));
+}
+
+function oneClickSection(v) {
+  const save = () => saveSecret("oneClickKey", { key: secretForm.text });
+  return section("key", t("NEAR Intents key", "Ключ NEAR Intents"), t("Lower fees on NEAR and cross-chain swaps through 1Click.", "Меньше комиссия на NEAR и обменах между сетями через 1Click."),
+    group(row({ label: v.oneClickKey ? t("NEAR Intents: your partner key", "NEAR Intents: твой партнёрский ключ") : t("NEAR Intents: no key — 0.25% more per swap", "NEAR Intents: ключа нет — +0,25% к каждому обмену"), mark: logo("near", 26),
+      about: t("1Click, NEAR Intents' swap service, takes an extra 0.25% from every quote asked without a key. A free partner key at partners.near-intents.org switches it to the partner fees: 0.20%, and 0.01% on stablecoins and the same coin between networks.",
+        "1Click, сервис обменов NEAR Intents, берёт лишние 0,25% с каждой котировки без ключа. Бесплатный партнёрский ключ на partners.near-intents.org переключает его на партнёрские комиссии: 0,20%, а на стейблкоинах и той же монете между сетями — 0,01%.") },
+      v.oneClickKey ? h("button", { class: "btn small", onclick: () => saveSecret("oneClickKey", { key: "" }) }, t("Remove", "Убрать")) : null,
+      h("button", { class: "btn small", onclick: () => openSecret("1click") }, v.oneClickKey ? t("Change…", "Изменить…") : t("Add your key…", "Добавить ключ…"))),
+      secretForm.open === "1click" ? secretPanel("1click",
+        [t("Buying and selling NEAR, and the moves between networks that go through NEAR Intents, are quoted by its 1Click service. Without a key it adds 0.25% to every quote. With a free partner key it charges its partner fees instead: 0.20%, and 0.01% on stablecoins and the same coin between networks.",
+          "Покупку и продажу NEAR и переводы между сетями через NEAR Intents оценивает его сервис 1Click. Без ключа он добавляет 0,25% к каждой котировке. С бесплатным партнёрским ключом берёт партнёрские комиссии: 0,20%, а на стейблкоинах и той же монете между сетями — 0,01%."),
+         t("The key only identifies you to 1Click: it can't move money or sign anything. It's kept encrypted for your Windows user.", "Ключ только представляет тебя 1Click: двигать деньги или что-то подписывать он не может. Он хранится зашифрованным для твоего пользователя Windows.")],
+        [t("Open partners.near-intents.org and sign in with your email — free.", "Открой partners.near-intents.org и войди по почте — бесплатно."),
+         t("In the Partner Dashboard, create an API key and copy the token (a long JWT: eyJ…).", "В Partner Dashboard создай API-ключ и скопируй токен (длинный JWT: eyJ…)."),
+         t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
+        ["https://partners.near-intents.org", t("Open partners.near-intents.org", "Открыть partners.near-intents.org")], "eyJ…", save, true) : null));
 }
 
 async function checkUpdate() {
@@ -269,10 +362,20 @@ function walletTab(s) {
       group(
         row({ label: t("Stays valid for", "Действует"), ico: "clock", about: t("One move covers that move's signatures for at most a minute. With 5–30 minutes, signatures need no new Windows Hello during that time; each still passes the guard and the second check. Locking the PC ends it.", "Один перевод покрывает подписи этого перевода не дольше минуты. С 5–30 минутами новые подписи в это время не спрашивают Windows Hello; каждая всё равно проходит проверки. Блокировка компьютера заканчивает сессию.") },
           segmented(sessions, s.signer.sessionLength, (v) => act("sessionLength", { seconds: v }), "pg-set-seg")),
+        s.trading ? row({ label: t("One transaction for approve and swap", "Одна транзакция для approve и обмена"), ico: "square.stack",
+          about: t("On Base, Arbitrum, Ethereum, Polygon and Robinhood, an approve and the swap, deposit or bridge that spends it go out as one transaction under one Windows Hello (EIP-7702). For that, from the first such move on a network your wallet there runs the code of an audited account contract (eth-infinitism's Simple7702Account): it takes coins and tokens as before, only you can make it act, and every call in it is checked like a single one. Off: two transactions, two confirmations, as before; a network already switched stays so.",
+            "В Base, Arbitrum, Ethereum, Polygon и Robinhood approve и обмен, депозит или мост, который его тратит, уходят одной транзакцией под одним Windows Hello (EIP-7702). Для этого с первого такого движения в сети твой кошелёк там исполняет код проверенного аудитом контракта-аккаунта (Simple7702Account от eth-infinitism): он принимает монеты и токены как раньше, заставить его действовать можешь только ты, и каждый вызов в нём проверяется как отдельный. Выключено — две транзакции и два подтверждения, как раньше; сеть, где уже включено, такой и остаётся.") },
+          toggle("pg-batches", s.trading.batches, (on) => act("batches", { test: on }))) : null,
+        s.trading ? row({ label: t("Cap for unknown protocols", "Лимит для незнакомых протоколов"), ico: "shield",
+          about: t("A contract the chat calls outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) may put at most this much at risk in one call — what leaves the wallet, its approve and the coins sent with it. It must also have verified code, be a month old, hold $1M or more by DefiLlama and be on no scam list. Every check can be fooled; this caps what that costs.",
+            "Контракт, который чат вызывает вне собственного списка ihatecrypto (Aave, Morpho, Uniswap, Relay…), может рисковать за один вызов не больше этой суммы — что уходит из кошелька, его approve и монеты, отправленные с ним. Ещё у него должен быть проверенный код, возраст от месяца, от $1M по DefiLlama и ни одного списка мошенников. Любую проверку можно обмануть — лимит ограничивает, во что это обойдётся.") },
+          h("select", { id: "pg-contract-cap", onchange: (e) => act("contractCap", { value: Number(e.target.value) }) },
+            [10, 25, 50, 100, 250, 500, 1000].map((v) => h("option", { value: v, selected: s.trading.contractCap === v }, "$" + v.toLocaleString("en-US"))))) : null,
         row({ label: t("Ask again now", "Спрашивать снова сейчас"), ico: "lock", about: t("Ends the session now and pauses the Hyperliquid trading key until the next Windows Hello.", "Заканчивает сессию сейчас и ставит торговый ключ Hyperliquid на паузу до следующего Windows Hello.") },
           h("button", { class: "btn small", onclick: () => act("lock") }, t("Lock", "Заблокировать"))),
         s.signer.notes.map((n) => row({ label: n, ico: "checkmark.seal", cls: "wrap note" })),
         s.signer.error ? row({ label: s.signer.error, ico: "exclamationmark.triangle", cls: "wrap loss" }) : null)),
+    s.trading?.key?.possible ? hyperliquidSection(s) : null,
     watched ? section("eye", t("Addresses for balances", "Адреса для балансов"), t("Read-only wallets. Never paste a recovery phrase or key.", "Кошельки только для просмотра. Никогда не вставляй фразу восстановления или ключ."),
       group(h("div", { class: "pg-set-panel" }, watched.fields,
         h("div", { class: "btns" }, h("button", { class: "btn primary", onclick: watched.save }, t("Watch", "Смотреть")),
@@ -303,6 +406,159 @@ function walletRow(w, s) {
         ? h("button", { class: "btn small pg-danger", title: t("Only if its recovery phrase or key is written down: the money itself stays where it is.", "Только если фраза или ключ записаны: сами деньги остаются на месте."),
           onclick: async () => { removing = null; await act("removeWallet", { wallet: w.id }); } }, t("Remove?", "Удалить?"))
         : h("button", { class: "icon-btn", title: t("Remove this wallet", "Удалить этот кошелёк"), onclick: () => { removing = w.id; render(); setTimeout(() => { if (removing === w.id) { removing = null; render(); } }, 4000); } }, icon("trash", 14)))));
+}
+
+/** Settings › Wallet › Hyperliquid: the trading key (made and approved once, paused by «lock») and ihatecrypto's fee. */
+let feeAskedFor = null;
+function hyperliquidSection(s) {
+  const k = s.trading.key;
+  const owner = s.addresses.evm;
+  if (k.feeApproved == null && owner && feeAskedFor !== owner) { feeAskedFor = owner; act("readFee"); }
+  const confirm = k.ledger ? t("the Ledger's buttons", "кнопок Ledger") : "Windows Hello";
+  return section("bolt", "Hyperliquid", t("A trading key places orders. It cannot withdraw money.", "Торговый ключ ставит ордера. Вывести деньги он не может."),
+    group(
+      row({ label: t("Trading key", "Торговый ключ"), mark: logo("hype", 26),
+        about: k.active ? t("Opens positions without Windows Hello for 7 days after your last confirmation for it; stops and closes go on after that. It cannot withdraw money.",
+          "Открывает позиции без Windows Hello 7 дней после последнего подтверждения для него; стопы и закрытия работают и после. Вывести деньги он не может.")
+          : t(`Without a trading key, every order asks for ${k.ledger ? "the Ledger's buttons" : "Windows Hello"}. Hyperliquid accepts the key after the account has had a deposit.`,
+            `Без торгового ключа каждый ордер спрашивает ${k.ledger ? "кнопки Ledger" : "Windows Hello"}. Hyperliquid принимает ключ, когда на аккаунт уже был депозит.`) },
+        pill(k.active ? t("On", "Включён") : t("Off", "Выключен"), k.active),
+        !k.active && !k.paused ? h("button", { class: "btn small", onclick: () => act("tradingKey") }, k.ledger ? t("Approve on Ledger…", "Одобрить на Ledger…") : t("Approve…", "Одобрить…")) : null),
+      k.paused ? row({ label: t("Paused by «lock»", "На паузе после «Заблокировать»"), ico: "lock",
+        about: t(`Orders ask for ${k.ledger ? "the Ledger's buttons" : "Windows Hello"} until it resumes. Resuming asks for Windows Hello once.`, `Ордера спрашивают ${confirm}, пока ключ не возобновлён. Возобновление один раз спросит Windows Hello.`) },
+        h("button", { class: "btn small", onclick: () => act("tradingKey") }, t("Resume…", "Возобновить…"))) : null,
+      row({ label: t("ihatecrypto's fee", "Комиссия ihatecrypto"), ico: "percent",
+        about: t(`${k.feeRate} of each Hyperliquid trade placed in ihatecrypto, on top of the exchange's own fee: perps both ways, spot only when selling. Hyperliquid takes it, and only once you approve it: the first trade you confirm asks. «Revoke» takes the approval back, and the next trade asks again. The referral code ${k.referral} gives the account 4% off Hyperliquid's fees.`,
+          `${k.feeRate} с каждой сделки на Hyperliquid, сделанной в ihatecrypto, сверх комиссии самой биржи: перпы в обе стороны, спот только при продаже. Её берёт Hyperliquid, и только после твоего одобрения: спросит первая сделка, которую ты подтвердишь. «Отозвать» забирает одобрение, и следующая сделка спросит снова. Реферальный код ${k.referral} даёт аккаунту скидку 4% на комиссии Hyperliquid.`) },
+        pill(k.feeApproved === true ? `${k.feeRate} · ${t("Approved", "Одобрена")}` : k.feeApproved === false ? `${k.feeRate} · ${t("Not yet", "Ещё нет")}` : k.feeRate, k.feeApproved === true),
+        k.feeApproved === true ? h("button", { class: "btn small", onclick: () => act("revokeFee") }, t("Revoke…", "Отозвать…")) : null)));
+}
+
+// Trading agent: a style that sets every rule at once, the limits, «by the book», Safe search (SettingsView.agent).
+
+const styleWords = {
+  careful: ["gauge.0", () => t("Careful", "Осторожный"), () => t("Small bets, little leverage, wide stops.", "Маленькие ставки, мало плеча, широкие стопы.")],
+  balanced: ["gauge.50", () => t("Balanced", "Сбалансированный"), () => t("The book: 1% risk, a 2R take.", "По учебнику: риск 1%, тейк 2R.")],
+  bold: ["gauge.100", () => t("Bold", "Смелый"), () => t("Bigger bets and more leverage.", "Ставки крупнее и больше плеча.")],
+};
+const ruleKeys = ["maxRiskPct", "defaultRiskPct", "minRewardRisk", "defaultRewardRisk", "maxLeverage", "atrStopMultiple", "maxOpenRiskPct"];
+const samePolicy = (a, b) => ruleKeys.every((k) => Math.abs(a[k] - b[k]) < 1e-9);
+const n2 = (v) => String(Number(Number(v).toFixed(2)));
+const pctText = (v) => n2(v) + "%";
+
+/** A rule changed by a step: the ones that depend on each other kept in line after it (the Mac's update). */
+function changeRule(change) {
+  const p = { ...ui.state.trading.policy };
+  change(p);
+  for (const k of ruleKeys) p[k] = Math.round(p[k] * 100) / 100;
+  p.defaultRiskPct = Math.min(p.defaultRiskPct, p.maxRiskPct);
+  p.maxOpenRiskPct = Math.max(p.maxOpenRiskPct, p.maxRiskPct);
+  p.defaultRewardRisk = Math.max(p.defaultRewardRisk, p.minRewardRisk);
+  act("policy", { policy: p });
+}
+
+/** − value +. */
+function stepper(value, what, down, up, change) {
+  const step = (sym, help, enabled, d) => h("button", { class: "pg-agent-step", title: help, "aria-label": help, disabled: !enabled, onclick: () => changeRule((p) => change(p, d)) }, icon(sym, 11));
+  return h("span", { class: "pg-agent-stepper" }, step("minus", t("Less ", "Меньше: ") + what, down, -1), h("b", { class: "num" }, value), step("plus", t("More ", "Больше: ") + what, up, 1));
+}
+
+function agentTab(s) {
+  if (!s.trading) return [];
+  const tr = s.trading, p = tr.policy;
+  const current = tr.styles.find((x) => samePolicy(x.policy, p));
+  const card = (x) => {
+    const [ico, name, line] = styleWords[x.id];
+    const on = x === current;
+    return h("button", { class: "pg-agent-style" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? t(`${name()} — in use`, `${name()} — сейчас`) : t(`Use ${name()}: sets all the rules below`, `Выбрать «${name()}»: задаёт все правила ниже`),
+      onclick: () => act("policy", { policy: x.policy }) },
+      h("div", { class: "pg-agent-style-top" }, tile(ico, 34), h("span", { class: "spacer" }), icon(on ? "check" : "circle", 15)),
+      h("div", {}, h("b", {}, name()), h("div", { class: "secondary small" }, line())),
+      h("div", { class: "pg-agent-figures" },
+        [[t("Risk", "Риск"), pctText(x.policy.maxRiskPct)], [t("Leverage", "Плечо"), n2(x.policy.maxLeverage) + "×"], [t("Take", "Тейк"), n2(x.policy.defaultRewardRisk) + "R"]]
+          .map(([l, v]) => h("span", {}, h("span", { class: "secondary" }, l), h("b", { class: "num" }, v)))));
+  };
+  return [
+    section("dial", t("Style", "Стиль"), current ? t("Sets every rule below at once. Change any number after.", "Задаёт все правила ниже сразу. Любое число можно поменять потом.")
+      : t("Custom: your own numbers below. A style resets them.", "Свои: твои числа ниже. Стиль их сбросит."),
+      h("div", { class: "pg-agent-styles" }, tr.styles.map(card))),
+    section("shield", t("Limits", "Лимиты"), t("A plan that breaks one is not executed. Crypto only.", "План, который нарушает хоть один, не исполняется. Только крипта."),
+      group(
+        row({ label: t("Risk per trade", "Риск на сделку"), ico: "chart.bar", about: t("The most one trade may lose at its stop, as a share of your capital.", "Сколько одна сделка может потерять на стопе — в доле от капитала.") },
+          h("span", { class: "pg-agent-bar", "aria-hidden": "true" }, h("i", { style: `width:${Math.min(100, Math.max(0, p.maxRiskPct * 10))}%` })),
+          stepper(pctText(p.maxRiskPct), t("risk per trade", "риск на сделку"), p.maxRiskPct > 0.5, p.maxRiskPct < 10, (q, d) => (q.maxRiskPct += d * 0.5))),
+        row({ label: t("All open positions together", "Все открытые позиции вместе"), ico: "square.stack", about: t("Their combined loss at the stops can't go over this share of capital. It's never below the risk per trade.", "Их общий убыток на стопах не может быть больше этой доли капитала. Он никогда не меньше риска на сделку.") },
+          stepper(pctText(p.maxOpenRiskPct), t("for all positions", "для всех позиций"), p.maxOpenRiskPct > p.maxRiskPct, p.maxOpenRiskPct < 30, (q, d) => (q.maxOpenRiskPct += d))),
+        row({ label: t("Reward / risk at least", "Прибыль к риску не меньше"), ico: "arrow.up.right", about: t("The planned profit must be at least this many times the planned loss.", "Плановая прибыль должна быть хотя бы во столько раз больше планового убытка.") },
+          stepper(n2(p.minRewardRisk), t("reward per risk", "прибыль к риску"), p.minRewardRisk > 1, p.minRewardRisk < 5, (q, d) => (q.minRewardRisk += d * 0.1))),
+        row({ label: t("Leverage up to", "Плечо до"), ico: "multiply", about: t("Borrowed exposure makes gains and losses larger. The assistant never trades above this.", "Заёмные деньги увеличивают и прибыль, и убыток. Выше этого ассистент не торгует.") },
+          stepper(n2(p.maxLeverage) + "×", t("leverage", "плечо"), p.maxLeverage > 1, p.maxLeverage < 20, (q, d) => (q.maxLeverage += d))))),
+    section("book", t("By the book", "По правилам"), t("What «by the book» uses when you name no numbers.", "Что берут «по правилам», если ты не назвал чисел."),
+      group(
+        row({ label: t("Risk", "Риск"), ico: "chart.bar", about: t("The share of capital a trade risks at its stop when you don't say how much. Never above the risk per trade.", "Доля капитала, которой сделка рискует на стопе, если ты не назвал сумму. Никогда не больше риска на сделку.") },
+          stepper(pctText(p.defaultRiskPct), t("default risk", "риск по умолчанию"), p.defaultRiskPct > 0.25, p.defaultRiskPct < p.maxRiskPct, (q, d) => (q.defaultRiskPct += d * 0.25))),
+        row({ label: t("Take-profit", "Тейк-профит"), ico: "flag", about: t("How far the take is, as a multiple of the stop's distance: 2R takes twice what the stop would lose. Never below the reward / risk limit.", "Как далеко тейк — в кратных расстоянию до стопа: 2R забирает вдвое больше, чем потерял бы стоп. Никогда не меньше лимита прибыли к риску.") },
+          stepper(n2(p.defaultRewardRisk) + "R", t("take-profit", "тейк-профит"), p.defaultRewardRisk > p.minRewardRisk, p.defaultRewardRisk < 10, (q, d) => (q.defaultRewardRisk += d * 0.5))),
+        row({ label: t("Stop", "Стоп"), ico: "hand.raised", about: t("How far the stop is, in 4-hour ATRs — the coin's usual move over four hours. Wider stops are hit less often but lose more when they are.", "Как далеко стоп — в 4-часовых ATR, обычном движении монеты за четыре часа. Широкий стоп срабатывает реже, но теряет больше.") },
+          stepper(n2(p.atrStopMultiple) + " ATR", t("stop distance", "расстояние до стопа"), p.atrStopMultiple > 0.5, p.atrStopMultiple < 5, (q, d) => (q.atrStopMultiple += d * 0.5))))),
+    section("checkmark.seal", t("What it may buy", "Что можно покупать"), t("Tokens on Solana.", "Токены на Solana."),
+      group(row({ label: t("Safe search", "Безопасный поиск"), ico: "checkmark.seal",
+        about: tr.safeSearch ? t("Only verified coins on Solana: SOL, BTC, ETH, JUP and JitoSOL. Look-alikes of famous tokens cannot slip in.", "Только проверенные монеты на Solana: SOL, BTC, ETH, JUP и JitoSOL. Подделки известных токенов не проскочат.")
+          : t("Any Solana token can be bought by its mint through Jupiter. Before you confirm, the assistant explains risks such as a creator who can freeze or print tokens, a thin pool, or no verification. Confirm and simulation still apply.",
+            "Любой токен Solana можно купить по mint-адресу через Jupiter. Перед подтверждением ассистент объясняет риски: создатель может заморозить или напечатать токены, пул тонкий или проверки нет. «Подтвердить» и симуляция остаются.") },
+        toggle("pg-safe-search", tr.safeSearch, (on) => act("safeSearch", { test: on }))))),
+  ];
+}
+
+// Modules: the networks and each kind of move on the left, the switches of the one picked on the right (ModulesSettings).
+
+const kindIcon = { swaps: "arrow.left.arrow.right", earn: "percent", perps: "chart.line", stocks: "chart.bar", bridges: "bridge", payments: "creditcard" };
+const kindWords = {
+  swaps: () => [t("Swaps", "Обмены"), t("Trade one token for another", "Один токен на другой")],
+  earn: () => [t("Earn · DeFi", "Доход · DeFi"), t("Lend and stake idle money", "Давать в долг и стейкать свободные деньги")],
+  perps: () => [t("Perps", "Перпы"), t("Long or short with leverage", "Лонг или шорт с плечом")],
+  stocks: () => [t("Stocks & oil", "Акции и нефть"), t("Commodities and tokenized shares", "Сырьё и токенизированные акции")],
+  bridges: () => [t("Bridges", "Мосты"), t("Move money between networks", "Перевод денег между сетями")],
+  payments: () => [t("Payments", "Платежи"), t("Pay for services per request", "Оплата сервисов за запрос")],
+};
+
+function modulesTab(s) {
+  const m = s.modules;
+  if (!m) return [];
+  let pick = store("modulesPick") || "networks";
+  const kind = m.kinds.find((k) => k.key === pick);
+  if (!kind) pick = "networks";
+  const count = (k) => [k.on ? k.protocols.filter((p) => p.on).length : 0, k.protocols.length];
+  const netsOn = m.networks.filter((n) => n.on).length;
+  const words = (k) => (kindWords[k.key] ? kindWords[k.key]() : [k.name, k.line]);
+  const side = (id, name, ico, on, of) => h("button", { class: "pg-mod-side-row" + (pick === id ? " on" : ""), "aria-pressed": String(pick === id), onclick: () => { store("modulesPick", id); render(); } },
+    icon(ico, 16), h("span", { class: "one-line" }, name), h("span", { class: "spacer" }), h("span", { class: "pg-mod-count" + (on === of ? "" : " some") }, `${on}/${of}`));
+  const header = (title, line, ico, on, of, master) => h("div", { class: "pg-mod-head" }, tile(ico, 44),
+    h("div", { class: "pg-mod-head-text" }, h("b", {}, title), h("span", { class: "secondary" }, line)), h("span", { class: "spacer" }),
+    h("span", { class: "secondary small" }, t(`${on} of ${of} on`, `включено ${on} из ${of}`)), master || null);
+  const item = (logoName, name, sub, control, { dim, faded, warn } = {}) => h("div", { class: "pg-mod-row" + (faded ? " faded" : "") },
+    h("span", { class: "pg-mod-logo" + (dim ? " dim" : "") }, logo(logoName, 34)),
+    h("div", { class: "pg-mod-row-text" }, h("b", { class: dim ? "secondary" : "" }, name), h("span", { class: warn ? "accent-ink" : "secondary" }, sub)),
+    h("span", { class: "spacer" }), control);
+  let detail;
+  if (kind) {
+    const [on, of] = count(kind);
+    const [name, line] = words(kind);
+    detail = [header(name, line, kindIcon[kind.key] || "square.grid", on, of, toggle("mod-" + kind.id, kind.on, (v) => act("module", { name: kind.id, test: v }))),
+      h("div", { class: "pg-mod-box" }, kind.protocols.map((p) => item(p.logo, p.name, p.line,
+        toggle("mod-" + p.id, p.on, (v) => act("module", { name: p.id, test: v }), !kind.on), { faded: !p.allowed, warn: p.networksOff && p.on })))];
+  } else {
+    detail = [header(t("Networks", "Сети"), t("Where the assistant may move money", "Где ассистенту можно двигать деньги"), "globe", netsOn, m.networks.length),
+      h("div", { class: "pg-mod-box" }, m.networks.map((n) => item(n.logo, n.name, n.users,
+        toggle("mod-" + n.id, n.on, (v) => act("module", { name: n.id, test: v })), { dim: !n.on })))];
+  }
+  return [h("div", { class: "pg-mod" },
+    h("nav", { class: "pg-mod-side" },
+      side("networks", t("Networks", "Сети"), "globe", netsOn, m.networks.length),
+      h("div", { class: "menu-divider" }),
+      m.kinds.map((k) => { const [on, of] = count(k); return side(k.key, words(k)[0], kindIcon[k.key] || "square.grid", on, of); }),
+      h("div", { class: "pg-mod-side-row soon" }, icon("questionmark.circle", 16), h("span", {}, t("Predictions", "Прогнозы")), h("span", { class: "spacer" }), h("span", { class: "small" }, t("Soon", "Скоро")))),
+    h("div", { class: "pg-mod-detail" }, detail))];
 }
 
 // Skills: a card each, its switch, its text on demand, and adding one from a file.

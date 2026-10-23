@@ -2,6 +2,7 @@
 // engine says about the site. It never sees the page's contents, and the page never sees it.
 
 import { h, icon, t, ui, addIcons } from "./core.js";
+import { loadError } from "./browser-words.js";
 
 addIcons({
   "exclamationmark.octagon": "M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM12 7.5v5.5M12 16v.5",
@@ -46,12 +47,12 @@ function badge(check, real) {
 }
 
 function draw() {
-  const host = (() => { try { return new URL(s.url).host; } catch { return ""; } })();
+  const host = s?.blockedHost || (() => { try { return new URL(s.url).host; } catch { return ""; } })();
   if (s && document.activeElement !== field) field.value = s.url === "about:blank" ? "" : s.url;
   field.placeholder = t("Site address", "Адрес сайта");
   const row = h("div", { class: "bar-row" },
-    h("button", { class: "icon-btn", title: t("Back", "Назад"), onclick: () => go("back") }, icon("chevron.left")),
-    h("button", { class: "icon-btn", title: t("Forward", "Вперёд"), onclick: () => go("forward") }, icon("chevron.right")),
+    h("button", { class: "icon-btn", title: t("Back", "Назад"), disabled: s ? !s.back : true, onclick: () => go("back") }, icon("chevron.left")),
+    h("button", { class: "icon-btn", title: t("Forward", "Вперёд"), disabled: s ? !s.forward : true, onclick: () => go("forward") }, icon("chevron.right")),
     s?.loading
       ? h("button", { class: "icon-btn", title: t("Stop", "Остановить"), onclick: () => go("stop") }, icon("xmark"))
       : h("button", { class: "icon-btn", title: t("Reload", "Обновить"), onclick: () => go("reload") }, icon("arrow.clockwise")),
@@ -70,9 +71,10 @@ function draw() {
           h("span", { class: "one-line" }, t("only watching: nothing here can sign", "только просмотр: подписывать нечем")))),
   );
   const blocked = s?.blocked ? h("div", { class: "blocked" }, icon("hand.raised", 15),
-    t(`${host} is on MetaMask's list of phishing sites, so ihatecrypto offers it no wallet. If you typed it, check the address letter by letter.`,
-      `${host} в списке фишинговых сайтов MetaMask, поэтому ihatecrypto не даёт ему кошелёк. Если ты вводил адрес сам, сверь его по буквам.`)) : null;
-  bar.replaceChildren(...[row, blocked, error ? h("div", { class: "load-error" }, error) : null].filter(Boolean));
+    t(`${host} is on MetaMask's list of phishing sites, so ihatecrypto didn't open it and offers it no wallet. If you typed it, check the address letter by letter.`,
+      `${host} в списке фишинговых сайтов MetaMask, поэтому ihatecrypto его не открыл и не даёт ему кошелёк. Если ты вводил адрес сам, сверь его по буквам.`)) : null;
+  const problem = error || (s?.blocked ? "" : loadError(s?.error));
+  bar.replaceChildren(...[row, blocked, problem ? h("div", { class: "load-error" }, problem) : null].filter(Boolean));
 }
 
 let timer = null;

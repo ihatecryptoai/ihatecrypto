@@ -247,3 +247,66 @@
 .live-ledger-problem span { flex: 1; }
 .live-ledger-note { display: flex; align-items: flex-start; gap: 6px; font-size: 10.5px; color: var(--jev-ink); }
 .live-ledger-on { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--profit); }
+
+/* Favorites «+»: the paste box (AddFavoriteButton's popover). */
+.live-fav-plus { width: 30px; padding: 0; flex: none; }
+.live-fav-pop { width: 380px; max-width: calc(100vw - 16px); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.live-fav-pop-title { font-size: 14px; }
+.live-fav-field-row { display: flex; gap: 6px; }
+.live-fav-field { flex: 1; min-width: 0; font-size: 11.5px; }
+.live-fav-result, .live-fav-held { display: flex; flex-direction: column; gap: 8px; }
+.live-fav-result:empty, .live-fav-held:empty { display: none; }
+.live-fav-card { display: flex; flex-direction: column; gap: 9px; padding: 12px; border-radius: 10px; background: var(--fill); }
+.live-fav-kind { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.live-fav-chip { font-size: 9.5px; font-weight: 800; letter-spacing: 0.8px; padding: 3px 7px; border-radius: 5px; flex: none; }
+.live-fav-chip.token { color: var(--accent-ink); background: rgba(255, 122, 47, 0.14); }
+.live-fav-chip.wallet { color: var(--text); background: var(--fill-strong); }
+.live-fav-token { display: flex; align-items: center; gap: 10px; }
+.live-fav-token .live-tok-text { flex: 1; }
+.live-fav-price { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; }
+.live-fav-actions { display: flex; align-items: center; gap: 8px; }
+.live-fav-looking { display: flex; align-items: center; gap: 8px; }
+.live-fav-held-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px; border: none; border-radius: 8px; background: none; text-align: left; }
+.live-fav-held-row:hover { background: var(--fill); }
+.live-fav-star { color: #f5b301; display: inline-flex; }
+.live-fav-name { display: flex; flex-direction: column; gap: 4px; }
+.live-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--fill-strong); border-top-color: var(--accent); animation: live-spin 0.8s linear infinite; flex: none; }
+@keyframes live-spin { to { transform: rotate(360deg); } }
+
+/* The Schedule: its pause, the History tab, the automation wallet's QR. */
+.live-wide-btn.live-held { border-color: var(--accent); color: var(--accent-ink); }
+.live-sched-tasks { display: flex; flex-direction: column; gap: 6px; }
+.live-sched-tasks.held .live-task-row { opacity: 0.55; }
+.live-runs { display: flex; flex-direction: column; gap: 2px; }
+.live-run-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px 0; }
+.live-run-time { width: 58px; flex: none; white-space: nowrap; }
+.live-run-icon { display: inline-flex; flex: none; }
+.live-run-title { flex: 1; font-size: 12px; font-weight: 500; }
+.live-place-pay { display: flex; align-items: flex-start; gap: 12px; }
+.live-place-qr { flex: none; padding: 5px; border-radius: 12px; background: #fff; }
+.live-qr-small { width: 92px; height: 92px; display: block; }
+.live-place-pay .live-place-address { min-width: 0; flex: 1; }
+
+/* The multisig's money: the total, then each network's coins and dollars. */
+.live-msig-total { font-size: 26px; font-weight: 700; }
+.live-net-coins { max-width: 46%; text-align: right; }
+.live-net-usd { font-size: 13px; min-width: 52px; text-align: right; }
+
+/* The budget: how many weeks it covers, the SOL warning, «Top up gas». */
+.live-budget-weeks { font-weight: 600; }
+.live-budget-bar { display: flex; gap: 3px; }
+.live-budget-bar span { flex: 1; height: 5px; border-radius: 3px; background: var(--fill-strong); }
+.live-budget-bar span.on { background: var(--profit); }
+.live-budget-sol { display: flex; align-items: center; gap: 8px; }
+.live-budget-sol .loss { flex: 1; font-weight: 600; }
+.live-gas-btn { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 7px 12px; border-radius: 12px; text-align: left;
+  border: 1px solid var(--card-border); background: none; }
+.live-gas-btn:hover { background: var(--fill); }
+.live-gas-btn.short { border-color: var(--accent); }
+.live-gas-icon { display: inline-flex; color: var(--secondary); }
+.live-gas-btn.short .live-gas-icon { color: var(--accent); }
+.live-gas-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.live-gas-text b { font-size: 12.5px; }
+.live-gas-text .small { white-space: pre-line; }
+.live-place-row .live-place-text { flex: 1; }
+.live-place-usd { font-size: 12.5px; flex: none; }

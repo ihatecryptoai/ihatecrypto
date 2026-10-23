@@ -30,6 +30,12 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         var section = "tokens"
         /// Under a deposit's name: «earning», «Allez USDC · 5.42%».
         var note: String?
+        /// A token found by listing the address (Holding.id): the person can hide it or show it again; nil for the
+        /// network's dollars, gas and deposits, which always show.
+        var id: String?
+        /// It looks real (Holding.looksReal): verified, or a real pool and a cent's worth. Shown unless the person hid it;
+        /// the others are tucked until the person shows them.
+        var real: Bool?
     }
     struct Network: Encodable, Equatable {
         var key: String
@@ -38,6 +44,10 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         var rows: [Row]
         /// What its money does, as the Mac's network card says it: «idle $757.59 · earning $2.51», «$0.01 · margin».
         var note: String?
+        /// Tokens tucked under «N hidden · show»: hidden by the person, or airdrops that look like scams. Out of `usd`.
+        var hidden: [Row] = []
+        /// Tucked beyond the first hundred (a spammed address has hundreds): counted, not sent.
+        var hiddenMore = 0
     }
     struct Point: Encodable, Equatable { var at: Date; var usd: Decimal }
     var networks: [Network] = []
@@ -70,7 +80,10 @@ extension Engine {
         var networks: [PortfolioView.Network] = [], errors: [String] = []
         for part in parts {
             switch part {
-            case .success(let n?): if !n.rows.isEmpty { networks.append(noted(priced(n))) }
+            case .success(let n?):
+                // A network with nothing on show (only airdrops) has no card, as before they were tucked.
+                let n = Self.tucked(priced(n), choices: settings.tokenChoices ?? [:])
+                if !n.rows.isEmpty { networks.append(noted(n)) }
             case .success(nil): break
             case .failure(let key, let why):
                 errors.append(why)
@@ -94,6 +107,7 @@ extension Engine {
         if !me.evm.isEmpty { positions = (try? await HyperliquidAccount.positions(me.evm)) ?? positions }
         await refreshFavorites()
         await checkAlerts()
+        await readTransit()
         changed()
     }
 
@@ -102,7 +116,7 @@ extension Engine {
     func announceIncoming(from old: PortfolioView, to new: PortfolioView) {
         guard running == nil, Date().timeIntervalSince(lastOwnMove) > 120 else { return }
         func amounts(_ p: PortfolioView) -> [String: Decimal] {
-            Dictionary(p.networks.flatMap { n in n.rows.filter { ["USDC", "USDG", "SOL"].contains($0.symbol) }.map { ("\(n.name)|\($0.symbol)", $0.value) } },
+            Dictionary(p.networks.flatMap { n in n.rows.filter { $0.id == nil && ["USDC", "USDG", "SOL"].contains($0.symbol) }.map { ("\(n.name)|\($0.symbol)", $0.value) } },
                        uniquingKeysWith: +)
         }
         let before = amounts(old), after = amounts(new)
@@ -140,7 +154,7 @@ extension Engine {
         return n
     }
 
-    private func noted(_ n: PortfolioView.Network) -> PortfolioView.Network {
+    func noted(_ n: PortfolioView.Network) -> PortfolioView.Network {
         var n = n
         n.note = Self.note(n, russian: russian)
         // A deposit's «earning» in the window's language; a vault's own name and rate stay as they are.
@@ -205,8 +219,11 @@ extension Engine {
     /// A token found by listing the address, with its day's move and whether a market list vouches for it.
     nonisolated static func row(_ h: Holding) -> PortfolioView.Row {
         // As the Mac marks it: verified, or «unverified» — never on Hyperliquid's spot book, where a name is one token.
-        row(h.symbol, h.amount, usd: h.usd, icon: h.icon, chain: h.chain, contract: h.contract, change24h: h.change24h,
-            verified: h.verified ? true : h.unverified ? false : nil)
+        var r = row(h.symbol, h.amount, usd: h.usd, icon: h.icon, chain: h.chain, contract: h.contract, change24h: h.change24h,
+                    verified: h.verified ? true : h.unverified ? false : nil)
+        r.id = h.id
+        r.real = h.looksReal
+        return r
     }
 
     /// A deposit in the DeFi section: its dollars, and what it does under its name.
@@ -226,7 +243,7 @@ extension Engine {
             var rows: [PortfolioView.Row] = []
             if b.usdc > 0 { rows.append(row("USDC", b.usdc, usd: b.usdc)) }
             if b.sol > 0 { rows.append(row("SOL", b.sol, chain: "solana", contract: CostBasis.wsol)) }
-            rows += b.tokens.filter(\.looksReal).map(row)
+            rows += b.tokens.map(row)
             // What's put in, as the Mac's DeFi lines: Jupiter Lend and Kamino Lend earning, Kamino's vaults by name and rate.
             let cent = Decimal(string: "0.01")!
             let lend = ((await lendRead) ?? []).reduce(Decimal(0)) { $0 + Decimal($1.assets) / 1_000_000 }
@@ -248,7 +265,7 @@ extension Engine {
             var rows: [PortfolioView.Row] = []
             if b.accountValue > 0 { rows.append(row("Perps", b.accountValue, usd: b.accountValue)) }
             if b.spotUSDC > 0 { rows.append(row("USDC", b.spotUSDC, usd: b.spotUSDC)) }
-            rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" && $0.looksReal }.map(row)
+            rows += ((await Holdings.hyperliquidSpot(user: user)) ?? []).filter { $0.symbol != "USDC" }.map(row)
             return .success(.init(key: "hyperliquid", name: "Hyperliquid", usd: 0, rows: rows))
         } catch {
             return .failure("hyperliquid", "Hyperliquid: \(error.localizedDescription)")
@@ -269,7 +286,7 @@ extension Engine {
                         if usd > 0 { rows.append(row(net.key == "robinhood" ? "USDG" : "USDC", usd, usd: usd)) }
                         if coin > 0 { rows.append(row(net.gasCoin, coin, chain: net.key, contract: "native")) }
                         let others = (await Holdings.evm(net.key, address: owner, native: false, skip: [net.usdc.lowercased()])) ?? []
-                        rows += others.filter(\.looksReal).map(row)
+                        rows += others.map(row)
                         // USDC lent on Aave or in Morpho's vault here; a market that doesn't answer shows nothing this time.
                         for m in AaveV3.markets where m.chain == net.key {
                             if let raw = try? await m.rpc.tokenBalance(m.aUSDC, owner: owner), raw >= 10_000 {
@@ -299,7 +316,7 @@ extension Engine {
             let b = try await Near.balance(account: account)
             let total = b.near + b.wrapped
             var rows = total > 0 ? [row("NEAR", total)] : []
-            rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" && $0.looksReal }.map(row)
+            rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" }.map(row)
             return .success(.init(key: "near", name: "NEAR", usd: 0, rows: rows))
         } catch {
             return .failure("near", "NEAR: \(error.localizedDescription)")

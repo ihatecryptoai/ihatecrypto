@@ -26,6 +26,14 @@ nonisolated struct Multisig: Codable, Equatable, Identifiable {
     var id: String { address }
 }
 
+/// What a multisig holds on one of its networks, for its block (the Mac's MultisigBoard «By network»): its coins as a
+/// line and their dollars; both nil while the network's node hasn't answered.
+nonisolated struct MultisigNetHolding: Encodable, Equatable {
+    var network: String
+    var coins: String?
+    var usd: Decimal?
+}
+
 /// The set-up card's choices, before Confirm.
 nonisolated struct MultisigDraft: Codable, Equatable {
     var keys: [Multisig.Key]
@@ -56,6 +64,34 @@ extension Engine {
     static let multisigNetworks = ["base", "arbitrum", "optimism", "ethereum", "polygon", "bnb", "hyperevm", "robinhood", "tempo"]
 
     func saveMultisigs() { Store.save(multisigs, "multisigs.json") }
+
+    /// Each multisig's money on each of its networks, read with the balances.
+    func refreshMultisigs() async {
+        for m in multisigs { multisigHeld[m.address] = await multisigHoldings(m) }
+    }
+
+    /// As the Mac's MultisigBoard.holdings: the network's coin and its USDC read from the chain itself (an explorer lists
+    /// a new address minutes late), the other tokens from the explorer; dust that no market vouches for stays out.
+    func multisigHoldings(_ m: Multisig) async -> [MultisigNetHolding] {
+        var out: [MultisigNetHolding] = []
+        for key in m.networks {
+            guard let net = EVMNetwork.named(key) else { continue }
+            guard let usdc = (try? await net.rpc.read(net.usdc, ERC20.balanceOf(m.address))).flatMap({ ABI.decimal(in: $0, word: 0) }) else {
+                out.append(.init(network: key))
+                continue
+            }
+            var list = (await Holdings.evm(key, address: m.address, native: false, skip: [net.usdc.lowercased()]) ?? []).filter { !$0.native }
+            if usdc > 0 { list.insert(Holdings.dollar(key, contract: net.usdc, amount: usdc / pow(10, net.usdcDecimals), icon: nil), at: 0) }
+            if net.feeToken == nil, let wei = try? await net.rpc.balance(m.address), wei > 0 {
+                list.insert(Holding(chain: key, contract: "native", amount: Decimal(wei) / 1_000_000_000_000_000_000, symbol: net.gasCoin,
+                                    price: markets[net.gasCoin]?.markPx, verified: true, native: true), at: 0)
+            }
+            let shown = list.filter { $0.looksReal || ($0.usd ?? 0) >= Decimal(string: "0.01")! }
+            out.append(.init(network: key, coins: shown.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }.joined(separator: " · "),
+                             usd: shown.compactMap(\.usd).reduce(0, +)))
+        }
+        return out
+    }
 
     /// The signer's own EVM key, whichever wallet is shown: one computer is one key of a multisig.
     var pcKey: String? { status?.evmAddress.map { $0.lowercased() } }
@@ -192,6 +228,7 @@ extension Engine {
             multisigs.removeAll { $0.address == address }
             multisigs.append(Multisig(address: address, keys: d.keys, threshold: d.threshold, salt: d.salt, networks: made))
             saveMultisigs()
+            Task { await refreshMultisigs() }
         }
         multisigDraft = nil
         pin(Board(kind: "multisig", title: "multisig"))

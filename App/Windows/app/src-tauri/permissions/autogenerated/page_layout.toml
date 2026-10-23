@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-page-layout"
+description = "Enables the page_layout command without any pre-configured scope."
+commands.allow = ["page_layout"]
+
+[[permission]]
+identifier = "deny-page-layout"
+description = "Denies the page_layout command without any pre-configured scope."
+commands.deny = ["page_layout"]

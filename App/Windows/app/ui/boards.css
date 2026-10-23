@@ -319,3 +319,31 @@
 
 /* Hyperliquid's mark on its own dark green (TokenLogo «hype»). */
 .logo.route-hl-logo { background: var(--hl); border-radius: 30%; }
+
+/* The step's and the block's menus: a greyed item is one that can't run now, as on the Mac. */
+.menu.route-menu .item:disabled { opacity: 0.4; cursor: default; background: none; }
+.menu.route-menu .item .ico, .menu.route-menu .item .mascot { flex: none; color: var(--secondary); }
+
+/* A waiting step's details (StepDetails): the amount, the way, what's wrong with what was typed. */
+.route-edit { display: flex; flex-direction: column; gap: 6px; }
+.route-edit-head { font-size: 10px; font-weight: 800; letter-spacing: 0.8px; color: var(--secondary); }
+.route-amount { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 12px; border-radius: 12px; box-shadow: inset 0 0 0 1.5px var(--card-border); cursor: text; }
+.route-amount:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.route-amount input { width: 110px; padding: 0; border: none; background: none; font-size: 20px; font-weight: 700; outline: none; }
+.route-amount-unit { font-size: 14px; font-weight: 600; }
+.route-amount-hint { font-size: 11px; color: var(--secondary); max-width: 180px; }
+.route-way { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: none; border-radius: 12px; background: none; text-align: left;
+  box-shadow: inset 0 0 0 1.5px var(--card-border); color: var(--text); }
+.route-way:hover { background: var(--fill); }
+.route-way.route-on { background: color-mix(in srgb, var(--accent) 7%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+.route-way:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.route-radio { width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--card-border); flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.route-way.route-on .route-radio { box-shadow: inset 0 0 0 2px var(--accent); }
+.route-way.route-on .route-radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.route-way-logos { display: inline-flex; width: 42px; flex: none; }
+.route-way-logos .logo + .logo { margin-left: -7px; box-shadow: 0 0 0 1.5px var(--card); }
+.route-way-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.route-way-text b { font-size: 13px; }
+.route-way-text span { font-size: 11px; color: var(--secondary); }
+.route-way-badge { flex: none; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.route-edit-problem { display: flex; align-items: center; gap: 6px; font-size: 11px; }

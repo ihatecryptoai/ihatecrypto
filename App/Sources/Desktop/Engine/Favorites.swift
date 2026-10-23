@@ -1,6 +1,7 @@
 import Foundation
 import IhatecryptoCore
 import SignerAPI
+import WalletCore
 
 /// «show token 0x…», «add 0x… to favorites», «remove token AERO from favorites»: the shared TokenCommand and
 /// DexScreener's TokenLookup, as on the Mac; the favorites' prices refresh with the balances.
@@ -64,6 +65,27 @@ extension Engine {
             line += say(". ⚠ Its name looks like a well-known coin's but the contract isn't that coin's.", ". ⚠ Имя похоже на известную монету, но контракт не её.")
         }
         return line + "."
+    }
+
+    /// The board's one «+» (TokensUI.AddFavoriteButton): what a pasted text is — a token DexScreener prices, a wallet
+    /// address (with the network it's saved on by default: Base for a 0x one), or not known while DexScreener is silent.
+    func lookToken(_ text: String) async -> [String: String] {
+        guard let a = AddressBookCommand.address(in: text) else { return ["kind": "invalid"] }
+        let network = a.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil ? "base"
+            : AddressCheck.Network.allCases.first { AddressCheck.problem(a, network: $0) == nil }?.rawValue ?? "solana"
+        // Bitcoin, TRON, NEAR… are never a DexScreener token.
+        guard network == "base" || network == "solana" else { return ["kind": "address", "address": a, "network": network] }
+        do {
+            guard let info = try await TokenLookup.lookup(a).first else { return ["kind": "address", "address": a, "network": network] }
+            var out = ["kind": "token", "address": info.address, "chain": info.chain, "name": info.name, "symbol": info.symbol]
+            out["image"] = info.imageURL?.absoluteString
+            out["price"] = info.priceUSD.map { "\($0)" }
+            out["change24h"] = info.change24h.map { "\($0)" }
+            out["liquidity"] = info.liquidityUSD.map { "\($0)" }
+            return out
+        } catch {
+            return ["kind": "unknown", "address": a, "network": network]
+        }
     }
 
     /// The favorites' prices, with the balances (DexScreener, one request each).

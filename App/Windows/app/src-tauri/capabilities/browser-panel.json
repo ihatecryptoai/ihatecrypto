@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "browser-panel",
+  "description": "The header of the page beside the canvas (webview «panel-bar», our own page): it moves the page back, reloads or stops it, closes it, hands it to the browser or the person's own one, reads what to show and where the chat is, and hears that something changed. The page itself (webview «panel») gets nothing.",
+  "webviews": [
+    "panel-bar"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-page-nav",
+    "allow-page-state",
+    "allow-page-layout"
+  ]
+}
