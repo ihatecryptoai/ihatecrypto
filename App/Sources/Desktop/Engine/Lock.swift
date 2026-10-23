@@ -167,6 +167,12 @@ extension Engine {
     }
 
     /// Every 15 s: time away from the PC, its session locked, or a gap in the timer (the PC slept) locks the app.
+    private var sessionEndedForLock: Bool {
+        get { Self.sessionEnded }
+        set { Self.sessionEnded = newValue }
+    }
+    nonisolated(unsafe) private static var sessionEnded = false
+
     private func startLockWatch() {
         Task {
             var last = Date()
@@ -175,6 +181,9 @@ extension Engine {
                 let now = Date()
                 let slept = now.timeIntervalSince(last) > 75
                 last = now
+                let screenLocked = winsec_session_locked() == 1
+                if slept || screenLocked, !sessionEndedForLock { sessionEndedForLock = true; _ = try? await SignerLink.shared.send(.endSession) }
+                if !slept && !screenLocked { sessionEndedForLock = false }
                 guard settings.codeSet == true, !lock.locked else { continue }
                 let away = Int(winsec_idle_ms()) >= lockView.lockAfter * 60_000
                 if slept || away || winsec_session_locked() == 1 { await lockApp() }

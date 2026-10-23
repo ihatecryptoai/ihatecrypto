@@ -215,8 +215,8 @@ final class Engine {
         didSet { Store.save(alerts, "alerts.json") }
     }
     /// Scheduled tasks and recurring buys, run by the minute.
-    var tasks: [ScheduledTask] = Store.load([ScheduledTask].self, "tasks.json") ?? [] {
-        didSet { Store.save(tasks, "tasks.json") }
+    var tasks: [ScheduledTask] = TaskSeal.load().tasks {
+        didSet { TaskSeal.save(tasks) }
     }
     /// What each scheduled run did, for the Schedule's History tab.
     var scheduleRuns: [ScheduleRun] = Store.load([ScheduleRun].self, "schedule-runs.json") ?? [] {
@@ -558,6 +558,11 @@ final class Engine {
         case "hello":
             await startSigner()
             if !refreshingEveryMinute {
+                // The tasks were changed outside ihatecrypto and loaded paused: said once.
+                if TaskSeal.load().tampered && tasks.allSatisfy({ $0.paused == true }) {
+                    reply(say("The scheduled tasks were changed outside ihatecrypto, so every one is paused. Check them in the Schedule and switch on only the ones you made.",
+                              "Задачи по расписанию изменили вне ihatecrypto, поэтому все они на паузе. Проверь их в «Расписании» и включи только свои."))
+                }
                 offerNewModules()
                 watchAlerts()
                 // The balances follow the chain while the window is open, as on the Mac (there every 30 s).

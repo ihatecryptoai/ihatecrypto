@@ -526,6 +526,7 @@ extension Engine {
             keepSteps(at: said)
             runningBoard = nil
             running = nil; lastOwnMove = Date(); changed(); Task { await refresh() }
+            if (status?.sessionLength ?? SignerSession.standard) == SignerSession.standard { Task { _ = try? await SignerLink.shared.send(.endSession) } }
             // The request this move was a step of goes on, with how it went.
             if agentGoal != nil { Task { await continueAgent() } }
         }

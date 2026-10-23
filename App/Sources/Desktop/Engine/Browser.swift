@@ -293,7 +293,7 @@ extension Engine {
     /// Decodes the call, names the token, simulates our balances and estimates gas, as the Mac does. Problems mean «don't sign».
     func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> SiteReview {
         let call = EVMCall.decode(data)
-        var problems = call.refusal(sender: from, chainId: rpc.chainId).map { [$0] } ?? []
+        var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
         if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
         let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()

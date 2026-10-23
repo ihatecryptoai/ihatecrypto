@@ -112,6 +112,12 @@ nonisolated struct LinkTradeSigner: TradeSigner {
         return signature
     }
 
+    /// A Relay order before the deposit that names it: the signer checks whom it pays (SignerRequest.relayOrder).
+    func registerRelayOrder(_ order: Data) async throws {
+        let reply = try await send(.relayOrder(order: order))
+        guard reply.ok else { throw ExecutionError(Self.reason(reply)) }
+    }
+
     // Dollars without gas, as the Mac's XPCTradeSigner: someone else pays the fee and the signer reads what it signs.
 
     func signSolanaSponsored(_ wire: Data, accounts: [String], tokenOwners: [String: String], sponsor: String) async throws -> Data {

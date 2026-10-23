@@ -32,8 +32,15 @@ extension Engine {
             return
         }
         let ask = messages.last(where: \.fromUser)?.text ?? ""
+        // Asking a price is a request: only to a service Tempo's directory lists, or a site the user named themselves — so
+        // text a lookup slipped into the chat can't have the model send the user's numbers to an address of its choosing.
+        let listed = await MPP.serviceName(url)
+        guard listed != nil || ask.lowercased().contains(host.lowercased()) else {
+            reply(say("\(host) isn't in Tempo's directory of paid services and isn't in your message, so ihatecrypto doesn't call it. Write its address yourself to use it.",
+                      "\(host) нет в каталоге платных сервисов Tempo и нет в твоём сообщении, поэтому ihatecrypto его не вызывает. Напиши его адрес сам, чтобы воспользоваться."), note: note)
+            return
+        }
         do {
-            async let named = MPP.serviceName(url)
             // The price is asked without the request's content (an email's text, a phone number), so a service the user
             // turns down never sees it; one that can't quote without it gets it unpaid, as the protocol has it.
             var probed = !(body ?? "").isEmpty && !Self.pricedWithContent.contains(url)
@@ -42,7 +49,7 @@ extension Engine {
                 probed = false
                 (status, headers, data) = try await MPP.call(method, url, body)
             }
-            let service = await named ?? host
+            let service = listed ?? host
             guard status == 402 else {
                 if (200..<300).contains(status) {
                     reply(await answered(ask, service: service, data: data, usdc: nil, proof: nil), note: note)

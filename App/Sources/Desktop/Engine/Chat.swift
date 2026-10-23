@@ -376,7 +376,12 @@ extension Engine {
 
     /// The whole chat as the model reads it: a person's message whole (up to 3000 characters), our replies' gist.
     func chatLines() -> [String] {
-        messages.map { $0.fromUser ? "user: " + $0.text.prefix(3000) : "ihatecrypto: " + $0.text.prefix(600) }
+        // A message the guard stopped never reaches a model, not even as history behind a later «pass it»: only the
+        // guard's reply stays (the Mac's chatLines).
+        let stopped = Set(messages.indices.dropLast().filter { messages[$0].fromUser && messages[$0 + 1].note?.hasPrefix("guard") == true })
+        return messages.indices.filter { !stopped.contains($0) }.map { i in
+            messages[i].fromUser ? "user: " + messages[i].text.prefix(3000) : "ihatecrypto: " + messages[i].text.prefix(600)
+        }
     }
 
     /// What goes with a message: all of it while it's short, its newest lines once it's long or the window small
