@@ -481,12 +481,19 @@ fn browser_layout(webview: tauri::Webview, state: tauri::State<'_, Engine>, heig
 /// A page's call to the wallet. The origin is the browser window's own address, read here, never what the page says;
 /// the engine puts the request on the canvas and answers once the person pressed Confirm or Cancel.
 #[tauri::command]
-async fn dapp_call(webview: tauri::Webview, state: tauri::State<'_, Engine>, method: String, params: serde_json::Value) -> Result<String, String> {
+async fn dapp_call(webview: tauri::Webview, request: tauri::ipc::Request<'_>, state: tauri::State<'_, Engine>, method: String,
+                   params: serde_json::Value) -> Result<String, String> {
     if webview.label() != SITE { return Err("only the browser's pages".into()) }
-    // A click in the page while the toolbar had the keyboard (provider.js): answered here, never by the engine.
+    let origin = origin_of(&webview.url().map_err(|e| e.to_string())?).ok_or("only https sites get the wallet")?;
+    // From the page itself, never a frame inside it: a frame on another origin (an ad, a widget) gets the same IPC, and
+    // its ask would show under the page's name. Tauri puts the sender's Origin on the request; the Mac checks the main
+    // frame (Browser.swift). With no Origin the call came by postMessage, which WebView2 gives no frame. A frame on the
+    // page's own origin passes: it can reach the page anyway. Checked on Windows 11: a sandboxed frame is refused.
+    if let Some(sender) = request.headers().get("Origin").and_then(|v| v.to_str().ok()) {
+        if sender.trim_end_matches('/') != origin { return Err("only the page itself, not a frame inside it".into()) }
+    }
     const METHODS: [&str; 6] = ["connect", "disconnect", "signMessage", "signTransaction", "signAndSendTransaction", "eth"];
     if !METHODS.contains(&method.as_str()) { return Err(format!("ihatecrypto doesn't support {method}.")) }
-    let origin = origin_of(&webview.url().map_err(|e| e.to_string())?).ok_or("only https sites get the wallet")?;
     let line = serde_json::json!({ "op": "dapp", "name": method, "text": params.to_string(), "address": origin });
     // The person may take a while to read the card.
     let v = engine_call(&state, line, std::time::Duration::from_secs(900)).await?;

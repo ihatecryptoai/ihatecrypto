@@ -3,12 +3,13 @@
 // the app, which puts it on the canvas for Confirm.
 (() => {
   if (window.__ihatecryptoWallet) return;
+  // The page itself, never a frame inside it (an ad, a widget): the Mac offers the wallet to the main frame only.
+  if (window.top !== window) return;
   // Through the app's one command a site may call; the app reads the page's origin itself. Answers are JSON text.
   const call = async (method, params) => {
     const r = await window.__TAURI_INTERNALS__.invoke('dapp_call', { method, params });
     return method === 'eth' ? r : JSON.parse(r);
   };
-  // WebView2 gives a page beside another webview no keyboard on a click: the app moves it here when it isn't.
   const toB64 = (bytes) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); };
   const fromB64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
   const listeners = { change: [] };
