@@ -170,6 +170,16 @@ with the amount and «Landed on …»; price alerts every 10 s with their THEN s
 plan drawn on its chart; Robinhood's stock routes; the Hyperliquid details (HIP-3 exchanges, HLP and its lock) and the
 position guardian (the half at 1R, the stop to breakeven after the first take, trailing stops).
 
+And the rest of a second audit: each move drawn as its route with a balance box per step and checked before its card
+(the shortfall and its choices, a first send, an address saved for another network, a saved address by its name);
+the trade plan's whole route with what stops it and its fix; the chat's own commands, folders and notes, and answers
+when no model does; the token card and the rich boards (P/L, rates, movers, approvals, DCA, a paid answer); scheduled
+runs on their own canvas while the person is away; «Think before answering», the model check, Claude Code and Ollama
+installed from the app, «Keep always running». Main's second security review is ported too: Relay deposits bound to
+the order the signer checked, scheduled tasks sealed (HMAC under DPAPI: a list changed outside the app loads paused),
+paid services only from Tempo's directory, a site transaction's target checked, the signing session ended per move and
+on a locked screen or sleep.
+
 Everything the Mac's window does is in the Windows app; what only a Windows machine can check is listed below.
 
 ## Checking on a Windows machine
@@ -217,3 +227,10 @@ the logos); the caption buttons minimize, maximize and restore, a double click o
 site's check and the wallet over app.hyperliquid.xyz. What that run fixed: the folded rail's Profile below a short
 window's edge, the toolbar never hearing a state (it looked for «event» at the start of the line, where Windows'
 encoder needn't put it), and the toolbar's address empty while a page is still loading.
+
+Wave two on the same machine, 2026-10-24: the passcode made and turned off through the real Windows Hello prompt, the
+lock screen (a wrong code counted, the right one opens), the tray panel, a test notification, «Open at sign-in» writing
+and removing its Run key, one instance; the browser's Back/Forward, the red line for a site that doesn't answer, and
+typing in its address field — which needed two fixes found there: the toolbar redrew six times a second (each state
+redrew it and asked siteState, and every request, even a read, sent a state), and a redraw moved the field out of the
+page, dropping its focus. A programmatic focus on a click made it worse and is gone: WebView2 focuses what's clicked.

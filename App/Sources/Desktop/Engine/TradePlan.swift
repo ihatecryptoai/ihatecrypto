@@ -2,6 +2,7 @@ import EVMChain
 import Foundation
 import HyperliquidSigning
 import IhatecryptoCore
+import LLMCore
 import TradeExecution
 import WalletCore
 
@@ -569,14 +570,18 @@ extension Engine {
         guard let client = llmClient(), let sent = messages.last, !sent.fromUser else { return }
         let plan = intent, context = routerContext(), model = model, command = intent.command
         let userText = messages.last(where: \.fromUser)?.text ?? command
-        Task {
-            let reading = try? await ChatRouter.comment(on: list, command: command, userText, context: context, client: client, model: model)
-            guard let reading, case .chat(let words) = reading.route, !words.isEmpty, intent == plan, messages.last?.id == sent.id else { return }
-            messages[messages.count - 1].text = words + "\n" + list
-            saveChat()
-            changed()
-            offer(reading.options, userText: userText, found: reading.found)
-        }
+        // The work in a method of its own: Swift 6.4.1 for Windows crashed optimizing it inside the Task's closure (CSE).
+        Task { await applyPlanComment(list, plan: plan, after: sent.id, command: command, userText: userText, context: context, client: client, model: model) }
+    }
+
+    private func applyPlanComment(_ list: String, plan: TradeIntent, after sentID: String, command: String, userText: String,
+                                  context: ChatRouter.Context, client: any LLMClient, model: String) async {
+        let reading = try? await ChatRouter.comment(on: list, command: command, userText, context: context, client: client, model: model)
+        guard let reading, case .chat(let words) = reading.route, !words.isEmpty, intent == plan, messages.last?.id == sentID else { return }
+        messages[messages.count - 1].text = words + "\n" + list
+        saveChat()
+        changed()
+        offer(reading.options, userText: userText, found: reading.found)
     }
 
     /// A plan for watched addresses: prepared and simulated against them, never signed (the Mac's previewWallet).
