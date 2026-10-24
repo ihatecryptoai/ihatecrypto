@@ -29,14 +29,15 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // MARK: The camera
 
-/** Where the canvas is looked at, per canvas: the pan past the rail's edge and the person's zoom on top of the fit. */
+/** Where the canvas is looked at: the pan past the rail's edge and the person's zoom on top of the fit. At launch, as it
+ * was left; another canvas opens at its start with the zoom kept (the Mac's CanvasHost home). */
 let cam = null, camFor = null;
 function camera() {
   const id = ui.state.canvas;
   if (camFor !== id) {
+    const kept = cam ? null : store("cam:" + id);
+    cam = kept && Number.isFinite(kept.x) ? { x: kept.x, y: kept.y, z: clamp(kept.z || 1, Z_MIN, Z_MAX) } : { x: 0, y: 0, z: cam?.z ?? 1 };
     camFor = id;
-    const kept = store("cam:" + id);
-    cam = kept && Number.isFinite(kept.x) ? { x: kept.x, y: kept.y, z: clamp(kept.z || 1, Z_MIN, Z_MAX) } : { x: 0, y: 0, z: 1 };
   }
   return cam;
 }
@@ -160,7 +161,8 @@ function wire(surface) {
   surface.addEventListener("pointerup", lift);
   surface.addEventListener("pointercancel", lift);
   surface.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || e.target.closest("button, a, input, textarea, select, label, [contenteditable], .chat-panel, .blocks-panel, .zoom-pill, .add-block, .selectable, .address, [data-no-pan]")) return;
+    // A drag pans over the boards too, as the Mac's CanvasHost: a card's click is still a click until it moves 6 px.
+    if (e.button !== 0 || e.target.closest("button, a, input, textarea, select, label, [contenteditable], .chat-panel, .blocks-panel, .zoom-pill, .add-block, .selectable, .address")) return;
     const start = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
     let panning = false;
     const move = (ev) => {
@@ -171,6 +173,8 @@ function wire(surface) {
         if (Math.hypot(dx, dy) < 6) return;
         panning = true;
         ui.dragging = true;
+        // A drag that began on a note's text pans: what it had started to select goes.
+        window.getSelection()?.removeAllRanges();
         surface.classList.add("grabbing");
         try { surface.setPointerCapture(e.pointerId); } catch {}
       }
@@ -195,6 +199,11 @@ function wire(surface) {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+  });
+  // Right-click on the ground, the portfolio's frame or a gap: no menu, as the Mac (not WebView2's Back / Refresh /
+  // Print). Fields and selectable text keep theirs for Copy and Paste; a block's own menu has already taken the click.
+  surface.addEventListener("contextmenu", (e) => {
+    if (!e.target.closest("input, textarea, [contenteditable], .selectable, .address, .chat-panel, .blocks-panel")) e.preventDefault();
   });
   surface.addEventListener("wheel", (e) => {
     if (e.ctrlKey && e.target.closest(".chat-panel, .blocks-panel")) { e.preventDefault(); return; }

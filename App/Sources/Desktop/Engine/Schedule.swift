@@ -17,6 +17,9 @@ nonisolated struct ScheduleRun: Codable, Equatable {
     var canvas: String?
     /// The task's id: its own canvas lists its runs (the Mac's ScheduleItemBoard «LAST RUNS»).
     var task: String?
+    /// All it did, as History keeps its canvas's request (the Mac's run opened to its ActivityCard). Only in the state:
+    /// never saved, filled while an item's own block is on the canvas.
+    var activity: HistoryTabs.Activity? = nil
 }
 
 /// The automation wallet's budget as the Schedule shows it (the Mac's AutomationBudget and the numbers drawn from it):
@@ -246,7 +249,22 @@ extension Engine {
     func pauseSchedule(_ on: Bool) { settings.schedulePaused = on ? true : nil }
 
     /// The History tab: the newest 30 runs first.
-    var recentRuns: [ScheduleRun] { Array(scheduleRuns.suffix(30).reversed()) }
+    var recentRuns: [ScheduleRun] {
+        // The guardian's moves on a position (partial profit, the trailing stop) are runs of its item too — the Mac's
+        // activities with schedule «perp:…» (Execution.swift:1194,1203). History keeps them with their coin; only it does.
+        let guarded = HistoryStore.saved.automatic.suffix(60).compactMap { a in
+            a.coin.map { ScheduleRun(at: a.at, title: a.title ?? "", result: a.failed ? "failed" : "done", line: a.lines.last, canvas: nil, task: "perp:" + $0) }
+        }
+        var runs = Array((scheduleRuns.suffix(30) + guarded).sorted { $0.at > $1.at }.prefix(30))
+        guard runs.contains(where: { $0.canvas != nil }), boards.contains(where: { $0.kind == "scheduleItem" }) else { return runs }
+        // A run's canvas starts with its «Scheduled: …» request, said as the run starts.
+        let asked = historyActivities.filter { $0.kind == "request" && $0.request != nil }
+        for i in runs.indices where runs[i].canvas != nil {
+            let at = runs[i].at
+            runs[i].activity = asked.filter { abs($0.at.timeIntervalSince(at)) < 3 }.min { abs($0.at.timeIntervalSince(at)) < abs($1.at.timeIntervalSince(at)) }
+        }
+        return runs
+    }
 
     /// The first task whose time has come, as the Mac's runDueTask: on a canvas of its own (the last run's makes way), and
     /// back to the canvas the person was on once it's done, unless it needs them (a Confirm, a failure). Only while nothing
@@ -421,6 +439,8 @@ extension Engine {
     func openSchedule(_ key: String) throws {
         guard key.hasPrefix("task:") || key.hasPrefix("perp:") else { throw WalletError("Unknown scheduled item «\(key)».") }
         if scheduleKey == nil { Self.scheduleReturn = canvasID }
+        // Opened from the Schedule: it comes along, so the next item is one click away (the Mac keeps its frame open).
+        let fromSchedule = boards.contains { $0.kind == "schedule" }
         if let c = canvases.first(where: { $0.schedule == key }) {
             try openCanvas(c.id)
         } else {
@@ -428,8 +448,11 @@ extension Engine {
             canvases[canvasIndex].title = String(scheduleTitle(key).prefix(60))
             canvases[canvasIndex].schedule = key
         }
+        if fromSchedule, !boards.contains(where: { $0.kind == "schedule" }) { pin(Board(kind: "schedule", title: "schedule")) }
         // Its block on top, put back if it was closed.
-        if !boards.contains(where: { $0.kind == "scheduleItem" && $0.title == key }) { pin(Board(kind: "scheduleItem", title: key)) }
+        if let i = boards.firstIndex(where: { $0.kind == "scheduleItem" && $0.title == key }) {
+            if i != 0 { boards.insert(boards.remove(at: i), at: 0) }
+        } else { pin(Board(kind: "scheduleItem", title: key)) }
     }
 
     /// Back to the canvas it came from (or the newest other one); an item's canvas nothing was written on leaves the list.

@@ -2,6 +2,7 @@ import DeFiYields
 import EVMChain
 import Foundation
 import IhatecryptoCore
+import JupiterSwap
 import TradeExecution
 import WalletCore
 
@@ -151,6 +152,8 @@ extension Engine {
         guard !list.isEmpty else {
             reply(say("No token approvals: nothing may spend this wallet's tokens.", "Разрешений нет: никто не может тратить токены этого кошелька.")
                   + (unread.isEmpty ? "" : say(" Not read: ", " Не прочитано: ") + unread.joined(separator: ", ") + "."), note: note)
+            // Its board says so too, as the Mac's ApprovalsBoard with nothing in it.
+            pin("result", say("Approvals", "Разрешения"), lines: [say("No token approvals.", "Разрешений нет.")], data: BlockData(approvals: approvalsCard([], unread: unread)))
             return
         }
         reply(say("Token approvals:\n", "Разрешения на токены:\n") + list.prefix(20).map { a in
@@ -170,14 +173,30 @@ extension Engine {
 
     func showJupiterDCA(note: String?) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { reply(say("Jupiter didn't answer.", "Jupiter не ответил."), note: note); return }
-        if !orders.isEmpty {
-            let symbol: (String) -> String = { mint in mint == SpotAsset.usdc.mint ? "USDC" : SpotAsset.all.first { $0.mint == mint }?.symbol ?? String(mint.prefix(6)) + "…" }
-            pin("result", "Jupiter DCA", lines: orders.prefix(10).map { o in
-                "\(Fmt.num(o.used, maxFraction: 2)) / \(Fmt.num(o.deposited, maxFraction: 2)) \(symbol(o.inputMint)) → \(Fmt.num(o.received, maxFraction: 6)) \(symbol(o.outputMint)) · "
-                    + say("\(o.fills) swaps, every \(o.every / 3600) h", "\(o.fills) обменов, раз в \(o.every / 3600) ч")
-            }, data: BlockData(dca: dcaRows(Array(orders.prefix(10)))))
-        }
+        if !orders.isEmpty { pin("result", "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10))))) }
         reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
               : say("Running Jupiter DCA: \(orders.count).", "Запущено Jupiter DCA: \(orders.count)."), note: note ?? "Jupiter DCA")
+    }
+
+    func dcaLines(_ orders: [JupiterRecurring.Order]) -> [String] {
+        let symbol: (String) -> String = { mint in mint == SpotAsset.usdc.mint ? "USDC" : SpotAsset.all.first { $0.mint == mint }?.symbol ?? String(mint.prefix(6)) + "…" }
+        return orders.prefix(10).map { o in
+            "\(Fmt.num(o.used, maxFraction: 2)) / \(Fmt.num(o.deposited, maxFraction: 2)) \(symbol(o.inputMint)) → \(Fmt.num(o.received, maxFraction: 6)) \(symbol(o.outputMint)) · "
+                + say("\(o.fills) swaps, every \(o.every / 3600) h", "\(o.fills) обменов, раз в \(o.every / 3600) ч")
+        }
+    }
+
+    /// After a DCA is placed or cancelled the orders are read again (the Mac's Execution.swift:711-716): the Jupiter DCA
+    /// block on the canvas shows them as they are now, so a cancelled order keeps no Cancel; a placed one with no block
+    /// here gets one. Jupiter not answering leaves the block as it was.
+    func refreshJupiterDCA(placed: Bool) async {
+        guard let orders = try? await executor().jupiterDCAOrders() else { return }
+        let lines = orders.isEmpty ? [say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")] : dcaLines(orders)
+        let data = orders.isEmpty ? nil : BlockData(dca: dcaRows(Array(orders.prefix(10))))
+        var list = boards, found = false
+        for i in list.indices where list[i].kind == "result" && list[i].title == "Jupiter DCA" {
+            list[i].lines = lines; list[i].data = data; found = true
+        }
+        if found { boards = list; changed() } else if placed, !orders.isEmpty { pin("result", "Jupiter DCA", lines: lines, data: data) }
     }
 }

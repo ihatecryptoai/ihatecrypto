@@ -42,7 +42,8 @@ extension Engine {
         v.codeSet = settings.codeSet == true
         v.codeOff = settings.codeOff == true
         v.lockAfter = Self.lockChoices.contains(settings.lockAfter ?? 5) ? settings.lockAfter ?? 5 : 5
-        v.tasksRun = !tasks.isEmpty
+        // What keeps running while locked, as the Mac's scheduleEntries: tasks, recurring buys and the guarded positions.
+        v.tasksRun = !tasks.isEmpty || !positions.isEmpty
         return v
     }
 
@@ -96,7 +97,9 @@ extension Engine {
 
     /// Windows Hello in its own window: ihatecrypto never sees the PIN, the face or the fingerprint. After a code that's
     /// off, Settings › Wallet then offers a new one.
-    func unlockWithHello() async {
+    /// `forgot`: «Forgot the code?» — opened by Windows Hello, then Settings › Wallet offers a new code (the Mac's
+    /// unlockWithMacPassword). Windows Hello stands for both of the Mac's ways in: its touch and its password.
+    func unlockWithHello(forgot: Bool = false) async {
         guard lock.locked else { return }
         let reason = say("open ihatecrypto", "открыть ihatecrypto")
         var signature: UnsafeMutablePointer<UInt8>?
@@ -117,14 +120,14 @@ extension Engine {
         guard status == WINSEC_OK else {
             if status != WINSEC_CANCELLED {
                 lock.problem = say("Windows Hello didn't open it: set up a PIN in Windows Settings › Accounts › Sign-in options.",
-                                   "Windows Hello не открыл: задай PIN в «Параметры Windows › Учётные записи › Варианты входа».")
+                                   "Windows Hello не открыл: задай PIN в «Параметры Windows › Учетные записи › Варианты входа».")
             }
             changed()
             return
         }
         let wasOff = settings.codeOff == true
         openLock()
-        if wasOff {
+        if wasOff || forgot {
             settings.codeOff = nil
             lock.offerNewCode = true
         }

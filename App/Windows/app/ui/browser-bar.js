@@ -79,7 +79,7 @@ function draw() {
         ? h("div", { class: "one-line" }, h("b", {}, t("With your wallet", "С твоим кошельком")),
           h("span", { class: "one-line" }, t("wallet ", "кошелёк ") + s.wallet + " · " + t("every signature is shown first", "каждую подпись сначала видишь ты")))
         : h("div", { class: "one-line" }, h("b", {}, t("No wallet here", "Без кошелька")),
-          h("span", { class: "one-line" }, t("only watching: nothing here can sign", "только просмотр: подписывать нечем")))),
+          h("span", { class: "one-line" }, noKey(s)))),
   );
   const blocked = s?.blocked ? h("div", { class: "blocked" }, icon("hand.raised", 15),
     t(`${host} is on MetaMask's list of phishing sites, so ihatecrypto didn't open it and offers it no wallet. If you typed it, check the address letter by letter.`,
@@ -97,7 +97,7 @@ function draw() {
       s.wallet ? h("b", {}, t("With your wallet", "С твоим кошельком")) : h("b", {}, t("No wallet here", "Без кошелька")),
       h("span", { class: "one-line" }, s.wallet
         ? `· ${t("wallet", "кошелёк")} ${s.wallet} · ${t("every signature is shown first", "каждую подпись сначала видишь ты")}`
-        : `· ${t("only watching: nothing here can sign", "только просмотр: подписывать нечем")}`),
+        : `· ${noKey(s)}`),
       h("span", { class: "spacer" }),
       h("button", { class: "icon-btn", title: t("Move to its own window", "В отдельное окно"), onclick: () => go("window") }, icon("macwindow.on.rectangle", 15)),
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => go("close") }, icon("xmark")),
@@ -135,3 +135,8 @@ follow();
 grip(head, edge);
 draw();
 refresh();
+
+/** Why the site gets no wallet: the addresses are only watched, or there's no key here at all (the Mac's «no key»). */
+function noKey(s) {
+  return s?.watching ? t("only watching: nothing here can sign", "только просмотр: подписывать нечем") : t("no key: nothing here can sign", "нет ключа: подписывать нечем");
+}

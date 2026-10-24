@@ -22,6 +22,8 @@ nonisolated struct OfferView: Codable, Equatable {
     var title: String
     var comment: String
     var recommended: Bool
+    /// What the card runs, shown on hover as on the Mac («Answer with this» when it's a reply); nil in older saved chats.
+    var command: String?
 }
 
 /// A priced swap's card, for the field's waiting bar (the Mac's quoteState): quoting, fresh until 15 s after its quote,
@@ -101,7 +103,7 @@ extension Engine {
     func pinOptions() {
         guard !options.isEmpty else { optionsMessage = nil; return }
         guard let i = messages.indices.last, !messages[i].fromUser else { optionsMessage = nil; return }
-        let shown = options.map { OfferView(title: $0.title, comment: $0.comment, recommended: $0.recommended) }
+        let shown = options.map { OfferView(title: $0.title, comment: $0.comment, recommended: $0.recommended, command: $0.command) }
         if messages[i].options != shown { messages[i].options = shown; messages[i].picked = nil }
         optionsMessage = messages[i].id
         saveChat()
@@ -181,6 +183,15 @@ extension Engine {
         case .sendToken(let name, let token, _?, let net): (try? acrossRecipient(name, token: token, network: net)) != nil
         default: RouteEdit.wayKey(c) != nil || c.isStockTrade
         }
+    }
+
+    /// The open position this canvas's plan is on, or the coin just traded while its position is open: the chat's position
+    /// chips (breakeven, trail, close half, close) show only then and act on it (the Mac's managesPosition and
+    /// positions.contains(intent.asset)); targetCoin picks the same coin when the phrase names none.
+    var chipsPosition: String? {
+        let plan = intent != TradeIntent() ? intent.asset : tradedPlan?.asset
+        guard let plan, positions.contains(where: { $0.coin == plan }) else { return nil }
+        return plan
     }
 
     var quoteView: QuoteView? {
@@ -406,10 +417,16 @@ extension Engine {
             reply(say("\(LLMCatalog.displayName(model: model)) is downloaded to this PC — pick it in the model menu.",
                       "\(LLMCatalog.displayName(model: model)) скачана на этот ПК — выбери её в меню моделей."))
         } catch {
-            reply(error.localizedDescription.contains("newer version of Ollama")
-                  ? say("Ollama is too old for \(LLMCatalog.displayName(model: model)). Update it (free, ollama.com/download), then press Download again.",
-                        "Ollama слишком старая для \(LLMCatalog.displayName(model: model)). Обнови её (бесплатно, ollama.com/download) и нажми «Скачать» ещё раз.")
-                  : say("Couldn't download \(model): ", "Не удалось скачать \(model): ") + error.localizedDescription)
+            // «pull model manifest: 412: The model you are attempting to pull requires a newer version of Ollama.»: the bar
+            // and the menu offer the update from then on (the Mac's ollamaOutdated).
+            if error.localizedDescription.contains("newer version of Ollama") {
+                localSetup.ollamaOutdated = true
+                let version = localSetup.ollamaVersion.map { " \($0)" } ?? ""
+                reply(say("Ollama\(version) is too old for \(LLMCatalog.displayName(model: model)). Update it (free, ollama.com/download), then press Download again.",
+                          "Ollama\(version) слишком старая для \(LLMCatalog.displayName(model: model)). Обнови её (бесплатно, ollama.com/download) и нажми «Скачать» ещё раз."))
+            } else {
+                reply(say("Couldn't download \(model): ", "Не удалось скачать \(model): ") + error.localizedDescription)
+            }
         }
     }
 

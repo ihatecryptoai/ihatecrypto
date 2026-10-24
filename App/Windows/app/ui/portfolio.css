@@ -189,3 +189,12 @@ button.pf-d-row:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.6); }
 
 /* A task's next run: the time always, its tail only when it fits whole on the one line (the Mac's ViewThatFits). */
 .pf-task-next { display: flex; flex-wrap: wrap; height: 1.35em; overflow: hidden; white-space: pre; }
+
+/* The Schedule summary while the whole schedule is paused (the Mac's ScheduleTop3): the word in red, the rows dimmed. */
+.pf-sched-paused { white-space: nowrap; font-size: 10px; margin-left: 6px; }
+.pf-task.pf-held { opacity: 0.55; }
+.pf-recurring { border: 1px solid var(--card-border, var(--border)); border-radius: 16px; padding: 11px; display: grid; gap: 4px; }
+.pf-recurring-head { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; }
+.pf-recurring-row { font-size: 10px; }
+.pf-transit-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-transit-qr { display: block; width: 120px; height: 120px; border-radius: 8px; }

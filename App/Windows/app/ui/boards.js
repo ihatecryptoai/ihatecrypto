@@ -5,7 +5,8 @@
 
 import { ui, act, engine, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence, usd, signedUsd, masked, qrCode, link, store } from "./core.js";
 import { liveBlock, liveKinds, liveTitle } from "./live.js";
-import { isAttached } from "./chat.js";
+import * as live from "./live.js";
+import { isAttached, detach } from "./chat.js";
 import { planStatus, planHead, planExtras, planStepState, PLAN_CHIPS } from "./trade.js";
 // A namespace, so a step's «Open <place>» shows only once portfolio.js exports toggleDetail (its place details board).
 import * as portfolio from "./portfolio.js";
@@ -56,7 +57,11 @@ export function planColumn() {
       : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))) : [starter()];
   // What was on the canvas when it opened is already there; only what comes after fades in.
   setTimeout(() => { seenReady = true; }, 0);
-  const column = h("div", { class: "route-plan" }, items);
+  // Nothing waiting, running or done here yet: «Plan · waiting for a task» over the column, as the Mac's planHeader.
+  const s = ui.state, idle = !boards.some((b) => b.kind === "move") && !s.card && !s.runningBoard && !s.scheduleKey;
+  const head = idle ? h("div", { class: "route-move-head" }, h("span", { class: "route-move-title" }, t("Plan", "План")),
+    h("span", { class: "route-status-chip secondary" }, t("waiting for a task", "ждёт задачи"))) : null;
+  const column = h("div", { class: "route-plan" }, head, items);
   return at === "beside" ? h("div", { class: "route-plan-row" }, column, h("div", { class: "route-beside" }, fade(chart, chartBlock(chart)))) : column;
 }
 
@@ -108,7 +113,8 @@ function blockMenu(e, b, title, more = []) {
   e.preventDefault();
   const on = isAttached(b.id), s = ui.state;
   menu(e, [
-    on ? [[icon("xmark.circle", 14), t("Take out of the chat", "Убрать из чата")], () => { ui.attached = null; render(); }]
+    // That block only, not the newest one attached (the Mac's BlockMenu).
+    on ? [[icon("xmark.circle", 14), t("Take out of the chat", "Убрать из чата")], () => detach(b.id)]
       : [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attach(b)],
     [[icon("questionmark.bubble", 14), t("What's going on here?", "Что здесь происходит?")],
       () => act("send", { text: t(`What's going on in «${title}»?`, `Что происходит в «${title}»?`), board: b.id }), !s.thinking && !!s.model?.connected],
@@ -162,11 +168,20 @@ function moveBoard(b, newest, onChart) {
     return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
       pill(b, open, toggle), open ? route : null, open ? notes(b) : null);
   }
-  const status = planStatus(b) || (siteHere ? [t("waiting for your answer", "ждёт твоего ответа"), "route-accent"] : waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
+  // The newest trade done here manages its position (the Mac's managesPosition): «Position · long ETH», open or
+  // closed, and that position's own card under the route while it's open.
+  const managed = newest && finished && b.trade && b.state === "done";
+  const position = managed ? (s.positions || []).find((p) => p.coin === b.trade.coin) : null;
+  const status = managed ? (position ? [t("position open", "позиция открыта"), "profit"] : [t("done · position closed", "готово · позиция закрыта"), "profit"])
+    : planStatus(b) || (siteHere ? [t("waiting for your answer", "ждёт твоего ответа"), "route-accent"]
+    // An address to save signs nothing: the Mac's «waiting for your confirmation».
+    : waitingHere && /^(SAVE|СОХРАНИТЬ) ·/.test(steps[0]?.label || "") ? [t("waiting for your confirmation", "ждёт твоего подтверждения"), "profit"]
+    : waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
     : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], unknown: [t("sent, status unknown", "отправлено, статус неизвестен"), "route-amber"],
       nothing: [t("nothing to do", "нечего делать"), "secondary"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"]);
+  const coin = b.trade?.coin.split(":").pop();
   const head = h("div", { class: "route-move-head" },
-      h("span", { class: "route-move-title" }, b.title),
+      h("span", { class: "route-move-title" }, managed ? (b.trade.side === "long" ? t(`Position · long ${coin}`, `Позиция · лонг ${coin}`) : t(`Position · short ${coin}`, `Позиция · шорт ${coin}`)) : b.title),
       b.plan ? planHead(b) : null,
       h("span", { class: "route-status-chip " + status[1] }, status[0]),
       runningHere ? h("span", { class: "route-rc-spinner" }) : null,
@@ -177,10 +192,14 @@ function moveBoard(b, newest, onChart) {
       // Right after the chip, not at the route's far end (the Mac's Spacer): a wide route would put Confirm under
       // «Add block» and Windows' caption buttons.
       waitingHere ? h("div", { class: "btns route-nowrap" },
-        h("button", { class: "btn route-large", onclick: () => act("cancel", { board: s.card.id }) }, t("Cancel", "Отмена")),
+        // A trade plan's Cancel clears the plan and its price alert, with the Mac's reply (clearPlan); a move's, its card.
+        h("button", { class: "btn route-large", onclick: () => b.plan ? act("planCancel") : act("cancel", { board: s.card.id }) }, t("Cancel", "Отмена")),
         confirmButton(s.card)) : null);
   return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
     onChart ? planChart(b, onChart, head) : head,
+    // How old the card's numbers are, as the Mac's Execute sheet: past 45 s, Confirm reads them again first.
+    waitingHere && b.trade?.prepared ? h("div", { class: "route-age" }, t("numbers refreshed ", "цифры обновлены "), since(b.trade.prepared * 1000),
+      t(" ago · after 45 s they are recalculated", " назад · после 45 с пересчитаются")) : null,
     // The Mac's «I understand the second check's warning and execute anyway», right under the Confirm it unlocks.
     waitingHere && s.card.ticks?.length ? cardTicks(s.card) : null,
     finished && b.state !== "plan" ? outcome(b) : null,
@@ -191,6 +210,7 @@ function moveBoard(b, newest, onChart) {
     waitingHere && s.card.warnings.length && !s.card.ticks?.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
       h("div", {}, s.card.warnings.map((w) => h("div", {}, w)))) : null,
     runningHere ? signing(b) : null,
+    position && live.positionCard ? live.positionCard(position) : null,
     notes(b));
 }
 
@@ -303,7 +323,9 @@ function outcome(b) {
     nothing: [t("Nothing to do", "Нечего делать"), "secondary", null] }[b.state]
     || [t("Not signed", "Не подписано"), "secondary", null];
   const retry = b.state === "failed" && ui.state.retryBoard === b.id
-    ? h("button", { class: "btn small route-retry", disabled: ui.state.thinking || !!ui.state.runningBoard, onclick: () => act("retry") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
+    ? h("button", { class: "btn small route-retry", disabled: ui.state.thinking || !!ui.state.runningBoard, onclick: () => act("retry"),
+      title: t("Lays the same move out again with fresh quotes; nothing moves until you Confirm. What the failed run already did stays done.",
+        "Выложит то же действие заново со свежими котировками; ничего не двинется, пока не нажмёшь «Подтвердить». Что неудачный запуск уже сделал, так и останется.") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
     : null;
   return h("div", { class: "route-outcome " + cls }, statusMark(mark), text + " · " + fmtDate(b.at), retry);
 }
@@ -331,7 +353,7 @@ function statusMark(ok) {
 
 function moveText(b) {
   return [b.title, ...(b.steps || []).map((s, i) => `${i + 1}. ${s.label} · ${s.title}` + (s.money ? ` (${s.money.place} ${s.money.was} → ${s.money.after} ${s.money.symbol})` : "")
-    + (s.lines.length ? "\n   " + s.lines.join("\n   ") : "")), ...(b.lines || [])].join("\n");
+    + (s.lines.length ? "\n   " + s.lines.join("\n   ") : "")), ...(b.lines || []), footerOf(b)].filter(Boolean).join("\n");
 }
 
 /** Where a step is: waiting for Confirm, done, the one a running move is on (or waiting for Windows Hello), still to come,
@@ -372,9 +394,24 @@ function signing(b) {
           h("span", {}, t("Look at the camera, touch the fingerprint reader or type your PIN when Windows asks. It covers this move only.",
             "Посмотри в камеру, приложи палец или введи PIN, когда Windows спросит. Подпись — только на это действие."))),
         icon("hello", 24)) : null,
-    h("div", { class: "route-progress-line" }, icon("bolt", 12), last),
+    h("div", { class: "route-progress-line" }, icon("bolt", 12), last, " · ", elapsed(b.id)),
   ];
 }
+
+/** «· 12 s» since the move began, as the Mac's TimelineView: counted here from when this window first saw it run. */
+const runStarted = new Map();
+function elapsed(id) {
+  if (!runStarted.has(id)) runStarted.set(id, Date.now());
+  return since(runStarted.get(id));
+}
+/** Seconds since `ms`, counting up once a second. */
+function since(ms) {
+  const el = h("span", { class: "route-elapsed", "data-since": ms });
+  el.textContent = seconds(el);
+  return el;
+}
+const seconds = (el) => Math.floor((Date.now() - Number(el.dataset.since)) / 1000) + t(" s", " с");
+setInterval(() => document.querySelectorAll(".route-elapsed").forEach((el) => { el.textContent = seconds(el); }), 1000);
 
 // MARK: The route
 
@@ -556,7 +593,7 @@ function stepCard(b, step, i, state, compact, isOpen) {
       // That step goes with the next message, with its money and rows (the Mac's sendToChat), not the whole block.
       [[mascot(14, "idle"), t("Send to chat", "Отправить в чат")], () => { closeStep(b, i); attach(b, i); }],
       null,
-      [[icon("copy", 14), t("Copy details", "Скопировать подробности")], () => copy(stepText(step, i))],
+      [[icon("copy", 14), t("Copy details", "Скопировать подробности")], () => copy(stepText(step, i, footerOf(b)))],
     ]); },
   },
     h("div", { class: "route-step-pic" }, scene(kind, state, step, w), state !== "plain" && kind !== "result" ? stateChip(state, compact) : null),
@@ -606,16 +643,24 @@ function editOf(b, state) {
   return state === "ready" && e && e.board === b.id ? e : null;
 }
 
-function stepText(step, i) {
+/** The step with its money, rows and the route's footer, as the Mac's RouteCards.copy. */
+function stepText(step, i, footer) {
   return [`${i + 1}. ${step.label} · ${step.title}`, step.money ? `${step.money.place} ${step.money.was} → ${step.money.after} ${step.money.symbol}` : null,
-    ...step.lines.map((l) => l.replace("\t", " "))].filter(Boolean).join("\n");
+    ...step.lines.map((l) => l.replace("\t", " ")), footer].filter(Boolean).join("\n");
+}
+
+/** The route's footer: a move's note, or a trade plan's own footer. */
+function footerOf(b) {
+  return b.note || b.plan?.footer || null;
 }
 
 /** Under the picture: what the step does and where, the move itself, its numbers, one line of the rest, «Details ›». */
 function stepInfo(step, state, kind, place, compact, isOpen) {
   const verb = step.label.split("·")[0].trim();
   const rows = step.lines.filter((l) => l.includes("\t"));
-  const notes = step.lines.filter((l) => l && !l.includes("\t"));
+  // «free: 29.39 USDC» says again what the money box shows, as the Mac's RouteCards.info leaves it out.
+  const notes = step.lines.filter((l) => l && !l.includes("\t")
+    && (!step.money || !(["free:", "held:", "in the vault:", "свободно:", "есть:", "в хранилище:"].some((p) => l.startsWith(p)) || /^≈ [\d.,]+ \S+$/.test(l))));
   const said = !step.money && !rows.length ? notes : [];
   const foot = said.length ? null : notes[0];
   const room = compact ? 3 : 4;
@@ -714,11 +759,11 @@ function stepDetails(b, steps, i, state, notch) {
     can && can.stock ? stockWays(can.quotes) : null,
     step.money ? h("div", { class: "route-money-box route-big" }, h("div", { class: "route-money-head" }, state === "done" ? t("MONEY · WAS → NOW", "ДЕНЬГИ · БЫЛО → СТАЛО") : t("MONEY · NOW → AFTER", "ДЕНЬГИ · СЕЙЧАС → ПОСЛЕ")),
       moneyLine(step.money)) : null,
-    !can && (step.lines.length || b.note) ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " "))),
-      b.note ? h("div", { class: "route-details-note" }, b.note) : null) : null,
+    !can && (step.lines.length || footerOf(b)) ? h("div", { class: "route-details-lines selectable" }, step.lines.filter(Boolean).map((l) => h("div", {}, l.replace("\t", " "))),
+      footerOf(b) ? h("div", { class: "route-details-note" }, footerOf(b)) : null) : null,
     can && edit.problem ? h("div", { class: "route-edit-problem loss" }, icon("exclamationmark.triangle", 13), edit.problem) : null,
     h("div", { class: "route-details-buttons" },
-      h("button", { class: "btn route-bordered route-large route-ask", title: t("Attaches this block to your next message", "Прикрепит этот блок к следующему сообщению"), onclick: () => { close(); attach(b); } },
+      h("button", { class: "btn route-bordered route-large route-ask", title: t("Attaches this step to your next message", "Прикрепит этот шаг к следующему сообщению"), onclick: () => { close(); attach(b, i); } },
         mascot(20, "waiting"), t("Ask in chat", "Спросить в чате")),
       h("span", { class: "spacer" }),
       can ? [h("button", { class: "btn route-bordered route-large", onclick: close }, t("Cancel", "Отмена")),
@@ -1076,7 +1121,7 @@ const RANGES = [["day", "24h"], ["week", "7d"], ["month", "30d"]];
  * the line with its fill; with a plan's levels across it and its loss and gain as bands (ChartZone), the domain
  * stretched to show them, as the Mac's. Drawn from numbers only. */
 function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
-  const c = b.chart, pts = c.closes;
+  const c = b.chart, pts = c.closes, times = c.times?.length === pts.length ? c.times : null;
   const coin = c.title.split("·")[0].trim();
   // The engine's titles: «ETH · 24 h», «ETH · 7 days», «ETH · 30 days» («7 days» has «day» in it, so day is what's left).
   const range = /30|month|мес/i.test(c.title) ? "month" : /\b7\b|week|недел/i.test(c.title) ? "week" : "day";
@@ -1099,9 +1144,14 @@ function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
     svg("path", { d: line + `L${W} ${H}L0 ${H}Z`, fill: `url(#${gid})` }), svg("path", { d: line, class: "route-chart-line" }),
     shown.map((l) => svg("path", { d: `M0 ${Y(l.price).toFixed(1)}H${W}`, class: "route-level route-" + l.tint + (l.dashed ? " route-dashed" : "") })),
     rule, dot);
+  // The axes, as the Mac's priceAxes: about four prices on the right, about four times under it, a faint grid at each.
+  const yTicks = times ? priceTicks(lo, lo + span) : [], xTicks = times ? timeTicks(times, range) : [];
+  plot.prepend(...yTicks.map((v) => svg("path", { d: `M0 ${Y(v).toFixed(1)}H${W}`, class: "route-chart-grid" })),
+    ...xTicks.map((x) => svg("path", { d: `M${(x.at * W).toFixed(1)} 0V${H}`, class: "route-chart-grid" })));
   plot.style.height = H + "px";
   const priceEl = h("span", { class: "route-chart-price" }, price(pts.at(-1)));
-  const changeEl = h("span", { class: "route-chart-change " + (up ? "profit" : "loss") }, c.change + " · " + rangeTitle(range));
+  const moveText = c.change + " · " + rangeTitle(range);
+  const changeEl = h("span", { class: "route-chart-change " + (up ? "profit" : "loss") }, moveText);
   plot.addEventListener("mousemove", (e) => {
     const r = plot.getBoundingClientRect();
     const i = Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1));
@@ -1109,13 +1159,74 @@ function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
     dot.setAttribute("cx", X(i)); dot.setAttribute("cy", Y(pts[i]));
     rule.setAttribute("d", `M${X(i)} 0V${H}`);
     priceEl.textContent = price(pts[i]);
+    // Under the price, the pointer's time instead of the move (the Mac's PointerPrice).
+    if (times) { changeEl.textContent = pointerTime(times[i]); changeEl.classList.add("route-chart-when"); }
   });
-  plot.addEventListener("mouseleave", () => { dot.setAttribute("cx", -100); rule.setAttribute("d", ""); priceEl.textContent = price(pts.at(-1)); });
+  plot.addEventListener("mouseleave", () => {
+    dot.setAttribute("cx", -100); rule.setAttribute("d", ""); priceEl.textContent = price(pts.at(-1));
+    changeEl.textContent = moveText; changeEl.classList.remove("route-chart-when");
+  });
   // A level's name and price over its line, in its color (the Mac's annotation): HTML, so the stretched drawing doesn't stretch it.
-  const area = h("div", { class: "route-chart-area" }, plot,
-    shown.map((l) => { const el = h("span", { class: "route-level-label route-" + l.tint }, `${l.label} ${price(l.price)}`); el.style.top = `calc(${(Y(l.price) / H) * 100}% - 15px)`; return el; }));
+  const area = h("div", { class: "route-chart-area" + (times ? " route-axes" : "") },
+    h("div", { class: "route-chart-box" }, plot,
+      shown.map((l) => { const el = h("span", { class: "route-level-label route-" + l.tint }, `${l.label} ${price(l.price)}`); el.style.top = `calc(${(Y(l.price) / H) * 100}% - 15px)`; return el; })),
+    times ? yAxis(yTicks, Y, H) : null,
+    times ? h("div", { class: "route-chart-x" }, xTicks.map((x) => { const el = h("span", {}, x.label); el.style.left = `${x.at * 100}%`; return el; })) : null);
   const pick = h("div", { class: "route-chart-range" }, RANGES.map(([key, label]) => h("button", { class: key === range ? "route-on" : "", onclick: () => key !== range && reload(c, coin, key) }, label)));
   return { coin, range, up, area, priceEl, changeEl, pick };
+}
+
+/** The prices on the right, as wide as the longest of them. */
+function yAxis(ticks, Y, H) {
+  const labels = ticks.map((v) => tickPrice(v, ticks));
+  const el = h("div", { class: "route-chart-y" }, labels.map((l, i) => { const x = h("span", {}, l); x.style.top = `${(Y(ticks[i]) / H) * 100}%`; return x; }));
+  el.style.width = Math.max(0, ...labels.map((l) => l.length)) * 6 + 2 + "px";
+  el.style.height = H + "px";
+  return el;
+}
+
+/** About four round prices between `lo` and `hi` (Swift Charts' automatic axis). */
+function priceTicks(lo, hi) {
+  const raw = (hi - lo) / 4;
+  if (!(raw > 0)) return [];
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const at = (step) => { const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(Number(v.toPrecision(12))); return out; };
+  // The round step whose count comes closest to four.
+  return [1, 2, 2.5, 5, 10].map((m) => at(m * mag)).reduce((a, b) => Math.abs(b.length - 4) < Math.abs(a.length - 4) ? b : a);
+}
+
+/** A tick's price with as many decimals as its step needs: «3,880», «0.0012». */
+function tickPrice(v, ticks) {
+  const step = ticks.length > 1 ? ticks[1] - ticks[0] : Math.abs(v) || 1;
+  const decimals = Math.min(8, Math.max(0, -Math.floor(Math.log10(step) + 1e-9)));
+  return v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+/** About four times under the chart: every 6 hours on a day's chart («6 PM»), the date on a week's or a month's
+ * («Oct 22»), short enough to read whole (the Mac's priceAxes). `at` is the place along the chart, 0…1. */
+function timeTicks(times, range) {
+  const t0 = times[0] * 1000, t1 = times.at(-1) * 1000, ru = ui.state.russian, locale = ru ? "ru-RU" : "en-US";
+  if (!(t1 > t0)) return [];
+  const every = range === "day" ? 6 : range === "week" ? 2 : 7;
+  const out = [];
+  const d = new Date(t0);
+  d.setMinutes(0, 0, 0);
+  if (range !== "day") d.setHours(0);
+  let n = 0;
+  for (; d.getTime() <= t1; range === "day" ? d.setHours(d.getHours() + 1) : d.setDate(d.getDate() + 1)) {
+    if (d.getTime() < t0) continue;
+    if (range === "day" ? d.getHours() % every : n++ % every) continue;
+    out.push({ at: (d.getTime() - t0) / (t1 - t0),
+      label: range === "day" ? d.toLocaleTimeString(locale, ru ? { hour: "2-digit", minute: "2-digit" } : { hour: "numeric" }) : d.toLocaleDateString(locale, { month: "short", day: "numeric" }) });
+  }
+  // Not a label cut at either end.
+  return out.filter((x) => x.at > 0.04 && x.at < 0.96);
+}
+
+/** «Oct 22, 3:40 PM»: the point under the pointer. */
+function pointerTime(sec) {
+  const ru = ui.state.russian;
+  return new Date(sec * 1000).toLocaleString(ru ? "ru-RU" : "en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 /** The chart again in a range, in place (the Mac's picker); an older board without its market's name asks the chat. */
@@ -1259,13 +1370,14 @@ function tokenBlock(b) {
     !c.loading ? h("button", { class: "icon-btn", title: t("Read the market again", "Прочитать рынок снова"), onclick: () => act("tokenRange", { board: b.id, text: c.range }) }, icon("arrow.clockwise")) : null,
     h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark")));
   const change = c.change === null || c.change === undefined ? null : Number(c.change);
-  const chart = c.closes.length > 1 ? chartParts({ id: b.id, chart: { title: `${c.symbol} · ${c.range}`, closes: c.closes, change: (change < 0 ? "−" : "+") + Math.abs(change ?? 0).toFixed(2) + "%" } }) : null;
+  const chart = c.closes.length > 1 ? chartParts({ id: b.id, chart: { title: `${c.symbol} · ${c.range}`, closes: c.closes, times: c.times, change: (change < 0 ? "−" : "+") + Math.abs(change ?? 0).toFixed(2) + "%" } }) : null;
   const pick = h("div", { class: "route-chart-range" }, TRANGES.map(([key, label]) => h("button", { class: key === c.range ? "route-on" : "", onclick: () => key !== c.range && act("tokenRange", { board: b.id, text: key }) }, label)));
   const priceEl = chart ? chart.priceEl : h("span", { class: "route-chart-price" }, c.price !== null && c.price !== undefined ? price(Number(c.price)) : "—");
   const changeEl = change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range));
   const held = c.held ? heldCard(c.held, c.symbol) : null;
   const phrases = tradePhrases(c.chain, c.address, c.symbol, { stock: c.stock, verified: c.verified === true, dollar: c.dollar });
-  const watch = !c.favorite && !c.dollar ? [[t(`Watch ${c.symbol}`, `Следить за ${c.symbol}`), "star", `watch token ${c.address} on ${c.chain}`]] : [];
+  // Only where there's nothing to trade, as the Mac's TokenBoard (which always has its trades): Favorites' «+» watches a token.
+  const watch = !phrases.length && !c.favorite && !c.dollar ? [[t(`Watch ${c.symbol}`, `Следить за ${c.symbol}`), "star", `watch token ${c.address} on ${c.chain}`]] : [];
   return h("div", { class: "route-block route-chart-block route-token" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
     head,
     h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick),
@@ -1291,6 +1403,14 @@ function heldCard(held, symbol) {
     h("div", { class: "route-held-value" }, h("b", { class: "num" }, masked(held.usd !== null && held.usd !== undefined ? usd(held.usd) : "—")),
       held.pnl ? h("span", { class: "num small " + (Number(held.gain) < 0 ? "loss" : "profit") }, masked(held.pnl)) : null),
     held.paid ? h("div", { class: "plan-held-paid secondary small" }, masked(held.paid)) : null);
+}
+
+/** « · +5.2%» of what it was bought for, as the Mac's PnLBoard.percent. */
+function heldPct(x) {
+  const paid = Number(x.paid), gain = Number(x.gain);
+  if (!(paid > 0) || !Number.isFinite(gain)) return "";
+  const pct = (gain / paid) * 100;
+  return ` · ${pct < 0 ? "−" : "+"}${Math.round(Math.abs(pct) * 10) / 10}%`;
 }
 
 /** P/L (PnLBoard): the period picker, trading in the period, open positions, what's held, the portfolio's change, by
@@ -1323,7 +1443,7 @@ function pnlBlock(b, p) {
           h("span", { class: "secondary small one-line" }, masked(x.amount + (x.usd !== null && x.usd !== undefined ? ` ≈ ${usd(x.usd)}` : "")
             + (x.paid !== null && x.paid !== undefined ? t(` · bought for ${usd(x.paid)}`, ` · куплено за ${usd(x.paid)}`) : t(" · cost unknown", " · цена покупки неизвестна"))))),
         h("span", { class: "spacer" }),
-        h("b", { class: "num " + (x.gain !== null && x.gain !== undefined ? tone(x.gain) : "") }, masked(x.gain !== null && x.gain !== undefined ? signedUsd(x.gain) : x.usd !== null && x.usd !== undefined ? usd(x.usd) : t("no price", "нет цены")))))) : null,
+        h("b", { class: "num " + (x.gain !== null && x.gain !== undefined ? tone(x.gain) : "") }, masked(x.gain !== null && x.gain !== undefined ? signedUsd(x.gain) + heldPct(x) : x.usd !== null && x.usd !== undefined ? usd(x.usd) : t("no price", "нет цены")))))) : null,
     !p.coin ? (r.change !== null && r.change !== undefined && r.changeSince
       ? line(t(`Portfolio since ${fmtDate(r.changeSince)}`, `Портфель с ${fmtDate(r.changeSince)}`), r.change,
           Number(r.flows) === 0 ? t("prices, yield and trading together", "цены, доходность и торговля вместе") : t(`without ${signedUsd(r.flows)} you moved in or out`, `без ${signedUsd(r.flows)}, которые ты завёл или вывел`))
@@ -1373,7 +1493,12 @@ function moversBlock(b, m) {
 }
 
 /** Token approvals (ApprovalsBoard): who may spend what, unlimited ones in red; Revoke draws its card for Confirm, as the Mac's. */
+const readingApprovals = new Set();
 function approvalsBlock(b, a) {
+  // Read again: «Reading every network's approvals…» until they're back (the Mac's ApprovalsBoard while it loads).
+  if (readingApprovals.has(b.id)) return blockFrame(b, t("Token approvals", "Разрешения на токены"),
+    h("div", { class: "route-loading secondary" }, h("span", { class: "route-rc-spinner" }), t("Reading every network's approvals…", "Читаю разрешения во всех сетях…")),
+    { width: 520, icon: "checkmark.shield" });
   const open = a.list.filter((x) => x.unlimited).length;
   const sub = `${a.list.length} ` + t("active", "активных") + (open ? ` · ${open} ` + t("unlimited", "без лимита") : "") + t(" · ihatecrypto's own are exact and spent at once", " · свои ihatecrypto даёт точно и тратит сразу");
   return blockFrame(b, t("Token approvals", "Разрешения на токены"), h("div", { class: "route-result" },
@@ -1387,7 +1512,7 @@ function approvalsBlock(b, a) {
       h("button", { class: "btn small", disabled: !!ui.state.thinking, title: t(`Sets it to zero: one ${x.place} transaction, nothing spent`, `Обнуляет: одна транзакция в ${x.place}, ничего не тратится`), onclick: () => act("send", { text: x.revoke }) }, t("Revoke", "Отозвать")))))
       : h("div", { class: "secondary" }, t("No token approvals left: nothing can spend your tokens but you.", "Разрешений не осталось: никто, кроме тебя, не может тратить твои токены.")),
     a.unread.length ? h("div", { class: "secondary small" }, t(`Couldn't read ${a.unread.join(", ")} now — try again in a minute.`, `Не удалось прочитать ${a.unread.join(", ")} — попробуй через минуту.`)) : null),
-  { width: 520, icon: "checkmark.shield", extra: h("button", { class: "icon-btn", title: t("Read them again", "Прочитать заново"), onclick: () => act("refreshApprovals", { board: b.id }) }, icon("arrow.clockwise")) });
+  { width: 520, icon: "checkmark.shield", extra: h("button", { class: "icon-btn", title: t("Read them again", "Прочитать заново"), onclick: () => { readingApprovals.add(b.id); render(); act("refreshApprovals", { board: b.id }).finally(() => { readingApprovals.delete(b.id); render(); }); } }, icon("arrow.clockwise")) });
 }
 
 /** Jupiter DCA (JupiterDCABoard): each order's progress; Cancel puts the cancel in the chat. */

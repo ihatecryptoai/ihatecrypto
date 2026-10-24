@@ -267,8 +267,12 @@ export function copyButton(text, label) {
 
 /** An explorer link in the default browser. */
 export function link(url, text) {
-  // Beside the chat, in the page panel (the Mac's WebPanel); sign-in pages still go to the person's own browser.
-  return h("a", { href: "#", onclick: (e) => { e.preventDefault(); invoke("open_page", { url }).catch((x) => toast(String(x))); } }, text);
+  // Beside the chat, in the page panel (the Mac's WebPanel); on Settings, which fills the window as the Mac's replaces the
+  // Studio, in the person's own browser, as the Mac's Settings links go (the panel isn't shown there).
+  return h("a", { href: "#", onclick: (e) => {
+    e.preventDefault();
+    invoke(ui.view === "settings" ? "open_link" : "open_page", { url }).catch((x) => toast(String(x)));
+  } }, text);
 }
 
 /** A per-viewer setting kept in this window's storage (a folded rail, the chat's size): never anything that matters. */

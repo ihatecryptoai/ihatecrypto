@@ -376,3 +376,8 @@
 /* Listening: what was heard as it goes, Cancel and Done. */
 .chat-panel .chat-voice-row .chat-round-btn { width: 30px; height: 30px; }
 .chat-pop .chat-networks-menu { max-height: calc(100vh - 48px); overflow-y: auto; }
+
+/* Why the voice didn't work, kept under the chips until the next try (the Mac's orange .failed line). */
+.chat-panel .chat-voice-failed { display: flex; align-items: flex-start; gap: 6px; padding: 0 6px; color: var(--accent-ink); line-height: 1.35; }
+.chat-panel .chat-voice-failed .icon { flex: none; margin-top: 1px; }
+.chat-panel .chat-plan-hint { padding: 0 6px; line-height: 1.35; }

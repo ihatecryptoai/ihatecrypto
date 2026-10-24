@@ -47,6 +47,13 @@ extension Engine {
     /// «turn on the trading key», «верни торговый ключ»: never approved — approved now; paused — resumed.
     func tradingKeyCommand(_ text: String) async -> Bool {
         guard text.lowercased().contains(/(?:resume|unpause|turn\s+on|enable|approve|включи|верни|одобри)\s+(?:the\s+)?(?:hyperliquid\s+)?(?:trading\s+key|торгов\w*\s+ключ)/) else { return false }
+        // «… on my Ledger» with the Ledger not signing: its own account's key, never the main wallet's (the Mac's
+        // ledgerCommand answers before the trading-key command, Ledger.swift:77-80).
+        if text.lowercased().contains(/ledger|л[еэ]дж[еэ]р/), !ledgerActive {
+            reply(say("Switch to your Ledger first («use my Ledger»): the trading key belongs to its Hyperliquid account.",
+                      "Сначала переключись на Ledger («используй мой Ledger»): торговый ключ принадлежит его счёту Hyperliquid."))
+            return true
+        }
         await turnOnTradingKey()
         return true
     }
@@ -104,6 +111,8 @@ extension Engine {
         if ledgerConnect == nil {
             ledgerConnect = LedgerConnect(model: account.model, evm: account.evm, solana: account.solana, status: say("Making the trading key…", "Делаю торговый ключ…"), busy: true)
         }
+        // The Ledger's block follows the approval, as the Mac's LedgerBoard draws whenever ledgerConnect is set.
+        pin(Board(kind: "ledger", title: "ledger"))
         defer { ledgerConnect?.busy = false; changed() }
         do {
             let made = try await signerCall(.ledgerAgent(owner: wallet.evm, create: true))
@@ -162,7 +171,7 @@ extension Engine {
     /// Hyperliquid's first money on this wallet: the chat offers the key, once per address. Nothing signs until the card is
     /// picked and Windows Hello says so.
     func offerTradingKey() {
-        guard agentAddress == nil, !agentActive, !watching, let evm = activeWallet?.evm, pending == nil, !thinking, signing == 0,
+        guard agentAddress == nil, !agentActive, !watching, !onboarding, let evm = activeWallet?.evm, pending == nil, !thinking, signing == 0,
               (portfolio.networks.first { $0.key == "hyperliquid" }?.usd ?? 0) > 0 else { return }
         let offered = settings.tradingKeyOffered ?? []
         guard !offered.contains(evm.lowercased()) else { return }

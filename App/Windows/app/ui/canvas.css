@@ -1,6 +1,6 @@
 /* The canvas: the whole window under the rail; the ground (dots) is app.js's, under the rail too. */
 .canvas { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: default; --check-fill: #f7f7f8; }
-.canvas.grabbing, .canvas.grabbing * { cursor: grabbing !important; }
+.canvas.grabbing, .canvas.grabbing * { cursor: grabbing !important; user-select: none !important; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .world-row { display: flex; align-items: flex-start; gap: 36px; padding: 24px 0 0 28px; width: max-content; }
 

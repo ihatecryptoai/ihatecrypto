@@ -12,5 +12,7 @@ export function loadError(code) {
     connect: lead + t("no connection to the site. Check the internet and press Reload.", "нет связи с сайтом. Проверь интернет и нажми «Обновить»."),
     certificate: lead + t("the site's certificate isn't valid, so it isn't shown.", "у сайта недействительный сертификат, поэтому он не показан."),
     crashed: t("The page's process stopped. Press Reload.", "Процесс страницы остановился. Нажми «Обновить»."),
+    https: t("That link went to an http page or another app: ihatecrypto's browser opens https sites only, so it stayed here.",
+      "Эта ссылка вела на http-страницу или в другое приложение: браузер ihatecrypto открывает только https-сайты, поэтому остался здесь."),
   }[code] || lead + t(`WebView2 error ${code.replace("other:", "")}. Press Reload.`, `ошибка WebView2 ${code.replace("other:", "")}. Нажми «Обновить».`);
 }

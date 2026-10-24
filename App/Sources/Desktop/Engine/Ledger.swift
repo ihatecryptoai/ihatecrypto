@@ -220,9 +220,11 @@ extension Engine {
             guard ledgerConnect != nil else { return }
             found = WinLedgerHID.connected()
         }
+        // Its block closed meanwhile: the search ends there and nothing connects (the Mac's loop checks ledgerConnect).
+        guard ledgerConnect != nil else { return }
         guard let model = found else {
-            ledgerConnect?.problem = say("No Ledger answered over USB or Bluetooth in a minute. Plug it in or turn its Bluetooth on, unlock it and press Connect again.",
-                                         "За минуту Ledger не ответил ни по USB, ни по Bluetooth. Подключи его или включи Bluetooth, разблокируй и нажми «Подключить снова».")
+            ledgerConnect?.problem = say("No Ledger answered over USB or Bluetooth in a minute. Plug it in or turn its Bluetooth on, unlock it and press Try again.",
+                                         "За минуту Ledger не ответил ни по USB, ни по Bluetooth. Подключи его или включи Bluetooth, разблокируй и нажми «Ещё раз».")
                 + (why.map { " (" + $0 + ")" } ?? "")
             ledgerConnect?.busy = false
             changed()

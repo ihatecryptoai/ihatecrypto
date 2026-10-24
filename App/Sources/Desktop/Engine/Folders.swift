@@ -48,11 +48,19 @@ extension Engine {
     var canvasRows: [Snapshot.CanvasRow] {
         canvases.map { c in
             let plan = c.id == canvasID ? intent : c.intent ?? TradeIntent()
-            return .init(id: c.id, title: c.title, at: c.messages.last?.at ?? c.at, pinnedAt: c.pinnedAt, folder: c.folder, icon: c.icon,
+            return .init(id: c.id, title: Self.shownTitle(c, boards: c.id == canvasID ? boards : c.boards), at: c.messages.last?.at ?? c.at, pinnedAt: c.pinnedAt, folder: c.folder, icon: c.icon,
                   provider: c.provider, model: c.model, empty: c.schedule == nil && c.messages.isEmpty && c.boards.isEmpty, blocks: !c.boards.isEmpty,
                   coin: plan == TradeIntent() ? nil : plan.asset,
                   note: c.boards.contains { $0.kind == "note" && $0.opens == nil })
         }
+    }
+
+    /// What the list calls a canvas, as the Mac's: the person's own name, else its newest move's title (the Mac names a
+    /// canvas after its board on every save), else its first message's words.
+    nonisolated static func shownTitle(_ c: CanvasDoc, boards: [Board]) -> String {
+        if let name = c.name, !name.isEmpty { return name }
+        if let move = boards.first(where: { $0.kind == "move" && !$0.title.isEmpty }) { return move.title }
+        return c.title
     }
 
     /// The window's folder and pin requests, one op each.

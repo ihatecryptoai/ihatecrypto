@@ -52,8 +52,17 @@ extension Engine {
         return reply
     }
 
+    private static var creatingWallet = false
+
     /// A new 12-word phrase made inside the signer. The window shows it once, then never again (`phraseSaved`).
     func createWallet(test: Bool) async throws {
+        // One at a time, and never over words not yet written down: a second click made a second wallet whose words
+        // replaced the first's, so the first wallet's were never shown (the Mac's Create stays busy while the signer works).
+        guard !Self.creatingWallet, phrase == nil else {
+            throw WalletError(say("A new wallet is being made: write its words down first.", "Новый кошелёк уже создаётся: сначала запиши его слова."))
+        }
+        Self.creatingWallet = true
+        defer { Self.creatingWallet = false }
         let reply = try await signerCall(.createWallet(requirePresence: !test))
         guard let words = reply.phrase?.split(separator: " ").map(String.init), words.count == 12 else { return }
         phrase = words
@@ -107,8 +116,14 @@ extension Engine {
     }
 
     func removeAddress(name: String, network: String) async throws {
+        let gone = book.first { $0.name.lowercased() == name.lowercased() && $0.network == network }
         let reply = try await signerCall(.removeAddress(name: name, network: network))
         book = reply.addresses ?? book
+        // Its picture, category, note and star go with it, as the Mac's removal does.
+        var extras = addressExtras
+        extras[Self.extraKey(name: name, network: network)] = nil
+        addressExtras = extras
+        if let gone { starred.remove(Self.starKey(gone)) }
     }
 
     /// The saved entry money may go to by this name, on this network when it's given.

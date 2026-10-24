@@ -291,6 +291,29 @@ extension Engine {
         }
     }
 
+    /// A recurring buy as its board on the canvas draws it (the Mac's ScheduleBoard, Canvases.swift:1048): the buy, how
+    /// often, the next run and the USDC free on Solana that pays for it.
+    struct RecurringView: Encodable {
+        var id: String; var symbol: String; var usdc: Decimal; var days: Int; var next: Date; var paused: Bool; var solana: Decimal?
+    }
+    var recurringViews: [RecurringView] {
+        let marked = recurringBuys
+        guard !marked.isEmpty else { return [] }
+        let free = usdcFree(on: "solana")
+        return tasks.filter { marked.contains($0.id) }.compactMap { t in
+            guard case .buy(let a, let usdc?)? = WalletCommand.parse(t.steps.first ?? "") else { return nil }
+            let days = switch t.every { case .days(let n)?: n; case .months(let n)?: n * 30; case .hours(let n)?: max(1, n / 24); case nil: 1 }
+            return RecurringView(id: t.id.uuidString, symbol: tokenNames[a.mint] ?? a.symbol, usdc: usdc, days: max(days, 1), next: t.next,
+                                 paused: t.paused == true, solana: free)
+        }
+    }
+    /// The board's facts for the chat: the buy, how often, the next run, what Solana has for it.
+    func recurringFacts(_ symbol: String) -> [String] {
+        guard let r = recurringViews.first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else { return ["stopped: no recurring \(symbol) buy now"] }
+        return ["\(r.usdc) USDC → \(r.symbol) every \(r.days) day(s)\(r.paused ? ", paused" : "")", "next run \(r.next)",
+                r.solana.map { "USDC free on Solana: \($0)" } ?? "USDC on Solana: not read yet"]
+    }
+
     /// The symbol each recurring buy kept by its mint goes by (its step names only the mint), from its first buy and each
     /// run since: the Schedule's row and the notices say «SAMO», not the mint.
     var tokenNames: [String: String] {

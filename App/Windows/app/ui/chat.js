@@ -150,9 +150,11 @@ function dock() { place.x = 0; place.y = 0; save(); render(); }
 export function chatPanel() {
   const s = ui.state;
   const panel = h("div", { class: "chat-panel glass" });
-  const mood = moodNow();
-  // The model menu's lists are read when the chip first appears (and after the menu closes), never while it's open.
+  // The model menu's lists are read when the chip first appears (and after the menu closes), never while it's open;
+  // the open menu draws again from each state, so a download's percent or a finished sign-in shows in it.
   if (!modelsAsked) { modelsAsked = true; act("refreshModels"); }
+  if (liveMenu) liveMenu();
+  const mood = moodNow();
   const head = h("div", { class: "chat-head", title: t("Drag to move · double-click: back to its corner", "Перетащи, чтобы подвинуть · двойной клик — на место"),
       onpointerdown: (e) => moveBy(e, panel), ondblclick: (e) => { if (!e.target.closest("button")) dock(); } },
     mascot(30, mood),
@@ -176,6 +178,8 @@ export function chatPanel() {
 function moodNow() {
   const s = ui.state;
   if (s.thinking || s.runningBoard) return "thinking";
+  // A menu of the chat's open: the coin raises its brows and looks at it (the Mac's ws.tuning).
+  if (tuning) return "tuning";
   if (voice.on) return "listening";
   if (s.card) return "waiting";
   const newest = s.boards.find((b) => b.kind === "move");
@@ -192,6 +196,7 @@ function statusLine(mood) {
       if (s.runningBoard) return s.signer.waiting ? t(`${presence()} is asking for you`, `${presence()} спрашивает тебя`) : t("Carrying it out", "Выполняю");
       return t("Working on it", "Работаю над этим");
     case "listening": return t("Listening…", "Слушаю…");
+    case "tuning": return tuning === "networks" ? t("Choosing networks", "Выбор сетей") : t("Picking a model", "Выбор модели");
     case "waiting": return t("Waiting for your Confirm", "Ждёт твоего «Подтвердить»");
     case "done": return t("Done", "Готово");
     default: return s.model.connected ? t("Waiting for you", "Жду тебя") : t("No model: plain commands only", "Без модели: только простые команды");
@@ -258,8 +263,8 @@ function mentions(text) {
 
 function tokenChip(token) {
   const address = /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(token);
-  const found = address ? (lookups.get(token) || [])[0] : null;
-  if (address && !lookups.has(token)) lookUp(token);
+  const found = address ? marketOf(token) : null;
+  if (address) lookUp(token);
   const label = address ? found?.symbol || `${token.slice(0, 5)}…${token.slice(-4)}` : token.toUpperCase();
   const held = !address && heldRow(token.toUpperCase());
   return h("span", { class: "chat-token-chip", title: address ? token : label }, logo(address ? (found?.symbol || "?") : token, 14, found?.image || held?.icon), label);
@@ -288,7 +293,10 @@ function drawMirror(field) {
 
 function fieldToken(token) {
   const address = /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(token);
-  const found = address ? (lookups.get(token) || [])[0] : null;
+  // A pasted contract is looked up at once, as the Mac's field does, and its market's logo goes over the «$» (the
+  // symbol itself can't replace the address here: this layer must match the field glyph for glyph).
+  const found = address ? marketOf(token) : null;
+  if (address) lookUp(token);
   const held = !address && heldRow(token.toUpperCase());
   const mark = logo(address ? (found?.symbol || "?") : token, 13, found?.image || held?.icon);
   return h("span", { class: "chat-field-token" }, h("span", { class: "chat-field-dollar" }, "$", mark), token);
@@ -298,14 +306,19 @@ function fieldToken(token) {
 export function modelName(id) {
   if (!id) return "";
   if (/\s/.test(id)) return id;
-  const out = [];
-  for (const w of id.replace(/^.*\//, "").split(/[-_:]/).filter(Boolean)) {
-    const prev = out[out.length - 1];
-    if (/^\d+$/.test(w) && prev && /^\d+(\.\d+)*$/.test(prev)) out[out.length - 1] = prev + "." + w;
-    else if (/^\d/.test(w) && prev === "GPT") out[out.length - 1] = "GPT-" + w;
-    else out.push(/^gpt$/i.test(w) ? "GPT" : /^\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1));
+  // The engine's names first (LLMCatalog.displayName, as the Mac shows them).
+  for (const p of ui.state?.providers || []) if (p.names?.[id]) return p.names[id];
+  // The same rule here, for a model the engine hasn't named yet: «gpt-5.4» → «GPT 5.4», «qwen3:8b» → «Qwen3 8B».
+  const words = [];
+  for (const part of id.split("/").pop().split(/[-_: ]/).filter(Boolean)) {
+    const last = words[words.length - 1];
+    if (/^\d+$/.test(part) && last && /^[\d.]+$/.test(last)) words[words.length - 1] = last + "." + part;
+    else if (part === "deepseek") words.push("DeepSeek");
+    else if (part.length <= 3 && /^[a-z]+$/i.test(part) && !["pro", "max"].includes(part)) words.push(part.toUpperCase());
+    else if (/^[\d.]*b$/.test(part)) words.push(part.toUpperCase());
+    else words.push(part[0].toUpperCase() + part.slice(1));
   }
-  return out.join(" ");
+  return words.join(" ");
 }
 
 /** A reply's note as its header says it (ChatText.header): the model by name, or where a move ran — then a result card. */
@@ -443,28 +456,47 @@ function words(text) {
   });
 }
 
-/** Inline marks as text nodes: **bold**, links as «Solscan ↗», long hex short, amounts bold, signed numbers colored. */
+/** A held or favourite token's ticker by its contract, as the Mac's ChatText.tokenName: «AI 0x2E8c…1e18». */
+function tokenName(contract) {
+  const c = contract.toLowerCase();
+  const fav = (ui.state.favorites || []).find((f) => (f.address || "").toLowerCase() === c);
+  if (fav?.symbol) return fav.symbol;
+  for (const n of ui.state.portfolio?.networks || []) for (const r of n.rows) if ((r.contract || "").toLowerCase() === c && r.symbol) return r.symbol;
+  return null;
+}
+
+/** «Solscan ↗» from a link's host, as the Mac names a bare link. */
+function hostName(url) {
+  let name = url;
+  try { const labels = new URL(url).hostname.split("."); name = labels.length >= 2 ? labels[labels.length - 2] : labels[0]; } catch {}
+  return name.charAt(0).toUpperCase() + name.slice(1) + " ↗";
+}
+
+/** Inline marks as text nodes, as the Mac's inline markdown reads them: `code`, [title](link), **bold**, *italics*,
+ *  bare links as «Solscan ↗», long hex short (a known token's ticker before it), amounts bold, signed numbers colored. */
 function rich(text) {
   const out = [];
-  const re = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s]+[^\s.,;:)])|(0x[0-9a-fA-F]{40,64})|([+−-]\$?\d[\d,]*(?:\.\d+)?%?)|(\$\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)? [A-Z]{2,6}\b)/g;
+  const re = /`([^`]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|\*\*([^*]+)\*\*|(?<![\w*])\*(?![\s*])([^*\n]+?)(?<!\s)\*(?![\w*])|(?<![\w_])_(?![\s_])([^_\n]+?)(?<!\s)_(?![\w_])|(https?:\/\/[^\s]+[^\s.,;:)])|(0x[0-9a-fA-F]{40,64})|([+−-]\$?\d[\d,]*(?:\.\d+)?%?)|(\$\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)? [A-Z]{2,6}\b)/g;
   let at = 0, m;
   while ((m = re.exec(text))) {
     const before = text.slice(at, m.index);
-    if (m[5]) {
+    if (m[9]) {
       // Signed numbers start the text or follow a space or «(»: «+25», not «gpt-6»; «−15.5% away» is a distance.
       const prev = text[m.index - 1];
       if ((m.index > 0 && !" (".includes(prev)) || text.slice(re.lastIndex).startsWith(" away")) continue;
     }
     out.push(before);
     if (m[1]) out.push(h("code", {}, m[1]));
-    else if (m[2]) out.push(h("b", {}, m[2]));
-    else if (m[3]) {
-      let name = m[3];
-      try { const labels = new URL(m[3]).hostname.split("."); name = labels.length >= 2 ? labels[labels.length - 2] : labels[0]; } catch {}
-      out.push(link(m[3], name.charAt(0).toUpperCase() + name.slice(1) + " ↗"));
-    } else if (m[4]) out.push(h("code", { title: m[4] }, m[4].slice(0, 6) + "…" + m[4].slice(-4)));
-    else if (m[5]) out.push(h("span", { class: m[5].startsWith("+") ? "profit" : "loss" }, m[5]));
-    else out.push(h("b", {}, m[6]));
+    else if (m[2]) out.push(link(m[3], m[2]));
+    else if (m[4]) out.push(h("b", {}, m[4]));
+    else if (m[5] || m[6]) out.push(h("i", {}, m[5] || m[6]));
+    else if (m[7]) out.push(link(m[7], hostName(m[7])));
+    else if (m[8]) {
+      const code = h("code", { title: m[8] }, m[8].slice(0, 6) + "…" + m[8].slice(-4));
+      const symbol = m[8].length === 42 ? tokenName(m[8]) : null;
+      out.push(symbol ? symbol + " " : "", code);
+    } else if (m[9]) out.push(h("span", { class: m[9].startsWith("+") ? "profit" : "loss" }, m[9]));
+    else out.push(h("b", {}, m[10]));
     at = re.lastIndex;
   }
   out.push(text.slice(at));
@@ -555,7 +587,9 @@ function answers(m) {
       const card = h("button", {
         class: "chat-option" + (o.recommended && cardKey === null && live ? " chat-rec" : "") + (live && cardKey === i ? " chat-keyed" : "")
           + (live ? "" : " chat-past") + (picked === i ? " chat-picked" : ""),
-        disabled: live && !!s.runningBoard, tabindex: live ? null : "-1", title: o.comment || o.title,
+        disabled: live && !!s.runningBoard, tabindex: live ? null : "-1",
+        // On hover, what it runs (the Mac's .help(o.command)); a card that answers in words says so.
+        title: o.command ? o.command : o.command === "" ? t("Answer with this", "Ответить этим") : o.comment || o.title,
         onclick: () => { if (!live) return; cardKey = null; act("pick", { index: i }); },
       },
       h("span", { class: "chat-option-icon" }, icon(picked === i ? "check" : optionIcon(o.title), 13)),
@@ -603,6 +637,12 @@ const templates = [
 ];
 let ideasStart = Math.floor(Math.random() * templates.length);
 
+/** A template's steps as tooltip lines, «Bridge: Relay or 1Click — the cheaper», read off trade.js's scheme (its table isn't exported). */
+function templateSteps(en, ru, colors) {
+  const lines = [...templatePreview(en, ru, colors).querySelectorAll(".plan-tpl-text")].map((e) => e.firstChild.textContent + ": " + e.lastChild.textContent);
+  return lines.length ? "\n\n" + lines.join("\n") : "";
+}
+
 function ideas() {
   const four = [0, 1, 2, 3].map((i) => templates[(ideasStart + i) % templates.length]);
   return [
@@ -610,7 +650,8 @@ function ideas() {
       "Твой портфель — на холсте. Скажи, что сделать с деньгами, на любом языке, — я построю план рядом. Без твоей подписи ничего не двигается.")),
     h("div", { class: "chat-ideas" },
       h("div", { class: "chat-ideas-head" }, h("button", { class: "icon-btn", title: t("Other starting points", "Другие идеи"), onclick: () => { ideasStart += 4; render(); } }, icon("arrow.clockwise", 14))),
-      four.map(([en, ru, phrase, ico, lineEn, lineRu]) => h("button", { class: "chat-idea", title: t(`Puts “${phrase}” in the field to edit and send`, `Вставит «${phrase}» в поле — поправь и отправь`), onclick: () => suggest(phrase) },
+      // The tooltip lists the scheme it builds, step by step, as the Mac's (TemplatesPanel.steps).
+      four.map(([en, ru, phrase, ico, lineEn, lineRu, colors]) => h("button", { class: "chat-idea", title: t(`Puts “${phrase}” in the field to edit and send`, `Вставит «${phrase}» в поле — поправь и отправь`) + templateSteps(en, ru, colors), onclick: () => suggest(phrase) },
         h("span", { class: "chat-idea-icon" }, icon(ico, 14)),
         h("span", { class: "chat-idea-text" }, h("b", { class: "one-line" }, t(en, ru)), h("span", { class: "one-line" }, t(lineEn, lineRu))),
         icon("arrow.up.left", 12)))),
@@ -632,6 +673,8 @@ const lookups = new Map();
 /** The «/» list (BlockCatalog), from the engine once. */
 let catalogRows = null;
 let modelsAsked = false;
+/** The model menu's draw while it's open (redrawn with each state), and which of the chat's menus is open. */
+let liveMenu = null, tuning = null;
 let quoteTimer = null;
 
 /** Every block the next message is about, the newest last. Each right-click adds one; one taken out elsewhere goes. */
@@ -647,7 +690,21 @@ function attachedIds() {
 /** Whether a block is among the ones the next message goes with: for the canvas to light every one of them. */
 export function isAttached(id) { return attachStack.includes(id) || ui.attached === id; }
 
-function detach(id) {
+/** «Ask in chat» on something that isn't a block — a coin, a frame — as the Mac's attach(StepContext): a chip over the
+ *  field (the same title again replaces it), and the next message reaches the model with `about`, the facts it's told.
+ *  `logo` is a token symbol for the chip's logo, or nothing for the bubble. The field takes the keys. */
+export function attachAbout({ title, about, logo = null }) {
+  if (!title || !about) return;
+  const list = [...(ui.attachedAbout || [])], i = list.findIndex((a) => a.title === title);
+  if (i >= 0) list[i] = { title, about, logo }; else list.push({ title, about, logo });
+  ui.attachedAbout = list;
+  render();
+  const f = document.getElementById("composer");
+  if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+}
+
+/** One block out of the next message: the × on its chip, and the canvas's «Take out of the chat» on the one right-clicked. */
+export function detach(id) {
   attachStack = attachStack.filter((x) => x !== id);
   if (ui.attached === id) ui.attached = attachStack[attachStack.length - 1] || null;
   lastAttached = ui.attached;
@@ -655,12 +712,12 @@ function detach(id) {
 }
 
 function composer(s) {
-  const ids = attachedIds();
+  const ids = attachedIds(), abouts = ui.attachedAbout || [], n = ids.length + abouts.length;
   const field = h("textarea", {
     id: "composer", rows: "1", spellcheck: "false",
     placeholder: s.card ? t("Ask about it, change it («make it 0.02»), or something else", "Спроси о нём, измени («сделай 0.02») или что-то другое")
-      : ids.length > 1 ? t(`Ask about these ${ids.length}, or say what to do with them…`, `Спроси про эти ${ids.length} или скажи, что с ними сделать…`)
-      : ids.length ? t("Ask about it, or say what to do with it…", "Спроси о нём или скажи, что с ним сделать…")
+      : n > 1 ? t(`Ask about these ${n}, or say what to do with them…`, `Спроси про эти ${n} или скажи, что с ними сделать…`)
+      : n ? t("Ask about it, or say what to do with it…", "Спроси о нём или скажи, что с ним сделать…")
       : t("What should we do? / blocks, @ names, $ tokens", "Что сделаем? / блоки, @ имена, $ токены"),
     oninput: (e) => { ui.composerText = e.target.value; reportComposing(e.target.value); recalled = null; cardKey = null; autosize(e.target, 140); refreshSuggestions(e.target); sendLit(); drawHelpers(); },
     onkeydown: keys,
@@ -674,12 +731,20 @@ function composer(s) {
   const listening = voice.on;
   return h("div", { class: "chat-composer" },
     !listening ? positionChips(s) : null,
+    !listening ? planHint(s) : null,
     listening ? listeningRow() : h("div", { class: "chat-chips" }, modelChip(s), networksChip(), h("span", { class: "spacer" }), contextChip(s)),
-    ids.length && !listening ? h("div", { class: "chat-attached-row" }, ids.map((id) => {
+    // Why the voice didn't work stays under the chips until the next try (the Mac's .failed line), not a passing toast.
+    voice.failed && !listening ? h("div", { class: "chat-voice-failed small" }, icon("mic.slash", 12), h("span", {}, voice.failed)) : null,
+    n && !listening ? h("div", { class: "chat-attached-row" }, ids.map((id) => {
       const b = s.boards.find((x) => x.id === id);
-      return h("div", { class: "chat-attached" }, icon("square.on.square", 11), h("span", { class: "one-line" }, blockTitle(b) || b.title),
+      // A route step sent to the chat goes by its name, «Step 2 · Bridge · Relay · 10 USDC» (the Mac's StepContextChip).
+      const step = ui.attachedStep?.board === id ? b.steps?.[ui.attachedStep.index] : null;
+      const name = step ? t(`Step ${ui.attachedStep.index + 1}`, `Шаг ${ui.attachedStep.index + 1}`) + " · " + stepLabel(step.label) + " · " + step.title : blockTitle(b) || b.title;
+      return h("div", { class: "chat-attached" }, icon("square.on.square", 11), h("span", { class: "one-line" }, name),
         h("button", { class: "icon-btn", title: t("Take it out of the message", "Убрать из сообщения"), onclick: () => detach(id) }, icon("xmark", 11)));
-    })) : null,
+    }), abouts.map((a) => h("div", { class: "chat-attached", title: t(`Your next message is about ${a.title}`, `Следующее сообщение — про ${a.title}`) },
+      a.logo ? logo(a.logo, 13) : icon("bubble.left", 11), h("span", { class: "one-line" }, a.title),
+      h("button", { class: "icon-btn", title: t("Take it out of the message", "Убрать из сообщения"), onclick: () => { ui.attachedAbout = abouts.filter((x) => x !== a); render(); } }, icon("xmark", 11))))) : null,
     h("div", { id: "chat-suggest", class: "chat-suggest-slot" }),
     h("div", { id: "chat-helper", class: "chat-helper-slot" }),
     // Without a model the bar says how to get one; plain commands still work in the field under it.
@@ -771,39 +836,67 @@ function siteBar(site) {
 
 /** An open position under the chat: its usual changes, each put in the field to send (never sent by a button). */
 function positionChips(s) {
-  if (!s.positions?.length || s.card) return null;
-  const coin = s.positions.length > 1 ? " " + s.positions[0].coin : "";
+  // Only while the canvas's plan is on an open position (the Mac's managesPosition): the phrase names no coin, and the
+  // engine takes that position's (targetCoin), whatever else is open.
+  if (!s.chipsPosition || s.card) return null;
   const chips = [["move stop to breakeven", "shield.lefthalf"], ["trail 2%", "arrow.up.right"], ["close half", "circle.lefthalf"], ["close", "xmark.circle"]];
   return h("div", { class: "chat-position-chips" }, chips.map(([phrase, ico]) =>
-    h("button", { class: "chat-pos-chip" + (phrase === "close" ? " loss" : ""), title: t(`Puts “${phrase}${coin}” in the field`, `Вставит «${phrase}${coin}» в поле`), onclick: () => suggest(phrase + coin) },
+    h("button", { class: "chat-pos-chip" + (phrase === "close" ? " loss" : ""), title: t(`Puts “${phrase}” in the field`, `Вставит «${phrase}» в поле`), onclick: () => suggest(phrase) },
       icon(ico, 12), phrase)));
+}
+
+/** While a plan is open and not yet a position, how to change it: in words (the Mac's line under the plan, Studio.swift:2586). */
+function planHint(s) {
+  if (!s.plan || s.chipsPosition || s.card) return null;
+  return h("div", { class: "chat-plan-hint small secondary" }, t("Edit it in words: “take like the pros”, “risk $0.20”, “entry on a 1% pullback”.",
+    "Меняй словами: «тейк как у профи», «риск $0,20», «вход на откате 1%»."));
 }
 
 /** No model reads the chat yet, or the one on this PC can't answer: how to get one, or what it still needs (ConnectModelBar). */
 function connectBar(s) {
   const m = s.models || {}, model = s.model.model || "", name = modelName(model);
-  const local = s.model.provider === "ollama" && !m.refusals?.[model];
-  const down = local && m.servers?.ollama === false;
+  const way0 = s.providers.find((p) => p.id === s.model.provider);
+  // Any way on this PC (Ollama, LM Studio…), as the Mac's ConnectModelBar: running, then the model downloaded.
+  const local = way0?.kind === "local" && !way0.unavailable && !m.refusals?.[model];
+  const down = local && m.servers?.[s.model.provider] === false;
+  const ollama = s.model.provider === "ollama";
+  const setup = s.localSetup || {};
+  const outdated = local && ollama && setup.ollamaState === "outdated";
+  // An install or update under way says how far it is, and its button waits (the Mac's ollamaInstall).
+  const installing = setup.ollamaInstall || null;
   const size = m.sizes?.[model];
   const loading = m.downloads?.[model];
   const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
-  const way = (title, file) => h("button", { class: "chat-way-chip", onclick: () => openSettings("model") }, logo(file, 20), title);
+  // A subscription or a key: Settings › AI model opens on that way, where it signs in (the Mac's way(…, id:)).
+  const way = (title, file, id) => h("button", { class: "chat-way-chip", onclick: () => openSettings("model", id) }, logo(file, 20), title);
   const chip = (title, ico, run, accent = false, disabled = false) => h("button", { class: "chat-way-chip" + (accent ? " chat-accent" : ""), disabled, onclick: run }, icon(ico, 13), title);
+  const latest = setup.ollamaLatest;
   let head, line, actions = [];
-  if (down) {
-    head = t("Ollama isn't running", "Ollama не запущена");
+  if (outdated) {
+    head = t(`Ollama ${setup.ollamaVersion || ""} is too old for ${name}`, `Ollama ${setup.ollamaVersion || ""} слишком старая для ${name}`);
+    line = t(`Update it to ${latest ? "the newest, " + latest : "the newest"} — free, right here — then download the model.`,
+      `Обнови её до ${latest ? "новейшей, " + latest : "новейшей"} — бесплатно, прямо здесь, — потом скачай модель.`);
+    actions.push(chip(installing || (loading !== undefined ? t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`)
+      : t(`Update Ollama${latest ? " to " + latest : ""} and download`, `Обновить Ollama${latest ? " до " + latest : ""} и скачать`)), "arrow.down.circle", () => act("setUpLocal"), true, !!installing));
+    actions.push(chip(t("Check again", "Проверить снова"), "arrow.clockwise", () => act("refreshModels")));
+  } else if (down) {
+    head = ollama ? t("Ollama isn't running", "Ollama не запущена") : t(`${way0.name} isn't running`, `${way0.name} не запущена`);
     line = t("Open it to chat with a model on this PC — or connect a subscription instead.", "Открой её, чтобы общаться с моделью на этом ПК, — или подключи подписку.");
-    actions.push(m.installed ? chip(t("Open Ollama", "Открыть Ollama"), "play.circle", () => act("startOllama")) : chip(t("Set up on this PC", "Поставить на этот ПК"), "arrow.down.circle", () => act("setUpLocal"), true));
+    if (ollama) actions.push(m.installed ? chip(t("Open Ollama", "Открыть Ollama"), "play.circle", () => act("startOllama"))
+      : chip(installing || t(`Get Ollama${latest ? " " + latest : ""} and a model`, `Скачать Ollama${latest ? " " + latest : ""} и модель`), "arrow.down.circle", () => act("setUpLocal"), true, !!installing));
     actions.push(chip(t("Check again", "Проверить снова"), "arrow.clockwise", () => act("refreshModels")));
   } else if (local) {
     head = t(`${name} isn't on this PC yet`, `${name} пока нет на этом ПК`);
     line = size ? t(`≈ ${size.toFixed(1)} GB to download; it runs in ≈ ${Math.round(size * 1.2)} GB of this PC's ${m.memoryGB} GB`, `≈ ${size.toFixed(1)} ГБ скачать; работает в ≈ ${Math.round(size * 1.2)} ГБ из ${m.memoryGB} ГБ этого ПК`)
       + (fits(size) ? "." : t(" — too big for it: pick a smaller one or a subscription.", " — слишком большая: выбери поменьше или подписку."))
       : t("Download it, or use one this PC already has.", "Скачай её или выбери ту, что уже есть на этом ПК.");
-    if (loading !== undefined) actions.push(chip(t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`), "arrow.down.circle", null, false, true));
-    else if (!size || fits(size)) actions.push(chip(size ? t(`Download · ≈ ${size.toFixed(1)} GB`, `Скачать · ≈ ${size.toFixed(1)} ГБ`) : t("Download", "Скачать"), "arrow.down.circle", () => act("downloadModel", { model }), true));
-    for (const have of (m.live?.ollama || []).filter((x) => !m.refusals?.[x]).slice(0, 2)) {
-      actions.push(chip(t(`Use ${modelName(have)}`, `Взять ${modelName(have)}`), "desktop", () => act("useAccount", { provider: "ollama", model: have })));
+    // Only Ollama downloads from here; LM Studio's models are fetched in LM Studio itself.
+    if (ollama) {
+      if (loading !== undefined) actions.push(chip(t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`), "arrow.down.circle", null, false, true));
+      else if (!size || fits(size)) actions.push(chip(size ? t(`Download · ≈ ${size.toFixed(1)} GB`, `Скачать · ≈ ${size.toFixed(1)} ГБ`) : t("Download", "Скачать"), "arrow.down.circle", () => act("downloadModel", { model }), true));
+    }
+    for (const have of (m.live?.[s.model.provider] || []).filter((x) => !m.refusals?.[x]).slice(0, 2)) {
+      actions.push(chip(t(`Use ${modelName(have)}`, `Взять ${modelName(have)}`), "desktop", () => act("useAccount", { provider: s.model.provider, model: have })));
     }
   } else if (m.refusals?.[model]) {
     head = t(`${name} is too small for the chat`, `${name} слишком мала для чата`);
@@ -815,17 +908,27 @@ function connectBar(s) {
   }
   return h("div", { class: "chat-connect-bar" },
     h("b", {}, head), h("div", { class: "small secondary" }, line),
-    h("div", { class: "chat-way-chips" }, actions, way("ChatGPT", "llm-openai"), way("Claude", "llm-claude"), way("OpenRouter", "llm-openrouter"),
-      local ? null : chip(t("On this PC", "На этом ПК"), "desktop", () => act("setUpLocal"))));
+    h("div", { class: "chat-way-chips" }, actions, way("ChatGPT", "llm-openai", "chatgpt"), way("Claude", "llm-claude", "claude-code"), way("OpenRouter", "llm-openrouter", "openrouter"),
+      local ? null : chip(installing || t("On this PC", "На этом ПК"), "desktop", () => act("setUpLocal"), false, !!installing)));
 }
 
-function openSettings(tab) { document.querySelector(".menu")?.remove(); if (tab) store("settingsTab", tab); ui.view = "settings"; render(); }
+/** Settings on a tab — and, for the AI model tab, on a way the person picked (pages.js reads `ui.settingsProvider` once). */
+function openSettings(tab, provider) {
+  document.querySelector(".menu")?.remove();
+  liveMenu = null;
+  tuning = null;
+  if (tab) store("settingsTab", tab);
+  if (provider) ui.settingsProvider = provider;
+  ui.view = "settings";
+  render();
+}
 
 function keys(e) {
   const s = ui.state;
   const rows = suggestionRows(e.target);
   if (rows.length) {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); pick = (pick + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length; drawSuggestions(rows); return; }
+    // ↑↓ stop at the ends, as the Mac's keyed(max(0, pick - 1)) and keyed(min(count - 1, pick + 1)).
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); pick = Math.max(0, Math.min(rows.length - 1, pick + (e.key === "ArrowDown" ? 1 : -1))); drawSuggestions(rows); return; }
     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(rows[Math.min(pick, rows.length - 1)], e.target); return; }
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dismissed = e.target.value; drawSuggestions([]); return; }
   }
@@ -844,7 +947,7 @@ function keys(e) {
     return;
   }
   if ((e.key === "ArrowUp" && (empty || recalled !== null)) || (e.key === "ArrowDown" && recalled !== null)) {
-    const sent = s.chat.filter((m) => m.fromUser).map((m) => m.text);
+    const sent = s.sent || [];
     if (!sent.length) return;
     e.preventDefault();
     recalled = e.key === "ArrowUp" ? Math.max(0, (recalled ?? sent.length) - 1) : recalled + 1 < sent.length ? recalled + 1 : null;
@@ -879,8 +982,13 @@ function send() {
   // undefined, and reading .index of nothing stopped every message from being sent.
   const step = ui.attachedStep && ids[0] && ui.attachedStep.board === ids[0] ? ui.attachedStep.index : undefined;
   ui.attachedStep = null;
-  act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined, step });
+  const abouts = (ui.attachedAbout || []).map(({ title, about }) => ({ title, about }));
+  ui.attachedAbout = null;
+  act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined, step, abouts: abouts.length ? abouts : undefined });
   render();
+  // Your own message brings the end back, scrolled up or not, and the reply follows it there (the Mac's chat).
+  const list = document.querySelector(".chat-scroll");
+  if (list) list.scrollTop = list.scrollHeight;
 }
 
 // MARK: Over the field: the amount it says, a top-up of the automation wallet
@@ -1007,6 +1115,9 @@ function wordAtCaret(el) {
   return /^[/@$]/.test(word) ? { sign: word[0], word: word.slice(1), start, end, before: text.slice(0, start), after: text.slice(end) } : null;
 }
 
+/** The deepest market a looked-up contract trades on, or null while it's being looked up or none knows it. */
+function marketOf(address) { const rows = lookups.get(address); return Array.isArray(rows) ? rows[0] || null : null; }
+
 const isAddress = (x) => /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(x);
 
 function lookUp(address) {
@@ -1017,7 +1128,7 @@ function lookUp(address) {
     try { rows = JSON.parse(r?.list || "[]"); } catch {}
     lookups.set(address, rows);
     const f = document.getElementById("composer");
-    if (f) refreshSuggestions(f);
+    if (f) { refreshSuggestions(f); drawMirror(f); }
     if (document.querySelector(".chat-token-chip")) render();
   }).catch(() => lookups.set(address, []));
 }
@@ -1041,7 +1152,7 @@ function tokenList() {
   const rows = (s.portfolio.networks || []).flatMap((n) => n.rows.filter((r) => r.section !== "defi").map((r) => ({ r, n }))).sort((a, b) => (b.r.usd || 0) - (a.r.usd || 0));
   for (const { r, n } of rows) add(r.symbol, `${n.name} · ${r.usd !== null && r.usd !== undefined ? "$" + Number(r.usd).toFixed(2) : r.amount}`, r.icon);
   for (const [sym, name] of [["SOL", "Solana"], ["USDC", "USD Coin"], ["ETH", "Ether"], ["BTC", "Bitcoin"], ["HYPE", "Hyperliquid"], ["NEAR", "NEAR"], ["USDT", "Tether"], ["JUP", "Jupiter"]]) add(sym, name);
-  for (const f of s.favorites || []) add(f.symbol, `${f.name} · ${f.chain}`, f.image);
+  for (const f of s.favorites || []) add(f.symbol, `${f.name} · ${networkName(f.chain)}`, f.image);
   return out;
 }
 
@@ -1065,8 +1176,10 @@ function suggestionRows(el) {
     const found = lookups.get(w.word);
     if (found === "pending") return [row({ icon: "magnifyingglass", title: short, detail: t("looking it up…", "ищу…") }, put, dollar)];
     if (!found.length) return [row({ icon: "questionmark.circle", title: short, detail: t("no market knows it", "ни один рынок его не знает") }, put, dollar)];
-    return found.map((f) => row({ icon: "circle.dotted", logo: f.symbol, src: f.image, title: f.symbol,
-      detail: [f.name, f.chain, f.price, f.liquidity ? t(`liquidity ${f.liquidity}`, `ликвидность ${f.liquidity}`) : null].filter(Boolean).join(" · ") }, (dollar ? "$" : "") + f.address, dollar));
+    // One row per network, the deepest pool first (the engine's order), the network by its name.
+    const seen = new Set();
+    return found.filter((f) => !seen.has(f.chain) && seen.add(f.chain)).map((f) => row({ icon: "circle.dotted", logo: f.symbol, src: f.image, title: f.symbol,
+      detail: [f.name, networkName(f.chain), f.price, f.liquidity ? t(`liquidity ${f.liquidity}`, `ликвидность ${f.liquidity}`) : null].filter(Boolean).join(" · ") }, (dollar ? "$" : "") + f.address, dollar));
   }
   // «$» lists the tokens; «$5» is dollars.
   if (w.sign === "$") {
@@ -1074,10 +1187,15 @@ function suggestionRows(el) {
     return tokenList().filter((x) => !q || x.symbol.toLowerCase().startsWith(q) || x.detail.toLowerCase().includes(q)).slice(0, 40)
       .map((x) => row({ icon: "dollarsign.circle", logo: x.symbol, src: x.image, title: x.symbol, detail: x.detail }, "$" + x.symbol, true));
   }
-  const names = s.book.map((e) => row({ icon: "person", title: e.name, detail: e.network }, e.name));
-  const favs = (s.favorites || []).map((f) => row({ logo: f.symbol, src: f.image, title: f.symbol, detail: f.name + " · " + f.chain }, f.symbol));
-  return [...names, ...favs].filter((r) => !q || r.title.toLowerCase().includes(q)).slice(0, 30);
+  // The address book with each network's logo, then the favourite tokens; all of them, as the Mac lists (it scrolls).
+  const names = s.book.map((e) => row({ icon: "person", logo: networkOf(e.network)?.logo || null, title: e.name, detail: networkName(e.network) }, e.name));
+  const favs = (s.favorites || []).map((f) => row({ logo: f.symbol, src: f.image, title: f.symbol, detail: f.name + " · " + networkName(f.chain) }, f.symbol));
+  return [...names, ...favs].filter((r) => !q || r.title.toLowerCase().includes(q));
 }
+
+/** A network by its key («base»), from Settings › Modules' list: its name and logo, «Base», as the Mac's ModuleNetwork. */
+function networkOf(key) { return (ui.state.modules?.networks || []).find((n) => n.id === "network." + key) || null; }
+function networkName(key) { return networkOf(key)?.name || (key ? key.charAt(0).toUpperCase() + key.slice(1) : ""); }
 
 function refreshSuggestions(el) { pick = 0; drawSuggestions(suggestionRows(el)); }
 
@@ -1087,9 +1205,13 @@ function drawSuggestions(rows) {
   if (!rows.length) { slot.replaceChildren(); return; }
   const field = document.getElementById("composer");
   slot.replaceChildren(h("div", { class: "chat-suggest" },
-    h("div", { class: "chat-suggest-rows" }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); } },
+    h("div", { class: "chat-suggest-rows" }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); },
+      // The pointer over a row picks it, as ↑↓ do (the Mac's onHover).
+      onmouseenter: () => { if (pick !== i) { pick = i; for (const [n, b] of [...slot.querySelectorAll(".chat-suggest-row")].entries()) b.classList.toggle("chat-lit", n === i); } } },
       r.logo ? logo(r.logo, 16, r.src) : icon(r.icon, 13), h("b", { class: "one-line" }, r.title), h("span", { class: "one-line secondary" }, r.detail)))),
-    h("div", { class: "chat-suggest-foot" }, t("↑↓ choose · Return puts it in · Esc closes", "↑↓ — выбрать · Return — вставить · Esc — закрыть"))));
+    h("div", { class: "chat-suggest-foot" }, rows.length > 8
+      ? t(`${rows.length} · scroll or ↑↓ · Return puts it in · Esc closes`, `${rows.length} · прокрути или ↑↓ · Return — вставить · Esc — закрыть`)
+      : t("↑↓ choose · Return puts it in · Esc closes", "↑↓ — выбрать · Return — вставить · Esc — закрыть"))));
   slot.querySelector(".chat-suggest-row.chat-lit")?.scrollIntoView({ block: "nearest" });
 }
 
@@ -1162,17 +1284,23 @@ function modelChip(s) {
 
 /** Two columns, so nothing moves under the pointer: the companies, then the chosen one's ways in and models. */
 function modelMenu(anchor) {
-  const s = ui.state;
-  const m = s.models || {};
+  // Read again at every draw: a download's percent, a server coming up, a sign-in — the open menu follows (the Mac's
+  // rows update live); chatPanel() redraws it with each state while it's open.
+  let s = ui.state, m = s.models || {};
   let shown = companyOf(s.model.provider)?.name || companies[0].name;
   const right = h("div", { class: "chat-ways-col" });
   const left = h("div", { class: "chat-companies-col" });
   const draw = () => {
+    // Closed some other way (another menu, Settings): it stops redrawing, and only its own face goes.
+    if (!left.isConnected && liveMenu === draw) { liveMenu = null; if (tuning === "model") tuning = null; return; }
+    s = ui.state; m = s.models || {};
     const list = companiesNow();
     const row = (c) => {
       const ways = s.providers.filter((p) => c.ids.includes(p.id));
       const current = ways.find((p) => p.id === s.model.provider);
+      // Under the company: the model in use, or a single way's own state, or else how to get in (the Mac's summary).
       const detail = current ? (s.model.model ? modelName(s.model.model) : current.name) + t(" · in use", " · сейчас")
+        : ways.length === 1 ? wayDetail(ways[0])
         : ways.filter((p) => !p.unavailable).map((p) => (p.kind === "subscription" ? t("Subscription", "Подписка") : p.kind === "local" ? t("On this PC", "На этом ПК") : t("API key", "API-ключ"))).join(t(" or ", " или "));
       return h("button", { class: "chat-company-row" + (shown === c.name ? " chat-selected" : ""), onclick: () => { shown = c.name; draw(); } },
         companyTile(c), h("span", { class: "chat-company-text" }, h("b", {}, c.name), h("span", { class: "one-line" + (current ? " accent-ink" : "") }, detail || "—")), icon("chevron.right", 11));
@@ -1185,17 +1313,24 @@ function modelMenu(anchor) {
     const c = list.find((x) => x.name === shown) || list[0];
     right.replaceChildren(h("div", { class: "chat-caption" }, c.name), ...s.providers.filter((p) => c.ids.includes(p.id)).map(way).flat(Infinity));
   };
-  const close = () => { document.querySelector(".menu")?.remove(); act("refreshModels"); };
+  const close = () => { document.querySelector(".menu")?.remove(); closed(); };
+  const closed = () => { if (liveMenu === draw) liveMenu = null; if (tuning === "model") tuning = null; act("refreshModels"); render(); };
+  // «<model> · connected», «any model by key · sign-in needed», «<model> · on this PC» (the Mac's detail(info)).
+  const wayDetail = (p) => {
+    const state = p.kind === "local" ? t("on this PC", "на этом ПК") : p.connected ? t("connected", "подключено") : t("sign-in needed", "нужен вход");
+    const name = p.takesKey && !p.connected ? t("any model by key", "любая модель по ключу") : p.chosen ? modelName(p.chosen) : "";
+    return [name, state].filter(Boolean).join(" · ");
+  };
   const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
   const way = (p) => {
     const kindIcon = p.kind === "subscription" ? "person.circle" : p.kind === "local" ? "desktop" : "key";
     const models = p.connected && !p.unavailable ? (p.models || []) : [];
     if (!models.length) {
       // Nothing to choose inside it: the way in is the choice, or its sign-in.
-      const detail = p.unavailable ? t("not open to apps yet — use the API key", "пока закрыто для приложений — используй API-ключ")
-        : p.connected ? t("connected", "подключено") + (p.existingLogin ? " · " + p.existingLogin : "") : t("sign-in needed", "нужен вход");
+      const detail = p.unavailable ? t("not open to apps yet — use the API key", "пока закрыто для приложений — используй API-ключ") : wayDetail(p);
+      // Not signed in: Settings › AI model opens on this way, where it signs in (the Mac's pick → openSettings(.signIns)).
       return h("button", { class: "chat-model-row chat-way", disabled: !!p.unavailable, title: p.unavailable || p.note || "",
-        onclick: () => { close(); p.connected ? act("useAccount", { provider: p.id }) : openSettings("model"); } },
+        onclick: () => { close(); p.connected ? act("useAccount", { provider: p.id }) : openSettings("model", p.id); } },
       icon(kindIcon, 13), h("span", { class: "chat-way-text" }, h("b", {}, p.name), h("span", { class: "small secondary" }, detail)), p.id === s.model.provider ? icon("check", 13) : null);
     }
     const local = p.kind === "local";
@@ -1207,7 +1342,10 @@ function modelMenu(anchor) {
     if (p.id === "ollama" && m.servers?.ollama === false) {
       rows.push(m.installed
         ? h("button", { class: "chat-model-row chat-sub-row", onclick: () => act("startOllama") }, icon("exclamationmark.triangle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Ollama isn't running", "Ollama не запущена")), h("span", { class: "small secondary" }, t("start it, then open this menu again", "запусти её и открой меню снова"))))
-        : h("button", { class: "chat-model-row chat-sub-row", onclick: () => { close(); act("setUpLocal"); } }, icon("arrow.down.circle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Set up on this PC", "Поставить на этот ПК")), h("span", { class: "small secondary" }, t("Ollama, free · then a model that fits this PC", "Ollama, бесплатно · потом модель под этот ПК")))));
+        // Its install says how far it is and waits (the Mac's ollamaInstall); the menu stays open to show it.
+        : h("button", { class: "chat-model-row chat-sub-row", disabled: !!s.localSetup?.ollamaInstall, onclick: () => act("setUpLocal") }, icon("arrow.down.circle", 12),
+          h("span", { class: "chat-way-text" }, h("b", {}, s.localSetup?.ollamaInstall || t("Get Ollama", "Скачать Ollama")),
+            h("span", { class: "small secondary" }, t("free · the newest release, then a model that fits this PC", "бесплатно · новейшая версия, потом модель под этот ПК")))));
     }
     for (const id of models) {
       const off = m.refusals?.[id], absent = local && live && !live.includes(id);
@@ -1236,7 +1374,11 @@ function modelMenu(anchor) {
   popover(anchor, h("div", { class: "chat-model-menu" },
     h("div", { class: "chat-model-cols" }, left, right),
     h("div", { class: "chat-model-foot" }, icon("lock.shield", 12), h("span", {}, t("The model never sees your wallet key.", "Модель никогда не видит ключ кошелька.")),
-      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings("model") }, t("Sign-ins…", "Входы…")))), "up", () => act("refreshModels"));
+      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings("model") }, t("Sign-ins…", "Входы…")))), "up", closed);
+  // Open first, then the face: a redraw before the menu is in the page would take it for closed.
+  liveMenu = draw;
+  tuning = "model";
+  render();
 }
 
 /** The networks the assistant may use, as on the Mac (NetworksChip): those switched on, three logos and «+N»; the menu
@@ -1245,7 +1387,7 @@ function networksChip() {
   const all = ui.state.modules?.networks || [];
   const on = all.filter((n) => n.on);
   const chip = h("button", { class: "chat-chip-btn", title: t("Networks the assistant may use: ", "Сети, где работает ассистент: ") + on.map((n) => n.name).join(", "),
-    onclick: () => popover(chip, networksMenu(), "up") },
+    onclick: () => { popover(chip, networksMenu(), "up", () => { if (tuning === "networks") tuning = null; render(); }); tuning = "networks"; render(); } },
   on.length ? [h("span", { class: "chat-logo-stack" }, on.slice(0, 3).map((n) => logo(n.logo, 20))), on.length > 3 ? h("b", { class: "secondary" }, "+" + (on.length - 3)) : null]
     : h("b", { class: "chat-no-nets" }, t("No networks", "Нет сетей")),
   icon("chevron.down", 9));
@@ -1331,10 +1473,16 @@ function popover(anchor, content, side = "up", onClose) {
 
 /** Speaking into the field: what Windows hears shows as it goes (the settled words in ink, the rest grey); Done puts it in
  *  the field, Cancel drops it; nothing is sent by itself. A build whose window has no live recognizer listens to a pause. */
-const voice = { on: false, heard: "", started: 0, timer: null, unlisten: null };
+const voice = { on: false, heard: "", started: 0, timer: null, unlisten: null, language: "", failed: null };
+
+/** «BRIDGE · RELAY» → «Bridge · Relay», tickers kept («USDC»), for a step's name over the field. */
+function stepLabel(label) {
+  return String(label || "").split(" ").map((w) => /^[A-Z0-9]{2,5}$/.test(w) && !/^(FROM|INTO|SWAP|SEND|BUY|SELL|ON|TO|OPEN|GAS|PAY|CHECK|SIGN)$/.test(w) ? w
+    : w.charAt(0) + w.slice(1).toLowerCase()).join(" ");
+}
 
 async function speak() {
-  Object.assign(voice, { on: true, heard: "", started: Date.now() });
+  Object.assign(voice, { on: true, heard: "", started: Date.now(), language: "", failed: null });
   clearInterval(voice.timer);
   voice.timer = setInterval(() => {
     const el = document.getElementById("voice-time");
@@ -1344,7 +1492,15 @@ async function speak() {
   render();
   try {
     voice.unlisten = await window.__TAURI__.event.listen("voice", (e) => {
-      voice.heard = String(e.payload || "");
+      const said = String(e.payload || "");
+      // The first word from Windows is the language it listens in (voice.rs LANGUAGE_MARK), for the line over the panel.
+      if (said.startsWith("\u0001")) {
+        voice.language = said.slice(1);
+        const lang = document.getElementById("voice-lang");
+        if (lang) lang.textContent = voice.language;
+        return;
+      }
+      voice.heard = said;
       const el = document.getElementById("voice-heard");
       if (el) { el.textContent = voice.heard ? voice.heard + "…" : t("Say what to do…", "Скажи, что сделать…"); el.classList.toggle("secondary", !voice.heard); }
     });
@@ -1355,8 +1511,8 @@ async function speak() {
   } catch (e) {
     // No live recognizer in this build: the one that listens to a pause.
     if (/not found|unknown|not allowed|undefined/i.test(String(e))) {
-      try { text = (await invoke("listen")).trim(); } catch (x) { toast(String(x)); }
-    } else toast(String(e));
+      try { text = (await invoke("listen")).trim(); } catch (x) { voice.failed = String(x); }
+    } else voice.failed = String(e);
   } finally {
     voice.unlisten?.();
     voice.unlisten = null;
@@ -1378,9 +1534,24 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); stopVoice(true); }
 }, true);
 
+// Ctrl+Return sends the message from anywhere in the window, as the Mac's ⌘Return on its send button; the field's own
+// Return is the field's (it may be picking a suggestion).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || !e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented || voice.on) return;
+  const field = document.getElementById("composer");
+  if (!field || e.target === field) return;
+  e.preventDefault();
+  send();
+});
+
+/** «Listening · Russian · recognized online by Microsoft»: the language, and where the sound goes — Windows' dictation needs
+ *  Online speech recognition, so it leaves the PC (the Mac says «on this Mac» or «by Apple»). */
 function listeningRow() {
-  return h("div", { class: "chat-listening-row" }, h("span", { class: "chat-rec-dot" }), h("b", {}, t("Listening", "Слушаю")),
-    h("span", { class: "small secondary" }, t("· in the keyboard layout's language · recognized by Windows", "· на языке раскладки · распознаёт Windows")));
+  return h("div", { class: "chat-listening-row", title: t("It listens in the keyboard's language: switch the layout before the microphone to speak another one. Windows sends the sound to Microsoft's online speech recognition, so Settings › Privacy & security › Speech › Online speech recognition has to be on; ihatecrypto keeps nothing of it.",
+      "Слушает на языке раскладки: переключи раскладку до микрофона, чтобы говорить на другом. Windows отправляет звук в онлайн-распознавание Microsoft, поэтому в Параметрах › Конфиденциальность и защита › Речь должно быть включено «Распознавание голоса в сети»; ihatecrypto ничего из него не хранит.") },
+    h("span", { class: "chat-rec-dot" }), h("b", {}, t("Listening", "Слушаю")),
+    h("span", { class: "small secondary" }, "· ", h("span", { id: "voice-lang" }, voice.language || t("the keyboard's language", "язык раскладки")),
+      t(" · recognized online by Microsoft", " · распознаёт Microsoft онлайн")));
 }
 
 function voicePanel() {
@@ -1401,4 +1572,6 @@ export function showDraft() { suggest("send 120 USDC to Mom"); drawHelpers(); }
 /** The preview's and the console sweep's send: a message with nothing attached goes out (`&call=chat.sendDraft`). */
 export function sendDraft() { ui.composerText = "send 1 USDC to Mom"; send(); }
 /** The preview's «$» chips in the field (`&call=chat.showMention`). */
+/** The preview's `&call=chat.showAbout`: a coin attached from outside the canvas, its chip over the field. */
+export function showAbout() { attachAbout({ title: "SOL · Solana", about: "About the coin «SOL on Solana; the wallet holds 0.0215»", logo: "SOL" }); }
 export function showMention() { suggest("buy $SOL for 5 USDC, then swap half to $JUP"); drawHelpers(); }

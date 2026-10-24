@@ -26,6 +26,10 @@ nonisolated struct ProviderView: Encodable {
     /// Its models for the menu (Engine.models(of:)) and the one it starts with.
     var models: [String] = []
     var defaultModel: String = ""
+    /// The model chosen for this account, kept per account (the model menu's «<model> · connected»).
+    var chosen: String = ""
+    /// Each model's name as the Mac's LLMCatalog.displayName writes it («GPT 5.4», «Qwen3 8B»), the chosen one too.
+    var names: [String: String] = [:]
 }
 
 /// The chat's model: the same providers as the Mac (LLMCatalog), keys kept with DPAPI. A browser sign-in (ChatGPT,
@@ -119,7 +123,9 @@ extension Engine {
                          existingLogin: p.existingLogin() != nil ? p.info.existingLoginLabel : nil, signIn: p.info.signInLabel,
                          note: p.info.note.replacingOccurrences(of: "this Mac", with: "this PC"),
                          unavailable: p.info.unavailable, connected: saved[p.info.id] != nil || p.info.kind == .local,
-                         models: models(of: p.info.id), defaultModel: p.info.defaultModel)
+                         models: models(of: p.info.id), defaultModel: p.info.defaultModel, chosen: model(of: p.info.id),
+                         names: Dictionary(models(of: p.info.id).map { ($0, LLMCatalog.displayName(model: $0)) } + [(model(of: p.info.id), LLMCatalog.displayName(model: model(of: p.info.id)))],
+                                           uniquingKeysWith: { a, _ in a }))
         }
     }
 
@@ -144,6 +150,10 @@ extension Engine {
             credential = existing
         } else if p.info.kind == .local {
             credential = nil
+        } else if !p.info.takesKey {
+            // A subscription that signs in through its own tool (Claude Code, Codex) with no sign-in on this PC yet: as the
+            // Mac's useExistingLogin says it.
+            throw WalletError(say("No sign-in found on this PC.", "Вход на этом ПК не найден."))
         } else {
             throw WalletError(say("Paste the key for \(p.info.name).", "Вставь ключ для \(p.info.name)."))
         }

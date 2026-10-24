@@ -84,11 +84,13 @@ nonisolated struct HistoryTabs: Encodable {
         var changed = false
         for c in canvases where !c.messages.isEmpty || c.boards.contains(where: { !Engine.liveBoards.contains($0.kind) }) {
             let i: Int
+            // Named as the canvas list names it: the person's name, else its newest move, else its first words.
+            let title = Engine.shownTitle(c, boards: c.boards)
             if let at = saved.chats.firstIndex(where: { $0.id == c.id }) { i = at } else {
-                saved.chats.append(CanvasDoc(id: c.id, title: c.title, at: c.at))
+                saved.chats.append(CanvasDoc(id: c.id, title: title, at: c.at))
                 i = saved.chats.count - 1
             }
-            if saved.chats[i].title != c.title { saved.chats[i].title = c.title; changed = true }
+            if saved.chats[i].title != title { saved.chats[i].title = title; changed = true }
             var messages = Dictionary(saved.chats[i].messages.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
             for m in c.messages {
                 if let at = messages[m.id] {
@@ -162,7 +164,7 @@ extension Engine {
             for (i, q) in asked.enumerated() {
                 let until = i + 1 < asked.count ? asked[i + 1].at : .distantFuture
                 let said = c.messages.filter { !$0.fromUser && $0.at >= q.at && $0.at < until }.map(\.text)
-                let made = c.boards.filter { $0.at >= q.at && $0.at < until && !Self.liveBoards.contains($0.kind) }.sorted { $0.at < $1.at }
+                let made = c.boards.filter { $0.at >= q.at && $0.at < until && !Self.liveBoards.contains($0.kind) && !["recurring", "scheduleItem"].contains($0.kind) }.sorted { $0.at < $1.at }
                 let bubbles = made.flatMap { b -> [HistoryTabs.Bubble] in
                     let status = b.state == "failed" ? "blocked" : b.state == "done" ? "done" : "info"
                     if let steps = b.steps, !steps.isEmpty {

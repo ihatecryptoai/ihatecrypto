@@ -84,7 +84,8 @@ extension Engine {
     func offerNewModules() {
         guard settings.modulesKnown != nil else { settings.modulesKnown = Modules.allIDs; return }
         let new = Modules.current.newIDs
-        guard !new.isEmpty, card == nil else { return }
+        // Not during the first run (the Mac's ModulesUI.swift:334): the question waits for the next launch.
+        guard !new.isEmpty, card == nil, !onboarding else { return }
         reply(say("New in ihatecrypto: \(new.map(Modules.name).joined(separator: ", ")). It stays off until you say — turn it on?",
                   "Новое в ihatecrypto: \(new.map(Modules.name).joined(separator: ", ")). Пока выключено — включить?"))
         options = new.prefix(4).map { id in

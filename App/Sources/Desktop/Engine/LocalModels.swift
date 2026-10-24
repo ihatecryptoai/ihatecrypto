@@ -20,6 +20,9 @@ nonisolated struct LocalSetup: Equatable {
     var claudeInstall: String?
     /// Ollama was just updated here: its newest is in, whatever GitHub said a moment ago.
     var ollamaUpdated = false
+    /// A download said this Ollama is too old for its model («requires a newer version of Ollama»), until its version
+    /// changes (the Mac's ollamaOutdated).
+    var ollamaOutdated = false
 }
 
 nonisolated struct LocalSetupView: Encodable {
@@ -132,12 +135,15 @@ extension Engine {
     /// Its version here (when it runs) and its newest release, for «Update» and the outdated state.
     func readOllamaVersions() async {
         async let latest = OllamaSetup.latest()
-        localSetup.ollamaVersion = await OllamaSetup.version()
+        let version = await OllamaSetup.version()
+        // An updated Ollama may take the model now.
+        if version != localSetup.ollamaVersion { localSetup.ollamaVersion = version; localSetup.ollamaOutdated = false }
         localSetup.ollamaLatest = await latest
     }
 
     /// Older than its newest release (and not just updated), or a model said it's too old.
     var needsNewOllama: Bool {
+        if localSetup.ollamaOutdated { return true }
         guard !localSetup.ollamaUpdated, let version = localSetup.ollamaVersion, let latest = localSetup.ollamaLatest else {
             return localServers["ollama"] == false && !Self.ollamaInstalled
         }
@@ -147,7 +153,8 @@ extension Engine {
     var ollamaState: String {
         if localServers["ollama"] == false { return Self.ollamaInstalled ? "notRunning" : "noOllama" }
         let missing = liveModels["ollama"].map { $0.contains(model) } == false
-        if missing && needsNewOllama { return "outdated" }
+        // Too old for a model it tried, or older than its newest release while the model still has to be downloaded.
+        if localSetup.ollamaOutdated || (missing && needsNewOllama) { return "outdated" }
         return missing || providerID != "ollama" ? "missing" : "ready"
     }
 
@@ -159,7 +166,7 @@ extension Engine {
         defer { localSetup.ollamaInstall = nil; changed() }
         do {
             try await OllamaSetup.install { [weak self] text in self?.localSetup.ollamaInstall = text; self?.changed() }
-            localSetup.ollamaUpdated = true
+            localSetup.ollamaUpdated = true; localSetup.ollamaOutdated = false
             // The installer starts its app; the server takes a moment to answer after that.
             for _ in 0..<10 where localServers["ollama"] != true {
                 try? await Task.sleep(for: .seconds(2))

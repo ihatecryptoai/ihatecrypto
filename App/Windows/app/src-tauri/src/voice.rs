@@ -49,22 +49,34 @@ pub fn listen() -> Result<String, String> {
     Err("Voice uses Windows' speech recognizer: it works on Windows.".into())
 }
 
-/// The recognition under way, for Cancel and Done (`stop`); `done` keeps what was heard so far.
+/// The recognition under way: Cancel (false) and Done (true) end it (`stop`).
 #[cfg(windows)]
-struct Live {
-    cancel: Box<dyn Fn() + Send>,
-    done: bool,
-}
-#[cfg(windows)]
-static LIVE: std::sync::Mutex<Option<Live>> = std::sync::Mutex::new(None);
+static LIVE: std::sync::Mutex<Option<std::sync::mpsc::Sender<Ended>>> = std::sync::Mutex::new(None);
 
-/// As `listen`, with each guess the recognizer makes along the way handed to `heard` (the Mac's live transcript), until a
-/// pause, Cancel (nothing goes in the field) or Done (what was heard so far goes in).
+#[cfg(windows)]
+enum Ended {
+    /// Done (true: the words go in the field) or Cancel (false: nothing does).
+    Stop(bool),
+    /// Windows ended it by itself: the mic went, a long silence, an error.
+    Completed(windows::Media::SpeechRecognition::SpeechRecognitionResultStatus),
+}
+
+/// The first line `heard` gets: the language being listened to, ahead of any words (the window's «· Russian ·»).
+#[cfg(windows)]
+const LANGUAGE_MARK: char = '\u{1}';
+
+/// As `listen`, but across pauses until Done or Cancel, as the Mac's dictation keeps listening (Voice.swift): Windows'
+/// continuous session, the settled phrases joined, each guess along the way handed to `heard` (the live transcript).
+/// First it hands `heard` the language, after LANGUAGE_MARK.
 #[cfg(windows)]
 pub fn listen_live(heard: impl Fn(String) + Send + Sync + 'static) -> Result<String, String> {
+    use std::sync::{Arc, Mutex};
     use windows::Foundation::TypedEventHandler;
     use windows::Globalization::Language;
-    use windows::Media::SpeechRecognition::{SpeechRecognitionHypothesisGeneratedEventArgs, SpeechRecognitionResultStatus, SpeechRecognizer};
+    use windows::Media::SpeechRecognition::{
+        SpeechContinuousRecognitionCompletedEventArgs, SpeechContinuousRecognitionResultGeneratedEventArgs, SpeechContinuousRecognitionSession,
+        SpeechRecognitionHypothesisGeneratedEventArgs, SpeechRecognitionResultStatus, SpeechRecognizer,
+    };
     use windows::Win32::Globalization::LCIDToLocaleName;
     use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -90,38 +102,82 @@ pub fn listen_live(heard: impl Fn(String) + Send + Sync + 'static) -> Result<Str
     if compiled.Status().map_err(said)? != SpeechRecognitionResultStatus::Success {
         return Err("Windows has no speech recognition for this language: add it in Settings › Time & language › Speech.".into());
     }
-    let last = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let kept = last.clone();
-    let token = recognizer.HypothesisGenerated(&TypedEventHandler::new(move |_: Ref<SpeechRecognizer>, args: Ref<SpeechRecognitionHypothesisGeneratedEventArgs>| {
+    let heard = Arc::new(heard);
+    // The language the recognizer listens in, as Windows names it (it may fall back to the system's speech language).
+    let language = recognizer.CurrentLanguage().and_then(|l| l.DisplayName()).map(|n| n.to_string()).unwrap_or(tag);
+    heard(format!("{LANGUAGE_MARK}{language}"));
+
+    // What's settled (each phrase after its pause) and the guess at the phrase being said now.
+    let settled = Arc::new(Mutex::new(String::new()));
+    let guess = Arc::new(Mutex::new(String::new()));
+    let both = |settled: &Mutex<String>, guess: &Mutex<String>| {
+        let (s, g) = (settled.lock().map(|x| x.clone()).unwrap_or_default(), guess.lock().map(|x| x.clone()).unwrap_or_default());
+        [s, g].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ")
+    };
+    let (send, ended) = std::sync::mpsc::channel::<Ended>();
+
+    let (s1, g1, h1) = (settled.clone(), guess.clone(), heard.clone());
+    let hypothesis = recognizer.HypothesisGenerated(&TypedEventHandler::new(move |_: Ref<SpeechRecognizer>, args: Ref<SpeechRecognitionHypothesisGeneratedEventArgs>| {
         if let Some(a) = &*args {
             if let Ok(text) = a.Hypothesis().and_then(|h| h.Text()) {
-                let text = text.to_string();
-                if let Ok(mut l) = kept.lock() { *l = text.clone(); }
-                heard(text);
+                if let Ok(mut g) = g1.lock() { *g = text.to_string(); }
+                h1(both(&s1, &g1));
             }
         }
         Ok(())
     })).map_err(said)?;
-    let op = recognizer.RecognizeAsync().map_err(said)?;
-    let handle = op.clone();
-    if let Ok(mut live) = LIVE.lock() { *live = Some(Live { cancel: Box::new(move || { let _ = handle.Cancel(); }), done: false }); }
-    let result = op.join();
-    let ended = LIVE.lock().ok().and_then(|mut l| l.take());
-    let _ = recognizer.RemoveHypothesisGenerated(token);
+    let session = recognizer.ContinuousRecognitionSession().map_err(said)?;
+    let (s2, g2, h2) = (settled.clone(), guess.clone(), heard.clone());
+    let result = session.ResultGenerated(&TypedEventHandler::new(move |_: Ref<SpeechContinuousRecognitionSession>, args: Ref<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
+        if let Some(a) = &*args {
+            if let Ok(r) = a.Result() {
+                if r.Status().ok() == Some(SpeechRecognitionResultStatus::Success) {
+                    if let Ok(text) = r.Text() {
+                        let text = text.to_string();
+                        if !text.trim().is_empty() {
+                            if let Ok(mut s) = s2.lock() { if !s.is_empty() { s.push(' '); } s.push_str(text.trim()); }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(mut g) = g2.lock() { g.clear(); }
+        h2(both(&s2, &g2));
+        Ok(())
+    })).map_err(said)?;
+    let done_send = send.clone();
+    let completed = session.Completed(&TypedEventHandler::new(move |_: Ref<SpeechContinuousRecognitionSession>, args: Ref<SpeechContinuousRecognitionCompletedEventArgs>| {
+        let status = args.as_ref().and_then(|a| a.Status().ok()).unwrap_or(SpeechRecognitionResultStatus::Unknown);
+        let _ = done_send.send(Ended::Completed(status));
+        Ok(())
+    })).map_err(said)?;
+
+    if let Ok(mut live) = LIVE.lock() { *live = Some(send); }
+    let started = session.StartAsync().and_then(|op| op.join());
+    let end = match started {
+        Ok(()) => ended.recv().unwrap_or(Ended::Stop(false)),
+        Err(e) => { if let Ok(mut live) = LIVE.lock() { *live = None; } return Err(said(e)); }
+    };
+    if let Ok(mut live) = LIVE.lock() { *live = None; }
+    let outcome = match end {
+        // Done: the phrase being said is finished first, so its words count too.
+        Ended::Stop(true) => {
+            let _ = session.StopAsync().and_then(|op| op.join());
+            Ok(both(&settled, &guess))
+        }
+        Ended::Stop(false) => { let _ = session.CancelAsync().and_then(|op| op.join()); Ok(String::new()) }
+        Ended::Completed(SpeechRecognitionResultStatus::MicrophoneUnavailable) => Err("No microphone is available.".into()),
+        Ended::Completed(SpeechRecognitionResultStatus::Success | SpeechRecognitionResultStatus::TimeoutExceeded
+            | SpeechRecognitionResultStatus::UserCanceled | SpeechRecognitionResultStatus::PauseLimitExceeded) => Ok(both(&settled, &guess)),
+        Ended::Completed(SpeechRecognitionResultStatus::NetworkFailure) =>
+            Err("Windows' online speech recognition didn't answer: check the internet connection and try again.".into()),
+        Ended::Completed(_) => Err("Windows couldn't make out the words; try again.".into()),
+    };
+    let _ = session.RemoveResultGenerated(result);
+    let _ = session.RemoveCompleted(completed);
+    let _ = recognizer.RemoveHypothesisGenerated(hypothesis);
     let _ = recognizer.Close();
-    let heard_so_far = last.lock().map(|l| l.clone()).unwrap_or_default();
-    match result {
-        Ok(r) => match r.Status().map_err(said)? {
-            SpeechRecognitionResultStatus::Success => Ok(r.Text().map_err(said)?.to_string()),
-            SpeechRecognitionResultStatus::UserCanceled => Ok(if ended.map(|l| l.done) == Some(true) { heard_so_far } else { String::new() }),
-            SpeechRecognitionResultStatus::TimeoutExceeded => Ok(heard_so_far),
-            SpeechRecognitionResultStatus::MicrophoneUnavailable => Err("No microphone is available.".into()),
-            _ => Err("Windows couldn't make out the words; try again.".into()),
-        },
-        // Cancelled by Cancel or Done: Done keeps the words heard so far, Cancel nothing.
-        Err(_) if ended.is_some() => Ok(if ended.map(|l| l.done) == Some(true) { heard_so_far } else { String::new() }),
-        Err(e) => Err(said(e)),
-    }
+    outcome
 }
 
 #[cfg(not(windows))]
@@ -132,11 +188,8 @@ pub fn listen_live(_heard: impl Fn(String) + Send + Sync + 'static) -> Result<St
 /// Cancel (`done` false) or Done (true) on the recognition under way.
 pub fn stop(done: bool) {
     #[cfg(windows)]
-    if let Ok(mut live) = LIVE.lock() {
-        if let Some(l) = live.as_mut() {
-            l.done = done;
-            (l.cancel)();
-        }
+    if let Ok(live) = LIVE.lock() {
+        if let Some(send) = live.as_ref() { let _ = send.send(Ended::Stop(done)); }
     }
     #[cfg(not(windows))]
     let _ = done;

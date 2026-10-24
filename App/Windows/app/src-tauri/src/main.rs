@@ -53,6 +53,9 @@ struct BrowserPage {
     shown: bool,
     /// The site's origin as its page last started: a waiting request of that origin goes when its page does (siteGone).
     origin: Option<String>,
+    /// No key here because the addresses are only watched; with neither a wallet nor a watched address the toolbar says
+    /// «no key», as the Mac's.
+    watching: bool,
 }
 
 /// The browser: one window, our toolbar page on top (webview «browser-bar») and the site under it (webview «browser»).
@@ -102,6 +105,13 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
             }
             // The toolbar shows the active wallet and, after a Confirm on the canvas, that the site is connected: each
             // state tells it to look again. Anywhere in the line: the engine's encoder on Windows needn't put «event» first.
+            // The signer stopped answering and was started again: kept with the window's crashes (the Mac's Signer- reports).
+            if line.contains("\"event\":\"signerCrashed\"") {
+                let why = serde_json::from_str::<serde_json::Value>(&line).ok()
+                    .and_then(|v| v["data"]["text"].as_str().map(str::to_string)).unwrap_or_else(|| "the signer stopped".into());
+                system::write_crash(&handle, "signer", &why);
+                continue;
+            }
             if line.contains("\"event\":\"state\"") {
                 system::state_line(&handle, &line);
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -109,7 +119,8 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                         if let Ok(mut page) = engine.browser.lock() {
                             let a = &v["data"]["addresses"];
                             // Watched addresses have no key: the bar says a site can't get a signature here.
-                            page.wallet = if v["data"]["watching"].as_bool() == Some(true) { None }
+                            page.watching = v["data"]["watching"].as_bool() == Some(true);
+                            page.wallet = if page.watching { None }
                                 else { a["solana"].as_str().or(a["evm"].as_str()).map(short) };
                             page.russian = v["data"]["russian"].as_bool() == Some(true);
                         }
@@ -221,7 +232,17 @@ fn site_closed(app: &tauri::AppHandle) {
 /// start: the check when it finishes loading turns it back.
 fn site_allowed(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
     if url.as_str() == "about:blank" { return true }
-    let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else { return false };
+    let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else {
+        // An http page, an app's link: never opened here, and the toolbar says why rather than nothing happening (a page's
+        // own about:, data: or blob: frames stay quiet).
+        if !["about", "data", "blob", "javascript"].contains(&url.scheme()) {
+            if let Some(engine) = app.try_state::<Engine>() {
+                if let Ok(mut page) = engine.browser.lock() { page.error = Some("https".into()); }
+            }
+            let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+        }
+        return false
+    };
     let Some(engine) = app.try_state::<Engine>() else { return true };
     let known = engine.browser.lock().map(|p| p.refused.contains(host)).unwrap_or(false);
     let listed = known || engine_call_now(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_millis(400))
@@ -283,6 +304,7 @@ fn bring_hello_forward() {
 #[cfg(not(windows))]
 fn bring_hello_forward() {}
 
+mod keys;
 mod system;
 mod voice;
 mod web;
@@ -326,7 +348,13 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
 // window stays white (wry #583).
 #[tauri::command]
 async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    let url = site_url(&url)?;
+    // No address: the site the browser had (put away or not), else the last one asked for, else jup.ag, as the Mac's
+    // Profile › Browser opens straight on its last site.
+    let url = if url.trim().is_empty() {
+        let had = app.get_webview(SITE).and_then(|s| s.url().ok()).filter(|u| u.scheme() == "https");
+        let asked = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().and_then(|p| p.asked.clone()));
+        had.or(asked).unwrap_or_else(|| "https://jup.ag/".parse().expect("jup.ag"))
+    } else { site_url(&url)? };
     if let Some(engine) = app.try_state::<Engine>() {
         if let Ok(mut page) = engine.browser.lock() { page.asked = Some(url.clone()); }
     }
@@ -387,17 +415,22 @@ fn browser_window(app: &tauri::AppHandle) -> Result<tauri::Window, String> {
 /// The site's webview, wherever it shows: https only, the wallet provider in its page (never a frame's), the phishing
 /// check before and after each load.
 fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::WebviewBuilder<tauri::Wry> {
-    let (loads, titles, goes) = (app.clone(), app.clone(), app.clone());
+    let (loads, titles, goes, opens) = (app.clone(), app.clone(), app.clone(), app.clone());
     tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
         .initialization_script(include_str!("provider.js"))
         // Pages stay on https; anything else (a file, a custom scheme) isn't opened here, nor a phishing site.
         .on_navigation(move |u| site_allowed(&goes, u))
-        // A link for a new window: an https page goes to the person's own browser; the browser stays one page, as the
-        // Mac's, which opens no second window either.
-        .on_new_window(|u, _| {
-            if u.scheme() == "https" { let _ = open_link(u.to_string()); }
+        // A link for a new window: an https page goes to the person's own browser once the phishing list has been asked —
+        // a listed host gets the banner instead, as a navigation does; the browser stays one page, as the Mac's.
+        .on_new_window(move |u, _| {
+            if u.scheme() == "https" {
+                let (app, url) = (opens.clone(), u.clone());
+                tauri::async_runtime::spawn(async move { if site_allowed_late(&app, &url).await { let _ = open_link(url.to_string()); } });
+            }
             tauri::webview::NewWindowResponse::Deny
         })
+        // Nothing a site offers is saved to disk, as the Mac's browser, which has no downloads.
+        .on_download(|_, _| false)
         .on_page_load(move |site, payload| {
             let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
             let mut gone = None;
@@ -497,10 +530,12 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
         // The panel's close; in its own window the window's close does it.
         "close" => {
             let app = webview.app_handle();
+            // Put away with its page, as the Mac's × only hides the browser: the next «open» brings it back as it was. A
+            // request it had waiting goes now (siteGone), and the site's origin is kept for the next close.
             if web::wallet_in_panel(app) {
-                site_closed(app);
+                let origin = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().and_then(|p| p.origin.clone()));
+                site_gone(app, origin);
                 web::shown(app, SITE, false);
-                for label in [SITE, BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } }
                 web::layout_panel(app);
             }
             else if let Some(w) = app.get_window(BROWSER_WINDOW) { let _ = w.close(); }
@@ -522,7 +557,7 @@ async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>)
         let page = state.browser.lock().map_err(|_| "the engine is gone")?;
         // While WebView2 says about:blank, and after a refused phishing page (the last one stays, the field shows what was asked).
         if url.scheme() != "https" || page.blocked.is_some() { if let Some(asked) = &page.asked { url = asked.clone(); } }
-        serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "russian": page.russian,
+        serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "watching": page.watching, "russian": page.russian,
                             "connected": false, "check": "local", "real": null, "blocked": page.blocked.is_some(), "blockedHost": page.blocked,
                             "back": page.back || !web::NATIVE_HISTORY, "forward": page.forward || !web::NATIVE_HISTORY, "error": page.error,
                             "panel": web::wallet_in_panel(webview.app_handle()) })
@@ -825,6 +860,8 @@ fn main() {
         // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        // Ctrl+Q, Ctrl+Shift+Q, Ctrl+L and Ctrl+, in every window; WebView2's own menu and browser keys off in our pages.
+        .plugin(keys::plugin())
         .setup(|app| {
             system::keep_panics(app.handle());
             let engine = start_engine(app.handle())?;
@@ -864,7 +901,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, clear_secret, update_check, update_install, listen, open_browser, dapp_call,
             browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout,
-            system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::hide_main, system::quit_app,
+            system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::tray_hide, system::hide_main, system::quit_app,
             system::open_notification_settings, listen_live, listen_stop])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")

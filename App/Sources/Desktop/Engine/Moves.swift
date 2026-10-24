@@ -474,7 +474,7 @@ extension Engine {
             }
             let entry = SignerAddress(name: name, network: net, address: address)
             let key = Self.extraKey(name: name, network: net)
-            Self.savingExtras[key] = AddressExtra(note: domain.map { "\($0) — read on-chain \(Date().formatted(.iso8601.year().month().day()))" })
+            Self.savingExtras[key] = AddressExtra(note: domain.map { "\($0) — read on-chain \(Date().formatted(.iso8601.year().month().day()))" }, source: "chat")
             show(.address(entry), title: say("Save “\(name)” to Addresses", "Сохранить «\(name)» в адреса"), lines: ["\(kind.title): \(address)"])
             let ends = AddressCheck.ends(address)
             if let domain {
@@ -740,6 +740,8 @@ extension Engine {
         tasks.append(recurring)
         recurringBuys.insert(recurring.id)
         rememberName(buy)
+        // Its board: the next runs and what each leaves on Solana (the Mac's ScheduleBoard on the canvas).
+        if case .buy(let a, _) = buy { pin(Board(kind: "recurring", title: a.symbol)) }
         try await move(buy)
     }
 
@@ -939,7 +941,10 @@ extension Engine {
         case .sell(let asset, let amount): reply(try await e.swap(asset, buy: false, amount: amount, shown: shownOut(command)), note: "Solana · Jupiter")
         case .jupiterDCA(let asset, let usdc, let orders, let every):
             reply(try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every), note: "Jupiter DCA")
-        case .jupiterDCACancel(let asset): reply(try await e.cancelJupiterDCA(asset), note: "Jupiter DCA")
+            await refreshJupiterDCA(placed: true)
+        case .jupiterDCACancel(let asset):
+            reply(try await e.cancelJupiterDCA(asset), note: "Jupiter DCA")
+            await refreshJupiterDCA(placed: false)
         case .pay: reply(try await pay(command, e), note: "MPP · Tempo")
         case .allocate(let symbol, let share, let limit, let without, let from):
             reply(try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: true).text, note: "DeFi")

@@ -168,7 +168,9 @@ extension Engine {
             throw ExecutionError(say("That step isn't on the canvas any more.", "Этого шага на холсте уже нет."))
         }
         let s = steps[i], name = RouteEdit.pretty(s.label)
-        reply(say("Why this way — \(name): \(RouteEdit.facts(s)).", "Почему так — \(name): \(RouteEdit.facts(s)).") + (b.note.map { " " + $0 } ?? ""), note: "from the route")
+        // A trade plan keeps its footer in its plan view (the Mac's footer from the plan's route, RouteCards.swift:247).
+        let footer = b.note ?? b.plan.flatMap { $0.footer.isEmpty ? nil : $0.footer }
+        reply(say("Why this way — \(name): \(RouteEdit.facts(s)).", "Почему так — \(name): \(RouteEdit.facts(s)).") + (footer.map { " " + $0 } ?? ""), note: "from the route")
     }
 }
 
@@ -194,6 +196,8 @@ nonisolated struct TradeView: Codable, Equatable {
     var profitAtTake: String?
     /// The coin's price alerts, drawn as dashed lines.
     var alerts: [Double]
+    /// When a card's numbers were read, seconds since 1970: «numbers refreshed N s ago» (the Mac's Execute sheet).
+    var prepared: Double? = nil
 }
 
 nonisolated extension RouteEdit {
@@ -226,7 +230,9 @@ extension Engine {
                              margin: Fmt.usd(s.margin), liquidation: "≈ \(Fmt.price(s.liquidationPrice))", lossAtStop: "−\(Fmt.usd(s.lossAtStopUSD))",
                              lossPct: pct, profitAtTake: s.profitAtTakeUSD.map { "+\(Fmt.usd($0))" },
                              alerts: alerts.filter { $0.coin == intent.asset }.map { d($0.price) })
-        updateBoard(board) { $0.trade = view }
+        var drawn = view
+        if case .trade(let p)? = pending, card?.id == board { drawn.prepared = p.preparedAt.timeIntervalSince1970 }
+        updateBoard(board) { $0.trade = drawn }
     }
 }
 
@@ -273,9 +279,14 @@ nonisolated extension RouteEdit {
         case .gas(let n, let usd):
             return say("One Solana signature for the Relay bridge: \(Fmt.usd(usd ?? 1)) of the gas coin and half a dollar of USDC arrive at your own address on \(name(n)). When Solana is short, Relay swaps \(name(n))'s own USDC for it there.",
                        "Одна подпись в Solana для моста Relay: \(Fmt.usd(usd ?? 1)) монеты для газа и полдоллара USDC придут на твой же адрес в \(name(n)). Если в Solana не хватает, Relay обменяет на неё USDC самой \(name(n)).") + confirm
-        case .buyStock:
-            return say("Two signatures on Robinhood Chain (with USDG short there, the bridge comes first): an exact USDG approve and the swap the best way takes (Uniswap v4, v3 or Relay’s swap, compared in the step), which may only pay this wallet. The token is Robinhood's registered contract, checked on-chain, and the price must sit within 5% of the market.",
-                       "Две подписи в Robinhood Chain (если USDG там не хватает, сначала мост): точное разрешение на USDG и обмен лучшим путём (Uniswap v4, v3 или обмен Relay — сравнение в шаге), который может платить только этому кошельку. Токен — зарегистрированный контракт Robinhood, проверенный в сети, а цена не дальше 5% от рынка.") + confirm
+        case .buyStock(let s, _):
+            // A token by its contract isn't Robinhood's registered one (the Mac's stockRoute footer).
+            return say("Two signatures on Robinhood Chain (with USDG short there, the bridge comes first): an exact USDG approve and the swap the best way takes (Uniswap v4, v3 or Relay’s swap, compared in the step), which may only pay this wallet. ",
+                       "Две подписи в Robinhood Chain (если USDG там не хватает, сначала мост): точное разрешение на USDG и обмен лучшим путём (Uniswap v4, v3 или обмен Relay — сравнение в шаге), который может платить только этому кошельку. ")
+                + (s.hasPrefix("0x") ? say("The token is taken by its contract: it must trade on Robinhood Chain with $50k+ of liquidity, and the price must sit within 5% of DexScreener's.",
+                                           "Токен взят по контракту: он должен торговаться в Robinhood Chain с ликвидностью от $50 тыс., а цена — не дальше 5% от DexScreener.")
+                                     : say("The token is Robinhood's registered contract, checked on-chain, and the price must sit within 5% of the market.",
+                                           "Токен — зарегистрированный контракт Robinhood, проверенный в сети, а цена не дальше 5% от рынка.")) + confirm
         case .sellStock:
             return say("Two Robinhood Chain transactions: an exact approve and the Uniswap swap, which may only pay this wallet.",
                        "Две транзакции в Robinhood Chain: точное разрешение и обмен в Uniswap, который может платить только этому кошельку.") + drops
@@ -352,12 +363,25 @@ extension Engine {
     /// The route's note on its board when its card is shown (Moves.show calls this).
     func noteRoute(_ board: String, _ pending: Pending) {
         let note: String? = switch pending {
-        case .wallet(let c): RouteEdit.note(c, say: { say($0, $1) })
-        case .transfer(_, let amount):
-            say("Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(amount)) USDC leaving. Press Confirm.",
-                "Получить деньги может только этот сохранённый адрес: это проверяют защита и подписант, а симуляция должна показать, что уходит ровно \(Fmt.num(amount)) USDC. Нажми «Подтвердить».")
+        case .wallet(let c), .recurring(let c, _): routeNote(c)
+        case .transfer(let e, let amount): transferNote(e, amount)
+        // A chain's card reads as its first move's (the Mac draws the pending action's route and footer), then the chain's
+        // own words from its card (Chains.swift): which step asks how much, and that they run in order.
+        case .chain(let list):
+            Optional(([list.lazy.compactMap { step -> String? in
+                switch step {
+                case .wallet(let c): self.routeNote(c)
+                case .transfer(let e, let amount): self.transferNote(e, amount)
+                case .said: nil
+                }
+            }.first].compactMap { $0 } + (card?.id == board ? card?.lines ?? [] : []).filter { $0.wholeMatch(of: /\d+\. .*/) == nil })
+                .joined(separator: " ")).flatMap { $0.isEmpty ? nil : $0 }
+        // An address to save from the chat (the Mac's PendingAddressBoard): where it came from and what Save asks.
+        case .address(let e): addressNote(e)
         default: nil
         }
+        if case .address = pending, card?.id == board { card?.confirm = say("Save", "Сохранить") }
+        if case .wallet(let c) = pending { nameTokens(board, c) }
         guard let note else { return }
         updateBoard(board) { $0.note = note }
     }

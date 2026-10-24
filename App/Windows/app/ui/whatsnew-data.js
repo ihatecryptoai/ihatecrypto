@@ -196,7 +196,7 @@ export const releases = [
   "stories": [
    {
     "title": "Lock the app with a passcode",
-    "text": "Set a 6-digit code when you set up or in Settings › Wallet › Passcode. The app locks when it opens, after the time away you pick, when the PC sleeps, on «lock» and on Ctrl+L. Open it with the code, Windows Hello or your PC password. Five wrong codes turn the code off. Scheduled tasks, stops and alerts keep running while it's locked.",
+    "text": "Set a 6-digit code when you set up or in Settings › Wallet › Passcode. The app locks when it opens, after the time away you pick, when the PC sleeps, on «lock» and on Ctrl+L. Open it with the code or Windows Hello. Five wrong codes turn the code off. Scheduled tasks, stops and alerts keep running while it's locked.",
     "symbol": "lock.fill",
     "color": "FF7A2F"
    },
@@ -208,7 +208,7 @@ export const releases = [
    },
    {
     "title": "Smaller things",
-    "text": "The top 300 coins' logos come with the app, so tokens such as HYPE and USDC on the Hyperliquid card show their logos instead of a letter. The icon picker for canvases, folders and addresses is one scroll with Logos, Symbols, Emoji and Picture buttons. On a PC without Windows Hello, prompts say «your PC password».",
+    "text": "The top 300 coins' logos come with the app, so tokens such as HYPE and USDC on the Hyperliquid card show their logos instead of a letter. The icon picker for canvases, folders and addresses is one scroll with Logos, Symbols, Emoji and Picture buttons. Prompts name Windows Hello, the way this PC asks.",
     "symbol": "wrench.and.screwdriver.fill",
     "color": "8E8E93"
    }
@@ -751,7 +751,7 @@ export const releases = [
    },
    {
     "title": "Your own nodes",
-    "text": "Settings › General › Your own nodes: a free node of your own for Solana (Helius) or an EVM network (Alchemy), with the steps to get one. Yours goes first, the built-in nodes stay behind it, and the key stays in this PC's Keychain.",
+    "text": "Settings › General › Your own nodes: a free node of your own for Solana (Helius) or an EVM network (Alchemy), with the steps to get one. Yours goes first, the built-in nodes stay behind it, and its key is kept encrypted for your Windows user.",
     "symbol": "server.rack",
     "color": "9945FF"
    },

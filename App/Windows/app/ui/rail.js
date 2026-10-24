@@ -3,12 +3,13 @@
 // round glass buttons. The collapse button, the strip's expand button or a drag of the right edge switch the two; a
 // window narrower than 1140 folds it, and widening again brings back what it folded.
 
-import { ui, act, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest, toast } from "./core.js";
+import { ui, act, invoke, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest, toast } from "./core.js";
 import { logoFiles } from "./logos.js";
 // The canvas module draws the rail too; read through the namespace so neither waits on the other to load.
 import * as canvas from "./canvas.js";
-import { renameDialog, browserDialog } from "./onboarding.js";
+import { renameDialog } from "./onboarding.js";
 import { openWhatsNew, whatsNewUnseen } from "./whatsnew.js";
+import { releases } from "./whatsnew-data.js";
 
 addIcons({
   "bubble.left": "M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z",
@@ -134,7 +135,8 @@ async function refresh() {
 }
 
 function refreshButton() {
-  return h("button", { class: "rail-hover-icon" + (refreshing ? " spinning" : ""), disabled: refreshing, title: t("Refresh balances", "Обновить балансы"), onclick: refresh },
+  return h("button", { class: "rail-hover-icon" + (refreshing ? " spinning" : ""), disabled: refreshing, title: t("ihatecrypto reads balances straight from Solana, Hyperliquid and Base: every 30 s, every 10 s while it guards a position or watches an alert, and right after each action. Click to refresh now.",
+    "ihatecrypto читает балансы прямо из Solana, Hyperliquid и Base: каждые 30 с, каждые 10 с, пока охраняет позицию или следит за оповещением, и сразу после каждого действия. Нажми, чтобы обновить сейчас."), onclick: refresh },
     icon("arrow.triangle.2.circlepath", 14));
 }
 
@@ -159,7 +161,7 @@ function balanceAmount(cls, mask, [w, hgt]) {
   const { all, ready } = totals();
   // The last full balance, dimmed, until every network answers (the Mac's lastBalance); a skeleton only at the very first.
   const last = ui.state.lastBalance;
-  if (!ready && last != null) return h("div", { class: cls + " num rail-stale" }, masked(usd(Number(last)), mask));
+  if (!ready && last != null) return h("div", { class: cls + " num rail-stale", title: t("Updating: the last full balance until every network answers", "Обновляю: последний полный баланс, пока не ответят все сети") }, masked(usd(Number(last)), mask));
   if (!ready) return h("span", { class: "rail-skeleton", style: `width:${w}px;height:${hgt}px;border-radius:${hgt / 3}px` });
   return h("div", { class: cls + " num" }, masked(usd(all), mask));
 }
@@ -257,8 +259,8 @@ function walletMenu(anchor, compact, start) {
           h("span", { class: "secondary one-line" }, t(`${m.threshold} of ${m.keys.length} keys · `, `${m.threshold} из ${m.keys.length} ключей · `) + m.networks.map(netName).join(", "))))),
       h("div", { class: "spacer" }),
       h("div", { class: "menu-divider" }),
-      s.wallets.some((w) => w.kind === "ledger") ? null : h("button", { class: "rail-wm-action", onclick: () => { closePopover(); act("addBoard", { name: "ledger" }); } }, icon("bolt", 14), t("Connect Ledger…", "Подключить Ledger…")),
-      h("button", { class: "rail-wm-action", onclick: () => { closePopover(); store("settingsTab", "wallet"); ui.view = "settings"; render(); } }, icon("plus", 14), t("New wallet…", "Новый кошелёк…")),
+      s.wallets.some((w) => w.kind === "ledger") ? null : h("button", { class: "rail-wm-action", title: t("Keys stay on the device; you approve each move on it", "Ключи остаются на устройстве; каждое действие подтверждаешь на нём"), onclick: () => { closePopover(); act("addBoard", { name: "ledger" }); } }, icon("bolt", 14), t("Connect Ledger…", "Подключить Ledger…")),
+      h("button", { class: "rail-wm-action", title: t("Create or import a wallet in Settings", "Создать или импортировать кошелёк в настройках"), onclick: () => { closePopover(); store("settingsTab", "wallet"); ui.view = "settings"; render(); } }, icon("plus", 14), t("New wallet…", "Новый кошелёк…")),
       h("button", { class: "rail-wm-action" + (picked === "new-ms" ? " on" : ""), title: t("What a multisig is, and how to make one", "Что такое мультисиг и как его сделать"),
         onclick: () => { picked = "new-ms"; renaming = false; draw(); } }, icon("rail.shield", 14), t("New multisig…", "Новый мультисиг…")));
     const ms = multisigs.find((m) => picked === "ms:" + m.address);
@@ -277,10 +279,11 @@ function walletMenu(anchor, compact, start) {
         h("button", { class: "rail-hover-icon", title: t("Rename", "Переименовать"), onclick: () => { renaming = true; draw(); setTimeout(() => body.querySelector(".rail-wm-rename")?.focus(), 0); } }, icon("pencil", 13)));
     const nets = [
       ["Solana", "", "sol", w.solana],
-      ["EVM", t("every EVM network", "все EVM-сети"), "eth", w.evm],
+      ["EVM", t(`${EVM_NETWORKS.length} networks`, `${EVM_NETWORKS.length} сетей`), "eth", w.evm],
       ["Hyperliquid", t("same as EVM", "тот же, что EVM"), "hype", w.evm],
       ["NEAR", "", "near", w.near],
     ];
+    const onLedger = w.kind === "ledger";
     return h("div", { class: "rail-wm-detail" },
       h("div", { class: "rail-wm-detail-head" },
         h("div", {}, title, h("div", { class: "secondary rail-wm-how" }, current ? t("Current wallet · ", "Текущий кошелёк · ") + how : how[0].toUpperCase() + how.slice(1))),
@@ -288,9 +291,9 @@ function walletMenu(anchor, compact, start) {
         current ? null : h("button", { class: "btn primary", title: t("Switching asks for Windows Hello.", "Переключение спросит Windows Hello."),
           onclick: () => { closePopover(); act("switchWallet", { wallet: w.id }); } }, t(`Switch to ${w.label}`, `Переключить на «${w.label}»`))),
       nets.map(([n, note, lg, address]) => h("div", { class: "rail-wm-net" + (address ? "" : " missing") },
-        h("span", { class: "rail-wm-net-name" }, logo(lg, 20), h("span", {}, h("b", {}, n), note ? h("span", { class: "secondary small" }, note) : null)),
+        h("span", { class: "rail-wm-net-name", title: n === "EVM" ? EVM_NETWORKS.map(netName).join(", ") : n }, logo(lg, 20), h("span", {}, h("b", {}, n), note ? h("span", { class: "secondary small" }, note) : null)),
         address ? [h("span", { class: "address rail-wm-address" }, address), copyButton(address)]
-          : h("span", { class: "secondary" }, n === "NEAR" && w.kind === "phrase" ? t("Shown after its first NEAR move.", "Появится после первого действия в NEAR.") : t(`No ${n} key in this wallet.`, `В этом кошельке нет ключа ${n}.`)))));
+          : h("span", { class: "secondary" }, n === "NEAR" && w.kind === "phrase" ? t("Shown after its first NEAR move.", "Появится после первого действия в NEAR.") : onLedger ? t(`No ${n} key on a Ledger.`, `На Ledger нет ключа ${n}.`) : t(`No ${n} key in this wallet.`, `В этом кошельке нет ключа ${n}.`)))));
   };
   draw();
   popover(anchor, compact ? "right" : "bottom", body, "rail-wallet-pop");
@@ -338,6 +341,20 @@ function newMultisig() {
       h("span", { class: "secondary small" }, t("It goes to the chat; nothing is made until you confirm.", "Это уйдёт в чат; ничего не создаётся, пока ты не подтвердишь."))));
 }
 
+/** The dApp browser at the last site it showed, jup.ag the first time (the Mac's ws.browser.address): Rust keeps it. */
+function openLastSite() {
+  invoke("open_browser", { url: "" }).catch((e) => toast(String(e)));
+}
+
+/** The EVM networks one address covers, in EVMNetwork.all's order. */
+const EVM_NETWORKS = ["base", "arbitrum", "robinhood", "polygon", "ethereum", "tempo", "hyperevm", "optimism", "bnb"];
+/** «Version 0.7.6 · Oct 24»: What's new's newest, as the Mac's menu says it. */
+function newestVersionLine() {
+  const r = releases[0];
+  if (!r) return t("What's new", "Что нового");
+  const day = r.date ? new Date(r.date + "T12:00:00").toLocaleDateString(ui.state.russian ? "ru-RU" : "en-US", { month: "short", day: "numeric" }) : "";
+  return t(`Version ${r.version}`, `Версия ${r.version}`) + (day ? " · " + day : "");
+}
 /** An EVM network's name by its key. */
 const netName = (k) => ({ base: "Base", arbitrum: "Arbitrum", ethereum: "Ethereum", polygon: "Polygon", optimism: "Optimism", bnb: "BNB Chain", hyperevm: "HyperEVM",
   robinhood: "Robinhood", tempo: "Tempo", avalanche: "Avalanche", monad: "Monad" })[k] || k[0].toUpperCase() + k.slice(1);
@@ -361,7 +378,7 @@ function railActions(compact) {
       () => toggleBoard("history")],
     ["favorites", t("Favorites", "Избранное"), "star.fill", hasBoard("favorites"), false, t("Favorite tokens, saved addresses, your wallets", "Избранные токены, сохранённые адреса, твои кошельки"),
       () => toggleBoard("favorites")],
-    ["schedule", t("Schedule", "Расписание"), "calendar", hasBoard("schedule"), false, t("What runs on its own, its budget and when it ran", "Что запускается само, его бюджет и когда оно шло"),
+    ["schedule", t("Schedule", "Расписание"), "calendar", hasBoard("schedule"), false, t("Beside the portfolio: what runs on its own, its budget and when it ran", "Рядом с портфелем: что запускается само, его бюджет и когда оно шло"),
       () => toggleBoard("schedule")],
   ];
   if (compact) {
@@ -525,8 +542,9 @@ function canvasMenu(e, c, anchor) {
       : [[icon("pin", 14), full ? t(`Pin — ${maxPinned} already pinned, unpin one first`, `Закрепить — уже ${maxPinned}, сначала открепи один`) : t("Pin to the top", "Закрепить наверху")],
         () => act("pinCanvas", { wallet: c.id, test: true }), full],
     null,
-    [[icon("pencil", 14), t("Rename", "Переименовать")], () => askName(anchor, t("Rename the canvas", "Переименовать холст"), c.title, null, t("Rename", "Переименовать"),
-      (label) => act("renameCanvas", { wallet: c.id, label }))],
+    [[icon("pencil", 14), t("Rename", "Переименовать")], () => askName(anchor, t("Rename the canvas", "Переименовать холст"), c.title,
+      t("Empty gives back its own title.", "Пустое имя вернёт его собственное название."), t("Rename", "Переименовать"),
+      (label) => act("renameCanvas", { wallet: c.id, label }), { emptyOk: true, blur: true })],
     [[icon("face.smiling", 14), t("Change icon…", "Сменить иконку…")], () => iconPicker(anchor, c.icon, c.title, { wallet: c.id })],
     [[icon("folder", 14), t("Move to folder…", "Перенести в папку…")], () => folderMenu(e, c, anchor)],
     null,
@@ -633,14 +651,23 @@ function menuWith(e, items) {
 }
 
 /** A name asked in place, by the row (the Mac's alerts): Enter saves, Escape or a click outside leaves it. */
-function askName(anchor, title, value, hint, save, done) {
-  let text = value;
-  const go = () => { const v = text.trim(); if (!v) return; closePopover(); done(v); };
-  const field = h("input", { id: "rail-ask", value, oninput: (e) => (text = e.target.value),
-    onkeydown: (e) => { if (e.key === "Enter") go(); else if (e.key === "Escape") { e.stopPropagation(); closePopover(); } } });
+/** A name asked for in a small panel. `blur`: leaving the field keeps what's typed, as the Mac's rename field does;
+ *  Escape and Cancel keep the old name. A name left as it was saves nothing. */
+function askName(anchor, title, value, hint, save, done, { emptyOk = false, blur = false } = {}) {
+  let text = value, closed = false;
+  const close = () => { closed = true; closePopover(); };
+  const go = () => {
+    const v = text.trim();
+    if (closed || (!v && !emptyOk)) return;
+    close();
+    if (v !== value.trim()) done(v);
+  };
+  const field = h("input", { id: "rail-ask", value, oninput: (e) => (text = e.target.value), onblur: blur ? go : null,
+    onkeydown: (e) => { if (e.key === "Enter") go(); else if (e.key === "Escape") { e.stopPropagation(); close(); } } });
   popover(anchor, "right", h("div", { class: "rail-ask" },
     h("b", {}, title), hint ? h("span", { class: "secondary small" }, hint) : null, field,
-    h("div", { class: "btns" }, h("button", { class: "btn small", onclick: closePopover }, t("Cancel", "Отмена")),
+    // Pressing Cancel takes no focus from the field first: its blur would keep the name.
+    h("div", { class: "btns" }, h("button", { class: "btn small", onmousedown: (e) => e.preventDefault(), onclick: close }, t("Cancel", "Отмена")),
       h("button", { class: "btn small primary", onclick: go }, save))), "rail-ask-pop");
   setTimeout(() => { field.focus(); field.select(); }, 0);
 }
@@ -851,10 +878,12 @@ function shortName(p) {
 }
 const kindName = (p) => p.kind === "subscription" ? t("Subscription", "Подписка") : p.kind === "local" ? t("On this PC · free", "На этом ПК · бесплатно") : t("API key", "API-ключ");
 
-/** The accounts the chat can use: logins and keys kept, and the local model in use. */
+/** The accounts the chat can use: logins and keys kept, and a model on this PC whose server is up with a model in it
+ *  (the Mac's accounts: Ollama shows while it runs, in use or not; LM Studio, which says nothing of itself here, while in use). */
 function accounts() {
   const s = ui.state;
-  const list = s.providers.filter((p) => !p.unavailable && p.connected && (p.kind !== "local" || p.id === s.model.provider));
+  const localUp = (p) => p.id === "ollama" ? s.localSetup?.ollamaState === "ready" : p.id === s.model.provider;
+  const list = s.providers.filter((p) => !p.unavailable && p.connected && (p.kind !== "local" || localUp(p)));
   const current = list.find((p) => p.id === s.model.provider);
   return current ? [current, ...list.filter((p) => p !== current)] : list;
 }
@@ -864,7 +893,7 @@ function profileRow() {
   const current = list.find((p) => p.id === ui.state.model.provider);
   const count = t(`${list.length} ${list.length === 1 ? "account" : "accounts"}`, `${list.length} ${list.length === 1 ? "аккаунт" : list.length < 5 ? "аккаунта" : "аккаунтов"}`);
   const wallet = ui.state.wallets.length ? t("wallet on this PC", "кошелёк на этом ПК") : t("no wallet yet", "кошелька пока нет");
-  return h("button", { class: "rail-profile", title: t("Chat accounts, Settings, the browser", "Аккаунты чата, настройки, браузер"),
+  return h("button", { class: "rail-profile", title: t("Chat accounts, Settings, the browser, What's new", "Аккаунты чата, настройки, браузер, «Что нового»"),
     onclick: (e) => { e.stopPropagation(); profileMenu(e.currentTarget, "top"); } },
     list.length ? h("span", { class: "rail-profile-logos" }, list.slice(0, 3).map((p) => companyLogo(p.id, 28, p.name)))
       : h("span", { class: "rail-profile-none" }, icon("person.fill", 13)),
@@ -876,6 +905,8 @@ function profileRow() {
 
 function profileMenu(anchor, side) {
   const go = (run) => () => { closePopover(); run(); };
+  // Whether the model on this PC runs, read again as the menu opens (the Mac re-reads its accounts there).
+  act("ollamaStatus");
   const body = h("div", { class: "rail-profile-menu" });
   const draw = (signingOut, open) => {
     const s = ui.state;
@@ -900,7 +931,7 @@ function profileMenu(anchor, side) {
             companyLogo(p.id, 32, p.name),
             h("span", { class: "rail-pm-text" }, h("b", { class: "one-line" }, shortName(p)), h("span", { class: "secondary one-line" }, kindName(p))),
             inUse ? h("span", { class: "rail-pm-check" }, icon("check", 14)) : null),
-          h("button", { class: "rail-pm-more", title: t("Add another account, sign out", "Добавить аккаунт, выйти"),
+          h("button", { class: "rail-pm-more", title: p.kind === "local" ? t("Add another account", "Добавить аккаунт") : t(`Add another account, sign out of ${shortName(p)}`, `Добавить аккаунт, выйти из ${shortName(p)}`),
             onclick: () => draw(null, open === p.id ? null : p.id) }, icon("ellipsis", 16)),
           open === p.id ? h("div", { class: "rail-pm-actions" },
             inUse ? null : h("button", { onclick: go(() => act("useAccount", { provider: p.id })) }, icon("arrow.left.arrow.right", 13), t(`Switch to ${shortName(p)}`, `Переключиться на ${shortName(p)}`)),
@@ -912,8 +943,8 @@ function profileMenu(anchor, side) {
       h("div", { class: "menu-divider" }),
       h("div", { class: "rail-pm-apps" },
         h("button", { class: "rail-pm-app", title: t("Settings · Ctrl+,", "Настройки · Ctrl+,"), onclick: go(() => { ui.view = "settings"; render(); }) }, icon("gear", 15), t("Settings", "Настройки")),
-        h("button", { class: "rail-pm-app", title: t("The dApp browser, with your wallet", "Браузер для dApp, с твоим кошельком"), onclick: go(browserDialog) }, icon("globe", 15), t("Browser", "Браузер")),
-        h("button", { class: "rail-pm-app", title: t("What's new in ihatecrypto", "Что нового в ihatecrypto"), onclick: go(() => openWhatsNew()) },
+        h("button", { class: "rail-pm-app", title: t("The dApp browser, with your wallet", "Браузер для dApp, с твоим кошельком"), onclick: go(openLastSite) }, icon("globe", 15), t("Browser", "Браузер")),
+        h("button", { class: "rail-pm-app", title: newestVersionLine(), onclick: go(() => openWhatsNew()) },
           icon("sparkles", 15), t("What's new", "Что нового"), whatsNewUnseen() ? h("i", { class: "rail-new-dot" }) : null)));
   };
   draw();

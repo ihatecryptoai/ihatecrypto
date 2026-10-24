@@ -66,7 +66,8 @@ extension Engine {
             portfolio.networks.first { $0.key == key }?.rows.filter(match).reduce(0) { $0 + $1.value } ?? 0
         }
         return Self.stuck(solanaUSDC: value("solana") { $0.symbol == "USDC" }, solanaSOL: value("solana") { $0.symbol == "SOL" },
-                          hyperliquidFree: value("hyperliquid") { $0.symbol == "USDC" }, say: { say($0, $1) }) { n in
+                          // Hyperliquid's perps withdrawable, as the Mac's hl.withdrawable: what brings gas from there.
+                          hyperliquidFree: placeFacts.hyperliquid?.withdrawable ?? 0, say: { say($0, $1) }) { n in
             (value(n.key) { $0.contract?.lowercased() == n.usdc.lowercased() || ($0.symbol == "USDC" && $0.section == "tokens" && $0.contract != "native") },
              value(n.key) { $0.contract == "native" })
         }
@@ -74,7 +75,7 @@ extension Engine {
 
     /// Said once per wallet and network, when nothing else is going on, with the ways out as cards.
     func offerGasWays() {
-        guard !watching, card == nil, running == nil, !thinking, let wallet = solanaAddress ?? evmAddress else { return }
+        guard !watching, !onboarding, card == nil, running == nil, !thinking, let wallet = solanaAddress ?? evmAddress else { return }
         var offered = Store.load(Set<String>.self, "gas-ways-offered.json") ?? []
         guard let stuck = stuckDollars.first(where: { !offered.contains("\(wallet)-\($0.key)") }) else { return }
         offered.insert("\(wallet)-\(stuck.key)")

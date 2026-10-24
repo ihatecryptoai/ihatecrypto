@@ -11,6 +11,7 @@
     "allow-tray-layout",
     "allow-tray-state",
     "allow-tray-open",
-    "allow-tray-quit"
+    "allow-tray-quit",
+    "allow-tray-hide"
   ]
 }

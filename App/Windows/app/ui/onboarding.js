@@ -74,6 +74,16 @@ const ends = (a) => (a && a.length > 14 ? a.slice(0, 6) + "…" + a.slice(-6) : 
 function sheet(card) { return h("div", { class: "ob-page" }, brandCorner(), h("div", { class: "ob-column" }, card)); }
 const brandCorner = () => h("div", { class: "ob-brand" }, mascot(28), h("span", {}, "ihatecrypto"));
 
+// Return presses the step's orange button (the Mac's `.keyboardShortcut(.defaultAction)`), as long as the button is on
+// and the key isn't for the field it was pressed in: several lines, a list, the API key's own Save, the code's digits.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing || !onboardingRunning() || ui.overlay) return;
+  const at = e.target;
+  if (at?.tagName === "TEXTAREA" || at?.tagName === "SELECT" || at?.tagName === "BUTTON" || at?.closest?.(".ob-key-row, .lk-maker, .ob-local-panel")) return;
+  const primary = document.querySelector(".ob-card .ob-primary");
+  if (primary && !primary.disabled) { e.preventDefault(); primary.click(); }
+});
+
 function setOverlay(el) { ui.overlay = el; render(); }
 function closeOverlay() { ui.overlay = null; render(); }
 
@@ -93,12 +103,20 @@ export const onboardingRunning = () => !!stageOf[step()];
 /** «Look around first», or the flow finished: the first screen is passed. */
 export const welcomeDone = () => store("welcomeDone") === true;
 
-function go(next) { flow.history.push(step()); store("onboardingStep", next); render(); }
-function back() { store("onboardingStep", flow.history.pop() || ""); render(); }
+/** The engine holds its chat offers (new modules, the trading key, gas) while the flow is on, as the Mac's offers check
+ *  «onboardingStep»; told only when that changes. */
+let toldRunning = false;
+function tellEngine() {
+  const on = onboardingRunning();
+  if (on !== toldRunning) { toldRunning = on; act("onboarding", { test: on }); }
+}
+function go(next) { flow.history.push(step()); store("onboardingStep", next); tellEngine(); render(); }
+function back() { store("onboardingStep", flow.history.pop() || ""); tellEngine(); render(); }
 function finish() {
   Object.assign(flow, { history: [], accounts: null, money: null, tried: false });
   store("onboardingStep", "");
   store("welcomeDone", true);
+  tellEngine();
   ui.view = "canvas";
   render();
 }
@@ -126,6 +144,7 @@ function readFunded() {
 
 /** The flow's page: the logo, the rail of stages, the step's card. */
 export function onboarding(card = stepView()) {
+  tellEngine();
   return h("div", { class: "ob-page" },
     h("div", { class: "ob-top" }, h("div", { class: "ob-top-brand" }, mascot(28), h("span", {}, "ihatecrypto")), railView(), h("span", { class: "ob-top-pad" })),
     h("div", { class: "ob-column" }, card));
@@ -168,11 +187,15 @@ function modelStep() {
   const s = ui.state, m = s.model;
   const prov = (id) => s.providers.find((p) => p.id === id);
   const connected = (id) => m.provider === id && m.connected;
+  // Connected from this step, the account becomes the chat's (the Mac's Onboarding: `ws.providerID = id`): the person
+  // picked it here to chat with. Claude without Claude Code's login on this PC says so, as the Mac's row does.
   const connect = async (p, login) => {
+    if (p.id === "claude-code" && !p.existingLogin && !p.signIn) { toast(t("No sign-in found on this PC.", "Вход на этом компьютере не найден.")); return; }
     flow.busy = true;
     render();
     if (p.signIn && !login) toast(t("Finish the sign-in in the browser.", "Закончи вход в браузере."));
-    await act(p.signIn && !login ? "signIn" : "connectModel", { provider: p.id });
+    const r = await act(p.signIn && !login ? "signIn" : "connectModel", { provider: p.id });
+    if (r !== null) await act("useAccount", { provider: p.id });
     flow.busy = false;
     render();
   };
@@ -201,7 +224,7 @@ function modelStep() {
         const key = (flow.key || "").trim();
         if (!key) { toast(t("Paste the key first.", "Сначала вставь ключ.")); return; }
         flow.key = "";
-        if (await act("connectModel", { provider: flow.keyProvider, key }) !== null) render();
+        if (await act("connectModel", { provider: flow.keyProvider, key }) !== null) { await act("useAccount", { provider: flow.keyProvider }); render(); }
       } }, t("Save", "Сохранить"))))) : null;
   const local = s.providers.find((p) => p.kind === "local");
   // The Mac's local row: the whole local-models panel — set up, start, switch to or download a model for this PC.
@@ -209,11 +232,13 @@ function modelStep() {
     tileText(t("Free, on this PC", "Бесплатно, на этом компьютере"), null, h("div", { class: "ob-local-panel" }, pages.localModelsPanel(s)))) : null;
   // The person picks the model; the chat's menu changes it later. The catalog lists the provider's default first.
   const current = prov(m.provider);
+  // The account's own list, read once when its picker first shows (the Mac refreshes it for the account picked).
+  if (m.connected && current && current.kind !== "local" && flow.modelsFor !== current.id) { flow.modelsFor = current.id; act("refreshModels"); }
   const list = m.models.includes(m.model) || !m.model ? m.models : [...m.models, m.model];
   const picker = m.connected && current?.kind !== "local" && list.length ? h("div", { class: "ob-model-row" },
     h("b", {}, t("Model", "Модель")),
     h("select", { id: "ob-model", onchange: (e) => act("setModel", { model: e.target.value }) },
-      list.map((id, i) => h("option", { value: id, selected: id === m.model }, (chat.modelName?.(id) || id) + (i === 0 ? t(" · recommended", " · рекомендую") : "")))),
+      list.map((id) => h("option", { value: id, selected: id === m.model }, (chat.modelName?.(id) || id) + (id === current?.defaultModel ? t(" · recommended", " · рекомендую") : "")))),
     h("span", { class: "spacer" }), h("span", { class: "secondary small" }, t("Change it any time in the chat's menu.", "Её можно сменить в меню чата."))) : null;
   return stepCard({
     mood: "tuning", title: t("What does the chat think with?", "Чем думает чат?"),
@@ -234,20 +259,30 @@ function modelStep() {
 
 // A new wallet, its words and their check.
 
+/** The signer's own note when Windows Hello isn't set up (Signer/Windows/Host.swift presence()): then only a test
+ * wallet can be made, as nothing could ask before a move. The Mac adapts its texts to a Mac without Touch ID. */
+const noHello = () => (ui.state.signer?.notes || []).some((n) => n.startsWith("Windows Hello isn't set up"));
+const helloMissing = () => factRow("person", t("Windows Hello isn't set up on this PC", "Windows Hello на этом компьютере не настроен"),
+  t("So only a test wallet can be made, and a phrase or key can't be brought: nothing could ask before a move. Turn on a face, fingerprint or PIN in Windows Settings › Accounts › Sign-in options, then come back.",
+    "Поэтому можно создать только тестовый кошелёк, а фразу или ключ не принести: перед движением некому было бы спросить. Включи лицо, отпечаток или PIN в «Параметры Windows › Учетные записи › Варианты входа» и вернись."));
+
 function newWalletStep() {
-  const test = !!flow.test;
+  const hello = !noHello(), test = !!flow.test || !hello;
   return stepCard({
     mood: "idle", title: t("A new wallet", "Новый кошелёк"),
     subtitle: t("Made inside the separate signer on this PC, which has no network access.", "Создаётся внутри отдельного подписанта на этом компьютере, у которого нет доступа к сети."),
     content: h("div", { class: "ob-content" },
       factRow("doc", t("12 recovery words", "12 слов восстановления"), t("Made from this PC's random number generator. They are the only way back if the PC is lost; you see them once, next.",
         "Из генератора случайных чисел этого компьютера. Это единственный путь обратно, если компьютер потеряется; ты увидишь их один раз, дальше.")),
-      factRow("lock", t("Sealed by Windows Hello and the TPM", "Запечатан Windows Hello и TPM"), t("The key never leaves the signer; nothing can read it back, ihatecrypto included.", "Ключ не покидает подписанта; прочитать его не может никто, даже ihatecrypto.")),
+      test ? factRow("lock", t("Encrypted for your Windows user", "Зашифрован для твоего пользователя Windows"), t("A test wallet's key never leaves the signer, but Windows Hello doesn't seal it, so it can sign with no one there.",
+        "Ключ тестового кошелька не покидает подписанта, но Windows Hello его не запечатывает — поэтому он подписывает, даже когда никого нет."))
+        : factRow("lock", t("Sealed by Windows Hello and the TPM", "Запечатан Windows Hello и TPM"), t("The key never leaves the signer; nothing can read it back, ihatecrypto included.", "Ключ не покидает подписанта; прочитать его не может никто, даже ihatecrypto.")),
       factRow("person", test ? t("Signs without asking", "Подписывает без вопросов") : t("Windows Hello for every move", "Windows Hello на каждое движение"),
         test ? t("A test wallet: keep only a few dollars on it.", "Тестовый кошелёк: держи на нём только несколько долларов.")
           : t("Every signature asks first; one face, fingerprint or PIN covers one move.", "Каждая подпись сначала спрашивает; одно лицо, отпечаток или PIN — на одно движение.")),
-      tile(false, tileText(t("Test wallet: signs without asking", "Тестовый кошелёк: подписывает без вопросов"), t("For trying things out with a few dollars.", "Чтобы попробовать с парой долларов.")),
-        h("span", { class: "spacer" }), toggle("ob-test", test, (on) => { flow.test = on; render(); })),
+      hello ? tile(false, tileText(t("Test wallet: signs without asking", "Тестовый кошелёк: подписывает без вопросов"), t("For trying things out with a few dollars.", "Чтобы попробовать с парой долларов.")),
+        h("span", { class: "spacer" }), toggle("ob-test", test, (on) => { flow.test = on; render(); }))
+        : helloMissing(),
       ui.state.signer.error ? statusLine(ui.state.signer.error, false) : null),
     primary: test ? t("Create a test wallet", "Создать тестовый кошелёк") : t("Create a new wallet", "Создать кошелёк"), busy: flow.busy,
     onPrimary: async () => {
@@ -358,7 +393,7 @@ function wordsGoneStep() {
 // Secure: how the signer asks before a move. Windows Hello stands where the Mac has Touch ID and its password.
 
 function secureStep() {
-  const test = !!activeWallet()?.test, made = !!ui.state.lock?.codeSet;
+  const test = !!activeWallet()?.test, made = !!ui.state.lock?.codeSet, hello = !noHello();
   const way = (name, title, line, on) => h("div", { class: "ob-way" + (on ? " on" : "") }, icon(name, 16), h("b", {}, title), h("div", { class: "secondary small" }, line));
   return stepCard({
     mood: "tuning", title: test ? t("A test wallet signs by itself", "Тестовый кошелёк подписывает сам") : t("Each move asks once", "Каждое движение спрашивает один раз"),
@@ -366,8 +401,8 @@ function secureStep() {
       : t("So the first real move is no surprise: each move asks once, and so does switching wallets.", "Чтобы первое настоящее движение не стало сюрпризом: каждое движение спрашивает один раз, и смена кошелька тоже."),
     content: h("div", { class: "ob-content" },
       h("div", { class: "ob-ways" },
-        way("person", "Windows Hello", t("Face or fingerprint", "Лицо или отпечаток"), true),
-        way("lock", t("Windows Hello PIN", "PIN Windows Hello"), t("Where there's no camera or reader", "Где нет камеры или сканера"), true),
+        way("person", "Windows Hello", hello ? t("Face or fingerprint", "Лицо или отпечаток") : t("Not set up on this PC", "Не настроен на этом компьютере"), hello),
+        way("lock", t("Windows Hello PIN", "PIN Windows Hello"), hello ? t("Where there's no camera or reader", "Где нет камеры или сканера") : t("Not set up on this PC", "Не настроен на этом компьютере"), hello),
         way("ob.grid", t("Passcode", "Код"), t("Opens the app · next step", "Открывает приложение · следующий шаг"), false)),
       test ? null : h("div", { class: "ob-secure-row" }, h("span", { class: "ob-ring" }, icon(made ? "check" : "person", 30)),
         h("div", {}, h("b", {}, made ? t("Each move asks for Windows Hello", "Каждое движение спрашивает Windows Hello") : t("Windows Hello asks on every move", "Windows Hello спрашивает на каждом движении")),
@@ -404,21 +439,29 @@ function bringStep() {
   const field = (id, key, placeholder, secret, rows) => {
     const el = h(rows ? "textarea" : "input", {
       id, class: "address ob-field" + (secret ? " secret" : ""), rows: rows || null, type: !rows && secret ? "password" : null, placeholder, autocomplete: "off", spellcheck: "false",
-      oninput: (e) => { bring[key] = e.target.value; document.querySelector(".ob-card .ob-primary")?.toggleAttribute("disabled", !ready()); },
+      oninput: (e) => { bring[key] = e.target.value; document.querySelector(".ob-card .ob-primary")?.toggleAttribute("disabled", !ready()); if (key === "key") readKey(); },
     });
     el.value = bring[key];
     return el;
   };
-  const ready = () => way === "phrase" ? bring.phrase.trim().split(/\s+/).length >= 12 : way === "key" ? bring.key.trim().length > 30
+  // Without Windows Hello the signer can't seal a phrase or key (Host.swift): said here, not on the press.
+  const blocked = (way === "phrase" || way === "key") && noHello();
+  const ready = () => blocked ? false : way === "phrase" ? bring.phrase.trim().split(/\s+/).length >= 12 : way === "key" ? !!bring.keyFound
     : way === "ledger" ? true : !!(bring.solana.trim() || bring.evm.trim());
   const body = {
     phrase: [field("bring-phrase", "phrase", t("12 or 24 words separated by spaces", "12 или 24 слова через пробел"), true, "3"),
       field("bring-passphrase", "passphrase", t("Extra passphrase, if your wallet has one", "Дополнительная парольная фраза, если она есть у кошелька"), true),
       h("div", { class: "secondary small" }, t("The same words open the same addresses here as in Phantom and MetaMask: Solana, every EVM network and NEAR.",
         "Те же слова открывают здесь те же адреса, что в Phantom и MetaMask: Solana, все EVM-сети и NEAR."))],
+    // Read as it's typed, before anything goes to the signer (the Mac's ImportedKey.parse): its chain and its address,
+    // or why it isn't a key; «Find my wallet» only for a key that parses.
     key: [field("bring-key", "key", t("Solana key from Phantom, or EVM key from MetaMask", "Ключ Solana из Phantom или EVM-ключ из MetaMask"), true, "2"),
-      h("div", { class: "secondary small" }, t("Phantom: Settings › Manage accounts › Show private key. MetaMask: Account details › Show private key. A key opens one network only.",
-        "Phantom: Настройки › Управление аккаунтами › Показать приватный ключ. MetaMask: Детали аккаунта › Показать приватный ключ. Ключ открывает только одну сеть."))],
+      bring.keyFound ? [statusLine(`${bring.keyFound.chain}: ${bring.keyFound.address}`, true),
+        h("div", { class: "secondary small" }, t(`A key opens one network only: ${bring.keyFound.chain}. For every network, use the recovery phrase instead.`,
+          `Ключ открывает только одну сеть: ${bring.keyFound.chain}. Чтобы открыть все сети, принеси фразу восстановления.`))]
+        : bring.keyError ? statusLine(bring.keyError, false)
+        : h("div", { class: "secondary small" }, t("Phantom: Settings › Manage accounts › Show private key. MetaMask: Account details › Show private key. A key opens one network only.",
+          "Phantom: Настройки › Управление аккаунтами › Показать приватный ключ. MetaMask: Детали аккаунта › Показать приватный ключ. Ключ открывает только одну сеть."))],
     ledger: [factRow("link", t("USB or Bluetooth", "USB или Bluetooth"), t("Nano X, Stax and Flex work over Bluetooth; any Ledger over USB.", "Nano X, Stax и Flex работают по Bluetooth; любой Ledger — по USB.")),
       factRow("lock", t("The keys stay on the device", "Ключи остаются на устройстве"), t("Every move shows on its screen and waits for its buttons.", "Каждое движение показывается на его экране и ждёт его кнопок."))],
     address: [field("bring-solana", "solana", t("Solana address", "Адрес Solana")),
@@ -437,7 +480,7 @@ function bringStep() {
     if (r === null) { render(); return; }
     flow.accounts = parseAccounts(r);
     flow.others = "only";
-    Object.assign(bring, { phrase: "", passphrase: "", key: "", solana: "", evm: "" });
+    Object.assign(bring, { phrase: "", passphrase: "", key: "", keyFound: null, keyError: null, solana: "", evm: "" });
     go(way === "address" ? "networks" : "found");
   };
   return stepCard({
@@ -446,11 +489,21 @@ function bringStep() {
       "Из Phantom, MetaMask или любого кошелька. Он уходит только отдельному подписанту, который запечатывает его Windows Hello и TPM этого компьютера."),
     content: h("div", { class: "ob-content" },
       segmented([["phrase", t("Recovery phrase", "Фраза")], ["key", t("Private key", "Ключ")], ["ledger", "Ledger"], ["address", t("Address only", "Только адрес")]],
-        way, (v) => { bring.way = v; render(); }, "wide"), body),
+        way, (v) => { bring.way = v; render(); }, "wide"), blocked ? helloMissing() : null, body),
     primary: { phrase: t("Find my wallet", "Найти кошелёк"), key: t("Find my wallet", "Найти кошелёк"), ledger: t("Connect a Ledger", "Подключить Ledger"), address: t("Watch these", "Смотреть") }[way],
     onPrimary: goOn, enabled: ready(), busy: flow.busy,
     quiet: quietButton(t("Back", "Назад"), back),
   });
+}
+
+/** The key in the field, read by the engine without saving anything (keyAddress): the newest typing wins. */
+let keyAsked = 0;
+async function readKey() {
+  const n = ++keyAsked, key = bring.key.trim();
+  if (!key) { Object.assign(bring, { keyFound: null, keyError: null }); render(); return; }
+  try { const r = await engine("keyAddress", { key }); if (n === keyAsked) Object.assign(bring, { keyFound: r, keyError: null }); }
+  catch (e) { if (n === keyAsked) Object.assign(bring, { keyFound: null, keyError: e.message }); }
+  if (n === keyAsked) render();
 }
 
 /** The first addresses an imported phrase makes (WalletOps.firstAccounts), as the engine answered them. */
@@ -469,7 +522,7 @@ function foundStep() {
   const choice = (value, title, line) => h("button", { class: "ob-choice-row" + (flow.others === value ? " on" : ""), onclick: () => { flow.others = value; render(); } },
     h("span", { class: "ob-radio" }), tileText(title, line));
   const done = async () => {
-    if (keyChain && flow.others === "phrase") { back(); return; }
+    if (keyChain && flow.others === "phrase") { bring.way = "phrase"; back(); return; }
     // A single key: the networks it can't sign on go off, so the assistant never plans a move through them.
     if (keyChain) for (const n of networks()) if (n.on && !hasAddress(n.id)) await act("module", { name: n.id, test: false });
     go("secure");
@@ -506,7 +559,7 @@ function compareTable(accounts) {
 
 /** A Ledger: the keys stay on the device (LedgerStep). */
 function ledgerStep() {
-  const lc = ui.state.ledgerConnect;
+  const lc = flow.ledgerLooked ? ui.state.ledgerConnect : null;
   const connected = !!lc && !lc.busy && !lc.problem && ui.state.wallets.some((w) => w.id === "ledger" && w.evm);
   return stepCard({
     mood: connected ? "done" : lc?.busy ? "thinking" : "waiting", title: t("Connect a Ledger", "Подключи Ledger"),
@@ -519,10 +572,10 @@ function ledgerStep() {
         lc.notes.map((n) => h("div", { class: "ob-note" }, n))] : null),
     primary: connected ? t("Use this Ledger", "Работать с этим Ledger") : !lc ? t("Look for it", "Найти его") : t("Try again", "Ещё раз"), busy: !!lc?.busy,
     onPrimary: async () => {
-      if (!connected) { await act("connectLedger"); return; }
+      if (!connected) { flow.ledgerLooked = true; await act("connectLedger"); return; }
       if (await act("switchWallet", { wallet: "ledger" }) !== null) go("networks");
     },
-    quiet: quietButton(t("Back", "Назад"), back),
+    quiet: quietButton(t("Back", "Назад"), () => { flow.ledgerLooked = false; back(); }),
   });
 }
 
@@ -551,35 +604,19 @@ function networksStep() {
 // Top up (variant A): the Top up panel inside the card; once money lands, «Money landed». A wallet that already holds
 // money (one brought along) first shows what's on it.
 
-/** Every coin's balance by network, to see what lands while the step is open. */
-const balances = () => {
-  const out = {};
-  for (const n of ui.state.portfolio.networks) for (const r of n.rows) out[n.key + ":" + r.symbol] = { name: n.name, symbol: r.symbol, value: Number(r.value) || 0 };
-  return out;
-};
-const num = (v) => String(Number(v.toFixed(6)));
-
 function moneyStep() {
   const s = ui.state, p = s.portfolio;
-  // The balances when the step opened: only once read, or a first read would look like money landing.
-  if (!flow.money && p.updatedAt) flow.money = { base: balances(), landed: null, more: false };
+  // Only once read, or a first read would look like money landing; a landing the board already showed isn't new.
+  if (!flow.money && p.updatedAt) flow.money = { landed: null, more: false, stale: s.topUp?.arrived ?? null };
   const m = flow.money;
-  if (m && !m.landed) {
-    for (const [key, now] of Object.entries(balances())) {
-      const was = m.base[key]?.value || 0;
-      if (now.value - was > 1e-9 && (now.symbol !== "USDC" || now.value - was >= 0.01)) {
-        m.landed = t(`Landed on ${now.name}: +${num(now.value - was)} ${now.symbol}, ${num(was)} → ${num(now.value)}`,
-          `Пришло на ${now.name}: +${num(now.value - was)} ${now.symbol}, ${num(was)} → ${num(now.value)}`);
-        break;
-      }
-    }
-  }
+  // As the Mac: «Money landed» comes from the Top up board's own watched coin, never any row rising (P/L, HLP, yields).
+  const landed = (text) => { if (m && !m.landed && text !== m.stale) { m.landed = text; render(); } };
   if (m?.landed) return landedCard(m.landed);
   if (m && !m.more && Number(p.total) >= 1) return hasMoneyCard();
   return stepCard({
     mood: "waiting", title: t("Top up ihatecrypto", "Пополни ihatecrypto"),
     subtitle: t("From a wallet in this browser, your phone or an exchange. It shows here the moment it lands.", "Из кошелька в браузере, с телефона или с биржи. Здесь будет видно, как только деньги придут."),
-    content: h("div", { class: "ob-content" }, pages.topUpPanel ? pages.topUpPanel({ embedded: true }) : receiveTiles(), gasWarning()),
+    content: h("div", { class: "ob-content" }, pages.topUpPanel ? pages.topUpPanel({ embedded: true, landed }) : receiveTiles(), gasWarning()),
     primary: t("Continue", "Дальше"), enabled: false,
     quiet: [quietButton(t("Back", "Назад"), back), quietButton(t("I'll do it later", "Сделаю позже"), finish)],
   });
@@ -606,14 +643,19 @@ function landedCard(line) {
         t("It turns on after Hyperliquid's first deposit. On the canvas, say «move 10 USDC to Hyperliquid», then approve the key in Settings › Wallet › Hyperliquid.",
           "Он включается после первого депозита на Hyperliquid. На холсте скажи «переведи 10 USDC на Hyperliquid», потом одобри ключ в «Настройки › Кошелёк › Hyperliquid».")) : null),
     primary: t("Continue", "Дальше"), onPrimary: () => go("stayInTouch"),
-    quiet: [quietButton(t("Back", "Назад"), back), quietButton(t("Top up more", "Пополнить ещё"), () => { flow.money.landed = null; flow.money.more = true; flow.money.base = balances(); render(); })],
+    quiet: [quietButton(t("Back", "Назад"), back), quietButton(t("Top up more", "Пополнить ещё"), () => { flow.money.stale = flow.money.landed; flow.money.landed = null; flow.money.more = true; render(); })],
   });
 }
 
-/** The portfolio's networks as its cards order them: the first three, and over $100; the rest folded. */
+/** The portfolio's networks as its cards order them (the Mac's PortfolioSplit.networkCards): Solana, Hyperliquid and
+ * Robinhood first, the others by money, $100 or less folded. */
 function hasMoneyCard() {
-  const p = ui.state.portfolio;
-  const shown = p.networks.filter((n, i) => i < 3 || Number(n.usd) > 100), folded = p.networks.filter((n) => !shown.includes(n));
+  const p = ui.state.portfolio, pinned = ["solana", "hyperliquid", "robinhood"], byKey = new Map(p.networks.map((n) => [n.key, n]));
+  const rest = p.networks.filter((n) => !pinned.includes(n.key) && Number(n.usd) >= 0.01)
+    .sort((a, b) => Number(b.usd) - Number(a.usd) || a.key.localeCompare(b.key));
+  // Solana and Hyperliquid whenever the wallet has them (the engine sends them only then), Robinhood once it holds money.
+  const shown = [...pinned.map((k) => byKey.get(k)).filter((n) => n && (n.key !== "robinhood" || Number(n.usd) >= 0.01)),
+    ...rest.filter((n) => Number(n.usd) > 100)], folded = rest.filter((n) => Number(n.usd) <= 100);
   const row = (mark, name, value, detail) => h("div", { class: "ob-money-row" }, mark, tileText(name, detail), h("span", { class: "spacer" }), h("b", { class: "num" }, masked(usd(value))));
   return stepCard({
     mood: "done", title: t("Your wallet already has money", "На кошельке уже есть деньги"),
@@ -622,7 +664,7 @@ function hasMoneyCard() {
       h("div", { class: "ob-tiles tight" }, shown.map((n) => row(logo(n.key === "solana" ? "sol" : n.key, 26), n.name, n.usd)),
         folded.length ? row(h("span", { class: "ob-tile-ico" }, icon("rectangle.stack", 14)), t("Other networks", "Другие сети"), folded.reduce((x, n) => x + Number(n.usd), 0), folded.map((n) => n.name).join(", ")) : null),
       gasWarning(),
-      h("button", { class: "ob-tile ob-tile-button", onclick: () => { flow.money.more = true; flow.money.base = balances(); render(); } },
+      h("button", { class: "ob-tile ob-tile-button", onclick: () => { flow.money.more = true; render(); } },
         h("span", { class: "ob-tile-ico accent-ink" }, icon("arrow.down.circle", 18)),
         tileText(t("Top up more", "Пополнить ещё"), t("The same Top up as for a new wallet: amount, network, browser wallet, phone or exchange", "То же пополнение, что для нового кошелька: сумма, сеть, кошелёк в браузере, телефон или биржа")),
         h("span", { class: "spacer" }), icon("chevron.right", 11))),
@@ -639,7 +681,7 @@ function gasWarning() {
     `Доллары там не сдвинуть, пока ≈ ${usd(stuck.usd)} ${stuck.coin} не оплатят комиссии сети. Пополни ${stuck.coin} так же.`)
     : stuck.key === "solana" ? t(`The chat offers to swap 5 USDC for SOL, Jupiter paying that fee. Or top up ≈ ${usd(stuck.usd)} of SOL.`, `Чат предложит обменять 5 USDC на SOL — комиссию заплатит Jupiter. Или пополни SOL на ≈ ${usd(stuck.usd)}.`)
     : t(`The chat offers to move them by signature, Relay paying the gas. Or top up ≈ ${usd(stuck.usd)} of ${stuck.coin}.`, `Чат предложит перевести их по подписи — газ заплатит Relay. Или пополни ${stuck.coin} на ≈ ${usd(stuck.usd)}.`);
-  return h("button", { class: "ob-tile ob-tile-button", onclick: () => { if (flow.money) { flow.money.landed = null; flow.money.more = true; } render(); } },
+  return h("button", { class: "ob-tile ob-tile-button", onclick: () => { if (flow.money) { flow.money.stale = flow.money.landed ?? flow.money.stale; flow.money.landed = null; flow.money.more = true; } render(); } },
     h("span", { class: "ob-tile-ico accent-ink" }, icon("bolt", 16)),
     tileText(!stuck.ways ? t(`Add ${stuck.coin} for fees on ${stuck.network}`, `Добавь ${stuck.coin} на комиссии в ${stuck.network}`) : t(`No ${stuck.coin} for fees on ${stuck.network}`, `Нет ${stuck.coin} на комиссии в ${stuck.network}`), line),
     h("span", { class: "spacer" }), icon("chevron.right", 11));
@@ -673,7 +715,14 @@ function stayInTouchStep() {
 function tradingKeyStep() {
   const key = ui.state.trading?.key || {}, noDeposit = flow.funded[activeWallet()?.evm] === false;
   const ready = key.active || noDeposit, ask = key.ledger ? t("the Ledger's buttons", "кнопок Ledger") : "Windows Hello";
-  const said = flow.tried && !key.active ? ui.state.chat.filter((m) => !m.fromUser).pop()?.text : null;
+  // The approval runs in the engine's background: the step waits as the Mac's does, until the key is on or the engine has
+  // said how it went with Windows Hello no longer asking — never a fixed few seconds.
+  const chatNow = ui.state.chat.length;
+  if (flow.keyFrom != null && (key.active || (chatNow > flow.keyFrom && !ui.state.signer?.waiting))) {
+    flow.keyReply = key.active ? null : ui.state.chat.slice(flow.keyFrom).filter((m) => !m.fromUser).pop()?.text || null;
+    flow.keyFrom = null; flow.busy = false; flow.tried = true;
+  }
+  const said = flow.tried && !key.active ? flow.keyReply : null;
   return stepCard({
     mood: key.active ? "done" : flow.busy ? "thinking" : "idle", title: t("A trading key for Hyperliquid", "Торговый ключ для Hyperliquid"),
     subtitle: noDeposit && !key.active
@@ -692,10 +741,9 @@ function tradingKeyStep() {
       if (ready) { go("rules"); return; }
       flow.busy = true;
       flow.tried = false;
+      flow.keyFrom = ui.state.chat.length;
       render();
-      await act("tradingKey");
-      // The engine turns it on in the background; its state and its chat line say how it went.
-      setTimeout(() => { flow.busy = false; flow.tried = true; render(); }, 4000);
+      if (await act("tradingKey") === null) { flow.keyFrom = null; flow.busy = false; render(); }
     },
     quiet: [quietButton(t("Back", "Назад"), back), ready ? null : quietButton(t("Later", "Позже"), () => go("rules"))],
   });
@@ -773,7 +821,8 @@ export function welcome() {
   // The flow's first steps (Model, a new wallet, bringing one) come before there's a wallet; the demo stops meanwhile.
   if (onboardingRunning()) { stage = null; return onboarding(); }
   const lang = welcomeLang();
-  if (!stage || stage.lang !== lang) stage = buildStage(lang);
+  // A new language goes on with the request that was playing, as the Mac's (WelcomeView keeps its scenario).
+  if (!stage || stage.lang !== lang) stage = buildStage(lang, stage?.scenario ?? 0);
   stage.error.replaceChildren(ui.state.signer.error ? h("div", { class: "ob-status loss" }, ui.state.signer.error) : "");
   fit();
   return stage.root;
@@ -786,11 +835,11 @@ function fit() {
 }
 window.addEventListener("resize", fit);
 
-function buildStage(lang) {
+function buildStage(lang, scenario = 0) {
   const i = lang === "es" ? 1 : lang === "ru" ? 2 : 0;
   const pos = (x, y, el) => { el.style.left = x + "px"; el.style.top = y + "px"; return el; };
   const at = (x, y, el) => { el.classList.add("ob-c-center"); return pos(x, y, el); };
-  const text = h("span", { class: "ob-c-typed" });
+  const text = h("span", { class: "ob-c-typed", "data-empty": ["Say what you want", "Di lo que quieres", "Скажи, что нужно"][i] });
   const input = at(640, 240, h("div", { class: "ob-c-input glass" }, h("span", { class: "ob-c-field" }, text, h("span", { class: "ob-caret" })),
     icon("mic", 16), h("span", { class: "ob-welcome-send" }, icon("arrow.up", 15))));
   const chipRow = at(640, 296, h("div", { class: "ob-welcome-chips" }));
@@ -817,7 +866,7 @@ function buildStage(lang) {
   const root = h("div", { class: "ob-welcome" },
     h("button", { class: "ob-welcome-look", onclick: () => { store("welcomeDone", true); render(); } }, ["Look around first", "Explorar primero", "Сначала осмотреться"][i]),
     box);
-  const s = { lang, i, root, box, text, input, chipRow, bubbles, info, route, confirm, cursor, error, scenario: 0, run: 0 };
+  const s = { lang, i, root, box, text, input, chipRow, bubbles, info, route, confirm, cursor, error, scenario, run: 0 };
   play(s);
   return s;
 }
@@ -985,9 +1034,14 @@ export function showImport() {
 /** A single private key: Phantom's Solana key or MetaMask's EVM key, recognized as it's pasted and shown as its address
  * to compare before anything is saved (ImportWalletView.keyImport); only «Save as a wallet» sends it to the signer. */
 export function showImportKey() {
-  let value = "", asked = 0;
+  let value = "", asked = 0, read = null;
   const done = () => { value = ""; closeOverlay(); };
-  const run = async () => { if (await act("importKey", { key: value.trim() }) !== null) done(); };
+  // Saved: said in words, with the address it signs for (the Mac's «Key saved as a wallet: … It signs now.»).
+  const run = async () => {
+    if (await act("importKey", { key: value.trim() }) === null) return;
+    done();
+    toast(read ? t(`Key saved as a wallet: ${read}. It signs now.`, `Ключ сохранён как кошелёк: ${read}. Теперь подписывает он.`) : t("Key saved as a wallet. It signs now.", "Ключ сохранён как кошелёк. Теперь подписывает он."));
+  };
   const idle = () => h("div", { class: "secondary small" }, t("The key goes only to the separate signer, which seals it under Windows Hello like a phrase and never shows it again.",
     "Ключ уходит только отдельному подписанту, который запечатывает его под Windows Hello, как фразу, и больше никогда не показывает."));
   const found = h("div", { class: "ob-key-found" }, idle());
@@ -997,6 +1051,7 @@ export function showImportKey() {
     if (!key) { found.replaceChildren(idle()); save.disabled = true; return; }
     try {
       const r = await engine("keyAddress", { key });
+      read = r.address;
       if (n !== asked) return;
       const other = r.chain === "Solana" ? "Phantom" : "MetaMask";
       found.replaceChildren(

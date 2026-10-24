@@ -40,8 +40,10 @@ pub fn notify(app: &tauri::AppHandle, v: &serde_json::Value) {
         }
     }
     let (title, body) = (data["title"].as_str().unwrap_or("ihatecrypto"), data["body"].as_str().unwrap_or(""));
-    if let Ok(mut kind) = LAST_KIND.lock() { kind.clear(); kind.push_str(data["kind"].as_str().unwrap_or("")); }
-    let _ = app.notification().builder().title(title).body(body).show();
+    let kind = data["kind"].as_str().unwrap_or("");
+    if let Ok(mut last) = LAST_KIND.lock() { last.clear(); last.push_str(kind); }
+    // Each toast carries its kind, so a click acts on the one clicked, not on whichever came last.
+    let _ = app.notification().builder().title(title).body(body).extra("kind", kind).show();
     // Windows' toasts are silent: the Mac's sound for the kind plays here (the engine names it: coin, chime, knock).
     play(data["sound"].as_str().unwrap_or(""));
 }
@@ -71,11 +73,13 @@ pub fn window_focus(app: &tauri::AppHandle, focused: bool) {
 pub fn on_notification_click(app: &tauri::AppHandle) {
     use tauri_plugin_notification::NotificationExt;
     let handle = app.clone();
-    let _ = app.notification().on_action(move |_| {
+    let _ = app.notification().on_action(move |action| {
         crate::show(&handle);
         // The update's notice opens Settings › About with Install, as the Mac's opens its update (the page's checkUpdates).
-        // ponytail: the last notice shown stands for the one clicked; a toast carrying its kind if they ever differ.
-        if LAST_KIND.lock().map(|k| k.as_str() == "update").unwrap_or(false) {
+        // The clicked toast's own kind; the last one shown only when Windows doesn't report which it was.
+        let clicked = action.notification().and_then(|n| n.extra().get("kind").and_then(|k| k.as_str().map(str::to_string)));
+        let kind = clicked.unwrap_or_else(|| LAST_KIND.lock().map(|k| k.clone()).unwrap_or_default());
+        if kind == "update" {
             let _ = handle.emit_to("main", "engine", "{\"event\":\"checkUpdates\",\"data\":{}}");
         }
     });
@@ -85,7 +89,7 @@ pub fn on_notification_click(app: &tauri::AppHandle) {
 static LAST_KIND: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// A line to the engine from the app itself (the crash line, the updater's news), as the page's engine_send.
-fn tell_engine(app: &tauri::AppHandle, request: serde_json::Value) {
+pub fn tell_engine(app: &tauri::AppHandle, request: serde_json::Value) {
     use std::io::Write;
     if let Some(engine) = app.try_state::<crate::Engine>() {
         if let Ok(mut input) = engine.input.lock() { let _ = writeln!(input, "{request}").and_then(|_| input.flush()); }
@@ -237,6 +241,14 @@ pub fn tray_open(webview: tauri::Webview, schedule: Option<String>) -> Result<()
     Ok(())
 }
 
+/// Esc in the panel: it closes, as the Mac's popover does, and nothing else opens.
+#[tauri::command]
+pub fn tray_hide(webview: tauri::Webview) -> Result<(), String> {
+    from_panel(&webview)?;
+    if let Some(window) = webview.app_handle().get_window(TRAY) { panel_blurred(&window); }
+    Ok(())
+}
+
 /// «Quit Completely» in the panel.
 #[tauri::command]
 pub fn tray_quit(webview: tauri::Webview) -> Result<(), String> {
@@ -259,11 +271,20 @@ fn from_main(webview: &tauri::Webview) -> Result<(), String> {
     if webview.label() == "main" { Ok(()) } else { Err("only the main window".into()) }
 }
 
-/// Ctrl+Q: the window goes to the tray, the schedule, alerts and stops go on (the Mac's ⌘Q, Quit to Menu Bar).
+/// Ctrl+Q: every window goes away — the main one, the browser's own, the tray's panel — and the schedule, alerts and stops
+/// go on in the tray (the Mac's ⌘Q, Quit to Menu Bar, puts all its windows away).
+pub fn put_away(app: &tauri::AppHandle) {
+    for label in ["main", crate::BROWSER_WINDOW, TRAY] {
+        if let Some(window) = app.get_window(label) { let _ = window.hide(); }
+    }
+}
+
+/// Ctrl+Q from the main page (on Windows WebView2's own key handler gets there first, in every window: keys.rs).
 #[tauri::command]
 pub fn hide_main(webview: tauri::Webview) -> Result<(), String> {
     from_main(&webview)?;
-    webview.window().hide().map_err(|e| e.to_string())
+    put_away(webview.app_handle());
+    Ok(())
 }
 
 /// Ctrl+Shift+Q: quits for real (the Mac's ⌥⌘Q, Quit Completely).
@@ -367,15 +388,17 @@ pub fn open_notification_settings(webview: tauri::Webview) -> Result<(), String>
 /// Started at login (`--hidden`): the window stays in the tray until it's opened.
 pub fn started_hidden() -> bool { std::env::args().any(|a| a == "--hidden") }
 
-/// The lock came down (the engine's `locked`): the dApp browser and the page beside the chat close, as the Mac closes
-/// its browser and import windows on lock — nothing of the wallet stays on screen behind the lock.
+/// The lock came down (the engine's `locked`): the browser's own window closes, as the Mac closes its browser window on
+/// lock. What's beside the chat stays, as the Mac's stays under its lock screen: the lock screen hides the panel's webviews
+/// (app.js `panelHidden`), and they come back as they were once it opens. The engine declines a site's waiting request on
+/// its own lock and answers nothing else while locked.
 pub fn locked(app: &tauri::AppHandle) {
-    // The site's waiting request goes too (the engine declines it on its own lock as well).
-    crate::site_closed(app);
-    if let Some(window) = app.get_window(crate::BROWSER_WINDOW) { let _ = window.close(); }
-    // The browser beside the chat, put away or not, and the page there.
-    crate::web::shown(app, crate::SITE, false);
-    if crate::web::wallet_in_panel(app) { for label in [crate::SITE, crate::BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } } }
-    crate::web::close_page(app);
-    if let Some(edge) = app.get_webview(crate::web::PANEL_EDGE) { let _ = edge.hide(); }
+    if let Some(window) = app.get_window(crate::BROWSER_WINDOW) {
+        if !crate::web::wallet_in_panel(app) { crate::site_closed(app); }
+        let _ = window.close();
+    }
+    // Hidden from here at once, not only once the page has drawn its lock screen: a page that didn't would leave the site
+    // showing over it.
+    if let Some(engine) = app.try_state::<crate::Engine>() { if let Ok(mut place) = engine.panel.lock() { place.hidden = true; } }
+    crate::web::layout_panel(app);
 }

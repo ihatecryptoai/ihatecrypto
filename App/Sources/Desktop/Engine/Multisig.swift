@@ -57,6 +57,8 @@ struct MultisigPayment {
     let units: Decimal
     let threshold: Int
     let signers: [Multisig.Key]
+    /// What the multisig holds of it now, for the card's balance box (the Mac's MultisigPayment.held).
+    var held: Decimal = 0
 }
 
 extension Engine {
@@ -286,7 +288,7 @@ extension Engine {
             return
         }
         multisigPayment = MultisigPayment(command: command, multisig: m, net: key, to: to, symbol: symbol, token: coin ? nil : contract,
-                                          amount: units / scale, units: units, threshold: Int(threshold), signers: Array(here.prefix(Int(threshold))))
+                                          amount: units / scale, units: units, threshold: Int(threshold), signers: Array(here.prefix(Int(threshold))), held: held)
         let shown = "\(Fmt.num(units / scale, maxFraction: 6)) \(symbol)"
         show(.wallet(command), title: say("\(shown) from the multisig to \(to.name) on \(net.name)", "\(shown) из мультисига на \(to.name) в \(net.name)"),
              lines: [say("The multisig holds \(Fmt.num(held, maxFraction: 6)) \(symbol) → \(Fmt.num(held - units / scale, maxFraction: 6)) after", "В мультисиге \(Fmt.num(held, maxFraction: 6)) \(symbol) → \(Fmt.num(held - units / scale, maxFraction: 6)) после"),

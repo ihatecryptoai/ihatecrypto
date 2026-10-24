@@ -221,6 +221,8 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
             }
             tauri::webview::NewWindowResponse::Deny
         })
+        // Nothing is saved to disk from a page here, as the Mac's panel has no downloads.
+        .on_download(|_, _| false)
         .on_page_load(move |_, payload| {
             let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
             set(&loads, PANEL, |p| { p.loading = started; if started { p.error = None; } });

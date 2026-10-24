@@ -89,9 +89,10 @@ extension Engine {
         for part in parts {
             switch part {
             case .success(let n?):
-                // A network with nothing on show (only airdrops) has no card, as before they were tucked.
+                // Solana's and Hyperliquid's cards stay once their read answered, at $0 too, and a network whose tokens are
+                // all tucked keeps its card for «N hidden · show» (the Mac's PortfolioNetworks.present).
                 let n = Self.tucked(priced(n), choices: settings.tokenChoices ?? [:])
-                if !n.rows.isEmpty { networks.append(noted(n)) }
+                if !n.rows.isEmpty || !n.hidden.isEmpty || n.hiddenMore > 0 || n.key == "solana" || n.key == "hyperliquid" { networks.append(noted(n)) }
             case .success(nil): break
             case .failure(let key, let why):
                 errors.append(why)
@@ -185,12 +186,21 @@ extension Engine {
         if n.key == "robinhood" {
             // Robinhood's own registry tells a stock token from any other; read once, the rows marked from the next read on.
             if let stocks = Self.stockRegistry.map({ Set($0.map { $0.address.lowercased() }) }) {
-                n.rows = n.rows.map { r in var r = r; if let c = r.contract?.lowercased(), stocks.contains(c) { r.stock = true }; return r }
+                // A stock's day off its Hyperliquid market (xyz:TSLA), as the Mac's stockRow; none there, none shown.
+                n.rows = n.rows.map { r in
+                    var r = r
+                    if let c = r.contract?.lowercased(), stocks.contains(c) { r.stock = true; r.change24h = Self.stockDay(r.symbol, markets) }
+                    return r
+                }
             } else { Task { _ = await robinhoodStock("") } }
         }
         // A deposit's «earning» in the window's language; a vault's own name and rate stay as they are.
         if russian { n.rows = n.rows.map { r in var r = r; if let note = r.note, note.hasPrefix("earning") { r.note = "приносит доход" + note.dropFirst("earning".count) }; return r } }
         return n
+    }
+
+    nonisolated static func stockDay(_ symbol: String, _ markets: [String: Market]) -> Decimal? {
+        (markets["xyz:\(symbol)"] ?? markets["xyz:\(symbol.uppercased())"])?.change24h
     }
 
     /// The line under a network's name, as the Mac's NetworkCard writes it: Hyperliquid's margin, Tempo's purpose, else
@@ -362,6 +372,8 @@ extension Engine {
             var row = deposit("Jupiter", usd: Decimal(value).rounded(2, .plain), note: (name.isEmpty ? e.platform ?? "position" : name) + apy)
             row.icon = "logos/jup.png"
             row.site = "jup.ag"
+            // In dollars: a platform's position is no USDC (the Mac's line shows Fmt.usd of it).
+            row.amount = Fmt.usd(Decimal(value).rounded(2, .plain))
             return row
         }
     }
@@ -384,7 +396,11 @@ extension Engine {
             let kamino = ((await kaminoRead) ?? []).reduce(Decimal(0)) { $0 + $1.valueUSD }
             if kamino >= cent { rows.append(deposit("Kamino Lend", usd: kamino, note: "earning")) }
             for v in (await vaultsRead) ?? [] where v.valueUSD >= cent {
-                rows.append(deposit("Kamino", usd: v.valueUSD, note: "\(v.name) · \(Fmt.num(v.apy.rounded(2, .plain)))%"))
+                // In its own coin and managed on its site, as the Mac's ProtocolPosition: «0.5 SOL», ≈ its dollars, kamino.com.
+                var r = deposit("Kamino", usd: v.valueUSD, note: "\(v.name) · \(Fmt.num(v.apy.rounded(2, .plain)))%")
+                r.amount = "\(Fmt.num(v.tokens)) \(v.symbol)"
+                r.site = "kamino.com"
+                rows.append(r)
             }
             // Jupiter's other platforms (staked JUP, perps, predictions…), so a deposit made on its site still shows.
             rows += ((await jupiterRead) ?? []).filter { ($0.usd ?? 0) >= cent }

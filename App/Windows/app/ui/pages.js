@@ -4,7 +4,8 @@
 
 import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode, usd, popup } from "./core.js";
 import { railEdge, companyLogo } from "./rail.js";
-import { chatPanel } from "./chat.js";
+import { chatPanel, modelName } from "./chat.js";
+import { askMenu } from "./portfolio.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
 import { codeMaker, lockAfterPicker } from "./lock.js";
 
@@ -97,7 +98,8 @@ export function settingsPage() {
     general: [t("General", "Основные"), t("How the app talks to you and keeps running.", "Как приложение говорит с тобой и работает в фоне."), general],
     agent: [t("Trading agent", "Торговый агент"), t("How the assistant trades for you. Code checks every plan against these rules.", "Как ассистент торгует за тебя. Код проверяет каждый план по этим правилам."), agentTab],
     modules: [t("Modules", "Модули"), t("What the assistant may use. Off means it never plans a move there. Money already there still shows on the canvas.", "Чем ассистенту можно пользоваться. Выключено — он никогда не планирует там движений. Деньги, которые там уже есть, по-прежнему видны на холсте."), modulesTab],
-    model: [t("AI model", "Модель ИИ"), t("What reads your chat: a subscription, an API key, or a free model on this PC.", "Что читает твой чат: подписка, API-ключ или бесплатная модель на этом компьютере."), modelTab],
+    model: [t("AI model", "Модель ИИ"), t("What reads your chat: a subscription, an API key, or a free model on this PC. It reads your messages with your balances, positions and address book names, never your keys; a model on this PC keeps all of it here.",
+      "Что читает твой чат: подписка, API-ключ или бесплатная модель на этом компьютере. Модель читает твои сообщения вместе с балансами, позициями и именами из адресной книги, но никогда — ключи; модель на этом компьютере держит всё это здесь."), modelTab],
     wallet: [t("Wallet", "Кошелёк"), t(`Your wallets, the key that signs and ${presence()}.`, `Твои кошельки, ключ, который подписывает, и ${presence()}.`), walletTab],
     skills: [t("Skills", "Навыки"), t("Instructions the assistant follows for one kind of work. Switch them on and off, or add your own from a file.", "Инструкции, которым ассистент следует в одном виде работы. Включай и выключай их или добавь свой из файла."), skillsTab],
   }[tab];
@@ -157,7 +159,9 @@ function noticeSection(s) {
     group(
       row({ label: t("Notifications", "Уведомления"), ico: "bell", about: t("They show while the window is in the tray or behind others; click one to come back to it. Windows decides whether they can appear at all: Settings › System › Notifications › ihatecrypto.",
           "Они появляются, когда окно в трее или за другими; нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows: «Параметры › Система › Уведомления › ihatecrypto».") },
-        h("button", { class: "btn small", onclick: () => act("noticeTest") }, t("Send a test", "Отправить тест")),
+        // «Sent» for a moment once it went, as the Mac's button says.
+        h("button", { class: "btn small", onclick: async (e) => { const b = e.currentTarget; if (await act("noticeTest") !== null) { b.textContent = t("Sent", "Отправлено"); setTimeout(() => { b.textContent = t("Send a test", "Отправить тест"); }, 2000); } } },
+          t("Send a test", "Отправить тест")),
         h("button", { class: "btn small", onclick: () => invoke("open_notification_settings").catch((x) => toast(String(x))) }, t("Windows settings…", "Настройки Windows…"))),
       row({ label: t("Which events", "Какие события"), ico: "bell" },
         h("button", { class: "btn small", onclick: () => { noticeList.open = !noticeList.open; render(); } }, t(`${on} of ${list.length}`, `${on} из ${list.length}`), icon(noticeList.open ? "chevron.up" : "chevron.down", 10))),
@@ -191,13 +195,14 @@ async function saveSecret(op, args) {
   catch (e) { secretForm.problem = e.message; secretForm.checking = false; }
   render();
 }
-function secretPanel(id, why, steps, site, placeholder, save, password) {
+function secretPanel(id, why, steps, site, placeholder, save, password, others) {
   return h("div", { class: "pg-set-panel" },
     why.map((x) => h("div", { class: "secondary small" }, x)),
     h("ol", { class: "pg-node-steps small" }, steps.map((x) => h("li", { class: "selectable" }, x))),
     site ? h("div", { class: "small" }, link(site[0], site[1])) : null,
+    others ? h("div", { class: "secondary small" }, others) : null,
     h("input", { id: "secret-" + id, class: "pg-set-input pg-node-input address", type: password ? "password" : "text", placeholder, value: secretForm.text, autocomplete: "off", spellcheck: "false",
-      oninput: (e) => (secretForm.text = e.target.value), onkeydown: (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") openSecret(null); } }),
+      oninput: (e) => (secretForm.text = e.target.value), onkeydown: (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { e.stopPropagation(); openSecret(null); } } }),
     secretForm.problem ? h("div", { class: "small loss" }, icon("exclamationmark.triangle", 12), " ", secretForm.problem) : null,
     h("div", { class: "btns" }, h("button", { class: "btn", onclick: () => openSecret(null) }, t("Cancel", "Отмена")),
       h("button", { class: "btn primary", disabled: secretForm.checking || !secretForm.text.trim(), onclick: save }, secretForm.checking ? t("Checking…", "Проверяю…") : t("Check and save", "Проверить и сохранить"))));
@@ -218,7 +223,11 @@ function nodesSection(v) {
         n.host ? h("button", { class: "btn small", onclick: () => saveSecret("node", { network: n.id, address: "" }) }, t("Remove", "Убрать")) : null,
         h("button", { class: "btn small", onclick: () => openSecret("node-" + n.id) }, n.host ? t("Change…", "Изменить…") : t("Add your own…", "Добавить свою…"))),
         secretForm.open === "node-" + n.id ? secretPanel("node-" + n.id,
-          [t(`A node only reads the chain and passes on transactions already signed on this PC: it never sees your keys and can't move money. It does see your addresses. Its address carries your key, so it's kept encrypted for your Windows user and shown only by its host.${n.id === "ethereum" ? " Ethereum's transactions still go out through MEV Blocker, out of the public mempool." : ""}`,
+          [sol ? t("Why: every balance and every move on Solana goes through a node. Solana's public node is free but shared by everyone: it limits how often you may ask and has no backup, so at a busy moment a balance doesn't load or a move fails half-way. A node of your own gives you your own limit; the public one stays behind it as a backup.",
+              "Зачем: каждый баланс и каждый перевод в Solana идут через ноду. Публичная нода Solana бесплатна, но общая для всех: она ограничивает, как часто можно спрашивать, и запасной у неё нет — в час пик баланс не загрузится или перевод сорвётся на полпути. Своя нода даёт тебе свой лимит, а публичная остаётся за ней запасной.")
+            : t(`Why: every balance and every move on ${n.title} goes through a node. The app's built-in nodes are free and shared by everyone: each limits how often you may ask, so at a busy moment a quote, a balance or a move can stall. A node of your own gives you your own limit; the built-in ones stay behind it as backups.`,
+              `Зачем: каждый баланс и каждый перевод в ${n.title} идут через ноду. Встроенные ноды приложения бесплатны и общие для всех: каждая ограничивает, как часто можно спрашивать, поэтому в час пик котировка, баланс или перевод могут застрять. Своя нода даёт тебе свой лимит, а встроенные остаются за ней запасными.`),
+           t(`A node only reads the chain and passes on transactions already signed on this PC: it never sees your keys and can't move money. It does see your addresses. Its address carries your key, so it's kept encrypted for your Windows user and shown only by its host.${n.id === "ethereum" ? " Ethereum's transactions still go out through MEV Blocker, out of the public mempool." : ""}`,
             `Нода только читает сеть и передаёт транзакции, уже подписанные на этом компьютере: ключей она не видит и двигать деньги не может. Твои адреса она видит. В её адресе лежит твой ключ, поэтому он хранится зашифрованным для твоего пользователя Windows и показывается только хостом.${n.id === "ethereum" ? " Транзакции Ethereum по-прежнему уходят через MEV Blocker, мимо публичного мемпула." : ""}`)],
           sol ? [t("Open helius.dev and sign up — the free plan, no card.", "Открой helius.dev и зарегистрируйся — бесплатный план, без карты."),
             t(`In the dashboard, open RPCs (Endpoints) and copy the Mainnet URL: ${n.example}`, `В панели открой RPCs (Endpoints) и скопируй адрес Mainnet: ${n.example}`),
@@ -226,7 +235,10 @@ function nodesSection(v) {
             : [t("Open alchemy.com and sign up — the free plan, no card.", "Открой alchemy.com и зарегистрируйся — бесплатный план, без карты."),
               t(`Create an app, pick ${n.title} Mainnet, and copy its HTTPS URL: ${n.example}`, `Создай приложение, выбери ${n.title} Mainnet и скопируй его адрес HTTPS: ${n.example}`),
               t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
-          [n.site, t(`Open ${n.site.replace("https://www.", "")}`, `Открыть ${n.site.replace("https://www.", "")}`)], n.example, save, false) : null];
+          [n.site, t(`Open ${n.site.replace("https://www.", "")}`, `Открыть ${n.site.replace("https://www.", "")}`)], n.example, save, true,
+          sol ? t("Any Solana mainnet node works the same way: QuickNode, Alchemy, Triton — paste its https address.", "Так же подойдёт любая нода Solana mainnet: QuickNode, Alchemy, Triton — вставь её адрес https.")
+            : t(`Any ${n.title} node works the same way: QuickNode, Infura, drpc with a key — paste its https address. If the check says a node lacks something, try another provider.`,
+              `Так же подойдёт любая нода ${n.title}: QuickNode, Infura, drpc с ключом — вставь её адрес https. Если проверка скажет, что ноде чего-то не хватает, попробуй другого провайдера.`)) : null];
     })));
 }
 
@@ -302,12 +314,14 @@ const ways = [["claude-code", () => t("Claude subscription", "Подписка C
 
 function modelTab(s) {
   const providers = s.providers;
+  // A way picked in the chat's menu or connect bar that isn't connected opens here on itself.
+  if (ui.settingsProvider) { modelForm.shown = ui.settingsProvider; ui.settingsProvider = null; }
   const shown = providers.find((p) => p.id === (modelForm.shown || s.model.provider)) || providers.find((p) => !p.unavailable) || providers[0];
   if (!shown) return [];
   if (modelForm.modelFor !== shown.id) {
     modelForm.modelFor = shown.id;
     modelForm.key = "";
-    modelForm.model = shown.id === s.model.provider ? s.model.model || "" : "";
+    modelForm.model = shown.id === s.model.provider ? s.model.model || "" : s.modelChoices?.[shown.id] || "";
   }
   const state = (p) => p.connected ? (p.id === s.model.provider ? chatsModel() : pill(t("Connected", "Подключено"), true)) : null;
   const pick = (id) => { modelForm.shown = id; render(); };
@@ -336,11 +350,11 @@ function modelTab(s) {
   };
   const jevReady = providers.some((p) => p.id === "openrouter" && p.connected);
   const local = s.localSetup || {};
-  const checkModel = modelForm.model || (isChat ? s.model.model : shown.defaultModel) || "";
+  const checkModel = modelForm.model || (isChat ? s.model.model : s.modelChoices?.[shown.id] || shown.defaultModel) || "";
+  const listed = isChat ? s.model.models : shown.models || [];
   const examKey = checkModel ? `${shown.id}/${checkModel}` : null;
   const score = examKey ? local.scores?.[examKey] : null;
-  // Ollama's version and what this PC has, read once when the tab first shows (nothing is started to read them).
-  if (!localAsked) { localAsked = true; act("ollamaStatus"); act("refreshModels"); }
+  askLocal();
   return [
     section("sparkles", t("Chat model", "Модель чата"), t("Lets you write freely, in any language. Connect one or more; the chat uses one at a time.", "Позволяет писать свободно, на любом языке. Подключи одну или несколько; чат пользуется одной."),
       group(known.map(([p, title, line]) => wayRow(p, title(), line())), others.length ? other : null),
@@ -351,7 +365,7 @@ function modelTab(s) {
             : [pill(shown.connected ? t("Connected", "Подключено") : t("Not connected", "Не подключено"), shown.connected),
               shown.connected ? h("button", { class: "btn small", title: t(`The chat goes on with ${shown.name}`, `Чат продолжит с ${shown.name}`), onclick: () => connect() }, t("Switch", "Переключить")) : null]),
         row({ label: t("Sign-in", "Вход"), ico: "person", about: shown.connected ? t("Connected: the key is kept with Windows' data protection (DPAPI).", "Подключено: ключ хранится под защитой данных Windows (DPAPI).") : t("Not connected.", "Не подключено.") },
-          shown.existingLogin ? h("button", { class: "btn small", onclick: () => act("useLogin", { provider: shown.id }) }, t(`Use ${shown.existingLogin}`, `Взять вход ${shown.existingLogin}`)) : null,
+          shown.existingLogin ? h("button", { class: "btn small", onclick: () => act("useLogin", { provider: shown.id }) }, shown.existingLogin) : null,
           shown.signIn ? h("button", { class: "btn small", onclick: async () => {
             toast(t("Finish the sign-in in the browser.", "Закончи вход в браузере."));
             if (await act("signIn", { provider: shown.id }) !== null) toast(t("Signed in.", "Вход выполнен."));
@@ -366,13 +380,14 @@ function modelTab(s) {
           h("button", { class: "btn small", onclick: () => modelForm.key ? connect() : toast(t("Paste the key first.", "Сначала вставь ключ.")) }, t("Save", "Сохранить"))) : null,
         row({ label: t("Model", "Модель"), ico: "bolt", about: t("Empty: the provider's default.", "Пусто — модель провайдера по умолчанию.") },
           h("input", { id: "model-id", class: "pg-set-input", list: "model-list", placeholder: t("Default", "По умолчанию"), value: modelForm.model, oninput: (e) => (modelForm.model = e.target.value.trim()) }),
-          isChat && s.model.models.length ? h("datalist", { id: "model-list" }, s.model.models.map((m) => h("option", { value: m }))) : null,
-          // «List» as the Mac's: the models it knows to pick from, or «Load models» before it has asked.
-          isChat ? h("button", { class: "btn small", onclick: (e) => popup(e, s.model.models.length
-            ? s.model.models.map((m) => [m, () => { modelForm.model = m; render(); }])
-            : [[t("Load models", "Загрузить модели"), () => act("refreshModels")]]) }, t("List", "Список"), icon("chevron.down", 9)) : null,
+          listed.length ? h("datalist", { id: "model-list" }, listed.map((m) => h("option", { value: m }))) : null,
+          // «List» as the Mac's, for whichever account is shown: the models it knows to pick from, or «Load models».
+          h("button", { class: "btn small", onclick: (e) => popup(e, listed.length
+            ? listed.map((m) => [m, () => { modelForm.model = m; render(); }])
+            : [[t("Load models", "Загрузить модели"), () => act("refreshModels")]]) }, t("List", "Список"), icon("chevron.down", 9)),
           isChat ? h("button", { class: "btn small", onclick: () => act("setModel", { model: modelForm.model || undefined }) }, t("Use", "Выбрать"))
-            : !shown.connected && (shown.kind === "local") ? h("button", { class: "btn small", onclick: () => connect() }, t("Connect", "Подключить")) : null),
+            : shown.connected ? h("button", { class: "btn small", title: t("Kept for this account; the chat stays on its model", "Запоминается для этого аккаунта; чат остаётся на своей модели"), onclick: () => act("modelFor", { provider: shown.id, model: modelForm.model || undefined }) }, t("Keep", "Запомнить"))
+            : shown.kind === "local" ? h("button", { class: "btn small", onclick: () => connect() }, t("Connect", "Подключить")) : null),
         row({ label: t("Connection", "Подключение"), ico: "dial",
           about: t(`Check asks the model ${local.examTotal || 10} requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat; fewer, and it will misread.`,
             `«Проверить» задаёт модели ${local.examTotal || 10} обычных запросов — купить, перевести, положить под процент, график, лонг, вопрос, DCA — и считает, сколько она поняла верно. 8 и больше — для чата хорошо; меньше — она будет путать.`) },
@@ -388,33 +403,63 @@ function modelTab(s) {
     section("checkmark.seal", t("Second check", "Вторая проверка"), t("A second reader. It can only stop, never approve.", "Второй читатель. Он может только остановить, но не одобрить."),
       group(
         row({ label: t("Check commands and plans twice", "Проверять команды и планы дважды"), ico: "checkmark.seal",
-          about: t("The model reads every command and every trade plan again before a card is drawn. On a doubt nothing runs: you pick.", "Модель перечитывает каждую команду и каждый план сделки, прежде чем нарисовать карточку. При сомнении ничего не запускается — выбираешь ты.") },
+          about: jevReady && (s.model?.provider === "openrouter" || s.jevOpenRouter)
+            ? t("The chat's model and a separate model on OpenRouter check your commands and plans against your words. OpenRouter receives your messages, pasted text, lookup results and each plan with its balance changes before you sign, and a site's transaction. This check can stop a move, never approve a signature.",
+              "Модель чата и отдельная модель на OpenRouter сверяют твои команды и планы с твоими словами. OpenRouter получает твои сообщения, вставленный текст, результаты поиска и каждый план с изменениями балансов до подписи, а также транзакцию сайта. Эта проверка может остановить движение, но не одобрить подпись.")
+            : t("The chat's model reads each command and plan a second time. Local rules also check incoming text. OpenRouter can add a separate model; the chat keeps its own. This check can stop a move, never approve a signature.",
+              "Модель чата перечитывает каждую команду и план. Входящий текст проверяют и локальные правила. OpenRouter может добавить отдельную модель; чат остаётся на своей. Эта проверка может остановить движение, но не одобрить подпись.") },
           toggle("second-check", s.secondCheck, (on) => act("secondCheck", { test: on }))),
-        row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key: the message goes there.", "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter: сообщение уходит туда.") },
+        row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key. OpenRouter then receives your messages, pasted text, lookup results, each plan with its balance changes before you sign, and a site's transaction.",
+          "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter. Тогда OpenRouter получает твои сообщения, вставленный текст, результаты поиска, каждый план с изменениями балансов до подписи и транзакцию сайта.") },
           // The chat on OpenRouter: Jev reads there anyway, so no switch that could read Off (SettingsView.swift:840).
           jevReady && s.model?.provider === "openrouter" ? pill(t("Your chat runs here", "Здесь работает твой чат"), true)
           : jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
-            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: () => act("signInJev") }, t("Connect", "Подключить"))]))),
+            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", disabled: jevStatus === "waiting", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: signInJev }, t("Connect", "Подключить"))]),
+        jevStatus ? row({ label: jevStatus === "waiting" ? t("Waiting for the sign-in in the browser…", "Жду вход в браузере…")
+          : jevStatus === "done" ? t("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель.") : jevStatus,
+          ico: "info.circle", cls: "wrap note" + (jevStatus !== "waiting" && jevStatus !== "done" ? " loss" : "") }) : null)),
     section("server", t("Free, on this PC", "Бесплатно, на этом ПК"), t("No subscription needed: Ollama runs a model here, with no internet.", "Подписка не нужна: Ollama запускает модель здесь, без интернета."),
       group(h("div", { class: "pg-set-panel" }, localPanel(s)))),
     section("lock", t("Safety", "Безопасность"), t("A model reads your words. It cannot approve a move.", "Модель читает твои слова. Одобрить движение она не может."),
       group(
         row({ label: t(`Money moves only after Confirm + ${presence()}`, `Деньги двигаются только после «Подтвердить» и ${presence()}`), ico: "person",
-          about: t(`You approve money moves in the app. One ${presence()} can cover one move or a few minutes, as set in Wallet.`, `Движения денег одобряешь ты в приложении. Одно подтверждение ${presence()} действует на одно движение или несколько минут — как задано во вкладке «Кошелёк».`) }),
+          about: t(`You approve money moves in the app. One ${presence()} can cover one move or a few minutes, as set in Wallet. A separately approved Hyperliquid trading key can place orders without a new ${presence()}; it cannot withdraw money.`,
+            `Движения денег одобряешь ты в приложении. Одно подтверждение ${presence()} действует на одно движение или несколько минут — как задано во вкладке «Кошелёк». Отдельно одобренный торговый ключ Hyperliquid может ставить ордера без нового ${presence()}; вывести деньги он не может.`) }),
         row({ label: t("Keys stay on this PC", "Ключи остаются на этом компьютере"), ico: "eye.slash",
-          about: t("The chat model receives your messages, your balances, open positions and what it looks up. It never receives keys or the recovery phrase.", "Модель чата получает твои сообщения, балансы, открытые позиции и то, что она ищет. Ключи и фразу восстановления она не получает никогда.") }))),
+          about: t("The chat model receives your messages, your balances and open positions, the plan and what it looks up. It never receives keys or the recovery phrase, and your own addresses reach it as «me».",
+            "Модель чата получает твои сообщения, балансы и открытые позиции, план и то, что она ищет. Ключи и фразу восстановления она не получает никогда, а твои собственные адреса доходят до неё как «я».") }))),
     s.memory.length ? section("doc", t("What the chat remembers", "Что помнит чат"), t("Facts it keeps across canvases. Forget any of them.", "Факты, которые он помнит между холстами. Любой можно забыть."),
       group(s.memory.map((m) => row({ label: m, ico: "doc", cls: "wrap" }, h("button", { class: "btn small", onclick: () => act("forget", { text: m }) }, t("Forget", "Забыть")))))) : null,
   ];
 }
 
 let localAsked = false;
+/** The second check's OpenRouter sign-in, said where it was pressed (the Mac's jevStatus): waiting, done, or the error. */
+let jevStatus = null;
+async function signInJev() {
+  jevStatus = "waiting"; render();
+  try { await engine("signInJev"); jevStatus = "done"; } catch (e) { jevStatus = e.message; }
+  render();
+}
 
 /** The local-models panel for onboarding's «Free, on this PC» (the Mac's Onboarding localRow → LocalModelsPanel): Ollama's
  *  state and this PC's memory read once, then Set up, Start, Switch or Download. */
 export function localModelsPanel(s) {
-  if (!localAsked) { localAsked = true; act("ollamaStatus"); act("refreshModels"); }
+  askLocal();
   return localPanel(s);
+}
+
+/** Ollama's state read again each time the panel comes back on screen (the Mac's .task on appear), the models once:
+ *  a panel not drawn for 5 s was off screen. Nothing is started to read them.
+ *  ponytail: «off screen» is a gap between draws; a panel left open on an idle window reads Ollama again on its next draw. */
+let localDrawnAt = 0;
+function askLocal() {
+  const now = Date.now();
+  if (now - localDrawnAt > 5000) {
+    act("ollamaStatus");
+    if (!localAsked) { localAsked = true; act("refreshModels"); }
+  }
+  localDrawnAt = now;
 }
 
 /** Free, on this PC through Ollama: what it still needs (installed, running, new enough), this PC's memory, and the models —
@@ -442,7 +487,7 @@ function localPanel(s) {
       const size = m.sizes?.[x], ok = size === undefined || fits(size), loading = m.downloads?.[x], score = L.scores?.["ollama/" + x];
       const chat = s.model.provider === "ollama" && s.model.model === x && have.includes(x);
       return h("div", { class: "pg-local-model" },
-        h("b", {}, x),
+        h("b", { title: x }, modelName(x)),
         size !== undefined ? h("span", { class: "small " + (ok ? "secondary" : "loss") }, t(`≈ ${size.toFixed(1)} GB · runs in ≈ ${Math.round(size * 1.2)} GB`, `≈ ${size.toFixed(1)} ГБ · работает в ≈ ${Math.round(size * 1.2)} ГБ`) + (ok ? "" : t(" · too big", " · слишком велика"))) : null,
         score ? pill(score.short, score.good) : null, h("span", { class: "spacer" }),
         chat ? chatsModel()
@@ -455,6 +500,15 @@ function localPanel(s) {
 const chatsModel = () => h("span", { class: "pg-set-chat-model profit", title: t("The chat answers with this account", "Чат отвечает этим аккаунтом") }, icon("check", 13), t("Chat model", "Модель чата"));
 
 // Wallet: the wallet that signs, the wallets, adding one, Windows Hello, addresses watched.
+
+/** «recovery phrase · Solana AN5b…e8cL, EVM 0x1523…F656, NEAR …» (ChatCommands.describe, the Mac's Wallets.describe). */
+function describeWallet(w) {
+  const cut = (a) => a.length > 12 ? a.slice(0, 4) + "…" + a.slice(-4) : a;
+  const kind = w.kind === "phrase" ? t("recovery phrase", "фраза восстановления") : w.kind === "ledger" ? t("Ledger, confirm on the device", "Ledger, подтверждение на устройстве")
+    : w.kind === "solana" ? t("Solana key only", "только ключ Solana") : t("EVM key only", "только ключ EVM");
+  const parts = [w.solana && "Solana " + cut(w.solana), w.evm && "EVM " + cut(w.evm), w.near && "NEAR " + cut(w.near)].filter(Boolean);
+  return parts.length ? kind + " · " + parts.join(", ") : kind;
+}
 
 function kindName(w) {
   const base = w.kind === "ledger" ? "Ledger" : w.kind === "solana" ? t("Private key · Solana only", "Приватный ключ · только Solana")
@@ -497,8 +551,15 @@ function walletTab(s) {
           h("div", { class: "pg-set-option" }, h("span", {}, t(`Test wallet: signs without ${presence()}`, `Тестовый кошелёк: подписывает без ${presence()}`)), h("span", { class: "spacer" }),
             toggle("new-test", creating.test, (on) => { creating.test = on; render(); })),
           creating.test ? h("div", { class: "small pg-jev-ink" }, t("For trying things out: keep only a few dollars on it.", "Для проб: держи на нём только несколько долларов.")) : null,
-          h("div", {}, h("button", { class: "btn primary", onclick: async () => { if (await act("createWallet", { test: creating.test }) !== null) creating = { open: false, test: false }; } },
-            creating.test ? t("Create a test wallet", "Создать тестовый") : t("Create a new wallet", "Создать новый кошелёк")))) : null,
+          // Busy while the signer works, as the Mac's: a second press would ask Windows Hello for a second wallet.
+          h("div", {}, h("button", { class: "btn primary", disabled: !!creating.busy, onclick: async () => {
+            if (creating.busy) return;
+            creating.busy = true; render();
+            const made = await act("createWallet", { test: creating.test }) !== null;
+            creating = made ? { open: false, test: false } : { ...creating, busy: false };
+            render();
+          } },
+            creating.busy ? t("Creating…", "Создаю…") : creating.test ? t("Create a test wallet", "Создать тестовый") : t("Create a new wallet", "Создать новый кошелёк")))) : null,
         way("doc", t("Import a recovery phrase", "Импортировать фразу восстановления"), t("12 or 24 words from MetaMask, Phantom or another wallet", "12 или 24 слова из MetaMask, Phantom или другого кошелька"), showImport),
         way("lock", t("Import a private key", "Импортировать приватный ключ"), t("One key from Phantom (Solana) or MetaMask (EVM)", "Один ключ из Phantom (Solana) или MetaMask (EVM)"), showImportKey),
         s.automation ? null : way("calendar", t("Automation wallet", "Кошелёк автоматизации"), t("A small budget scheduled tasks spend without Windows Hello", "Небольшой бюджет, который задачи тратят без Windows Hello"), () => act("createAutomationWallet")),
@@ -561,18 +622,24 @@ function walletRow(w, s) {
   return h("div", { class: "pg-set-row" }, h("div", { class: "pg-set-row-line" },
     letterTile(w.label, 26, active),
     h("div", { class: "pg-set-wallet" },
-      renaming === w.id ? h("input", { id: "rename-wallet", class: "pg-set-input", value: renameDraft, oninput: (e) => (renameDraft = e.target.value), onkeydown: (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { renaming = null; render(); } } })
+      renaming === w.id ? h("input", { id: "rename-wallet", class: "pg-set-input", value: renameDraft, oninput: (e) => (renameDraft = e.target.value), onkeydown: (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { e.stopPropagation(); renaming = null; render(); } } })
         : h("b", {}, w.label),
-      h("span", { class: "secondary small one-line selectable" }, [w.solana && "Solana " + short(w.solana), w.evm && "EVM " + short(w.evm)].filter(Boolean).join(" · ") || kindName(w))),
+      // What it signs for, as the Mac's Wallets.describe: its kind, then Solana, EVM and NEAR.
+      h("span", { class: "secondary small one-line selectable" }, describeWallet(w))),
     h("span", { class: "spacer" }),
     h("span", { class: "pg-set-controls" },
       active ? pill(t("Signs now", "Подписывает"), true) : h("button", { class: "btn small", onclick: () => act("switchWallet", { wallet: w.id }) }, t("Use", "Выбрать")),
       renaming === w.id ? h("button", { class: "btn small", onclick: save }, t("Save", "Сохранить"))
         : h("button", { class: "icon-btn", title: t("Rename", "Переименовать"), onclick: () => { renaming = w.id; renameDraft = w.label; render(); setTimeout(() => document.getElementById("rename-wallet")?.select(), 0); } }, icon("pencil", 14)),
-      removing === w.id
-        ? h("button", { class: "btn small pg-danger", title: t("Only if its recovery phrase or key is written down: the money itself stays where it is.", "Только если фраза или ключ записаны: сами деньги остаются на месте."),
-          onclick: async () => { removing = null; await act("removeWallet", { wallet: w.id }); } }, t("Remove?", "Удалить?"))
-        : h("button", { class: "icon-btn", title: t("Remove this wallet", "Удалить этот кошелёк"), onclick: () => { removing = w.id; render(); setTimeout(() => { if (removing === w.id) { removing = null; render(); } }, 4000); } }, icon("trash", 14)))));
+      removing === w.id ? null
+        : h("button", { class: "icon-btn", title: t("Remove this wallet", "Удалить этот кошелёк"), onclick: () => { removing = w.id; render(); } }, icon("trash", 14)))),
+    // Asked in words before anything goes, as the Mac's dialog «Remove «X»?»: the warning shows, not only on hover.
+    removing === w.id ? h("div", { class: "pg-set-panel" },
+      h("b", {}, t(`Remove «${w.label}»?`, `Удалить «${w.label}»?`)),
+      h("div", { class: "secondary small" }, t("Only if its recovery phrase or key is written down: without it the money on this wallet can't be reached from here again. The money itself stays where it is.",
+        "Только если его фраза восстановления или ключ записаны: без них до денег этого кошелька отсюда больше не добраться. Сами деньги остаются на месте.")),
+      h("div", { class: "btns" }, h("button", { class: "btn", onclick: () => { removing = null; render(); } }, t("Cancel", "Отмена")),
+        h("button", { class: "btn pg-danger", onclick: async () => { removing = null; await act("removeWallet", { wallet: w.id }); } }, t("Remove the wallet", "Удалить кошелёк")))) : null);
 }
 
 /** Settings › Wallet › Hyperliquid: the trading key (made and approved once, paused by «lock») and ihatecrypto's fee. */
@@ -888,7 +955,7 @@ export function historyPage() {
     ];
   }
   return h("div", { class: "page-pane", style: `left:${railEdge()}px` },
-    h("div", { class: "page-scroll", "data-keep": "history-" + tab },
+    h("div", { class: "page-scroll", "data-keep": "history-" + tab, oncontextmenu: (e) => askMenu(e, t("History", "История")) },
       pageHeader(t("History", "История"), [
         segmented([["agent", t("Agent", "Агент")], ["positions", t("Positions", "Позиции")], ["all", t("All", "Всё")]], tab, (v) => { store("historyTab", v); render(); }),
         history.loading ? h("span", { class: "page-spin" }) : null,
@@ -942,7 +1009,7 @@ const num = (v, digits) => Number(v).toLocaleString(ui.state.russian ? "ru-RU" :
 /** The Top up page: the panel in its card, with its title and close. */
 export function topUpPage() {
   return h("div", { class: "page-pane", style: `left:${railEdge()}px` },
-    h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, h("div", { class: "page-topup card" },
+    h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, h("div", { class: "page-topup card", oncontextmenu: (e) => askMenu(e, t("Top up", "Пополнить")) },
       h("div", { class: "page-tu-head" }, h("span", { class: "accent-ink" }, icon("arrow.down.circle", 20)), h("b", {}, t("Top up ihatecrypto", "Пополнить ihatecrypto")),
         h("span", { class: "spacer" }), h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: back }, icon("xmark", 14))),
       topUpPanel()))), chatPanel());
@@ -1117,7 +1184,10 @@ export function topUpPanel({ embedded = false, landed } = {}) {
   return frame(amountRow, netRow, ways, wayBody, status, gasLine,
     topUpProblem ? h("div", { class: "loss small" }, topUpProblem) : null,
     h("div", { class: "secondary small" }, s.portfolio.updatedAt ? t("Balances read ", "Балансы прочитаны ") + when(s.portfolio.updatedAt) + " · " : "",
-      h("button", { class: "link-btn", onclick: () => act("refresh") }, t("Refresh", "Обновить"))));
+      h("button", { class: "link-btn", onclick: () => act("refresh"),
+        title: t("ihatecrypto reads balances straight from Solana, Hyperliquid and Base: every 30 s, every 10 s while it guards a position or watches an alert, and right after each action. Click to refresh now.",
+          "ihatecrypto читает балансы прямо из Solana, Hyperliquid и Base: каждые 30 с, каждые 10 с, пока охраняет позицию или следит за оповещением, и сразу после каждого действия. Нажми, чтобы обновить сейчас.") },
+        t("Refresh", "Обновить"))));
 }
 
 /** An address as it's checked by eye: the whole of it as an even block (lines of the same length, never a half that

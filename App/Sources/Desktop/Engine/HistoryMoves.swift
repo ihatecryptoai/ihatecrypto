@@ -17,6 +17,9 @@ nonisolated struct MoveRow: Encodable, Equatable {
     var reply: String
     /// The canvas it was said on; none for a recurring buy, which runs without one.
     var canvas: String?
+    /// The request as History keeps it (the Mac's ActivityCard opened from the block): how it was understood, the cards
+    /// it drew and all its lines. Filled for the block's rows only.
+    var activity: HistoryTabs.Activity? = nil
 }
 
 /// What the latest day did to the money: «−25 USDT to Automation · 5 sends», and the own wallets it went to.
@@ -59,8 +62,19 @@ extension Engine {
         return Array(historyActivities.reversed().filter { !$0.lines.isEmpty || !$0.bubbles.isEmpty || $0.request != nil }.prefix(3))
     }
 
-    /// The block's rows: the newest 14.
-    var historyMoves: [MoveRow] { Array(allMoves.prefix(14).map(\.row)) }
+    /// The block's rows: the newest 14, each with the request it came from as History keeps it — the latest one asked
+    /// with those words at or before the move.
+    var historyMoves: [MoveRow] {
+        let rows = Array(allMoves.prefix(14).map(\.row))
+        // Only the History block opens them: no reading every chat for a state push without one.
+        guard !rows.isEmpty, boards.contains(where: { $0.kind == "history" }) else { return rows }
+        let asked = historyActivities.filter { $0.kind == "request" && $0.request != nil }
+        return rows.map { row in
+            var row = row
+            row.activity = asked.filter { $0.request == row.request && $0.at <= row.at.addingTimeInterval(1) }.max { $0.at < $1.at }
+            return row
+        }
+    }
 
     /// The newest move's day, summed up the shared way (MovedLine.summary), which the chat reads too.
     var movesDay: MovesDay? {

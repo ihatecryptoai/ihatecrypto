@@ -43,3 +43,7 @@
 .lk-after { display: flex; gap: 6px; }
 .lk-after button { height: 28px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--card-border); background: none; font-size: 12px; }
 .lk-after button.on { border: 1.5px solid var(--accent); background: rgba(255, 122, 47, 0.12); color: var(--accent-ink); font-weight: 600; }
+
+/* «Forgot the code? Unlock with Windows Hello…» under the form (the Mac's footer link). */
+.lk-forgot { position: absolute; bottom: 52px; left: 0; right: 0; text-align: center; font-size: 14px; }
+.lk-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--fg, inherit); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); cursor: pointer; }

@@ -60,10 +60,33 @@ extension Engine {
         return Decimal(string: String(m.0).replacingOccurrences(of: ",", with: ""), locale: Locale(identifier: "en_US_POSIX"))
     }
 
-    /// The route drawn again from what is known now: a quote that came lands on its step.
+    /// The route drawn again from what is known now: a quote that came lands on its step, and the footer says the way it
+    /// takes now (a cross swap found through NEAR Intents, Tempo's exchange or Relay's swap there).
     func redrawRoute(_ board: String, _ c: WalletCommand) {
         guard let steps = routeSteps(c) else { changed(); return }
-        updateBoard(board) { $0.steps = steps }
+        let note = routeNote(c)
+        updateBoard(board) { b in b.steps = steps; if let note { b.note = note } }
+        nameTokens(board, c)
+    }
+
+    /// A move's title with each token it names by contract as people read it, «⚠ USDC (0x3C44…93BC)» (the Mac's
+    /// readable title); only a title that is the move's own words, and only its tokens — never a recipient's address.
+    func nameTokens(_ board: String, _ c: WalletCommand) {
+        let tokens: [(String, String)] = switch c {
+        case .buyOn(let p, let t, _, _), .sellOn(let p, let t, _, _): [(t, p)]
+        case .swapOn(let p, let a, let b, _): [(a, p), (b, p)]
+        case .crossSwap(let a, let src, let b, let dst, _): [(a, src), (b, dst)]
+        case .buyStock(let s, _), .sellStock(let s, _): [(s, "robinhood")]
+        default: []
+        }
+        let contracts = tokens.filter { $0.0.hasPrefix("0x") && $0.0.count == 42 }
+        guard !contracts.isEmpty else { return }
+        let named = contracts.reduce(c.summary) { $0.replacingOccurrences(of: $1.0, with: tokenName($1.0, on: $1.1), options: .caseInsensitive) }
+        // Named before its symbol was known: the contract shortened.
+        let unnamed = contracts.reduce(c.summary) { $0.replacingOccurrences(of: $1.0, with: "\($1.0.prefix(6))…\($1.0.suffix(4))", options: .caseInsensitive) }
+        let ours: (String?) -> Bool = { $0 == c.summary || $0 == unnamed }
+        updateBoard(board) { b in if ours(b.title) { b.title = named } }
+        if card?.id == board, ours(card?.title) { card?.title = named }
     }
 
     /// The waiting move's quote for its route (the Mac's quoteSwap, all but Jupiter's): asked once and again every 15 s
@@ -74,8 +97,13 @@ extension Engine {
         case .claimRewards, .sweepRewards:
             // What Merkl owes, by network, is the route itself.
             guard let me = evmAddress, let owed = try? await Merkl.rewards(user: me), !owed.isEmpty, card?.id == board else { return true }
-            let steps = claimSteps(owed, c)
-            updateBoard(board) { $0.steps = steps }
+            let steps = claimSteps(owed, c), note = claimNote(owed, c)
+            // Its title names what's claimed (the Mac's claimRoute), not the command's words.
+            let sweep: Bool = if case .sweepRewards = c { true } else { false }
+            let title = (sweep ? say("Sweep rewards · ", "Собрать награды · ") : say("Claim rewards · ", "Забрать награды · "))
+                + owed.map { "\(Fmt.num($0.claimable, maxFraction: 6)) \($0.symbol)" }.joined(separator: ", ")
+            updateBoard(board) { $0.steps = steps; $0.note = note; $0.title = title }
+            card?.title = title
             return true
         default: break
         }
@@ -164,18 +192,44 @@ extension Engine {
 
     // MARK: The routes
 
-    /// A token as people read it: a contract by its symbol (a favorite, the portfolio) or shortened; a ticker as written.
+    /// A token as people read it (the Mac's tokenLabel): a contract as «AI (0x2E8c…1e18)», with ⚠ before a symbol that
+    /// imitates another — a ticker the app moves money in, on any other contract — and shortened until its symbol is
+    /// known (a favorite, the portfolio, else looked up once); a ticker as written.
     func tokenName(_ token: String, on place: String) -> String {
         guard token.hasPrefix("0x") else { return Stablecoins.find(token, on: place)?.symbol ?? token.uppercased() }
-        return favorites.first { $0.address.lowercased() == token.lowercased() }?.symbol
-            ?? portfolio.networks.first { $0.key == place }?.rows.first { $0.contract?.lowercased() == token.lowercased() }?.symbol
-            ?? "\(token.prefix(6))…\(token.suffix(4))"
+        let key = token.lowercased(), short = "\(token.prefix(6))…\(token.suffix(4))"
+        let symbol = favorites.first { $0.address.lowercased() == key }?.symbol
+            ?? portfolio.networks.first { $0.key == place }?.rows.first { $0.contract?.lowercased() == key }?.symbol
+            ?? ContractNames.known[key]
+        guard let symbol else { learnName(token); return short }
+        return "\(TokenLookup.suspicious(symbol, contract: token, genuine: Self.genuineContracts) ? "⚠ " : "")\(symbol) (\(short))"
+    }
+
+    /// The real dollars and wrapped ether where the app moves money: their tickers on any other contract are a fake.
+    nonisolated static let genuineContracts = Set(EVMNetwork.all.map { $0.usdc.lowercased() } + Stablecoins.byNetwork.values.joined().map { $0.address.lowercased() } + [
+        "0x4200000000000000000000000000000000000006",   // WETH · Base
+        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",   // WETH · Arbitrum
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",   // WETH · Ethereum
+        "0xdac17f958d2ee523a2206206994597c13d831ec7",   // USDT · Ethereum
+        "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",   // USDT · Arbitrum
+    ])
+
+    /// An unknown contract's symbol, asked once (DexScreener); the waiting card is drawn again with it.
+    private func learnName(_ contract: String) {
+        guard ContractNames.asked.insert(contract.lowercased()).inserted else { return }
+        Task { await learnedName(contract) }
+    }
+
+    private func learnedName(_ contract: String) async {
+        guard let symbol = try? await TokenLookup.lookup(contract).first?.symbol else { return }
+        ContractNames.known[contract.lowercased()] = symbol
+        if case .wallet(let c)? = pending, let id = card?.id { redrawRoute(id, c) }
     }
 
     /// A token that arrives: what's held of it now (0 when none) and that plus what arrives, «≈».
     func gained(_ token: String, _ label: String, on place: String, by delta: Decimal) -> Board.Money {
         let was = heldThere(token, on: place) ?? 0
-        return Board.Money(place: WalletCommand.placeName(place), symbol: label, was: Fmt.num(was, maxFraction: 6), after: "≈ " + Fmt.num(was + delta, maxFraction: 6))
+        return Board.Money(place: WalletCommand.placeName(place), symbol: label, was: Self.amount(was, label), after: "≈ " + Self.amount(was + delta, label))
     }
 
     /// A price per token from the portfolio's row, when it's held.
@@ -225,16 +279,23 @@ extension Engine {
         }
     }
 
+    /// What pays a stock buy: the USDG on Robinhood Chain, and what's missing brought from Solana, or straight from the EVM
+    /// network holding USDC when Solana is short. A few cents short ($1 or 2% at most) isn't worth a bridge: the buy spends
+    /// what's there (Executor.buyStock).
+    func stockFunding(_ asked: Decimal) -> (usdg: Decimal, solana: Decimal, fits: Bool, usdc: Decimal, bring: Decimal, elsewhere: (net: EVMNetwork, send: Decimal)?) {
+        let usdg = usdcFree(on: "robinhood") ?? 0, solana = usdcFree(on: "solana") ?? 0
+        let fits = usdg > 0 && usdg < asked && asked - usdg <= max(1, asked / 50)
+        let usdc = fits ? usdg : asked, bring = max(0, usdc - usdg)
+        let elsewhere = bring > 0 ? EVMNetwork.source(arrive: bring, onSolana: solana, target: "robinhood", held: { self.usdcFree(on: $0) }) : nil
+        return (usdg, solana, fits, usdc, bring, elsewhere)
+    }
+
     /// A Robinhood Stock Token (or a token by its contract) bought on Robinhood Chain: the USDG there pays first, Solana or
     /// the EVM network holding USDC brings the rest over Relay, an exact approve, and the way that gives the most.
     private func stockBuy(_ s: String, _ asked: Decimal) -> [Board.Step] {
         let ways = quotes(.buyStock(symbol: s, usdc: asked)), symbol = tokenName(s, on: "robinhood")
         let price = s.hasPrefix("0x") ? rowPrice(s, on: "robinhood") : (markets["xyz:\(s)"] ?? markets["xyz:\(s.uppercased())"])?.markPx ?? rowPrice(s, on: "robinhood")
-        // A few cents short ($1 or 2% at most) isn't worth a bridge: the buy spends what's there (Executor.buyStock).
-        let usdg = usdcFree(on: "robinhood") ?? 0, solana = usdcFree(on: "solana") ?? 0
-        let fits = usdg > 0 && usdg < asked && asked - usdg <= max(1, asked / 50)
-        let usdc = fits ? usdg : asked, bring = max(0, usdc - usdg)
-        let elsewhere = bring > 0 ? EVMNetwork.source(arrive: bring, onSolana: solana, target: "robinhood", held: { self.usdcFree(on: $0) }) : nil
+        let (usdg, solana, fits, usdc, bring, elsewhere) = stockFunding(asked)
         var steps: [Board.Step]
         if bring == 0 {
             steps = [st(say("FROM · ROBINHOOD CHAIN", "ОТКУДА · ROBINHOOD CHAIN"), "\(Fmt.num(usdc)) USDG",
@@ -300,9 +361,9 @@ extension Engine {
     /// A token on an EVM network (the Mac's swapRoute): bought with the USDC already there (or brought straight from the
     /// network holding it), else with USDC from Solana by Relay's swap or Relay's bridge and Uniswap; sold back to Solana,
     /// or for USDC that stays there (`keep`).
-    private func evmTrade(_ place: String, _ token: String, usdc: Decimal?, sell: Decimal?, from src: String?, keep: Bool) -> [Board.Step] {
-        let name = WalletCommand.placeName(place), net = name.uppercased(), label = tokenName(token, on: place)
-        let command: WalletCommand = usdc != nil ? .buyOn(place, token: token, usdc: usdc, from: src) : .sellOn(place, token: token, amount: sell, keep: keep)
+    /// Where a buy or sale on an EVM network pays from: `payer`, another EVM network whose USDC Relay brings first; `here`,
+    /// done on the network itself with Uniswap (the USDC there, or brought from that network) — else Relay's ways from Solana.
+    func evmTradeSource(_ place: String, usdc: Decimal?, from src: String?, keep: Bool, command: WalletCommand) -> (payer: String?, here: Bool) {
         let quoted = quotes(command), key = RouteEdit.wayKey(command)
         let picked = key.flatMap { k in routeWay?.key == k ? routeWay?.way : nil }
         // Solana short and the network without the USDC: it comes straight from the EVM network holding it (EVMNetwork.source).
@@ -313,6 +374,15 @@ extension Engine {
         let payer = (src ?? auto).flatMap { $0 == "solana" || $0 == place ? nil : $0 }
         let here = keep || ((src ?? auto) != nil && (src ?? auto) != "solana")
             || (usdc.map { u in quoted?.first.map { $0.way == "here" } ?? (src != "solana" && (usdcFree(on: place) ?? 0) >= u) } ?? false)
+        return (payer, here)
+    }
+
+    private func evmTrade(_ place: String, _ token: String, usdc: Decimal?, sell: Decimal?, from src: String?, keep: Bool) -> [Board.Step] {
+        let name = WalletCommand.placeName(place), net = name.uppercased(), label = tokenName(token, on: place)
+        let command: WalletCommand = usdc != nil ? .buyOn(place, token: token, usdc: usdc, from: src) : .sellOn(place, token: token, amount: sell, keep: keep)
+        let quoted = quotes(command), key = RouteEdit.wayKey(command)
+        let picked = key.flatMap { k in routeWay?.key == k ? routeWay?.way : nil }
+        let (payer, here) = evmTradeSource(place, usdc: usdc, from: src, keep: keep, command: command)
         let moving = usdc.map { "\(Fmt.num($0)) USDC" } ?? (sell.map { "\(Fmt.num($0, maxFraction: 8)) \(label)" } ?? say("all \(label)", "всё \(label)"))
         if here {
             let gets = quoted?.first { $0.way == "here" }?.gets
@@ -500,7 +570,7 @@ extension Engine {
                        say("a float for ≈ \(requests) requests like this · Relay ≈ $0.02", "запас на ≈ \(requests) таких запросов · Relay ≈ $0.02"), moved("USDC", on: "solana", by: -need))
         } else {
             first = st(from("tempo"), "\(price) USDC", say("your USDC on Tempo", "твои USDC в Tempo"),
-                       Board.Money(place: "Tempo", symbol: "USDC", was: Fmt.num(there, maxFraction: 6), after: Fmt.num(max(0, there - ch.usdc), maxFraction: 6)))
+                       Board.Money(place: "Tempo", symbol: "USDC", was: Self.amount(there, "USDC"), after: Self.amount(max(0, there - ch.usdc), "USDC")))
         }
         return [first, st(say("PAY · MPP", "ОПЛАТА · MPP"), "\(price) USDC", ch.purpose ?? say("one request", "один запрос")),
                 st(say("TO · ", "КУДА · ") + q.service.uppercased(), say("the answer comes here", "ответ придёт сюда"), host)]
@@ -529,7 +599,10 @@ extension Engine {
         }
         return signs + [Board.Step(label: say("TO · ", "КУДА · ") + p.to.name.uppercased(), title: "\(amount) → \(p.to.name)",
                                    lines: [say("from the multisig \(p.multisig.address.prefix(6))…\(p.multisig.address.suffix(4))", "из мультисига \(p.multisig.address.prefix(6))…\(p.multisig.address.suffix(4))"),
-                                           say("gas from this computer", "газ с этого компьютера")])]
+                                           say("gas from this computer", "газ с этого компьютера")],
+                                   // The multisig's own balance going down, as the Mac's card shows it.
+                                   money: Board.Money(place: say("Multisig", "Мультисиг"), symbol: p.symbol, was: Self.amount(p.held, p.symbol),
+                                                      after: Self.amount(max(0, p.held - p.amount), p.symbol)))]
     }
 
     nonisolated static func bridgeName(_ way: String) -> String { ["relay": "Relay", "cctp": "CCTP", "1click": "NEAR Intents", "layerzero": "LayerZero"][way] ?? way }
@@ -631,5 +704,162 @@ extension Engine {
                            lines: [say("share\t", "доля\t") + Fmt.pct(share * 100), say("size\t", "размер\t") + "\(Fmt.num(abs(p.size) * share, maxFraction: 6)) \(name)",
                                    say("entry\t", "вход\t") + Fmt.price(p.entry)] + (markets[coin].map { [say("now\t≈ ", "сейчас\t≈ ") + Fmt.price($0.markPx)] } ?? [])),
                 st(say("TO · HYPERLIQUID", "КУДА · HYPERLIQUID"), "USDC", say("back to the trading balance", "обратно на торговый баланс"))]
+    }
+}
+
+/// Contracts' symbols looked up for a route's labels (the Mac's tokenNames), each asked once.
+enum ContractNames {
+    static var known: [String: String] = [:]
+    static var asked: Set<String> = []
+}
+
+// MARK: The footer under each route
+
+extension Engine {
+    /// What the route signs and how it's checked, from what the route does now (the Mac's MoveRoute footers,
+    /// Canvases.swift): where the money comes from, the way the quote took, a coin going in as itself. The rest as
+    /// RouteEdit.note says it. With «One transaction for approve and swap» on, a footer that counts an approve says the
+    /// two go out as one (the Mac's MoveRoute.init).
+    func routeNote(_ c: WalletCommand) -> String? {
+        guard let note = ownNote(c) ?? RouteEdit.note(c, say: { say($0, $1) }) else { return nil }
+        return Executor.batchesOn && (note.contains("approve") || note.contains("разрешени"))
+            ? note + say(" With «One transaction for approve and swap» on, the approve and what spends it go out as one transaction under one Windows Hello.",
+                         " Включена «Одна транзакция для approve и обмена»: разрешение и то, что его тратит, уйдут одной транзакцией под одним Windows Hello.")
+            : note
+    }
+
+    private func ownNote(_ c: WalletCommand) -> String? {
+        func name(_ k: String) -> String { WalletCommand.placeName(k) }
+        let confirm = say(" Press Confirm.", " Нажми «Подтвердить».")
+        switch c {
+        case .buyOn(let place, _, let u?, let src): return hereNote(c, place, usdc: u, from: src, keep: false)
+        case .sellOn(let place, _, _, let keep): return hereNote(c, place, usdc: nil, from: nil, keep: keep)
+        case .buyStock(let s, let u?):
+            let f = stockFunding(u)
+            let start = f.bring == 0 ? say("Two signatures on Robinhood Chain with the USDG already there: ", "Две подписи в Robinhood Chain с USDG, которые уже там: ")
+                : f.elsewhere.map { say("An exact approve and Relay's deposit on \($0.net.name), then two on Robinhood Chain: ", "Точное разрешение и депозит Relay в \($0.net.name), потом две в Robinhood Chain: ") }
+                    ?? say("One Solana signature for the bridge, then two on Robinhood Chain: ", "Одна подпись в Solana для моста, потом две в Robinhood Chain: ")
+            return start
+                + say("an exact USDG approve and the swap the best way takes (Uniswap v4, v3 or Relay’s swap, compared in the step), which may only pay this wallet. ",
+                      "точное разрешение на USDG и обмен лучшим путём (Uniswap v4, v3 или обмен Relay — сравнение в шаге), который может платить только этому кошельку. ")
+                + (s.hasPrefix("0x")
+                    ? say("The token is taken by its contract: it must trade on Robinhood Chain with $50k+ of liquidity, and the price must sit within 5% of DexScreener's.",
+                          "Токен взят по контракту: он должен торговаться в Robinhood Chain с ликвидностью от $50 тыс., а цена — не дальше 5% от DexScreener.")
+                    : say("The token is Robinhood's registered contract, checked on-chain, and the price must sit within Robinhood's own quote.",
+                          "Токен — зарегистрированный контракт Robinhood, проверенный в сети, а цена должна быть в пределах собственной котировки Robinhood."))
+                + confirm
+        case .swapOn("tempo", _, _, _):
+            let relay = quotes(c)?.first?.way == "Relay's swap"
+            return say("An exact approve to \(relay ? "Relay's swap on Tempo" : "Tempo's own exchange"), then the swap at no less than \(relay ? "Relay's checked quote" : "0.1% under its quote"), paying only this wallet; Tempo's fees come out of the USDC, a tenth of a cent each.",
+                       "Точное разрешение для \(relay ? "обмена Relay в Tempo" : "собственной биржи Tempo"), потом обмен не хуже \(relay ? "проверенной котировки Relay" : "котировки на 0,1%"), платит только этому кошельку; комиссии Tempo — из USDC, по десятой цента.") + confirm
+        case .swapOn(let place, let a, let b, _) where !["solana", "near", "hyperliquid"].contains(place):
+            guard let net = EVMNetwork.named(place) else { return nil }
+            let coin = net.gasCoin, coinIn = a.uppercased() == coin.uppercased(), coinOut = b.uppercased() == coin.uppercased(), n = name(place)
+            return say("One swap on \(n), no USDC in the middle: the best of Uniswap v2, v3 and v4, at most 0.5–3% under its quote by the price impact, paying only this wallet.",
+                       "Один обмен в \(n), без USDC посередине: лучший из Uniswap v2, v3 и v4, не хуже котировки больше чем на 0,5–3% по влиянию на цену, платит только этому кошельку.")
+                + (coinIn ? say(" \(coin) goes in as itself into a v4 pool of it, else wrapped into W\(coin) first (one more transaction).", " \(coin) идёт как есть в пул v4 с ним, иначе сначала оборачивается в W\(coin) (ещё одна транзакция).")
+                          : say(" An exact approve first.", " Сначала точное разрешение."))
+                + (coinOut ? say(" \(coin) comes out as itself, or is unwrapped after.", " \(coin) выходит как есть или разворачивается после.") : "") + confirm
+        case .crossSwap(let a, let src, let b, let dst, _):
+            let from = name(src), to = name(dst), label = tokenName(b, on: dst)
+            if src == "near" || dst == "near" || quotes(c)?.first?.way.hasPrefix("NEAR Intents") == true {
+                return say("One deposit on \(from) to the 1Click address NEAR Intents binds to this quote — checked with 1Click before signing; that address needs Windows Hello the first time — and \(label) comes to your own address on \(to); a refund comes back to \(from).",
+                           "Один депозит в \(from) на адрес 1Click, который NEAR Intents привязывает к этой котировке, — сверяется с 1Click перед подписью; этому адресу в первый раз нужен Windows Hello, — и \(label) придёт на твой же адрес в \(to); возврат — обратно в \(from).") + confirm
+            }
+            let coinIn = a.uppercased() == (src == "solana" ? "SOL" : EVMNetwork.named(src)?.gasCoin.uppercased() ?? "ETH")
+            return say("One signature on \(from): Relay's solver swaps on the way and pays \(label) to your own address on \(to), usually within seconds. If more than 3% (or 15 cents) of the value would be lost, nothing is signed.",
+                       "Одна подпись в \(from): решатель Relay обменивает по пути и платит \(label) на твой же адрес в \(to), обычно за секунды. Если потерялось бы больше 3% (или 15 центов) стоимости, ничего не подписывается.")
+                + (src != "solana" && coinIn ? say(" The \(a.uppercased()) goes to Relay's depository: that address needs Windows Hello the first time.", " \(a.uppercased()) уходит в хранилище Relay: этому адресу в первый раз нужен Windows Hello.") : "")
+                + (src != "solana" && !coinIn ? say(" An exact approve to Relay comes first, in the same transaction where the network allows.", " Сначала точное разрешение для Relay, в той же транзакции, где сеть это умеет.") : "")
+                + confirm
+        case .sendToken(let who, let token, let x?, let net):
+            guard let r = try? acrossRecipient(who, token: token, network: net) else { return nil }
+            let place = AddressCheck.Network(rawValue: r.entry.network)?.title ?? WalletCommand.placeName(r.entry.network), what = "\(Fmt.num(x, maxFraction: 8)) \(r.symbol)"
+            return say("NEAR Intents' 1Click turns USDC into \(r.symbol) on \(place) and pays this saved address exactly \(what); what's left of the USDC comes back. Its deposit address is fresh: it needs Windows Hello before anything is sent.",
+                       "1Click от NEAR Intents превращает USDC в \(r.symbol) в \(place) и платит этому сохранённому адресу ровно \(what); остаток USDC возвращается. Его адрес депозита новый: перед отправкой нужен Windows Hello.") + confirm
+        case .pay:
+            guard let q = payment, q.command == c else { return nil }
+            let ch = q.challenge, host: String = { if case .pay(_, let url, _) = c { return URL(string: url)?.host ?? ch.realm } else { return ch.realm } }()
+            let price = Fmt.num(ch.usdc, maxFraction: 6), e = AddressCheck.ends(ch.payee), short = tempoUSDC < ch.usdc + Decimal(string: "0.01")!
+            return say("One Tempo transfer of \(price) USDC to the address \(host) named (\(e.start) … \(e.end)); ", "Один перевод в Tempo на \(price) USDC по адресу, который назвал \(host) (\(e.start) … \(e.end)); ")
+                + (short ? say("what's short comes from Solana over Relay first; ", "недостающее сначала придёт с Solana через Relay; ") : "")
+                + say("the fee, ≈ $0.001, comes out of the USDC. Then the request goes again with the payment's hash.", "комиссия ≈ $0,001 — из этих USDC. Потом запрос уходит снова с хешем платежа.") + confirm
+        case .aave(true, let x?, let net), .morpho(true, let x?, let net):
+            // The Mac's lendRoute footer: Solana's part only when Base is short, and Ethereum's gas said.
+            let morpho: Bool = if case .morpho = c { true } else { false }
+            let n = name(net), coin = EVMNetwork.named(net)?.gasCoin ?? "ETH", short = (usdcFree(on: net) ?? 0) < x
+            return (short ? say("What's missing on \(n) comes from Solana over Relay, with \(coin) for gas when there's none; then two",
+                                "Недостающее на \(n) придёт с Solana через Relay, с \(coin) на газ, если его нет; потом две")
+                          : say("Two", "Две"))
+                + say(" \(n) transactions: approve exactly \(Fmt.num(x)) USDC, then \(morpho ? "deposit; the shares come to this wallet only" : "supply"). \(morpho ? "The vault's asset is" : "Pool and aToken are") re-read from \(n) first",
+                      " транзакции в \(n): разрешение ровно на \(Fmt.num(x)) USDC, потом \(morpho ? "депозит — доли приходят только на этот кошелёк" : "вклад"). \(morpho ? "Актив хранилища" : "Пул и aToken") сначала перечитываются из \(n)")
+                + (net == "ethereum" ? say("; Ethereum's gas changes by the hour (cents to dollars): ask the chat «how much is gas?» for today's",
+                                           "; газ в Ethereum меняется каждый час (от центов до долларов): спроси в чате «сколько стоит газ?», чтобы узнать сегодняшний") : "")
+                + "." + confirm
+        case .multisigCreate:
+            return say("One transaction per network from this computer to Safe's factory (Safe 1.4.1, the same contracts and the same address on each). The keys and how many must sign are set in it; ihatecrypto never changes them.",
+                       "Одна транзакция на сеть с этого компьютера на фабрику Safe (Safe 1.4.1, те же контракты и тот же адрес в каждой). Ключи и сколько их нужно для подписи задаются в ней; ihatecrypto их никогда не меняет.") + confirm
+        case .multisigSend:
+            guard let p = multisigPayment, p.command == c, let net = EVMNetwork.named(p.net) else { return nil }
+            return say("Each key signs the same move: a plain payment, money only to \(p.to.name). Then this computer sends it with the signatures and pays the gas; the multisig needs no \(net.gasCoin).",
+                       "Каждый ключ подписывает одно и то же: обычный платёж, деньги только \(p.to.name). Потом этот компьютер отправляет его с подписями и платит газ; мультисигу \(net.gasCoin) не нужен.") + confirm
+        case .contractCall:
+            guard let r = callReview, r.command == c else { return nil }
+            return say("Encoded by ihatecrypto from \(r.call.function), simulated on \(r.net.name)", "Закодировано ihatecrypto из \(r.call.function), симуляция в \(r.net.name)")
+                + (r.approve == nil ? "" : say(" with its exact approve", " с точным разрешением"))
+                + say("; the signer reads it again and asks for a new spender in person.", "; подписант читает его снова и о новом получателе разрешения спрашивает лично.") + confirm
+        default:
+            return nil
+        }
+    }
+
+    /// A buy or sale done on the EVM network itself (the USDC there, or brought from another EVM network by Relay): its
+    /// Uniswap footer (the Mac's tokenRoute); nil for Relay's ways from Solana, which RouteEdit.note says.
+    private func hereNote(_ c: WalletCommand, _ place: String, usdc: Decimal?, from src: String?, keep: Bool) -> String? {
+        let (payer, here) = evmTradeSource(place, usdc: usdc, from: src, keep: keep, command: c)
+        guard here else { return nil }
+        let n = WalletCommand.placeName(place)
+        return (payer.map { say("First Relay moves the USDC from \(WalletCommand.placeName($0)) to \(n): an exact approve and its deposit. Then two",
+                                "Сначала Relay перевезёт USDC из \(WalletCommand.placeName($0)) в \(n): точное разрешение и его депозит. Потом две") }
+                ?? say("Two", "Две"))
+            + say(" \(n) transactions: an exact approve and the Uniswap swap, which may only pay this wallet", " транзакции в \(n): точное разрешение и обмен в Uniswap, который может платить только этому кошельку")
+            + (usdc == nil ? say("; the USDC stays on \(n).", "; USDC остаются в \(n).") : ".") + say(" Press Confirm.", " Нажми «Подтвердить».")
+    }
+
+    /// Merkl's claim or sweep (the Mac's claimRoute footer), once what's owed is read: one transaction a network.
+    func claimNote(_ owed: [Merkl.Reward], _ c: WalletCommand) -> String {
+        let names = Array(Set(owed.map { EVMNetwork.of(chainId: $0.chainId)?.name ?? "chain \($0.chainId)" })).sorted().joined(separator: ", ")
+        let sweep: Bool = if case .sweepRewards = c { true } else { false }
+        return say("One \(names) transaction a chain: Merkl's distributor pays each reward to this wallet — the signer refuses a claim that pays anyone else. ",
+                   "Одна транзакция на сеть (\(names)): распределитель Merkl платит каждую награду этому кошельку — подписант откажет в получении, которое платит кому-то ещё. ")
+            + (sweep ? say("Then each reward worth $1 or more is sold for USDC on Solana (Relay's swap or Uniswap and the bridge, whichever leaves more), paying only this wallet; dust stays. ",
+                           "Потом каждая награда от $1 продаётся за USDC на Solana (обмен Relay или Uniswap и мост — что оставит больше), только на этот кошелёк; мелочь остаётся. ") : "")
+            + say("The proofs are asked for again right before signing; gas missing there comes from Solana over Relay. Press Confirm.",
+                  "Доказательства запрашиваются снова прямо перед подписью; недостающий газ придёт с Solana через Relay. Нажми «Подтвердить».")
+    }
+}
+
+extension Engine {
+    /// The save card's line (the Mac's PendingAddressBoard): taken from the message, or resolved from a domain just now.
+    func addressNote(_ e: SignerAddress) -> String {
+        let net = AddressCheck.Network(rawValue: e.network)?.title ?? WalletCommand.placeName(e.network)
+        let domain = Self.savingExtras[Self.extraKey(name: e.name, network: e.network)]?.note?.components(separatedBy: " — ").first
+        return domain.map { say("Resolved from \($0) on \(net) just now and checked. Save asks for Windows Hello with the whole address on the prompt.",
+                                "Получено из \($0) в \(net) только что и проверено. «Сохранить» спросит Windows Hello с полным адресом в окне.") }
+            ?? say("Taken from your own message and checked for \(net). Compare it with the source: Save asks for Windows Hello with the whole address on the prompt.",
+                   "Взято из твоего сообщения и проверено для \(net). Сверь с источником: «Сохранить» спросит Windows Hello с полным адресом в окне.")
+    }
+
+    /// USDC to a saved address (the Mac's transferRoute footer): to one of the person's own wallets it says so; on Ethereum
+    /// mainnet, that the gas is in ETH and can be dollars.
+    func transferNote(_ e: SignerAddress, _ amount: Decimal) -> String {
+        let net = AddressCheck.Network(rawValue: e.network)?.title ?? WalletCommand.placeName(e.network)
+        return (isOwnWallet(e.address)
+                ? say("To your own wallet «\(e.name)», one transfer on \(net).", "На твой собственный кошелёк «\(e.name)», один перевод в \(net).")
+                : say("Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(amount)) USDC leaving.",
+                      "Получить деньги может только этот сохранённый адрес: это проверяют защита и подписант, а симуляция должна показать, что уходит ровно \(Fmt.num(amount)) USDC."))
+            + (e.network == "ethereum" ? say(" Ethereum mainnet: the fee is in ETH and can be dollars; it's bought for you if the wallet has none there.",
+                                             " Основная сеть Ethereum: комиссия — в ETH и может быть в долларах; если его на кошельке нет, его купят за тебя.") : "")
+            + say(" Press Confirm.", " Нажми «Подтвердить».")
     }
 }

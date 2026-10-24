@@ -1,0 +1,14 @@
+{
+ "lock": {
+  "codeSet": true,
+  "locked": true,
+  "codeOff": false,
+  "problem": null,
+  "lockAfter": 5,
+  "checking": false,
+  "offerNewCode": false,
+  "tasksRun": true
+ },
+ "russian": true,
+ "language": "ru"
+}

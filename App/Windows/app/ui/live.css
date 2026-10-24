@@ -320,6 +320,9 @@
 .live-hist-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: none; background: none; text-align: left; color: inherit; }
 .live-hist-amount { flex: none; font-size: 12px; white-space: nowrap; }
 .live-hist-request { display: flex; flex-direction: column; gap: 8px; margin: 2px 8px 8px 44px; padding: 10px 12px; border-radius: 14px; background: var(--fill); }
+.live-hist-activity { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 6px 0; }
+.live-hist-activity .page-act { margin-bottom: 0; align-self: stretch; }
+.live-hist-activity .page-hb { width: min(210px, 100%); }
 .live-hist-asked { align-self: flex-end; max-width: 85%; padding: 7px 11px; border-radius: 14px 14px 4px 14px; background: var(--accent); color: var(--on-accent); font-size: 12.5px; }
 .live-hist-reply { white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
 
@@ -400,3 +403,26 @@
 .live-fav-name .live-field-row:has(.live-fav-pic) { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; }
 .live-fav-name .live-field-row:has(.live-fav-pic) .field, .live-fav-name .live-field-row:has(.live-fav-pic) select { min-width: 0; width: 100%; }
 .live-fav-pic { align-self: end; margin-bottom: 4px; }
+
+/* A recurring buy on the canvas (the Mac's ScheduleBoard). */
+.live-recurring { display: flex; flex-direction: column; gap: 12px; }
+.live-rec-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.live-rec-title { font-size: 15px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.live-rec-chip { flex: none; padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.live-rec-chip.on { color: var(--profit); background: color-mix(in srgb, var(--profit) 12%, transparent); }
+.live-rec-chip.short { color: var(--jev-ink); background: var(--jev-tint); }
+.live-rec-chip.paused { color: var(--loss); background: color-mix(in srgb, var(--loss) 10%, transparent); }
+.live-rec-route { align-items: center; flex-wrap: nowrap; }
+.live-rec-route .page-hb { flex: 1 1 0; min-width: 0; width: auto; }
+.live-rec-arrow { flex: none; display: inline-flex; }
+.live-rec-runs { display: flex; flex-direction: column; }
+.live-rec-run { display: flex; align-items: center; gap: 12px; padding: 7px 0; font-size: 12.5px; }
+.live-rec-run + .live-rec-run { border-top: 1px solid var(--separator, var(--card-border)); }
+.live-rec-when { width: 130px; flex: none; }
+.live-rec-short { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border-radius: 12px; font-size: 10px; color: var(--jev-ink); background: var(--jev-tint); }
+@media (max-width: 520px) {
+  .live-rec-route { flex-wrap: wrap; }
+  .live-rec-route .page-hb { flex: 1 1 100%; }
+  .live-rec-arrow { display: none; }
+  .live-rec-when { width: auto; }
+}

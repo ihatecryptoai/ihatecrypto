@@ -86,6 +86,10 @@ function draw() {
     parts.push(h("div", { class: "ground" }), ui.overlay, windowControls());
   } else if (s.phrase) {
     parts.push(h("div", { class: "ground" }), phraseScreen(), windowControls());
+  } else if (ui.view === "settings" && (onboardingRunning() || (!s.wallets.length && !s.watching && !welcomeDone()))) {
+    // Ctrl+, during Welcome or the first run: Settings over them, as the Mac's opens over both; closing it goes back.
+    setProtect(false);
+    parts.push(h("div", { class: "ground" }), settingsPage(), windowControls());
   } else if (onboardingRunning()) {
     // The Mac's staged first run, wallet or not: its step is kept until it's finished.
     setProtect(false);
@@ -99,10 +103,11 @@ function draw() {
     parts.push(h("div", { class: "ground" }), page || canvasView(), rail(), windowControls());
   }
   app.replaceChildren(...parts);
-  // The page panel's webviews sit over this page: hidden while anything but the canvas fills it (Settings, a sheet,
-  // the lock, the first run), as the Mac's WebPanel shows only beside the canvas (panel-grip.js reads it) — and while a
-  // site's request waits, whose block (and its ticks) would sit under the browser: the Mac's sheet covers the browser.
-  const covered = parts.length !== 4 || ui.view === "settings" || ui.view === "history" || ui.view === "topup" || !!s.site;
+  // The page panel's webviews sit over this page: hidden while Settings, a sheet, the lock or the first run fills it, as
+  // the Mac's Settings replaces the Studio (panel-grip.js reads it) — History and Top up are drawn inside the Studio
+  // there, beside its panel, so it stays beside them here too — and while a site's request waits, whose block (and its
+  // ticks) would sit under the browser: the Mac's sheet covers the browser.
+  const covered = parts.length !== 4 || ui.view === "settings" || !!s.site;
   if (store("panelHidden") !== covered) store("panelHidden", covered);
   restore();
   if (focused) {
@@ -121,6 +126,9 @@ document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (document.querySelector(".menu")) { document.querySelector(".menu").remove(); return; }
+    // Esc in a field is that field's (a node's address, a rename): it doesn't leave the page as well, as the Mac's sheet
+    // closes alone.
+    if (e.defaultPrevented || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
     if (ui.view !== "canvas") { ui.view = "canvas"; render(); }
   }
 });

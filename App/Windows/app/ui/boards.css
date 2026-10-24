@@ -61,8 +61,11 @@
 /* A move */
 .route-move { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; border-radius: 24px; }
 .route-move.route-attached, .route-block.route-attached { outline: 2px solid var(--accent); outline-offset: 8px; }
-.route-move-head { display: flex; align-items: center; gap: 8px; min-height: 34px; align-self: stretch; }
-.route-move-title { font-size: 14px; font-weight: 600; min-width: 0; }
+/* At most as wide as the room left of «Add block» at 100 %: Cancel and Confirm go to a second row before they'd go under it. */
+.route-move-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 34px; align-self: flex-start; max-width: 560px; }
+/* A long title wraps rather than pushing Cancel and Confirm under «Add block»; it starts with a capital, as the chat's. */
+.route-move-title { display: inline-block; font-size: 14px; font-weight: 600; min-width: 0; max-width: 330px; overflow-wrap: anywhere; }
+.route-move-title::first-letter { text-transform: uppercase; }
 .route-status-chip { --route-tint: var(--secondary); font-size: 10px; padding: 4px 9px; border-radius: 999px; white-space: nowrap; color: var(--route-tint);
   background: color-mix(in srgb, var(--route-tint) 12%, transparent); }
 .route-status-chip.profit { --route-tint: var(--profit); }
@@ -175,7 +178,7 @@
 .route-money-line .route-was, .route-money-line .route-sym { color: var(--secondary); }
 .route-money-line .route-arr { color: var(--tertiary); }
 .route-money-line .route-sym { font-size: 10px; }
-.route-step-line { font-size: 11px; color: color-mix(in srgb, var(--text) 78%, transparent); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.route-step-line { font-size: 11px; color: color-mix(in srgb, var(--text) 78%, transparent); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .route-step-line.route-strong { font-weight: 600; }
 .route-step-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; white-space: nowrap; }
 .route-step-row > span { flex: 1; color: color-mix(in srgb, var(--text) 78%, transparent); }
@@ -353,6 +356,17 @@
 .route-plan-chart { width: auto; align-self: stretch; min-width: 470px; }
 .route-plan-chart .route-move-head { min-height: 34px; }
 .route-chart-area { position: relative; }
+.route-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.route-age { margin-top: -6px; font-size: 10px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+/* The axes (the Mac's priceAxes): prices on the right in the text's colour, times under the chart. */
+.route-chart-box { position: relative; min-width: 0; }
+.route-chart-area.route-axes { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; }
+.route-chart-y { position: relative; }
+.route-chart-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
+.route-chart-x { position: relative; height: 17px; }
+.route-chart-x span { position: absolute; top: 4px; transform: translateX(-50%); font-size: 10px; white-space: nowrap; color: var(--secondary); }
+.route-chart-plot .route-chart-grid { stroke: var(--text); stroke-opacity: 0.08; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.route-chart-change.route-chart-when { color: var(--secondary); font-weight: 500; }
 .route-chart-area .route-chart-plot { height: 190px; }
 .route-zone { fill-opacity: 0.1; }
 .route-zone.route-loss { fill: var(--loss); }

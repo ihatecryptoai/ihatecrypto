@@ -3,9 +3,10 @@
 // and Robinhood first, the others by money, those with $100 or less folded under «Other networks».
 // A row opens the coin (its board or chart) through the chat field; nothing here moves money by itself.
 
-import { ui, h, svg, act, engine, invoke, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link, presence } from "./core.js";
+import { ui, h, svg, act, engine, invoke, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link, presence, store, qrCode } from "./core.js";
 import { coinTrades, tradePhrases } from "./boards.js";
 import { suggestGas } from "./live.js";
+import { attachAbout } from "./chat.js";
 
 addIcons({
   bell: "M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
@@ -53,7 +54,22 @@ const amount = (text) => masked(text, String(text).replace(/\d/g, "•"));
 
 export function portfolioFrame() {
   const p = ui.state.portfolio;
-  return h("div", { class: "portfolio" }, p.updatedAt ? loaded(p) : loading());
+  return h("div", { class: "portfolio", oncontextmenu: (e) => askMenu(e, t("Portfolio", "Портфель")) }, p.updatedAt ? loaded(p) : loading());
+}
+
+/** Right-click on a frame that isn't a block of the plan (the Mac's BlockMenu on the portfolio, a place's details, Top up,
+ *  History): the chat about it, or «What's going on here?» straight away. A row with its own menu keeps it. */
+export function askMenu(e, title) {
+  if (e.defaultPrevented) return;
+  e.preventDefault();
+  const s = ui.state, can = !s.thinking && !!s.model?.connected;
+  const el = popup(e, [
+    // A chip over the field, as the Mac's attach: the frame goes with the next message, the question is the person's.
+    [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attachAbout({ title, about: t(`About «${title}» on the canvas`, `Про «${title}» на холсте`) })],
+    [[icon("questionmark.bubble", 14), t("What's going on here?", "Что здесь происходит?")],
+      () => act("send", { text: t(`What's going on in «${title}»?`, `Что происходит в «${title}»?`) })],
+  ], "route-menu");
+  if (!can) el.querySelectorAll(".item")[1].disabled = true;
 }
 
 /** Until the first read is in: the card's shape, shimmering. */
@@ -95,6 +111,7 @@ function loaded(p) {
     scheduleTop3(),
     networkCards(p),
     alertsCard(),
+    recurringBox(),
     p.errors.length ? h("div", { class: "pf-errors" }, t("Didn't answer: ", "Не ответили: ") + p.errors.join("; ")) : null);
 }
 
@@ -180,31 +197,83 @@ function nextLine(task) {
   return [h("span", {}, `${day} ${time}`), tail ? h("span", { class: "pf-next-tail" }, ` · ${tail}`) : null];
 }
 
-/** The next three runs on their own; a paused one isn't among them (ScheduleTop3). A row or «All» opens the Schedule. */
+/** Who signs an item's runs, as its mark says (the Mac's ScheduleSigner): by itself (the automation wallet, or nothing
+ *  moves), Windows Hello, Confirm on a test wallet, the Ledger, or the exchange for a position's stop and take. */
+function signerOf(e) {
+  const s = ui.state;
+  if (e.perp) return "exchange";
+  const active = s.wallets.find((w) => w.id === s.active);
+  const ledger = s.active === "ledger" || active?.kind === "ledger";
+  if (e.task.recurring) return ledger ? "ledger" : active?.test ? "itself" : "hello";
+  if (e.task.moves === false || e.task.automatic) return "itself";
+  return ledger ? "ledger" : active?.test ? "confirm" : "hello";
+}
+const SIGNERS = {
+  itself: ["bolt", () => t("runs by itself", "идёт сама")],
+  hello: ["hand", () => t(`asks ${presence()}`, `спросит ${presence()}`)],
+  confirm: ["hand.tap", () => t("waits for Confirm", "ждёт «Подтвердить»")],
+  ledger: ["lock.shield", () => t("asks your Ledger", "спросит твой Ledger")],
+  exchange: ["chart.line", () => t("on the exchange", "на бирже")],
+};
+
+/** The next three things that run on their own, then the open positions; a paused one isn't among them (ScheduleTop3).
+ *  A row opens its own canvas; «All» opens the Schedule beside the portfolio. */
 function scheduleTop3() {
-  const tasks = ui.state.tasks;
-  const running = tasks.filter((x) => !x.paused);
+  const s = ui.state;
+  const held = s.schedulePaused === true;
+  const dated = s.tasks.map((x) => ({ key: "task:" + x.id, task: x, paused: !!x.paused, next: x.next }))
+    .sort((a, b) => (a.next ? Date.parse(a.next) : Infinity) - (b.next ? Date.parse(b.next) : Infinity));
+  const perps = (s.positions || []).map((p) => ({ key: "perp:" + p.coin, perp: p, paused: false }));
+  const entries = [...dated, ...perps];
+  const running = entries.filter((e) => !e.paused);
   const next = running.slice(0, 3);
-  const paused = tasks.length - running.length;
-  const openSchedule = () => act("addBoard", { name: "schedule" });
-  // Runs by itself: the automation wallet signs it, or it moves no money at all (the Mac's ScheduleSigner).
-  const itself = (x) => x.automatic || x.moves === false;
-  const marks = [...new Set(next.map((x) => (itself(x) ? "auto" : "hello")))];
+  const paused = entries.length - running.length;
+  const marks = [...new Set(next.map(signerOf).filter((m) => m !== "exchange"))];
+  const menu = (ev, e) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (e.perp) return;
+    popup(ev, [[t("Pause", "Приостановить"), () => act("taskOn", { wallet: e.task.id, test: false })],
+      [t("Delete", "Удалить"), () => act("removeTask", { wallet: e.task.id })]]);
+  };
   return h("div", { class: "pf-schedule" },
     h("div", { class: "pf-row" },
       h("span", { class: "eyebrow pf-eyebrow" }, t("Schedule", "Расписание")),
+      held ? h("span", { class: "pf-sched-paused loss" }, t("paused", "на паузе")) : null,
       h("span", { class: "spacer" }),
       h("button", { class: "icon-btn pf-mini-btn", title: t("New schedule: puts a start in the chat", "Новое расписание: начало появится в чате"),
-        onclick: () => suggest(t("every day at 9:00: buy SOL for 5 USDC", "каждый день в 9:00: купи SOL на 5 USDC")) }, icon("plus", 11)),
-      h("button", { class: "icon-btn pf-all", onclick: openSchedule }, t("All", "Все"), icon("chevron.right", 10))),
+        onclick: () => suggest(t("every day at 09:00: what to do", "каждый день в 09:00: что сделать"), t("what to do", "что сделать")) }, icon("plus", 11)),
+      next.length ? h("button", { class: "icon-btn pf-mini-btn", title: held ? t("Resume the schedule", "Возобновить расписание") : t("Pause the whole schedule: nothing runs until you resume", "Приостановить всё расписание: ничего не запустится, пока не возобновишь"),
+        onclick: () => act("schedulePause", { test: !held }) }, icon(held ? "play" : "pause", 10)) : null,
+      h("button", { class: "icon-btn pf-all", onclick: () => act("addBoard", { name: "schedule" }) }, t("All", "Все"), icon("chevron.right", 10))),
     next.length ? null : h("div", { class: "pf-empty" }, paused ? t(`Nothing running · ${paused} paused`, `Ничего не идёт · на паузе: ${paused}`) : t("Nothing scheduled yet", "Пока ничего не запланировано")),
-    next.map((x) => h("div", { class: "pf-task pf-lit", onclick: openSchedule },
-      dateTile(x.next),
-      h("div", { class: "pf-task-text" }, h("div", { class: "pf-task-title" }, x.text), h("div", { class: "pf-task-next" }, nextLine(x))),
-      h("span", { class: "pf-mark " + (itself(x) ? "auto" : "hello"), title: itself(x) ? t("Runs by itself", "Идёт сама") : t(`Asks ${presence()}`, `Спросит ${presence()}`) },
-        icon(itself(x) ? "bolt" : "hand", 14)))),
-    marks.length ? h("div", { class: "pf-legend-marks" }, marks.map((m) => h("span", { class: "pf-mark " + m },
-      icon(m === "auto" ? "bolt" : "hand", 11), m === "auto" ? t("runs by itself", "идёт сама") : t(`asks ${presence()}`, `спросит ${presence()}`)))) : null);
+    next.map((e) => {
+      const mark = signerOf(e);
+      return h("div", { class: "pf-task pf-lit" + (held ? " pf-held" : ""), title: t("Open it on its own canvas", "Открыть на отдельном холсте"),
+        onclick: () => act("openSchedule", { name: e.key }), oncontextmenu: (ev) => menu(ev, e) },
+        e.perp ? h("div", { class: "pf-date-tile" }, h("div", { class: "pf-date-icon" }, icon("chart.line", 14))) : dateTile(e.next),
+        h("div", { class: "pf-task-text" },
+          h("div", { class: "pf-task-title" }, e.perp ? (e.perp.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + e.perp.coin.split(":").pop() : e.task.text),
+          h("div", { class: "pf-task-next" }, e.perp ? t("stop and take on the exchange", "стоп и тейк на бирже") : nextLine(e.task))),
+        h("span", { class: "pf-mark " + (mark === "itself" || mark === "exchange" ? "auto" : "hello"), title: SIGNERS[mark][1]() }, icon(SIGNERS[mark][0], 14)));
+    }),
+    marks.length ? h("div", { class: "pf-legend-marks" }, marks.map((m) => h("span", { class: "pf-mark " + (m === "itself" ? "auto" : "hello") },
+      icon(SIGNERS[m][0], 11), SIGNERS[m][1]()))) : null);
+}
+
+/** «Recurring buys · SOL for $5.00 · Oct 25»: every recurring buy at the portfolio's foot (the Mac's Studio portfolio). */
+function recurringBox() {
+  const buys = ui.state.tasks.filter((x) => x.recurring);
+  if (!buys.length) return null;
+  const locale = ui.state.russian ? "ru-RU" : "en-US";
+  const line = (x) => {
+    const m = /^buy\s+(.+?)\s+for\s+([\d.,]+)\s*USDC/i.exec(x.steps?.[0] || x.text);
+    const next = x.next ? new Date(x.next).toLocaleDateString(locale, { month: "short", day: "numeric" }) : "";
+    return (m ? t(`${m[1]} for ${usd(Number(m[2].replace(",", ".")))}`, `${m[1]} на ${usd(Number(m[2].replace(",", ".")))}`) : x.text) + (next ? " · " + next : "");
+  };
+  return h("div", { class: "pf-recurring" },
+    h("div", { class: "pf-recurring-head" }, icon("arrow.triangle.2.circlepath", 11), t("Recurring buys", "Регулярные покупки")),
+    buys.map((x) => h("div", { class: "secondary num pf-recurring-row" }, line(x))));
 }
 
 // MARK: Network cards
@@ -219,7 +288,10 @@ function networkCards(p) {
   const byKey = new Map(p.networks.map((n) => [n.key, n]));
   const rest = p.networks.filter((n) => !pinned.includes(n.key) && Number(n.usd) >= cent)
     .sort((a, b) => Number(b.usd) - Number(a.usd) || a.key.localeCompare(b.key));
-  const cards = [...pinned.map((k) => byKey.get(k)).filter((n) => n && (n.rows.length || Number(n.usd) >= cent)), ...rest.filter((n) => Number(n.usd) > 100)];
+  // Solana and Hyperliquid whenever their read answered, $0 too (the engine sends them only then); a card with only tucked
+  // tokens stays for «N hidden · show».
+  const shownCard = (n) => n && (n.rows.length || Number(n.usd) >= cent || n.key === "solana" || n.key === "hyperliquid" || n.hidden?.length || n.hiddenMore);
+  const cards = [...pinned.map((k) => byKey.get(k)).filter(shownCard), ...rest.filter((n) => Number(n.usd) > 100)];
   const folded = rest.filter((n) => Number(n.usd) <= 100);
   const s = ui.state;
   if (!cards.length && !folded.length && !(s.inTransit || []).length) {
@@ -323,49 +395,62 @@ function openCoin(r, n) {
     : kind ? act("openToken", { address: kind === "token" ? r.contract : "", network: n.key }) : Promise.resolve(null);
 }
 
-/** «Ask in chat»: the coin's card (or chart) opens and goes into the chat with the next message. */
-async function askCoin(r, n) {
-  const a = await openCoin(r, n);
-  if (!a?.board) return suggest(t(`What about my ${r.symbol} on ${n.name}?`, `Что с моим ${r.symbol} в ${n.name}?`));
-  ui.attached = a.board;
-  render();
-  document.getElementById("composer")?.focus();
+/** «Ask in chat»: what the coin is goes with the next message, as the Mac's chip «About SOL on Solana: amount, value»,
+ *  and no card opens that wasn't asked for. Amounts stay out while the balance is hidden. */
+function askCoin(r, n) {
+  const hidden = store("balanceHidden") === true;
+  const held = hidden ? [] : [r.amount + (r.usd !== null && r.usd !== undefined ? " ≈ " + usd(r.usd) : "")];
+  const contract = r.contract && r.contract !== "native" ? [t("contract ", "контракт ") + r.contract] : [];
+  const facts = held.length || contract.length ? ` (${[...contract, ...held].join("; ")})` : "";
+  attachAbout({ title: `${r.symbol} · ${n.name}`, about: t(`About the coin «${r.symbol} on ${n.name}${facts}»`, `Про монету «${r.symbol} в ${n.name}${facts}»`), logo: r.symbol });
 }
 
 function coinRow(r, n, dim) {
   const dollar = stables.has(r.symbol.toUpperCase());
   const p = dollar ? null : pnlPct(r);
   const change = dollar ? null : r.change24h;
-  const verified = r.verified === true ? h("span", { class: "pf-verified", title: t("Verified by the token list: the real token, not a copy under its name", "Проверен по списку токенов: настоящий, а не копия с тем же именем") }, seal())
+  // A Robinhood stock token wears no mark (the Mac's stockRow): the registry vouches for it, not a token list.
+  const verified = r.verified === true && !r.stock ? h("span", { class: "pf-verified", title: t("Verified by the token list: the real token, not a copy under its name", "Проверен по списку токенов: настоящий, а не копия с тем же именем") }, seal())
     : r.verified === false ? h("span", { class: "pf-unverified" }, t("unverified", "не проверен")) : null;
-  return h("div", { class: "pf-coin pf-lit" + (dim ? " dim" : ""), title: `${r.symbol}: ` + t("details and chart · right-click to ask the chat, buy or sell", "подробности и график · правый клик — спросить чат, купить или продать"),
+  // A network's own coin says what it's for (the Mac's gas line), any other its details.
+  const gasCoin = r.contract === "native" || (n.key === "solana" && r.symbol === "SOL");
+  return h("div", { class: "pf-coin pf-lit" + (dim ? " dim" : ""), title: gasCoin ? t(`${r.symbol} here pays the network fees on ${n.name}`, `${r.symbol} здесь платит комиссии сети ${n.name}`)
+    : `${r.symbol}${r.stock && r.usd != null && Number(r.value) > 0 ? t(" at ", " по ") + masked(usd(Number(r.usd) / Number(r.value)), "$•••") : ""}: `
+      + t("details and chart · right-click to ask the chat, buy or sell", "подробности и график · правый клик — спросить чат, купить или продать"),
     onclick: () => openCoin(r, n), oncontextmenu: (e) => coinMenu(e, r, n) },
     tokenIcon(r, n),
     h("div", { class: "pf-coin-name" },
       h("div", { class: "pf-coin-symbol" }, h("span", { class: "one-line" }, r.symbol), verified),
       h("div", { class: "pf-coin-amount num" }, h("span", { class: "secondary" }, amount(r.amount)),
-        p ? h("span", { class: (r.gain ?? 0) < 0 || p.startsWith("−") ? "loss" : "profit" }, " " + p) : null)),
+        p ? h("span", { class: (r.gain ?? 0) < 0 || p.startsWith("−") ? "loss" : "profit",
+          title: r.gain === null || r.gain === undefined ? null : masked(Number(r.gain) < 0 ? t(`Loss ${usd(Math.abs(Number(r.gain)))} since it came in`, `Убыток ${usd(Math.abs(Number(r.gain)))} с тех пор, как пришёл`)
+            : t(`Profit ${usd(Number(r.gain))} since it came in`, `Прибыль ${usd(Number(r.gain))} с тех пор, как пришёл`), "") }, " " + p) : null)),
     h("span", { class: "spacer" }),
     r.id ? h("button", { class: "icon-btn pf-eye" + (dim ? " on" : ""),
       title: dim ? t(`Show ${r.symbol} in the portfolio`, `Показывать ${r.symbol} в портфеле`) : t(`Hide ${r.symbol}: it leaves the portfolio and its total`, `Скрыть ${r.symbol}: он уйдёт из портфеля и его суммы`),
       onclick: (e) => { e.stopPropagation(); act("showToken", { address: r.id, test: !!dim }); } }, icon(dim ? "eye" : "eye.slash", 12)) : null,
     h("div", { class: "pf-coin-value" },
       h("div", { class: "num" }, r.usd !== null && r.usd !== undefined ? amount(usd(r.usd)) : t("no price", "нет цены")),
-      change !== null && change !== undefined ? h("div", { class: "pf-24h num" }, h("span", { class: Number(change) < 0 ? "loss" : "profit" }, pct(change)), h("span", { class: "secondary" }, " 24h")) : null));
+      change !== null && change !== undefined ? h("div", { class: "pf-24h num", title: t("How far the price moved in the last 24 hours", "Насколько цена сдвинулась за последние 24 часа") }, h("span", { class: Number(change) < 0 ? "loss" : "profit" }, pct(change)), h("span", { class: "secondary" }, " 24h")) : null));
 }
 
 /** A deposit: the protocol, what it holds and earns, the money in it. */
 function depositRow(r, n) {
   const usdLike = /^[\d.,]+$/.test(r.amount) && Math.abs(Number(r.amount.replace(/,/g, "")) - Number(r.usd ?? 0)) < 0.02;
   const place = depositPlace(r.symbol);
-  return h("div", { class: "pf-coin pf-lit", onclick: () => r.site ? openSite(r.site) : place ? toggleDetail(place) : suggest(t(`What's my ${r.symbol} deposit doing?`, `Что с моим депозитом в ${r.symbol}?`)), oncontextmenu: (e) => coinMenu(e, r, n) },
+  // Aave and Morpho off Base are brought back by a phrase; a site's own position is managed there (the Mac's line help).
+  const help = r.site && (r.symbol === "Aave" || r.symbol === "Morpho")
+    ? t(`Say “withdraw USDC from ${r.symbol} on ${n.name}” to bring it back to Solana`, `Скажи «выведи USDC из ${r.symbol} в ${n.name}», чтобы вернуть их в Solana`)
+    : r.site ? t(`Managed on ${r.site}: a click opens it beside the chat`, `Управляется на ${r.site}: клик откроет его рядом с чатом`) : null;
+  const dollars = typeof r.amount === "string" && r.amount.startsWith("$");
+  return h("div", { class: "pf-coin pf-lit", title: help, onclick: () => r.site ? openSite(r.site) : place ? toggleDetail(place) : suggest(t(`What's my ${r.symbol} deposit doing?`, `Что с моим депозитом в ${r.symbol}?`)), oncontextmenu: (e) => coinMenu(e, r, n) },
     logo(r.symbol, 20, r.icon),
     h("div", { class: "pf-coin-name" }, h("div", { class: "pf-coin-symbol" }, h("span", { class: "one-line" }, r.symbol)),
       r.note ? h("div", { class: "pf-coin-amount secondary one-line" }, r.note) : null),
     h("span", { class: "spacer" }),
     h("div", { class: "pf-coin-value" },
       usdLike ? h("div", { class: "pf-usdc num" }, logo("usdc", 12), amount(r.amount)) : h("div", { class: "num" }, amount(r.amount)),
-      !usdLike && r.usd ? h("div", { class: "pf-24h secondary num" }, amount("≈ " + usd(r.usd))) : null));
+      !usdLike && !dollars && r.usd ? h("div", { class: "pf-24h secondary num" }, amount("≈ " + usd(r.usd))) : null));
 }
 
 /** Right-click on a coin: ask the chat about it, or put a buy or a sale into the field (TokenMenu). */
@@ -433,18 +518,24 @@ function multisigCard(m) {
   return h("button", { class: "pf-plain pf-lit", onclick: () => act("addBoard", { name: "multisig" }) },
     h("span", { class: "pf-badge safe" }, icon("lock.square.stack", 16)),
     h("div", { class: "pf-net-name" }, h("div", { class: "pf-net-title" }, t("Multisig", "Мультисиг")),
-      h("div", { class: "pf-net-note secondary" }, t(`Safe · any ${m.threshold} of ${m.keys.length} keys · `, `Safe · любые ${m.threshold} из ${m.keys.length} ключей · `) + m.networks.join(", "))),
+      h("div", { class: "pf-net-note secondary" }, t(`Safe · any ${m.threshold} of ${m.keys.length} keys · `, `Safe · любые ${m.threshold} из ${m.keys.length} ключей · `) + m.networks.map((k) => NET_NAMES[k] || k).join(", "))),
     h("span", { class: "spacer" }),
     h("b", { class: "pf-net-usd num" }, total === null ? "…" : amount(usd(total))));
 }
 
 /** Price alerts waiting, each with a way to drop it (AlertsCard). */
+/** A network's name as the Mac's placeName says it. */
+const NET_NAMES = { base: "Base", arbitrum: "Arbitrum", ethereum: "Ethereum", polygon: "Polygon", optimism: "Optimism", bnb: "BNB Chain",
+  hyperevm: "HyperEVM", robinhood: "Robinhood Chain", tempo: "Tempo", solana: "Solana", hyperliquid: "Hyperliquid", near: "NEAR" };
+
 function alertsCard() {
   const alerts = ui.state.alerts;
   if (!alerts.length) return null;
   return h("div", { class: "pf-alerts" },
     h("div", { class: "pf-alerts-title" }, icon("bell", 12), t("Price alerts", "Ценовые оповещения")),
-    alerts.map((a) => h("div", { class: "pf-row" }, h("span", { class: "pf-alert-text one-line" }, a.text), h("span", { class: "spacer" }),
+    // Each alert with how far its price is now, as the Mac's alerts card («22.4% away»).
+    alerts.map((a) => h("div", { class: "pf-row" }, h("span", { class: "pf-alert-text one-line" }, a.text),
+      a.now?.includes(" · ") ? h("span", { class: "secondary small num" }, " · " + a.now.split(" · ").pop()) : null, h("span", { class: "spacer" }),
       h("button", { class: "icon-btn pf-mini-btn", title: t("Remove the alert", "Убрать оповещение"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("xmark", 10)))));
 }
 
@@ -461,6 +552,15 @@ function since(iso) {
 }
 
 /** Money between networks: each bridge order signed and not landed yet, with how long it's been on its way (InTransit). */
+/** For the preview (`&call=portfolio.openTransit`): the first entry in transit opened, its QR shown. */
+export function openTransit() {
+  const e = (ui.state.inTransit || [])[0];
+  if (!e) return;
+  transitOpen.set(e.id, t("waiting for your deposit", "жду твой перевод"));
+  qrShown.add(e.id);
+  render();
+}
+
 function transitCard() {
   const list = ui.state.inTransit || [];
   if (!list.length) return null;
@@ -489,13 +589,25 @@ function transitCard() {
     }));
 }
 
+/** Incoming deposits whose QR is shown under their details. */
+const qrShown = new Set();
+/** Whether a NEAR Intents deposit address is still the one to send to: its Receive block is on the canvas, in its hour. */
+function acrossOpen(address) {
+  const d = (ui.state.boards || []).map((b) => b.data?.receive).find((r) => r?.address === address);
+  return !!d && (!d.until || new Date(d.until) > new Date());
+}
+
 function transitDetails(e, state) {
   const line = (label, value) => h("div", { class: "pf-transit-line" }, h("span", { class: "secondary" }, label), h("span", {}, value));
   return h("div", { class: "pf-transit-details" },
     line(t("State", "Состояние"), state ?? t("asking…", "спрашиваю…")),
     line(t("Signed", "Подписано"), when(e.at)),
     e.tx ? line(t("Transaction", "Транзакция"), `${e.tx.slice(0, 10)}…${e.tx.slice(-6)}`) : null,
-    e.receiving ? [h("div", { class: "address" }, e.id), h("div", {}, copyButton(e.id, t("Copy address", "Скопировать адрес")))]
+    e.receiving ? [h("div", { class: "address" }, e.id), h("div", { class: "pf-transit-buttons" }, copyButton(e.id, t("Copy address", "Скопировать адрес")),
+      // The Mac's «Show QR», only while that deposit is the one still taken (its Receive block, before its hour is up).
+      acrossOpen(e.id) ? h("button", { class: "btn small", onclick: () => { qrShown.has(e.id) ? qrShown.delete(e.id) : qrShown.add(e.id); render(); } },
+        qrShown.has(e.id) ? t("Hide QR", "Скрыть QR") : t("Show QR", "Показать QR")) : null),
+      qrShown.has(e.id) && acrossOpen(e.id) ? qrCode(e.id, "pf-transit-qr") : null]
       : line(t("Order", "Заказ"), `${e.id.slice(0, 12)}…`),
     e.links.length ? h("div", { class: "pf-transit-links" }, e.links.map((l) => link(l.url, l.title))) : null);
 }
@@ -540,9 +652,12 @@ const places = {
     actions: () => [[t("Deposit", "Положить"), "deposit 1 USDC into Jupiter", "plus"], [t("Withdraw", "Вывести"), "withdraw 1 USDC from Jupiter", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
   kamino: { logo: "kamino", deposit: ["Kamino Lend", "Kamino"], title: () => "Kamino Lend", about: () => t("lending on Solana · withdraw any time", "займы в Solana · вывести можно в любой момент"),
     actions: () => [[t("Withdraw all", "Вывести всё"), "withdraw USDC from Kamino", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
-  aave: { logo: "aave", deposit: ["Aave"], title: () => "Aave v3", about: () => t("lending on Base · withdraw any time", "займы в Base · вывести можно в любой момент"),
+  aave: { logo: "aave", deposit: ["Aave"], title: () => "Aave v3 · Base", about: () => t("lending on Base · withdraw any time", "займы в Base · вывести можно в любой момент"),
     actions: () => [[t("Lend more", "Дать ещё"), "lend 1 USDC on Aave", "plus"], [t("Withdraw to Solana", "Вывести в Solana"), "withdraw USDC from Aave", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
-  morpho: { logo: "morpho", deposit: ["Morpho"], title: () => "Morpho", about: () => t("a curated vault · lending on Base · withdraw any time", "курируемое хранилище · займы в Base · вывести можно в любой момент"),
+  // Gauntlet USDC Prime, the vault the app deposits into (the Mac's MorphoVault.base).
+  morpho: { logo: "morpho", deposit: ["Morpho"], title: () => "Morpho · Base", about: () => t("Gauntlet USDC Prime vault · lending on Base · withdraw any time", "хранилище Gauntlet USDC Prime · займы в Base · вывести можно в любой момент"),
+    note: () => t("Your USDC is lent by Gauntlet’s curated Morpho markets; the vault shares are only ever credited to this wallet.",
+      "Твои USDC выдаются в займы на рынках Morpho, которые отбирает Gauntlet; доли хранилища зачисляются только на этот кошелёк."),
     actions: () => [[t("Deposit more", "Добавить"), "deposit 1 USDC into Morpho", "plus"], [t("Withdraw to Solana", "Вывести в Solana"), "withdraw USDC from Morpho", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
 };
 
@@ -553,7 +668,7 @@ function explorer(place) {
   return { solana: a.solana && `https://solscan.io/account/${a.solana}`, hyperliquid: evm && `https://app.hyperliquid.xyz/explorer/address/${evm}`,
     robinhood: evm && `https://robinhoodchain.blockscout.com/address/${evm}`, base: evm && `https://basescan.org/address/${evm}`, arbitrum: evm && `https://arbiscan.io/address/${evm}`,
     near: a.near && `https://nearblocks.io/address/${a.near}`, jupiter: "https://jup.ag/lend/earn", kamino: "https://app.kamino.finance", aave: evm && `https://basescan.org/address/${evm}`,
-    morpho: "https://app.morpho.org" }[place] || null;
+    morpho: "https://app.morpho.org/base/vault/0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61" }[place] || null;
 }
 
 /** The board a portfolio card opens, above the plan (PlaceDetailBoard): the address, everything there with what each
@@ -579,7 +694,7 @@ export function placeDetail() {
       : t(`USDC rate now ≈ ${pct(rate)} a year.`, `Ставка USDC сейчас ≈ ${pct(rate)} годовых.`)));
   if (!rows.length) rows.push(h("div", { class: "pf-d-note" }, t("Nothing here yet.", "Пока пусто.")));
   const url = explorer(detail);
-  return h("div", { class: "pf-detail", "data-no-pan": "" },
+  return h("div", { class: "pf-detail", "data-no-pan": "", oncontextmenu: (e) => askMenu(e, place.title()) },
     h("div", { class: "pf-d-head" }, logo(place.logo, 34),
       h("div", { class: "pf-d-title" }, h("b", {}, place.title()), h("span", { class: "secondary" }, place.about())),
       h("span", { class: "spacer" }),

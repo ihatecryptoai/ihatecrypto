@@ -18,6 +18,8 @@ export function lockScreen() {
   const l = ui.state?.lock;
   // Windows Hello stood in for a code that's off: Settings › Wallet opens on making a new one, once.
   if (l?.offerNewCode && !l.locked && !offered) { offered = true; store("settingsTab", "wallet"); ui.view = "settings"; }
+  // A later «Forgot the code?» opens it again: the offer is said once each time it's made.
+  if (!l?.offerNewCode) offered = false;
   if (!l?.locked) return null;
   // An open dialog (an import, a rename) goes, as the Mac closes its import window: nothing typed there survives the lock.
   ui.overlay = null;
@@ -41,6 +43,9 @@ export function lockScreen() {
           l.problem ? h("div", { class: "lk-problem" }, l.problem) : null,
           h("div", { class: "lk-or" }, h("i"), h("span", { class: "secondary" }, t("or", "или")), h("i")),
           hello)),
+    l.codeOff ? null : h("div", { class: "lk-forgot secondary" }, t("Forgot the code?", "Забыл код?"), " ",
+      h("button", { class: "lk-link", title: t("Windows Hello opens ihatecrypto, then Settings › Wallet makes a new code", "Windows Hello откроет ihatecrypto, потом в «Настройки › Кошелёк» задашь новый код"),
+        onclick: () => act("unlockHello", { test: true }) }, t("Unlock with Windows Hello and make a new one", "Открыть через Windows Hello и задать новый"))),
     l.tasksRun ? h("div", { class: "lk-foot secondary" }, icon("clock", 13), t("Scheduled tasks keep running", "Задачи по расписанию продолжают работать")) : null);
 }
 
@@ -66,6 +71,11 @@ function field(l) {
   queueMicrotask(() => { if (document.activeElement?.id !== "lk-code") input.focus({ preventScroll: true }); });
   return h("div", { class: "lk-field" + (l.problem ? " wrong" : "") }, input, go);
 }
+
+// The code off: Return presses «Unlock with Windows Hello», the screen's only way in (the Mac's default action).
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && ui.state?.lock?.locked && ui.state.lock.codeOff) { e.preventDefault(); act("unlockHello"); }
+});
 
 // Ctrl+L locks, as ⌘L on the Mac: only with a code set, since without one there's nothing to open it with.
 document.addEventListener("keydown", (e) => {

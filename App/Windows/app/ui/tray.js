@@ -32,7 +32,9 @@ function draw() {
   const alerts = s.alerts || [];
   const quiet = !positions.length && !scheduled.length && !alerts.length;
   const runs = s.scheduleRuns || [];
-  const lastRun = (task) => runs.filter((r) => r.title === task.text || (task.steps || []).join(" then ") === r.title).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  // By the task's id, as the Mac's matches its schedule's id (a run keeps its task, Schedule.swift); by its words only for
+  // runs older than that.
+  const lastRun = (task) => runs.filter((r) => r.task ? r.task === task.id : (task.steps || []).join(" then ") === r.title).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
   root.replaceChildren(...[
     h("div", { class: "tray-head" }, mascot(28, "idle"),
       h("div", { class: "tray-title" }, h("b", { class: "tray-brand" }, "ihatecrypto"),
@@ -86,4 +88,5 @@ tauri.event.listen("engine", (e) => take(e.payload));
 // Opened again: the last state, and the times («next in 5 min») drawn afresh.
 tauri.event.listen("opened", () => invoke("tray_state").then(take).catch(() => {}));
 invoke("tray_state").then(take).catch(() => {}).finally(() => { if (!ui.state) draw(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") invoke("tray_open").catch(() => {}); });
+// Esc closes the panel, as the Mac's popover; nothing else opens.
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") invoke("tray_hide").catch(() => {}); });

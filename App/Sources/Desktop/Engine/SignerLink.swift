@@ -8,6 +8,9 @@ import WalletCore
 /// Mac's XPC. A signer that died is started again on the next request.
 actor SignerLink {
     static let shared = SignerLink()
+    /// Told when the signer stopped answering (crashed, or killed by another program): the window keeps it with its crash
+    /// reports, as the Mac collects the signer's (Crashes.swift).
+    nonisolated(unsafe) static var stopped: (@Sendable (String) -> Void)?
 
     private var child: (pid: UInt32, process: Int, input: Int, output: Int)?
     /// The signer's process id, for the window to let it come forward when Windows Hello asks (AllowSetForegroundWindow).
@@ -75,6 +78,9 @@ actor SignerLink {
                 }
             }
             if let answer { return try JSONDecoder().decode(SignerReply.self, from: answer) }
+            // Only the request's name: its amounts, addresses and bytes never go into a crash report.
+            let name = Mirror(reflecting: request).children.first?.label ?? String(describing: request)
+            Self.stopped?("the signer stopped answering on «\(name)»; it was started again")
             drop()
             if attempt == 1 { break }
         }

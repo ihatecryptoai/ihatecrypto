@@ -40,6 +40,14 @@ extension Engine {
 
     private var hlpEquity: Decimal { placeFacts.hyperliquid?.hlpEquity ?? 0 }
 
+    /// The Kamino Earn vault «withdraw … from kamino» takes from when Lend holds nothing: its row's name and «0.5 SOL».
+    private func kaminoVault(_ symbol: String) -> (name: String, amount: String, tokens: Decimal)? {
+        guard depositThere(["Kamino Lend"], on: "solana") == 0,
+              let r = rowsRead("solana")?.first(where: { $0.section == "defi" && $0.symbol == "Kamino" && $0.amount.hasSuffix(" " + symbol.uppercased()) }),
+              let tokens = Decimal(string: String(r.amount.split(separator: " ").first ?? "").replacingOccurrences(of: ",", with: "")) else { return nil }
+        return (String((r.note ?? "Kamino").split(separator: "·").first ?? "Kamino").trimmingCharacters(in: .whitespaces), r.amount, tokens)
+    }
+
     /// One of this computer's wallets, by its Solana, EVM or NEAR address.
     func isOwnWallet(_ address: String) -> Bool {
         let a = address.lowercased()
@@ -562,14 +570,21 @@ extension Engine {
     func moved(_ symbol: String, on place: String, by delta: Decimal?, approx: Bool = false) -> Board.Money? {
         guard let was = heldThere(symbol, on: place) else { return nil }
         let after = max(0, was + (delta ?? -was))
-        return Board.Money(place: WalletCommand.placeName(place), symbol: symbol.count > 12 ? (portfolio.networks.first { $0.key == place }?.rows.first { $0.contract == symbol }?.symbol ?? symbol) : symbol,
-                           was: Fmt.num(was, maxFraction: 6), after: (approx ? "≈ " : "") + Fmt.num(after, maxFraction: 6))
+        let shown = symbol.count > 12 ? (portfolio.networks.first { $0.key == place }?.rows.first { $0.contract == symbol }?.symbol ?? symbol) : symbol
+        return Board.Money(place: WalletCommand.placeName(place), symbol: shown,
+                           was: Self.amount(was, shown), after: (approx ? "≈ " : "") + Self.amount(after, shown))
+    }
+
+    /// Dollars to the cent; another coin to 4 places from 1 up (2.4722 AERO), 6 under it (0.074852 SOL): the Mac's MoneyLine.amount.
+    nonisolated static func amount(_ d: Decimal, _ symbol: String) -> String {
+        let size = abs(d)
+        return Fmt.num(d, maxFraction: ["USDC", "USDG", "USDT", "USDC.e", "pathUSD"].contains(symbol) || size >= 100 ? 2 : size >= 1 ? 4 : 6)
     }
 
     /// Money into a deposit: its balance there now → after.
     private func into(_ place: String, _ symbol: String, was: Decimal, by delta: Decimal?) -> Board.Money? {
         guard let delta else { return nil }
-        return Board.Money(place: place, symbol: symbol, was: Fmt.num(was, maxFraction: 6), after: Fmt.num(max(0, was + delta), maxFraction: 6))
+        return Board.Money(place: place, symbol: symbol, was: Self.amount(was, symbol), after: Self.amount(max(0, was + delta), symbol))
     }
 
     func st(_ label: String, _ title: String, _ line: String = "", _ money: Board.Money? = nil) -> Board.Step {
@@ -617,7 +632,8 @@ extension Engine {
         }
         switch place {
         case "": return nil
-        case "KAMINO": return rowsRead("solana") == nil ? nil : depositThere(["Kamino Lend", "Kamino"], on: "solana")
+        case "KAMINO", "KAMINO LEND": return rowsRead("solana") == nil ? nil : depositThere(["Kamino Lend"], on: "solana")
+        case "KAMINO EARN": return kaminoVault(unit)?.tokens
         case "JUPITER LEND": return rowsRead("solana") == nil ? nil : depositThere(["Jupiter Lend"], on: "solana")
         case "HLP VAULT", "ХРАНИЛИЩЕ HLP": return placeFacts.hyperliquid == nil ? nil : hlpEquity
         case "JITOSOL": return heldThere("JitoSOL", on: "solana")
@@ -698,8 +714,11 @@ extension Engine {
                     st(say("INTO · KAMINO LEND", "В · KAMINO LEND"), n(x, s), say("first deposit pays ≈ 0.03 SOL rent", "первый депозит берёт ≈ 0.03 SOL залога"),
                        s == "USDC" ? into("Kamino Lend", s, was: depositThere(["Kamino Lend"], on: "solana"), by: a) : nil)]
         case .kamino(false, let s, let x):
-            let lent = depositThere(["Kamino Lend", "Kamino"], on: "solana"), moving = x ?? (s == "USDC" && lent > 0 ? lent : nil)
-            return [st(say("FROM · KAMINO", "ОТКУДА · KAMINO"), n(moving, s), "", s == "USDC" ? into("Kamino", s, was: lent, by: moving.map { -$0 }) : nil),
+            // From Lend when it holds anything, else the Earn vault holding the coin (the Mac's kaminoVault).
+            let lent = depositThere(["Kamino Lend"], on: "solana"), vault = kaminoVault(s)
+            let moving = x ?? vault?.tokens ?? (s == "USDC" && lent > 0 ? lent : nil)
+            return [st(vault == nil ? say("FROM · KAMINO LEND", "ОТКУДА · KAMINO LEND") : say("FROM · KAMINO EARN", "ОТКУДА · KAMINO EARN"), n(moving, s),
+                       vault.map { "\($0.name): \($0.amount)" } ?? "", vault == nil && s == "USDC" ? into("Kamino Lend", s, was: lent, by: moving.map { -$0 }) : nil),
                     st(say("TO · SOLANA", "КУДА · SOLANA"), n(moving, s), say("your wallet", "твой кошелёк"), moving.flatMap { moved(s, on: "solana", by: $0) })]
         case .stake(let x):
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(x, "SOL"), solSOL, moved("SOL", on: "solana", by: x.map { -$0 })),
@@ -736,6 +755,10 @@ extension Engine {
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(u, "USDC"), say("all goes in now", "вносится всё сразу"), moved("USDC", on: "solana", by: u.map { -$0 })),
                     st(say("EVERY ", "КАЖДЫЕ ") + WalletCommand.everyText(e).uppercased() + " · JUPITER DCA", "\(orders) × \(u.map { Fmt.num($0 / Decimal(orders)) } ?? "?") USDC → \(a.symbol)",
                        say("Jupiter's keepers buy on-chain, the first now · 0.1% fee · cancel any time", "Jupiter покупает на блокчейне, первая покупка сейчас · комиссия 0.1% · отменить можно в любой момент"))]
+        case .jupiterDCACancel(let a):
+            return [st(say("FROM · JUPITER DCA", "ОТКУДА · JUPITER DCA"), a.map { say("\($0.symbol) orders", "ордера \($0.symbol)") } ?? say("all orders", "все ордера"),
+                       say("what they haven't spent", "то, что они не потратили")),
+                    st(say("TO · SOLANA", "КУДА · SOLANA"), "USDC", say("your wallet · the ≈ 0.005 SOL rent too", "твой кошелёк · и ≈ 0.005 SOL залога"))]
         case .sendSol(_, let x):
             guard let e = try? nativeRecipient(c) else { return nil }
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(x, "SOL"), solSOL, moved("SOL", on: "solana", by: -x)),

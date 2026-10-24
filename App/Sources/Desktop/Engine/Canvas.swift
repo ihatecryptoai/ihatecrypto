@@ -56,7 +56,10 @@ nonisolated struct Board: Codable, Equatable, Identifiable {
 /// One canvas: its own chat and its own blocks, as on the Mac.
 nonisolated struct CanvasDoc: Codable, Equatable, Identifiable {
     var id = UUID().uuidString
+    /// Its automatic title (the first message's words); the list shows the newest move's title over it, and the
+    /// person's own `name` over both (the Mac's CanvasSession.title and .name).
     var title: String
+    var name: String?
     var messages: [Message] = []
     var boards: [Board] = []
     var at = Date()
@@ -182,22 +185,28 @@ extension Engine {
         afterSwitch()
     }
 
+    /// The person's own name for a canvas; an empty one gives the automatic title back (the Mac's renameCanvas).
     func renameCanvas(_ id: String, _ title: String) {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, let i = canvases.firstIndex(where: { $0.id == id }) else { return }
-        canvases[i].title = String(t.prefix(60))
+        guard let i = canvases.firstIndex(where: { $0.id == id }) else { return }
+        canvases[i].name = t.isEmpty ? nil : String(t.prefix(80))
         saveCanvases()
     }
 
     func removeCanvas(_ id: String) throws {
         guard let i = canvases.firstIndex(where: { $0.id == id }) else { return }
         declineSite(onCanvas: id == canvasID ? boards : canvases[i].boards)
-        if id == canvasID { try leaveCanvas() }
+        let wasOpen = id == canvasID
+        if wasOpen { try leaveCanvas() }
         // Its plan's price alert goes with it (the Mac's Canvases.swift:361).
         alerts.removeAll { $0.plan?.uuidString == id }
         canvases.remove(at: i)
-        if canvases.isEmpty { canvases = [CanvasDoc(title: say("Canvas", "Холст"))] }
-        if !canvases.contains(where: { $0.id == canvasID }) { canvasID = canvases[0].id; afterSwitch() }
+        // The open one gives way to a new blank canvas, as the Mac's deleteCanvas opens newCanvas(), not another.
+        if wasOpen || canvases.isEmpty {
+            canvases.insert(CanvasDoc(title: say("New canvas", "Новый холст")), at: 0)
+            canvasID = canvases[0].id
+            afterSwitch()
+        }
         saveCanvases()
     }
 
@@ -287,6 +296,7 @@ extension Engine {
         case "multisig": multisigs.map { "\($0.address): any \($0.threshold) of \($0.keys.map(\.name).joined(separator: ", ")) on \($0.networks.joined(separator: ", "))" }
         case "history": history().prefix(10).map { "\($0.note) (\($0.chain))" }
         case "scheduleItem": scheduleItemFacts(b.title)
+        case "recurring": recurringFacts(b.title)
         case "note": ["\(b.opens == nil ? "this canvas is" : "a card opens") \(b.lines.count == 1 ? "a note" : "\(b.lines.count) notes") in folder «\(b.title)»"]
         default: []
         }
@@ -307,12 +317,60 @@ extension Engine {
     func steps(for pending: Pending, title: String, lines: [String]) -> [Board.Step] {
         switch pending {
         case .chain(let list):
+            // As the Mac draws a chain (Canvases.swift chainSteps): the first move as its whole route, each later one as
+            // its route without its own start and approve, pale «then»; no bridge where a move before brings the money.
+            var arrived = Set<String>(), first = true
+            // And how much: a later step is drawn paid as it will be, by the balances the moves before it leave (the Mac's
+            // `ahead`): «buy on Base» after «move 10 to Base» pays on Base, not Solana's ways.
+            var ahead: [String: Decimal] = [:]
+            func count(_ c: WalletCommand) {
+                let sent: Decimal?? = switch c {
+                case .bridge(_, _, let a), .cctp(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
+                     .arbitrumToSolana(let a), .robinhoodToSolana(let a), .withdrawToSolana(let a): a
+                default: nil
+                }
+                if let sent, let from = Self.source(c), let moved = sent ?? usdcFree(on: from) {
+                    ahead[from, default: 0] -= moved
+                    if let to = Self.arrives(c) { ahead[to, default: 0] += moved }
+                } else if let spent = Self.solanaUSDC(c) {
+                    ahead["solana", default: 0] -= spent
+                }
+            }
+            func route(_ c: WalletCommand) -> [Board.Step]? {
+                guard !ahead.isEmpty else { return routeSteps(c) }
+                let kept = portfolio
+                defer { portfolio = kept }
+                for (net, delta) in ahead {
+                    let dollar = net == "robinhood" ? "USDG" : "USDC"
+                    if portfolio.networks.firstIndex(where: { $0.key == net }) == nil {
+                        portfolio.networks.append(PortfolioView.Network(key: net, name: WalletCommand.placeName(net), usd: 0, rows: []))
+                    }
+                    let n = portfolio.networks.firstIndex { $0.key == net }!
+                    if let r = portfolio.networks[n].rows.firstIndex(where: { $0.section == "tokens" && $0.symbol == dollar && $0.contract == nil }) {
+                        portfolio.networks[n].rows[r].value = max(0, portfolio.networks[n].rows[r].value + delta)
+                    } else if delta > 0 {
+                        portfolio.networks[n].rows.append(Self.row(dollar, delta, usd: delta))
+                    }
+                }
+                return routeSteps(c)
+            }
+            func later(_ steps: [Board.Step], spends: String?) -> [Board.Step] {
+                let brought = spends.map(arrived.contains) ?? false
+                let skip = ["FROM", "ОТКУДА", "APPROVE", "РАЗРЕШЕНИЕ"] + (brought ? ["BRIDGE", "МОСТ", "GAS", "ГАЗ"] : [])
+                let kept = steps.filter { s in !skip.contains { s.label.hasPrefix($0) } }
+                return (kept.isEmpty ? steps : kept).map { var s = $0; s.status = "then"; return s }
+            }
             return list.flatMap { step -> [Board.Step] in
+                defer { first = false }
                 switch step {
-                case .wallet(let c): [Board.Step(label: label(c), title: c.summary, money: money(c))]
+                case .wallet(let c):
+                    defer { if let to = Self.arrives(c) { arrived.insert(to) }; count(c) }
+                    let steps = (first ? routeSteps(c) : route(c)) ?? [Board.Step(label: label(c), title: c.summary, money: money(c))]
+                    return first ? steps : later(steps, spends: Self.spends(c))
                 // From its own network, with that network's balance, to the saved name (MoveRoutes.swift).
-                case .transfer(let e, let amount): transferSteps(e, amount)
-                case .said(let text): [saidStep(text)]
+                case .transfer(let e, let amount):
+                    return first ? transferSteps(e, amount) : later(transferSteps(e, amount), spends: e.network)
+                case .said(let text): return [saidStep(text)]
                 }
             }
         case .wallet(let c), .recurring(let c, _):
@@ -375,6 +433,6 @@ extension Engine {
     func money(spending amount: Decimal, _ symbol: String, on place: String) -> Board.Money? {
         guard let net = portfolio.networks.first(where: { $0.key == place }),
               let row = net.rows.first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else { return nil }
-        return Board.Money(place: net.name, symbol: row.symbol, was: Fmt.num(row.value, maxFraction: 6), after: Fmt.num(max(row.value - amount, 0), maxFraction: 6))
+        return Board.Money(place: net.name, symbol: row.symbol, was: Self.amount(row.value, row.symbol), after: Self.amount(max(row.value - amount, 0), row.symbol))
     }
 }

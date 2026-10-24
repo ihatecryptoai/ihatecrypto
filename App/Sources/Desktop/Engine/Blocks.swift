@@ -42,6 +42,8 @@ nonisolated struct BlockData: Codable, Equatable {
         var price: Decimal?
         var range = "day"
         var closes: [Double] = []
+        /// Each close's time, seconds since 1970 (the time axis).
+        var times: [Double]? = nil
         /// The move over the range shown, or the pool's 24h when there's no history.
         var change: Decimal?
         /// «5m», «1h», «6h», «24h» → %.
@@ -193,6 +195,8 @@ nonisolated struct AddressExtra: Codable, Equatable {
     var icon: CanvasIcon?
     var category: String?
     var note: String?
+    /// «chat» when it was saved from a chat message: the row says «from chat», as the Mac's SavedAddress.source.
+    var source: String? = nil
 }
 
 extension Engine {
@@ -270,6 +274,7 @@ extension Engine {
         }
         if chain == "robinhood" { card.links.append(.init(label: say("Explorer", "Обозреватель"), url: "https://robinhoodchain.blockscout.com/token/\(address)")) }
         card.closes = points.map { NSDecimalNumber(decimal: $0.close).doubleValue }
+        card.times = points.map { $0.time.timeIntervalSince1970 }
         if let first = points.first?.close, let last = points.last?.close, first > 0 { card.change = (last - first) / first * 100 } else { card.change = market?.changes["h24"] }
         card.verified = verified?.ok ?? held?.verified
         card.verifiedBy = verified?.by
@@ -358,7 +363,7 @@ extension Engine {
         let change = (last.close - first.close) / first.close * 100
         let low = candles.map(\.low).min() ?? last.close, high = candles.map(\.high).max() ?? last.close
         return ChartLine(title: "\(IntentParser.pretty(coin)) · \(range.title)", closes: candles.map { NSDecimalNumber(decimal: $0.close).doubleValue },
-                         low: Fmt.price(low), high: Fmt.price(high), change: signed(change), coin: coin)
+                         times: candles.map { $0.time.timeIntervalSince1970 }, low: Fmt.price(low), high: Fmt.price(high), change: signed(change), coin: coin)
     }
 
     /// Until the first full read: the wallet's last recorded total (equity.json), read only then.
