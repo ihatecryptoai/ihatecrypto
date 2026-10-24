@@ -62,6 +62,7 @@ fn settle(webview: &tauri::Webview) {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
     use windows::core::Interface;
+    use tauri::Manager;
     let own = ![crate::SITE, crate::web::PANEL].contains(&webview.label());
     let app = webview.app_handle().clone();
     let _ = webview.with_webview(move |w| {
