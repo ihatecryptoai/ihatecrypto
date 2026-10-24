@@ -9,6 +9,7 @@ body { background: var(--canvas); overflow: hidden; }
 .tray-money { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .tray-money b { font-size: 14px; font-weight: 800; }
 .tray-pnl { font-size: 10px; font-weight: 600; }
+.tray-stale { opacity: 0.45; }
 .tray-skeleton { width: 70px; height: 14px; border-radius: 5px; background: var(--fill-strong); }
 .tray-position { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 14px; background: var(--hl); color: #fff; }
 .tray-position .tray-pos-pnl.profit { color: var(--hl-mint); }

@@ -447,8 +447,9 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
     let (loads, titles, goes, opens) = (app.clone(), app.clone(), app.clone(), app.clone());
     tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
         .initialization_script(include_str!("provider.js"))
-        // No file picker in any frame, as the Mac's browser has none (keys.rs; its alerts are off there too).
-        .initialization_script_for_all_frames(keys::NO_FILE_PICKER)
+        // No file picker, print preview, close() or Notification in any frame, as the Mac's browser (keys.rs; its alerts are
+        // off there too).
+        .initialization_script_for_all_frames(keys::SITE_GUARD)
         // Pages stay on https; anything else (a file, a custom scheme) isn't opened here, nor a phishing site.
         .on_navigation(move |u| site_allowed(&goes, u))
         // A link for a new window opens nothing, anywhere, as the Mac's browser has no window to give it (no UI

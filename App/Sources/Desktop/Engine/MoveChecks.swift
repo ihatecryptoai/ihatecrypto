@@ -604,7 +604,7 @@ extension Engine {
 
     /// The Mac's route for a money move: where from, through what, where to, each with the balance it changes; nil for a
     /// command drawn as one step (its quotes and way picker live on that step). «all USDC» reads as the amount itself.
-    func routeSteps(_ c: WalletCommand) -> [Board.Step]? { rawRouteSteps(c).map(amountsForAll) }
+    func routeSteps(_ c: WalletCommand) -> [Board.Step]? { rawRouteSteps(c).map(amountsForAll).map { withJupiter(c, $0) } }
 
     /// «all USDT» on a step reads as the number held, «all available» small under it (the Mac's step(): the user wants
     /// the number, not «all»); the later steps saying the same «all» take the same number. Left as words when unread.

@@ -130,10 +130,15 @@ document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (document.querySelector(".menu")) { document.querySelector(".menu").remove(); return; }
-    // Under the lock screen, an Import sheet or the recovery words nothing behind changes: the Mac's are disabled under
-    // its lock or a window of their own, so Settings is still there after unlocking or Back.
-    if (ui.overlay || ui.state?.lock?.locked || ui.state?.phrase) return;
+    // The topmost menu first: a row's own menu over the folded Canvases list closes before the list.
+    const menus = document.querySelectorAll(".menu");
+    if (menus.length) { menus[menus.length - 1].remove(); return; }
+    // Under the lock screen or the recovery words nothing behind changes: the Mac's window is disabled under its lock, and
+    // the words stay until they're written down (as F10). Settings is still there after unlocking.
+    if (ui.state?.lock?.locked || ui.state?.phrase) return;
+    // An Import sheet from Settings › Wallet: the Mac's import is inline in Settings, so Esc leaves Settings as from any
+    // control and what was typed goes with the sheet (ImportWalletView's onDisappear). Elsewhere a sheet keeps Esc.
+    if (ui.overlay) { if (ui.view === "settings") { ui.overlay = null; ui.view = "canvas"; render(); } return; }
     // A field that owns Esc (a node's address, a rename) stops it, as the Mac's sheet closes alone. Settings is left from
     // any other control, as the Mac's hidden cancel button does; elsewhere Esc in a field stays the field's.
     if (e.defaultPrevented || (ui.view !== "settings" && e.target.closest?.("input, textarea, select, [contenteditable]"))) return;

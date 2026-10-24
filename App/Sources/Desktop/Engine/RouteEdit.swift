@@ -77,10 +77,11 @@ nonisolated enum RouteEdit {
 }
 
 extension Engine {
-    /// The waiting move's step that can change, as the window shows it; nil when nothing can (no move waits, it's a
-    /// chain or a site's request, or the command has no amount and no way).
+    /// The waiting move's step that can change, as the window shows it: a single move's, or a chain's first (the Mac's
+    /// chain card is its first move's RouteCards, the later steps pale); nil when nothing can (no move waits, a site's
+    /// request, or the command has no amount and no way).
     var stepEdit: RouteEdit.Edit? {
-        guard case .wallet(let command)? = pending, let id = card?.id else { return nil }
+        guard let command = quotedMove, let id = card?.id else { return nil }
         let key = RouteEdit.wayKey(command)
         guard command.editableAmount != nil || key != nil || command.isStockTrade else { return nil }
         return RouteEdit.Edit(board: id, amount: command.editableAmount.map { NSDecimalNumber(decimal: $0).stringValue },
@@ -100,9 +101,9 @@ extension Engine {
         default: return
         }
         guard let net = EVMNetwork.named(place), let e = try? executor() else { return }
-        while case .wallet(let waiting)? = pending, waiting == command {
+        while quotedMove == command {
             if let ways = try? await e.swapQuotes(net, token, usdc: usdc, sell: sell, from: from, keep: keep), !ways.isEmpty {
-                guard case .wallet(let still)? = pending, still == command else { return }
+                guard quotedMove == command else { return }
                 wayQuotes = (command, ways.map { RouteEdit.Way(way: $0.way, gets: $0.gets, worth: Fmt.usd($0.worth)) })
                 // The best way and what it gets, on the step it names (MoveRoutes.swift).
                 if let id = card?.id { redrawRoute(id, command) } else { changed() }
@@ -122,9 +123,9 @@ extension Engine {
         default: return
         }
         guard let e = try? executor() else { return }
-        while case .wallet(let waiting)? = pending, waiting == command {
+        while quotedMove == command {
             if let ways = try? await e.stockQuotes(symbol, usdc: usdc, sell: sell), let best = ways.first {
-                guard case .wallet(let still)? = pending, still == command, let id = card?.id else { return }
+                guard quotedMove == command, let id = card?.id else { return }
                 wayQuotes = (command, ways.enumerated().map { i, q in
                     RouteEdit.Way(way: q.way, gets: q.gets, worth: Fmt.usd(q.worth), less: i == 0 ? nil : Fmt.usd(best.worth - q.worth))
                 })
@@ -139,7 +140,7 @@ extension Engine {
     /// Save in a step's details (StepDetails.save): the way is kept for this move; a new amount is a new plan, through
     /// the same checks and the same Confirm as if typed.
     func editStep(board: String?, amount text: String?, way: String?) async throws {
-        guard case .wallet(let command)? = pending, let id = card?.id, board == nil || board == id else {
+        guard let command = quotedMove, let id = card?.id, board == nil || board == id else {
             throw ExecutionError(say("That move isn't waiting for Confirm any more.", "Этот перевод уже не ждёт подтверждения."))
         }
         var edited: WalletCommand?
@@ -152,7 +153,16 @@ extension Engine {
         if let key = RouteEdit.wayKey(command) {
             routeWay = (way == "relay" || way == "uniswap") ? (key, way!) : nil
         }
-        if let edited { await handleWallet(edited) } else { changed() }
+        guard let edited else { changed(); return }
+        guard case .chain(let list)? = pending else { await handleWallet(edited); return }
+        // A chain's first move edited: checked as that move would be on its own, then the chain drawn again with the rest
+        // still behind it (the Mac's Save keeps the task queue).
+        await freshenSource(edited)
+        if let why = refusalBeforeCard(edited) { throw ExecutionError(why) }
+        let steps = [ChainStep.wallet(edited)] + list.dropFirst()
+        var lines = card?.lines ?? []
+        if !lines.isEmpty { lines[0] = "1. \(chainLine(.wallet(edited)))" }
+        show(.chain(steps), title: card?.title ?? "", lines: lines, cautions: sendCautions(edited))
     }
 
     /// The way picked on the route's step for this trade, taken once: Confirm runs with it, the next move without.

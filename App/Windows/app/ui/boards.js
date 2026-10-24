@@ -58,8 +58,11 @@ export function planColumn() {
   // ScheduleBoard per schedule, JupiterDCABoard); not twice where one is pinned. Not the canvas's, so no close.
   const pinned = new Set(boards.filter((b) => b.kind === "recurring").map((b) => b.title.toUpperCase()));
   const lastAsk = Math.max(0, ...(s.chat || []).filter((m) => m.fromUser).map((m) => Date.parse(m.at) || 0));
-  // A spread's and a rebalance's card are titled by their command («… across the best rates», «move deposited USDC to the best rates»).
-  const spreading = !!s.card && /the best rates/.test(s.card.title || "");
+  // A spread's and a rebalance's card are titled by their command («… across the best rates», «move deposited USDC to the best rates»);
+  // one with nowhere to put the money or nothing worth moving draws its «nothing» board instead, until the next message
+  // (the Mac's allocationPreview / rebalancePlan, set ready or not).
+  const best = (title) => /the best rates/.test(title || "");
+  const spreading = (!!s.card && best(s.card.title)) || boards.some((b) => b.kind === "move" && b.state === "nothing" && best(b.title) && Date.parse(b.at) >= lastAsk);
   const quiet = !boards.some((b) => planning(b) || (b.data?.rates && Date.parse(b.at) >= lastAsk)) && !spreading;
   const recurring = !quiet ? [] : [
     ...(s.recurring || []).filter((r) => !pinned.has(r.symbol.toUpperCase())).map((r) => ({ id: "recurring:" + r.symbol, kind: "recurring", title: r.symbol, fixed: true })),

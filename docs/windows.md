@@ -189,7 +189,10 @@ tasks and the automation wallet's budget; a multisig's money per network; tokens
 pinch zoom on a touchpad or a touch screen; «In transit» and a place's details board; Receive's QR codes; the dApp
 browser's Back and Forward enabled only when there is somewhere to go (WebView2's own history), a page that fails to
 load said under the toolbar, phishing hosts never loaded (the check holds while the app is locked), a site's
-new-window link opening nothing (a phishing host gets the banner), no alerts or file pickers for sites, right-click
+new-window link opening nothing (a phishing host gets the banner), no alerts, file pickers (an input outside the page
+too), print preview, `window.close()` or `Notification` for sites, and none of WebView2's own prompts (permissions,
+HTTP sign-in, client certificates, «open this app?» from a frame, autofill), a certificate error refused with the red
+«certificate» line and no way past, right-click
 in a field or on selected text giving Cut/Copy/Paste, «open jup.ag» from the chat, and links opening beside the
 chat in a page panel (the Mac's WebPanel); Settings › Trading agent (styles, limits, rules, safe search), Modules (every
 network and protocol, «off» refused before a card), the Hyperliquid trading key (offered after the first money there,
@@ -223,7 +226,8 @@ folder, lock, a position or a trade plan beside the moves, «How much?» in the 
 landing side by side with an «ARRIVES · SOLANA» step, the next step spending what arrived, a send no balance covers said
 before its card); every move drawn step by step with its quote on its step (stocks, EVM tokens, swaps off Solana and
 across networks, revoke, NEAR, pay, multisig, CCTP, USDT0, Aave, Merkl, a saved address, closing a position) and the
-15-second countdown on every priced swap; the cards' warnings (an XRP exchange address without its tag, a token by its
+15-second countdown on every priced swap, a chain's first move too (it's quoted, counted down, refreshed and held to
+its price as a card of its own; its amount or way can be changed with the rest kept behind it); the cards' warnings (an XRP exchange address without its tag, a token by its
 contract, Robinhood's stock tokens, Aave's liquidation price, Jupiter Lend instead of Kamino's rent); a price alert
 added to the plan as its first step; the position board's ruler, guardian and «Close X at market?»; Jupiter's staked
 JUP, perps and predictions in the portfolio; the token card's held P/L; the plan templates' preview; Skills' Study notes
@@ -267,6 +271,9 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
    `invoke('dapp_call', …)` is refused while the page's own connect comes to the canvas.
    A site's `window.open(…)` opens nothing; `alert(1)` shows no dialog and an `<input type=file>` opens no picker; a
    listed host reached while the app is locked is still stopped and named after unlocking.
+   A file input made by script and never put in the page, or a label of one, opens no picker on a real click; a
+   frame sent to `ms-settings:` opens nothing; `window.print()` and `window.close()` do nothing; `typeof Notification`
+   is "undefined"; expired.badssl.com is blank under the «certificate» line, with no «Continue».
 10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
@@ -326,3 +333,8 @@ development build, from a site's page: `window.open` opens nothing and Edge neve
 gets the banner while the page stays; `alert`, `confirm` and `prompt` give undefined, false and null with no dialog; a
 file input opens no picker, from a script or a real click; a `beforeunload` handler can't hold the page; an http link
 leaves the red «https only» line and the open page's address.
+
+At 00f72cf (wave 14): every target, engine suite and suite-less test passes again. With the saved phishing list aged two
+days and the app restarted, a listed host opened as the very first site never loads and gets the banner; a file input
+made in another frame and moved into the page opens no picker on a real click; a site asking for the location is
+refused with no prompt.

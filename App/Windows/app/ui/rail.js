@@ -72,6 +72,7 @@ export const railEdge = () => 10 + (collapsed ? NARROW : WIDE);
 
 export function rail() {
   if (profileRedraw && !profileRedraw()) profileRedraw = null;
+  if (canvasesRedraw && !canvasesRedraw()) canvasesRedraw = null;
   const width = collapsed ? NARROW : WIDE;
   const from = drawnWidth ?? width;
   drawnWidth = width;
@@ -214,10 +215,12 @@ function walletChip(compact) {
 /** A panel by a button (the Mac's popovers): Escape, a click outside or a pick closes it. It lives on the body, so the
  * window's redraws leave it where it is. */
 function popover(anchor, side, content, cls = "") {
+  // Where the anchor is before the open menu goes: a row of the folded Canvases list is inside it (Rename beside it).
+  const r = anchor.getBoundingClientRect();
   document.querySelector(".menu")?.remove();
   const panel = h("div", { class: "menu rail-popover " + cls, onclick: (e) => e.stopPropagation() }, content);
   document.body.append(panel);
-  const r = anchor.getBoundingClientRect(), w = panel.offsetWidth, hgt = panel.offsetHeight;
+  const w = panel.offsetWidth, hgt = panel.offsetHeight;
   let x, y;
   if (side === "right") { x = r.right + 10; y = Math.min(r.top - 8, window.innerHeight - hgt - 10); }
   else if (side === "top") { x = r.left; y = r.top - hgt - 8; }
@@ -226,7 +229,8 @@ function popover(anchor, side, content, cls = "") {
   panel.style.top = Math.max(10, Math.min(y, window.innerHeight - hgt - 10)) + "px";
   setTimeout(() => document.addEventListener("click", function off(ev) {
     if (!panel.isConnected) { document.removeEventListener("click", off); return; }
-    if (!panel.contains(ev.target)) { panel.remove(); document.removeEventListener("click", off); }
+    // A row's own menu over it (a «…» or right-click in the folded Canvases list) is still inside.
+    if (!panel.contains(ev.target) && !ev.target.closest?.(".menu")) { panel.remove(); document.removeEventListener("click", off); }
   }), 0);
   return panel;
 }
@@ -955,7 +959,7 @@ function profileMenu(anchor, side) {
   // Redrawn with the state while it's open, as the Mac's menu observes it: a server that starts or stops, a re-read.
   profileRedraw = () => body.isConnected && (draw(...last), true);
 }
-let profileRedraw = null;
+let profileRedraw = null, canvasesRedraw = null;
 
 // MARK: Folded
 
@@ -973,7 +977,15 @@ function narrow() {
     roundButton("rectangle.stack", t("Canvases", "Холсты"), { help: t("Canvases", "Холсты"), run: (e) => {
       e.stopPropagation();
       const anchor = e.currentTarget;
-      popover(anchor, "right", h("div", { class: "rail-canvases-panel" }, canvasList(closePopover)), "rail-canvases-pop");
+      // The live list, as the Mac's popover holds CanvasList: a folder folds, a drag moves a row, a reply's row breathes.
+      const body = h("div", { class: "rail-canvases-panel" }, canvasList(closePopover));
+      const panel = popover(anchor, "right", body, "rail-canvases-pop menu-host");
+      canvasesRedraw = () => {
+        if (!panel.isConnected) return false;
+        // Not under a row's own menu: the row it was opened for stays the one Rename sits beside.
+        if (document.querySelectorAll(".menu").length === 1) { const top = panel.scrollTop; body.replaceChildren(canvasList(closePopover)); panel.scrollTop = top; }
+        return true;
+      };
     } }),
     roundButton("plus", t("New", "Новый"), { dashed: true, help: t("New canvas", "Новый холст"), run: () => { if (!canSwitch()) { toast(busyTip()); return; } ui.view = "canvas"; act("newCanvas"); } }),
     h("div", { class: "spacer" }),

@@ -195,13 +195,13 @@ extension Engine {
     }
 
     var quoteView: QuoteView? {
-        guard case .wallet(let c)? = pending, priced(c) else { return nil }
+        guard let c = quotedMove, priced(c) else { return nil }
         if let w = wayQuotes, w.command == c {
             guard let best = w.ways.first else { return QuoteView(state: "stale") }
             return state(c, gets: best.gets)
         }
-        if jupiterShown?.command == c, let title = boards.first(where: { $0.id == card?.id })?.steps?.last?.title, title.hasPrefix("≈") {
-            return state(c, gets: String(title.dropFirst()).trimmingCharacters(in: .whitespaces))
+        if let j = jupiterShown, j.command == c {
+            return state(c, gets: String(j.title.dropFirst()).trimmingCharacters(in: .whitespaces))
         }
         return QuoteView(state: "quoting")
     }
@@ -250,7 +250,7 @@ extension Engine {
 
     /// Refresh on a stale price: quoted again, and Confirm back for 15 s once it is.
     func requote() {
-        guard case .wallet(let c)? = pending, let id = card?.id else { return }
+        guard let c = quotedMove, let id = card?.id else { return }
         quotedAt = nil
         jupiterShown = nil
         wayQuotes = nil

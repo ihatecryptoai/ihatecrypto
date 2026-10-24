@@ -20,12 +20,6 @@ import Testing
         #expect(kept?["balance15-b"] == 7)
     }
 
-    @Test func aFirstReadWaitsForSolanaAndHyperliquid() {
-        #expect(Engine.waitsForSolanaOrHL([.success(nil), .failure("hyperliquid", "Hyperliquid: timed out")]))
-        #expect(Engine.waitsForSolanaOrHL([.failure("solana", "Solana: timed out")]))
-        #expect(!Engine.waitsForSolanaOrHL([.success(nil), .failure("near", "NEAR: timed out")]))
-    }
-
     @Test func aCanvasIsNamedInTheMacsOrder() {
         let chart = Board(kind: "chart", title: "BTC · 1 day")
         var rates = Board(kind: "result", title: "Rates · USDC")

@@ -163,6 +163,15 @@ extension Engine {
         return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
     }
 
+    /// What a canvas shows between requests, as the Mac's canvasBubbles picks it once the moves are done: its chart while
+    /// no plan or rates are there, else its rates, else its plan. The newest of each.
+    nonisolated static func standing(_ boards: [Board]) -> Board? {
+        let plan = boards.last { $0.kind == "move" && $0.plan != nil }
+        let rates = boards.last { $0.kind == "result" && $0.data?.rates != nil }
+        if plan == nil, rates == nil, let chart = boards.last(where: { $0.kind == "chart" }) { return chart }
+        return rates ?? plan
+    }
+
     /// The chats History reads: its own record (each save merges the canvases in; the first read of a launch does too, so
     /// the History a build before this one rebuilt from the canvases is all there).
     var historyChats: [CanvasDoc] {
@@ -180,13 +189,17 @@ extension Engine {
             for (i, q) in asked.enumerated() {
                 let until = i + 1 < asked.count ? asked[i + 1].at : .distantFuture
                 let said = c.messages.filter { !$0.fromUser && $0.at >= q.at && $0.at < until }.map(\.text)
-                let made = c.boards.filter { $0.at >= q.at && $0.at < until && !Self.liveBoards.contains($0.kind) && !["recurring", "scheduleItem"].contains($0.kind) }.sorted { $0.at < $1.at }
-                let bubbles = made.flatMap(Self.bubbles)
+                let kept = c.boards.filter { !Self.liveBoards.contains($0.kind) && !["recurring", "scheduleItem"].contains($0.kind) }
+                let made = kept.filter { $0.at >= q.at && $0.at < until }.sorted { $0.at < $1.at }
+                // A request that drew nothing keeps what the canvas showed as it was handled (the Mac's snapshotCanvas):
+                // its chart, its rates or its plan.
+                let shown = made.isEmpty ? Self.standing(kept.filter { $0.at < q.at }.sorted { $0.at < $1.at }) : nil
+                let bubbles = shown.map(Self.bubbles) ?? made.flatMap(Self.bubbles)
                 // A scheduled run is a request of its own, «Scheduled: …», with no coin, so it isn't a «Guardian» step of a
                 // trade (the Mac's beginActivity(.request, request:, schedule:), Tasks.swift:130).
                 let run = q.note == "schedule"
                 out.append(HistoryTabs.Activity(kind: "request", at: q.at, request: q.text, understood: q.understood,
-                                                title: made.first { $0.kind == "move" }?.title, coin: run ? nil : IntentParser.namedAsset(q.text, markets: names),
+                                                title: Self.boardTitle(shown.map { [$0] } ?? made), coin: run ? nil : IntentParser.namedAsset(q.text, markets: names),
                                                 bubbles: bubbles, lines: said, failed: run && made.contains { $0.state == "failed" }))
             }
         }

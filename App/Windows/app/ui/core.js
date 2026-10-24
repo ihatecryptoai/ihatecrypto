@@ -304,7 +304,8 @@ export function when(iso) {
 
 /** A menu at a point; Escape or a click outside closes it. `items`: [label, run] or null for a divider. */
 export function popup(e, items, cls = "") {
-  document.querySelector(".menu")?.remove();
+  // A list that holds rows with menus of their own (`menu-host`) stays under the row's menu.
+  document.querySelector(".menu:not(.menu-host)")?.remove();
   const menu = h("div", { class: "menu " + cls },
     items.map((it) => it === null ? h("div", { class: "menu-divider" }) : h("button", { class: "item", onclick: () => { menu.remove(); it[1](); } }, it[0])));
   document.body.append(menu);

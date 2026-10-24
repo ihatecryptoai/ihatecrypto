@@ -541,6 +541,16 @@ function kindName(w) {
 /** The wallet being renamed and what's typed for it, kept across the states that arrive meanwhile. */
 let renaming = null, renameDraft = "";
 let removing = null;
+// Esc with the node / 1Click panel or a wallet's «Remove?» open is their Cancel, as the Mac's sheet and dialog take it:
+// Settings stays (before app.js's Esc leaves it).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || ui.view !== "settings" || ui.overlay || document.querySelector(".menu")) return;
+  if (!secretForm.open && !removing) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (secretForm.open) openSecret(null);
+  else { removing = null; render(); }
+}, true);
 let creating = { open: false, test: false };
 
 function walletTab(s) {

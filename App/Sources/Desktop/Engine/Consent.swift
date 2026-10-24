@@ -183,6 +183,9 @@ extension Engine {
         declineSite(gone)
         portfolio = PortfolioView()
         positions = []
+        // The last wallet's orders and read aren't this one's (the Mac's walletChanged clears its orders too).
+        hlOrders = []
+        positionsFor = nil
         loadEquity()
         changed()
     }

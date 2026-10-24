@@ -491,6 +491,8 @@ extension Engine {
         if let attached { c.canvas.append("the user points at this block on the canvas: " + blockFacts(attached)) }
         c.canvas += alsoAttached.map { "the user points at this block on the canvas too: " + blockFacts($0) }
         c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block " + blockFacts($0) }
+        // The Jupiter DCA board every canvas shows once its orders are read (the Mac's canvasBlocks, Agent.swift:343-347).
+        if let dca = jupiterDCA, !boards.contains(where: { $0.title == "Jupiter DCA" }) { c.canvas.append("block " + blockFacts(dca)) }
         c.canvas += alerts.map { "price alert: " + alertText($0) }
         c.canvas.append("schedule: " + (tasks.isEmpty ? "nothing scheduled" : tasks.map(taskText).joined(separator: "; ")))
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }

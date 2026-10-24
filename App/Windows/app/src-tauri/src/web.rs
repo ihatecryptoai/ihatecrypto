@@ -99,15 +99,18 @@ pub fn go(webview: &tauri::Webview, back: bool) -> tauri::Result<()> {
 }
 
 /// WebView2's events for a webview of ours: its history changed (a page's pushState too), a load finished or failed,
-/// its page's process ended. The header hears each. And WebView2's own prompts never show: a permission a page asks for
-/// (notifications, location, camera, microphone, clipboard…) is denied and an HTTP sign-in is cancelled, as the Mac's
-/// WKWebView has no handler for either and shows nothing.
+/// its page's process ended. The header hears each. And WebView2's own UI never shows, as the Mac's WKWebView has no
+/// handler for any of it and shows nothing: a permission a page asks for (notifications, location, camera, microphone,
+/// clipboard…) is denied; an HTTP sign-in is cancelled; a client certificate isn't offered; a frame sent to an app's
+/// scheme opens nothing; a certificate error is refused with no «continue» (the toolbar says «certificate»), and no load
+/// error gets WebView2's own page; fields get no autofill suggestions.
 #[cfg(windows)]
 pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
-    use webview2_com::{BasicAuthenticationRequestedEventHandler, HistoryChangedEventHandler, NavigationCompletedEventHandler,
-                       PermissionRequestedEventHandler, ProcessFailedEventHandler};
-    use windows::core::Interface;
+    use webview2_com::{BasicAuthenticationRequestedEventHandler, ClientCertificateRequestedEventHandler, HistoryChangedEventHandler,
+                       LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
+                       PermissionRequestedEventHandler, ProcessFailedEventHandler, ServerCertificateErrorDetectedEventHandler, take_pwstr};
+    use windows::core::{Interface, PWSTR};
     let (label, app) = (webview.label().to_string(), app.clone());
     let _ = webview.with_webview(move |w| {
         let Ok(core) = (unsafe { w.controller().CoreWebView2() }) else { return };
@@ -153,13 +156,56 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
             if let Some(args) = args { unsafe { let _ = args.SetCancel(true); } }
             Ok(())
         }));
+        // Answered with no certificate and no picker, as a WKWebView that doesn't take the challenge.
+        let client_cert = ClientCertificateRequestedEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args { unsafe { let _ = args.SetHandled(true); } }
+            Ok(())
+        }));
+        // The top level never gets here (on_navigation refuses an app's scheme); a frame's would get «open this app?».
+        let app_link = LaunchingExternalUriSchemeEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args { unsafe { let _ = args.SetCancel(true); } }
+            Ok(())
+        }));
+        // The page's own load, kept so a certificate error on it (and not on a picture inside) says so in the toolbar; a
+        // cancelled load ends «cancelled», which keeps the line it set.
+        let loading = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let started = {
+            let loading = loading.clone();
+            NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                let mut uri = PWSTR::null();
+                if let Some(args) = args { unsafe { let _ = args.Uri(&mut uri); } }
+                if let Ok(mut l) = loading.lock() { *l = take_pwstr(uri); }
+                Ok(())
+            }))
+        };
+        let (a, l) = (app.clone(), label.clone());
+        let bad_cert = ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut uri = PWSTR::null();
+            unsafe {
+                let _ = args.SetAction(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL);
+                let _ = args.RequestUri(&mut uri);
+            }
+            if loading.lock().map(|p| *p == take_pwstr(uri)).unwrap_or(false) { set(&a, &l, |p| p.error = Some("certificate".into())); }
+            Ok(())
+        }));
+        if let Ok(settings) = unsafe { core.Settings() } {
+            let _ = unsafe { settings.SetIsBuiltInErrorPageEnabled(false) };
+            if let Ok(more) = settings.cast::<ICoreWebView2Settings4>() {
+                unsafe { let _ = more.SetIsGeneralAutofillEnabled(false); let _ = more.SetIsPasswordAutosaveEnabled(false); }
+            }
+        }
         let mut token = 0i64;
         unsafe {
             let _ = core.add_HistoryChanged(&history, &mut token);
             let _ = core.add_NavigationCompleted(&completed, &mut token);
             let _ = core.add_ProcessFailed(&failed, &mut token);
             let _ = core.add_PermissionRequested(&permission, &mut token);
+            let _ = core.add_NavigationStarting(&started, &mut token);
+            if let Ok(core) = core.cast::<ICoreWebView2_5>() { let _ = core.add_ClientCertificateRequested(&client_cert, &mut token); }
             if let Ok(core) = core.cast::<ICoreWebView2_10>() { let _ = core.add_BasicAuthenticationRequested(&sign_in, &mut token); }
+            if let Ok(core) = core.cast::<ICoreWebView2_14>() { let _ = core.add_ServerCertificateErrorDetected(&bad_cert, &mut token); }
+            if let Ok(core) = core.cast::<ICoreWebView2_18>() { let _ = core.add_LaunchingExternalUriScheme(&app_link, &mut token); }
         }
     });
 }
@@ -231,8 +277,8 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     window.add_child(header, tauri::LogicalPosition::new(bar[0], bar[1]), tauri::LogicalSize::new(bar[2], bar[3])).map_err(|e| e.to_string())?;
     let (loads, titles, opens) = (app.clone(), app.clone(), app.clone());
     let page = tauri::webview::WebviewBuilder::new(PANEL, tauri::WebviewUrl::External(url))
-        // No file picker and no alerts, as the Mac's panel has neither (keys.rs).
-        .initialization_script_for_all_frames(crate::keys::NO_FILE_PICKER)
+        // No file picker, alerts, print preview, close() or Notification, as the Mac's panel (keys.rs).
+        .initialization_script_for_all_frames(crate::keys::SITE_GUARD)
         .on_navigation(|u| matches!(u.scheme(), "http" | "https" | "about" | "blob" | "data"))
         // A link that asks for a new window opens here instead.
         .on_new_window(move |u, _| {

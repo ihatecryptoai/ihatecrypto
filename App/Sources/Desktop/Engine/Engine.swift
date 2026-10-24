@@ -123,6 +123,17 @@ final class Engine {
     /// What each canvas's chat filled of its model's window with its last message (the Mac's ContextMeter), this run.
     var meters: [String: Snapshot.Context] = [:]
     var refreshing = false
+    /// A refresh asked for while one ran (a wallet switch's, a move's): it runs right after, never skipped.
+    var refreshAgain = false
+    /// The Hyperliquid account `positions` and `hlOrders` were read for: the guardian acts only on those, never on a
+    /// list that was never read (a first request that failed) or read for another wallet.
+    var positionsFor: String?
+    /// The last Solana read's tokens, named and priced: a read Jupiter didn't price takes them (the Mac's pricing(from:)).
+    var solanaHoldings: [Holding] = []
+    /// Since this wallet came on screen, kept through a read that failed (the Mac's solana / hl): Solana answered
+    /// (priced or not) and Hyperliquid answered.
+    var seenSolanaPriced: Bool?
+    var seenHL = false
     var refreshingEveryMinute = false
     /// The scheduled buys and tasks running now, beside the 30 s loop (startScheduledRun): one at a time.
     var scheduledRun: Task<Void, Never>?
@@ -173,8 +184,8 @@ final class Engine {
     var offeredFor: (options: [ChatRouter.Option], text: String)?
     /// Hyperliquid's trades closed in the last 7 days (Blocks.swift).
     var recentlyClosed: [ClosedTrade] = []
-    /// A Solana swap's output as its card showed it, in the token's units (Quotes.swift).
-    var jupiterShown: (command: WalletCommand, out: UInt64)? { didSet { if jupiterShown != nil { quotedAt = Date() } } }
+    /// A Solana swap's output as its card showed it, in the token's units, and its step's words (Quotes.swift).
+    var jupiterShown: (command: WalletCommand, out: UInt64, title: String, route: String)? { didSet { if jupiterShown != nil { quotedAt = Date() } } }
     var options: [ChatRouter.Option] = [] { didSet { pinOptions() } }
     /// The chat's turn (ChatTurns.swift): the model call Stop can cancel, the lookup under way, the reply the live cards
     /// belong to, the failed move «Try again» lays out, when the waiting swap was priced, the other blocks a message goes with.
@@ -329,6 +340,8 @@ final class Engine {
         settings.watchEVM = e.isEmpty ? nil : e
         portfolio = PortfolioView()
         positions = []
+        hlOrders = []
+        positionsFor = nil
         loadEquity()
         Task { await refresh() }
     }

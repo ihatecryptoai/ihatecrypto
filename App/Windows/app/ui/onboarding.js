@@ -625,13 +625,14 @@ function networksStep() {
 
 function moneyStep() {
   const s = ui.state, p = s.portfolio;
-  // Only once read, or a first read would look like money landing; a landing the board already showed isn't new.
-  if (!flow.money && p.ready) flow.money = { landed: null, more: false, stale: s.topUp?.arrived ?? null };
+  // From the step's first draw: a landing the board already showed isn't new. As the Mac: «Money landed» comes from the
+  // Top up board's own watched coin whenever it lands, never any row rising (P/L, HLP, yields), balance whole or not.
+  if (!flow.money) flow.money = { landed: null, more: false, stale: s.topUp?.arrived ?? null };
   const m = flow.money;
-  // As the Mac: «Money landed» comes from the Top up board's own watched coin, never any row rising (P/L, HLP, yields).
-  const landed = (text) => { if (m && !m.landed && text !== m.stale) { m.landed = text; render(); } };
-  if (m?.landed) return landedCard(m.landed);
-  if (m && !m.more && Number(p.total) >= 1) return hasMoneyCard();
+  const landed = (text) => { if (!m.landed && text !== m.stale) { m.landed = text; render(); } };
+  if (m.landed) return landedCard(m.landed);
+  // «Already has money» only from the whole balance (the Mac's balanceReady).
+  if (!m.more && p.ready && Number(p.total) >= 1) return hasMoneyCard();
   return stepCard({
     mood: "waiting", title: t("Top up ihatecrypto", "Пополни ihatecrypto"),
     subtitle: t("From a wallet in this browser, your phone or an exchange. It shows here the moment it lands.", "Из кошелька в браузере, с телефона или с биржи. Здесь будет видно, как только деньги придут."),

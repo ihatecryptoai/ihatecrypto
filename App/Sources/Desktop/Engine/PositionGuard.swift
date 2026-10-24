@@ -48,6 +48,9 @@ extension Engine {
     /// One pass over the rules: a limit that filled gets its half at 1R, then each position's stop moves if a rule says so.
     func guardPositions() async {
         guard !watching, activeWallet?.evm != nil, running == nil, signing == 0, !guarding else { return }
+        // Only on this account's own positions: never a list not read yet (its first request failed: every rule would
+        // read as closed and be dropped) or read for the wallet before a switch.
+        guard let account = evmAddress?.lowercased(), positionsFor == account else { return }
         var rules = exitRules
         guard !rules.isEmpty else { return }
         guarding = true

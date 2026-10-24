@@ -70,24 +70,40 @@ nonisolated struct PortfolioView: Encodable, Equatable {
 }
 
 extension Engine {
-    /// Every network read at once, then drawn together. A network that didn't answer keeps its last card.
+    /// Every network read at once, then drawn together. A network that didn't answer keeps its last card. One read at a
+    /// time; one asked for meanwhile (a wallet switch's, a move's) runs right after it instead of being dropped.
     func refresh() async {
-        guard !refreshing, let me = readWallet else { return }
+        if refreshing { refreshAgain = true; return }
         refreshing = true
         defer { refreshing = false }
+        repeat {
+            refreshAgain = false
+            await readOnce()
+        } while refreshAgain
+    }
+
+    private func readOnce() async {
+        guard let me = readWallet else { return }
         let near = nearAddress
+        // Another wallet since the read began: nothing of it is this one's — not its balances, its positions or what the
+        // guardian does with them — and the new wallet's own read follows (the Mac's same() / user == hlAddress).
+        func same() -> Bool { readWallet.map { $0.solana + $0.evm } == me.solana + me.evm && nearAddress == near }
         async let automationRead = Self.automationMoney(automationWallet)
         async let marketsRead = try? Hyperliquid.markets()
         // A wallet of one chain (a key, a watched address) has nothing to read on the other.
-        async let solanaRead = me.solana.isEmpty ? .success(nil) : Self.solana(me.solana)
+        async let solanaRead: (Read, [Holding], Bool) = me.solana.isEmpty ? (.success(nil), [], false) : Self.solana(me.solana, last: solanaHoldings)
         async let hlRead: (Read, PlaceFacts.HL?) = me.evm.isEmpty ? (.success(nil), nil) : Self.hyperliquid(me.evm)
         async let evmRead = me.evm.isEmpty ? [] : Self.evm(me.evm)
         async let nearRead = Self.near(near)
         if let m = await marketsRead { markets = m }
         let (hlPart, hlFacts) = await hlRead
+        let (solanaPart, holdings, unpriced) = await solanaRead
+        let parts = [solanaPart, hlPart] + (await evmRead) + [await nearRead]
+        let automation = await automationRead
+        guard same() else { return }
         // A read that failed keeps what the details board showed.
         if hlFacts != nil || me.evm.isEmpty { placeFacts.hyperliquid = hlFacts }
-        let parts = [await solanaRead, hlPart] + (await evmRead) + [await nearRead]
+        if case .success = solanaPart, !me.solana.isEmpty { solanaHoldings = holdings }
         let last = Dictionary(uniqueKeysWithValues: portfolio.networks.map { ($0.key, $0) })
         var networks: [PortfolioView.Network] = [], errors: [String] = []
         for part in parts {
@@ -105,19 +121,23 @@ extension Engine {
         }
         // Shares a contract call brought that the explorer doesn't list yet (the Mac's missingDeposits).
         if !me.evm.isEmpty { networks = await withMissingDeposits(networks, owner: me.evm) }
+        guard same() else { return }
         // Solana, then Hyperliquid, then the rest by their money, as on the Mac.
         let order = ["solana": 0, "hyperliquid": 1]
         networks.sort { (order[$0.key] ?? 2, -$0.usd) < (order[$1.key] ?? 2, -$1.usd) }
         // A read that failed keeps the last one: read as it came, the balance would drop by Automation's money.
-        if automationWallet == nil { automationUSD = nil } else if let m = await automationRead { automationUSD = m.dollars + m.sol * (markets["SOL"]?.markPx ?? 0) }
+        if automationWallet == nil { automationUSD = nil } else if let m = automation { automationUSD = m.dollars + m.sol * (markets["SOL"]?.markPx ?? 0) }
         // Another wallet since the last read: its balances aren't money that arrived.
         let owner = me.solana + me.evm
-        // The screen stays «loading» under this wallet's last full balance until Solana, Hyperliquid and the Automation
-        // wallet have answered — never the sum of what came so far (the Mac's balanceReady). Only the screen: the checks
-        // and the chat read each read as it came, as the Mac's do.
-        let waits = Self.waitsForSolanaOrHL(parts) || (automationWallet != nil && automationUSD == nil)
+        // The screen stays «loading» under this wallet's last full balance until Solana (priced), Hyperliquid and the
+        // Automation wallet have each answered since it came on screen — never the sum of what came so far (the Mac's
+        // balanceReady). Only the screen: the checks and the chat read each read as it came, as the Mac's do.
+        if portfolioOwner != owner { seenSolanaPriced = nil; seenHL = false }
+        if case .success = solanaPart { seenSolanaPriced = !unpriced }
+        if case .success = hlPart { seenHL = true }
         var next = PortfolioView(networks: networks, total: networks.reduce(0) { $0 + $1.usd }, updatedAt: Date(), errors: errors)
-        next.ready = (portfolio.ready && portfolioOwner == owner) || !waits
+        next.ready = Self.balanceReady(solana: !me.solana.isEmpty, evm: !me.evm.isEmpty, solanaPriced: seenSolanaPriced, hl: seenHL,
+                                       automation: automationWallet == nil || automationUSD != nil)
         let sameWallet = portfolioOwner == owner
         if portfolio.updatedAt != nil, portfolioOwner == owner { announceIncoming(from: portfolio, to: next) }
         portfolio = withProfit(next)
@@ -126,14 +146,16 @@ extension Engine {
         // The history and the 7-day line measure what the P/L does, the gas coins left out (the Mac's equity).
         if errors.isEmpty { recordEquity(ruleEquity ?? 0, wallet: me.solana.isEmpty ? me.evm : me.solana) }
         // The whole balance, gas coins and Automation's money in, for the next launch or switch (the Mac's rememberBalance).
-        if !waits, readWallet.map({ $0.solana + $0.evm }) == owner { Self.rememberBalance(next.total + (automationUSD ?? 0), wallet: Self.balanceKey(me)) }
+        if next.ready { Self.rememberBalance(next.total + (automationUSD ?? 0), wallet: Self.balanceKey(me)) }
         loadEquity()
         if !me.evm.isEmpty {
             // A request that failed keeps what was read before: read as «none», a position would look closed by its stop.
             async let ordersRead = try? HyperliquidAccount.openOrders(me.evm)
             let before = positions.map(\.coin)
-            positions = (try? await HyperliquidAccount.positions(me.evm))?.filter { $0.size != 0 } ?? positions
-            hlOrders = await ordersRead ?? hlOrders
+            let read = try? await HyperliquidAccount.positions(me.evm), orders = await ordersRead
+            guard same() else { return }
+            if let read { positions = read.filter { $0.size != 0 }; positionsFor = me.evm.lowercased() }
+            hlOrders = orders ?? hlOrders
             // Another wallet since the last read: its positions aren't this one's, closed.
             if sameWallet { await noteClosedPositions(before: before) }
             await guardPositions()
@@ -251,9 +273,10 @@ extension Engine {
         Store.save(all, "balances.json")
     }
 
-    /// Solana or Hyperliquid didn't answer: the balance isn't whole without them (the Mac's balanceReady).
-    nonisolated static func waitsForSolanaOrHL(_ parts: [Read]) -> Bool {
-        parts.contains { if case .failure(let key, _) = $0 { key == "solana" || key == "hyperliquid" } else { false } }
+    /// The balance on screen is whole (the Mac's balanceReady): Solana has answered priced and Hyperliquid has answered
+    /// since the wallet came on screen (each kept through a later read that failed), and the Automation wallet is read.
+    nonisolated static func balanceReady(solana: Bool, evm: Bool, solanaPriced: Bool?, hl: Bool, automation: Bool) -> Bool {
+        (!solana || solanaPriced == true) && (!evm || hl) && automation
     }
 
     nonisolated static func automationMoney(_ wallet: SignerWallet?) async -> (dollars: Decimal, sol: Decimal)? {
@@ -411,13 +434,15 @@ extension Engine {
         }
     }
 
-    nonisolated static func solana(_ owner: String) async -> Read {
+    /// `last`: the last read's tokens, which price a read Jupiter didn't answer. With the read: its tokens (for the next
+    /// one) and whether any is still unpriced — a coin new since the last read.
+    nonisolated static func solana(_ owner: String, last: [Holding] = []) async -> (Read, [Holding], Bool) {
         do {
             async let lendRead = try? JupiterLend.positions(user: owner)
             async let kaminoRead = try? Kamino.positions(wallet: owner)
             async let vaultsRead = try? Kamino.vaultPositions(wallet: owner)
             async let jupiterRead = jupiterPlatforms(owner)
-            let b = try await Solana.balance(owner: owner)
+            let b = try await Solana.balance(owner: owner).pricing(from: last)
             var rows: [PortfolioView.Row] = []
             if b.usdc > 0 { rows.append(row("USDC", b.usdc, usd: b.usdc)) }
             if b.sol > 0 { rows.append(row("SOL", b.sol, chain: "solana", contract: CostBasis.wsol)) }
@@ -437,9 +462,9 @@ extension Engine {
             }
             // Jupiter's other platforms (staked JUP, perps, predictions…), so a deposit made on its site still shows.
             rows += ((await jupiterRead) ?? []).filter { ($0.usd ?? 0) >= cent }
-            return .success(.init(key: "solana", name: "Solana", usd: 0, rows: rows))
+            return (.success(.init(key: "solana", name: "Solana", usd: 0, rows: rows)), b.tokens, b.unpriced)
         } catch {
-            return .failure("solana", "Solana: \(error.localizedDescription)")
+            return (.failure("solana", "Solana: \(error.localizedDescription)"), [], false)
         }
     }
 

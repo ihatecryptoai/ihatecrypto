@@ -79,17 +79,19 @@ extension Engine {
         chainState.cardsDrawn += 1
         // A warning on the card is read before the button: the button says it goes ahead despite it.
         let id = UUID().uuidString
+        // An earlier card's price never shows on this one's step, even for the same command (routeSteps reads it).
+        jupiterShown = nil
         card = Card(id: id, title: title, lines: lines, warnings: warnings + cautions,
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
         pin(Board(id: id, kind: "move", title: title, lines: (warnings + cautions).map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
-        jupiterShown = nil
         noticeCard(title)
-        if case .wallet(let command) = pending { Task { await quoteCard(command, board: id) } }
-        // A chain's first move is quoted as its own card would be (a cross swap, Tempo or NEAR, 1Click): the Mac's is.
-        if case .chain(let list) = pending, case .wallet(let first)? = list.first { Task { _ = await quoteRoute(first, board: id) } }
-        // A Base or Arbitrum trade's two ways for its step's way picker, a Robinhood Chain trade's to take the best;
-        // the route's note for «Why this way?» (RouteEdit.swift).
-        if case .wallet(let c) = pending, RouteEdit.quoted(c) { Task { await quoteWays(c) } }
+        // A single move, or a chain's first as its own card would be (the Mac's chain card is its first move's): Jupiter,
+        // a cross swap, Tempo or NEAR, 1Click; a Base or Arbitrum trade's two ways for its step's way picker, a Robinhood
+        // Chain trade's to take the best; the route's note for «Why this way?» (RouteEdit.swift).
+        if let c = quotedMove {
+            Task { await quoteCard(c, board: id) }
+            if RouteEdit.quoted(c) { Task { await quoteWays(c) } }
+        }
         noteRoute(id, pending)
     }
 

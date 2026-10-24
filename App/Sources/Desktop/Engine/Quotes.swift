@@ -22,21 +22,35 @@ extension Engine {
         guard units > 0 else { return }
         while !Task.isCancelled, card?.id == board {
             if let q = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units) {
-                guard card?.id == board else { return }
-                jupiterShown = (command, q.outAmount)
+                guard card?.id == board, quotedMove == command else { return }
                 let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
-                // The step that gets it: the last of the route (the token bought, or the USDC back), the only one of one.
-                updateBoard(board) { b in
-                    guard let last = b.steps?.indices.last, var step = b.steps?[last] else { return }
-                    step.title = "≈ \(Fmt.num(out, maxFraction: 6)) \(to.symbol)"
-                    let route = "Jupiter: \(from.symbol) → \(to.symbol)"
-                    if !step.lines.contains(route) { step.lines.insert(route, at: 0) }
-                    b.steps?[last] = step
-                }
+                jupiterShown = (command, q.outAmount, "≈ \(Fmt.num(out, maxFraction: 6)) \(to.symbol)", "Jupiter: \(from.symbol) → \(to.symbol)")
+                // On its route's last step (routeSteps), a single move's or a chain's first: every redraw keeps it.
+                redrawRoute(board, command)
                 return
             }
             try? await Task.sleep(for: .seconds(15))
         }
+    }
+
+    /// The move a waiting card prices: a single move, or a chain's first, as the Mac's chain card is its first move's
+    /// (Canvases.swift:3001-3005): quoted, counted down and held to its price the same way.
+    var quotedMove: WalletCommand? {
+        switch pending {
+        case .wallet(let c)?: return c
+        case .chain(let list)?: if case .wallet(let c)? = list.first { return c } else { return nil }
+        default: return nil
+        }
+    }
+
+    /// The route's steps with Jupiter's quote on the step that gets it: the last of the route (the token bought, or the
+    /// USDC back).
+    func withJupiter(_ c: WalletCommand, _ steps: [Board.Step]) -> [Board.Step] {
+        guard let j = jupiterShown, j.command == c, let last = steps.indices.last else { return steps }
+        var steps = steps
+        steps[last].title = j.title
+        if !steps[last].lines.contains(j.route) { steps[last].lines.insert(j.route, at: 0) }
+        return steps
     }
 
     /// The output the card showed for this very command, for the Executor's floor; nil for any other.

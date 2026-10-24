@@ -650,8 +650,8 @@ function walletsTab(b) {
     section(t("Saved addresses", "Сохранённые адреса")),
     saved.length ? list(saved.map((e) => addressCard(e, b)))
       : note(q ? t(`Nothing matches “${favSearch}”.`, `Ничего не нашлось по «${favSearch}».`)
-        : t("Save an exchange's deposit address, another wallet or a friend's — with a name, so you never paste a wrong one: the Address book block, or «save <address> as Bybit on base» in the chat.",
-          "Сохрани адрес пополнения биржи, другой кошелёк или адрес друга — с именем, чтобы никогда не вставить чужой: блок «Адресная книга» или «сохрани <адрес> как Bybit на base» в чате.")),
+        : t("Save an exchange's deposit address, another wallet or a friend's — with a name, so you never paste a wrong one. Press + and paste it.",
+          "Сохрани адрес пополнения биржи, другой кошелёк или адрес друга — с именем, чтобы никогда не вставить чужой. Нажми «+» и вставь его.")),
     hint(t(`Every saved address is confirmed with ${presence()}, the whole address on the prompt, and money goes to a name only at that address — never to an address from a chat, a site or a model.`,
       `Каждый сохранённый адрес подтверждается через ${presence()}, весь адрес в окне, и деньги уходят по имени только на этот адрес — никогда на адрес из чата, сайта или от модели.`), "lock"),
   ];
@@ -1268,9 +1268,10 @@ function scheduleItemBody(b) {
   const head = h("div", { class: "live-section" }, h("span", {}, runs.length ? t(`LAST RUNS · ${runs.length}`, `ПОСЛЕДНИЕ ЗАПУСКИ · ${runs.length}`) : t("HASN'T RUN YET", "ЕЩЁ НЕ ЗАПУСКАЛАСЬ")));
   if (key.startsWith("perp:")) {
     const p = s.positions.find((x) => (x.market || x.coin) === key.slice(5));
-    const last = runs.length ? [head, h("div", { class: "live-item-runs" }, runRows)] : [];
+    // Its runs always, «HASN'T RUN YET» before the first (the Mac's ScheduleFrame).
+    const last = [head, h("div", { class: "live-item-runs" }, runRows)];
     return p ? [positionCard(p), h("div", { class: "secondary small" }, t("Its stop and take sit on the exchange: they work with ihatecrypto closed.", "Стоп и тейк стоят на бирже: работают, даже когда ihatecrypto закрыт.")), ...last]
-      : [note(t("Closed — nothing open on this market now.", "Закрыта — на этом рынке сейчас ничего не открыто.")), ...last];
+      : [h("b", { class: "secondary" }, t("No longer scheduled — what it did is below.", "Больше не в расписании — что она сделала, ниже.")), ...last];
   }
   if (!x) return [h("b", { class: "secondary" }, t("No longer scheduled — what it did is below.", "Больше не в расписании — что она сделала, ниже.")), head, h("div", { class: "live-item-runs" }, runRows)];
   const held = s.schedulePaused === true, a = s.automation;

@@ -607,8 +607,11 @@ extension Engine {
         guard !exitRules.isEmpty, let me = evmAddress, !me.isEmpty else { return }
         async let ordersRead = try? HyperliquidAccount.openOrders(me)
         let before = positions.map(\.coin), sameWallet = portfolioOwner == readWallet.map { $0.solana + $0.evm }
-        if let now = try? await HyperliquidAccount.positions(me) { positions = now.filter { $0.size != 0 } }
-        hlOrders = await ordersRead ?? hlOrders
+        let now = try? await HyperliquidAccount.positions(me), orders = await ordersRead
+        // Another wallet since the read began: they aren't its positions (the Mac's user == hlAddress).
+        guard evmAddress == me else { return }
+        if let now { positions = now.filter { $0.size != 0 }; positionsFor = me.lowercased() }
+        hlOrders = orders ?? hlOrders
         // One its stop closed between the reads is said here, as refresh() would.
         if sameWallet { await noteClosedPositions(before: before) }
         await guardPositions()

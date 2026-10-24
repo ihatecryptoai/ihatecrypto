@@ -42,7 +42,10 @@ function draw() {
         h("span", { class: "secondary" }, quiet ? t("Nothing running", "Ничего не работает") : t("ihatecrypto keeps working here", "ihatecrypto работает здесь"))),
       h("span", { class: "spacer" }),
       h("div", { class: "tray-money" },
-        s.portfolio?.ready ? h("b", { class: "num" }, masked(usd(total))) : h("span", { class: "tray-skeleton" }),
+        // Until every network answers: the last full balance, dimmed (the Mac's menu bar), a skeleton only at the very first.
+        s.portfolio?.ready ? h("b", { class: "num" }, masked(usd(total)))
+          : s.lastBalance != null ? h("b", { class: "num tray-stale", title: t("Updating: the last full balance until every network answers", "Обновляю: последний полный баланс, пока не ответят все сети") }, masked(usd(Number(s.lastBalance))))
+          : h("span", { class: "tray-skeleton" }),
         s.positionsPnl != null ? h("span", { class: "tray-pnl num " + (Number(s.positionsPnl) < 0 ? "loss" : "profit") },
           masked((Number(s.positionsPnl) < 0 ? "" : "+") + usd(s.positionsPnl)) + t(" in positions", " в позициях")) : null)),
     positions.map((p) => h("div", { class: "tray-position" },

@@ -22,6 +22,8 @@ export function lockScreen() {
   if (!l?.locked) return null;
   // An open dialog (an import, a rename) goes, as the Mac closes its import window: nothing typed there survives the lock.
   ui.overlay = null;
+  // Every open menu and popover too (the wallet menu with whole addresses, the Profile menu): nothing over the lock.
+  for (const m of document.querySelectorAll(".menu")) m.remove();
   const hello = h("button", { class: "lk-hello btn primary capsule", onclick: () => act("unlockHello") },
     icon("hello", 18), t("Unlock with Windows Hello", "Открыть через Windows Hello"));
   return h("div", { class: "lk-screen" },

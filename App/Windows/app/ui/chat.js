@@ -154,6 +154,9 @@ export function chatPanel() {
   // the open menu draws again from each state, so a download's percent or a finished sign-in shows in it.
   if (!modelsAsked) { modelsAsked = true; act("refreshModels"); }
   if (liveMenu) liveMenu();
+  // The networks menu and the context popover follow the state while open too («N of M on» as a switch flips).
+  const live = document.querySelector(".menu");
+  if (live?._live) { const top = live.scrollTop; live.replaceChildren(live._live()); live.scrollTop = top; }
   // Cards come under a reply already shown: when they don't all fit, the reply they answer stays in view from its top
   // (the Mac's onChange(of: nextSteps?.message)) — after app.js has put a following chat at its end; not at launch.
   const cardsFor = liveMessage()?.id || null;
@@ -741,7 +744,16 @@ function composer(s) {
     onscroll: (e) => { const m = e.target.previousElementSibling; if (m) m.scrollTop = e.target.scrollTop; },
   });
   field.value = ui.composerText;
-  setTimeout(() => { autosize(field, 140); drawHelpers(); }, 0);
+  // The «/ @ $» list is the draft's at every draw (the Mac's `suggestions` in the body): a state's redraw keeps it, with
+  // the row ↑↓ had lit, and a contract's rows that landed with a lookup's answer stay.
+  setTimeout(() => {
+    autosize(field, 140);
+    drawHelpers();
+    if (document.activeElement !== field) return;
+    const rows = suggestionRows(field);
+    pick = Math.min(pick, Math.max(0, rows.length - 1));
+    drawSuggestions(rows);
+  }, 0);
   const waiting = s.card, site = s.site;
   const listening = voice.on;
   return h("div", { class: "chat-composer" },
@@ -1412,6 +1424,7 @@ function networksChip() {
     onclick: () => {
       const pop = popover(chip, networksMenu(), "up", () => { if (tuning === "networks" && netsPop === pop) tuning = null; render(); });
       if (!pop) return;
+      pop._live = networksMenu;
       netsPop = pop; tuning = "networks"; render();
     } },
   on.length ? [h("span", { class: "chat-logo-stack" }, on.slice(0, 3).map((n) => logo(n.logo, 20))), on.length > 3 ? h("b", { class: "secondary" }, "+" + (on.length - 3)) : null]
@@ -1443,25 +1456,15 @@ function short(n) {
 /** «$1.24», «$0.04», «$0.004»; under a tenth of a cent «<$0.001». */
 const dollars = (v) => (v >= 0.0095 ? "$" + v.toFixed(2) : v >= 0.00095 ? "$" + v.toFixed(3) : v > 0 ? "<$0.001" : "$0");
 
-/** How much of the model's window the chat fills, or what a key paid for its answers (ContextChip); a click opens its parts. */
-function contextChip(s) {
-  const c = s.context;
-  if (!c || !c.used) return null;
+/** The context chip's popover, from the state now: drawn again with each state while it's open (the Mac's ContextMeter). */
+function contextPop() {
+  const c = ui.state.context;
+  if (!c) return h("div", { class: "chat-context-pop" });
   const share = c.window ? Math.min(1, c.used / c.window) : null;
-  const tight = (share || 0) >= 0.8;
-  const paid = s.providers.find((p) => p.id === s.model.provider)?.kind === "apiKey" && c.spent > 0;
-  const r = 6.5, len = 2 * Math.PI * r;
-  const ring = share === null ? null : svg("svg", { viewBox: "0 0 18 18", class: "chat-ring" },
-    svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-back" }),
-    svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-fill", "stroke-linecap": "round",
-      "stroke-dasharray": `${Math.max(0.5, share * len)} ${len}`, transform: "rotate(-90 9 9)" }));
   const rest = Math.max(0, c.used - (c.instructions || 0) - (c.chat || 0));
   const part = (cls, n) => n > 0 && c.window ? h("span", { class: cls, style: `width:${Math.max(2, (n / c.window) * 100)}%` }) : null;
   const line = (cls, name, value) => h("div", { class: "chat-context-line" }, cls ? h("i", { class: "chat-dot " + cls }) : null, h("span", { class: "one-line" }, name), h("span", { class: "spacer" }), h("b", {}, value));
-  const chip = h("button", { class: "chat-chip-btn chat-ctx" + (tight ? " chat-near" : ""), "data-pop": "context",
-    title: paid ? t(`This chat's answers cost ${dollars(c.spent)} so far. Click for the context they read.`, `Ответы этого чата уже стоили ${dollars(c.spent)}. Нажми, чтобы увидеть, что они читали.`)
-      : t("What the model read with your last message, of what its window holds.", "Что модель прочитала с последним сообщением — из того, что вмещает её окно."),
-    onclick: () => popover(chip, h("div", { class: "chat-context-pop" },
+  return h("div", { class: "chat-context-pop" },
       h("div", { class: "chat-caption chat-split" }, h("span", {}, t("Context", "Контекст")), share === null ? null : h("span", {}, share < 0.01 ? t("under 1%", "меньше 1%") : Math.round(share * 100) + "%")),
       h("div", { class: "chat-context-big" }, h("b", {}, short(c.used)), h("span", { class: "secondary" }, c.window ? t(`of ${short(c.window)} tokens`, `из ${short(c.window)} токенов`) : t("tokens", "токенов"))),
       c.window ? h("div", { class: "chat-context-bar chat-split-bar" }, part("chat-part-brief", c.instructions || 0), part("chat-part-chat", c.chat || 0), part("chat-part-rest", rest)) : null,
@@ -1475,7 +1478,25 @@ function contextChip(s) {
       h("div", { class: "menu-divider" }),
       h("div", { class: "small secondary" }, c.sent < c.lines
         ? t("This chat is long: only its newest messages go with each request, so it never runs out of room.", "Чат длинный: с каждым запросом уходят только его новые сообщения, поэтому место не кончается.")
-        : t("Each message goes with the chat so far. A long chat sends only its newest messages, so it never runs out of room.", "Каждое сообщение уходит вместе с чатом. Длинный чат отправляет только новые сообщения, поэтому место не кончается."))), "up") },
+        : t("Each message goes with the chat so far. A long chat sends only its newest messages, so it never runs out of room.", "Каждое сообщение уходит вместе с чатом. Длинный чат отправляет только новые сообщения, поэтому место не кончается.")));
+}
+
+/** How much of the model's window the chat fills, or what a key paid for its answers (ContextChip); a click opens its parts. */
+function contextChip(s) {
+  const c = s.context;
+  if (!c || !c.used) return null;
+  const share = c.window ? Math.min(1, c.used / c.window) : null;
+  const tight = (share || 0) >= 0.8;
+  const paid = s.providers.find((p) => p.id === s.model.provider)?.kind === "apiKey" && c.spent > 0;
+  const r = 6.5, len = 2 * Math.PI * r;
+  const ring = share === null ? null : svg("svg", { viewBox: "0 0 18 18", class: "chat-ring" },
+    svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-back" }),
+    svg("circle", { cx: 9, cy: 9, r, fill: "none", "stroke-width": 2.2, class: "chat-ring-fill", "stroke-linecap": "round",
+      "stroke-dasharray": `${Math.max(0.5, share * len)} ${len}`, transform: "rotate(-90 9 9)" }));
+  const chip = h("button", { class: "chat-chip-btn chat-ctx" + (tight ? " chat-near" : ""), "data-pop": "context",
+    title: paid ? t(`This chat's answers cost ${dollars(c.spent)} so far. Click for the context they read.`, `Ответы этого чата уже стоили ${dollars(c.spent)}. Нажми, чтобы увидеть, что они читали.`)
+      : t("What the model read with your last message, of what its window holds.", "Что модель прочитала с последним сообщением — из того, что вмещает её окно."),
+    onclick: () => { const pop = popover(chip, contextPop(), "up"); if (pop) pop._live = contextPop; } },
   ring, paid ? h("span", {}, dollars(c.spent)) : [h("span", {}, short(c.used)), c.window ? h("span", { class: "secondary" }, "/ " + short(c.window)) : null]);
   return chip;
 }

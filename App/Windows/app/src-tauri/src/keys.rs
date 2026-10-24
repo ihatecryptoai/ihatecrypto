@@ -58,27 +58,41 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("keys").on_webview_ready(|webview| settle(&webview)).build()
 }
 
-/// In every frame of a site and of a page beside the chat: a file input and the File System Access pickers open nothing,
-/// as the Mac's web views have no open panel (no UI delegate), so a page can't ask for a «keystore backup» and read it.
+/// In every frame of a site and of a page beside the chat, what a WKWebView with no UI delegate gives (the Mac's browser
+/// and panel): a file input and the File System Access pickers open nothing, so a page can't ask for a «keystore backup»
+/// and read it; `print()` and `close()` do nothing (WebView2 would open its print preview, or destroy the webview under
+/// our header); and there's no `Notification` (Tauri's notification plugin puts a stand-in in the page that reads
+/// «granted» — the site's capability can't use it, and a plain WKWebView has none).
 // An input is told by the platform's own getters, not `instanceof` or its own properties: one made in another frame's
-// realm and moved here, or with `type` redefined on it, is still a file input.
-// ponytail: a page script, so a page that calls a fresh about:blank frame's own `showPicker` (a realm without this
-// script) or uses a closed shadow root it declares in HTML could still ask; WebView2 has no file-chooser event to refuse
-// it at the host. Dropping a file onto the page stays, as it needs the person's drag.
-pub const NO_FILE_PICKER: &str = r#"(() => {
-  const nameOf = Object.getOwnPropertyDescriptor(Element.prototype, "localName").get;
-  const typeOf = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type").get;
+// realm and moved here, or with `type` redefined on it, is still a file input. One never put in the page (or a label of
+// one) has a click path that never reaches the window, so `click()` and `dispatchEvent` refuse it themselves.
+// ponytail: a page script, so a page that calls a fresh about:blank frame's own `showPicker` or `click` (a realm without
+// this script) or uses a closed shadow root it declares in HTML could still ask; WebView2 has no file-chooser event to
+// refuse it at the host. Dropping a file onto the page stays, as it needs the person's drag.
+pub const SITE_GUARD: &str = r#"(() => {
+  const own = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
+  const nameOf = own(Element.prototype, "localName"), typeOf = own(HTMLInputElement.prototype, "type");
+  const controlOf = own(HTMLLabelElement.prototype, "control"), eventType = own(Event.prototype, "type");
+  const closest = Element.prototype.closest;
   const file = (el) => { try { return nameOf.call(el) === "input" && typeOf.call(el) === "file"; } catch { return false; } };
+  // A file input, or anything inside a label whose control is one.
+  const picks = (el) => { if (file(el)) return true; try { const label = closest.call(el, "label"); return !!label && file(controlOf.call(label)); } catch { return false; } };
   const stop = (e) => { if (file(e.composedPath()[0])) { e.preventDefault(); e.stopImmediatePropagation(); } };
   addEventListener("click", stop, true);
   // Inside a closed shadow root the window never sees the input itself: each root gets the same guard.
   const attach = Element.prototype.attachShadow;
   Element.prototype.attachShadow = function (init) { const root = attach.call(this, init); root.addEventListener("click", stop, true); return root; };
+  const click = HTMLElement.prototype.click;
+  HTMLElement.prototype.click = function () { if (!picks(this)) click.call(this); };
+  const dispatch = EventTarget.prototype.dispatchEvent;
+  EventTarget.prototype.dispatchEvent = function (e) { let refused = false; try { refused = eventType.call(e) === "click" && picks(this); } catch {} return refused ? false : dispatch.call(this, e); };
   const show = HTMLInputElement.prototype.showPicker;
   if (show) HTMLInputElement.prototype.showPicker = function () { if (file(this)) throw new DOMException("No file picker here.", "NotAllowedError"); return show.call(this); };
   for (const name of ["showOpenFilePicker", "showSaveFilePicker", "showDirectoryPicker"]) {
     if (name in window) window[name] = () => Promise.reject(new DOMException("No file picker here.", "AbortError"));
   }
+  for (const name of ["print", "close"]) Object.defineProperty(window, name, { value: () => {}, writable: false, configurable: false });
+  delete window.Notification;
 })();"#;
 
 /// WebView2's menu items kept in a field or on selected text: the Mac's text menu (spelling, Cut, Copy, Paste…).

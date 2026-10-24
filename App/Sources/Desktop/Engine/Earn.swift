@@ -199,10 +199,16 @@ extension Engine {
         readDCA(orders)
         let lines = orders.isEmpty ? [say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")] : dcaLines(orders)
         let data = orders.isEmpty ? nil : BlockData(dca: dcaRows(Array(orders.prefix(10))))
-        var list = boards, found = false
-        for i in list.indices where list[i].kind == "result" && list[i].title == "Jupiter DCA" {
-            list[i].lines = lines; list[i].data = data; found = true
+        // Every canvas's, as the Mac's one live board (Studio.swift:1379): one pinned elsewhere never lists a cancelled order.
+        var found = false
+        for c in canvases.indices {
+            for i in canvases[c].boards.indices where canvases[c].boards[i].kind == "result" && canvases[c].boards[i].title == "Jupiter DCA" {
+                canvases[c].boards[i].lines = lines; canvases[c].boards[i].data = data
+                if c == canvasIndex { found = true }
+            }
         }
-        if found { boards = list; changed() } else if placed, !orders.isEmpty { pin("result", "Jupiter DCA", lines: lines, data: data) }
+        saveCanvases()
+        changed()
+        if !found, placed, !orders.isEmpty { pin("result", "Jupiter DCA", lines: lines, data: data) }
     }
 }
