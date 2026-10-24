@@ -265,6 +265,35 @@ function tokenChip(token) {
   return h("span", { class: "chat-token-chip", title: address ? token : label }, logo(address ? (found?.symbol || "?") : token, 14, found?.image || held?.icon), label);
 }
 
+/** The field's «$TOKEN» mentions as chips on the layer under it: the same text, glyph for glyph, so each chip sits on its
+ *  letters and the caret stays where the textarea puts it; a pill behind «$TICKER» and the token's logo over the «$». */
+function drawMirror(field) {
+  const mirror = field?.previousElementSibling;
+  if (!mirror?.classList.contains("chat-mirror")) return;
+  const text = field.value, parts = [];
+  let at = 0, m;
+  mentionRe.lastIndex = 0;
+  while ((m = mentionRe.exec(text))) {
+    const start = m.index + m[1].length;
+    parts.push(text.slice(at, start), fieldToken(m[2]));
+    at = mentionRe.lastIndex;
+  }
+  field.classList.toggle("chat-mirrored", parts.length > 0);
+  if (!parts.length) { mirror.replaceChildren(); return; }
+  // A last line break keeps the last line's height, as the textarea has it.
+  parts.push(text.slice(at) + "\n");
+  mirror.replaceChildren(...parts);
+  mirror.scrollTop = field.scrollTop;
+}
+
+function fieldToken(token) {
+  const address = /^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(token);
+  const found = address ? (lookups.get(token) || [])[0] : null;
+  const held = !address && heldRow(token.toUpperCase());
+  const mark = logo(address ? (found?.symbol || "?") : token, 13, found?.image || held?.icon);
+  return h("span", { class: "chat-field-token" }, h("span", { class: "chat-field-dollar" }, "$", mark), token);
+}
+
 /** «Claude Opus 5.5» from «claude-opus-5-5», «GPT-5.4» from «gpt-5.4». */
 export function modelName(id) {
   if (!id) return "";
@@ -637,6 +666,7 @@ function composer(s) {
     onkeydown: keys,
     onclick: (e) => refreshSuggestions(e.target),
     onkeyup: (e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) refreshSuggestions(e.target); },
+    onscroll: (e) => { const m = e.target.previousElementSibling; if (m) m.scrollTop = e.target.scrollTop; },
   });
   field.value = ui.composerText;
   setTimeout(() => { autosize(field, 140); drawHelpers(); }, 0);
@@ -659,7 +689,9 @@ function composer(s) {
       waiting ? waitingBar(waiting) : null,
       h("div", { class: "chat-entry" },
         h("button", { class: "chat-round-btn chat-glassy", title: t("Plan templates", "Шаблоны планов"), onclick: (e) => templatesMenu(e.currentTarget) }, icon("square.grid", 15)),
-        field,
+        // «$SOL» drawn as its token on a layer under the field (the Mac's ComposerField): the textarea keeps the typing,
+        // the caret and IME; only its letters go clear while a mention is in it.
+        h("div", { class: "chat-field-wrap" }, h("div", { class: "chat-mirror", "aria-hidden": "true" }), field),
         h("button", { class: "icon-btn chat-mic", title: t("Speak instead of typing (the keyboard layout's language)", "Сказать голосом (язык раскладки)"), onclick: speak }, icon("mic", 16)),
         sendButton(s))),
   );
@@ -705,6 +737,9 @@ function waitingBar(card) {
     ? h("button", { class: "chat-pill-accent", disabled: busy, title: t("Ask for the price again; Confirm comes back for 15 s", "Спросить цену заново; «Подтвердить» вернётся на 15 с"), onclick: () => act("requote") },
       icon("arrow.clockwise", 13), t("Refresh", "Обновить"))
     : stateNow === "quoting" ? h("span", { class: "chat-pill-quiet" }, icon("hourglass", 13), t("Quoting…", "Котирую…"))
+    // A trade the second check doubts has its tick on its block (the Mac's Execute sheet); the engine refuses Confirm without it.
+    : card.ticks?.length ? h("button", { class: "chat-pill-outline", title: t("Tick the second check's warning on its block first", "Сначала отметь предупреждение второй проверки на блоке"),
+      onclick: () => { ui.view = "canvas"; render(); goHome(); } }, icon("eye", 13), t("Review on the canvas", "Посмотреть на холсте"))
     : h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm", { board: card.id }) }, icon("check", 13), card.confirm);
   return h("div", { class: "chat-waiting-bar" },
     h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
@@ -900,6 +935,7 @@ function nudge(el, up) {
 
 /** The draft's amount panel, or the automation top-up's balances, over the field; drawn on its own as the text changes. */
 function drawHelpers() {
+  drawMirror(document.getElementById("composer"));
   const slot = document.getElementById("chat-helper");
   if (!slot) return;
   const top = topUpDraft();
@@ -1351,3 +1387,5 @@ export function openModelMenu() { document.querySelector(".chat-model")?.click()
 export function openNetworksMenu() { document.querySelectorAll(".chat-chips .chat-chip-btn")[1]?.click(); }
 export function openContextMenu() { document.querySelector(".chat-ctx")?.click(); }
 export function showDraft() { suggest("send 120 USDC to Mom"); drawHelpers(); }
+/** The preview's «$» chips in the field (`&call=chat.showMention`). */
+export function showMention() { suggest("buy $SOL for 5 USDC, then swap half to $JUP"); drawHelpers(); }

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ihatecrypto · panel edge</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="browser-panel.css">
+  <!-- The panel's left edge beside its page, the page's full height (the Mac's ResizeEdge). -->
+  <style>
+    body { background: var(--card); border-left: 1px solid var(--card-border); box-sizing: border-box; overflow: hidden; }
+    #edge { width: 100%; }
+    #edge::after { left: 1px; }
+  </style>
+  <script type="module" src="panel-edge.js"></script>
+</head>
+<body>
+  <div id="edge"></div>
+</body>
+</html>

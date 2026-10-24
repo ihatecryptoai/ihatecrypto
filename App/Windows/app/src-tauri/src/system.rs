@@ -329,8 +329,12 @@ pub fn started_hidden() -> bool { std::env::args().any(|a| a == "--hidden") }
 /// The lock came down (the engine's `locked`): the dApp browser and the page beside the chat close, as the Mac closes
 /// its browser and import windows on lock — nothing of the wallet stays on screen behind the lock.
 pub fn locked(app: &tauri::AppHandle) {
+    // The site's waiting request goes too (the engine declines it on its own lock as well).
+    crate::site_closed(app);
     if let Some(window) = app.get_window(crate::BROWSER_WINDOW) { let _ = window.close(); }
-    // The browser beside the chat, and the page there.
+    // The browser beside the chat, put away or not, and the page there.
+    crate::web::shown(app, crate::SITE, false);
     if crate::web::wallet_in_panel(app) { for label in [crate::SITE, crate::BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } } }
     crate::web::close_page(app);
+    if let Some(edge) = app.get_webview(crate::web::PANEL_EDGE) { let _ = edge.hide(); }
 }

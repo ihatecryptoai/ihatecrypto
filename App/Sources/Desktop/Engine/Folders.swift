@@ -1,4 +1,5 @@
 import Foundation
+import IhatecryptoCore
 import WalletCore
 
 /// A picture from the icon library (the Mac's AddressIcon): a token or network logo, one of the library's glyphs, an
@@ -46,8 +47,11 @@ extension Engine {
 
     var canvasRows: [Snapshot.CanvasRow] {
         canvases.map { c in
-            .init(id: c.id, title: c.title, at: c.messages.last?.at ?? c.at, pinnedAt: c.pinnedAt, folder: c.folder, icon: c.icon,
-                  provider: c.provider, model: c.model, empty: c.schedule == nil && c.messages.isEmpty && c.boards.isEmpty, blocks: !c.boards.isEmpty)
+            let plan = c.id == canvasID ? intent : c.intent ?? TradeIntent()
+            return .init(id: c.id, title: c.title, at: c.messages.last?.at ?? c.at, pinnedAt: c.pinnedAt, folder: c.folder, icon: c.icon,
+                  provider: c.provider, model: c.model, empty: c.schedule == nil && c.messages.isEmpty && c.boards.isEmpty, blocks: !c.boards.isEmpty,
+                  coin: plan == TradeIntent() ? nil : plan.asset,
+                  note: c.boards.contains { $0.kind == "note" && $0.opens == nil })
         }
     }
 

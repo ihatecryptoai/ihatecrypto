@@ -279,10 +279,10 @@ function aboutRow() {
     try { await invoke("update_install"); } catch (e) { update.installing = false; toast(t("Couldn't install the update: ", "Не удалось поставить обновление: ") + e); render(); }
   };
   return row({ label: update.version ? `ihatecrypto ${update.version}` : t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle",
-      about: update.found ? t(`${update.found} is ready. Install restarts ihatecrypto and What's New shows what changed; the wallet, settings and canvases stay.`,
+      about: (ui.state.build ? t(`Build ${ui.state.build}. `, `Сборка ${ui.state.build}. `) : "") + (update.found ? t(`${update.found} is ready. Install restarts ihatecrypto and What's New shows what changed; the wallet, settings and canvases stay.`,
         `Готова ${update.found}. «Установить» перезапустит ihatecrypto, а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.`)
         : t("A new version waits for you to press Install, and What's New shows what changed; the wallet, settings and canvases stay.",
-          "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.") },
+          "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.")) },
     update.found ? h("div", { class: "btns" },
       h("button", { class: "btn small", disabled: update.installing, onclick: () => { update.found = null; render(); } }, t("Later", "Позже")),
       h("button", { class: "btn small primary", disabled: update.installing, onclick: install }, update.installing ? t("Installing…", "Ставлю…") : t(`Install ${update.found}`, `Установить ${update.found}`)))
@@ -349,7 +349,7 @@ function modelTab(s) {
             : [pill(shown.connected ? t("Connected", "Подключено") : t("Not connected", "Не подключено"), shown.connected),
               shown.connected ? h("button", { class: "btn small", title: t(`The chat goes on with ${shown.name}`, `Чат продолжит с ${shown.name}`), onclick: () => connect() }, t("Switch", "Переключить")) : null]),
         row({ label: t("Sign-in", "Вход"), ico: "person", about: shown.connected ? t("Connected: the key is kept with Windows' data protection (DPAPI).", "Подключено: ключ хранится под защитой данных Windows (DPAPI).") : t("Not connected.", "Не подключено.") },
-          shown.existingLogin ? h("button", { class: "btn small", onclick: () => connect() }, t(`Use ${shown.existingLogin}`, `Взять вход ${shown.existingLogin}`)) : null,
+          shown.existingLogin ? h("button", { class: "btn small", onclick: () => act("useLogin", { provider: shown.id }) }, t(`Use ${shown.existingLogin}`, `Взять вход ${shown.existingLogin}`)) : null,
           shown.signIn ? h("button", { class: "btn small", onclick: async () => {
             toast(t("Finish the sign-in in the browser.", "Закончи вход в браузере."));
             if (await act("signIn", { provider: shown.id }) !== null) toast(t("Signed in.", "Вход выполнен."));

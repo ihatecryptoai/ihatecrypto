@@ -104,14 +104,21 @@ extension Engine {
     /// A key wallet asked for a chain it has no key on.
     func missingKey(_ command: WalletCommand) -> String? {
         guard let wallet = activeWallet, wallet.kind != "phrase" else { return nil }
+        // The Mac's Wallets.missingKey(for:): a key wallet signs its own chain's moves only.
         let chains: [String] = switch command {
-        case .receive: []
-        case .hlp, .bridge, .cctp, .usdt, .aaveBorrow, .aaveRepay, .aaveCollateral, .sweepDust, .revokeApproval, .hlSpotBuy, .hlSpotSell: ["evm"]
+        case .yields, .receive, .stopSchedules: []
+        case .hlp: ["evm"]
+        case .withdrawToSolana, .aave, .morpho, .baseToSolana, .arbitrumToSolana, .evmToSolana, .robinhoodToSolana, .solanaTo, .buyStock, .sellStock, .buyOn, .sellOn, .pay, .claimRewards, .sweepRewards: ["evm", "solana"]
         case .swapOn("solana", _, _, _): ["solana"]
-        case .swapOn("near", _, _, _), .buyNear, .sellNear, .sendNear, .closeNear: ["near"]
-        case .swapOn: ["evm"]
-        case .buy, .sell, .lendDeposit, .lendWithdraw, .kamino, .stake, .unstake, .sendSol, .jupiterDCA, .jupiterDCACancel: ["solana"]
-        default: ["evm", "solana"]
+        case .swapOn("near", _, _, _): ["near"]
+        case .bridge, .cctp, .usdt, .aaveBorrow, .aaveRepay, .aaveCollateral, .swapOn, .sweepDust, .revokeApproval, .hlSpotBuy, .hlSpotSell: ["evm"]
+        case .showApprovals, .multisigShow: []
+        case .multisigCreate, .multisigSend: ["evm"]
+        case .crossSwap(_, let from, _, let to, _): Array(Set([from, to].map { $0 == "solana" || $0 == "near" ? $0 : "evm" })).sorted()
+        case .gas: ["evm", "solana"]
+        case .sendNear, .closeNear: ["near"]
+        case .buyNear, .sellNear: ["solana", "near"]
+        default: ["solana"]   // spot, vaults, staking, sends: all on Solana
         }
         return chains.lazy.compactMap { wallet.missing($0) }.first
     }
@@ -512,9 +519,11 @@ extension Engine {
 
     /// The Confirm button: the one way a move starts. With the card's id it confirms only that card — one drawn after the
     /// click was aimed (another move, a scheduled run's) waits for its own; a site's request has its own answer (Consent.swift).
-    func confirm(card id: String? = nil) async {
+    func confirm(card id: String? = nil, ticks: [String] = []) async {
         if let id, id != card?.id { return }
         guard let waiting = pending, let title = card?.title else { return }
+        // The card's ticks first (a trade the second check doubts): the engine holds it, not only the button.
+        if let missing = untickedOnCard(ticks) { reply(missing); return }
         retry = nil
         // Settings › Modules switched off since the card was drawn: refused now too.
         if let off = confirmRefusal(waiting) {
@@ -594,9 +603,14 @@ extension Engine {
                       + (opened.take.map { say(", take \(Fmt.price($0)).", ", тейк \(Fmt.price($0)).") } ?? "."), note: "Hyperliquid")
             case .recurring(let buy, let days):
                 try await move(buy)
-                tasks.removeAll { $0.steps == [buy.summary] }
+                // The recurring buy of that coin makes way (the Mac's one schedule a symbol); a task the person scheduled stays.
+                let marked = recurringBuys
+                tasks.removeAll { t in
+                    guard marked.contains(t.id), case .buy(let a, _)? = WalletCommand.parse(t.steps.first ?? ""), case .buy(let b, _) = buy else { return false }
+                    return (!a.mint.isEmpty && a.mint == b.mint) || a.symbol.uppercased() == b.symbol.uppercased()
+                }
                 // A recurring buy pays from the wallet that's on, as on the Mac: never from the automation wallet.
-                var recurring = ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
+                var recurring = ScheduledTask(steps: [Self.recurringStep(buy)], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
                 recurring.fromActive = true
                 tasks.append(recurring)
                 recurringBuys.insert(recurring.id)
@@ -758,7 +772,10 @@ extension Engine {
         case .evmToSolana(let network, let amount): reply(try await e.evmToSolana(try net(network), usdc: amount), note: "Relay → Solana")
         case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
         case .solanaTo(let place, let amount): reply(try await e.solanaToEVM(try net(place), usdc: amount ?? 0), note: "Relay · Solana → \(place)")
-        case .buyStock(let symbol, let usdc): reply(try await e.buyStock(symbol, usdc: usdc ?? 0), note: "Robinhood Chain · Uniswap")
+        case .buyStock(let symbol, let usdc):
+            reply(try await e.buyStock(symbol, usdc: usdc ?? 0), note: "Robinhood Chain · Uniswap")
+            // Shown at Robinhood's bid before the explorer lists it (the Mac's Execution.swift:556); not one by its contract.
+            Self.rememberStock(symbol)
         case .sellStock(let symbol, let amount): reply(try await e.sellStock(symbol, amount: amount), note: "Robinhood Chain · Uniswap")
         case .buyOn(let place, let token, let usdc, let from): reply(try await e.buyOn(try net(place), token, usdc: usdc ?? 0, prefer: takeWay(place, token), from: from), note: place)
         case .sellOn(let place, let token, let amount, let keep): reply(try await e.sellOn(try net(place), token, amount: amount, prefer: takeWay(place, token), keep: keep), note: place)

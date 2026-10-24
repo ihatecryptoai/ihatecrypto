@@ -191,7 +191,10 @@ extension Engine {
 
     func removeCanvas(_ id: String) throws {
         guard let i = canvases.firstIndex(where: { $0.id == id }) else { return }
+        declineSite(onCanvas: id == canvasID ? boards : canvases[i].boards)
         if id == canvasID { try leaveCanvas() }
+        // Its plan's price alert goes with it (the Mac's Canvases.swift:361).
+        alerts.removeAll { $0.plan?.uuidString == id }
         canvases.remove(at: i)
         if canvases.isEmpty { canvases = [CanvasDoc(title: say("Canvas", "Холст"))] }
         if !canvases.contains(where: { $0.id == canvasID }) { canvasID = canvases[0].id; afterSwitch() }

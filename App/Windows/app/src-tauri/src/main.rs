@@ -48,6 +48,11 @@ struct BrowserPage {
     /// A host on MetaMask's phishing list the browser didn't open, and the hosts it has refused this run.
     blocked: Option<String>,
     refused: HashSet<String>,
+    /// Beside the chat: whether it shows now (the dApp browser hidden behind a page, the page panel closed). A browser
+    /// behind a page keeps its page alive, as the Mac's.
+    shown: bool,
+    /// The site's origin as its page last started: a waiting request of that origin goes when its page does (siteGone).
+    origin: Option<String>,
 }
 
 /// The browser: one window, our toolbar page on top (webview «browser-bar») and the site under it (webview «browser»).
@@ -198,6 +203,19 @@ fn engine_answer(state: &Engine, id: i64, answer: Option<String>) -> Result<serd
     serde_json::from_str(&answer).map_err(|e| e.to_string())
 }
 
+/// The site's page is gone — closed, the app locked, or another origin loaded in its webview: a request of that origin
+/// still waiting goes with it (the engine declines it), as the Mac's sheet goes with its browser view. No answer awaited.
+fn site_gone(app: &tauri::AppHandle, origin: Option<String>) {
+    let (Some(origin), Some(engine)) = (origin, app.try_state::<Engine>()) else { return };
+    let _ = engine_ask(&engine, serde_json::json!({ "op": "siteGone", "address": origin }));
+}
+
+/// The same for the page the site has now, which is closing.
+fn site_closed(app: &tauri::AppHandle) {
+    let origin = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().and_then(|mut p| p.origin.take()));
+    site_gone(app, origin);
+}
+
 /// Whether the browser may go to `url`: https (or a blank page), and not a host on MetaMask's phishing list, which never
 /// loads, as on the Mac. The engine has the list; asked here before the page starts, briefly, and a slow answer lets it
 /// start: the check when it finishes loading turns it back.
@@ -327,6 +345,9 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
             let _ = own.close();
             let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
         }
+        // Put away behind a page, or back from its own window: it shows beside the chat again.
+        web::shown(&app, SITE, true);
+        web::ensure_edge(&app)?;
         web::layout_panel(&app);
         return Ok(());
     }
@@ -339,6 +360,8 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
     let site = main.add_child(site_view(&app, url), tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0))
         .map_err(|e| e.to_string())?;
     web::watch(&site, &app);
+    web::shown(&app, SITE, true);
+    web::ensure_edge(&app)?;
     web::layout_panel(&app);
     Ok(())
 }
@@ -354,6 +377,8 @@ fn browser_window(app: &tauri::AppHandle) -> Result<tauri::Window, String> {
     if !has_room(&window, 1180.0, 800.0) { let _ = window.maximize(); }
     for label in [BAR, SITE] { if let Some(v) = app.get_webview(label) { v.reparent(&window).map_err(|e| e.to_string())?; } }
     layout_browser(&window);
+    // Nothing beside the chat now: its edge goes out of sight.
+    web::layout_panel(app);
     let _ = window.set_focus();
     let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
     Ok(window)
@@ -375,12 +400,21 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
         })
         .on_page_load(move |site, payload| {
             let started = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
+            let mut gone = None;
             if let Some(engine) = loads.try_state::<Engine>() {
                 if let Ok(mut page) = engine.browser.lock() {
                     page.loading = started;
-                    if started { page.error = None; }
+                    if started {
+                        page.error = None;
+                        // Another origin's page: the one that asked is gone, and so is its waiting request.
+                        // ponytail: a reload of the same origin keeps it, as the contract with the engine says (siteGone).
+                        let now = origin_of(payload.url());
+                        if page.origin.is_some() && page.origin != now { gone = page.origin.clone(); }
+                        page.origin = now;
+                    }
                 }
             }
+            site_gone(&loads, gone);
             // A page the quick check let through while the engine was slow: looked at again once it's loaded.
             if !started {
                 let (app, url) = (loads.clone(), payload.url().clone());
@@ -462,8 +496,14 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
         "window" if web::wallet_in_panel(webview.app_handle()) => { browser_window(webview.app_handle())?; Ok(()) }
         // The panel's close; in its own window the window's close does it.
         "close" => {
-            if web::wallet_in_panel(webview.app_handle()) { for label in [SITE, BAR] { if let Some(v) = webview.app_handle().get_webview(label) { let _ = v.close(); } } }
-            else if let Some(w) = webview.app_handle().get_window(BROWSER_WINDOW) { let _ = w.close(); }
+            let app = webview.app_handle();
+            if web::wallet_in_panel(app) {
+                site_closed(app);
+                web::shown(app, SITE, false);
+                for label in [SITE, BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } }
+                web::layout_panel(app);
+            }
+            else if let Some(w) = app.get_window(BROWSER_WINDOW) { let _ = w.close(); }
             Ok(())
         }
         _ => return Err(format!("unknown action {action}")),
@@ -691,7 +731,7 @@ fn ui_eval(app: &tauri::AppHandle) {
             let Ok(text) = std::fs::read_to_string(&path) else { continue };
             for line in text.lines().skip(done) {
                 // «browser:» lines go to the site's page instead, «bar:» to the browser's toolbar, «panel:» and
-                // «panelbar:» to the page beside the canvas and its header; «show:<label>» brings that window forward.
+                // «panelbar:» to the page beside the canvas and its header, «edge:» to its edge; «show:<label>» brings that window forward.
                 // «tray:x,y» opens the tray's panel as a click on an icon at that point would (physical pixels).
                 if let Some(at) = line.strip_prefix("tray:") {
                     let xy: Vec<f64> = at.split(',').filter_map(|v| v.trim().parse().ok()).collect();
@@ -710,7 +750,8 @@ fn ui_eval(app: &tauri::AppHandle) {
                 let (label, js) = line.strip_prefix("browser:").map(|js| (SITE, js))
                     .or_else(|| line.strip_prefix("bar:").map(|js| (BAR, js)))
                     .or_else(|| line.strip_prefix("panel:").map(|js| (web::PANEL, js)))
-                    .or_else(|| line.strip_prefix("panelbar:").map(|js| (web::PANEL_BAR, js))).unwrap_or(("main", line));
+                    .or_else(|| line.strip_prefix("panelbar:").map(|js| (web::PANEL_BAR, js)))
+                    .or_else(|| line.strip_prefix("edge:").map(|js| (web::PANEL_EDGE, js))).unwrap_or(("main", line));
                 if let Some(webview) = handle.get_webview(label) { let _ = webview.eval(js); }
                 done += 1;
             }
@@ -806,6 +847,8 @@ fn main() {
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(false) if window.label() == system::TRAY => system::panel_blurred(window),
+            // The browser's own window closed with its site (not when the site went back beside the chat first).
+            tauri::WindowEvent::Destroyed if window.label() == BROWSER_WINDOW && !web::wallet_in_panel(window.app_handle()) => site_closed(window.app_handle()),
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == BROWSER_WINDOW => layout_browser(window),
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == "main" => web::layout_panel(window.app_handle()),
             _ => {}

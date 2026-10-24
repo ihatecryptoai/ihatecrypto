@@ -224,6 +224,19 @@ extension Engine {
         return line
     }
 
+    /// «Sell all USDT» with the amount held for each «all X» the wallet holds in one place only: «Sell 0.999604 USDT»
+    /// (the Mac's withAmounts, for the chat bar's head). Words stay where it's held in several places or not read yet,
+    /// and for USDC, which is on every network.
+    func withAmounts(_ text: String) -> String {
+        text.replacing(/\ball ([A-Za-z][A-Za-z0-9₮.]*)/) { m in
+            let want = String(m.1).uppercased()
+            let held = portfolio.networks.flatMap { n in n.rows.filter { $0.section == "tokens" && $0.symbol.uppercased() == want }.map { (n.key, $0) } }
+            guard want != "USDC", let first = held.first, first.1.value > 0,
+                  held.allSatisfy({ $0.0 == first.0 && $0.1.contract == first.1.contract }) else { return String(m.0) }
+            return "\(Fmt.num(first.1.value, maxFraction: 8)) \(m.1)"
+        }
+    }
+
     /// Refresh on a stale price: quoted again, and Confirm back for 15 s once it is.
     func requote() {
         guard case .wallet(let c)? = pending, let id = card?.id else { return }

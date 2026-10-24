@@ -624,7 +624,7 @@ const dollars = new Set(["USDC", "USDT", "USDT0", "USD₮0", "USDS", "USDE", "DA
 
 export function openFavAdd(anchor = document.querySelector(".live-fav-plus")) {
   document.querySelector(".menu")?.remove();
-  Object.assign(favAdd, { text: "", found: null, naming: false, name: "", memo: "", category: "", note: "", busy: false });
+  Object.assign(favAdd, { text: "", found: null, naming: false, name: "", memo: "", category: "", note: "", busy: false, picFor: null });
   const field = h("input", { id: "fav-add-field", class: "address live-fav-field", placeholder: t("A token's contract or a wallet address", "Контракт токена или адрес кошелька"),
     autocomplete: "off", spellcheck: "false", oninput: (e) => look(e.target.value) });
   const paste = h("button", { class: "btn small", onclick: async () => {
@@ -642,13 +642,23 @@ export function openFavAdd(anchor = document.querySelector(".live-fav-plus")) {
   favPanel.style.left = Math.max(8, Math.min(r.right - favPanel.offsetWidth, window.innerWidth - favPanel.offsetWidth - 8)) + "px";
   favPanel.style.top = Math.max(8, Math.min(r.bottom + 8, window.innerHeight - favPanel.offsetHeight - 8)) + "px";
   setTimeout(() => document.addEventListener("click", function off(ev) {
-    if (favPanel?.isConnected && favPanel.contains(ev.target)) return;
+    // A click in the panel, or in the picture picker it opened, keeps it open.
+    if (favPanel?.isConnected && (favPanel.contains(ev.target) || ev.target.closest?.(".rail-picker-pop, .rail-picker"))) return;
     closeFavAdd(); document.removeEventListener("click", off);
   }), 0);
   field.focus();
 }
 
-function closeFavAdd() { favPanel?.remove(); favPanel = null; }
+/** The «+» form naming a pasted wallet address, with its picture (the preview's `&call=live.previewFavName`). */
+export function previewFavName() {
+  openFavAdd();
+  // Hardhat's public account #4.
+  const a = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
+  Object.assign(favAdd, { text: a, found: { kind: "address", address: a, network: "base" }, network: "base", naming: true, name: t("Mom", "Мама") });
+  drawFavAdd();
+}
+
+function closeFavAdd() { favPanel?.remove(); favPanel = null; favAdd.picFor = null; }
 
 /** A token if a pool trades it, else an address: the engine says, a moment after the typing stops. */
 function look(text) {
@@ -721,11 +731,19 @@ function drawFavAdd() {
             : same ? hint(t(`Already saved as “${same.name}”.`, `Уже сохранён как «${same.name}».`), "checkmark.circle") : null),
         favAdd.naming && !own && !same ? h("div", { class: "live-fav-name" },
           h("div", { class: "live-field-row" },
+            // Its picture, as the book's form: kept beside the name it's picked for, moved if the name changes before Save.
+            h("button", { class: "live-book-pic live-fav-pic", type: "button", title: t("Choose a picture: a logo, an emoji or your own image", "Выбрать картинку: логотип, эмодзи или своё изображение"),
+              onclick: (ev) => {
+                const name = favAdd.name.trim();
+                if (!name) { toast(t("Give it a name first.", "Сначала дай ему имя.")); return; }
+                favAdd.picFor = { name, network: favAdd.network };
+                pickPicture(ev.currentTarget, favAdd.picFor);
+              } }, addressPic({ name: favAdd.picFor?.name || favAdd.name || "?", network: favAdd.picFor?.network || favAdd.network }, 26), h("span", { class: "live-book-pen" }, icon("pencil", 9))),
             h("div", { class: "field" }, h("label", { for: "fav-add-name" }, t("Name", "Имя")),
               h("input", { id: "fav-add-name", value: favAdd.name, placeholder: "Bybit", oninput: (e) => (favAdd.name = e.target.value) })),
             h("div", { class: "field" }, h("label", { for: "fav-add-network" }, t("Network", "Сеть")),
               h("select", { id: "fav-add-network", onchange: (e) => (favAdd.network = e.target.value) }, networks.map((n) => h("option", { value: n, selected: n === favAdd.network }, netName(n)))))),
-          // As the address book's form: an exchange's memo or tag, a category and a note (the picture from its card's menu).
+          // As the address book's form: an exchange's memo or tag, a category and a note.
           h("div", { class: "live-field-row" },
             h("div", { class: "field" }, h("label", { for: "fav-add-memo" }, t("Memo / tag", "Memo / тег")),
               h("input", { id: "fav-add-memo", value: favAdd.memo || "", placeholder: t("If the exchange asks for one", "Если биржа его просит"), oninput: (e) => (favAdd.memo = e.target.value) })),
@@ -744,6 +762,11 @@ function drawFavAdd() {
               if (saved === null) { drawFavAdd(); return; }
               if ((favAdd.category || "").trim() || (favAdd.note || "").trim()) {
                 await act("addressExtra", { name: favAdd.name.trim(), network: favAdd.network, label: (favAdd.category || "").trim(), text: (favAdd.note || "").trim() });
+              }
+              const pf = favAdd.picFor, pic = pf && ui.state.addressExtras?.[pf.network + ":" + pf.name.toLowerCase()]?.icon;
+              if (pic && (pf.name !== favAdd.name.trim() || pf.network !== favAdd.network)) {
+                await act("addressIcon", { name: favAdd.name.trim(), network: favAdd.network, text: JSON.stringify(pic) });
+                await act("addressIcon", { name: pf.name, network: pf.network, text: "" });
               }
               favTab = "wallets"; store("favTab", "wallets");
               closeFavAdd(); toast(t("Saved.", "Сохранено.")); render();
@@ -834,10 +857,11 @@ function nextLine(x) {
   const day = d.toDateString() === now.toDateString() ? t("Today", "Сегодня") : d.toDateString() === tomorrow.toDateString() ? t("Tomorrow", "Завтра")
     : d.toLocaleDateString(dateLocale(), { weekday: "short", day: "numeric", month: "short" });
   const left = d - now;
-  const tail = left <= 0 ? t("any moment", "вот-вот") : left < 86_400_000
+  // A task that's due waits for the person to step away (Schedule.swift, the Mac's NextLine); a recurring buy runs at its time.
+  const tail = left <= 0 ? (x.recurring ? t("any moment", "вот-вот") : t("when you step away", "когда отойдёшь")) : left < 86_400_000
     ? (left < 3_600_000 ? t(`in ${Math.max(1, Math.round(left / 60_000))} min`, `через ${Math.max(1, Math.round(left / 60_000))} мин`)
       : t(`in ${Math.round(left / 3_600_000)} h`, `через ${Math.round(left / 3_600_000)} ч`)) : "";
-  return [h("b", {}, `${day} ${time}`), tail ? " · " + tail : ""];
+  return [h("b", {}, `${day} ${time}`), tail ? h("span", { class: "live-next-tail" }, " · " + tail) : null];
 }
 
 /** A spread with no free USDC where it pays from (the Mac's nothingFree): its runs do nothing, said before they do, with
@@ -875,6 +899,22 @@ function taskFacts(x, a, wallet, fact) {
     : test ? fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("Your Confirm", "Твоё «Подтвердить»"), t("each move waits on its canvas", "каждое движение ждёт на холсте"))
     : fact(t("SIGNS", "ПОДПИСЫВАЕТ"), presence(), t(`each move waits for Confirm and ${presence()}`, `каждое движение ждёт «Подтвердить» и ${presence()}`));
   if (!x.moves) return [fact(t("MONEY", "ДЕНЬГИ"), t("None", "Нет"), t("it reads and tells you, moves nothing", "читает и сообщает, ничего не двигает")), signs];
+  // A recurring buy runs at its time from the wallet that's on, on Solana, with its own prompt and no Confirm: no
+  // «Pays from» to pick (the Mac's ScheduleFrame facts for a schedule).
+  if (x.recurring) {
+    const usdc = s.portfolio?.networks?.find((n) => n.key === "solana")?.rows.find((r) => r.symbol === "USDC" && r.section !== "defi");
+    const free = usdc ? Number(usdc.value) : null;
+    const step = x.steps[0] || x.text;
+    const per = Number(step.match(/for\s+([\d.]+)\s*USDC/i)?.[1] || 0);
+    const more = free !== null && per > 0 ? Math.floor(free / per) : null;
+    const coin = step.match(/buy\s+(\S+)/i)?.[1]?.toUpperCase() || "";
+    return [
+      fact(t("PAYS FROM", "ПЛАТИТ С"), `${wallet} · Solana`, free === null ? t("USDC on Solana", "USDC в Solana")
+        : t(`${free} USDC free`, `${free} USDC свободно`) + (more === null ? "" : t(` · ${more} more buy${more === 1 ? "" : "s"}`, ` · ещё покупок: ${more}`))),
+      fact(coin ? t(`BOUGHT ${coin} GOES TO`, `${coin} ПОПАДАЕТ В`) : t("ENDS UP IN", "ПОПАДАЕТ В"), wallet, t("the wallet it pays from", "кошелёк, с которого платит")),
+      test ? fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("By itself", "Сама"), t(`no ${presence()}`, `без ${presence()}`))
+        : fact(t("SIGNS", "ПОДПИСЫВАЕТ"), presence(), t(`each buy asks for ${presence()}`, `каждая покупка спросит ${presence()}`))];
+  }
   const free = x.free === null || x.free === undefined ? null : Number(x.free);
   const pays = x.automatic && a
     ? [t("Automation budget", "Бюджет автоматизации"), free !== null ? t(`${free} USDC free on «${a.label}»`, `${free} USDC свободно на «${a.label}»`)
@@ -905,9 +945,13 @@ function toggle(id, on, label, change) {
 
 function taskRow(x, a) {
   const title = x.text.replace(/ · (paused|на паузе)$/, "");
-  const mark = x.automatic
+  // As the Mac's signer mark: a task that moves no money runs by itself too; only a money move waits for a finger.
+  const mark = !x.moves
+    ? h("span", { class: "live-signer-mark", title: t("Runs by itself: it reads and tells you, moves nothing", "Идёт сама: читает и сообщает, ничего не двигает") }, icon("bolt", 14))
+    : x.automatic
     ? h("span", { class: "live-signer-mark", title: t("Runs by itself from ", "Идёт сама с ") + (a ? a.label : "") + t(`, no ${presence()}`, `, без ${presence()}`) }, icon("bolt", 14))
-    : h("span", { class: "live-signer-mark ask", title: t("A money move waits for Confirm", "Перевод ждёт «Подтвердить»") }, icon("hand.tap", 14));
+    : h("span", { class: "live-signer-mark ask", title: x.recurring ? t(`Each buy asks for ${presence()} at its time`, `Каждая покупка спросит ${presence()} в своё время`)
+      : t(`A money move waits for Confirm and ${presence()}`, `Перевод ждёт «Подтвердить» и ${presence()}`) }, icon("hand.tap", 14));
   const key = "task:" + x.id;
   return h("div", { class: "live-task-row" + (x.paused ? " paused" : "") + (ui.state.scheduleKey === key ? " lit" : ""),
     title: t("Open it on its own canvas", "Открыть на отдельном холсте"), onclick: (e) => { if (!e.target.closest("button, label")) act("openSchedule", { name: key }); } },
@@ -1132,17 +1176,18 @@ function scheduleItemBody(b) {
       h("b", { class: "live-item-title" }, x.steps.length ? x.steps.join(" → ") : x.text),
       toggle("item-" + x.id, !x.paused, x.paused ? t("Paused: switch on to run it again", "На паузе: включи, чтобы снова шла") : t("Switch off to pause it", "Выключи, чтобы поставить на паузу"),
         (on) => act("taskOn", { wallet: x.id, test: on })),
-      h("button", { class: "btn small", disabled: held || x.paused, title: t("Runs within the minute, here", "Запустится в течение минуты, здесь"), onclick: () => act("runNow", { name: key }) },
+      h("button", { class: "btn small", disabled: held || x.paused, title: t("Runs within half a minute, on a canvas of its own", "Запустится в течение полуминуты, на отдельном холсте"), onclick: () => act("runNow", { name: key }) },
         icon("play", 12), t("Run now", "Запустить"))),
     next ? h("div", { class: "live-item-next" + (x.paused || held ? " dim" : "") },
       dateTile(x.next),
       h("span", { class: "live-task-text" }, h("span", { class: "live-alert-label" }, t("NEXT RUN", "СЛЕДУЮЩИЙ ЗАПУСК")),
         h("span", { class: "live-item-when" }, nextLine(x)),
         h("span", { class: "secondary small" }, x.paused ? t("paused — switch it on to run", "на паузе — включи, чтобы шла") : held ? t("the whole schedule is paused", "всё расписание на паузе")
+          : next <= new Date() ? (x.recurring ? t("runs within a minute", "пойдёт в течение минуты") : t("waits until you step away from the computer, half an hour at most", "ждёт, пока ты отойдёшь от компьютера, — не дольше получаса"))
           : x.every ? t("then again ", "потом снова ") + everyWords(x.every) : t("once, then it's off the schedule", "один раз, потом уходит из расписания")))) : null,
     h("div", { class: "live-item-facts" }, taskFacts(x, a, wallet, fact)),
     !x.paused && x.free !== null && x.free !== undefined && Number(x.free) === 0 ? nothingFree(x, a, wallet) : null,
-    !x.untrusted && !a && x.moves && !x.sells ? automationOffer() : null,
+    !x.untrusted && !a && x.moves && !x.sells && !x.recurring ? automationOffer() : null,
     x.steps.length > 1 ? h("div", { class: "live-item-steps" }, x.steps.map((st, i) => h("div", { class: "small" }, h("b", { class: "num" }, `${i + 1}. `), st))) : null,
     head, h("div", { class: "live-item-runs" }, runRows),
     h("div", { class: "live-item-foot" },

@@ -21,48 +21,62 @@ extension Engine {
 
     var tempoUSDC: Decimal { portfolio.networks.first { $0.key == "tempo" }?.rows.first { $0.symbol == "USDC" }?.value ?? 0 }
 
-    func preparePayment(_ command: WalletCommand, note: String?) async {
+    /// What a service asks, read as its card reads it: its price, or its answer when it asks none. Throws the reason it
+    /// can't be paid (said as is).
+    enum PriceAsked { case quoted(PaymentQuote), answered(String) }
+
+    func askPrice(_ command: WalletCommand) async throws -> PriceAsked {
         guard case .pay(let method, let url, let body) = command, let host = URL(string: url)?.host else {
-            reply(say("That isn't a web address ihatecrypto can call.", "Это не веб-адрес, который ihatecrypto может вызвать."), note: note)
-            return
+            throw ExecutionError(say("That isn't a web address ihatecrypto can call.", "Это не веб-адрес, который ihatecrypto может вызвать."))
         }
         if MPP.refusesProof.contains(host.lowercased()) {
-            reply(say("\(host) takes the payment and then refuses its proof (checked 2026-10-23), so ihatecrypto doesn't pay it. Ask for another service.",
-                      "\(host) берёт оплату, а потом не принимает её подтверждение (проверено 2026-10-23), поэтому ihatecrypto его не оплачивает. Попроси другой сервис."), note: note)
-            return
+            throw ExecutionError(say("\(host) takes the payment and then refuses its proof (checked 2026-10-23), so ihatecrypto doesn't pay it. Ask for another service.",
+                                     "\(host) берёт оплату, а потом не принимает её подтверждение (проверено 2026-10-23), поэтому ihatecrypto его не оплачивает. Попроси другой сервис."))
         }
         let ask = messages.last(where: \.fromUser)?.text ?? ""
         // Asking a price is a request: only to a service Tempo's directory lists, or a site the user named themselves — so
         // text a lookup slipped into the chat can't have the model send the user's numbers to an address of its choosing.
         let listed = await MPP.serviceName(url)
         guard listed != nil || ask.lowercased().contains(host.lowercased()) else {
-            reply(say("\(host) isn't in Tempo's directory of paid services and isn't in your message, so ihatecrypto doesn't call it. Write its address yourself to use it.",
-                      "\(host) нет в каталоге платных сервисов Tempo и нет в твоём сообщении, поэтому ihatecrypto его не вызывает. Напиши его адрес сам, чтобы воспользоваться."), note: note)
-            return
+            throw ExecutionError(say("\(host) isn't in Tempo's directory of paid services and isn't in your message, so ihatecrypto doesn't call it. Write its address yourself to use it.",
+                                     "\(host) нет в каталоге платных сервисов Tempo и нет в твоём сообщении, поэтому ihatecrypto его не вызывает. Напиши его адрес сам, чтобы воспользоваться."))
         }
+        let service = listed ?? host
+        let status: Int, headers: [String: String], data: Data
         do {
             // The price is asked without the request's content (an email's text, a phone number), so a service the user
             // turns down never sees it; one that can't quote without it gets it unpaid, as the protocol has it.
             var probed = !(body ?? "").isEmpty && !Self.pricedWithContent.contains(url)
-            var (status, headers, data) = try await MPP.call(method, url, probed ? nil : body)
-            if probed, status != 402 {
+            var answer = try await MPP.call(method, url, probed ? nil : body)
+            if probed, answer.0 != 402 {
                 probed = false
-                (status, headers, data) = try await MPP.call(method, url, body)
+                answer = try await MPP.call(method, url, body)
             }
-            let service = listed ?? host
+            (status, headers, data) = answer
             guard status == 402 else {
-                if (200..<300).contains(status) {
-                    reply(await answered(ask, service: service, data: data, usdc: nil, proof: nil), note: note)
-                } else {
-                    reply(say("\(service) answered \(status): ", "\(service) ответил \(status): ") + MPP.shown(data, limit: 300), note: note)
-                }
-                return
+                if (200..<300).contains(status) { return .answered(await answered(ask, service: service, data: data, usdc: nil, proof: nil)) }
+                throw ExecutionError(say("\(service) answered \(status): ", "\(service) ответил \(status): ") + MPP.shown(data, limit: 300))
             }
             switch MPP.challenge(headers["www-authenticate"] ?? "") {
-            case .failure(let refusal):
-                reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
-            case .success(let c):
-                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed)
+            case .failure(let refusal): throw ExecutionError(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason)
+            case .success(let c): return .quoted(PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed))
+            }
+        } catch let said as ExecutionError {
+            throw said
+        } catch {
+            throw ExecutionError(say("Couldn't reach \(host): ", "Не достучался до \(host): ") + error.localizedDescription)
+        }
+    }
+
+    func preparePayment(_ command: WalletCommand, note: String?) async {
+        do {
+            switch try await askPrice(command) {
+            case .answered(let text): reply(text, note: note)
+            case .quoted(let q):
+                payment = q
+                var host = q.service
+                if case .pay(_, let url, _) = command, let h = URL(string: url)?.host { host = h }
+                let c = q.challenge, service = q.service
                 let price = Fmt.num(c.usdc, maxFraction: 6), short = tempoUSDC < c.usdc + Decimal(string: "0.01")!
                 show(.wallet(command), title: say("Pay \(price) USDC · \(service)", "Оплатить \(price) USDC · \(service)"), lines: [
                     say("One Tempo transfer of \(price) USDC to the address \(host) named: \(c.payee)", "Один перевод \(price) USDC на Tempo, на адрес, который назвал \(host): \(c.payee)"),
@@ -75,13 +89,21 @@ extension Engine {
                           "\(service) просит \(price) USDC. Нажми «Подтвердить», чтобы оплатить в USDC на Tempo, или «Отмена»."), note: note)
             }
         } catch {
-            reply(say("Couldn't reach \(host): ", "Не достучался до \(host): ") + error.localizedDescription, note: note)
+            reply(error.localizedDescription, note: note)
         }
     }
 
     func pay(_ command: WalletCommand, _ e: Executor) async throws -> String {
-        guard case .pay(let method, let url, let body) = command, let quote = payment, quote.command == command else {
-            throw ExecutionError("The service's price is gone; ask for it again.")
+        guard case .pay(let method, let url, let body) = command else { throw ExecutionError("The service's price is gone; ask for it again.") }
+        let quote: PaymentQuote
+        if let shown = payment, shown.command == command { quote = shown }
+        else {
+            // A pay step of a confirmed chain or a scheduled run: its price asked now and paid, as the Mac's runSteps
+            // prepares it on the chain's Confirm.
+            switch try await askPrice(command) {
+            case .answered(let text): return text
+            case .quoted(let q): quote = q
+            }
         }
         var c = quote.challenge
         if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 30 }) == true {

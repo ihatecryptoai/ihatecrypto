@@ -82,6 +82,8 @@ nonisolated struct Card: Encodable, Equatable {
     var lines: [String] = []
     var warnings: [String] = []
     var confirm: String
+    /// What Confirm needs ticked first (a trade the second check doubts, the Mac's acknowledgement; Consent.swift).
+    var ticks: [SiteTick] = []
 }
 
 /// The desktop app's engine: the window (Tauri, App/Windows/app) sends it what the person did, one JSON line at a time,
@@ -426,6 +428,9 @@ final class Engine {
             /// wrote it (then it never pays by itself).
             var freeOther: Decimal? = nil
             var untrusted = false
+            /// A recurring buy (Automation.recurringBuys): it runs at its time from the wallet that's on, Windows Hello only —
+            /// its block says «PAYS FROM wallet · Solana» and has no «Pays from» to pick (the Mac's ScheduleFrame).
+            var recurring = false
         }
         /// Tokens the model read with the canvas's last message, and its window when the service or the catalog says.
         /// Of `used`: the instructions and the chat's lines; how many lines went of how many; dollars an API key paid.
@@ -445,6 +450,9 @@ final class Engine {
             /// Nothing on it yet: the list shows it as the new canvas, kept once written on. `blocks`: something on its canvas.
             var empty = false
             var blocks = false
+            /// Its trade plan's coin, drawn as the row's picture (the Mac's AssetBadge); `note`: it was written as a folder note.
+            var coin: String?
+            var note = false
         }
         var canvases: [CanvasRow]
         var folders: [FolderView]
@@ -509,7 +517,19 @@ final class Engine {
         var planAlertExample: String?
         /// The last full balance of the wallet that's on, shown dimmed until every network answers (the Mac's lastBalance).
         var lastBalance: Decimal?
+        /// Settings › About's «Build …» behind ⓘ (the Mac's CFBundleVersion): when this engine was built.
+        var build: String? = Engine.build
     }
+
+    /// The engine program's own build time, «20261024.0831»: Windows has no bundle build number to show.
+    nonisolated static let build: String? = {
+        guard let path = Bundle.main.executablePath, let at = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyyMMdd.HHmm"
+        return f.string(from: at)
+    }()
 
     func snapshot() -> Snapshot {
         var addresses: [String: String] = [:]
@@ -523,18 +543,19 @@ final class Engine {
             addresses: addresses, phrase: phrase,
             portfolio: portfolio,
             positions: positionViews(),
-            chat: messages, thinking: thinking, draft: draft, card: card, site: siteAsk?.view,
+            chat: messages, thinking: thinking, draft: draft, card: card.map { c in var c = c; c.title = withAmounts(c.title); return c }, site: siteAsk?.view,
             options: options.map { .init(title: $0.title, comment: $0.comment, recommended: $0.recommended) },
             running: running.map { .init(title: $0.title, lines: $0.lines) },
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: appRussian, book: book, history: history(),
             alerts: alerts.filter { $0.id != planAlert?.id }.map(alertView),
-            tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next,
-                                                                steps: $0.steps, every: $0.every?.words, pick: canPickPays($0),
+            tasks: { let marks = recurringBuys; return tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true,
+                                                                automatic: !marks.contains($0.id) && usesAutomation($0) && $0.movesMoney, next: $0.next,
+                                                                steps: $0.steps, every: $0.every?.words, pick: !marks.contains($0.id) && canPickPays($0),
                                                                 moves: $0.movesMoney, buys: $0.buysCoins, sells: $0.sells, free: $0.spreadsUSDC ? taskFreeUSDC($0) : nil,
                                                                 freeOther: $0.spreadsUSDC && automationWallet != nil && $0.untrusted != true ? taskFreeUSDC(otherPayer($0)) : nil,
-                                                                untrusted: $0.untrusted == true) },
+                                                                untrusted: $0.untrusted == true, recurring: marks.contains($0.id)) } }(),
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id),
                                                               journal: $0.id == Skill.tradingStudy.id ? Self.journalKept : nil) },
@@ -640,7 +661,8 @@ final class Engine {
                         await refreshLive()
                         await readClosed()
                         await runDueTasks()
-                        try? await Task.sleep(for: .seconds(60))
+                        // Every 30 s, as the Mac's («Runs within half a minute»).
+                        try? await Task.sleep(for: .seconds(30))
                     }
                 }
             }
@@ -664,7 +686,8 @@ final class Engine {
         case "getOllama": getOllama()
         case "lookUpContract": return await lookUpContract(r.address ?? "")
         case "blockCatalog": return blockCatalog()
-        case "confirm": await confirm(card: r.board)
+        case "confirm": await confirm(card: r.board, ticks: r.ticks ?? [])
+        case "siteGone": siteGone(r.address ?? "")
         case "cancel": cancelPending(card: r.board)
         case "siteAnswer": try answerSite(r.board, yes: r.test == true, ticks: r.ticks ?? [])
         case "pick": await pick(r.index)
@@ -686,7 +709,7 @@ final class Engine {
         case "showOnLedger": await showOnLedger(solana: r.test == true)
         case "renameWallet": try await signerCall(.renameWallet(id: r.wallet ?? "", label: r.label ?? ""))
         case "removeWallet":
-            if r.wallet == LedgerAccount.id { forgetLedger() } else { try await signerCall(.removeWallet(id: r.wallet ?? "")); walletRemoved(r.wallet ?? "") }
+            if r.wallet == LedgerAccount.id { await forgetLedger() } else { try await signerCall(.removeWallet(id: r.wallet ?? "")); walletRemoved(r.wallet ?? "") }
         case "lock": try await signerCall(.lock); await lockApp()
         case "sessionLength": try await signerCall(.setSessionLength(seconds: r.seconds ?? SignerSession.standard))
         case "saveAddress":
@@ -737,6 +760,7 @@ final class Engine {
             star(e, r.test == true)
         case "connectModel": try await connect(provider: r.provider ?? "", key: r.key, model: r.model)
         case "signIn": try await signIn(provider: r.provider ?? "")
+        case "useLogin": try useLogin(provider: r.provider ?? "")
         case "disconnectModel": disconnect(provider: r.provider ?? "")
         case "setModel": chooseModel(r.model)
         case "useAccount": useAccount(r.provider ?? providerID, model: r.model)

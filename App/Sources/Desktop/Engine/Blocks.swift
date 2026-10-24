@@ -349,13 +349,7 @@ extension Engine {
         var line = try await chartLine(coin, range: range)
         // Opened again in another range it keeps the network it was opened from.
         line.network = network ?? boards.first { $0.kind == "chart" && $0.chart?.coin == coin }?.chart?.network
-        // The same coin's chart again is drawn anew and comes to the top, as the Mac's one chart place.
-        if let old = boards.first(where: { $0.kind == "chart" && $0.chart?.coin == line.coin }) {
-            updateBoard(old.id) { $0.chart = line; $0.title = line.title; $0.at = Date() }
-            if let i = boards.firstIndex(where: { $0.id == old.id }) { boards.insert(boards.remove(at: i), at: 0) }
-            return ["board": old.id]
-        }
-        return ["board": pin(Board(kind: "chart", title: line.title, chart: line))]
+        return ["board": placeChart(line)]
     }
 
     func chartLine(_ coin: String, range: ChartCommand.Range) async throws -> ChartLine {

@@ -283,10 +283,16 @@ extension Engine {
         if check {
             // A check says something only when its condition is met.
             quietCheck = false
+            // Its model answers as a message's would: the chat is busy meanwhile, so no canvas switch or message lands in
+            // the middle of it (the Mac's routeWithModel marks itself busy).
+            thinking = true
+            changed()
             for step in task.steps { _ = await runCanonical(step, userText: step) }
+            thinking = false
+            changed()
             ran = !quietCheck
         } else if usesAutomation(task), let automation = automationWallet, task.movesMoney {
-            await runOnAutomation(task, automation)
+            if !(await runOnAutomation(task, automation)) { stepFailed = true }
             await refreshAutomationBudget()
         } else if task.steps.count > 1 {
             // A step that can't go on or a first move that can't be paid stops the run before any card: it failed.
@@ -303,14 +309,17 @@ extension Engine {
         }
         logRun(task, started: started, mark: mark, canvas: canvas, ran: ran, failed: stepFailed)
         let failed = scheduleRuns.last?.result == "failed"
-        // A card waits for Confirm the way the Mac's move waits on its canvas.
-        let waits = card != nil || pending != nil
+        // A card waits for Confirm the way the Mac's move waits on its canvas; a trade plan does too, and one a rule stops
+        // (no card) needs the person just as much (the Mac's runDueTask).
+        let plan = canvasID == canvas && intent != TradeIntent() && tradedPlan != intent && !positions.contains { $0.coin == intent.asset }
+        let waits = card != nil || pending != nil || plan
         let told = messages.dropFirst(mark).last { !$0.fromUser }?.text ?? ""
         // A check with nothing to tell stays quiet: the run is in the History with a grey mark.
         if ran {
             // A check that speaks is a task's run like any other (the Mac's runDueTask), not a price alert.
             notify(waits ? .confirm : .moves, request,
-                   waits ? say("Ready on its canvas — press Confirm.", "Готово на своём холсте — нажми «Подтвердить».") : String(told.prefix(200)), failed: failed)
+                   plan && card == nil ? say("The plan is on its canvas, but a rule stops it — open it to fix.", "План на своём холсте, но его останавливает правило — открой и поправь.")
+                   : waits ? say("Ready on its canvas — press Confirm.", "Готово на своём холсте — нажми «Подтвердить».") : String(told.prefix(200)), failed: failed)
         }
         // Nothing here for the person: back where they were. «Run now» and an alert's task stay to be seen.
         guard !asked, !waits, !failed, canvasID == canvas, messages.filter(\.fromUser).count <= 1,

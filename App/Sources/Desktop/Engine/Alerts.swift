@@ -19,7 +19,11 @@ extension Engine {
         case .set(let coin, let price, let above, let steps):
             if markets.isEmpty { markets = (try? await Hyperliquid.markets()) ?? [:] }
             guard let mark = markets[coin]?.markPx else {
-                reply(say("Hyperliquid has no market for \(coin), so there's no price to watch.", "На Hyperliquid нет рынка \(coin) — нечего отслеживать."), note: note)
+                // No markets at all: Hyperliquid didn't answer, which isn't «no market» (the Mac: «No price … right now»).
+                reply(markets.isEmpty
+                      ? say("No price for \(IntentParser.pretty(coin)) right now — Hyperliquid didn't answer. Nothing was set; try again in a moment.",
+                            "Цены \(IntentParser.pretty(coin)) сейчас нет — Hyperliquid не ответил. Оповещение не поставлено, попробуй через минуту.")
+                      : say("Hyperliquid has no market for \(coin), so there's no price to watch.", "На Hyperliquid нет рынка \(coin) — нечего отслеживать."), note: note)
                 return
             }
             // A step must be something a chain runs (Chains.knows, the Mac's Alerts.swift): it fires as a task due now.
@@ -65,10 +69,10 @@ extension Engine {
             // Its steps run as a task due now, as on the Mac: once nothing else is going on (never over a card waiting
             // for Confirm), from the wallet that's on, each move waiting for Confirm — never off the automation wallet.
             if var steps = a.steps {
-                // Tied to a plan: that plan as it is now, edits included — unless it's no longer that trade.
-                // ponytail: Windows keeps one plan, the open canvas's; on another canvas the plan as it was when set runs.
-                if let id = a.plan, id.uuidString == canvasID, intent != TradeIntent() {
-                    let plan = intent
+                // Tied to a plan: that plan as it is now on its own canvas, edits included (the open one's live, another's as
+                // saved, the Mac's CanvasSession) — unless it's no longer that trade.
+                if let id = a.plan, let plan = id.uuidString == canvasID ? intent : canvases.first(where: { $0.id == id.uuidString })?.intent,
+                   plan != TradeIntent() {
                     steps = steps.map { step in planStep(step).map { $0.asset == plan.asset && $0.side == plan.side } == true ? plan.command : step }
                 }
                 var task = ScheduledTask(steps: steps, next: Date(), every: nil,

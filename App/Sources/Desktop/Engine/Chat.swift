@@ -232,7 +232,7 @@ extension Engine {
             reply(r, note: model)
         case .command(let canonical):
             noteUnderstood(canonical)
-            guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.displays, markets: Set(markets.keys)) else {
+            guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.foundAllowed, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address is neither in your message nor among your favorites, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет ни в твоём сообщении, ни в избранном, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
@@ -394,17 +394,34 @@ extension Engine {
         }
         options = list.filter { o in
             o.command.isEmpty || (ChatRouter.parses(o.command, markets: names) || exact(o.command)) && runs(o.command)
-                && ChatRouter.addressesAllowed(o.command, userText: userText, known: knownContracts, found: found, displays: Self.displays, markets: names)
+                && ChatRouter.addressesAllowed(o.command, userText: userText, known: knownContracts, found: found, displays: Self.foundAllowed, markets: names)
         }
         offeredFor = (options, userText)
         changed()
     }
 
-    /// Contracts a command may name without the user writing them: their favorites and each network's dollars — tokens,
-    /// never recipients (money goes to an address-book name or this wallet).
+    /// Contracts a command may name without the user writing them: tokens they hold, their favorites and each network's
+    /// dollars — tokens, never recipients (money goes to an address-book name or this wallet; the Mac's knownContracts).
     var knownContracts: [String] {
-        favorites.map(\.address) + EVMNetwork.all.flatMap { net in [net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address } }
+        favorites.map(\.address) + heldContracts.map(\.contract)
+            + EVMNetwork.all.flatMap { net in [net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address } }
     }
+
+    /// The tokens the portfolio shows with their contracts, the network's own coin left out: what the model may name by
+    /// contract («sell my fUSDC»), as the Mac's shownTokens.
+    var heldContracts: [(network: String, row: PortfolioView.Row, contract: String)] {
+        portfolio.networks.flatMap { n in
+            n.rows.compactMap { r in
+                guard r.section == "tokens", let c = r.contract, !c.isEmpty, c != "native", c != CostBasis.wsol else { return nil }
+                return (n.key, r, c)
+            }
+        }
+    }
+
+    /// A command that may use an address a lookup found: one that only shows something, or a contract call, whose
+    /// contract and arguments prepareContractCall checks against the user's own words and the explorer before its card
+    /// (the Mac's Agent.foundAllowed).
+    nonisolated static func foundAllowed(_ command: String) -> Bool { displays(command) || ContractCall.parse(command) != nil }
 
     /// A command that only shows something (a token's card, a chart, P/L, the rates) or is kept, not done (the journal,
     /// a study note): it may use an address a lookup found (the Mac's Agent.displays).
@@ -459,7 +476,7 @@ extension Engine {
         var c = ChatRouter.Context()
         c.recent = recentChat()
         c.plan = intent == TradeIntent() ? nil : intent.command
-        if let card { c.canvas.append("waiting for Confirm: " + card.title) }
+        c.canvas += moveFacts()
         if let attached { c.canvas.append("the user points at this block on the canvas: " + blockFacts(attached)) }
         c.canvas += alsoAttached.map { "the user points at this block on the canvas too: " + blockFacts($0) }
         c.canvas += boards.prefix(6).filter { $0.kind != "move" && $0.id != attached?.id }.map { "block " + blockFacts($0) }
@@ -480,14 +497,68 @@ extension Engine {
         return c
     }
 
+    /// The moves on this canvas as the model may read them (the Mac's routerContext and canvasBlocks): the card waiting
+    /// for Confirm with its route as drawn — amounts, fees, where the money comes from, a spread's whole plan — so «what's
+    /// the fee?» is answered from the card's numbers; the one running now; how the last ones ended.
+    func moveFacts() -> [String] {
+        func step(_ s: Board.Step) -> String {
+            "\(s.label) \(s.title)" + (s.money.map { " (\($0.place) \($0.was) → \($0.after) \($0.symbol))" } ?? "")
+                + (s.lines.isEmpty ? "" : " (\(s.lines.joined(separator: ", ")))")
+        }
+        return moveLines(step).map(readable)
+    }
+
+    /// This wallet's own addresses as «your wallet» and a saved address as its name: the model never reads them
+    /// (routerContext); a token's contract stays, the model may name a token by it.
+    func readable(_ text: String) -> String {
+        var t = text
+        for own in [readWallet?.solana, readWallet?.evm].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            t = t.replacingOccurrences(of: own, with: "your wallet", options: .caseInsensitive)
+        }
+        for e in book where !e.address.isEmpty { t = t.replacingOccurrences(of: e.address, with: e.name, options: .caseInsensitive) }
+        return t
+    }
+
+    private func moveLines(_ step: (Board.Step) -> String) -> [String] {
+        func outcome(_ state: String?) -> String? {
+            switch state {
+            case "done": "done"
+            case "failed": "failed"
+            case "unknown": "sent, no outcome back"
+            case "cancelled": "not signed"
+            case "nothing": "nothing to do"
+            default: nil
+            }
+        }
+        var out: [String] = []
+        if let card {
+            let b = boards.first { $0.id == card.id }
+            let route = (b?.steps ?? []).filter { $0.status != "then" }
+            let lines = (b?.lines ?? card.lines).filter { !$0.hasPrefix("⚠ ") }
+            out.append("waiting for Confirm: «\(card.title)»" + (route.isEmpty ? "" : "; its route (not part of the command): " + route.map(step).joined(separator: " → "))
+                       + (lines.isEmpty ? "" : "; its plan: " + lines.joined(separator: "; ")) + (card.warnings.isEmpty ? "" : "; warnings: " + card.warnings.joined(separator: " ")))
+        }
+        if let r = running { out.append("running now: \(r.title)" + (r.lines.isEmpty ? "" : " (\(r.lines.suffix(4).joined(separator: "; ")))")) }
+        let finished = boards.filter { $0.kind == "move" && $0.id != card?.id && $0.id != runningBoard && outcome($0.state) != nil }
+        if let last = finished.first { out.append("just finished: \(last.title) — \(outcome(last.state) ?? "")") }
+        out += finished.dropFirst().prefix(5).map { "done earlier on this canvas: \($0.title) — \(outcome($0.state) ?? "")" }
+        return out
+    }
+
     /// The balances as facts for the model. Said outright when there are none or they weren't read yet: with nothing
     /// to read the model made a balance up (a local model answered «$2.50» for an empty wallet).
     func portfolioFacts() -> [String] {
         guard let read = portfolio.updatedAt else { return ["Balances: not read yet — say so, don't guess."] }
         let when = "read \(Int(Date().timeIntervalSince(read))) s ago"
         guard !portfolio.networks.isEmpty else { return ["Balances (\(when)): nothing on any network — the wallet is empty."] }
+        // A token with its contract (a vault's shares, a coin bought by its address), so the model can name it (the Mac's
+        // balances list shownTokens with theirs); dollars and gas coins by name only.
+        func shown(_ r: PortfolioView.Row) -> String {
+            let contract = r.section == "tokens" && !Stablecoins.dollars.contains(r.symbol.uppercased()) ? r.contract.flatMap { $0 == "native" || $0 == CostBasis.wsol ? nil : $0 } : nil
+            return "\(r.amount) \(r.symbol)" + (contract.map { " (\($0))" } ?? "") + (r.usd.map { " (\(Fmt.usd($0)))" } ?? "")
+        }
         return ["Total: \(Fmt.usd(portfolio.total)) (\(when))."] + portfolio.networks.map { n in
-            "\(n.name): " + n.rows.map { r in "\(r.amount) \(r.symbol)" + (r.usd.map { " (\(Fmt.usd($0)))" } ?? "") }.joined(separator: ", ")
+            "\(n.name): " + n.rows.map(shown).joined(separator: ", ")
         } + positions.map { "Open \($0.size > 0 ? "long" : "short") \(IntentParser.pretty($0.coin)), unrealized \(Fmt.usd($0.unrealizedPnl))" }
     }
 

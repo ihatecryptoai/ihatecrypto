@@ -50,6 +50,42 @@ extension Engine {
         changed()
     }
 
+    /// The page that asked is gone (its webview closed or hidden for good, another origin loaded, the app locked): its
+    /// request is declined, as the Mac's sheet goes with its view. From the window (main.rs, `siteGone`).
+    func siteGone(_ origin: String) {
+        func bare(_ o: String) -> String { o.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+        guard let ask = siteAsk, bare(ask.view.origin) == bare(origin) else { return }
+        declineSite(say("The page closed before an answer: nothing was signed.", "Страница закрылась до ответа: ничего не подписано."))
+    }
+
+    /// A canvas going away with the site's request on it: declined, since its ticks were only there to answer.
+    func declineSite(onCanvas boards: [Board]) {
+        guard let ask = siteAsk, boards.contains(where: { $0.id == ask.view.id }) else { return }
+        declineSite(say("Its canvas was deleted: nothing was signed.", "Его холст удалён: ничего не подписано."))
+    }
+
+    /// The window waits 900 s for an answer to the page; the request is declined a little before, so an Approve never
+    /// signs for a page that already got its error.
+    func expireSite(_ id: String) async {
+        try? await Task.sleep(for: .seconds(880))
+        guard siteAsk?.view.id == id else { return }
+        declineSite(say("No answer for 15 minutes: declined, nothing was signed.", "15 минут без ответа: отклонено, ничего не подписано."))
+    }
+
+    // MARK: A trade the second check doubts (S2)
+
+    /// The Mac's Execute sheet toggle: Sign stays grey until it's on.
+    nonisolated static func tradeTick(_ concern: String, say: (String, String) -> String) -> SiteTick {
+        SiteTick(id: "doubt", title: say("The second check has a concern", "У второй проверки есть сомнение"), detail: concern,
+                 toggle: say("I understand the second check's warning and execute anyway", "Понимаю предупреждение второй проверки и выполняю всё равно"))
+    }
+
+    /// What the waiting card still needs ticked, said; nil when Confirm may go.
+    func untickedOnCard(_ ticks: [String]) -> String? {
+        guard let missing = card?.ticks.first(where: { !ticks.contains($0.id) }) else { return nil }
+        return say("Tick «\(missing.toggle)» on the card first, or cancel it.", "Сначала отметь на карточке «\(missing.toggle)» или отмени её.")
+    }
+
     /// The site's request waiting is declined, with why on its block.
     func declineSite(_ why: String) {
         guard let ask = siteAsk else { return }

@@ -165,17 +165,19 @@ function nextLine(task) {
   if (task.paused) return t("paused", "на паузе");
   if (!task.next) return "";
   const d = new Date(task.next), now = new Date();
-  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  // In the window's language, as the Schedule's own rows (live.js).
+  const locale = ui.state?.russian ? "ru-RU" : "en-US";
+  const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const day = d.toDateString() === now.toDateString() ? t("today", "сегодня")
     : d.toDateString() === new Date(now.getTime() + 86_400_000).toDateString() ? t("tomorrow", "завтра")
-    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    : d.toLocaleDateString(locale, { day: "numeric", month: "short" });
   const left = d - now;
-  if (left <= 0) return `${day} ${time} · ` + t("any moment", "вот-вот");
-  if (left < 86_400_000) {
-    const hours = Math.floor(left / 3_600_000), mins = Math.round((left % 3_600_000) / 60_000);
-    return `${day} ${time} · ` + (hours ? t(`in ${hours} h`, `через ${hours} ч`) : t(`in ${mins} min`, `через ${mins} мин`));
-  }
-  return `${day} ${time}`;
+  const hours = Math.floor(left / 3_600_000), mins = Math.round((left % 3_600_000) / 60_000);
+  // A task that's due waits for the person to step away (the Mac's NextLine).
+  const tail = left <= 0 ? (task.recurring ? t("any moment", "вот-вот") : t("when you step away", "когда отойдёшь"))
+    : left < 86_400_000 ? (hours ? t(`in ${hours} h`, `через ${hours} ч`) : t(`in ${mins} min`, `через ${mins} мин`)) : null;
+  // The time always; what follows only when it fits whole (the Mac's ViewThatFits): a tail too long wraps out of sight.
+  return [h("span", {}, `${day} ${time}`), tail ? h("span", { class: "pf-next-tail" }, ` · ${tail}`) : null];
 }
 
 /** The next three runs on their own; a paused one isn't among them (ScheduleTop3). A row or «All» opens the Schedule. */
@@ -185,7 +187,9 @@ function scheduleTop3() {
   const next = running.slice(0, 3);
   const paused = tasks.length - running.length;
   const openSchedule = () => act("addBoard", { name: "schedule" });
-  const marks = [...new Set(next.map((x) => (x.automatic ? "auto" : "hello")))];
+  // Runs by itself: the automation wallet signs it, or it moves no money at all (the Mac's ScheduleSigner).
+  const itself = (x) => x.automatic || x.moves === false;
+  const marks = [...new Set(next.map((x) => (itself(x) ? "auto" : "hello")))];
   return h("div", { class: "pf-schedule" },
     h("div", { class: "pf-row" },
       h("span", { class: "eyebrow pf-eyebrow" }, t("Schedule", "Расписание")),
@@ -196,11 +200,11 @@ function scheduleTop3() {
     next.length ? null : h("div", { class: "pf-empty" }, paused ? t(`Nothing running · ${paused} paused`, `Ничего не идёт · на паузе: ${paused}`) : t("Nothing scheduled yet", "Пока ничего не запланировано")),
     next.map((x) => h("div", { class: "pf-task pf-lit", onclick: openSchedule },
       dateTile(x.next),
-      h("div", { class: "pf-task-text" }, h("div", { class: "pf-task-title" }, x.text), h("div", { class: "pf-task-next one-line" }, nextLine(x))),
-      h("span", { class: "pf-mark " + (x.automatic ? "auto" : "hello"), title: x.automatic ? t("Runs by itself", "Идёт сама") : t("Asks Windows Hello", "Спросит Windows Hello") },
-        icon(x.automatic ? "bolt" : "hand", 14)))),
+      h("div", { class: "pf-task-text" }, h("div", { class: "pf-task-title" }, x.text), h("div", { class: "pf-task-next" }, nextLine(x))),
+      h("span", { class: "pf-mark " + (itself(x) ? "auto" : "hello"), title: itself(x) ? t("Runs by itself", "Идёт сама") : t(`Asks ${presence()}`, `Спросит ${presence()}`) },
+        icon(itself(x) ? "bolt" : "hand", 14)))),
     marks.length ? h("div", { class: "pf-legend-marks" }, marks.map((m) => h("span", { class: "pf-mark " + m },
-      icon(m === "auto" ? "bolt" : "hand", 11), m === "auto" ? t("runs by itself", "идёт сама") : t("asks Windows Hello", "спросит Windows Hello")))) : null);
+      icon(m === "auto" ? "bolt" : "hand", 11), m === "auto" ? t("runs by itself", "идёт сама") : t(`asks ${presence()}`, `спросит ${presence()}`)))) : null);
 }
 
 // MARK: Network cards

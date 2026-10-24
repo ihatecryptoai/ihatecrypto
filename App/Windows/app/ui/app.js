@@ -12,7 +12,7 @@
 //   pages.js       Settings, History and Top up, which take the canvas's place
 //   onboarding.js  the first run, the recovery phrase, importing, watching, small dialogs
 
-import { ui, answered, engine, invoke, render, setRoot, t, toast, h, suggest } from "./core.js";
+import { ui, answered, engine, invoke, render, setRoot, t, toast, h, suggest, store } from "./core.js";
 import { rail } from "./rail.js";
 import { windowControls } from "./chrome.js";
 import { canvasView } from "./canvas.js";
@@ -100,8 +100,9 @@ function draw() {
   }
   app.replaceChildren(...parts);
   // The page panel's webviews sit over this page: hidden while anything but the canvas fills it (Settings, a sheet,
-  // the lock, the first run), as the Mac's WebPanel shows only beside the canvas (panel-grip.js reads it).
-  const covered = parts.length !== 4 || ui.view === "settings" || ui.view === "history" || ui.view === "topup";
+  // the lock, the first run), as the Mac's WebPanel shows only beside the canvas (panel-grip.js reads it) — and while a
+  // site's request waits, whose block (and its ticks) would sit under the browser: the Mac's sheet covers the browser.
+  const covered = parts.length !== 4 || ui.view === "settings" || ui.view === "history" || ui.view === "topup" || !!s.site;
   if (store("panelHidden") !== covered) store("panelHidden", covered);
   restore();
   if (focused) {

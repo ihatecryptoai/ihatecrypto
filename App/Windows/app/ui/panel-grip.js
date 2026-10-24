@@ -8,13 +8,15 @@ import { store } from "./core.js";
 
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
 const KEYS = ["railCollapsed", "chatWidth", "chatX", "chatY", "webWidth", "webX", "panelHidden"];
+/** The panel's width as the app last laid it out: the edge's own page is only a few pixels wide. */
+let laidWidth = 0;
 
 /** Where the main page has the rail and the chat, and the panel's width and offset (`live` while a drag goes on). */
 export function report(live = {}) {
   return invoke("page_layout", {
     folded: store("railCollapsed"), chat: store("chatWidth"), x: store("chatX"), y: store("chatY"),
     width: live.width ?? store("webWidth") ?? 0, offset: live.offset ?? store("webX") ?? 0, hidden: store("panelHidden") === true,
-  }).catch(() => null);
+  }).then((took) => { if (took?.width) laidWidth = took.width; return took; }).catch(() => null);
 }
 
 /** The main page moved the rail or the chat, or something now fills its window: the panel follows. */
@@ -23,7 +25,7 @@ export function follow() {
   report();
 }
 
-/** `handle` moves the panel (its buttons and fields keep their clicks), `edge` sizes it. */
+/** `handle` moves the panel (its buttons and fields keep their clicks), `edge` sizes it; the edge's page has no handle. */
 export function grip(handle, edge) {
   const own = (e) => !!e.target.closest("button, input, label, a");
   let drag = null, frame = 0, live = null;
@@ -31,7 +33,7 @@ export function grip(handle, edge) {
   const start = (e, kind) => {
     if (e.button !== 0 || (kind === "move" && own(e))) return;
     // The screen's coordinates: the panel moves under the pointer while it drags.
-    drag = { kind, x: e.screenX, width: window.innerWidth, offset: store("webX") || 0, moved: false };
+    drag = { kind, x: e.screenX, width: laidWidth || window.innerWidth, offset: store("webX") || 0, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
   };
@@ -59,11 +61,12 @@ export function grip(handle, edge) {
     report();
   };
   for (const [el, kind] of [[handle, "move"], [edge, "resize"]]) {
+    if (!el) continue;
     el.addEventListener("pointerdown", (e) => start(e, kind));
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", end);
     el.addEventListener("pointercancel", end);
   }
-  handle.addEventListener("dblclick", (e) => { if (!own(e)) { store("webX", 0); report(); } });
+  handle?.addEventListener("dblclick", (e) => { if (!own(e)) { store("webX", 0); report(); } });
   edge.addEventListener("dblclick", () => { store("webWidth", 0); report(); });
 }

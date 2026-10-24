@@ -127,16 +127,31 @@ extension Engine {
             case .sell(let a, let x) where !a.resolved:
                 guard let token = await spotToken(a, note: note) else { chainState.stopped = true; return true }
                 c = .sell(token, amount: x)
+            case .jupiterDCA(let a, let u, let o, let e) where !a.resolved:
+                guard let token = await spotToken(a, note: note) else { chainState.stopped = true; return true }
+                c = .jupiterDCA(token, usdc: u, orders: o, every: e)
             default: break
             }
             if case .sendTo(let name, let amount, let network) = c {
                 let found = chainTransfer(name, network: network)
                 guard let e = found.entry else { stop(found.why ?? ""); return true }
                 // The first step reads the balances as they are now; later ones spend what the steps before bring.
-                if i == k, let short = transferShortfall(e.network, amount) { stop(short); return true }
+                if i == k, let short = transferShortfall(e.network, amount) {
+                    stop(short)
+                    noteRefusal(step, short, note: note)
+                    return true
+                }
                 parsed.append(.transfer(e, amount))
             } else {
-                if i == k, let why = refusalBeforeCard(c) { stop(why); return true }
+                if i == k {
+                    // Its source read fresh first, as a move asked alone is (freshenSource).
+                    await freshenSource(c)
+                    if let why = refusalBeforeCard(c) {
+                        stop(why)
+                        noteRefusal(c.summary, why, note: note)
+                        return true
+                    }
+                }
                 parsed.append(.wallet(c))
             }
         }
@@ -257,6 +272,8 @@ extension Engine {
                 if i + 1 < steps.count {
                     reply(say("“\(step.title)” didn’t go through, so the steps after it don’t run.", "«\(step.title)» не прошёл, поэтому следующие шаги не запускаю."))
                 }
+                // The model works out why and the way that works, as after a failed Confirm (not in a scheduled run).
+                if sent.isEmpty { noteRefusal(step.title, error.localizedDescription, note: nil) }
                 break
             }
             // The next step reads balances after this one.
@@ -443,8 +460,10 @@ extension Engine {
             guard !Task.isCancelled else { return }
             seen = signing > 0 ? seen + 1 : 0
             guard seen >= 2 else { continue }
+            // A notice only, as the Mac's (record: false): the run itself is what History keeps.
             notify(.signature, say("Scheduled: \(title)", "По расписанию: \(title)"),
-                   say("Waiting for Windows Hello — confirm it when Windows asks.", "Ждёт Windows Hello — подтверди, когда Windows спросит."))
+                   ledgerActive ? say("Waiting for your Ledger — approve it on the device.", "Ждёт Ledger — подтверди на устройстве.")
+                                : say("Waiting for Windows Hello — confirm it when Windows asks.", "Ждёт Windows Hello — подтверди, когда Windows спросит."), record: false)
             return
         }
     }

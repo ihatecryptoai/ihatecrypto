@@ -457,6 +457,29 @@ enum AgentStore {
 
     nonisolated(unsafe) private static var opened: [String: Data] = [:]
     private static let lock = NSLock()
+    /// When opening the key last went unanswered (or was declined). For ten minutes after, the key doesn't ask again: the
+    /// guardian tries every 10 s while no one is there, and each prompt holds every other signer request for its minute.
+    nonisolated(unsafe) private static var unansweredAt: Date?
+    static let quietFor: TimeInterval = 600
+
+    /// An order that opens or adds comes from a card the person just confirmed: it may ask at once.
+    static func askAgain() { lock.withLock { unansweredAt = nil } }
+
+    private static func asksNow() -> Bool { lock.withLock { unansweredAt.map { Date().timeIntervalSince($0) >= quietFor } ?? true } }
+
+    private static func unanswered() -> Data? {
+        lock.withLock { unansweredAt = Date() }
+        return nil
+    }
+
+    /// Why an order through a key kept here but not opened this run wasn't signed (Signer's fallback refuses it rather than
+    /// hand it to the main key, whose prompt would never close for an order no one is there for).
+    static var unopened: String {
+        let again = lock.withLock { unansweredAt }.map { $0.addingTimeInterval(quietFor) }
+        let when = again.map { " Orders through it ask again from \(DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short))," } ?? " The next order asks again,"
+        return "The Hyperliquid trading key opens once with \(Presence.name) after ihatecrypto starts, and it wasn't opened, so this order wasn't signed. "
+            + "The stop and take on the exchange still protect the position." + when + " and any move you confirm with \(Presence.name) opens it."
+    }
 
     /// Sealed under Windows Hello: when the wallet's seed is (a Ledger's key too), and Windows Hello seals anything here.
     static func sealedFor(_ id: String) -> Bool {
@@ -496,19 +519,20 @@ enum AgentStore {
     private static func load(id: String, prompt: Bool) -> Data? {
         if let key = lock.withLock({ opened[name(id)] }) { return key }
         if let s = readSealed(id) {
-            guard prompt, let master = try? Vault.currentKey ?? Vault.key(
+            guard prompt, asksNow() else { return nil }
+            guard let master = try? Vault.currentKey ?? Vault.key(
                 reason: "open your Hyperliquid trading key until ihatecrypto restarts: orders then go without Windows Hello; it can't withdraw money",
                 session: false, within: 60),
-                  let key = open(s, master, name(id)) else { return nil }
+                  let key = open(s, master, name(id)) else { return unanswered() }
             lock.withLock { opened[name(id)] = key }
             return key
         }
         guard let blob = Vault.read(plain(id)), let key = try? Vault.unprotect(blob) else { return nil }
         // A DPAPI-only key where a sealed one was kept: put there by someone else.
         guard Trusted.state.prefs[record(id)] == nil else { return nil }
-        // Kept before keys were sealed: sealed now (that asks Windows Hello once), the old file gone.
+        // Kept before keys were sealed: sealed now (that asks Windows Hello once, closing after a minute), the old file gone.
         if sealedFor(id), prompt {
-            guard (try? save(key, id: id)) != nil else { return nil }
+            guard asksNow(), (try? save(key, id: id, within: 60)) != nil else { return unanswered() }
         }
         return key
     }
@@ -535,7 +559,7 @@ enum AgentStore {
         throw WalletError("Couldn't create the agent key.")
     }
 
-    static func save(_ key: Data, id: String = Wallets.activeID) throws {
+    static func save(_ key: Data, id: String = Wallets.activeID, within: TimeInterval? = nil) throws {
         guard sealedFor(id) else {
             try Vault.write(plain(id), Vault.protect(key))
             Vault.remove(file(id))
@@ -543,7 +567,7 @@ enum AgentStore {
             return
         }
         let address = try EVMAccount.address(privateKey: key)
-        let master = try Vault.currentKey ?? Vault.key(reason: "keep your Hyperliquid trading key under Windows Hello", session: false)
+        let master = try Vault.currentKey ?? Vault.key(reason: "keep your Hyperliquid trading key under Windows Hello", session: false, within: within)
         guard let box = try AES.GCM.seal(key, using: subkey(master, name(id)), authenticating: Data(address.utf8)).combined else {
             throw WalletError("Couldn't seal the trading key.")
         }
@@ -565,5 +589,5 @@ enum AgentStore {
     }
 
     /// For tests: forget the opened keys, as a new signer process would.
-    static func forget() { lock.withLock { opened = [:] } }
+    static func forget() { lock.withLock { opened = [:]; unansweredAt = nil } }
 }

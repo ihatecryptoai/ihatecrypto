@@ -496,3 +496,6 @@
 .route-site-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .route-status-chip.route-amber, .route-outcome.route-amber { color: var(--jev-ink); }
 .route-status-chip.route-amber { background: var(--jev-tint); }
+
+/* A card's ticks under its head (the second check's doubt on a trade): read before the Confirm beside them. */
+.route-card-ticks { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }

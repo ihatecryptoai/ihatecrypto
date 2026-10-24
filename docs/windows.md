@@ -39,6 +39,12 @@ every change. Between the engine and the signer go the Mac's own `SignerRequest`
   order — then kept only in the signer's memory. Its address is kept beside it and recorded in the trusted settings, so
   Settings shows it without opening it and a key file put there by another program is never approved as the trading key.
   A key kept before (DPAPI only) is sealed the first time it is used.
+- **After a restart, until that first Windows Hello**, the guardian can't move a stop by itself, as it can on a Mac. Its
+  first try asks for the trading key, a prompt that closes after a minute; unanswered, that order is refused with why —
+  never handed to the main key — and for ten minutes the key doesn't ask again for orders that only reduce (stops,
+  takes, closes), so a stop retried every 10 s doesn't keep a prompt up or hold the signer. The stop and take on the
+  exchange protect the position meanwhile. An order that opens or adds asks at once (someone just confirmed its card),
+  and any Windows Hello answered for anything opens the key.
 - **Test and automation wallets** sign with no prompt, so they are under DPAPI only, with their trading keys: any program
   of the same user could read them. They are for a few dollars, as on the Mac.
 - **A scheduled move's Windows Hello** (the automation wallet asking for a new address) closes by itself after a minute

@@ -399,11 +399,15 @@ extension Engine {
     /// A wallet removed from the signer: what was kept under its id goes too (the Mac's walletRemoved), so a wallet made
     /// later with the same id never runs the old one's tasks with its own money or shows its P/L.
     func walletRemoved(_ id: String) {
-        guard !id.isEmpty, id != SignerWallet.firstID else { return }
-        for file in [Self.scoped("costs.json", id), Self.scoped("tasks.json", id), TaskSeal.sealName(Self.scoped("tasks.json", id))] {
+        guard !id.isEmpty else { return }
+        // «1» too: the signer gives it to the next wallet made into an empty list (the Mac's walletRemoved).
+        let list = Self.scoped("tasks.json", id)
+        for file in [Self.scoped("costs.json", id), list, TaskSeal.sealName(list), Self.scoped("recurring-buys.json", id)] {
             try? FileManager.default.removeItem(at: Store.url(file))
         }
-        if WalletScope.tasks == id { WalletScope.tasks = nil; tasks = TaskSeal.load().tasks }
-        if WalletScope.costs == id { WalletScope.costs = nil; appCosts = Store.load([String: CostBasis].self, "costs.json") ?? [:] }
+        // Still the one loaded (the list went empty, so «1» reads as the wallet that's on): emptied, never shown for the
+        // next wallet.
+        if (WalletScope.tasks ?? SignerWallet.firstID) == id { tasks = [] }
+        if (WalletScope.costs ?? SignerWallet.firstID) == id { appCosts = [:] }
     }
 }

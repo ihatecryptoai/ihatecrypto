@@ -27,8 +27,10 @@ extension VaultTests {
         setEnv("WINSEC_FAKE_CANCEL", "1")
         #expect(try send(.status).agentAddress == agent)
         #expect(AgentStore.load(id: id) == nil)
-        // One prompt opens it; after that it's in memory, with no one needed.
+        // One prompt opens it; after that it's in memory, with no one needed. (After the unanswered one it waits ten
+        // minutes unless an order that opens asks: AgentFallbackTests.)
         setEnv("WINSEC_FAKE_CANCEL", "0")
+        AgentStore.askAgain()
         let key = try #require(AgentStore.load(id: id))
         #expect(try EVMAccount.address(privateKey: key) == agent)
         setEnv("WINSEC_FAKE_CANCEL", "1")

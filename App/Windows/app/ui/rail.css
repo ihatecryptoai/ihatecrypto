@@ -342,3 +342,7 @@ button.rail-pk-way:hover { border-color: rgba(255, 122, 47, 0.7); }
 
 /* The last balance while the networks are still answering (the Mac shows it dimmed). */
 .rail-stale { opacity: 0.45; }
+
+/* A canvas's trade plan coin, on a dark tile as the Mac's AssetBadge(dark: true). */
+.rail-crow-coin { border-radius: 8px; flex: none; }
+.rail-crow-coin.letter { background: var(--text); color: var(--bg); }

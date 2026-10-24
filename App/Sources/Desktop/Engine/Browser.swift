@@ -174,6 +174,8 @@ extension Engine {
                                ticks: ticks, approve: connect ? say("Connect", "Подключить") : say("Sign", "Подписать"))
         out.event("showMain", ["why": "site"])
         notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."))
+        // The window's call gives up after 900 s (main.rs dapp_call): declined before that, never signed for a page that left.
+        Task { await expireSite(view.id) }
         return await withCheckedContinuation { c in
             siteAsk = SiteAsk(view, c)
             pin(Board(id: view.id, kind: "move", title: title, lines: (warnings + ticks.map(\.title)).map { "⚠ " + $0 },
@@ -320,12 +322,7 @@ extension Engine {
             let decimals = (try? await rpc.read(address, Data([0x31, 0x3c, 0xe5, 0x67]))).flatMap { ABI.uint(in: $0, word: 0) } ?? 18
             return (symbol, Int(decimals))
         }
-        var lines = [call.summary(chainId: rpc.chainId, to: to, value: value)]
-        if case .approve(_, let word) = call {
-            let t = await token(to)
-            let n = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) } / Decimal(sign: .plus, exponent: t.decimals, significand: 1)
-            lines.append(say("Token: \(t.symbol), up to \(word.allSatisfy { $0 == 0xff } ? "unlimited" : Fmt.num(n, maxFraction: 6))", "Токен: \(t.symbol), до \(word.allSatisfy { $0 == 0xff } ? "без лимита" : Fmt.num(n, maxFraction: 6))"))
-        }
+        var lines = [await callLine(call, to: to, value: value, from: from, chainId: rpc.chainId, native: native, token: token)]
         if !recipients.isEmpty {
             lines.append(say("Money or the right to spend it goes to: ", "Деньги или право их тратить уходят: ") + recipients.joined(separator: ", "))
         }
@@ -362,6 +359,73 @@ extension Engine {
         var ticks = [Self.payeeTick(to: to, recipients: recipients, unread: unread, say: say)].compactMap { $0 }
         await siteSecondCheck(host: host, title: title, programs: ["EVM \(rpc.chainId): \(to)"], changes: lines + changes, lines: &lines, ticks: &ticks)
         return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, recipients: recipients, gas: gas, ticks: ticks)
+    }
+
+    /// What the call does, each token by its symbol and decimals (the Mac's evmReview lines), not raw units.
+    func callLine(_ call: EVMCall, to: String, value: UInt64, from: String, chainId: UInt64, native: String,
+                          token: (String) async -> (symbol: String, decimals: Int)) async -> String {
+        func amount(_ word: Data, _ decimals: Int) -> String {
+            if word.allSatisfy({ $0 == 0xff }) { return say("unlimited", "без лимита") }
+            let n = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
+            return Fmt.num(n / Decimal(sign: .plus, exponent: decimals, significand: 1), maxFraction: 6)
+        }
+        func coins(_ wei: UInt64) -> String { Fmt.num(Decimal(wei) / 1_000_000_000_000_000_000, maxFraction: 8) }
+        func whose(_ a: String) -> String { a.lowercased() == from.lowercased() ? "this wallet" : a }
+        switch call {
+        case .plain:
+            return "Transfer \(coins(value)) \(native) to \(to)."
+        case .approve(let spender, let a), .increaseAllowance(let spender, let a):
+            let t = await token(to)
+            return "Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol)."
+        case .transfer(let r, let a):
+            let t = await token(to)
+            return "Transfer \(amount(a, t.decimals)) \(t.symbol) to \(r)."
+        case .nftTransfer(let f, let r):
+            return "Move NFTs of \(to) from \(whose(f)) to \(r)."
+        case .delegation(let d, let on):
+            return on ? "Let \(d) borrow against or manage your lending positions." : "Revoke \(d)'s rights over your lending positions."
+        case .transferFrom(let f, let r, let a):
+            let t = await token(to)
+            return "Move \(amount(a, t.decimals)) \(t.symbol) from \(f) to \(r)."
+        case .setApprovalForAll(let op, let on):
+            return "\(on ? "Rights to all NFTs" : "Revoke NFT rights") for \(op)."
+        case .permit:
+            return "Call to permit (permission to spend)."
+        case .swap(let r):
+            return "Uniswap swap paying \(whose(r))."
+        case .borrow(let asset, let a, let owner):
+            let t = await token(asset)
+            return "Borrow \(amount(a, t.decimals)) \(t.symbol) from \(to), the debt on \(whose(owner))."
+        case .repay(let asset, let a, let owner):
+            let t = await token(asset)
+            return "Repay \(a.allSatisfy { $0 == 0xff } ? "all the" : amount(a, t.decimals)) \(t.symbol) debt of \(whose(owner)) to \(to)."
+        case .multisigExec:
+            return "Carry out a signed move of the multisig \(to): " + call.summary(chainId: chainId, to: to, value: value) + "."
+        case .cctpBurn(let r, let domain, let a):
+            return "Circle's CCTP: burn \(amount(a, 6)) USDC here to mint on \(CCTP.chainName(domain)) to \(r.map(whose) ?? "a non-EVM account")."
+        case .oftSend(let r, let eid, let a, let plain, _):
+            let known = USDT0.on(chainId)?.oft == to.lowercased()
+            return "LayerZero: send \(known ? "\(amount(a, 6)) USDT" : "tokens of \(to)") to \(r.map(whose) ?? "an account that can't be read") on \(USDT0.networkName(eid: eid))\(plain ? "" : ", with options or a message of its own")."
+        case .v4Swap(let s):
+            let (a, b) = (await token(s.currencyIn), await token(s.currencyOut))
+            func n(_ x: Decimal, _ d: Int) -> String { Fmt.num(x / Decimal(sign: .plus, exponent: d, significand: 1), maxFraction: 6) }
+            return "Uniswap v4 swap: \(n(s.amountIn, a.decimals)) \(a.symbol) for at least \(n(s.amountOutMinimum, b.decimals)) \(b.symbol), paid to this wallet."
+        case .permit2Approve(let contract, let spender, let a, let expiration):
+            let t = await token(contract)
+            return "Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol) through Permit2, until \(Fmt.date(Date(timeIntervalSince1970: TimeInterval(expiration))))."
+        case .vault(let r, let owner):
+            return "Vault \(owner == nil ? "deposit" : "withdrawal") crediting \(whose(r))."
+        case .lending(let b):
+            return "Lending pool call (Aave supply or withdraw) crediting \(whose(b))."
+        case .claim(let users):
+            return "Merkl rewards claim paying \(users.allSatisfy { $0.lowercased() == from.lowercased() } ? "this wallet" : users.joined(separator: ", "))."
+        case .wrap:
+            return "Wrap \(coins(value)) \(native) into its token at \(to)\(EVMCall.wrap.payees(to: to, value: value, chainId: chainId).isEmpty ? ", the network's own WETH" : " — not this network's WETH")."
+        case .unwrap(let a):
+            return "Unwrap \(amount(a, 18)) of the token at \(to) into \(native)."
+        case .contract(let selector):
+            return "Contract call \(to), function \(selector)\(value > 0 ? ", with \(coins(value)) \(native)" : "")."
+        }
     }
 
     /// Programs, the guard's verdict and the simulated change of every balance of ours the transaction touches.

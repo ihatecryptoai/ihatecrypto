@@ -537,6 +537,8 @@ extension Engine {
             } else {
                 let replaced = planBoard
                 show(.trade(p), title: title, lines: p.steps + p.changes, warnings: warnings)
+                // The second check's doubt, or a money mismatch code found: ticked before Confirm counts (the Mac's Execute sheet).
+                if let review { card?.ticks = [Self.tradeTick(review, say: say)] }
                 updateBoard(card?.id) { $0.steps = route.steps; $0.plan = view }
                 drawTrade(card?.id, r, e.sizing, market: market)
                 // The stopped plan, or the card it was before an edit: the new card takes its place.
@@ -556,6 +558,8 @@ extension Engine {
             drawPlan(title: title, steps: route.steps, view: view, r, e, market: market)
             let list = planChecklist(next, r, e, blocks, market: market, atrRead: atrRead, ready: false, quoted: quoted, failed: error.localizedDescription)
             reply(lead + "\n" + list, note: note)
+            // The model works out why and the way that works (the Mac's Execution.swift:334 noteFailure).
+            noteRefusal(title, error.localizedDescription, note: note)
         }
     }
 

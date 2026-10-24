@@ -300,7 +300,13 @@ enum Signer {
                 v.problems.append("The Ledger's trading key signs orders, cancels and leverage only; anything else is signed on the Ledger.")
                 return refused(v)
             }
+            #if canImport(CWinSec)
+            if !HLAction.onlyReduces(action) { AgentStore.askAgain() }
+            #endif
             guard defaults.string(forKey: "agentActive-" + id) == "on", var agent = AgentStore.load(id: id) else {
+                #if canImport(CWinSec)
+                if defaults.string(forKey: "agentActive-" + id) == "on", AgentStore.has(id: id) { throw WalletError(AgentStore.unopened) }
+                #endif
                 throw WalletError("The Ledger's trading key is off: approve it on the Ledger, or turn it back on.")
             }
             guard agentFresh("agentRenewed-" + id) || HLAction.onlyReduces(action) else {
@@ -617,10 +623,20 @@ enum Signer {
             // stays protected; what opens or adds to one takes the main key in person, and that renews the week.
             var r = SignerReply(ok: true)
             let agentOn = HLSigner.isTrading(action) && defaults.bool(forKey: agentActiveKey)
+            #if canImport(CWinSec)
+            // Windows keeps the key under Windows Hello, opened once per run (Vault.swift's AgentStore): an order that opens or
+            // adds comes from a card just confirmed, so it may ask at once.
+            if agentOn, !HLAction.onlyReduces(action) { AgentStore.askAgain() }
+            #endif
             if agentOn, agentFresh(agentRenewedKey) || HLAction.onlyReduces(action), var agent = AgentStore.load() {
                 defer { SeedStore.wipe(&agent) }
                 r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: mainnet)
             } else {
+                #if canImport(CWinSec)
+                // A key that's there but wasn't opened (no one answered Windows Hello): refused, never handed to the main key —
+                // that prompt would never close for an unattended stop, and its «7 days are over» would be wrong.
+                if agentOn, agentFresh(agentRenewedKey) || HLAction.onlyReduces(action), AgentStore.has() { throw WalletError(AgentStore.unopened) }
+                #endif
                 let stale = agentOn && AgentStore.has()
                 let type = HLAction.type(action)
                 let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"

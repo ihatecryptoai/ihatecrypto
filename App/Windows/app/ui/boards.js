@@ -181,12 +181,14 @@ function moveBoard(b, newest, onChart) {
         confirmButton(s.card)) : null);
   return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
     onChart ? planChart(b, onChart, head) : head,
+    // The Mac's «I understand the second check's warning and execute anyway», right under the Confirm it unlocks.
+    waitingHere && s.card.ticks?.length ? cardTicks(s.card) : null,
     finished && b.state !== "plan" ? outcome(b) : null,
     siteHere ? siteRequest(s.site) : draft ? multisigSetup(draft) : route,
     b.plan ? planExtras(b) : null,
     // What will be signed and what's checked, read before Confirm (the Mac's route footer under the waiting move).
     waitingHere && b.note ? h("div", { class: "route-footer", "data-no-pan": "" }, icon("signature", 15), h("div", {}, b.note)) : null,
-    waitingHere && s.card.warnings.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
+    waitingHere && s.card.warnings.length && !s.card.ticks?.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
       h("div", {}, s.card.warnings.map((w) => h("div", {}, w)))) : null,
     runningHere ? signing(b) : null,
     notes(b));
@@ -215,7 +217,31 @@ function confirmButton(card) {
       label.textContent = `${card.confirm} · ${n}`;
     }, 1000);
   }
-  return h("button", { class: "btn primary route-large", disabled: busy, "aria-label": card.confirm, onclick: () => act("confirm", { board: card.id }) }, icon("hello"), label);
+  const ticked = siteTicks.get(card.id) || new Set();
+  const all = (card.ticks || []).every((x) => ticked.has(x.id));
+  return h("button", { class: "btn primary route-large", disabled: busy || !all, "aria-label": card.confirm,
+    title: all ? card.confirm : t("Tick the box below first", "Сначала отметь пункт ниже"),
+    onclick: () => { const ids = [...ticked]; siteTicks.delete(card.id); act("confirm", { board: card.id, ticks: ids }); } }, icon("hello"), label);
+}
+
+/** The waiting card's warnings and ticks under its head; a warning a tick already says isn't said twice. */
+function cardTicks(card) {
+  const said = new Set(card.ticks.map((x) => x.detail));
+  const rest = card.warnings.filter((w) => !said.has(w));
+  return h("div", { class: "route-card-ticks" },
+    rest.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14), h("div", {}, rest.map((w) => h("div", {}, w)))) : null,
+    tickBoxes(card.id, card.ticks));
+}
+
+/** The ticks a request carries (a site's risks, a trade the second check doubts), each kept by the request's id. */
+function tickBoxes(id, ticks) {
+  if (!siteTicks.has(id)) siteTicks.set(id, new Set());
+  const ticked = siteTicks.get(id);
+  return ticks.map((x) => h("div", { class: "route-site-tick", "data-no-pan": "" },
+    h("b", {}, x.title), h("span", { class: "secondary small" }, x.detail),
+    h("label", { class: "route-site-toggle" },
+      h("input", { type: "checkbox", checked: ticked.has(x.id), onchange: (e) => { e.target.checked ? ticked.add(x.id) : ticked.delete(x.id); render(); } }),
+      h("span", {}, x.toggle))));
 }
 
 /** The ticks a site's request has had, by its id: Approve counts only once each risk it carries is ticked. */
@@ -243,11 +269,7 @@ function siteRequest(site) {
         h("div", { class: "route-site-origin selectable" }, site.origin))),
     site.lines.length ? h("div", { class: "route-site-lines selectable" }, site.lines.map((l) => h("div", {}, l))) : null,
     site.warnings.length ? h("div", { class: "route-warn-box" }, icon("exclamationmark.triangle", 14), h("div", {}, site.warnings.map((w) => h("div", {}, w)))) : null,
-    site.ticks.map((x) => h("div", { class: "route-site-tick" },
-      h("b", {}, x.title), h("span", { class: "secondary small" }, x.detail),
-      h("label", { class: "route-site-toggle" },
-        h("input", { type: "checkbox", checked: ticked.has(x.id), onchange: (e) => { e.target.checked ? ticked.add(x.id) : ticked.delete(x.id); render(); } }),
-        h("span", {}, x.toggle)))),
+    tickBoxes(site.id, site.ticks),
     h("div", { class: "route-site-buttons" }, h("span", { class: "spacer" }),
       h("button", { class: "btn route-large", onclick: () => { siteTicks.delete(site.id); act("siteAnswer", { board: site.id, test: false }); } }, t("Decline", "Отклонить")),
       h("button", { class: "btn primary route-large", disabled: !all, title: all ? site.approve : t("Tick each box above first", "Сначала отметь каждый пункт выше"),
@@ -537,7 +559,8 @@ export function openStep(b = ui.state.boards.find((x) => x.id === ui.state.card?
 document.addEventListener("keydown", (e) => {
   if (!["ArrowLeft", "ArrowRight", "Escape"].includes(e.key) || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) return;
   const key = [...ui.opened].find((k) => k.startsWith("step:"));
-  if (!key || document.querySelector(".menu")) return;
+  // Only while that step's details are on screen: another page (Settings, History) keeps its own Esc and arrows.
+  if (!key || document.querySelector(".menu") || ui.view !== "canvas" || !document.querySelector(".route-step-details")) return;
   const [, id, n] = key.split(":");
   const count = ui.state?.boards?.find((x) => x.id === id)?.steps?.length || 0;
   e.preventDefault();

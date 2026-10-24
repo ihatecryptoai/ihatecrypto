@@ -229,6 +229,32 @@ extension Engine {
         for g in got { appCosts[g.key, default: CostBasis()].bought(g.amount, for: got.count == 1 && spent > 0 ? spent : Decimal(string: "0.000001")!) }
     }
 
+    /// Shares a contract call brought (kept in the recorded costs) that the network's explorer hasn't listed yet: read from
+    /// the token itself and priced by DefiLlama, so the portfolio shows them at once (the Mac's missingDeposits; Blockscout
+    /// indexes a new holding minutes late). Called with each portfolio read, before the networks are sorted.
+    func withMissingDeposits(_ networks: [PortfolioView.Network], owner: String) async -> [PortfolioView.Network] {
+        guard !owner.isEmpty else { return networks }
+        var networks = networks
+        for key in appCosts.keys.sorted() {
+            let parts = key.split(separator: ":").map(String.init)
+            guard parts.count == 2, Holdings.blockscout[parts[0]] != nil, let net = EVMNetwork.named(parts[0]),
+                  !networks.contains(where: { $0.key == net.key && ($0.rows + $0.hidden).contains { $0.contract?.lowercased() == parts[1] } }),
+                  let raw = try? await net.rpc.read(parts[1], ERC20.balanceOf(owner)), let units = ABI.decimal(in: raw, word: 0), units > 0 else { continue }
+            let t = await tokenMeta(parts[1], net)
+            let held = Holding(chain: net.key, contract: parts[1], amount: units / pow(10, t.decimals), symbol: t.symbol)
+            var row = Self.row((await Holdings.llamaPriced(net.key, [held])).first ?? held)
+            // Bought through a checked call: shown, not tucked away with the airdrops.
+            row.real = true
+            if let i = networks.firstIndex(where: { $0.key == net.key }) {
+                networks[i].rows.append(row)
+                networks[i].usd += row.usd ?? 0
+            } else {
+                networks.append(.init(key: net.key, name: net.name, usd: row.usd ?? 0, rows: [row]))
+            }
+        }
+        return networks
+    }
+
     /// After Confirm: the approve and the call exactly as simulated (the executor dry-runs the call again before signing it).
     func runContractCall(_ command: WalletCommand, _ e: Executor) async throws -> String {
         guard let r = callReview, r.command == command else { throw ExecutionError("The call's check is gone; ask for it again.") }

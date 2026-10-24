@@ -150,10 +150,12 @@ extension Engine {
     /// A task's steps on the automation wallet, as the Mac's runSteps(confirmed: true): one confirmed chain, each move
     /// carried out at once and drawn on the canvas as it runs — a send to a saved name, a payment, a step that only shows
     /// something, the next step spending what the one before brought; the first that fails stops the rest.
-    func runOnAutomation(_ task: ScheduledTask, _ automation: SignerWallet) async {
+    /// False when the run stopped before anything moved (a step it can't take, said in the chat).
+    @discardableResult
+    func runOnAutomation(_ task: ScheduledTask, _ automation: SignerWallet) async -> Bool {
         let started = Date()
         reply(say("From the automation wallet «\(automation.label)», no Windows Hello.", "С кошелька автоматизации «\(automation.label)», без Windows Hello."), note: "schedule")
-        await TaskRun.$automation.withValue(automation) { await runAutomationSteps(task) }
+        guard await TaskRun.$automation.withValue(automation, operation: { await runAutomationSteps(task) }) else { return false }
         // Short of SOL, it fails the same way every run: said with what its tasks need for 4 weeks, and that as a card.
         if boards.contains(where: { $0.kind == "move" && $0.state == "failed" && $0.at >= started }),
            let a = automation.solana, let sol = try? await Solana.balance(owner: a).sol, sol < TaskRun.solFloor {
@@ -165,14 +167,16 @@ extension Engine {
                                          command: "send \(need) SOL to \(automation.label)", recommended: true)]
         }
         await sendBoughtToMain(from: automation)
+        return true
     }
 
     /// The task's steps as the chain a Confirm would run: moves resolved and checked as their cards would be, then
-    /// carried out in order on one block.
-    private func runAutomationSteps(_ task: ScheduledTask) async {
-        guard let parsed = await automationSteps(task) else { return }
+    /// carried out in order on one block. False when a step stopped it before anything ran.
+    private func runAutomationSteps(_ task: ScheduledTask) async -> Bool {
+        guard let parsed = await automationSteps(task) else { return false }
         let title = parsed.count == 1 ? parsed[0].title : task.steps.joined(separator: say(" then ", " потом "))
         await runAutomationChain(parsed, title: title)
+        return true
     }
 
     /// A task's steps as chain steps: a Solana token Jupiter-verified first, Modules asked, a send to a saved name as the
@@ -182,6 +186,13 @@ extension Engine {
         for step in task.steps {
             // A contract call is never carried out unseen: its card waits for Confirm (the Mac's runSteps).
             guard task.movesMoney, var c = WalletCommand.parse(step), case .move = chainKind(step, c), ContractCall.parse(step) == nil else { parsed.append(.said(step)); continue }
+            // A move that names no amount never runs as «all of it»: the Mac's run asks «How much?» and stops there.
+            // Nobody may be at the computer, so nothing moves until the task says how much.
+            if let question = c.amountQuestion {
+                reply(say("“\(step)” doesn't say how much (\(question)), so this run stops before anything moves. Change the task to name the amount.",
+                          "В «\(step)» нет суммы, поэтому запуск остановлен, ничего не ушло. Измени задачу и укажи сумму."), note: "schedule")
+                return nil
+            }
             switch c {
             case .buy(let a, let u) where !a.resolved:
                 guard let token = await spotToken(a, note: "schedule") else { return nil }
@@ -237,9 +248,10 @@ extension Engine {
 
     /// The tasks that are recurring buys: made by a recurring buy's first Confirm, they run at their time from the wallet
     /// that's on with Windows Hello only, as the Mac's schedules do — no card, no waiting for the person to step away.
+    /// Kept per wallet, as its tasks are (the Mac keeps schedules per wallet): a switch never turns them into plain tasks.
     var recurringBuys: Set<UUID> {
-        get { Store.load(Set<UUID>.self, "recurring-buys.json") ?? [] }
-        set { Store.save(newValue, "recurring-buys.json") }
+        get { Store.load(Set<UUID>.self, Self.scoped("recurring-buys.json", WalletScope.tasks)) ?? [] }
+        set { Store.save(newValue, Self.scoped("recurring-buys.json", WalletScope.tasks)) }
     }
 
     /// Due recurring buys, one run each; the next date moves on even after a failure, so it doesn't retry in a loop.
@@ -252,23 +264,56 @@ extension Engine {
             // Found again after every await: «stop recurring buys» or a deletion meanwhile changes the list.
             guard running == nil, signing == 0, let i = tasks.firstIndex(where: { $0.id == id }), tasks[i].next <= Date(),
                   case .buy(let asset, let usdc?)? = WalletCommand.parse(tasks[i].steps.first ?? "") else { continue }
+            // On a Ledger a purchase needs the device and the person: while it's away the buy stays due and says so once;
+            // when it's back, it runs and asks for its approval there (the Mac's runSchedules).
+            if ledgerActive, !(await ledgerReachable()) {
+                if Self.ledgerWaitNotified.insert(id).inserted {
+                    notify(.signature, say("Scheduled \(asset.symbol) buy waits for your Ledger", "Регулярная покупка \(asset.symbol) ждёт Ledger"),
+                           say("Connect and unlock the Ledger: the buy runs then and asks you to approve it on the device.",
+                               "Подключи и разблокируй Ledger: покупка запустится и попросит подтверждение на устройстве."))
+                }
+                continue
+            }
+            Self.ledgerWaitNotified.remove(id)
+            guard let i = tasks.firstIndex(where: { $0.id == id }) else { continue }
             var task = tasks[i]
             _ = task.advance()
             if let kept = Self.keptNext.removeValue(forKey: id.uuidString), kept > Date() { task.next = kept }
             Self.runNowKeys.remove("task:\(id)")
             tasks[i] = task
-            await recurringBuy(asset, usdc: usdc, next: task.next)
+            await recurringBuy(asset, usdc: usdc, task: task)
         }
     }
 
-    private func recurringBuy(_ asset: SpotAsset, usdc: Decimal, next: Date) async {
+    /// Recurring buys told once that they wait for the Ledger.
+    static var ledgerWaitNotified: Set<UUID> = []
+
+    /// The step a recurring buy keeps: a coin off the fixed list by its mint, so each run buys that token and never
+    /// another one trading under its ticker (the Mac keeps the schedule's asset).
+    static func recurringStep(_ buy: WalletCommand) -> String {
+        guard case .buy(let a, let u) = buy, !a.mint.isEmpty, a != .usdc, !SpotAsset.all.contains(where: { $0.mint == a.mint }) else { return buy.summary }
+        return "buy token \(a.mint) for \(u.map { Fmt.num($0, maxFraction: 6) } ?? "all") USDC"
+    }
+
+    /// One run: no chat line when it goes through, a notification and its record either way (the Mac's notify with
+    /// `schedule:`) — the Schedule's History, the task's own canvas and History › Agent list it.
+    private func recurringBuy(_ asset: SpotAsset, usdc: Decimal, task: ScheduledTask) async {
         let title = say("\(asset.symbol) purchase", "Покупка \(asset.symbol)")
+        let started = Date()
+        func record(_ result: String, _ line: String) {
+            scheduleRuns.append(ScheduleRun(at: started, title: task.steps.joined(separator: " then "), result: result, line: String(line.prefix(300)), canvas: nil, task: task.id.uuidString))
+            if scheduleRuns.count > 100 { scheduleRuns.removeFirst(scheduleRuns.count - 100) }
+        }
         // Jupiter or Solana switched off: this run is skipped, the schedule stays.
         if let off = Modules.current.refusal(.buy(asset, usdc: usdc), ru: russian) {
-            notify(.moves, say("Scheduled \(asset.symbol) buy skipped", "Регулярная покупка \(asset.symbol) пропущена"), off, failed: true)
+            notify(.moves, say("Scheduled \(asset.symbol) buy skipped", "Регулярная покупка \(asset.symbol) пропущена"), off, failed: true, record: true)
+            record("failed", off)
             return
         }
-        guard let token = await spotToken(asset, note: "schedule") else { return }
+        guard let token = await spotToken(asset, note: "schedule") else {
+            record("failed", messages.last { !$0.fromUser }?.text ?? title)
+            return
+        }
         running = (title, [])
         changed()
         // Nobody may be at the computer: a session opened for a few minutes doesn't cover this buy, Windows Hello asks.
@@ -276,13 +321,14 @@ extension Engine {
         let hello = watchForHello(title)
         do {
             let line = try await executor().swap(token, buy: true, amount: usdc, equity: portfolio.total)
-            reply(line, note: "schedule")
-            notify(.moves, title, line)
+            notify(.moves, title, line, record: true)
+            record("done", line)
         } catch {
-            let text = say("Scheduled \(asset.symbol) purchase failed: \(error.localizedDescription) Next one: \(Fmt.date(next)).",
-                           "Регулярная покупка \(asset.symbol) не прошла: \(error.localizedDescription) Следующая: \(Fmt.date(next)).")
+            let text = say("Scheduled \(asset.symbol) purchase failed: \(error.localizedDescription) Next one: \(Fmt.date(task.next)).",
+                           "Регулярная покупка \(asset.symbol) не прошла: \(error.localizedDescription) Следующая: \(Fmt.date(task.next)).")
             reply(text, note: "schedule")
-            notify(.moves, say("\(asset.symbol) purchase failed", "Покупка \(asset.symbol) не прошла"), text, failed: true)
+            notify(.moves, say("\(asset.symbol) purchase failed", "Покупка \(asset.symbol) не прошла"), text, failed: true, record: true)
+            record("failed", text)
         }
         hello.cancel()
         running = nil

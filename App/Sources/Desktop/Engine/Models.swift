@@ -156,6 +156,17 @@ extension Engine {
         if !hadModel || (p.info.kind == .local && typed.isEmpty) { useAccount(id) }
     }
 
+    /// Settings' «Use <login>»: the login another tool has (Claude Code, Codex) taken again for this account, as the Mac's
+    /// useExistingLogin — kept, and the chat stays where it is unless it has no model to go on with («Switch» switches).
+    func useLogin(provider id: String) throws {
+        guard let p = provider(id), let login = p.existingLogin() else {
+            throw WalletError(say("No sign-in found on this PC.", "На этом компьютере входа не нашлось."))
+        }
+        let hadModel = hasModel
+        Store.setCredential(login, for: id)
+        if !hadModel { useAccount(id) } else { changed() }
+    }
+
     /// The provider's browser sign-in: the window opens the page (the «openURL» event), the redirect comes back to
     /// 127.0.0.1, and the tokens are kept like a key.
     func signIn(provider id: String) async throws {

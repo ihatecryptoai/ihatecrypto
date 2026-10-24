@@ -98,6 +98,8 @@ extension Engine {
                 if let kept = last[key] { networks.append(kept) }
             }
         }
+        // Shares a contract call brought that the explorer doesn't list yet (the Mac's missingDeposits).
+        if !me.evm.isEmpty { networks = await withMissingDeposits(networks, owner: me.evm) }
         // Solana, then Hyperliquid, then the rest by their money, as on the Mac.
         let order = ["solana": 0, "hyperliquid": 1]
         networks.sort { (order[$0.key] ?? 2, -$0.usd) < (order[$1.key] ?? 2, -$1.usd) }
@@ -186,7 +188,7 @@ extension Engine {
             } else { Task { _ = await robinhoodStock("") } }
         }
         // A deposit's «earning» in the window's language; a vault's own name and rate stay as they are.
-        if russian { n.rows = n.rows.map { r in var r = r; if r.note == "earning" { r.note = "приносит доход" }; return r } }
+        if russian { n.rows = n.rows.map { r in var r = r; if let note = r.note, note.hasPrefix("earning") { r.note = "приносит доход" + note.dropFirst("earning".count) }; return r } }
         return n
     }
 
@@ -255,6 +257,78 @@ extension Engine {
         r.id = h.id
         r.real = h.looksReal
         return r
+    }
+
+    /// USDC in one Aave market or Morpho vault: «earning 4.12%» under its name (the Mac's NetworkLine), its last reading
+    /// when the node doesn't answer, nil when nothing's lent. Off Base a click opens its site, as the Mac's; Base's has
+    /// its details board. The rate is read again at most every 10 minutes.
+    nonisolated static func lent(_ name: String, place: String, owner: String, onBase: Bool, read: () async -> UInt64?,
+                                 apy: () async -> Decimal?, now: Date = Date()) async -> PortfolioView.Row? {
+        let key = owner.lowercased() + "|" + place
+        let last = LendingReadings.shared.get(key)
+        var reading: LendingReadings.Reading?
+        if let raw = await read() {
+            let usd = Decimal(raw) / 1_000_000
+            if raw >= 10_000 {
+                let fresh = last.map { now.timeIntervalSince($0.apyAt) < 600 && $0.apy != nil } ?? false
+                reading = .init(usd: usd, apy: fresh ? last?.apy : await apy(), apyAt: fresh ? last!.apyAt : now)
+            }
+            LendingReadings.shared.set(key, reading)
+        } else {
+            reading = last
+        }
+        guard let reading else { return nil }
+        return lentRow(name, reading, onBase: onBase)
+    }
+
+    nonisolated static func lentRow(_ name: String, _ r: LendingReadings.Reading, onBase: Bool) -> PortfolioView.Row {
+        var row = deposit(name, usd: r.usd, note: "earning" + (r.apy.map { " \(Fmt.num($0.rounded(2, .plain)))%" } ?? ""))
+        if !onBase { row.site = name == "Aave" ? "app.aave.com" : "app.morpho.org" }
+        return row
+    }
+
+    /// Robinhood's Stock Tokens as the Mac's loadRobinhood: the ones bought here (remembered by symbol) and any the explorer
+    /// lists that Robinhood's registry knows, each read at Robinhood's bid; the explorer's copy is replaced, and a registry
+    /// token is never tucked as an unknown airdrop. Without the registry the rows stay as the explorer gave them.
+    nonisolated static func stocks(_ rows: [PortfolioView.Row], owner: String, rpc: EVMRPC) async -> [PortfolioView.Row] {
+        let registry: [RobinhoodStocks.Token]
+        if let known = Engine.stockRegistry { registry = known } else if let read = try? await RobinhoodStocks.registry() { registry = read } else { return rows }
+        let bought = Set(boughtStocks())
+        var out: [PortfolioView.Row] = []
+        var seen = Set<String>()
+        for r in rows {
+            guard let c = r.contract?.lowercased(), let t = registry.first(where: { $0.address.lowercased() == c }) else { out.append(r); continue }
+            seen.insert(c)
+            let bid = (try? await RobinhoodStocks.quote(t.symbol))?.bid
+            out.append(stockRow(t, amount: r.value, bid: bid, explorer: r))
+        }
+        for t in registry where bought.contains(t.symbol.uppercased()) && !seen.contains(t.address.lowercased()) {
+            guard let raw = try? await rpc.read(t.address, try ERC20.balanceOf(owner)), let units = ABI.decimal(in: raw, word: 0), units > 0 else { continue }
+            let amount = units / Decimal(sign: .plus, exponent: t.decimals, significand: 1)
+            out.append(stockRow(t, amount: amount, bid: (try? await RobinhoodStocks.quote(t.symbol))?.bid, explorer: nil))
+        }
+        return out
+    }
+
+    /// A Stock Token's row: its symbol and Robinhood's logo, valued at the bid (the explorer's price when Robinhood gives
+    /// none); kept on show, as the registry vouches for it.
+    nonisolated static func stockRow(_ t: RobinhoodStocks.Token, amount: Decimal, bid: Decimal?, explorer: PortfolioView.Row?) -> PortfolioView.Row {
+        var r = row(t.symbol, amount, usd: bid.map { $0 * amount } ?? explorer?.usd, icon: explorer?.icon.flatMap(URL.init(string:)) ?? t.logo,
+                    chain: "robinhood", contract: t.address, change24h: explorer?.change24h, verified: true)
+        r.id = explorer?.id
+        r.real = true
+        r.stock = true
+        return r
+    }
+
+    /// The Stock Tokens bought through ihatecrypto, by symbol (the Mac's «stockTokens»): their balances are read with
+    /// every refresh, listed by the explorer or not yet.
+    nonisolated static func boughtStocks() -> [String] { Store.load([String].self, "stock-tokens.json") ?? [] }
+    nonisolated static func rememberStock(_ symbol: String) {
+        let s = symbol.uppercased()
+        guard !s.hasPrefix("0X") else { return }
+        var list = boughtStocks()
+        if !list.contains(s) { list.append(s); Store.save(list, "stock-tokens.json") }
     }
 
     /// A deposit in the DeFi section: its dollars, and what it does under its name.
@@ -334,17 +408,17 @@ extension Engine {
                         if coin > 0 { rows.append(row(net.gasCoin, coin, chain: net.key, contract: "native")) }
                         let others = (await Holdings.evm(net.key, address: owner, native: false, skip: [net.usdc.lowercased()])) ?? []
                         rows += others.map(row)
-                        // USDC lent on Aave or in Morpho's vault here; a market that doesn't answer shows nothing this time.
+                        // USDC lent on Aave or in Morpho's vault here, with its rate; a market that doesn't answer keeps its
+                        // last reading (the Mac's loadLending), so the total and the curve don't dip.
                         for m in AaveV3.markets where m.chain == net.key {
-                            if let raw = try? await m.rpc.tokenBalance(m.aUSDC, owner: owner), raw >= 10_000 {
-                                rows.append(deposit("Aave", usd: Decimal(raw) / 1_000_000, note: "earning"))
-                            }
+                            if let r = await lent("Aave", place: m.place, owner: owner, onBase: net.key == "base",
+                                                  read: { try? await m.rpc.tokenBalance(m.aUSDC, owner: owner) }, apy: { try? await AaveV3.verify(m) }) { rows.append(r) }
                         }
                         for v in MorphoVault.vaults where v.chain == net.key {
-                            if let raw = try? await MorphoVault.value(owner, v), raw >= 10_000 {
-                                rows.append(deposit("Morpho", usd: Decimal(raw) / 1_000_000, note: "earning"))
-                            }
+                            if let r = await lent("Morpho", place: v.place, owner: owner, onBase: net.key == "base",
+                                                  read: { try? await MorphoVault.value(owner, v) }, apy: { await MorphoRates.netAPY(v) }) { rows.append(r) }
                         }
+                        if net.key == "robinhood" { rows = await stocks(rows, owner: owner, rpc: net.rpc) }
                         return (i, .success(.init(key: net.key, name: net.name, usd: 0, rows: rows)))
                     } catch {
                         return (i, .failure(net.key, "\(net.name): \(error.localizedDescription)"))
@@ -415,4 +489,14 @@ extension Engine {
         while x < 1, x > 0, digits < 10 { x *= 10; digits += 1 }
         return "$" + Fmt.num(d, maxFraction: min(digits + 2, 12))
     }
+}
+
+/// Each Aave market's and Morpho vault's last reading, by owner and place, for the portfolio's reads that run side by side.
+nonisolated final class LendingReadings: @unchecked Sendable {
+    struct Reading: Equatable { var usd: Decimal; var apy: Decimal?; var apyAt: Date }
+    static let shared = LendingReadings()
+    private let lock = NSLock()
+    private var all: [String: Reading] = [:]
+    func get(_ key: String) -> Reading? { lock.lock(); defer { lock.unlock() }; return all[key] }
+    func set(_ key: String, _ r: Reading?) { lock.lock(); all[key] = r; lock.unlock() }
 }

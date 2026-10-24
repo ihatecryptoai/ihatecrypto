@@ -300,9 +300,18 @@ extension Engine {
         Task { await refresh() }
     }
 
+    /// The Ledger in reach now (the Mac's ledgerReachable): plugged in over USB, or answering over Bluetooth.
+    func ledgerReachable() async -> Bool {
+        guard let account = ledger else { return false }
+        return account.bluetooth == true ? await WinLedgerBLE.shared.connect(timeout: 3) != nil : WinLedgerHID.connected() != nil
+    }
+
     /// Takes the Ledger off the list: only its addresses were here.
-    func forgetLedger() {
-        guard ledger != nil else { reply(say("No Ledger is connected.", "Ledger не подключён.")); return }
+    func forgetLedger() async {
+        guard let account = ledger else { reply(say("No Ledger is connected.", "Ledger не подключён.")); return }
+        // Its trading key stops signing first (the Mac's forgetLedger); connecting the same Ledger again brings it back
+        // with Windows Hello.
+        if let evm = account.evm { _ = try? await signerCall(.setLedgerAgentActive(owner: evm, active: false)) }
         useLedger(false)
         ledger = nil
         ledgerConnect = nil
@@ -320,7 +329,7 @@ extension Engine {
             return true
         }
         if lower.wholeMatch(of: /\s*(?:forget|remove|disconnect|забудь|удали|отключи)\s+(?:my\s+|мой\s+)?(?:ledger|л[еэ]дж[еэ]р\w*)\s*[.!]?\s*/) != nil {
-            forgetLedger()
+            await forgetLedger()
             return true
         }
         if lower.wholeMatch(of: /\s*(?:(?:connect|add|pair|set\s*up|link|подключи\w*|добавь|привяжи|подсоедини)\s+(?:my\s+|a\s+|мой\s+)?)?(?:ledger|л[еэ]дж[еэ]р\w*)(?:\s+(?:nano\s*\w*|flex|stax))?\s*[.!?]?\s*/) != nil {

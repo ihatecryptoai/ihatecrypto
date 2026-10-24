@@ -72,6 +72,8 @@ extension Engine {
         guard settings.codeSet == true else { return }
         lock.locked = true
         lock.problem = nil
+        // The window closes the browser: a site's request waiting is answered no (the Mac's sheet goes with its page).
+        declineSite(say("Locked before an answer: nothing was signed.", "Заблокировано до ответа: ничего не подписано."))
         out.event("locked", [String: String]())
         _ = try? await SignerLink.shared.send(.endSession)
         changed()

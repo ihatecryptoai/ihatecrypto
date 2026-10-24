@@ -13,6 +13,7 @@ import { openWhatsNew, whatsNewUnseen } from "./whatsnew.js";
 addIcons({
   "bubble.left": "M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z",
   "square.grid.2x2": "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z",
+  "note.text": "M6 3.5h9l3.5 3.5v13.5H6zM15 3.5V7h3.5M9 11h6M9 14h6M9 17h4",
   flask: "M9.5 3.5h5M10.5 3.5v6L5 19a1.2 1.2 0 0 0 1 1.5h12a1.2 1.2 0 0 0 1-1.5l-5.5-9.5v-6M7.5 15h9",
   "arrow.triangle.2.circlepath": "M4.5 11a7.5 7.5 0 0 1 13-4.5M19.5 13a7.5 7.5 0 0 1-13 4.5M17.5 3v3.5H14M6.5 21v-3.5H10",
   "person.fill": "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20.5a7.5 7.5 0 0 1 15 0z",
@@ -495,7 +496,9 @@ function canvasRow(c, close, inFolder) {
 /** The canvas's picture, or the sign of what it holds; the model that talked on it as its company's round logo at the
  * corner, never its name (that's in the tooltip). */
 function canvasGlyph(c) {
-  const base = c.icon ? pickedIcon(c.icon, 26, c.title) : h("span", { class: "rail-crow-icon" }, icon(c.blocks ? "square.grid.2x2" : "bubble.left", 12));
+  // As the Mac's row: its picture, else its trade plan's coin, else a sign of what it holds (a note, blocks, a chat).
+  const base = c.icon ? pickedIcon(c.icon, 26, c.title) : c.coin ? coinBadge(c.coin)
+    : h("span", { class: "rail-crow-icon" }, icon(c.note ? "note.text" : c.blocks ? "square.grid.2x2" : "bubble.left", 12));
   const wrap = h("span", { class: "rail-crow-glyph" }, base);
   if (c.provider) {
     const badge = companyLogo(c.provider, 12);
@@ -503,6 +506,14 @@ function canvasGlyph(c) {
     wrap.append(badge);
   }
   return wrap;
+}
+
+/** A plan's coin on its canvas's row (AssetBadge, dark): its logo, or a chart sign for a market without one (xyz:TSLA). */
+function coinBadge(coin) {
+  const el = logo(coin.split(":").pop(), 26);
+  el.classList.add("rail-crow-coin");
+  if (el.classList.contains("letter")) { el.replaceChildren(icon("chart.line", 12)); el.style.fontSize = ""; }
+  return el;
 }
 
 /** Each action with its icon, as in the Mac's menus; a greyed item says why. */

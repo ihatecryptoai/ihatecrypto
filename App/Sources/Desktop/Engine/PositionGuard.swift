@@ -97,11 +97,20 @@ extension Engine {
                                     "\(Fmt.time(Date())) · " + say("stop moved to \(Fmt.price(price))", "стоп передвинут на \(Fmt.price(price))"), coin: coin, merging: true)
                 case nil: break
                 }
+                if action != nil { Self.guardRefused[coin] = nil }
             } catch {
-                reply(say("The guardian couldn't move the \(name) stop: ", "Не получилось передвинуть стоп \(name): ") + error.localizedDescription, note: "guardian")
+                // Once per reason (it runs every 10 s): said again only when the reason changes or after a move went through.
+                let why = error.localizedDescription
+                if Self.guardRefused[coin] != why {
+                    Self.guardRefused[coin] = why
+                    reply(say("The guardian couldn't move the \(name) stop: ", "Не получилось передвинуть стоп \(name): ") + why, note: "guardian")
+                }
             }
         }
     }
+
+    /// The last reason the guardian couldn't move a coin's stop, said once.
+    static var guardRefused: [String: String] = [:]
 
     /// A position gone while ihatecrypto wasn't closing it: its stop, take or a hand elsewhere closed it. Said once, in the
     /// chat and as a notification, as the Mac's closedByExchange.
