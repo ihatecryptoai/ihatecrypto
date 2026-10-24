@@ -84,11 +84,19 @@ extension Engine {
         // Up to the first step with a card: each runs now, in order.
         var k = 0
         while k < steps.count, case .now = chainKind(steps[k], command(k)) {
+            let before = card?.id
             guard await runCanonical(steps[k], userText: steps[k]) else {
                 stop(say("ihatecrypto can’t do “\(steps[k])” — the steps stop here.", "ihatecrypto не умеет «\(steps[k])» — на этом шаги останавливаются."))
                 return true
             }
             k += 1
+            // It drew a card of its own (an address to save): the steps after it wait behind that card's Confirm, as the
+            // Mac's runSteps holds its taskQueue behind a pendingAction — a step needing the new name isn't read before it's
+            // saved, and no later card takes its place.
+            if card != nil, card?.id != before {
+                holdAfterCall(Array(steps[k...]))
+                return true
+            }
         }
         guard k < steps.count else { return true }
         let rest = Array(steps[(k + 1)...])
@@ -104,7 +112,13 @@ extension Engine {
             // waits on its own card, so one Confirm never signs what no card showed.
             // And only the card this step drew itself: exactly one drawn meanwhile (nothing else may draw while a held run
             // is busy, but a card that isn't provably the step's waits for its own Confirm).
-            if confirmed, let id = card?.id, id != before, chainState.cardsDrawn == drawn + 1, Self.carriedOnChain(pending) { await confirm(card: id) }
+            if confirmed, let id = card?.id, id != before, chainState.cardsDrawn == drawn + 1, Self.carriedOnChain(pending) {
+                // Its card is known by its id now: the chat opens again for the move itself, as after a card's own Confirm
+                // (runningHeld still keeps scheduled runs and the model's next step out).
+                thinking = false
+                changed()
+                await confirm(card: id)
+            }
             return true
         }
         // The first move without its amount: asked now, the steps after it held for the answer.
@@ -218,7 +232,13 @@ extension Engine {
                 + [say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
                        "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")],
              cautions: cautions)
-        if confirmed { await confirm(card: card?.id); return true }
+        if confirmed {
+            let id = card?.id
+            thinking = false
+            changed()
+            await confirm(card: id)
+            return true
+        }
         reply(say("In steps: ", "По шагам: ", "Por pasos: ") + parsed.map(chainLine).joined(separator: " → ")
               + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена».", ". Pulsa Confirm o Cancel."), note: note)
         return true
@@ -264,7 +284,8 @@ extension Engine {
     /// a contract call (its own simulated card waits) or a trade plan (its own route and checklist).
     nonisolated static func carriedOnChain(_ p: Pending?) -> Bool {
         switch p {
-        // A multisig's own card (its keys, networks and cost; its payment's check) waits, as the Mac's.
+        // A multisig's own card (its keys, networks and cost; its payment's check) waits for its own Confirm. Stricter than
+        // the Mac's runSteps, which carries out the multisig it just drew without showing it for adjustment.
         case .wallet(.contractCall)?, .wallet(.multisigCreate)?, .wallet(.multisigSend)?: false
         case .wallet?, .transfer?, .position?, .address?, .orders?, .recurring?: true
         case .trade?, .chain?, nil: false
@@ -391,6 +412,22 @@ extension Engine {
                     // run on it once it's through (the Mac's continueTask).
                     if let p = pending {
                         if case .trade = p { break }
+                        if case .recurring(let buy, let days) = p {
+                            // Named on the card this Confirm is for: started on it, as the Mac's carryOut starts the first
+                            // buy (Execution.swift:684-703). Its own block says so; the chain goes on.
+                            let drawn = card?.id
+                            pending = nil
+                            card = nil
+                            updateBoard(drawn) { $0.state = "running" }
+                            do {
+                                try await startRecurring(buy, days: days)
+                                updateBoard(drawn) { $0.state = "done" }
+                            } catch {
+                                updateBoard(drawn) { $0.state = "failed" }
+                                throw error
+                            }
+                            break
+                        }
                         holdAfterCall(rest)
                         if chainState.afterCall == nil, !rest.isEmpty {
                             reply(say("“\(text)” waits on its card, so the steps after it don’t run: \(rest.joined(separator: " → ")).",

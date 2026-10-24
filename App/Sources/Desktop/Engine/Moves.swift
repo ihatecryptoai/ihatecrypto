@@ -595,6 +595,7 @@ extension Engine {
         retry = nil
         // Settings › Modules switched off since the card was drawn: refused now too.
         if let off = confirmRefusal(waiting) {
+            dropHeld(behind: card?.id)
             updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(off) }
             pending = nil
             card = nil
@@ -605,6 +606,7 @@ extension Engine {
         // Only watched addresses: nothing here signs for them (a saved address needs no key).
         if watching {
             if case .address = waiting {} else {
+                dropHeld(behind: card?.id)
                 updateBoard(card?.id) { $0.state = "cancelled" }
                 pending = nil
                 card = nil
@@ -669,22 +671,7 @@ extension Engine {
                 reply(say("Opened: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))",
                           "Открыто: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) по \(Fmt.price(opened.entry)), стоп \(Fmt.price(opened.stop))")
                       + (opened.take.map { say(", take \(Fmt.price($0)).", ", тейк \(Fmt.price($0)).") } ?? "."), note: "Hyperliquid")
-            case .recurring(let buy, let days):
-                // The schedule is kept by this Confirm before its first buy, so a first buy that fails still leaves it to run
-                // next period (the Mac's firstBuyOf, kept in carryOut before the move).
-                // The recurring buy of that coin makes way (the Mac's one schedule a symbol); a task the person scheduled stays.
-                let marked = recurringBuys
-                tasks.removeAll { t in
-                    guard marked.contains(t.id), case .buy(let a, _)? = WalletCommand.parse(t.steps.first ?? ""), case .buy(let b, _) = buy else { return false }
-                    return (!a.mint.isEmpty && a.mint == b.mint) || a.symbol.uppercased() == b.symbol.uppercased()
-                }
-                // A recurring buy pays from the wallet that's on, as on the Mac: never from the automation wallet.
-                var recurring = ScheduledTask(steps: [Self.recurringStep(buy)], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
-                recurring.fromActive = true
-                tasks.append(recurring)
-                recurringBuys.insert(recurring.id)
-                rememberName(buy)
-                try await move(buy)
+            case .recurring(let buy, let days): try await startRecurring(buy, days: days)
             case .chain(let steps): try await runChain(steps)
             case .address(let entry):
                 try await saveAddress(entry)
@@ -696,6 +683,9 @@ extension Engine {
             // Marked held now, not when the task starts: nothing scheduled may start in between (runDueTasks).
             if let board = runningBoard, chainState.afterCall?.board == board { chainState.runningHeld = true; Task { await continueAfterCall(board) } }
         } catch {
+            // Its own move didn't go through: the steps held behind it don't run on it, and the request the model carries
+            // on hears the failure (the Mac's continueTask drops taskQueue whatever the outcome).
+            dropHeld(behind: runningBoard)
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown»,
             // never «failed» (the Mac's finish(false, unknown:)).
             let sent = (try? journal.unresolved())?.filter { $0.at >= started.addingTimeInterval(-1) } ?? []
@@ -726,6 +716,31 @@ extension Engine {
                       + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.map { "\($0.chain) \($0.id)" }.joined(separator: " · "))
             }
         }
+    }
+
+    /// The steps a chain held behind the card `id` (holdAfterCall) go: it didn't go through.
+    func dropHeld(behind id: String?) {
+        if let id, chainState.afterCall?.board == id { chainState.afterCall = nil }
+    }
+
+    /// A recurring buy's Confirm: its schedule, then its first buy. On its own card's Confirm, or on a confirmed chain's
+    /// that named it (the Mac's runSteps → carryOut, Execution.swift:684-703).
+    func startRecurring(_ buy: WalletCommand, days: Int) async throws {
+        // The schedule is kept by this Confirm before its first buy, so a first buy that fails still leaves it to run
+        // next period (the Mac's firstBuyOf, kept in carryOut before the move).
+        // The recurring buy of that coin makes way (the Mac's one schedule a symbol); a task the person scheduled stays.
+        let marked = recurringBuys
+        tasks.removeAll { t in
+            guard marked.contains(t.id), case .buy(let a, _)? = WalletCommand.parse(t.steps.first ?? ""), case .buy(let b, _) = buy else { return false }
+            return (!a.mint.isEmpty && a.mint == b.mint) || a.symbol.uppercased() == b.symbol.uppercased()
+        }
+        // A recurring buy pays from the wallet that's on, as on the Mac: never from the automation wallet.
+        var recurring = ScheduledTask(steps: [Self.recurringStep(buy)], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
+        recurring.fromActive = true
+        tasks.append(recurring)
+        recurringBuys.insert(recurring.id)
+        rememberName(buy)
+        try await move(buy)
     }
 
     static let sendAnyway = "__send anyway", leaveCostly = "__leave it"

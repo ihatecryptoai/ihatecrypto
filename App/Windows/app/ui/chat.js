@@ -3,7 +3,7 @@
 // mood; the conversation; the field with the model, the networks and the context over it. It never moves money: a
 // move waits as a card, and only Confirm on it (here or on the canvas) runs it.
 
-import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, suggest, autosize, link, presence } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, suggest, autosize, link, presence, reportComposing } from "./core.js";
 import { railEdge } from "./rail.js";
 import { blockTitle } from "./boards.js";
 import { templatePreview } from "./trade.js";
@@ -662,7 +662,7 @@ function composer(s) {
       : ids.length > 1 ? t(`Ask about these ${ids.length}, or say what to do with them…`, `Спроси про эти ${ids.length} или скажи, что с ними сделать…`)
       : ids.length ? t("Ask about it, or say what to do with it…", "Спроси о нём или скажи, что с ним сделать…")
       : t("What should we do? / blocks, @ names, $ tokens", "Что сделаем? / блоки, @ имена, $ токены"),
-    oninput: (e) => { ui.composerText = e.target.value; recalled = null; cardKey = null; autosize(e.target, 140); refreshSuggestions(e.target); sendLit(); drawHelpers(); },
+    oninput: (e) => { ui.composerText = e.target.value; reportComposing(e.target.value); recalled = null; cardKey = null; autosize(e.target, 140); refreshSuggestions(e.target); sendLit(); drawHelpers(); },
     onkeydown: keys,
     onclick: (e) => refreshSuggestions(e.target),
     onkeyup: (e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) refreshSuggestions(e.target); },
@@ -850,6 +850,7 @@ function keys(e) {
     recalled = e.key === "ArrowUp" ? Math.max(0, (recalled ?? sent.length) - 1) : recalled + 1 < sent.length ? recalled + 1 : null;
     ui.composerText = recalled === null ? "" : sent[recalled];
     e.target.value = ui.composerText;
+    reportComposing(ui.composerText);
     autosize(e.target, 140);
     sendLit();
     drawHelpers();
@@ -867,6 +868,7 @@ function send() {
   const text = ui.composerText.trim();
   if (!text || ui.state.thinking) return;
   ui.composerText = "";
+  reportComposing("");
   recalled = null;
   const ids = attachedIds().slice();
   attachStack = [];
@@ -1361,6 +1363,7 @@ async function speak() {
     voice.on = false;
     clearInterval(voice.timer);
     if (text) ui.composerText = ui.composerText ? ui.composerText.trimEnd() + " " + text : text;
+    reportComposing(ui.composerText);
     render();
     document.getElementById("composer")?.focus();
   }

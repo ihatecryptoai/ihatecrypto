@@ -314,6 +314,7 @@ export function popup(e, items, cls = "") {
  *  Name»), else the first number on its own (not the digits inside an address). */
 export function suggest(text, select) {
   ui.composerText = text;
+  reportComposing(text);
   render();
   const f = document.getElementById("composer");
   if (!f) return;
@@ -325,6 +326,16 @@ export function suggest(text, select) {
     if (m) f.setSelectionRange(m.index, m.index + m[0].length);
   }
   autosize(f);
+}
+
+/** Whether the chat's field holds text, told to the engine when that changes: a scheduled run waits while it does
+ *  (the Mac's draft.isEmpty). */
+let composingSaid = false;
+export function reportComposing(text) {
+  const now = !!(text || "").trim();
+  if (now === composingSaid) return;
+  composingSaid = now;
+  engine("composing", { test: now }).catch(() => {});
 }
 
 export function autosize(el, max = 160) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, max) + "px"; }

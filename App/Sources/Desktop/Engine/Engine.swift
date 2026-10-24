@@ -642,7 +642,7 @@ final class Engine {
         if !Self.answersOnly.contains(r.op) { changed() }
     }
 
-    nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus", "openStudyFiles", "keyAddress", "phraseAccounts", "multisigFees"]
+    nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus", "composing", "openStudyFiles", "keyAddress", "phraseAccounts", "multisigFees"]
 
     private func run(_ r: Request) async throws -> [String: String] {
         if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }
@@ -679,6 +679,7 @@ final class Engine {
             }
             return [:]
         case "send":
+            Self.composing = false
             alsoAttached = (r.boards ?? []).filter { $0 != r.board }.compactMap { id in boards.first { $0.id == id } }
             // The model and the parsers read «SOL»: the «$» only made the chip; the chat shows it as typed (the Mac's send).
             let typed = r.text ?? "", plain = TokenMentions.plain(typed)
@@ -729,6 +730,10 @@ final class Engine {
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
         case "taskOn": setTask(r.wallet ?? "", on: r.test == true)
+        case "composing":
+            // The chat's field holds text (or no longer does): a scheduled run waits for it (the Mac's draft.isEmpty).
+            Self.composing = r.test == true
+            return [:]
         case "windowFocus":
             if Self.windowFront != (r.test ?? true) { Self.windowFront = r.test ?? true; if !Self.windowFront { Self.windowLeft = Date() } }
             return [:]

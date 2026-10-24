@@ -271,7 +271,7 @@ extension Engine {
         // As the Mac's runDueTask: nothing else going on — a card, a reply, a move, a «How much?», steps held behind a
         // card or running after it (a scheduled card in their middle could be taken for theirs).
         guard settings.schedulePaused != true, pending == nil, card == nil, running == nil, !thinking, awaitingAmount == nil,
-              !chainState.runningHeld else { return }
+              !chainState.runningHeld, !Self.composing else { return }
         // A recurring buy has its own runs (runRecurringBuys): one waiting for a Ledger stays due there, never a card here.
         let marked = recurringBuys
         guard let i = tasks.firstIndex(where: { $0.paused != true && $0.next <= Date() && !marked.contains($0.id) }) else { return }
@@ -352,6 +352,9 @@ extension Engine {
     /// window not in front for that long, as the Mac counts another app in front (main.rs sends `windowFocus`).
     static var userAway: Bool { Int(winsec_idle_ms()) >= 300_000 || (!windowFront && Date().timeIntervalSince(windowLeft) >= 300) }
     nonisolated(unsafe) static var windowFront = true
+    /// The chat's field holds half-typed text (the window says so, `composing`): a scheduled run waits, so it doesn't open
+    /// its canvas under what the person is writing (the Mac's runDueTask requires draft.isEmpty).
+    nonisolated(unsafe) static var composing = false
     nonisolated(unsafe) static var windowLeft = Date()
 
     /// The day before the automation wallet runs short for its buys, once a day: a notification, and with no one at the
