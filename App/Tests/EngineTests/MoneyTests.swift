@@ -1,6 +1,9 @@
 @testable import DesktopEngine
 import ExecutionCore
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import IhatecryptoCore
 import Testing
 

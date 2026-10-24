@@ -115,7 +115,7 @@ package.dependencies = [
 ]
 package.targets.removeAll { ["IhatecryptoApp", "IhatecryptoSigner", "IhatecryptoAppTests"].contains($0.name) }
 for target in package.targets {
-    if ["WalletCore", "SolanaChain", "LLMCore", "Ledger", "WalletTests", "IhatecryptoCore"].contains(target.name) {
+    if ["WalletCore", "SolanaChain", "LLMCore", "Ledger", "WalletTests", "IhatecryptoCore", "IhatecryptoCoreTests"].contains(target.name) {
         target.dependencies.append(.product(name: "Crypto", package: "swift-crypto"))
     }
     // PBKDF2 for the BIP-39 seed; CommonCrypto's on a Mac.

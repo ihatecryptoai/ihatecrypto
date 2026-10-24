@@ -7,7 +7,7 @@ import Testing
 /// is this test process's own folder, set before anything else reads it.
 @Test func aTaskListChangedOutsideLoadsPaused() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("taskseal-\(UUID().uuidString)")
-    setenv("IHATECRYPTO_ENGINE_DIR", dir.path, 1)
+    setEnv("IHATECRYPTO_ENGINE_DIR", dir.path)
     defer { try? FileManager.default.removeItem(at: dir) }
     let task = ScheduledTask(steps: ["buy SOL for 5 USDC"], next: Date().addingTimeInterval(3600), every: nil)
     TaskSeal.save([task])

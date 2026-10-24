@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import LLMAPIKey
 #if canImport(FoundationModels)
 @testable import LLMApple

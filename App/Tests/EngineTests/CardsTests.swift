@@ -11,7 +11,7 @@ import Testing
 /// anything else reads it; the balances are set by hand, nothing goes to the network.
 @MainActor @Suite(.serialized) struct CardsTests {
     static let engine: Engine = {
-        setenv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("cards-\(UUID().uuidString)").path, 1)
+        setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("cards-\(UUID().uuidString)").path)
         return Engine(out: Outbox())
     }()
 

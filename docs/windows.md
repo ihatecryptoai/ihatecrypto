@@ -118,7 +118,8 @@ page in a webview of its own above the site's, with ihatecrypto as a Solana Wall
 EIP-1193/EIP-6963 provider in the site; each connect, message, typed data or transaction is a card on the canvas — the Solana guard and simulation,
 the EVM call decoded and simulated, the site checked against MetaMask's phishing list and for lookalikes — and nothing
 is signed before Confirm; a site's page may call only the wallet command, never the engine, the toolbar's commands,
-links or events, and its origin is read from its webview, not from the page), a Safe
+links or events, its origin is read from its webview, not from the page, and only the page itself gets the wallet —
+a frame inside it, an ad or a widget, gets none and its call is refused), a Safe
 multisig (made from a card where its keys, how many sign and its networks change before Confirm; paid out of when this
 computer's key is enough), wallets (create with the phrase shown once, import a phrase or a key, switch, rename, remove, a test wallet; or, with none, addresses only watched for their balances, as the Mac's «Addresses for balances»: nothing signs or connects for them),
 Receive, the address book, the portfolio on Solana, Hyperliquid, every EVM network and NEAR, the chat with a model
@@ -180,6 +181,17 @@ the order the signer checked, scheduled tasks sealed (HMAC under DPAPI: a list c
 paid services only from Tempo's directory, a site transaction's target checked, the signing session ended per move and
 on a locked screen or sleep.
 
+And a third audit's: chains of every step kind the Mac chains (a chart, a token, P/L, an alert, the address book, a
+folder, lock, a position or a trade plan beside the moves, «How much?» in the middle holding the rest, bridge legs
+landing side by side with an «ARRIVES · SOLANA» step, the next step spending what arrived, a send no balance covers said
+before its card); every move drawn step by step with its quote on its step (stocks, EVM tokens, swaps off Solana and
+across networks, revoke, NEAR, pay, multisig, CCTP, USDT0, Aave, Merkl, a saved address, closing a position) and the
+15-second countdown on every priced swap; the cards' warnings (an XRP exchange address without its tag, a token by its
+contract, Robinhood's stock tokens, Aave's liquidation price, Jupiter Lend instead of Kamino's rent); a price alert
+added to the plan as its first step; the position board's ruler, guardian and «Close X at market?»; Jupiter's staked
+JUP, perps and predictions in the portfolio; the token card's held P/L; the plan templates' preview; Skills' Study notes
+and Journal.
+
 Everything the Mac's window does is in the Windows app; what only a Windows machine can check is listed below.
 
 ## Checking on a Windows machine
@@ -202,7 +214,8 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
    toolbar's Disconnect takes the address away and reloads the page. Back and Forward turn on after a link and after a
    single-page app's route change; an unreachable site (jup.ag times out on some networks) shows the red line; a host on
    MetaMask's phishing list doesn't load; a block's link opens beside the chat, and that panel's page is refused our
-   commands too.
+   commands too. A frame inside a site gets no wallet: in a development build, a sandboxed `srcdoc` frame's
+   `invoke('dapp_call', …)` is refused while the page's own connect comes to the canvas.
 10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
@@ -234,3 +247,8 @@ and removing its Run key, one instance; the browser's Back/Forward, the red line
 typing in its address field — which needed two fixes found there: the toolbar redrew six times a second (each state
 redrew it and asked siteState, and every request, even a read, sent a state), and a redraw moved the field out of the
 page, dropping its focus. A programmatic focus on a click made it worse and is gone: WebView2 focuses what's clicked.
+
+The frame check on the same machine, 2026-10-24, in a development build: WebView2 gives a frame inside a site Tauri's
+IPC too, so the wallet's script now stays out of frames and `dapp_call` refuses a call whose Origin isn't the page's. A
+sandboxed frame got no wallet and its call was refused; a frame of the page's own origin got no wallet object either
+(its direct call reaches the card, as the page's would); the page's own connect came to the canvas.
