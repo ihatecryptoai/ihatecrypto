@@ -374,3 +374,23 @@
 .live-book-pic { position: relative; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; }
 .live-book-pen { position: absolute; right: -3px; bottom: -3px; display: inline-flex; padding: 2px; border-radius: 50%; background: var(--accent); color: #fff; }
 .live-addr-note { font-size: 11px; }
+
+/* Wave 5 (cards): a saved address's Delete asked in its card; a task's offers and the run rows that open. */
+.live-addr-delete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 10px 10px; padding: 10px 12px; border-radius: 12px; background: var(--blocked-tint); }
+.live-addr-delete > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.live-offer { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+.live-offer > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.live-offer .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.live-offer > div > .btn { align-self: flex-start; margin-top: 4px; }
+.live-offer-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-ink); }
+.live-offer-loss { border-color: color-mix(in srgb, var(--loss) 50%, transparent); }
+.live-offer-loss .live-offer-icon { background: color-mix(in srgb, var(--loss) 12%, transparent); color: var(--loss); }
+.live-run-wrap { display: flex; flex-direction: column; }
+.live-run-open { width: 100%; border: 0; background: none; color: inherit; text-align: left; border-radius: 10px; padding: 2px 6px; cursor: pointer; }
+.live-run-open:hover { background: var(--fill); }
+.live-run-open .link-btn { display: inline-flex; align-items: center; gap: 3px; flex: none; font-size: 11px; }
+.live-run-whole { display: flex; flex-direction: column; gap: 3px; margin: 2px 6px 8px 72px; padding: 8px 10px; border-radius: 10px; background: var(--fill); overflow-wrap: anywhere; }
+/* Three facts in a row as the Mac's tile (pays from, ends up in, signs), two or one on a narrow board. */
+.live-item-facts { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.live-unknown { color: var(--jev-ink); }

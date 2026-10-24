@@ -12,6 +12,19 @@ actor SignerLink {
     private var child: (pid: UInt32, process: Int, input: Int, output: Int)?
     /// The signer's process id, for the window to let it come forward when Windows Hello asks (AllowSetForegroundWindow).
     private(set) var pid: UInt32?
+    /// One exchange on the pipes at a time: the actor gives way while a reply is awaited (a Windows Hello prompt can take
+    /// a minute), and a second request — a lock's endSession, a status read — would write and read the same pipes.
+    private var busy = false
+    private var queue: [CheckedContinuation<Void, Never>] = []
+
+    private func take() async {
+        guard busy else { busy = true; return }
+        await withCheckedContinuation { queue.append($0) }
+    }
+
+    private func give() {
+        if queue.isEmpty { busy = false } else { queue.removeFirst().resume() }
+    }
 
     static var executable: URL {
         let me = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
@@ -50,6 +63,8 @@ actor SignerLink {
 
     func send(_ request: SignerRequest) async throws -> SignerReply {
         let body = try JSONEncoder().encode(request)
+        await take()
+        defer { give() }
         // A dead signer (killed, crashed) is started once more for this request.
         for attempt in 0..<2 {
             let c = try start()

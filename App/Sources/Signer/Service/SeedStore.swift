@@ -614,6 +614,10 @@ enum AgentStore {
         return SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess ? out as? Data : nil
     }
 
+    /// Whether `id` has a trading key, and its address: what the status shows (on Windows, without opening the key).
+    static func has(id: String = Wallets.activeID) -> Bool { load(id: id) != nil }
+    static func address(id: String = Wallets.activeID) -> String? { load(id: id).flatMap { try? EVMAccount.address(privateKey: $0) } }
+
     /// 32 random bytes that make a valid secp256k1 key; retried in the vanishing case they don't.
     static func make() throws -> Data {
         for _ in 0..<4 {

@@ -3,7 +3,7 @@
 // round glass buttons. The collapse button, the strip's expand button or a drag of the right edge switch the two; a
 // window narrower than 1140 folds it, and widening again brings back what it folded.
 
-import { ui, act, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest } from "./core.js";
+import { ui, act, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest, toast } from "./core.js";
 import { logoFiles } from "./logos.js";
 // The canvas module draws the rail too; read through the namespace so neither waits on the other to load.
 import * as canvas from "./canvas.js";
@@ -156,6 +156,9 @@ function totals() {
 /** The balance, or a grey block with a light sweep until every network answered (Skeleton). */
 function balanceAmount(cls, mask, [w, hgt]) {
   const { all, ready } = totals();
+  // The last full balance, dimmed, until every network answers (the Mac's lastBalance); a skeleton only at the very first.
+  const last = ui.state.lastBalance;
+  if (!ready && last != null) return h("div", { class: cls + " num rail-stale" }, masked(usd(Number(last)), mask));
   if (!ready) return h("span", { class: "rail-skeleton", style: `width:${w}px;height:${hgt}px;border-radius:${hgt / 3}px` });
   return h("div", { class: cls + " num" }, masked(usd(all), mask));
 }
@@ -240,7 +243,7 @@ function walletMenu(anchor, compact, start) {
     const list = h("div", { class: "rail-wm-list" },
       h("div", { class: "rail-wm-head" }, h("b", {}, t("Wallets", "Кошельки")), h("span", { class: "spacer" }),
         h("button", { class: "rail-hover-icon", title: t("Manage wallets: create, import, remove", "Управление кошельками: создать, импортировать, удалить"),
-          onclick: () => { closePopover(); ui.view = "settings"; render(); } }, icon("gear", 15))),
+          onclick: () => { closePopover(); store("settingsTab", "wallet"); ui.view = "settings"; render(); } }, icon("gear", 15))),
       wallets.map((w) => h("button", { class: "rail-wm-row" + (shown && w.id === shown.id && !msShown ? " on" : ""), onclick: () => { picked = w.id; renaming = false; draw(); } },
         h("span", { class: "rail-wm-icon" + (w.test ? " test" : "") }, icon(w.kind === "ledger" ? "bolt" : w.test ? "flask" : "lock", 14)),
         h("span", { class: "rail-wm-text" }, h("b", { class: "one-line" }, w.label), h("span", { class: "secondary one-line" }, listLine(w))),
@@ -254,7 +257,7 @@ function walletMenu(anchor, compact, start) {
       h("div", { class: "spacer" }),
       h("div", { class: "menu-divider" }),
       s.wallets.some((w) => w.kind === "ledger") ? null : h("button", { class: "rail-wm-action", onclick: () => { closePopover(); act("addBoard", { name: "ledger" }); } }, icon("bolt", 14), t("Connect Ledger…", "Подключить Ledger…")),
-      h("button", { class: "rail-wm-action", onclick: () => { closePopover(); ui.view = "settings"; render(); } }, icon("plus", 14), t("New wallet…", "Новый кошелёк…")),
+      h("button", { class: "rail-wm-action", onclick: () => { closePopover(); store("settingsTab", "wallet"); ui.view = "settings"; render(); } }, icon("plus", 14), t("New wallet…", "Новый кошелёк…")),
       h("button", { class: "rail-wm-action" + (picked === "new-ms" ? " on" : ""), title: t("What a multisig is, and how to make one", "Что такое мультисиг и как его сделать"),
         onclick: () => { picked = "new-ms"; renaming = false; draw(); } }, icon("rail.shield", 14), t("New multisig…", "Новый мультисиг…")));
     const ms = multisigs.find((m) => picked === "ms:" + m.address);
@@ -433,7 +436,7 @@ function canvasList(close) {
     h("button", { class: "rail-hover-icon", title: t("New folder — drag canvases into it", "Новая папка — перетащи в неё холсты"),
       onclick: (e) => { e.stopPropagation(); askName(e.currentTarget, t("New folder", "Новая папка"), "", t("Drag canvases into it, or start one there from its menu.", "Перетащи в неё холсты или начни новый из её меню."),
         t("Create", "Создать"), (name) => act("createFolder", { name })); } }, icon("folder.badge.plus", 13)),
-    h("button", { class: "rail-hover-icon new", title: t("New canvas", "Новый холст"), onclick: () => { close?.(); ui.view = "canvas"; act("newCanvas"); } },
+    h("button", { class: "rail-hover-icon new", disabled: !canSwitch(), title: canSwitch() ? t("New canvas", "Новый холст") : busyTip(), onclick: () => { close?.(); ui.view = "canvas"; act("newCanvas"); } },
       icon("square.and.pencil", 12), t("New", "Новый")));
   const rows = [];
   if (fresh) rows.push(newCanvasRow(fresh));
@@ -474,7 +477,8 @@ function canvasRow(c, close, inFolder) {
   const menu = (e) => { e.preventDefault(); e.stopPropagation(); canvasMenu(e, c, row); };
   const title = h("span", { class: "rail-crow-title one-line" }, c.title);
   let stop = null;
-  const open = h("button", { class: "rail-crow-open", onclick: async () => { close?.(); ui.view = "canvas"; if (c.id !== s.canvas) await act("openCanvas", { wallet: c.id }); else render(); } },
+  const open = h("button", { class: "rail-crow-open", disabled: c.id !== s.canvas && !canSwitch(), title: c.id !== s.canvas && !canSwitch() ? busyTip() : null,
+    onclick: async () => { close?.(); ui.view = "canvas"; if (c.id !== s.canvas) await act("openCanvas", { wallet: c.id }); else render(); } },
     canvasGlyph(c),
     h("span", { class: "rail-crow-text" },
       h("span", { class: "rail-crow-line" }, title, c.pinnedAt ? h("span", { class: "rail-crow-pin", title: t("Pinned", "Закреплён") }, icon("pin", 10)) : null),
@@ -515,7 +519,7 @@ function canvasMenu(e, c, anchor) {
     [[icon("face.smiling", 14), t("Change icon…", "Сменить иконку…")], () => iconPicker(anchor, c.icon, c.title, { wallet: c.id })],
     [[icon("folder", 14), t("Move to folder…", "Перенести в папку…")], () => folderMenu(e, c, anchor)],
     null,
-    [[icon("trash", 14), t("Delete canvas", "Удалить холст")], () => act("removeCanvas", { wallet: c.id }), c.id === s.canvas && !!s.running],
+    [[icon("trash", 14), t("Delete canvas", "Удалить холст")], () => act("removeCanvas", { wallet: c.id }), c.id === s.canvas && !canSwitch()],
   ];
   menuWith(e, items);
 }
@@ -881,18 +885,18 @@ function profileMenu(anchor, side) {
         const inUse = p.id === s.model.provider;
         return h("div", { class: "rail-pm-account" + (inUse ? " in-use" : "") },
           h("button", { class: "rail-pm-use", disabled: inUse, title: inUse ? t(`The chat uses ${shortName(p)}`, `Чат пользуется ${shortName(p)}`) : t(`The chat goes on with ${shortName(p)}`, `Чат продолжит с ${shortName(p)}`),
-            onclick: go(() => act("connectModel", { provider: p.id })) },
+            onclick: go(() => act("useAccount", { provider: p.id })) },
             companyLogo(p.id, 32, p.name),
             h("span", { class: "rail-pm-text" }, h("b", { class: "one-line" }, shortName(p)), h("span", { class: "secondary one-line" }, kindName(p))),
             inUse ? h("span", { class: "rail-pm-check" }, icon("check", 14)) : null),
           h("button", { class: "rail-pm-more", title: t("Add another account, sign out", "Добавить аккаунт, выйти"),
             onclick: () => draw(null, open === p.id ? null : p.id) }, icon("ellipsis", 16)),
           open === p.id ? h("div", { class: "rail-pm-actions" },
-            inUse ? null : h("button", { onclick: go(() => act("connectModel", { provider: p.id })) }, icon("arrow.left.arrow.right", 13), t(`Switch to ${shortName(p)}`, `Переключиться на ${shortName(p)}`)),
-            h("button", { onclick: go(() => { ui.view = "settings"; render(); }) }, icon("plus", 13), t("Add another account…", "Добавить другой аккаунт…")),
+            inUse ? null : h("button", { onclick: go(() => act("useAccount", { provider: p.id })) }, icon("arrow.left.arrow.right", 13), t(`Switch to ${shortName(p)}`, `Переключиться на ${shortName(p)}`)),
+            h("button", { onclick: go(() => { store("settingsTab", "model"); ui.view = "settings"; render(); }) }, icon("plus", 13), t("Add another account…", "Добавить другой аккаунт…")),
             p.kind === "local" ? null : h("button", { onclick: () => draw(p) }, icon("rectangle.portrait.and.arrow.right", 13), t(`Sign out of ${shortName(p)}…`, `Выйти из ${shortName(p)}…`))) : null);
       }),
-      h("button", { class: "rail-pm-add", onclick: go(() => { ui.view = "settings"; render(); }) },
+      h("button", { class: "rail-pm-add", onclick: go(() => { store("settingsTab", "model"); ui.view = "settings"; render(); }) },
         h("span", { class: "rail-pm-add-box" }, icon("plus", 14)), h("b", { class: "secondary" }, t("Add an account", "Добавить аккаунт"))),
       h("div", { class: "menu-divider" }),
       h("div", { class: "rail-pm-apps" },
@@ -923,7 +927,7 @@ function narrow() {
       const anchor = e.currentTarget;
       popover(anchor, "right", h("div", { class: "rail-canvases-panel" }, canvasList(closePopover)), "rail-canvases-pop");
     } }),
-    roundButton("plus", t("New", "Новый"), { dashed: true, help: t("New canvas", "Новый холст"), run: () => { ui.view = "canvas"; act("newCanvas"); } }),
+    roundButton("plus", t("New", "Новый"), { dashed: true, help: t("New canvas", "Новый холст"), run: () => { if (!canSwitch()) { toast(busyTip()); return; } ui.view = "canvas"; act("newCanvas"); } }),
     h("div", { class: "spacer" }),
     roundButton("sidebar.left", null, { plain: true, help: t("Expand the sidebar", "Развернуть панель"), run: () => { foldedForRoom = false; setCollapsed(false); } }),
     roundButton("person.fill", t("Profile", "Профиль"), { help: t("Chat accounts, Settings, the browser", "Аккаунты чата, настройки, браузер"),
@@ -971,4 +975,13 @@ function edge() {
     handle.addEventListener("pointercancel", up, { once: true });
   });
   return handle;
+}
+
+
+/** Another canvas may open: nothing is being answered or carried out (the Mac's canSwitchCanvas), so a reply or a move's
+ *  outcome lands on the canvas it was asked on. */
+function canSwitch() { const s = ui.state; return !s.thinking && !s.runningBoard; }
+function busyTip() {
+  return ui.state.runningBoard ? t("A move is running: wait for it to finish.", "Идёт перевод: дождись, пока он закончится.")
+    : t("The chat is still answering: wait for it, or press Stop.", "Чат ещё отвечает: подожди или нажми «Стоп».");
 }

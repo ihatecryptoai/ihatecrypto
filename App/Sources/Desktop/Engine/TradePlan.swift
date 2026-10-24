@@ -293,7 +293,7 @@ extension Engine {
     /// Hyperliquid), the bridge, the rules and the second check, the position, its stop and take, the simulation, the
     /// signatures, and what it comes to. A step a rule stops, or that waits for a detail, says so on its card.
     func tradeRoute(_ r: TradeIntent, _ e: Evaluation, _ blocks: [Block], market: Market?, prepared p: Executor.Prepared?,
-                    review: String?, reviewed: Bool, quoted: PlanQuote? = nil) -> (steps: [Board.Step], footer: String) {
+                    review: String?, reviewed: Bool, notChecked: String? = nil, quoted: PlanQuote? = nil) -> (steps: [Board.Step], footer: String) {
         func block(_ id: String) -> Block? { blocks.first { $0.id == id } }
         func state(_ s: Block.Status, check: Bool = false) -> String {
             switch s {
@@ -371,7 +371,10 @@ extension Engine {
             lines.insert(contentsOf: risk.lines.filter { $0.hasPrefix("✗") }, at: 0)
             steps.append(Board.Step(label: "CHECK RULES", title: risk.title, lines: lines.isEmpty ? risk.lines : lines, status: state(risk.status, check: true)))
         }
-        if reviewed, p != nil {
+        if let notChecked, p != nil {
+            // It couldn't read the plan: the route says so, rather than the check passing or silently missing.
+            steps.append(Board.Step(label: "SECOND CHECK", title: say("Not checking", "Не проверяю"), lines: [notChecked], status: "info"))
+        } else if reviewed, p != nil {
             var lines = [review ?? say("Matches your request.", "Совпадает с твоей просьбой.")]
             if p?.bridge != nil { lines.append(say("USDC: Circle's token on Solana, EPjF…Dt1v.", "USDC: токен Circle на Solana, EPjF…Dt1v.")) }
             if p?.bridge != nil { lines.append(say("Bridge: Relay, its program on the allowed list; each signature is checked again at Confirm.",
@@ -470,7 +473,9 @@ extension Engine {
         var view = PlanView(market: r.asset, group: market?.group.rawValue ?? Market.Group.crypto.rawValue, footer: "")
 
         // Stopped, or waiting for a detail: the route with what stops it, the fix, the checklist.
-        let off = Modules.current.refusal(trade: market?.dex != nil, bridges: next.amountUSDC != nil, ru: russian)
+        // A bridge counts for Modules whenever the plan would take one: a sum named, or a quote for the money it moves (the
+        // Mac's tradeRefusal: amountUSDC != nil || quote != nil).
+        let off = Modules.current.refusal(trade: market?.dex != nil, bridges: next.amountUSDC != nil || quoted?.quote != nil, ru: russian)
         let blocker = off.map { (say("off in Modules", "выключено в модулях"), $0) } ?? planBlocker(e, blocks, equity: ruleEquity, from: quoted?.from?.name ?? "Solana")
         if blocker != nil || !e.missing.isEmpty || market == nil {
             let route = tradeRoute(r, e, blocks, market: market, prepared: nil, review: nil, reviewed: false, quoted: quoted)
@@ -513,9 +518,17 @@ extension Engine {
         if !watching, await askOpeningRoute(r, e, market: market, note: note) { return }
         do {
             let p = try await (watching ? previewExecutor() : executor()).prepare(next, policy: policy, openVia1Click: openVia1Click == true)
-            var review: String?
-            if warnings.isEmpty, secondCheck, let concern = await reviewPlan(next, p) { review = concern; warnings.append(concern) }
-            let route = tradeRoute(r, e, blocks, market: market, prepared: p, review: review, reviewed: secondCheck)
+            // A code mismatch is the check's doubt, second check on or off (the Mac's planReview «mismatch»); otherwise the
+            // second check reads it, and one that couldn't run says so on the route.
+            var review = warnings.first, notChecked: String?
+            if warnings.isEmpty, secondCheck {
+                switch await reviewPlan(next, p) {
+                case .doubt(let concern): review = concern; warnings.append(concern)
+                case .notChecked(let why): notChecked = why
+                case .matches: break
+                }
+            }
+            let route = tradeRoute(r, e, blocks, market: market, prepared: p, review: review, reviewed: secondCheck || review != nil, notChecked: notChecked)
             view.footer = route.footer
             if watching {
                 // A watched address: the simulation on the canvas, nothing to confirm.
@@ -583,6 +596,18 @@ extension Engine {
         saveChat()
         changed()
         offer(reading.options, userText: userText, found: reading.found)
+    }
+
+    /// Between the balance reads, while the guardian has rules: the positions and orders read again and its pass run.
+    func guardNow() async {
+        guard !exitRules.isEmpty, let me = evmAddress, !me.isEmpty else { return }
+        async let ordersRead = try? HyperliquidAccount.openOrders(me)
+        let before = positions.map(\.coin), sameWallet = portfolioOwner == readWallet.map { $0.solana + $0.evm }
+        if let now = try? await HyperliquidAccount.positions(me) { positions = now.filter { $0.size != 0 } }
+        hlOrders = await ordersRead ?? hlOrders
+        // One its stop closed between the reads is said here, as refresh() would.
+        if sameWallet { await noteClosedPositions(before: before) }
+        await guardPositions()
     }
 
     /// A plan for watched addresses: prepared and simulated against them, never signed (the Mac's previewWallet).

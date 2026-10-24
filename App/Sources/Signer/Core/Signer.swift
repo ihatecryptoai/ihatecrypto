@@ -31,7 +31,7 @@ enum Signer {
             r.solanaAddress = defaults.string(forKey: "solana")
             r.evmAddress = defaults.string(forKey: "evm")
             r.nearAddress = defaults.string(forKey: "near")
-            r.agentAddress = AgentStore.load().flatMap { try? EVMAccount.address(privateKey: $0) }
+            r.agentAddress = AgentStore.address()
             r.agentActive = defaults.bool(forKey: agentActiveKey) && r.agentAddress != nil
             r.sessionLength = SeedStore.sessionLength
             r.codeSet = CodeStore.isSet
@@ -93,10 +93,13 @@ enum Signer {
 
         case .enableAgent:
             let owner = try address("evm")
-            var agentKey = AgentStore.load()
-            let made = agentKey == nil
-            if made { agentKey = try AgentStore.make() }
-            let agent = try EVMAccount.address(privateKey: agentKey!)
+            // The key kept for this wallet, by its address (on Windows that doesn't open it), or a new one.
+            let kept = AgentStore.address()
+            var agentKey: Data?
+            if kept == nil { agentKey = try AgentStore.make() }
+            defer { if agentKey != nil { SeedStore.wipe(&agentKey!) } }
+            let made = agentKey != nil
+            let agent = try kept ?? EVMAccount.address(privateKey: agentKey!)
             guard agent.lowercased() != owner.lowercased() else { throw WalletError("The agent key matches the main key.") }
             let nonce = UInt64(Date().timeIntervalSince1970 * 1000)
             // In person every time: an open Touch ID session from another move doesn't turn the key on (the 2026-10-24 review).
@@ -119,13 +122,13 @@ enum Signer {
         case .setAgentActive(let on):
             // Resuming a paused trading key is the user's decision: it asks for Touch ID like a signature.
             // So does one whose week is over (agentWeek): the app can't keep it going by turning it on again.
-            if on, !defaults.bool(forKey: agentActiveKey) || !agentFresh(agentRenewedKey), AgentStore.load() != nil {
+            if on, !defaults.bool(forKey: agentActiveKey) || !agentFresh(agentRenewedKey), AgentStore.has() {
                 // A fresh prompt, not an open session's: SeedStore.confirm always asks.
                 try confirmAfresh("turn the Hyperliquid trading key on for 7 days: orders without \(Presence.name); it can't withdraw money")
                 SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
                 renewAgent(agentRenewedKey)
             }
-            defaults.set(on && AgentStore.load() != nil, forKey: agentActiveKey)
+            defaults.set(on && AgentStore.has(), forKey: agentActiveKey)
             var r = SignerReply(ok: true)
             r.agentActive = defaults.bool(forKey: agentActiveKey)
             return r
@@ -264,19 +267,19 @@ enum Signer {
 
         case .ledgerAgent(let owner, let create):
             let id = try ledgerAgentID(owner)
-            var key = AgentStore.load(id: id)
-            if key == nil, create {
-                key = try AgentStore.make()
-                try AgentStore.save(key!, id: id)
+            if !AgentStore.has(id: id), create {
+                var key = try AgentStore.make()
+                defer { SeedStore.wipe(&key) }
+                try AgentStore.save(key, id: id)
             }
             var r = SignerReply(ok: true)
-            r.agentAddress = key.flatMap { try? EVMAccount.address(privateKey: $0) }
+            r.agentAddress = AgentStore.address(id: id)
             r.agentActive = r.agentAddress != nil && defaults.string(forKey: "agentActive-" + id) == "on"
             return r
 
         case .setLedgerAgentActive(let owner, let on):
             let id = try ledgerAgentID(owner)
-            guard AgentStore.load(id: id) != nil else { throw WalletError("This Ledger has no trading key yet: approve one on the Ledger first.") }
+            guard AgentStore.has(id: id) else { throw WalletError("This Ledger has no trading key yet: approve one on the Ledger first.") }
             // Back on after a lock is the user's decision, as for a wallet's own key.
             let state = defaults.string(forKey: "agentActive-" + id)
             if on, state == nil { renewAgent("agentRenewed-" + id) }   // just approved on the Ledger itself, in person
@@ -618,7 +621,7 @@ enum Signer {
                 defer { SeedStore.wipe(&agent) }
                 r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: mainnet)
             } else {
-                let stale = agentOn && AgentStore.load() != nil
+                let stale = agentOn && AgentStore.has()
                 let type = HLAction.type(action)
                 let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
                     : type == "vaultTransfer" ? "move money between your Hyperliquid account and a vault"

@@ -20,7 +20,7 @@ extension Engine {
         if lower.wholeMatch(of: /\s*(?:new\s+canvas|новый\s+(?:канвас|холст)|start\s+over|начн[иём]\s+заново)\s*[.!]?\s*/) != nil {
             // The command itself doesn't belong to the canvas being closed.
             let said = messages.popLast()
-            do { try newCanvas() } catch {
+            do { try newCanvas(fromChat: true) } catch {
                 if let said { messages.append(said) }
                 reply(error.localizedDescription)
             }
@@ -94,6 +94,34 @@ extension Engine {
         } catch {
             reply(say("The wallet wasn't switched: ", "Кошелёк не переключён: ") + error.localizedDescription)
         }
+    }
+
+    // MARK: What's kept per wallet
+
+    /// A per-wallet file: wallet «1» keeps the name it had before there were several (the Mac's Workspace.scoped).
+    nonisolated static func scoped(_ file: String, _ wallet: String?) -> String {
+        guard let wallet, wallet != SignerWallet.firstID else { return file }
+        let name = file as NSString
+        return "\(name.deletingPathExtension)-\(wallet).\(name.pathExtension)"
+    }
+
+    /// The wallet that signs now has its own record of what its buys cost (the Mac's walletChanged loads each wallet's
+    /// own costbasis): another wallet's cost never reads as this one's P/L. Called with each word from the signer.
+    func loadWalletState() {
+        let id = status?.activeWallet ?? SignerWallet.firstID
+        if id != (WalletScope.tasks ?? SignerWallet.firstID) {
+            WalletScope.tasks = id
+            let loaded = TaskSeal.load(Self.scoped("tasks.json", id))
+            tasks = loaded.tasks
+            if loaded.tampered {
+                reply(say("This wallet's scheduled tasks were changed outside ihatecrypto, so every one is paused. Check them in the Schedule and switch on only the ones you made.",
+                          "Задачи этого кошелька изменили вне ihatecrypto, поэтому все они на паузе. Проверь их в «Расписании» и включи только свои."))
+            }
+        }
+        guard id != (WalletScope.costs ?? SignerWallet.firstID) else { return }
+        WalletScope.costs = id
+        appCosts = Store.load([String: CostBasis].self, Self.scoped("costs.json", id)) ?? [:]
+        chainCost = [:]
     }
 
     /// «recovery phrase · Solana AN5b…e8cL, EVM 0x1523…F656»: what a wallet can sign for (the Mac's Wallets.describe).
@@ -252,6 +280,17 @@ extension Engine {
             let open = s.fills.first, close = s.fills.last
             facts.append("Closed: \(s.long ? "long" : "short") \(IntentParser.pretty(s.coin)), opened \(Fmt.date(s.opened)) at \(open.map { Fmt.price($0.px) } ?? "?"), closed \(s.closed.map(Fmt.date) ?? "?") at \(close.map { Fmt.price($0.px) } ?? "?"), realized \(Fmt.usd(s.realized)) after fees.")
         }
+        // Where money went, as the History board says it: the latest day's moves summed, then each request with what was
+        // done (the Mac's Activity.answerFacts).
+        if let day = movesDay {
+            facts.append("Money moved by ihatecrypto on \(Fmt.date(day.day)): " + day.lines.joined(separator: "; ") + ".")
+            if !day.own.isEmpty { facts.append("\(day.own.joined(separator: ", ")) is the user's own wallet: what went there is still theirs, outside the portfolio total.") }
+        }
+        for a in historyActivities.suffix(12) where a.request != nil || a.title != nil {
+            let done = a.lines.flatMap { $0.split(separator: "\n").compactMap { MovedLine(String($0)) } }.map(\.text)
+            facts.append("Activity \(Fmt.date(a.at)): \(a.request.map { "user said “\($0.prefix(120))”" } ?? a.title ?? "")"
+                         + (done.isEmpty ? " → \((a.lines.first ?? "").prefix(200))" : " → done: \(done.joined(separator: "; "))"))
+        }
         let named = IntentParser.namedAsset(question, markets: Set(markets.keys))
         let asked = named ?? (intent != TradeIntent() ? intent.asset : nil)
         facts += Set([asked].compactMap { $0 } + positions.map(\.coin)).compactMap(marketLine)
@@ -347,5 +386,24 @@ extension Engine {
             return true
         }
         return false
+    }
+}
+
+/// Whose per-wallet records are in memory: nil is the first wallet's (Engine.loadWalletState).
+@MainActor enum WalletScope {
+    static var costs: String?
+    static var tasks: String?
+}
+
+extension Engine {
+    /// A wallet removed from the signer: what was kept under its id goes too (the Mac's walletRemoved), so a wallet made
+    /// later with the same id never runs the old one's tasks with its own money or shows its P/L.
+    func walletRemoved(_ id: String) {
+        guard !id.isEmpty, id != SignerWallet.firstID else { return }
+        for file in [Self.scoped("costs.json", id), Self.scoped("tasks.json", id), TaskSeal.sealName(Self.scoped("tasks.json", id))] {
+            try? FileManager.default.removeItem(at: Store.url(file))
+        }
+        if WalletScope.tasks == id { WalletScope.tasks = nil; tasks = TaskSeal.load().tasks }
+        if WalletScope.costs == id { WalletScope.costs = nil; appCosts = Store.load([String: CostBasis].self, "costs.json") ?? [:] }
     }
 }

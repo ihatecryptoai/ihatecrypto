@@ -179,6 +179,9 @@
 .chat-panel .chat-waiting-what .chat-wait-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; margin-top: 5px; }
 .chat-panel .chat-waiting-title { font-size: 13px; font-weight: 600; }
 .chat-panel .chat-waiting-line { font-size: 11px; color: var(--secondary); }
+/* A site's request beside the person's own card: its own bar, a line between them. */
+.chat-panel .chat-site-bar + .chat-waiting-bar { border-top: 1px solid var(--separator, rgba(0, 0, 0, 0.08)); }
+.chat-panel .chat-site-bar .chat-waiting-what > div { min-width: 0; }
 .chat-panel .chat-waiting-buttons { display: flex; gap: 6px; margin-left: auto; }
 .chat-panel .chat-pill-outline, .chat-panel .chat-pill-accent { height: 32px; padding: 0 13px; border-radius: 999px; font-size: 12.5px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .chat-panel .chat-pill-outline { background: none; border: 1px solid var(--card-border); font-weight: 500; }

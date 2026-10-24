@@ -325,6 +325,9 @@ const catalog = [
 const groups = ["Trade", "Triggers", "Move money", "Buy and sell", "Earn", "Tempo", "HyperEVM", "Optimism", "BNB Chain"];
 const groupRu = { Trade: "Торговля", Triggers: "Условия", "Move money": "Переводы", "Buy and sell": "Купить и продать", Earn: "Доход" };
 
+/** With a trade plan on the canvas, the price alert is for that plan (the engine's planAlertExample). */
+const example = (b) => (b.label.startsWith("WHEN") && ui.state.planAlertExample) || b.example;
+
 /** A route fill's color (RouteFill.color); the light ones keep dark text. */
 const fills = { solana: "var(--solana-tint)", relay: "#4615C8", hyperliquid: "#072723", hlp: "#0D3B35", jupiter: "#131D27", kamino: "#082A56",
   jito: "#1F9D6A", aave: "#2B2D3C", morpho: "#1D4FC4", base: "#0052FF", arbitrum: "#213147", robinhood: "#3A4A00", near: "#10231C",
@@ -374,6 +377,6 @@ function blocksPanel() {
         h("div", { class: "blocks-grid" }, catalog.filter((b) => b.group === g).map((b) => tile({
           label: b.label, title: b.title, rows: b.form.split(" · ").concat(b.automatic ? [t("added by the agent", "добавляет агент")] : []),
           fill: b.fill, logoName: b.logo,
-          hint: b.automatic ? t("The agent adds it to every trade by itself", "Агент добавляет его к каждой сделке сам") : t(`Puts “${b.example}” into the chat`, `Вставит в чат «${b.example}»`),
-          onpick: b.automatic ? null : () => { blocksOpen = false; suggest(b.example); } })))])));
+          hint: b.automatic ? t("The agent adds it to every trade by itself", "Агент добавляет его к каждой сделке сам") : t(`Puts “${example(b)}” into the chat`, `Вставит в чат «${example(b)}»`),
+          onpick: b.automatic ? null : () => { blocksOpen = false; suggest(example(b)); } })))])));
 }

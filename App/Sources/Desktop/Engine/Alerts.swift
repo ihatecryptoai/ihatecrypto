@@ -133,9 +133,11 @@ extension Engine {
         Task {
             while true {
                 try? await Task.sleep(for: .seconds(10))
-                guard !alerts.isEmpty, let m = try? await Hyperliquid.markets() else { continue }
+                // Exit rules too, as the Mac's watch(): a trailing stop or the move to breakeven lags 10 s, not a minute.
+                guard !alerts.isEmpty || !exitRules.isEmpty, let m = try? await Hyperliquid.markets() else { continue }
                 markets = m
                 await checkAlerts()
+                await guardNow()
                 changed()
             }
         }

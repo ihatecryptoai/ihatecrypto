@@ -3,8 +3,9 @@
 // and Robinhood first, the others by money, those with $100 or less folded under «Other networks».
 // A row opens the coin (its board or chart) through the chat field; nothing here moves money by itself.
 
-import { ui, h, svg, act, engine, invoke, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link } from "./core.js";
+import { ui, h, svg, act, engine, invoke, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link, presence } from "./core.js";
 import { coinTrades, tradePhrases } from "./boards.js";
+import { suggestGas } from "./live.js";
 
 addIcons({
   bell: "M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
@@ -57,9 +58,12 @@ export function portfolioFrame() {
 
 /** Until the first read is in: the card's shape, shimmering. */
 function loading() {
+  const last = ui.state.lastBalance;
   return h("div", { class: "pf-stack" },
     h("div", { class: "eyebrow pf-eyebrow" }, t("Portfolio", "Портфель")),
-    h("div", { class: "pf-skeleton", style: "width:110px;height:22px" }),
+    // The last full balance, dimmed and sweeping, until every network answers (the Mac's lastBalance).
+    last !== null && last !== undefined ? h("div", { class: "pf-total num pf-last", title: t("Updating: the last full balance until every network answers", "Обновляю: последний полный баланс, пока не ответят все сети") }, amount(usd(Number(last))))
+      : h("div", { class: "pf-skeleton", style: "width:110px;height:22px" }),
     h("div", { class: "pf-skeleton", style: "height:30px;border-radius:8px" }),
     h("div", { class: "pf-ring" }, h("div", { class: "pf-skeleton", style: "width:58px;height:58px;border-radius:50%" }),
       h("div", { class: "pf-legend" }, [0, 1, 2, 3].map(() => h("div", { class: "pf-skeleton", style: "height:8px" })))),
@@ -234,6 +238,17 @@ function networkCards(p) {
     automationCard());
 }
 
+/** A held token's icon (HoldingIcon): its list's picture only when verified — an unverified one's URL is its creator's
+ * pick — and the bundled logo by ticker only where a ticker can't be copied (a list's check, the network's own coin,
+ * Hyperliquid's spot book); an airdropped «USDC» look-alike keeps its letter. */
+function tokenIcon(r, n) {
+  // A genuine stablecoin carries its contract and no cost key (Engine.row): its ticker is the real one too.
+  const own = r.verified === true || !r.contract || r.contract === "native" || !r.key || n.key === "hyperliquid" || (n.key === "solana" && r.symbol === "SOL");
+  if (own) return logoRound(r.symbol, 20, r.verified === true ? r.icon : undefined);
+  const el = h("span", { class: "logo letter round", style: "width:20px;height:20px;font-size:9px" }, (r.symbol || "?").slice(0, 1).toUpperCase());
+  return el;
+}
+
 function logoRound(name, size, src) {
   const el = logo(name, size, src);
   el.classList.add("round");
@@ -263,6 +278,8 @@ function networkCard(n) {
       h("span", { class: "spacer" }),
       h("b", { class: "pf-net-usd num" }, amount(usd(n.usd)))),
     n.key === "hyperliquid" ? positions() : null,
+    // An entry still on the book, under the positions (the Mac's pendingEntry line).
+    n.key === "hyperliquid" && ui.state.limitWaiting ? h("div", { class: "pf-limit-waiting" }, ui.state.limitWaiting) : null,
     shown.length && defi.length ? h("div", { class: "pf-section" }, t("Tokens", "Токены")) : null,
     shown.map((r) => coinRow(r, n)),
     tucked.length ? h("button", { class: "pf-tucked", title: t("Tokens you hid, and airdrops that look like scams: unverified, with no real pool",
@@ -298,7 +315,7 @@ function coinKind(r, n) {
 /** Opens the coin's card or chart on the canvas; resolves to the engine's answer (`board`: the block's id). */
 function openCoin(r, n) {
   const kind = coinKind(r, n);
-  return kind === "coin" ? act("openChart", { name: r.symbol })
+  return kind === "coin" ? act("openChart", { name: r.symbol, network: n.key })
     : kind ? act("openToken", { address: kind === "token" ? r.contract : "", network: n.key }) : Promise.resolve(null);
 }
 
@@ -319,7 +336,7 @@ function coinRow(r, n, dim) {
     : r.verified === false ? h("span", { class: "pf-unverified" }, t("unverified", "не проверен")) : null;
   return h("div", { class: "pf-coin pf-lit" + (dim ? " dim" : ""), title: `${r.symbol}: ` + t("details and chart · right-click to ask the chat, buy or sell", "подробности и график · правый клик — спросить чат, купить или продать"),
     onclick: () => openCoin(r, n), oncontextmenu: (e) => coinMenu(e, r, n) },
-    logoRound(r.symbol, 20, r.verified === false ? undefined : r.icon),
+    tokenIcon(r, n),
     h("div", { class: "pf-coin-name" },
       h("div", { class: "pf-coin-symbol" }, h("span", { class: "one-line" }, r.symbol), verified),
       h("div", { class: "pf-coin-amount num" }, h("span", { class: "secondary" }, amount(r.amount)),
@@ -353,7 +370,7 @@ function coinMenu(e, r, n) {
   e.stopPropagation();
   const kind = coinKind(r, n);
   const phrases = kind === "coin" ? coinTrades(r.symbol, n.key)
-    : kind ? tradePhrases(n.key, r.contract || "", r.symbol, { verified: r.verified === true, dollar: kind === "dollar" }) : [];
+    : kind ? tradePhrases(n.key, r.contract || "", r.symbol, { verified: r.verified === true, dollar: kind === "dollar", stock: r.stock === true }) : [];
   popup(e, [
     ...(kind ? [[[icon(kind === "coin" ? "chart.xyaxis.line" : "info.circle", 14), kind === "coin" ? t("Chart", "График") : t("Details", "Подробности")], () => openCoin(r, n)]] : []),
     [[icon("bubble.left", 14), t("Ask in chat", "Спросить в чате")], () => askCoin(r, n)],
@@ -378,14 +395,32 @@ function positions() {
 
 /** The automation wallet: what the Schedule's tasks spend from without Windows Hello. A click opens the Schedule. */
 function automationCard() {
-  const s = ui.state;
+  const s = ui.state, b = s.automationBudget;
   if (!s.automation || s.automationUSD === null || s.automationUSD === undefined) return null;
-  return h("button", { class: "pf-plain pf-lit", title: t("Your automation wallet: the Schedule's tasks spend from it without Windows Hello. Click to open the Schedule.",
-    "Кошелёк автоматизации: задачи расписания тратят с него без Windows Hello. Нажми, чтобы открыть расписание."), onclick: () => act("addBoard", { name: "schedule" }) },
-    h("span", { class: "pf-badge auto" }, icon("clock.arrow.circlepath", 16)),
-    h("div", { class: "pf-net-name" }, h("div", { class: "pf-net-title" }, s.automation.label), h("div", { class: "pf-net-note secondary" }, t("your Schedule wallet", "кошелёк расписания"))),
-    h("span", { class: "spacer" }),
-    h("b", { class: "pf-net-usd num" }, amount(usd(s.automationUSD))));
+  // Its coins one per row, as the Mac's card: USDC on Solana, the other Solana coins, USDC on each EVM network and NEAR.
+  const coins = b ? [["usdc", "USDC", b.solana, "Solana", b.solana], ...(b.tokens || []).map((c) => [c.symbol.toLowerCase(), c.symbol, c.amount, "Solana", c.usd]),
+    ...Object.entries(b.evm || {}).sort(([x], [y]) => x.localeCompare(y)).map(([k, v]) => ["usdc", k === "robinhood" ? "USDG" : "USDC", v, (s.portfolio?.networks || []).find((n) => n.key === k)?.name || k, v]),
+    ["usdc", "USDC", b.near, "NEAR", b.near]].filter((c) => Number(c[2]) > 0) : [];
+  const sol = Number(b?.sol ?? 0);
+  const solRow = (s.portfolio?.networks || []).find((n) => n.key === "solana")?.rows.find((r) => r.symbol === "SOL");
+  const solPrice = solRow && Number(solRow.value) > 0 ? Number(solRow.usd) / Number(solRow.value) : 0;
+  const row = ([lg, symbol, amt, place, worth], dim = false) => h("div", { class: "pf-auto-coin" + (dim ? " dim" : "") }, logoRound(lg, 18),
+    h("span", { class: "one-line" }, h("b", {}, symbol), h("span", { class: "secondary" }, " · " + place)), h("span", { class: "spacer" }),
+    h("span", { class: "num" }, amount(String(Number(amt)))), h("span", { class: "num secondary pf-auto-usd" }, worth === null || worth === undefined ? "" : amount(usd(worth))));
+  return h("div", { class: "pf-auto" },
+    h("button", { class: "pf-plain pf-lit", title: t(`Your automation wallet: the Schedule's tasks spend from it without ${presence()}. Click to open the Schedule.`,
+      `Кошелёк автоматизации: задачи расписания тратят с него без ${presence()}. Нажми, чтобы открыть расписание.`), onclick: () => act("addBoard", { name: "schedule" }) },
+      h("div", { class: "pf-auto-head" },
+        h("span", { class: "pf-badge auto" }, icon("clock.arrow.circlepath", 16)),
+        h("div", { class: "pf-net-name" }, h("div", { class: "pf-net-title" }, s.automation.label), h("div", { class: "pf-net-note secondary" }, t("your Schedule wallet", "кошелёк расписания"))),
+        h("span", { class: "spacer" }),
+        h("b", { class: "pf-net-usd num" }, amount(usd(s.automationUSD)))),
+      b ? [coins.map((c) => row(c)), row(["sol", "SOL", sol, t("gas", "газ"), sol * solPrice], sol === 0)] : null),
+    // Money on Solana and no SOL: every task there fails on its fee. The fix is one chat message away.
+    b && sol < 0.005 && coins.length ? h("div", { class: "pf-auto-gas" },
+      h("span", {}, icon("exclamationmark.triangle", 12), t("No SOL for fees: it can't send yet", "Нет SOL на комиссии: отправлять пока не может")),
+      h("button", { class: "btn small", title: t(`Puts the send to «${s.automation.label}» in the chat; nothing goes until you send it`, `Вставит в чат перевод на «${s.automation.label}»; ничего не уйдёт, пока не отправишь`),
+        onclick: () => suggestGas(s.automation, b) }, icon("fuelpump", 12), t("Top up gas", "Пополнить газ"))) : null);
 }
 
 function multisigCard(m) {

@@ -8,7 +8,7 @@
 // The step is kept in this window's storage, so a quit comes back to it; the recovery words are the engine's and only in
 // its memory, so after a restart they are gone, as on the Mac.
 
-import { ui, act, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, qrCode, usd, masked, copyButton } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, qrCode, usd, masked, copyButton } from "./core.js";
 import * as pages from "./pages.js";
 import * as chat from "./chat.js";
 
@@ -207,7 +207,8 @@ function modelStep() {
   const localRow = local ? tile(connected(local.id), h("span", { class: "ob-tile-ico" }, icon("ob.desktop", 16)),
     tileText(t("Free, on this PC", "Бесплатно, на этом компьютере"), local.unavailable || local.note || local.name), h("span", { class: "spacer" }),
     connected(local.id) ? h("span", { class: "ob-ok profit" }, icon("check", 14), t("Connected", "Подключено"))
-      : local.unavailable ? null : h("button", { class: "btn small", disabled: flow.busy, onclick: () => connect(local) }, t("Use it", "Выбрать"))) : null;
+      // The one-click setup, as the Mac's local row: Ollama installed or updated, a model for this PC's memory, connected.
+      : h("button", { class: "btn small", disabled: flow.busy, onclick: () => act("setUpLocal") }, local.unavailable ? t("Set it up", "Установить") : t("Use it", "Выбрать"))) : null;
   // The person picks the model; the chat's menu changes it later. The catalog lists the provider's default first.
   const current = prov(m.provider);
   const list = m.models.includes(m.model) || !m.model ? m.models : [...m.models, m.model];
@@ -264,6 +265,8 @@ function newWalletStep() {
 }
 
 let copied = false;
+/** The copied words off the clipboard if it still holds them (main.rs clear_secret); a build without it waits its 60 s. */
+const wipeCopied = () => invoke("clear_secret").catch(() => {});
 /** The check after «I wrote them down» (CheckStep): three of the words by number, picked in order from a few shuffled ones. */
 let check = null;
 
@@ -297,6 +300,8 @@ function wordsCard(words) {
           "Для менеджера паролей: буфер очистится через 60 с, в историю буфера не попадёт.")))),
     primary: t("I wrote them down", "Я записал"),
     onPrimary: () => {
+      // The words leave the clipboard now, while it still holds them (the Mac's wipe by change count), not in 60 s.
+      if (copied) wipeCopied();
       const order = [...words.keys()].sort(() => Math.random() - 0.5);
       const asked = order.slice(0, 3).sort((a, b) => a - b);
       const others = order.slice(3, 8);
@@ -332,6 +337,7 @@ function checkCard(words) {
     primary: t("Continue", "Дальше"), enabled: done,
     onPrimary: async () => {
       check = null;
+      if (copied) wipeCopied();
       copied = false;
       await act("phraseSaved");
       setProtect(false);
@@ -653,11 +659,11 @@ function stayInTouchStep() {
         item("ob.bell", t("Notifications", "Уведомления"), t("Money arrived, an alert fired, a move finished or needs your Confirm. Windows turns them off in Settings › System › Notifications.",
           "Пришли деньги, сработало оповещение, движение закончилось или ждёт «Подтвердить». Выключаются в Windows: «Параметры › Система › Уведомления»."),
           h("span", { class: "ob-ok profit" }, icon("check", 14), t("On", "Включены"))),
-        item("rectangle.stack", t("Keep running in the tray", "Работать в трее"), t("Closing the window keeps ihatecrypto in the tray: stops, alerts and scheduled buys keep working.",
-          "Закрытое окно оставляет ihatecrypto в трее: стопы, оповещения и покупки по расписанию продолжают работать."),
-          h("span", { class: "ob-ok profit" }, icon("check", 14))),
-        s.openAtLogin === undefined ? null : item("power", t("Open at sign-in", "Открывать при входе"), t("Starts with Windows, in the tray, so nothing waits for you to open it.", "Запускается вместе с Windows, в трее, чтобы ничего не ждало, пока ты его откроешь."),
-          toggle("ob-login", !!s.openAtLogin, (v) => act("openAtLogin", { test: v })))),
+        // The Mac's «Keep running in the menu bar» switch: Settings › General › Keep always running (back after a quit or
+        // a crash, and at sign-in, in the tray).
+        item("rectangle.stack", t("Keep running in the tray", "Работать в трее"), t("Stops, alerts and scheduled buys keep working after the window is closed, and it comes back after a quit or a crash.",
+          "Стопы, оповещения и покупки по расписанию работают и при закрытом окне, а после выхода или сбоя приложение возвращается."),
+          toggle("ob-keep", s.localSetup?.keepRunning === true, (v) => act("keepRunning", { test: v }), s.localSetup?.keepRunning === undefined))),
       h("div", { class: "secondary small" }, t("Both are in Settings › General too.", "Это есть и в «Настройки › Основные»."))),
     primary: last ? t("Finish", "Готово") : t("Continue", "Дальше"), onPrimary: () => (last ? finish() : go("tradingKey")),
     quiet: quietButton(t("Back", "Назад"), back),
@@ -930,46 +936,93 @@ async function play(s) {
 
 // MARK: Dialogs
 
-/** Settings' «Import a recovery phrase»: the phrase and its passphrase go to the signer; then the first addresses it
- * makes, to compare with MetaMask and Phantom (ImportWalletView). */
+/** Settings' «Import a recovery phrase» (ImportWalletView): by default only the addresses it makes are shown, to see its
+ * balances — nothing saved; with «Save the key in secure storage to sign» on, the phrase and its passphrase go to the
+ * signer. Either way the first addresses follow, to compare with MetaMask and Phantom. */
 export function showImport() {
-  const form = { phrase: "", passphrase: "" };
+  const form = { phrase: "", passphrase: "", store: false };
+  const hintText = () => form.store
+    ? t(`The phrase goes only to the separate signer, which has no network access. It keeps the key sealed under this computer's Windows Hello and signs only what passes the guard, after Windows Hello. It is added next to your other wallets.`,
+      `Фраза уходит только отдельному подписанту, у которого нет доступа к сети. Он хранит ключ запечатанным под Windows Hello этого компьютера и подписывает только то, что прошло проверку, после Windows Hello. Кошелёк добавится к остальным.`)
+    : t("The phrase isn't saved or sent anywhere. The app takes only the public addresses from it to show balances. Try the test phrase first.",
+      "Фраза нигде не сохраняется и никуда не отправляется. Приложение берёт из неё только публичные адреса, чтобы показать балансы. Сначала попробуй тестовую фразу.");
+  const label = () => (form.store ? t("Save and show addresses", "Сохранить и показать адреса") : t("Show addresses", "Показать адреса"));
+  const hint = h("div", { class: "secondary small" }, hintText());
+  const shown = (accounts, saved) => setOverlay(sheet(stepCard({
+    mood: "done", title: saved ? t("Key saved", "Ключ сохранён") : t("Its addresses", "Её адреса"),
+    subtitle: saved ? t("The wallet is next to your other wallets. Check its addresses against the wallet you came from.", "Кошелёк добавлен к остальным. Сверь его адреса с кошельком, из которого ты пришёл.")
+      : t("Nothing was saved. Watch address #0 to see its balances here; nothing goes to the signer.", "Ничего не сохранено. Следи за адресом #0, чтобы видеть его балансы здесь; подписанту ничего не уходит."),
+    content: h("div", { class: "ob-content" }, compareTable(accounts),
+      saved ? null : h("button", { class: "btn small", title: t("Puts address #0 into «Addresses for balances»; nothing goes to the signer", "Добавит адрес #0 в «Адреса для балансов»; подписанту ничего не уходит"),
+        onclick: async () => { if (await act("watch", { solana: accounts[0].solana, evm: accounts[0].evm }) !== null) { toast(t("Watching the balances of address #0.", "Слежу за балансами адреса #0.")); closeOverlay(); } } },
+        icon("eye", 13), t("Watch #0", "Следить за #0"))),
+    primary: t("Done", "Готово"), onPrimary: closeOverlay,
+  })));
   const run = async () => {
-    const r = await act("importPhrase", { phrase: form.phrase.trim().toLowerCase().split(/\s+/).join(" "), passphrase: form.passphrase });
-    if (r === null) return;
+    const phrase = form.phrase.trim().toLowerCase().split(/\s+/).join(" "), passphrase = form.passphrase;
     form.phrase = form.passphrase = "";
+    const r = await act(form.store ? "importPhrase" : "phraseAccounts", { phrase, passphrase });
+    if (r === null) return;
     const accounts = parseAccounts(r);
     if (!accounts?.length) { closeOverlay(); return; }
-    setOverlay(sheet(stepCard({
-      mood: "done", title: t("Key saved", "Ключ сохранён"), subtitle: t("The wallet is next to your other wallets. Check its addresses against the wallet you came from.", "Кошелёк добавлен к остальным. Сверь его адреса с кошельком, из которого ты пришёл."),
-      content: h("div", { class: "ob-content" }, compareTable(accounts)), primary: t("Done", "Готово"), onPrimary: closeOverlay,
-    })));
+    shown(accounts, form.store);
   };
-  setOverlay(sheet(stepCard({
+  const card = stepCard({
     mood: "tuning", title: t("Import a recovery phrase", "Импорт фразы восстановления"),
-    subtitle: t("12 or 24 words, in order, from MetaMask, Phantom or another wallet. It goes straight to the signer, which keeps it under Windows Hello; nothing else keeps it.",
-      "12 или 24 слова по порядку — из MetaMask, Phantom или другого кошелька. Она уходит прямо подписанту, который хранит её под Windows Hello; больше нигде она не хранится."),
+    subtitle: t("12 or 24 words, in order, from MetaMask, Phantom or another wallet.", "12 или 24 слова по порядку — из MetaMask, Phantom или другого кошелька."),
     content: h("div", { class: "ob-content" },
       h("textarea", { id: "import-secret", class: "address ob-field secret", rows: "4", autocomplete: "off", spellcheck: "false", placeholder: t("12 or 24 words separated by spaces", "12 или 24 слова через пробел"), oninput: (e) => (form.phrase = e.target.value) }),
-      h("input", { id: "import-passphrase", type: "password", class: "ob-field", autocomplete: "off", spellcheck: "false", placeholder: t("Extra passphrase, if any", "Дополнительная парольная фраза, если есть"), oninput: (e) => (form.passphrase = e.target.value) })),
-    primary: t("Import", "Импортировать"), onPrimary: run,
+      h("input", { id: "import-passphrase", type: "password", class: "ob-field", autocomplete: "off", spellcheck: "false", placeholder: t("Extra passphrase, if any", "Дополнительная парольная фраза, если есть"), oninput: (e) => (form.passphrase = e.target.value) }),
+      h("label", { class: "ob-option" }, toggle("import-store", false, (on) => { form.store = on; hint.textContent = hintText(); primaryEl().textContent = label(); }),
+        h("span", {}, t("Save the key in secure storage to sign", "Сохранить ключ в защищённом хранилище, чтобы подписывать"))),
+      hint),
+    primary: label(), onPrimary: run,
     quiet: quietButton(t("Back", "Назад"), closeOverlay),
-  })));
+  });
+  const primaryEl = () => card.querySelector(".ob-primary");
+  setOverlay(sheet(card));
   setTimeout(() => document.getElementById("import-secret")?.focus(), 0);
 }
 
+/** A single private key: Phantom's Solana key or MetaMask's EVM key, recognized as it's pasted and shown as its address
+ * to compare before anything is saved (ImportWalletView.keyImport); only «Save as a wallet» sends it to the signer. */
 export function showImportKey() {
-  let value = "";
+  let value = "", asked = 0;
   const done = () => { value = ""; closeOverlay(); };
   const run = async () => { if (await act("importKey", { key: value.trim() }) !== null) done(); };
-  setOverlay(sheet(stepCard({
+  const idle = () => h("div", { class: "secondary small" }, t("The key goes only to the separate signer, which seals it under Windows Hello like a phrase and never shows it again.",
+    "Ключ уходит только отдельному подписанту, который запечатывает его под Windows Hello, как фразу, и больше никогда не показывает."));
+  const found = h("div", { class: "ob-key-found" }, idle());
+  const check = async () => {
+    const n = ++asked, key = value.trim();
+    const save = card.querySelector(".ob-primary");
+    if (!key) { found.replaceChildren(idle()); save.disabled = true; return; }
+    try {
+      const r = await engine("keyAddress", { key });
+      if (n !== asked) return;
+      const other = r.chain === "Solana" ? "Phantom" : "MetaMask";
+      found.replaceChildren(
+        h("div", { class: "ob-key-address" }, h("span", { class: "secondary small" }, r.chain), h("span", { class: "address selectable" }, r.address)),
+        h("div", { class: "secondary small" }, t(`Compare it with ${other} before saving. This wallet signs only on ${r.chain}; for the other chains, switch wallets.`,
+          `Сверь его с ${other}, прежде чем сохранять. Этот кошелёк подписывает только в ${r.chain}; для других сетей переключай кошельки.`)));
+      save.disabled = false;
+    } catch (e) {
+      if (n !== asked) return;
+      found.replaceChildren(h("div", { class: "loss small" }, e.message));
+      save.disabled = true;
+    }
+  };
+  const card = stepCard({
     mood: "tuning", title: t("Import a private key", "Импорт приватного ключа"),
-    subtitle: t("One key from Phantom (Solana) or MetaMask (EVM): it opens that network only. It goes straight to the signer, which keeps it under Windows Hello; nothing else keeps it.",
-      "Один ключ из Phantom (Solana) или MetaMask (EVM): он открывает только эту сеть. Он уходит прямо подписанту, который хранит его под Windows Hello; больше нигде он не хранится."),
-    content: h("div", { class: "ob-content" }, h("textarea", { id: "import-secret", class: "address ob-field secret", rows: "3", autocomplete: "off", spellcheck: "false", oninput: (e) => (value = e.target.value) })),
-    primary: t("Import", "Импортировать"), onPrimary: run,
+    subtitle: t("One key from Phantom (Solana) or MetaMask (EVM): it opens that network only.", "Один ключ из Phantom (Solana) или MetaMask (EVM): он открывает только эту сеть."),
+    content: h("div", { class: "ob-content" },
+      h("textarea", { id: "import-secret", class: "address ob-field secret", rows: "3", autocomplete: "off", spellcheck: "false", placeholder: t("Solana key from Phantom, or EVM key from MetaMask", "Ключ Solana из Phantom или EVM-ключ из MetaMask"),
+        oninput: (e) => { value = e.target.value; check(); } }),
+      found),
+    primary: t("Save as a wallet", "Сохранить как кошелёк"), onPrimary: run, enabled: false,
     quiet: quietButton(t("Back", "Назад"), done),
-  })));
+  });
+  setOverlay(sheet(card));
   setTimeout(() => document.getElementById("import-secret")?.focus(), 0);
 }
 
@@ -1019,7 +1072,8 @@ export function renameDialog(c) {
   setTimeout(() => { const f = document.getElementById("rename"); f?.focus(); f?.select(); }, 0);
 }
 
-/** ihatecrypto's browser: a site opens in a window of its own with the wallet in it; what it asks for comes here as a card. */
+/** ihatecrypto's browser: a site opens beside the chat with the wallet in it (its panel can move to its own window); what it
+ * asks for comes here as a card. */
 export function browserDialog() {
   let value = "";
   const sites = [["jup.ag", "jup"], ["kamino.com", "kmno"], ["raydium.io", "ray"], ["app.aave.com", "aave"], ["app.uniswap.org", "uni"], ["app.hyperliquid.xyz", "hype"]];
@@ -1029,8 +1083,8 @@ export function browserDialog() {
   };
   setOverlay(sheet(stepCard({
     mood: "tuning", title: t("Open a site with your wallet", "Открыть сайт со своим кошельком"),
-    subtitle: t("The site sees your address only after you connect it, and every signature it asks for comes to the canvas as a card: nothing is signed without Confirm and Windows Hello. Sites on MetaMask's phishing list get no wallet.",
-      "Сайт увидит адрес, только когда ты его подключишь, а каждая подпись, которую он просит, приходит на холст карточкой: без «Подтвердить» и Windows Hello ничего не подписывается. Сайты из списка фишинга MetaMask кошелёк не получают."),
+    subtitle: t("The site opens beside the chat. It sees your address only after you connect it, and every signature it asks for comes to the canvas as a card: nothing is signed without Confirm and Windows Hello. Sites on MetaMask's phishing list get no wallet.",
+      "Сайт откроется рядом с чатом. Он увидит адрес, только когда ты его подключишь, а каждая подпись, которую он просит, приходит на холст карточкой: без «Подтвердить» и Windows Hello ничего не подписывается. Сайты из списка фишинга MetaMask кошелёк не получают."),
     content: h("div", { class: "ob-content" },
       h("input", { id: "site-url", class: "ob-field", placeholder: "jup.ag", oninput: (e) => (value = e.target.value.trim()), onkeydown: (e) => { if (e.key === "Enter" && value) open(value); } }),
       h("div", { class: "ob-site-chips" }, sites.map(([s, l]) => h("button", { class: "ob-site-chip", onclick: () => open(s) }, logo(l, 18), s)))),

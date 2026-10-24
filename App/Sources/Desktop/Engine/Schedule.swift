@@ -10,7 +10,7 @@ import WalletCore
 nonisolated struct ScheduleRun: Codable, Equatable {
     var at: Date
     var title: String
-    /// «done», «failed», or «nothing»: a check whose condition wasn't met.
+    /// «done», «failed», «unknown» (sent, its outcome not known), or «nothing»: a check whose condition wasn't met.
     var result: String
     /// What it said last: the row's tooltip.
     var line: String?
@@ -21,6 +21,23 @@ nonisolated struct ScheduleRun: Codable, Equatable {
 
 /// The automation wallet's budget as the Schedule shows it (the Mac's AutomationBudget and the numbers drawn from it):
 /// its money on Solana and on each EVM network, how many weeks of its buys that covers, and the gas it lacks.
+extension ScheduledTask {
+    /// It buys coins: what it gets goes on to the wallet that's on after a run from the automation wallet.
+    var buysCoins: Bool {
+        steps.contains { step in
+            switch WalletCommand.parse(step) {
+            case .buy?, .buyStock?, .buyOn?: true
+            default: false
+            }
+        }
+    }
+
+    /// It spreads USDC across the best rates: it spends what's free where it pays from.
+    var spreadsUSDC: Bool {
+        steps.contains { if case .allocate("USDC", _, _, _, _)? = WalletCommand.parse($0) { true } else { false } }
+    }
+}
+
 nonisolated struct AutomationBudget: Encodable, Equatable {
     struct Coin: Encodable, Equatable { var symbol: String; var amount: Decimal; var usd: Decimal? }
     struct Gas: Encodable, Equatable { var network: String; var coin: String; var amount: Decimal }
@@ -141,6 +158,20 @@ extension Engine {
 
     /// The budget as read, with what the tasks on now take from it: worked out at every state, so a task switched on or
     /// the schedule paused shows at once.
+    /// The USDC a task could spread where it pays from (the Mac's freeUSDC): the automation wallet's budget, or the idle
+    /// USDC of the wallet that's on; nil until read.
+    func taskFreeUSDC(_ t: ScheduledTask) -> Decimal? {
+        if usesAutomation(t) { return automationBudget.map { ($0.solana ?? 0) + $0.evm.values.reduce(0, +) } }
+        return usdcFree(on: "solana").map { $0 + EVMNetwork.searched.compactMap { usdcFree(on: $0.key) }.reduce(0, +) }
+    }
+
+    /// The task paying from the other wallet: the one that's on instead of the automation wallet, or the other way.
+    func otherPayer(_ t: ScheduledTask) -> ScheduledTask {
+        var o = t
+        o.fromActive = usesAutomation(t) ? true : nil
+        return o
+    }
+
     var automationBudgetNow: AutomationBudget? {
         guard automationWallet != nil, var b = automationBudget else { return nil }
         let spend = automationSpend(until: Date().addingTimeInterval(7 * 86_400))
@@ -222,6 +253,8 @@ extension Engine {
     /// else is going on: a card waiting for Confirm, a reply being written, a move running.
     func runDueTasks() async {
         remindTopUp()
+        // Recurring buys first: at their time, Windows Hello only, no canvas of their own (Automation.swift).
+        await runRecurringBuys()
         guard settings.schedulePaused != true, pending == nil, card == nil, running == nil, !thinking else { return }
         guard let i = tasks.firstIndex(where: { $0.paused != true && $0.next <= Date() }) else { return }
         let key = "task:\(tasks[i].id)"
@@ -258,9 +291,15 @@ extension Engine {
         } else if task.steps.count > 1 {
             // A step that can't go on or a first move that can't be paid stops the run before any card: it failed.
             if !(await chain(task.steps, note: "schedule")) || chainState.stopped { stepFailed = true }
-        } else if let step = task.steps.first, !(await runCanonical(step, userText: step)) {
-            reply(say("“\(step)” didn't run.", "«\(step)» не выполнилось."), note: "schedule")
-            stepFailed = true
+        } else if let step = task.steps.first {
+            // A spread with nothing free stays quiet too, with a grey mark (the Mac's checkQuiet, Earn.preparePlan):
+            // every day's «see the canvas» led to a canvas already gone (the owner, 2026-10-16).
+            quietCheck = false
+            if !(await runCanonical(step, userText: step)) {
+                reply(say("“\(step)” didn't run.", "«\(step)» не выполнилось."), note: "schedule")
+                stepFailed = true
+            }
+            ran = !quietCheck
         }
         logRun(task, started: started, mark: mark, canvas: canvas, ran: ran, failed: stepFailed)
         let failed = scheduleRuns.last?.result == "failed"
@@ -269,7 +308,8 @@ extension Engine {
         let told = messages.dropFirst(mark).last { !$0.fromUser }?.text ?? ""
         // A check with nothing to tell stays quiet: the run is in the History with a grey mark.
         if ran {
-            notify(check ? .alerts : waits ? .confirm : .moves, request,
+            // A check that speaks is a task's run like any other (the Mac's runDueTask), not a price alert.
+            notify(waits ? .confirm : .moves, request,
                    waits ? say("Ready on its canvas — press Confirm.", "Готово на своём холсте — нажми «Подтвердить».") : String(told.prefix(200)), failed: failed)
         }
         // Nothing here for the person: back where they were. «Run now» and an alert's task stay to be seen.
@@ -316,8 +356,10 @@ extension Engine {
     /// nothing to tell. The last 100 are kept.
     private func logRun(_ task: ScheduledTask, started: Date, mark: Int, canvas: String, ran: Bool, failed stepFailed: Bool) {
         let failed = stepFailed || boards.contains { $0.kind == "move" && $0.at >= started && $0.state == "failed" }
+        // Sent with no answer back: not a failure to do again (it may have gone through), not done either.
+        let unknown = boards.contains { $0.kind == "move" && $0.at >= started && $0.state == "unknown" }
         let line = canvas == canvasID ? messages.dropFirst(mark).last { !$0.fromUser }?.text : nil
-        scheduleRuns.append(ScheduleRun(at: started, title: task.steps.joined(separator: " then "), result: failed ? "failed" : ran ? "done" : "nothing",
+        scheduleRuns.append(ScheduleRun(at: started, title: task.steps.joined(separator: " then "), result: failed ? "failed" : unknown ? "unknown" : ran ? "done" : "nothing",
                                         line: line.map { String($0.prefix(300)) }, canvas: canvas, task: task.id.uuidString))
         if scheduleRuns.count > 100 { scheduleRuns.removeFirst(scheduleRuns.count - 100) }
     }

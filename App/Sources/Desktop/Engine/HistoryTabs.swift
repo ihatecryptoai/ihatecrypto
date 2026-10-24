@@ -9,14 +9,14 @@ import TradeExecution
 /// «Positions» — each Hyperliquid position from open to close with its realized P/L and fees; «All» — every request,
 /// fill, transfer and signature in one timeline (the app's journal and the terminal tool's). Read when the page asks.
 nonisolated struct HistoryTabs: Encodable {
-    struct Bubble: Encodable, Equatable {
+    struct Bubble: Codable, Equatable {
         var kind: String
         var label: String
         var title: String
         var lines: [String] = []
         var status = "info"
     }
-    struct Activity: Encodable, Equatable {
+    struct Activity: Codable, Equatable {
         /// «request», «execution» or «automatic».
         var kind: String
         var at: Date
@@ -65,13 +65,99 @@ nonisolated struct HistoryTabs: Encodable {
     var hyperliquid: Bool
 }
 
+/// The History's own record, as the Mac keeps its 1,000 activities apart from the canvases: each canvas's chat and its
+/// moves copied in as they're said, so a canvas deleted, a chat cleared, a scheduled run's canvas cleaned up or the
+/// 300 messages a canvas keeps leave the History as it was; and what ihatecrypto did by itself (money arrived, an alert,
+/// the guardian, a limit filled) as activities of their own. The first launch with it copies what the canvases hold.
+@MainActor enum HistoryStore {
+    struct Saved: Codable {
+        var chats: [CanvasDoc] = []
+        var automatic: [HistoryTabs.Activity] = []
+    }
+    static let limit = 1000
+    static var saved: Saved = Store.load(Saved.self, "history.json") ?? Saved()
+    static var read = false
+
+    /// The canvases' chats and finished blocks merged in; true when anything was new or changed.
+    @discardableResult
+    static func record(_ canvases: [CanvasDoc]) -> Bool {
+        var changed = false
+        for c in canvases where !c.messages.isEmpty || c.boards.contains(where: { !Engine.liveBoards.contains($0.kind) }) {
+            let i: Int
+            if let at = saved.chats.firstIndex(where: { $0.id == c.id }) { i = at } else {
+                saved.chats.append(CanvasDoc(id: c.id, title: c.title, at: c.at))
+                i = saved.chats.count - 1
+            }
+            if saved.chats[i].title != c.title { saved.chats[i].title = c.title; changed = true }
+            var messages = Dictionary(saved.chats[i].messages.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
+            for m in c.messages {
+                if let at = messages[m.id] {
+                    if saved.chats[i].messages[at] != m { saved.chats[i].messages[at] = m; changed = true }
+                } else {
+                    messages[m.id] = saved.chats[i].messages.count
+                    saved.chats[i].messages.append(m)
+                    changed = true
+                }
+            }
+            for b in c.boards where !Engine.liveBoards.contains(b.kind) {
+                if let at = saved.chats[i].boards.firstIndex(where: { $0.id == b.id }) {
+                    if saved.chats[i].boards[at] != b { saved.chats[i].boards[at] = b; changed = true }
+                } else {
+                    saved.chats[i].boards.append(b)
+                    changed = true
+                }
+            }
+        }
+        if changed { trim(); Store.save(saved, "history.json") }
+        return changed
+    }
+
+    /// What ihatecrypto did by itself. `merging`: a trailing stop moving again is one more line on its record, as the
+    /// Mac keeps a trend from filling the History.
+    static func automatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false) {
+        if merging, var last = saved.automatic.last, last.title == title {
+            last.lines.append(line)
+            saved.automatic[saved.automatic.count - 1] = last
+        } else {
+            saved.automatic.append(HistoryTabs.Activity(kind: "automatic", at: Date(), title: title, coin: coin, lines: [line], failed: failed))
+        }
+        trim()
+        Store.save(saved, "history.json")
+    }
+
+    /// The newest 1,000 requests and 1,000 automatic records stay.
+    static func trim() {
+        if saved.automatic.count > limit { saved.automatic.removeFirst(saved.automatic.count - limit) }
+        let asked = saved.chats.flatMap { $0.messages.filter(\.fromUser).map(\.at) }.sorted()
+        guard asked.count > limit else { return }
+        let cutoff = asked[asked.count - limit]
+        for i in saved.chats.indices {
+            saved.chats[i].messages.removeAll { $0.at < cutoff }
+            saved.chats[i].boards.removeAll { $0.at < cutoff }
+        }
+        saved.chats.removeAll { $0.messages.isEmpty && $0.boards.isEmpty }
+    }
+}
+
 extension Engine {
-    /// What the canvases kept, as activities: each request with the cards made after it (until the next one) and the
-    /// replies; each scheduled run on its own. Newest last.
+    /// What ihatecrypto did by itself, kept in the History (the Mac's notify(record:)).
+    func recordAutomatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false) {
+        HistoryStore.automatic(title, line, coin: coin, failed: failed, merging: merging)
+    }
+
+    /// The chats History reads: its own record (each save merges the canvases in; the first read of a launch does too, so
+    /// the History a build before this one rebuilt from the canvases is all there).
+    var historyChats: [CanvasDoc] {
+        if !HistoryStore.read { HistoryStore.read = true; HistoryStore.record(canvases) }
+        return HistoryStore.saved.chats
+    }
+
+    /// What the History kept, as activities: each request with the cards made after it (until the next one) and the
+    /// replies; each scheduled run, and what ihatecrypto did by itself, on its own. Newest last.
     var historyActivities: [HistoryTabs.Activity] {
         var out: [HistoryTabs.Activity] = []
         let names = Set(markets.keys)
-        for c in canvases {
+        for c in historyChats {
             let asked = c.messages.filter(\.fromUser).sorted { $0.at < $1.at }
             for (i, q) in asked.enumerated() {
                 let until = i + 1 < asked.count ? asked[i + 1].at : .distantFuture
@@ -84,13 +170,19 @@ extension Engine {
                     }
                     return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
                 }
-                out.append(HistoryTabs.Activity(kind: "request", at: q.at, request: q.text, understood: q.understood, title: made.first { $0.kind == "move" }?.title,
-                                                coin: IntentParser.namedAsset(q.text, markets: names), bubbles: bubbles, lines: said))
+                // A scheduled run's request is the app's, not the person's: one automatic record, with what it made.
+                let run = q.note == "schedule"
+                out.append(HistoryTabs.Activity(kind: run ? "automatic" : "request", at: q.at, request: run ? nil : q.text, understood: q.understood,
+                                                title: run ? q.text : made.first { $0.kind == "move" }?.title, coin: IntentParser.namedAsset(q.text, markets: names),
+                                                bubbles: bubbles, lines: said, failed: run && made.contains { $0.state == "failed" }))
             }
         }
-        for r in scheduleRuns {
+        // A run whose canvas the History has is that record already (it showed twice).
+        let kept = Set(HistoryStore.saved.chats.filter { $0.messages.contains { $0.fromUser && $0.note == "schedule" } }.map(\.id))
+        for r in scheduleRuns where !kept.contains(r.canvas ?? "") {
             out.append(HistoryTabs.Activity(kind: "automatic", at: r.at, title: r.title, lines: r.line.map { [$0] } ?? [], failed: r.result == "failed"))
         }
+        out += HistoryStore.saved.automatic
         return out.sorted { $0.at < $1.at }
     }
 
@@ -132,7 +224,8 @@ extension Engine {
         let earlier = sessions(journal, before: activities.first?.at ?? .distantFuture, ru: ru)
         let signed = { (v: Decimal) in (v < 0 ? "−" : "+") + Fmt.usd(abs(v)) }
         let byCoin = Dictionary(grouping: activities.filter { $0.coin != nil }) { $0.coin!.uppercased() }
-        let stories = TradeHistory.stories(fills).reversed().map { story -> HistoryTabs.Story in
+        // Newest first, as TradeHistory gives them and the Mac lists them.
+        let stories = TradeHistory.stories(fills).map { story -> HistoryTabs.Story in
             var events = story.fills.map { f in
                 HistoryTabs.Event(kind: f.dir.hasPrefix("Open") ? "open" : "close", at: f.time, label: f.dir,
                                   title: "\(Fmt.num(f.sz, maxFraction: 6)) " + say("at", "по") + " \(Fmt.price(f.px))",

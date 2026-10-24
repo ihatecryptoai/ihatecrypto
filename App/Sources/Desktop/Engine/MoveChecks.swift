@@ -265,8 +265,70 @@ extension Engine {
             options = short.options
             return true
         }
-        if let why = refusalBeforeCard(command) { reply(why, note: note); return true }
+        if let why = refusalBeforeCard(command) {
+            reply(why, note: note)
+            noteRefusal(command.summary, why, note: note)
+            return true
+        }
         return false
+    }
+
+    /// A move refused before its card: once the message is through, the model works out why from the balances and offers
+    /// the way that works, as the Mac's noteFailure → explainFailure. Not inside a request the model carries on (it hears
+    /// it there), a scheduled run or a run on the automation wallet.
+    func noteRefusal(_ what: String, _ why: String, note: String?) {
+        guard agentGoal == nil, TaskRun.automation == nil, note != "schedule" else { return }
+        Task { await explainOnceFree(what, why) }
+    }
+
+    private func explainOnceFree(_ what: String, _ why: String) async {
+        // ponytail: polls the turn's end (30 s at most); a hook at the end of send() if it ever misses one.
+        for _ in 0..<150 where thinking { try? await Task.sleep(for: .milliseconds(200)) }
+        guard !thinking, pending == nil, running == nil, agentGoal == nil else { return }
+        await explainFailure(what, why: why)
+    }
+
+    /// The USDC (or USDT0) a move takes from an EVM network, read from its node now: the last balance read may be a minute
+    /// old, and a move right after money landed was refused with «0 there» (the Mac's freshenSource). Only that row changes.
+    func freshenSource(_ command: WalletCommand) async {
+        guard TaskRun.automation == nil, let owner = evmAddress, !owner.isEmpty, portfolio.updatedAt != nil else { return }
+        let place: String?, usdt: Bool
+        switch command {
+        case .evmToSolana(let n, _), .bridge(from: let n, to: _, _), .cctp(from: let n, to: _, _): (place, usdt) = (n, false)
+        case .buyOn(_, _, _, let from?): (place, usdt) = (from, false)
+        case .usdt(let from, _, _, _): (place, usdt) = (from, true)
+        case .baseToSolana: (place, usdt) = ("base", false)
+        case .arbitrumToSolana: (place, usdt) = ("arbitrum", false)
+        case .robinhoodToSolana: (place, usdt) = ("robinhood", false)
+        default: (place, usdt) = (nil, false)
+        }
+        guard let place, let net = EVMNetwork.named(place) else { return }
+        let token = usdt ? Stablecoins.find("USDT", on: place)?.address : nil
+        guard !usdt || token != nil else { return }
+        let units: UInt64?
+        if let token { units = try? await net.rpc.tokenBalance(token, owner: owner) } else { units = try? await net.usdcBalance(owner) }
+        guard let units else { return }
+        let amount = Decimal(units) / 1_000_000
+        patchDollar(place, symbol: usdt ? "USDT" : (place == "robinhood" ? "USDG" : "USDC"), contract: usdt ? token : nil, amount: amount)
+    }
+
+    /// A network's dollar row set to what was just read, the rest of its card as it was.
+    private func patchDollar(_ place: String, symbol: String, contract: String?, amount: Decimal) {
+        var p = portfolio
+        guard let i = p.networks.firstIndex(where: { $0.key == place }) ?? (amount > 0 ? p.networks.endIndex : nil) else { return }
+        if i == p.networks.endIndex { p.networks.append(PortfolioView.Network(key: place, name: WalletCommand.placeName(place), usd: 0, rows: [])) }
+        var rows = p.networks[i].rows
+        let match = { (r: PortfolioView.Row) in r.section == "tokens" && r.symbol == symbol && (contract == nil ? r.contract == nil : r.contract?.lowercased() == contract?.lowercased()) }
+        let old = rows.firstIndex(where: match)
+        if let old {
+            if amount > 0 { rows[old].value = amount; rows[old].amount = Fmt.num(amount); rows[old].usd = amount } else { rows.remove(at: old) }
+        } else if amount > 0 {
+            var r = Self.row(symbol, amount, usd: amount)
+            r.contract = contract
+            rows.insert(r, at: 0)
+        }
+        p.networks[i].rows = rows
+        portfolio = p
     }
 
     // MARK: «How much?» (14)
@@ -453,11 +515,10 @@ extension Engine {
 
     // MARK: A waiting card on a canvas left (15)
 
-    /// Leaving a canvas: its waiting card waits there, a quarter of an hour (the Mac's parkedPending). A site's request is
-    /// the browser's and is declined, as before.
+    /// Leaving a canvas: its waiting card waits there, a quarter of an hour (the Mac's parkedPending). A site's request
+    /// isn't a card: it waits in its own block until answered (Consent.swift).
     func parkPending() -> Bool {
         guard let pending, let card else { return false }
-        if case .site = pending { return false }
         parked[canvasID] = (pending, card, intent, Date())
         self.pending = nil
         self.card = nil
@@ -502,8 +563,54 @@ extension Engine {
     }
 
     /// The Mac's route for a money move: where from, through what, where to, each with the balance it changes; nil for a
-    /// command drawn as one step (its quotes and way picker live on that step).
-    func routeSteps(_ c: WalletCommand) -> [Board.Step]? {
+    /// command drawn as one step (its quotes and way picker live on that step). «all USDC» reads as the amount itself.
+    func routeSteps(_ c: WalletCommand) -> [Board.Step]? { rawRouteSteps(c).map(amountsForAll) }
+
+    /// «all USDT» on a step reads as the number held, «all available» small under it (the Mac's step(): the user wants
+    /// the number, not «all»); the later steps saying the same «all» take the same number. Left as words when unread.
+    func amountsForAll(_ steps: [Board.Step]) -> [Board.Step] {
+        var found: [String: Decimal] = [:]
+        let all = say("all available", "всё, что есть")
+        return steps.map { step in
+            var s = step
+            let word = ["all ", "всё "].first { s.title.hasPrefix($0) }
+            guard let word else { return s }
+            let unit = String(s.title.dropFirst(word.count))
+            guard let x = found[s.title] ?? heldForAll(unit, label: s.label), x > 0 else { return s }
+            found[s.title] = x
+            s.title = "\(Fmt.num(x, maxFraction: 8)) \(unit)"
+            // An approve says exactly what it allows; the others say it's all there is.
+            if !s.label.hasPrefix("APPROVE"), !s.label.hasPrefix("РАЗРЕШЕНИЕ") {
+                let first = s.lines.first ?? ""
+                s.lines = [first.isEmpty ? all : "\(all) · \(first)"] + s.lines.dropFirst()
+            }
+            return s
+        }
+    }
+
+    /// What «all <unit>» comes to at the step's place («FROM · KAMINO», «FROM · BASE»…); nil when that isn't read.
+    private func heldForAll(_ unit: String, label: String) -> Decimal? {
+        let place = (label.components(separatedBy: "·").dropFirst().last ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+        // «FROM · AAVE · BASE»: what's lent there, not the wallet's free dollars.
+        for what in ["Aave", "Morpho"] where label.uppercased().contains(what.uppercased()) {
+            let keys = EVMNetwork.all.map(\.key)
+            guard let key = keys.first(where: { WalletCommand.placeName($0).uppercased() == place }), rowsRead(key) != nil else { return nil }
+            return depositThere([what], on: key)
+        }
+        switch place {
+        case "": return nil
+        case "KAMINO": return rowsRead("solana") == nil ? nil : depositThere(["Kamino Lend", "Kamino"], on: "solana")
+        case "JUPITER LEND": return rowsRead("solana") == nil ? nil : depositThere(["Jupiter Lend"], on: "solana")
+        case "HLP VAULT", "ХРАНИЛИЩЕ HLP": return placeFacts.hyperliquid == nil ? nil : hlpEquity
+        case "JITOSOL": return heldThere("JitoSOL", on: "solana")
+        default:
+            let keys = ["solana", "hyperliquid", "near"] + EVMNetwork.all.map(\.key)
+            guard let key = keys.first(where: { WalletCommand.placeName($0).uppercased() == place || $0.uppercased() == place }) else { return nil }
+            return heldThere(unit, on: key)
+        }
+    }
+
+    private func rawRouteSteps(_ c: WalletCommand) -> [Board.Step]? {
         func n(_ d: Decimal?, _ unit: String) -> String { d.map { "\(Fmt.num($0, maxFraction: 6)) \(unit)" } ?? say("all \(unit)", "всё \(unit)") }
         let solUSDC = usdcFree(on: "solana").map { say("free: \(Fmt.num($0)) USDC", "свободно: \(Fmt.num($0)) USDC") } ?? ""
         let solSOL = heldThere("SOL", on: "solana").map { say("free: \(Fmt.num($0, maxFraction: 4)) SOL", "свободно: \(Fmt.num($0, maxFraction: 4)) SOL") } ?? ""

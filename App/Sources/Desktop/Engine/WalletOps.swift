@@ -21,7 +21,7 @@ extension Engine {
         do {
             let reply = try await SignerLink.shared.send(.status)
             guard reply.ok else { throw WalletError(LinkTradeSigner.reason(reply)) }
-            status = reply
+            statusHeard(reply)
             lockHeard(codeSet: reply.codeSet == true)
             signerError = nil
             await readLedgerAgent()
@@ -101,6 +101,9 @@ extension Engine {
         if let problem = AddressCheck.problem(entry.address, network: net) { throw WalletError(problem) }
         let reply = try await signerCall(.saveAddresses([entry]))
         book = reply.addresses ?? book
+        // What a save from the chat brought (an ENS name's note, an exchange's logo) goes beside it now that it's saved.
+        let key = Self.extraKey(name: entry.name, network: entry.network)
+        if let extra = Self.savingExtras.removeValue(forKey: key), extra != AddressExtra(), addressExtras[key] == nil { addressExtras[key] = extra }
     }
 
     func removeAddress(name: String, network: String) async throws {

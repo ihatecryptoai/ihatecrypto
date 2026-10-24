@@ -300,9 +300,10 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
     writeln!(input, "{line}").and_then(|_| input.flush()).map_err(|e| format!("the engine stopped: {e}"))
 }
 
-/// ihatecrypto's browser, as the Mac's: a window of its own with our toolbar on top (back, reload, the address and its
-/// check, the connection) and the site under it with the wallet provider in every page. The site shares nothing with
-/// either of our pages; its only way to the wallet is `dapp_call`.
+/// ihatecrypto's browser, as the Mac's: our toolbar on top (back, reload, the address and its check, the connection)
+/// and the site under it with the wallet provider in every page, in the panel beside the chat («open jup.ag», the
+/// profile menu's Browser, a portfolio row, a page's «with the wallet») and, by its «Move to its own window», in a
+/// window of its own. The site shares nothing with either of our pages; its only way to the wallet is `dapp_call`.
 // Async: on Windows a webview made inside a synchronous command waits on the event loop that command holds, and the
 // window stays white (wry #583).
 #[tauri::command]
@@ -311,31 +312,58 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
     if let Some(engine) = app.try_state::<Engine>() {
         if let Ok(mut page) = engine.browser.lock() { page.asked = Some(url.clone()); }
     }
+    // One panel at a time, as the Mac's: a page beside the chat gives way to the site.
+    web::close_page(&app);
+    let main = app.get_window("main").ok_or("The main window is closed.")?;
+    if !main.is_visible().unwrap_or(true) { show(&app); }
     if let Some(site) = app.get_webview(SITE) {
-        // The same page again only comes forward; another one opens in it.
+        // The same page again only comes back; another one opens in it.
         if site.url().map(|u| u != url).unwrap_or(true) { site.navigate(url).map_err(|e| e.to_string())?; }
-        let window = site.window();
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        // In its own window: back beside the chat with its page and connection, as the Mac's openSite closes that
+        // window first — one web view can't show in two places.
+        if site.window().label() != "main" {
+            let own = site.window();
+            for label in [BAR, SITE] { if let Some(v) = app.get_webview(label) { v.reparent(&main).map_err(|e| e.to_string())?; } }
+            let _ = own.close();
+            let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+        }
+        web::layout_panel(&app);
         return Ok(());
     }
-    // A new window starts clean: the last one's title and banner height aren't this page's.
+    // A new browser starts clean: the last one's title and banner height aren't this page's.
     if let Some(engine) = app.try_state::<Engine>() {
-        if let Ok(mut page) = engine.browser.lock() { page.title.clear(); page.loading = true; page.bar = BAR_HEIGHT; }
+        if let Ok(mut page) = engine.browser.lock() { page.title.clear(); page.loading = true; page.bar = BAR_HEIGHT + web::PANEL_HEAD; }
     }
-    let window = tauri::window::Window::builder(&app, BROWSER_WINDOW)
+    main.add_child(tauri::webview::WebviewBuilder::new(BAR, tauri::WebviewUrl::App("browser-bar.html".into())),
+                   tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0)).map_err(|e| e.to_string())?;
+    let site = main.add_child(site_view(&app, url), tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0))
+        .map_err(|e| e.to_string())?;
+    web::watch(&site, &app);
+    web::layout_panel(&app);
+    Ok(())
+}
+
+/// The browser's own window, which «Move to its own window» moves the toolbar and the site into, page and connection kept.
+fn browser_window(app: &tauri::AppHandle) -> Result<tauri::Window, String> {
+    let window = tauri::window::Window::builder(app, BROWSER_WINDOW)
         .title("ihatecrypto · browser")
         .inner_size(1180.0, 800.0)
         .min_inner_size(640.0, 420.0)
         .build()
         .map_err(|e| e.to_string())?;
     if !has_room(&window, 1180.0, 800.0) { let _ = window.maximize(); }
-    let size = window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(window.scale_factor().map_err(|e| e.to_string())?);
-    let bar = tauri::webview::WebviewBuilder::new(BAR, tauri::WebviewUrl::App("browser-bar.html".into()));
-    window.add_child(bar, tauri::LogicalPosition::new(0.0, TOP), tauri::LogicalSize::new(size.width, BAR_HEIGHT)).map_err(|e| e.to_string())?;
+    for label in [BAR, SITE] { if let Some(v) = app.get_webview(label) { v.reparent(&window).map_err(|e| e.to_string())?; } }
+    layout_browser(&window);
+    let _ = window.set_focus();
+    let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+    Ok(window)
+}
+
+/// The site's webview, wherever it shows: https only, the wallet provider in its page (never a frame's), the phishing
+/// check before and after each load.
+fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::WebviewBuilder<tauri::Wry> {
     let (loads, titles, goes) = (app.clone(), app.clone(), app.clone());
-    let site = tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
+    tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
         .initialization_script(include_str!("provider.js"))
         // Pages stay on https; anything else (a file, a custom scheme) isn't opened here, nor a phishing site.
         .on_navigation(move |u| site_allowed(&goes, u))
@@ -367,11 +395,7 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
                 if let Ok(mut page) = engine.browser.lock() { page.title = title; }
             }
             let _ = titles.emit_to(EventTarget::webview(BAR), "browser", ());
-        });
-    let site = window.add_child(site, tauri::LogicalPosition::new(0.0, TOP + BAR_HEIGHT), tauri::LogicalSize::new(size.width, (size.height - TOP - BAR_HEIGHT).max(0.0)))
-        .map_err(|e| e.to_string())?;
-    web::watch(&site, &app);
-    Ok(())
+        })
 }
 
 /// The check after a page loaded, with all the time the engine needs.
@@ -400,7 +424,10 @@ fn has_room(window: &tauri::Window, width: f64, height: f64) -> bool {
 
 /// The toolbar across the top at its own height, the site in the rest: on every resize and change of scale.
 fn layout_browser(window: &tauri::Window) {
-    let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
+    // macOS (a developer's run) gives a window whose webviews came by «Move to its own window» its first webview's size
+    // as its own (tauri-runtime-wry's inner_size); its frame is the window's. Windows reads the window itself.
+    let size = if cfg!(target_os = "macos") { window.outer_size() } else { window.inner_size() };
+    let (Ok(size), Ok(scale)) = (size, window.scale_factor()) else { return };
     let size = size.to_logical::<f64>(scale);
     let app = window.app_handle();
     let bar = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().map(|p| p.bar)).unwrap_or(BAR_HEIGHT);
@@ -431,6 +458,14 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
             engine_call(&state, line, std::time::Duration::from_secs(10)).await?;
             site.reload()
         }
+        // The panel's «Move to its own window»: the same page, its connection kept.
+        "window" if web::wallet_in_panel(webview.app_handle()) => { browser_window(webview.app_handle())?; Ok(()) }
+        // The panel's close; in its own window the window's close does it.
+        "close" => {
+            if web::wallet_in_panel(webview.app_handle()) { for label in [SITE, BAR] { if let Some(v) = webview.app_handle().get_webview(label) { let _ = v.close(); } } }
+            else if let Some(w) = webview.app_handle().get_window(BROWSER_WINDOW) { let _ = w.close(); }
+            Ok(())
+        }
         _ => return Err(format!("unknown action {action}")),
     };
     done.map_err(|e| e.to_string())
@@ -449,7 +484,8 @@ async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>)
         if url.scheme() != "https" || page.blocked.is_some() { if let Some(asked) = &page.asked { url = asked.clone(); } }
         serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "russian": page.russian,
                             "connected": false, "check": "local", "real": null, "blocked": page.blocked.is_some(), "blockedHost": page.blocked,
-                            "back": page.back || !web::NATIVE_HISTORY, "forward": page.forward || !web::NATIVE_HISTORY, "error": page.error })
+                            "back": page.back || !web::NATIVE_HISTORY, "forward": page.forward || !web::NATIVE_HISTORY, "error": page.error,
+                            "panel": web::wallet_in_panel(webview.app_handle()) })
     };
     if let Some(origin) = origin_of(&url) {
         out["check"] = "unknown".into();
@@ -473,8 +509,8 @@ async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>)
 #[tauri::command]
 fn browser_layout(webview: tauri::Webview, state: tauri::State<'_, Engine>, height: f64) -> Result<(), String> {
     if webview.label() != BAR { return Err("only the browser's toolbar".into()) }
-    state.browser.lock().map_err(|_| "the engine is gone")?.bar = height.clamp(40.0, 200.0);
-    layout_browser(&webview.window());
+    state.browser.lock().map_err(|_| "the engine is gone")?.bar = height.clamp(40.0, 260.0);
+    if web::wallet_in_panel(webview.app_handle()) { web::layout_panel(webview.app_handle()) } else { layout_browser(&webview.window()) }
     Ok(())
 }
 
@@ -494,7 +530,9 @@ async fn dapp_call(webview: tauri::Webview, request: tauri::ipc::Request<'_>, st
     }
     const METHODS: [&str; 6] = ["connect", "disconnect", "signMessage", "signTransaction", "signAndSendTransaction", "eth"];
     if !METHODS.contains(&method.as_str()) { return Err(format!("ihatecrypto doesn't support {method}.")) }
-    let line = serde_json::json!({ "op": "dapp", "name": method, "text": params.to_string(), "address": origin });
+    // The page's title for the second check (Jev reads host and title, as on the Mac); the toolbar's own copy of it.
+    let title = state.browser.lock().map(|p| p.title.clone()).unwrap_or_default();
+    let line = serde_json::json!({ "op": "dapp", "name": method, "text": params.to_string(), "address": origin, "label": title });
     // The person may take a while to read the card.
     let v = engine_call(&state, line, std::time::Duration::from_secs(900)).await?;
     if v["ok"].as_bool() == Some(true) {
@@ -576,6 +614,14 @@ fn copy_secret(text: String) -> Result<(), String> {
     }
 }
 
+/// The words off the clipboard now («I wrote them down», leaving the screen), as the Mac wipes them: only if the
+/// clipboard still holds what copy_secret put there.
+#[tauri::command]
+fn clear_secret() {
+    #[cfg(windows)]
+    secret_clipboard::clear_now();
+}
+
 #[cfg(windows)]
 mod secret_clipboard {
     use windows::Win32::Foundation::HANDLE;
@@ -584,6 +630,19 @@ mod secret_clipboard {
     use windows::core::w;
 
     const CF_UNICODETEXT: u32 = 13;
+    /// The clipboard's sequence number right after the words went on it; 0 once they're gone.
+    static COPIED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    pub fn clear_now() {
+        use std::sync::atomic::Ordering;
+        let copied = COPIED.swap(0, Ordering::SeqCst);
+        unsafe {
+            if copied != 0 && GetClipboardSequenceNumber() == copied && OpenClipboard(None).is_ok() {
+                let _ = EmptyClipboard();
+                let _ = CloseClipboard();
+            }
+        }
+    }
 
     unsafe fn put(format: u32, bytes: &[u8]) -> bool {
         unsafe {
@@ -608,12 +667,11 @@ mod secret_clipboard {
             let _ = CloseClipboard();
             if !ok { return Err("the clipboard refused it".into()) }
             let copied = GetClipboardSequenceNumber();
+            COPIED.store(copied, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(60));
-                if GetClipboardSequenceNumber() == copied && OpenClipboard(None).is_ok() {
-                    let _ = EmptyClipboard();
-                    let _ = CloseClipboard();
-                }
+                // Only these words: something copied since, or a wipe already done, is left alone.
+                if COPIED.load(std::sync::atomic::Ordering::SeqCst) == copied { clear_now() }
             });
         }
         Ok(())
@@ -752,7 +810,7 @@ fn main() {
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } if window.label() == "main" => web::layout_panel(window.app_handle()),
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, update_check, update_install, listen, open_browser, dapp_call,
+        .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, clear_secret, update_check, update_install, listen, open_browser, dapp_call,
             browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout,
             system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::hide_main, system::quit_app,
             system::open_notification_settings, listen_live, listen_stop])

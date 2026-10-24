@@ -1,5 +1,6 @@
 import Foundation
 import IhatecryptoCore
+import OneClickKit
 import SolanaChain
 import TradeExecution
 import WalletCore
@@ -8,6 +9,25 @@ import WalletCore
 /// the node's history, priced on the day for what came in unpaid), from the app's own buys, or — when nothing tells —
 /// from when the app first saw it.
 extension Engine {
+    /// Native NEAR bought through NEAR Intents: each swap the journal signed, as 1Click settled it (the Mac's
+    /// nearCoinChanges); nil when the journal or the account can't be read.
+    func nearCoinChanges() async -> [CostBasis.Change]? {
+        guard let account = nearAddress, let entries = try? journal.entries() else { return nil }
+        var swaps: [(id: String, at: Date)] = []
+        for e in entries where e.chain == "1click" && e.kind == .signed && e.note.contains("NEAR") && !swaps.contains(where: { $0.id == e.id }) {
+            swaps.append((e.id, e.at))
+        }
+        let settled = await withTaskGroup(of: (String, OneClick.Settled?).self) { group in
+            for s in swaps { group.addTask { (s.id, try? await OneClick.settled(depositAddress: s.id)) } }
+            var out: [String: OneClick.Settled] = [:]
+            for await (id, s) in group { out[id] = s }
+            return out
+        }
+        return swaps.compactMap { s in
+            settled[s.id]?.near(for: account).map { CostBasis.Change(at: s.at, tokens: $0.amount, paid: $0.amount > 0 ? $0.dollars : nil) }
+        }
+    }
+
     /// The cost a coin's P/L is measured from: the chain's or the app's, whichever covers more of it; else «seen».
     func cost(_ key: String) -> CostBasis? {
         [chainCost[key]?.cost, appCosts[key]].compactMap { $0 }.filter { $0.amount > 0 }.max { $0.amount < $1.amount }
@@ -59,7 +79,8 @@ extension Engine {
                 if spot == nil { spot = await Holdings.hyperliquidEntries(user: evm) }
                 basis = spot.map { $0[w.contract] ?? CostBasis() }
             case "near":
-                guard w.contract != "native", let account = nearAddress else { break }
+                if w.contract == "native" { changes = await nearCoinChanges(); break }
+                guard let account = nearAddress else { break }
                 if nearTokens == nil { nearTokens = await Holdings.nearTokenChanges(account: account) }
                 changes = nearTokens.map { $0[w.contract] ?? [] }
             default:

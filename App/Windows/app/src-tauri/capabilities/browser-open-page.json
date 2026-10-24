@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "browser-open-page",
-  "description": "The main window opens a web page beside the canvas (a link on a block or in the chat), as the Mac's WebPanel; open_page itself takes only the main window's own page.",
-  "windows": [
+  "description": "The main window's own page (webview «main») opens a web page beside the canvas (a link on a block or in the chat), as the Mac's WebPanel. Its webview, not the whole window: the panel's pages and the dApp browser beside the chat are webviews of the same window.",
+  "webviews": [
     "main"
   ],
   "permissions": [

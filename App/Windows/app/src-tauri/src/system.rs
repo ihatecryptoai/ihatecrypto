@@ -330,5 +330,7 @@ pub fn started_hidden() -> bool { std::env::args().any(|a| a == "--hidden") }
 /// its browser and import windows on lock — nothing of the wallet stays on screen behind the lock.
 pub fn locked(app: &tauri::AppHandle) {
     if let Some(window) = app.get_window(crate::BROWSER_WINDOW) { let _ = window.close(); }
-    for label in [crate::web::PANEL, crate::web::PANEL_BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } }
+    // The browser beside the chat, and the page there.
+    if crate::web::wallet_in_panel(app) { for label in [crate::SITE, crate::BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } } }
+    crate::web::close_page(app);
 }

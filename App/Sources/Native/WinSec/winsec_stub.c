@@ -44,6 +44,13 @@ int32_t winsec_hello_sign(const uint8_t *name, size_t name_len, const uint8_t *c
     return WINSEC_OK;
 }
 
+int32_t winsec_hello_sign_within(const uint8_t *name, size_t name_len, const uint8_t *challenge, size_t challenge_len,
+                                 const uint8_t *reason, size_t reason_len, int32_t create, uint32_t timeout_ms, uint8_t **out,
+                                 size_t *out_len) {
+    (void)timeout_ms;
+    return winsec_hello_sign(name, name_len, challenge, challenge_len, reason, reason_len, create, out, out_len);
+}
+
 int32_t winsec_hello_in_tpm(const uint8_t *name, size_t name_len) { (void)name; (void)name_len; return WINSEC_UNAVAILABLE; }
 
 static int32_t xor_copy(const uint8_t *data, size_t len, uint8_t **out, size_t *out_len) {

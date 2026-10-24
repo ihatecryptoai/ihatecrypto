@@ -2,7 +2,8 @@
    wallet, the person's browser, close. Our own page over the plain web view. */
 body { background: var(--card); }
 #head { display: flex; align-items: center; gap: 6px; height: 46px; padding: 0 8px 0 10px; border: 1px solid var(--card-border);
-  border-bottom-color: var(--separator); border-radius: 14px 14px 0 0; background: var(--card); }
+  border-bottom-color: var(--separator); border-radius: 14px 14px 0 0; background: var(--card); cursor: grab; user-select: none; }
+#head button { cursor: default; }
 .panel-lock { flex: none; color: var(--secondary); display: inline-flex; }
 .panel-lock .ico { width: 11px; height: 11px; }
 .panel-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
@@ -10,3 +11,9 @@ body { background: var(--card); }
 .panel-name span { font-size: 10px; color: var(--secondary); }
 .panel-copied { color: var(--profit); }
 .panel-error { font-size: 10px; color: var(--loss); }
+/* The panel's left edge sizes it (the Mac's ResizeEdge): a bar shows while the pointer is on it. Shared with the browser's
+   toolbar beside the chat. */
+#edge { position: fixed; left: 0; top: 0; bottom: 0; width: 8px; z-index: 2; cursor: ew-resize; }
+#edge::after { content: ""; position: absolute; left: 2px; top: 50%; width: 4px; height: 28px; margin-top: -14px; border-radius: 2px;
+  background: var(--accent); opacity: 0; transition: opacity .12s; }
+#edge:hover::after, #edge:active::after { opacity: .7; }

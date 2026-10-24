@@ -471,3 +471,28 @@
 .route-service-writing { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 .route-service-fact { display: flex; justify-content: space-between; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--separator); font-size: 12.5px; }
 .route-service-fact b { text-align: right; overflow-wrap: anywhere; }
+
+/* Wave 5 (cards): the waiting route's signing footer, the Confirm's quote state, Favorites' token card beside the list,
+   and a site's request with its ticks (the Mac's ApprovalSheet). */
+.route-footer { display: flex; gap: 6px; max-width: 560px; font-size: 12px; line-height: 1.5; color: color-mix(in srgb, var(--text) 78%, transparent); user-select: text; }
+.route-footer .ico { margin-top: 1px; flex: none; }
+.route-quoting { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 6px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.route-fav-row { display: flex; align-items: flex-start; gap: 36px; flex-wrap: wrap; }
+.route-site { display: flex; flex-direction: column; gap: 12px; width: 520px; max-width: 100%; padding: 18px; border-radius: 20px; background: var(--card); border: 1px solid var(--card-border); }
+.route-site-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.route-site-letter { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; border-radius: 13px; background: var(--fill); font-size: 20px; font-weight: 800; }
+.route-site-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.route-site-host { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.route-site-host b { font-size: 18px; font-weight: 800; min-width: 0; }
+.route-site-host .route-status-chip { display: inline-flex; align-items: center; gap: 4px; }
+.route-status-chip.route-amber { background: var(--jev-tint); color: var(--jev-ink); }
+.route-site-origin { font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--secondary); overflow-wrap: anywhere; }
+.route-site-lines { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.route-site-tick { display: flex; flex-direction: column; gap: 4px; padding: 11px 13px; border-radius: 14px; background: var(--jev-tint); color: var(--jev-ink); }
+.route-site-tick b { font-size: 12.5px; }
+.route-site-tick .secondary { color: color-mix(in srgb, var(--jev-ink) 80%, transparent); overflow-wrap: anywhere; }
+.route-site-toggle { display: inline-flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.route-site-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.route-site-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.route-status-chip.route-amber, .route-outcome.route-amber { color: var(--jev-ink); }
+.route-status-chip.route-amber { background: var(--jev-tint); }

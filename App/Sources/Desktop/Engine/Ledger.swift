@@ -296,9 +296,7 @@ extension Engine {
         guard account.active != on else { return }
         account.active = on
         ledger = account
-        cancelPending()
-        portfolio = PortfolioView()
-        loadEquity()
+        walletChanged()
         Task { await refresh() }
     }
 

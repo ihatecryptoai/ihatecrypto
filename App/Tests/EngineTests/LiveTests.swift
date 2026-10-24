@@ -21,14 +21,14 @@ import Testing
     }
 
     @Test func aPausedScheduleRunsNothingAndARunGoesInTheHistory() throws {
-        let paused = try EngineTests.Engine(seed: ["tasks.json": try Self.dueTask(), "settings.json": Data(#"{"schedulePaused":true}"#.utf8)])
+        let paused = try EngineTests.Engine(seed: sealedTasks(try Self.dueTask()).merging(["settings.json": Data(#"{"schedulePaused":true}"#.utf8)]) { a, _ in a })
         try paused.call("hello")
         let held = try #require(try Self.wait(paused, tries: 3) { _ in false })
         #expect(held["schedulePaused"] as? Bool == true)
         #expect((held["scheduleRuns"] as? [Any])?.isEmpty == true)
         #expect((held["tasks"] as? [Any])?.count == 1, "a paused schedule ran its task")
 
-        let engine = try EngineTests.Engine(seed: ["tasks.json": try Self.dueTask()])
+        let engine = try EngineTests.Engine(seed: sealedTasks(try Self.dueTask()))
         try engine.call("hello")
         let ran = try #require(try Self.wait(engine) { !(($0["scheduleRuns"] as? [Any]) ?? []).isEmpty })
         let run = try #require((ran["scheduleRuns"] as? [[String: Any]])?.first)

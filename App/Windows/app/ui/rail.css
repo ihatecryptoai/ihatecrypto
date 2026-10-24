@@ -336,3 +336,9 @@ button.rail-pk-way:hover { border-color: rgba(255, 122, 47, 0.7); }
 .rail-ms-step b { font-size: 13px; }
 .rail-ms-n { width: 24px; height: 24px; border-radius: 50%; background: var(--fill-strong); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none; }
 .rail-ms-make { display: flex; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--separator); }
+
+/* While the chat answers or a move runs no other canvas opens (canSwitch in rail.js): its rows and New say so, faded. */
+.rail-crow-open:disabled, .rail-hover-icon.new:disabled { opacity: 0.5; cursor: default; }
+
+/* The last balance while the networks are still answering (the Mac shows it dimmed). */
+.rail-stale { opacity: 0.45; }

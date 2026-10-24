@@ -1,6 +1,9 @@
 import EVMChain
 import ExecutionCore
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import GuardJev
 import IhatecryptoCore
 import OneClickKit
@@ -37,7 +40,9 @@ extension Engine {
         let owes = automation != nil
         // The Ledger signs while it's on (never a task's run on the automation wallet).
         let signer: any TradeSigner = automation == nil && ledgerActive ? ledgerSigner(wallet) : tradeSigner(asWallet: automation?.id)
-        return Executor(wallet: wallet, signer: signer, journal: journal) { [weak self] text in
+        // ihatecrypto's Hyperliquid fee is asked for on the first Confirm, as the Mac's executor(askFee: !owes); never on a
+        // task's run on the automation wallet, where no one reads the signer's window.
+        return Executor(wallet: wallet, signer: signer, journal: journal, askFee: !owes) { [weak self] text in
             Task { @MainActor in
                 guard let self else { return }
                 self.running?.lines.append(text)
@@ -68,8 +73,6 @@ extension Engine {
     // MARK: Cards
 
     func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = [], cautions: [String] = []) {
-        // A site's request that waited is declined: a new card takes its place.
-        if case .site(let ask)? = self.pending { ask.answer(false) }
         // A card waiting before this one stays on the canvas, marked: nothing of it was signed.
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Replaced by the next card: nothing was signed.", "Заменена следующей карточкой: ничего не подписано.")) }
         self.pending = pending
@@ -87,8 +90,9 @@ extension Engine {
         noteRoute(id, pending)
     }
 
-    func cancelPending() {
-        if case .site(let ask)? = pending { ask.answer(false) }
+    /// Cancel on the card: with its id, only that card (an older button can't cancel a newer one).
+    func cancelPending(card id: String? = nil) {
+        if let id, id != card?.id { return }
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Cancelled: nothing was signed.", "Отменено: ничего не подписано.")) }
         if case .wallet(.multisigCreate)? = pending { multisigDraft = nil }
         pending = nil
@@ -122,6 +126,15 @@ extension Engine {
         case .sell(let a, let x) where !a.resolved:
             guard let token = await spotToken(a, note: note) else { return }
             command = .sell(token, amount: x)
+        case .jupiterDCA(let a, let u, let o, let e) where !a.resolved:
+            guard let token = await spotToken(a, note: note) else { return }
+            command = .jupiterDCA(token, usdc: u, orders: o, every: e)
+        case .jupiterDCACancel(let a?) where !a.resolved:
+            guard let token = await spotToken(a, note: note) else { return }
+            command = .jupiterDCACancel(token)
+        // Both sides of a Solana swap checked as a buy is, before the card draws.
+        case .swapOn("solana", let a, let b, _):
+            guard await solanaAsset(a, note: note) != nil, await solanaAsset(b, note: note) != nil else { return }
         default: break
         }
         if let missing = missingKey(command) { reply(missing, note: note); return }
@@ -130,11 +143,12 @@ extension Engine {
         switch command {
         case .sendTo(let name, let amount, let net): prepareTransfer(amount, to: name, network: net, note: note); return
         case .receive:
-            pin(Board(kind: "receive", title: "receive"))
-            let lines = [solanaAddress.map { "Solana: \($0)" }, evmAddress.map { "Base, Arbitrum, Ethereum, Hyperliquid…: \($0)" }, nearAddress.map { "NEAR: \($0)" }]
-            reply(say("Your addresses (Receive shows them with Copy):\n", "Твои адреса (во вкладке «Получить» — с кнопкой «Копировать»):\n")
-                  + lines.compactMap { $0 }.joined(separator: "\n")
-                  + say("\nSend money there from an exchange or another wallet, on that network.", "\nОтправь туда деньги с биржи или другого кошелька, именно в этой сети."), note: note)
+            // Top up opens with every address, its QR and the ways in (the Mac's showReceive); the chat names Solana's ends
+            // only — the whole addresses are where Copy is.
+            out.event("openView", ["view": "topup"])
+            let sol = solanaAddress.flatMap { $0.isEmpty ? nil : AddressCheck.ends($0) }.map { "Solana \($0.start) … \($0.end)" }
+            reply(say("Top up is open\(sol.map { " — \($0) for USDC and SOL (recommended)" } ?? ""), plus Base for USDC and ETH. ihatecrypto can’t pull money in; send it there from an exchange or another wallet, on that network. It shows up within about a minute and I’ll tell you when it arrives. To put money you already have into a vault, say “deposit 1 USDC into Jupiter”.",
+                      "Открыл «Пополнить»\(sol.map { " — \($0) для USDC и SOL (рекомендую)" } ?? ""), и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через минуту, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter»."), note: note)
             return
         case .sendNear(let name, _), .closeNear(let name):
             guard saved(name, on: "near") != nil else {
@@ -167,18 +181,20 @@ extension Engine {
             guard let token = await spotToken(asset, note: note) else { return }
             let buy = WalletCommand.buy(token, usdc: usdc)
             let every = days == 7 ? say("week", "неделю") : days == 1 ? say("day", "день") : say("\(days) days", "\(days) дн.")
+            // Its Confirm buys now and turns the schedule on; each next buy runs at its time with Windows Hello, as the Mac's.
+            let monthly = Fmt.usd(usdc * Decimal(30) / Decimal(days))
             show(.recurring(buy, days: days), title: say("\(buy.summary), then every \(every)", "\(buy.summary), потом раз в \(every)"),
-                 lines: [say("This buy now. The next ones start in \(every), each as a card for Confirm.", "Эта покупка сейчас. Следующие — через \(every), каждая карточкой на подтверждение.")])
-            reply(say("Recurring buy: the first one is the card below. Once it goes through, the next ones come every \(every) as cards.",
-                      "Регулярная покупка: первая — карточка ниже. Когда она пройдёт, следующие будут приходить раз в \(every) карточками."), note: note)
+                 lines: [say("This buy now. The next ones run every \(every) while ihatecrypto is open, each with Windows Hello.",
+                             "Эта покупка сейчас. Следующие — раз в \(every), пока ihatecrypto открыт, каждая с Windows Hello.")])
+            reply(say("Scheduled purchases: \(buy.summary) every \(every) — ≈ \(monthly) a month. The first one is on the canvas: its Confirm buys now and turns the schedule on, Cancel leaves none. The next ones run while ihatecrypto is open; each goes through the same checks and Windows Hello.",
+                      "Регулярные покупки: \(buy.summary) раз в \(every) — ≈ \(monthly) в месяц. Первая — карточкой на холсте: «Подтвердить» купит сейчас и включит расписание, «Отмена» не оставит его. Следующие пойдут, пока ihatecrypto открыт; каждая проходит те же проверки и Windows Hello."), note: note)
             return
         case .stopSchedules:
-            func isBuy(_ t: ScheduledTask) -> Bool {
-                guard t.steps.count == 1, case .buy? = WalletCommand.parse(t.steps[0]) else { return false }
-                return true
-            }
-            let buys = tasks.filter(isBuy)
-            tasks.removeAll { t in buys.contains { $0.id == t.id } }
+            // Only the recurring buys: a buy the person scheduled as a task stays (the Mac's schedules = []).
+            let marked = recurringBuys
+            let buys = tasks.filter { marked.contains($0.id) }
+            tasks.removeAll { marked.contains($0.id) }
+            recurringBuys = []
             reply(buys.isEmpty ? say("There were no recurring buys.", "Регулярных покупок не было.") : say("Recurring buys stopped (\(buys.count)).", "Регулярные покупки остановлены (\(buys.count))."), note: note)
             return
         case .yields(let asset): await showYields(asset, note: note); return
@@ -198,6 +214,8 @@ extension Engine {
             reply(say(question, "Сколько? Напиши число.") + amountHint(command), note: note)
             return
         }
+        // The network the move takes from, read again now: the last read may be a minute old (the Mac's freshenSource).
+        await freshenSource(command)
         if checkedBeforeCard(&command, note: note) { return }
         show(.wallet(command), title: command.summary, lines: await preview(command), cautions: sendCautions(command))
         reply(say("Understood: \(command.summary). The card is above the field — press Confirm, then Windows Hello shows what is signed. Or Cancel.",
@@ -335,7 +353,11 @@ extension Engine {
             return
         }
         if let off = ModuleNetwork(place: entry.network).flatMap({ Modules.current.refusal(network: $0, ru: russian) }) { reply(off, note: note); return }
-        if let short = transferShortfall(entry.network, amount) { reply(short, note: note); return }
+        if let short = transferShortfall(entry.network, amount) {
+            reply(short, note: note)
+            noteRefusal("send \(Fmt.num(amount)) USDC to \(entry.name) on \(entry.network)", short, note: note)
+            return
+        }
         let title = say("Send \(Fmt.num(amount)) USDC to “\(entry.name)”", "Отправить \(Fmt.num(amount)) USDC на «\(entry.name)»")
         // The first time money goes to someone else's address, and an entry saved for another network: said on the card.
         let cautions = [otherNetworkWarning(saved: savedFor, sent: entry.network), firstSendWarning(entry.address)].compactMap { $0 }
@@ -352,8 +374,11 @@ extension Engine {
         case .save(var address, let name, var network):
             // A name (vitalik.eth, toly.sol) is read on its own chain now, and the address it points at is what's saved:
             // the name changing hands later moves nothing.
+            var domain: String?
             if ENS.isName(address) || SNS.isName(address) {
-                let domain = address
+                let domain0 = address
+                domain = domain0
+                let domain = domain0
                 do {
                     address = ENS.isName(domain) ? try await ENS.resolve(domain) : try await SNS.resolve(domain)
                     network = network ?? (domain.hasSuffix(".sol") ? "solana" : "ethereum")
@@ -369,10 +394,27 @@ extension Engine {
                 return
             }
             if let problem = AddressCheck.problem(address, network: kind) { reply(problem); return }
+            // The same address on the same network is one entry, under the name it has (the Mac's «Already saved as»).
+            if let same = book.first(where: { $0.network == net && $0.address.lowercased() == address.lowercased() }) {
+                reply(say("Already saved as “\(same.name)”.", "Уже сохранён как «\(same.name)»."))
+                return
+            }
             let entry = SignerAddress(name: name, network: net, address: address)
+            let key = Self.extraKey(name: name, network: net)
+            Self.savingExtras[key] = AddressExtra(note: domain.map { "\($0) — read on-chain \(Date().formatted(.iso8601.year().month().day()))" })
             show(.address(entry), title: say("Save “\(name)” to Addresses", "Сохранить «\(name)» в адреса"), lines: ["\(kind.title): \(address)"])
-            reply(say("Press Confirm to save it: Windows Hello shows the whole address, check every character.",
-                      "Нажми «Подтвердить», чтобы сохранить: Windows Hello покажет весь адрес — сверь каждый символ."))
+            let ends = AddressCheck.ends(address)
+            if let domain {
+                reply(say("\(domain) points at \(ends.start)…\(ends.end) on \(kind.title), read on-chain just now. Check it on the canvas; Confirm asks for Windows Hello with the whole address.",
+                          "\(domain) ведёт на \(ends.start)…\(ends.end) в \(kind.title) — прочитано в сети только что. Сверь на холсте; «Подтвердить» спросит Windows Hello с полным адресом."))
+            } else {
+                reply(say("Check it on the canvas: \(kind.title), starts \(ends.start), ends \(ends.end) — exactly as in your message. Confirm to save; Windows Hello shows the whole address.",
+                          "Сверь на холсте: \(kind.title), начало \(ends.start), конец \(ends.end) — как в твоём сообщении. Подтверди, чтобы сохранить; Windows Hello покажет весь адрес."))
+                // A known exchange's logo, from its own site; the entry works without it.
+                if let site = name.split(separator: " ").first.map({ $0.lowercased() }), let known = Self.exchanges[site] {
+                    Task { await fetchExchangeLogo(known, for: key) }
+                }
+            }
         case .favorite(let name, let on):
             // A saved address as a favorite (Favorites › Wallets); an address not saved is a token if a pool trades it.
             let key = name.lowercased(), written = AddressBookCommand.address(in: name)
@@ -389,10 +431,25 @@ extension Engine {
 
     // MARK: Positions and trades
 
+    /// Which position a position command is about, as the Mac's: never a guess — the asset the message names, else the
+    /// plan's asset if it has a position, else the only one when no plan is on screen. A limit waiting counts as open.
     func targetCoin(for text: String) -> String? {
-        let open = Set(positions.map(\.coin))
+        let open = Set(positions.map(\.coin) + (pendingEntry.map { [$0.coin] } ?? []))
         if let named = IntentParser.namedAsset(text, markets: Set(markets.keys)) { return open.contains(named) ? named : nil }
-        return open.count == 1 ? open.first : nil
+        if intent != TradeIntent(), open.contains(intent.asset) { return intent.asset }
+        return intent == TradeIntent() && open.count == 1 ? open.first : nil
+    }
+
+    /// A limit entry waiting on Hyperliquid's book (its stop and take are the trigger orders beside it): it can fill, so
+    /// it counts as a position for «cancel orders» and «close» (the Mac's pendingEntry).
+    var pendingEntry: HyperliquidAccount.Order? { hlOrders.first { !$0.isTrigger } }
+
+    /// What the portfolio says under Hyperliquid while one waits (the Mac's PortfolioNetworks).
+    var limitWaitingLine: String? {
+        pendingEntry.map { o in
+            let side = o.side == "B" ? say("long", "лонг") : say("short", "шорт"), at = o.limitPx.map(Fmt.price) ?? "?"
+            return say("Limit waiting: \(side) \(IntentParser.pretty(o.coin)) at \(at)", "Лимит ждёт: \(side) \(IntentParser.pretty(o.coin)) по \(at)")
+        }
     }
 
     func askWhichPosition() {
@@ -414,32 +471,57 @@ extension Engine {
 
     // A chain of steps («… then …»): Chains.swift.
 
-    /// The second check of a trade: the chat's model reads the plan against the user's words (Jev too, when allowed),
-    /// and its signatures with their balance changes. It can only warn.
-    func reviewPlan(_ intent: TradeIntent, _ p: Executor.Prepared) async -> String? {
+    /// How the second check read a plan: it matches, it has a doubt (said in its words), or it couldn't run (said why).
+    enum PlanReview: Equatable { case matches, doubt(String), notChecked(String) }
+
+    /// The second check of a trade, as the Mac's reviewPlan: the chat's model reads the plan against the user's words and
+    /// its reading decides; Jev's concern counts when the model couldn't answer, and Jev reads the signatures with their
+    /// balance changes too. Neither answering is said, never shown as «All correct». It can only warn.
+    func reviewPlan(_ intent: TradeIntent, _ p: Executor.Prepared) async -> PlanReview {
         let requests = messages.filter(\.fromUser).suffix(6).map(\.text)
         let lines = [intent.command] + planAlertFacts() + p.steps
-        if let client = llmClient(), let why = try? await ChatRouter.verifyPlan(requests: requests, plan: lines, language: replyLanguage, client: client, model: model) {
-            return why
+        var modelRead = false, failed: String?
+        if let client = llmClient() {
+            do {
+                if let why = try await ChatRouter.verifyPlan(requests: requests, plan: lines, language: replyLanguage, client: client, model: model) { return .doubt(why) }
+                modelRead = true
+            } catch { failed = error.localizedDescription }
         }
-        guard let key = jevKey else { return nil }
-        if let r = try? await JevReviewer.plan(requests: requests, plan: lines, apiKey: key), r.concern { return r.text }
-        if let r = try? await JevReviewer.transactions(plan: lines, signatures: p.steps, changes: p.changes, apiKey: key), r.concern { return r.text }
-        return nil
+        var jevRead = false
+        if let key = jevKey {
+            if !modelRead, let r = try? await JevReviewer.plan(requests: requests, plan: lines, apiKey: key) {
+                if r.concern { return .doubt(r.text) }
+                jevRead = true
+            }
+            if let r = try? await JevReviewer.transactions(plan: lines, signatures: p.steps, changes: p.changes, apiKey: key) {
+                if r.concern { return .doubt(r.text) }
+                jevRead = true
+            }
+        }
+        if modelRead || jevRead { return .matches }
+        return .notChecked(Self.notChecking(failed, ru: russian))
+    }
+
+    /// The route's line when the second check couldn't read the plan (the Mac's jevNote).
+    nonisolated static func notChecking(_ failed: String?, ru: Bool) -> String {
+        ru ? "Вторая проверка не сработала" + (failed.map { ": \($0)" } ?? ": подключи модель в «Настройки › Входы»") + ". Действуют только проверки в коде."
+            : "The second check couldn't run" + (failed.map { ": \($0)" } ?? ": connect a model in Settings › Sign-ins") + ". Only code checks apply."
     }
 
     // MARK: Confirm
 
-    /// The Confirm button: the one way a move starts.
-    func confirm() async {
+    /// The Confirm button: the one way a move starts. With the card's id it confirms only that card — one drawn after the
+    /// click was aimed (another move, a scheduled run's) waits for its own; a site's request has its own answer (Consent.swift).
+    func confirm(card id: String? = nil) async {
+        if let id, id != card?.id { return }
         guard let waiting = pending, let title = card?.title else { return }
         retry = nil
-        // A site's request: Confirm lets it through; the browser's handler signs it, with the signer's own checks.
-        if case .site(let ask) = waiting {
-            updateBoard(card?.id) { $0.state = "done" }
+        // Settings › Modules switched off since the card was drawn: refused now too.
+        if let off = confirmRefusal(waiting) {
+            updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(off) }
             pending = nil
             card = nil
-            ask.answer(true)
+            reply(off)
             changed()
             return
         }
@@ -465,12 +547,15 @@ extension Engine {
         defer {
             // What the move ended with stays on its block.
             let outcome = messages.dropFirst(said).last { !$0.fromUser }?.text
+            var ended: String?
             updateBoard(runningBoard) { b in
                 if b.state == "running" { b.state = "done" }
                 if let outcome { b.lines.append(String(outcome.prefix(400))) }
                 lastMove = (Date(), b.state ?? "done")
+                ended = b.state
             }
-            noticeMove(title, state: lastMove?.state)
+            // A card that gave way to fresh numbers (a trade confirmed late) ended nothing: no notice for it.
+            if let ended { noticeMove(title, state: ended) }
             // Its steps stay in the chat as one card, before what it ended with (ChatTurns.keepSteps).
             keepSteps(at: said)
             runningBoard = nil
@@ -491,8 +576,13 @@ extension Engine {
             case .position(let command, let coin): reply(try await executor().manage(command, asset: coin, policy: policy, equity: ruleEquity), note: "Hyperliquid")
             case .trade(let p):
                 guard p.isFresh else {
-                    // The bridge transaction's blockhash is about to expire: fresh numbers, asked again.
+                    // Older than 45 s (the bridge transaction's blockhash is about to expire): fresh numbers on a new card,
+                    // asked again, as the Mac's confirmExecution. Nothing was signed, so this card leaves no «Done».
+                    if let old = runningBoard { boards.removeAll { $0.id == old } }
+                    runningBoard = nil
                     await plan(p.intent)
+                    reply(say("Numbers refreshed: the confirmation was older than 45 seconds. Check the card again and press Confirm.",
+                              "Цифры обновлены: подтверждению было больше 45 секунд. Проверь карточку ещё раз и нажми «Подтвердить»."), note: "Hyperliquid")
                     return
                 }
                 let opened = try await executor().execute(p)
@@ -509,18 +599,19 @@ extension Engine {
                 var recurring = ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
                 recurring.fromActive = true
                 tasks.append(recurring)
+                recurringBuys.insert(recurring.id)
             case .chain(let steps): try await runChain(steps)
             case .address(let entry):
                 try await saveAddress(entry)
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))
-            case .site(let ask): ask.answer(true) // answered above; kept for the switch
             case .orders(let moves, let coin, let traded): reply(try await moveOrders(moves, coin: coin, intent: traded), note: "Hyperliquid")
             }
             noteSent(waiting)
         } catch {
-            updateBoard(runningBoard) { $0.state = "failed" }
-            // Sent, but no outcome came back: it may have gone through, and a second try would pay twice.
+            // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown»,
+            // never «failed» (the Mac's finish(false, unknown:)).
             let sent = (try? journal.unresolved())?.filter { $0.at >= started.addingTimeInterval(-1) } ?? []
+            updateBoard(runningBoard) { $0.state = sent.isEmpty ? "failed" : "unknown" }
             if sent.isEmpty, let loss = error as? CostlyMove {
                 // More lost than a move may lose on its own: asked, not refused.
                 costly = (waiting, title, loss.lost)
@@ -547,11 +638,40 @@ extension Engine {
 
     static let sendAnyway = "__send anyway", leaveCostly = "__leave it"
 
+    /// What a save from the chat keeps beside the address once it's saved: an ENS/SNS name's note, an exchange's logo.
+    static var savingExtras: [String: AddressExtra] = [:]
+
+    /// Exchanges whose logo a saved name brings, by the name's first word: their own sites, nobody else's (the Mac's
+    /// AddressIcons.exchanges; a first word guessed into «<word>.com» would tell a stranger's site about the save).
+    static let exchanges = ["binance": "binance.com", "bybit": "bybit.com", "okx": "okx.com", "coinbase": "coinbase.com",
+                            "kraken": "kraken.com", "kucoin": "kucoin.com", "bitget": "bitget.com", "mexc": "mexc.com",
+                            "gate": "gate.io", "htx": "htx.com", "bitfinex": "bitfinex.com", "gemini": "gemini.com"]
+
+    /// The exchange's own touch icon, asked of its own site, kept for the save waiting on `key`.
+    func fetchExchangeLogo(_ domain: String, for key: String) async {
+        guard let icon = await Self.siteLogo(domain), var extra = Self.savingExtras[key] else { return }
+        extra.icon = icon
+        Self.savingExtras[key] = extra
+    }
+
+    /// A site's apple-touch-icon as a small picture of the window's own kind (a PNG data URL, CanvasIcon.checked);
+    /// nil when it has none, isn't a PNG or is too big to keep inline.
+    nonisolated static func siteLogo(_ domain: String) async -> CanvasIcon? {
+        guard let url = URL(string: "https://\(domain)/apple-touch-icon.png"),
+              let (data, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 58_000, data.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { return nil }
+        return CanvasIcon.checked(CanvasIcon(kind: "image", value: "data:image/png;base64," + data.base64EncodedString()))
+    }
+
+    /// What «Send anyway» accepts for a loss the card named (the Mac's Agent.swift: × 1.25 + $0.05).
+    nonisolated static func acceptedLoss(_ lost: Decimal) -> Decimal { lost * Decimal(string: "1.25")! + Decimal(string: "0.05")! }
+
     /// «Send anyway» on a move the loss cap stopped: the same move once more, that loss accepted.
     func sendAnyway() async {
         guard let c = costly else { return }
         costly = nil
-        await Executor.$lossAccepted.withValue(c.lost) {
+        // A fresh quote can lose a little more than the one asked about: a quarter more and 5 cents, as the Mac's.
+        await Executor.$lossAccepted.withValue(Self.acceptedLoss(c.lost)) {
             show(c.pending, title: c.title)
             await confirm()
         }
@@ -691,10 +811,10 @@ extension Engine {
     }
 
     /// A Solana token a swap names — USDC, a ticker or a mint — checked as a buy is.
-    func solanaAsset(_ ref: String) async -> SpotAsset? {
+    func solanaAsset(_ ref: String, note: String? = nil) async -> SpotAsset? {
         if ref.uppercased() == "USDC" { return .usdc }
         let mint = Stablecoins.find(ref, on: "solana")?.address ?? ref
-        return await spotToken(mint.count >= 32 ? .byMint(mint) : .bySymbol(mint), note: nil)
+        return await spotToken(mint.count >= 32 ? .byMint(mint) : .bySymbol(mint), note: note)
     }
 
     // MARK: History

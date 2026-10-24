@@ -68,6 +68,13 @@ nonisolated struct CanvasDoc: Codable, Equatable, Identifiable {
     var model: String?
     /// A scheduled item's own canvas: «task:<id>» or «perp:<coin>» (Schedule.swift).
     var schedule: String?
+    /// What its chat was in when the person left it, back when they come back and across a restart (the Mac's
+    /// CanvasSession): the trade plan, its board and the plan a trade came from, the skills loaded, the last reply's cards.
+    var intent: TradeIntent?
+    var planBoard: String?
+    var tradedPlan: TradeIntent?
+    var skills: [String]?
+    var offers: [ChatRouter.Option]?
 }
 
 extension Engine {
@@ -104,6 +111,9 @@ extension Engine {
     }
 
     func saveCanvases() {
+        keepCanvasState()
+        // The History keeps its own copy, so nothing said leaves it with a canvas (HistoryStore).
+        HistoryStore.record(canvases)
         var kept = canvases
         for i in kept.indices { kept[i].messages = Array(kept[i].messages.suffix(300)) }
         Store.save(kept, "canvases.json")
@@ -124,7 +134,8 @@ extension Engine {
             return b.id
         }
         list.insert(board, at: 0)
-        boards = Array(list.prefix(60))
+        // Nothing leaves the canvas (the Mac's EarlierBoards keeps every finished move): no cap.
+        boards = list
         return board.id
     }
 
@@ -150,8 +161,12 @@ extension Engine {
 
     // MARK: Canvases
 
-    func newCanvas() throws {
-        try leaveCanvas()
+    /// Another canvas may open: nothing is being answered or carried out (the Mac's canSwitchCanvas), so a reply or a
+    /// move's outcome can't land on a canvas it wasn't asked on. The chat's own «new canvas» passes `fromChat`.
+    var canSwitchCanvas: Bool { !thinking && running == nil && runningBoard == nil }
+
+    func newCanvas(fromChat: Bool = false) throws {
+        try leaveCanvas(fromChat: fromChat)
         forgetUnkept()
         let c = CanvasDoc(title: say("New canvas", "Новый холст"))
         canvases.insert(c, at: 0)
@@ -183,25 +198,72 @@ extension Engine {
         saveCanvases()
     }
 
-    /// A running move stays where it was started; a waiting card stays on its canvas, marked as not confirmed.
-    private func leaveCanvas() throws {
-        guard running == nil else { throw WalletError(say("A move is running: wait for it to finish.", "Идёт перевод: дождись, пока он закончится.")) }
+    /// A running move stays where it was started; a waiting card stays on its canvas, marked as not confirmed. What the
+    /// chat was in stays with the canvas (keepCanvasState).
+    private func leaveCanvas(fromChat: Bool = false) throws {
+        guard running == nil, runningBoard == nil else { throw WalletError(say("A move is running: wait for it to finish.", "Идёт перевод: дождись, пока он закончится.")) }
+        guard fromChat || !thinking else {
+            throw WalletError(say("The chat is still answering: wait for it, or press Stop.", "Чат ещё отвечает: подожди или нажми «Стоп»."))
+        }
         if card != nil, !parkPending() {
             updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Left without Confirm: nothing was signed.", "Ушёл без «Подтвердить»: ничего не подписано.")) }
             pending = nil
             card = nil
         }
+        keepCanvasState()
         options = []
         awaitingAmount = nil
         intent = TradeIntent()
+        planBoard = nil
+        tradedPlan = nil
         loadedSkills = []
     }
 
     private func afterSwitch() {
+        restoreCanvasState()
         unparkPending()
         settings.canvas = canvasID
         saveCanvases()
         changed()
+    }
+
+    /// The open canvas keeps its plan, skills and live cards (saved with canvases.json).
+    func keepCanvasState() {
+        let i = canvasIndex
+        canvases[i].intent = intent == TradeIntent() ? nil : intent
+        canvases[i].planBoard = planBoard
+        canvases[i].tradedPlan = tradedPlan
+        canvases[i].skills = loadedSkills.isEmpty ? nil : loadedSkills
+        // The last reply's cards while none is picked and nothing was said after them.
+        let last = canvases[i].messages.last
+        canvases[i].offers = !options.isEmpty && last?.id == optionsMessage && last?.picked == nil ? options : nil
+    }
+
+    /// Back on a canvas (or at launch): its plan, skills, model and the last reply's cards as they were; a chart older
+    /// than five minutes read again, as the Mac reloads a stale snapshot (Canvases.load).
+    func restoreCanvasState() {
+        let c = canvases[canvasIndex]
+        intent = c.intent ?? TradeIntent()
+        planBoard = c.planBoard.flatMap { id in c.boards.contains { $0.id == id } ? id : nil }
+        tradedPlan = c.tradedPlan
+        loadedSkills = c.skills ?? []
+        if let offers = c.offers, let last = c.messages.last, !last.fromUser, last.picked == nil, !offers.isEmpty { options = offers }
+        // The model the canvas was talked through, while that account is still connected (C3).
+        if let id = c.provider, id != providerID, let p = provider(id), p.info.unavailable == nil, Store.credentials()[id] != nil || p.info.kind == .local {
+            settings.provider = id
+            if let m = c.model { setModel(m, for: id) }
+        }
+        let stale = c.boards.filter { $0.kind == "chart" && $0.chart?.coin != nil && Date().timeIntervalSince($0.at) > 300 }.prefix(3)
+        for b in stale { Task { await reloadChart(b.id) } }
+    }
+
+    /// A chart board drawn again from fresh candles, in its own range; it keeps its place and time on the canvas.
+    func reloadChart(_ id: String) async {
+        guard let b = canvases.lazy.flatMap(\.boards).first(where: { $0.id == id }), let coin = b.chart?.coin else { return }
+        let range = ChartCommand.Range.allCases.first { b.title.hasSuffix($0.title) } ?? .day
+        guard var line = try? await chartLine(coin, range: range) else { return }
+        line.network = b.chart?.network
+        updateBoard(id) { $0.chart = line }
     }
 
     /// The first thing said on a canvas names it, as the Mac's canvas list does.
@@ -259,7 +321,6 @@ extension Engine {
         case .orders: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
         case .trade: return [Board.Step(label: say("TRADE · Hyperliquid", "СДЕЛКА · Hyperliquid"), title: title, lines: lines)]
         case .address(let e): return [Board.Step(label: say("SAVE · ", "СОХРАНИТЬ · ") + networkName(e.network), title: title, lines: lines)]
-        case .site: return [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)]
         }
     }
 

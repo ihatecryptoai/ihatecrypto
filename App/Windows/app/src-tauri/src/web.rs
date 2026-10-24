@@ -3,7 +3,7 @@
 
 use tauri::{Emitter, EventTarget, Manager};
 
-use crate::{BrowserPage, Engine, BAR, SITE};
+use crate::{BrowserPage, Engine, BAR, BAR_HEIGHT, SITE};
 
 /// Windows reads Back and Forward from WebView2. Elsewhere (a developer's run on a Mac) both stay on, as the Mac's Back is.
 pub const NATIVE_HISTORY: bool = cfg!(windows);
@@ -13,18 +13,35 @@ pub const NATIVE_HISTORY: bool = cfg!(windows);
 pub const PANEL_BAR: &str = "panel-bar";
 pub const PANEL: &str = "panel";
 const PANEL_BAR_HEIGHT: f64 = 46.0;
+/// The dApp browser in the panel: its toolbar under a row of the panel's own («With your wallet», its own window, close).
+pub const PANEL_HEAD: f64 = 40.0;
 
-/// Where the main page has the rail and the chat (its own storage, which the header page shares): the panel sits beside
-/// the chat in its corner, or at the right once the chat is moved, as on the Mac.
+/// Where the main page has the rail and the chat (its own storage, which the header pages share): the panel sits beside
+/// the chat in its corner, or at the right once the chat is moved, as on the Mac. Its width (0: its own) and how far its
+/// header moved it left of its place are the Mac's webWidth and webX, kept in the same storage.
 #[derive(Clone, Copy)]
 pub struct PanelPlace {
     pub folded: Option<bool>,
     pub chat: f64,
     pub docked: bool,
+    pub width: f64,
+    pub offset: f64,
+    /// Something fills the main window (Settings, a sheet): the panel is out of sight, as the Mac's under Settings.
+    pub hidden: bool,
 }
 
 impl Default for PanelPlace {
-    fn default() -> Self { Self { folded: None, chat: 350.0, docked: true } }
+    fn default() -> Self { Self { folded: None, chat: 350.0, docked: true, width: 0.0, offset: 0.0, hidden: false } }
+}
+
+/// The dApp browser shows in the panel: its site is a webview of the main window, not of its own window.
+pub fn wallet_in_panel(app: &tauri::AppHandle) -> bool {
+    app.get_webview(SITE).is_some_and(|site| site.window().label() == "main")
+}
+
+/// The panel's page gives way (to the dApp browser, or on the lock).
+pub fn close_page(app: &tauri::AppHandle) {
+    for label in [PANEL, PANEL_BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } }
 }
 
 fn page_of<'a>(engine: &'a Engine, label: &str) -> &'a std::sync::Mutex<BrowserPage> {
@@ -148,6 +165,9 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     if let Some(engine) = app.try_state::<Engine>() {
         if let Ok(mut p) = engine.side.lock() { p.asked = Some(url.clone()); }
     }
+    // One panel at a time, as the Mac's: the dApp browser beside the chat gives way to the page.
+    // ponytail: closed, not kept hidden as the Mac keeps its browser; the next «open» loads the site again.
+    if wallet_in_panel(&app) { for label in [SITE, BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } } }
     if let Some(page) = app.get_webview(PANEL) {
         page.navigate(url).map_err(|e| e.to_string())?;
         layout_panel(&app);
@@ -160,7 +180,7 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
         }
     }
     let window = app.get_window("main").ok_or("The main window is closed.")?;
-    let (bar, rest) = panel_rects(&app).ok_or("The main window is closed.")?;
+    let (bar, rest, _, _) = panel_rects(&app, PANEL_BAR_HEIGHT).ok_or("The main window is closed.")?;
     let header = tauri::webview::WebviewBuilder::new(PANEL_BAR, tauri::WebviewUrl::App("browser-panel.html".into()));
     window.add_child(header, tauri::LogicalPosition::new(bar[0], bar[1]), tauri::LogicalSize::new(bar[2], bar[3])).map_err(|e| e.to_string())?;
     let (loads, titles, opens) = (app.clone(), app.clone(), app.clone());
@@ -183,9 +203,11 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     Ok(())
 }
 
-/// The panel's header and page in the main window, as the Mac's Studio places WebPanel: right of the rail, beside the
-/// chat in its corner (at the right when the chat is moved), at most 760 wide and 62% of the room, the window's height.
-fn panel_rects(app: &tauri::AppHandle) -> Option<([f64; 4], [f64; 4])> {
+/// The panel's header (`head` tall) and page in the main window, as the Mac's Studio places WebPanel: right of the rail,
+/// beside the chat in its corner (at the right when the chat is moved), its own width at most 760 and 62% of the room or
+/// the one its edge was dragged to, moved left by its header no further than the rail, the window's height. Also the
+/// width and offset it takes, which the header keeps.
+fn panel_rects(app: &tauri::AppHandle, head: f64) -> Option<([f64; 4], [f64; 4], f64, f64)> {
     let window = app.get_window("main")?;
     let size = window.inner_size().ok()?.to_logical::<f64>(window.scale_factor().ok()?);
     let place = app.try_state::<Engine>().and_then(|e| e.panel.lock().ok().map(|p| *p)).unwrap_or_default();
@@ -193,34 +215,56 @@ fn panel_rects(app: &tauri::AppHandle) -> Option<([f64; 4], [f64; 4])> {
     let room = (size.width - rail).max(0.0);
     let chat = place.chat.min((room / 2.0).max(320.0));
     let beside = if place.docked { chat + 32.0 } else { 16.0 };
-    let width = (room - beside - 16.0).max(380.0).min((((room - beside) * 0.62).max(380.0)).min(760.0)).min((size.width - beside - rail - 8.0).max(240.0));
+    let widest = (room - beside - 16.0).max(380.0);
+    let own = if place.width > 0.0 { place.width.clamp(380.0, widest) } else { widest.min((((room - beside) * 0.62).max(380.0)).min(760.0)) };
+    let width = own.min((size.width - beside - rail - 8.0).max(240.0));
     // Windows' minimize, maximize and close sit at the top right: a panel reaching there starts under them.
     let top = if place.docked { 16.0 } else { 44.0 };
     let height = (size.height - top - 16.0).max(300.0);
-    let x = size.width - beside - width;
-    Some(([x, top, width, PANEL_BAR_HEIGHT], [x, top + PANEL_BAR_HEIGHT, width, height - PANEL_BAR_HEIGHT]))
+    let home = size.width - beside - width;
+    let offset = place.offset.min(0.0).max((rail + 8.0 - home).min(0.0));
+    let x = home + offset;
+    Some(([x, top, width, head], [x, top + head, width, height - head], width, offset))
 }
 
-/// On a resize of the main window, and when the rail or the chat moved.
+/// On a resize of the main window, when the rail or the chat moved, and as the panel's header moves or resizes it: the
+/// page with its header, or the dApp browser with its toolbar.
 pub fn layout_panel(app: &tauri::AppHandle) {
-    let Some((bar, rest)) = panel_rects(app) else { return };
+    let place = app.try_state::<Engine>().and_then(|e| e.panel.lock().ok().map(|p| *p)).unwrap_or_default();
+    let (top, page) = if wallet_in_panel(app) {
+        let bar = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().map(|p| p.bar)).unwrap_or(BAR_HEIGHT + PANEL_HEAD);
+        ((BAR, bar), SITE)
+    } else {
+        ((PANEL_BAR, PANEL_BAR_HEIGHT), PANEL)
+    };
+    let Some((bar, rest, _, _)) = panel_rects(app, top.1) else { return };
     let rect = |r: [f64; 4]| tauri::Rect { position: tauri::LogicalPosition::new(r[0], r[1]).into(), size: tauri::LogicalSize::new(r[2], r[3]).into() };
-    if let Some(v) = app.get_webview(PANEL_BAR) { let _ = v.set_bounds(rect(bar)); }
-    if let Some(v) = app.get_webview(PANEL) { let _ = v.set_bounds(rect(rest)); }
+    for (label, r) in [(top.0, bar), (page, rest)] {
+        let Some(v) = app.get_webview(label) else { continue };
+        if place.hidden { let _ = v.hide(); } else { let _ = v.set_bounds(rect(r)); let _ = v.show(); }
+    }
 }
 
-/// The header's report of where the main page has the rail and the chat (its storage changed, or it just loaded).
+/// A header's report of where the main page has the rail and the chat (its storage changed, or it just loaded), and of
+/// the panel's width and offset (its edge or header dragged). The answer is the width and offset the panel took.
 #[tauri::command]
 pub fn page_layout(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::State<'_, Engine>, folded: Option<bool>, chat: Option<f64>,
-                   x: Option<f64>, y: Option<f64>) -> Result<(), String> {
-    if webview.label() != PANEL_BAR { return Err("only the page's header".into()) }
+                   x: Option<f64>, y: Option<f64>, width: Option<f64>, offset: Option<f64>, hidden: Option<bool>) -> Result<serde_json::Value, String> {
+    // The page's header, or the browser's toolbar while the browser is in the panel.
+    if webview.label() != PANEL_BAR && webview.label() != BAR { return Err("only the panel's header".into()) }
+    let finite = |v: Option<f64>| v.filter(|v| v.is_finite());
     *state.panel.lock().map_err(|_| "the engine is gone")? = PanelPlace {
         folded,
-        chat: chat.unwrap_or(350.0).clamp(320.0, 4000.0),
-        docked: x.unwrap_or(0.0) > -40.0 && y.unwrap_or(0.0) > -40.0,
+        chat: finite(chat).unwrap_or(350.0).clamp(320.0, 4000.0),
+        docked: finite(x).unwrap_or(0.0) > -40.0 && finite(y).unwrap_or(0.0) > -40.0,
+        width: finite(width).unwrap_or(0.0).clamp(0.0, 8000.0),
+        offset: finite(offset).unwrap_or(0.0).clamp(-8000.0, 0.0),
+        hidden: hidden == Some(true),
     };
     layout_panel(&app);
-    Ok(())
+    let head = if webview.label() == BAR { state.browser.lock().map(|p| p.bar).unwrap_or(BAR_HEIGHT) } else { PANEL_BAR_HEIGHT };
+    let (_, _, width, offset) = panel_rects(&app, head).ok_or("The main window is closed.")?;
+    Ok(serde_json::json!({ "width": width, "offset": offset }))
 }
 
 /// The header's buttons: back, forward, reload, stop, close, the page with the wallet (the browser), the page in the

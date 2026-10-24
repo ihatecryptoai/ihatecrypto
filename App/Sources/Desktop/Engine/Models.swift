@@ -35,7 +35,43 @@ extension Engine {
 
     func provider(_ id: String) -> (any LLMProvider)? { LLMCatalog.provider(id: id) }
 
-    var model: String { settings.model ?? provider(providerID)?.info.defaultModel ?? "" }
+    var model: String { model(of: providerID) }
+
+    /// The model chosen for an account, kept per account as on the Mac (`modelChoices`): switching away and back brings it
+    /// back. A subscription that no longer offers it (a lapsed plan answers 400 for it) has its first listed model stand in,
+    /// and the choice comes back once the list has it again.
+    /// ponytail: the live list is what the provider listed last; a choice it dropped from a long list is stood in for too.
+    func model(of id: String) -> String {
+        guard let info = provider(id)?.info else { return "" }
+        let chosen = settings.models?[id] ?? (id == settings.provider ? settings.model : nil) ?? info.defaultModel
+        if info.kind == .subscription, let live = liveModels[id], let first = live.first, !live.contains(chosen) { return first }
+        return chosen
+    }
+
+    /// The model for an account; nil goes back to its default.
+    func setModel(_ model: String?, for id: String) {
+        var all = settings.models ?? [:]
+        all[id] = model.flatMap { $0.isEmpty ? nil : $0 }
+        settings.models = all.isEmpty ? nil : all
+        if id == settings.provider { settings.model = nil }
+    }
+
+    /// The model menu's or Settings' «Use»: the chat's account goes on with this model, on this canvas too.
+    func chooseModel(_ model: String?) {
+        setModel(model, for: providerID)
+        canvasTalked(provider: providerID)
+    }
+
+    /// The chat goes on with this account, as the profile menu's and Settings' «Switch» do (the Mac's useAccount): its
+    /// model stays as chosen for it, and on this PC the first downloaded chat model stands in for one that isn't there.
+    func useAccount(_ id: String, model: String? = nil) {
+        guard let p = provider(id), p.info.unavailable == nil, Store.credentials()[id] != nil || p.info.kind == .local else { return }
+        settings.provider = id
+        if let model { setModel(model, for: id) }
+        if provider(id)?.info.kind == .local, let live = liveModels[id], !live.contains(self.model),
+           let first = live.first(where: { LLMCatalog.chatRefusal(model: $0) == nil }) { setModel(first, for: id) }
+        canvasTalked(provider: id)
+    }
 
     /// The model client (the chat's account, or `id`'s for Settings' Check), or nil when it isn't connected: then the chat
     /// reads plain commands only.
@@ -89,16 +125,18 @@ extension Engine {
 
     /// A key typed in the window, or a login another tool already has (Claude Code, Codex) when no key is given.
     /// Without a key, an account connected before is switched to as it is: «Switch to OpenRouter» sends the provider only.
+    /// A new login doesn't switch the chat to it (the owner, 2026-10-20: «я просто хотел подключить другой аккаунт»),
+    /// unless the chat has no model to go on with; a model on this PC picked is a switch.
     func connect(provider id: String, key: String?, model: String?) async throws {
         guard let p = provider(id) else { throw WalletError("No model provider «\(id)».") }
         if let why = p.info.unavailable { throw WalletError(why) }
         let typed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Checked with its one short answer when it was kept: switching back asks the model nothing.
         if typed.isEmpty, Store.credentials()[id] != nil {
-            settings.provider = id
-            settings.model = model ?? p.info.defaultModel
+            useAccount(id, model: model)
             return
         }
+        let hadModel = hasModel
         let credential: Credential?
         if !typed.isEmpty {
             credential = .apiKey(typed)
@@ -114,8 +152,8 @@ extension Engine {
         let chosen = model ?? p.info.defaultModel
         _ = try await client.complete(LLMRequest(model: chosen, messages: [LLMMessage(.user, "Reply with OK.")]))
         if let credential { Store.setCredential(credential, for: id) }
-        settings.provider = id
-        settings.model = chosen
+        if let model { setModel(model, for: id) }
+        if !hadModel || (p.info.kind == .local && typed.isEmpty) { useAccount(id) }
     }
 
     /// The provider's browser sign-in: the window opens the page (the «openURL» event), the redirect comes back to
@@ -123,10 +161,21 @@ extension Engine {
     func signIn(provider id: String) async throws {
         guard let p = provider(id), p.info.signInLabel != nil else { throw WalletError("«\(id)» has no browser sign-in: paste its key.") }
         let out = out
+        let hadModel = hasModel
         let credential = try await p.signIn(open: { url in out.event("openURL", ["url": url.absoluteString]) })
         Store.setCredential(credential, for: id)
-        settings.provider = id
-        settings.model = p.info.defaultModel
+        if !hadModel { useAccount(id) }
+    }
+
+    /// Settings › Second check › Connect: OpenRouter signed in for the second check alone (the Mac's signInJev) — the
+    /// chat stays on its own account.
+    func signInJev() async throws {
+        guard let p = provider("openrouter") else { return }
+        let out = out
+        let credential = try await p.signIn(open: { url in out.event("openURL", ["url": url.absoluteString]) })
+        Store.setCredential(credential, for: "openrouter")
+        settings.jevOpenRouter = true
+        reply(say("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель."))
     }
 
     var secondCheck: Bool { settings.secondCheck ?? true }

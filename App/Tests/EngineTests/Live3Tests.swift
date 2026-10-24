@@ -27,7 +27,7 @@ import Testing
     @Test func aTaskOpensOnItsOwnCanvasAndRunNowKeepsItsNextRun() throws {
         let id = UUID().uuidString, next = Date().addingTimeInterval(3600).timeIntervalSinceReferenceDate
         let task: [String: Any] = ["id": id, "steps": ["remember: run now"], "next": next, "every": ["days": ["_0": 1]]]
-        let engine = try EngineTests.Engine(seed: ["tasks.json": try JSONSerialization.data(withJSONObject: [task])])
+        let engine = try EngineTests.Engine(seed: sealedTasks(try JSONSerialization.data(withJSONObject: [task])))
         try engine.call("hello")
         let key = "task:" + id
         let opened = try #require(try engine.call("openSchedule", ["name": key]).state)

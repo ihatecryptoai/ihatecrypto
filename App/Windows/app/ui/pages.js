@@ -2,7 +2,7 @@
 // sidebar of tabs, each a column of sections with rows), History (HistoryView.swift) and Top up (ReceiveBoard in
 // Receive.swift). Settings cover the chat while open; History and Top up keep it floating, as the canvas does.
 
-import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode, usd } from "./core.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode, usd, popup } from "./core.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel } from "./chat.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
@@ -140,9 +140,8 @@ function general(s) {
         h("span", { class: "secondary" }, t("Keeps it in the tray", "Оставляет в трее"))))),
     s.nodes ? nodesSection(s.nodes) : null,
     s.nodes ? oneClickSection(s.nodes) : null,
-    section("arrow.down.circle", t("About", "О приложении"), t("An update installs only when its signature matches ihatecrypto's key.", "Обновление ставится, только если его подпись совпадает с ключом ihatecrypto."),
-      group(row({ label: t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle" },
-        h("button", { class: "btn small", onclick: checkUpdate }, t("Check for updates", "Проверить обновления"))))),
+    section("arrow.down.circle", t("About", "О приложении"), t("An update installs only when its signature matches ihatecrypto's key, and only when you press Install.", "Обновление ставится, только если его подпись совпадает с ключом ihatecrypto, и только когда ты нажмёшь «Установить»."),
+      group(aboutRow())),
   ];
 }
 
@@ -255,11 +254,39 @@ export async function checkUpdate() {
   try {
     const version = await invoke("update_check");
     if (!version) { toast(t("ihatecrypto is up to date.", "Установлена последняя версия.")); return; }
-    toast(t(`Installing ${version}: ihatecrypto restarts by itself.`, `Ставлю ${version}: ihatecrypto перезапустится сам.`));
-    await invoke("update_install");
+    // A new version waits for Install, as the Mac's: What's New shows what changed once it has restarted.
+    update.found = version;
+    ui.view = "settings";
+    store("settingsTab", "general");
+    render();
   } catch (e) {
     toast(t("Couldn't check for updates: ", "Не удалось проверить обновления: ") + e);
   }
+}
+
+/** The version this is (Tauri's, once asked), and a newer one found and waiting for Install. */
+const update = { version: null, asked: false, found: null, installing: false };
+
+/** Settings › About (the Mac's): «ihatecrypto 0.1.0», then Check for updates, or the version found with Install. */
+function aboutRow() {
+  if (!update.asked) {
+    update.asked = true;
+    window.__TAURI__?.app?.getVersion?.().then((v) => { update.version = v; render(); }).catch(() => {});
+  }
+  const install = async () => {
+    update.installing = true;
+    render();
+    try { await invoke("update_install"); } catch (e) { update.installing = false; toast(t("Couldn't install the update: ", "Не удалось поставить обновление: ") + e); render(); }
+  };
+  return row({ label: update.version ? `ihatecrypto ${update.version}` : t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle",
+      about: update.found ? t(`${update.found} is ready. Install restarts ihatecrypto and What's New shows what changed; the wallet, settings and canvases stay.`,
+        `Готова ${update.found}. «Установить» перезапустит ihatecrypto, а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.`)
+        : t("A new version waits for you to press Install, and What's New shows what changed; the wallet, settings and canvases stay.",
+          "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.") },
+    update.found ? h("div", { class: "btns" },
+      h("button", { class: "btn small", disabled: update.installing, onclick: () => { update.found = null; render(); } }, t("Later", "Позже")),
+      h("button", { class: "btn small primary", disabled: update.installing, onclick: install }, update.installing ? t("Installing…", "Ставлю…") : t(`Install ${update.found}`, `Установить ${update.found}`)))
+      : h("button", { class: "btn small", onclick: checkUpdate }, t("Check for updates", "Проверить обновления")));
 }
 
 // AI model: the chat's account, the second check, safety, what the chat remembers.
@@ -338,6 +365,10 @@ function modelTab(s) {
         row({ label: t("Model", "Модель"), ico: "bolt", about: t("Empty: the provider's default.", "Пусто — модель провайдера по умолчанию.") },
           h("input", { id: "model-id", class: "pg-set-input", list: "model-list", placeholder: t("Default", "По умолчанию"), value: modelForm.model, oninput: (e) => (modelForm.model = e.target.value.trim()) }),
           isChat && s.model.models.length ? h("datalist", { id: "model-list" }, s.model.models.map((m) => h("option", { value: m }))) : null,
+          // «List» as the Mac's: the models it knows to pick from, or «Load models» before it has asked.
+          isChat ? h("button", { class: "btn small", onclick: (e) => popup(e, s.model.models.length
+            ? s.model.models.map((m) => [m, () => { modelForm.model = m; render(); }])
+            : [[t("Load models", "Загрузить модели"), () => act("refreshModels")]]) }, t("List", "Список"), icon("chevron.down", 9)) : null,
           isChat ? h("button", { class: "btn small", onclick: () => act("setModel", { model: modelForm.model || undefined }) }, t("Use", "Выбрать"))
             : !shown.connected && (shown.kind === "local") ? h("button", { class: "btn small", onclick: () => connect() }, t("Connect", "Подключить")) : null),
         row({ label: t("Connection", "Подключение"), ico: "dial",
@@ -359,7 +390,7 @@ function modelTab(s) {
           toggle("second-check", s.secondCheck, (on) => act("secondCheck", { test: on }))),
         row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key: the message goes there.", "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter: сообщение уходит туда.") },
           jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
-            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", onclick: () => pick("openrouter") }, t("Connect", "Подключить"))]))),
+            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: () => act("signInJev") }, t("Connect", "Подключить"))]))),
     section("server", t("Free, on this PC", "Бесплатно, на этом ПК"), t("No subscription needed: Ollama runs a model here, with no internet.", "Подписка не нужна: Ollama запускает модель здесь, без интернета."),
       group(h("div", { class: "pg-set-panel" }, localPanel(s)))),
     section("lock", t("Safety", "Безопасность"), t("A model reads your words. It cannot approve a move.", "Модель читает твои слова. Одобрить движение она не может."),
@@ -815,6 +846,10 @@ function storyCard(st) {
 export function historyPage() {
   const tab = ["agent", "positions", "all"].includes(store("historyTab")) ? store("historyTab") : "agent";
   whileShown("history", () => { history.stale = true; });
+  // A move, a run or a trade that lands while it's open is read again (the Mac's History follows its activities live).
+  const s = ui.state, key = [s.history?.length, s.history?.[0]?.note, s.moves?.length, s.scheduleRuns?.length, s.recentlyClosed?.length, s.boards?.filter((b) => b.kind === "move" && b.state !== "waiting").length].join("|");
+  if (history.key !== undefined && history.key !== key) history.stale = true;
+  history.key = key;
   if (history.stale && !history.loading) setTimeout(loadHistory);
   const d = history.data;
   let body;

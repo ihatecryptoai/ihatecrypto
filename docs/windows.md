@@ -33,9 +33,17 @@ every change. Between the engine and the signer go the Mac's own `SignerRequest`
   swaps a saved name's address) stops every signature (`Trusted.tampered`). Changes that only take trust away (a
   rename, a removal, a pause, a shorter session) may be made with no prompt and wait in `pending.json`, which counts
   only as far as it takes trust away; anything else asks Windows Hello first.
-- **Test and automation wallets** sign with no prompt, so they are under DPAPI only: any program of the same user could
-  read them. They are for a few dollars, as on the Mac.
-- **No passcode** on Windows: Windows Hello itself asks for the PIN.
+- **The Hyperliquid trading key** places orders with no prompt; it can't withdraw. A Mac keeps it in the signer's
+  Keychain group, which no other program reads; on Windows it is sealed as a seed is, under the Windows Hello key, and
+  opened once per signer run — by the first Windows Hello the signer asks for anything, or by a prompt at the first
+  order — then kept only in the signer's memory. Its address is kept beside it and recorded in the trusted settings, so
+  Settings shows it without opening it and a key file put there by another program is never approved as the trading key.
+  A key kept before (DPAPI only) is sealed the first time it is used.
+- **Test and automation wallets** sign with no prompt, so they are under DPAPI only, with their trading keys: any program
+  of the same user could read them. They are for a few dollars, as on the Mac.
+- **A scheduled move's Windows Hello** (the automation wallet asking for a new address) closes by itself after a minute
+  unanswered, as a Mac's Touch ID prompt does (`winsec_hello_sign_within`); so does the trading key's own prompt.
+- **The passcode** only opens the app (PBKDF2 under DPAPI, kept by the signer); Windows Hello signs every move.
 
 ### Other programs of the same user
 
@@ -52,6 +60,19 @@ signer narrows that (`winsec_harden`, `winsec_spawn_signer`):
 What remains: a program of the same user can open the same Windows Hello key by name and ask for a prompt itself, and
 read the engine's memory. It still needs the person to answer a prompt, and the Guard and the signer's checks hold for
 whatever reaches them: money goes only to the wallet's own addresses and to addresses confirmed in person.
+
+Files such a program can put back, which a Mac's Keychain would keep from it; nothing on Windows short of the TPM's own
+counters can tell an older copy from the newest, so these stay:
+
+- **An older `state.json`**, sealed then, passes the seal: it can bring back an address removed since — a saved name,
+  an address approved for money — until the next change seals a newer one. Every move still asks Windows Hello with
+  the address shown; only the automation wallet's moves, which ask nothing, could then pay such an address.
+- **`pending.json` deleted** undoes a change that only took trust away and wasn't sealed yet (it is at the next
+  Windows Hello). While the signer runs it notices and stops every signature; after a restart it doesn't. The trading
+  key's pause is the one that matters, and the paused key stays sealed under Windows Hello, so the program still can't
+  use it.
+- **The scheduled tasks' key** (`task-seal.key`, DPAPI): a list with no key beside it loads paused, but a program that
+  reads the key can tag a list of its own. It can read the automation wallet's seed too, which is the larger matter.
 
 ## Building
 
@@ -112,7 +133,8 @@ keyboard layout's language; the words go into the field, never sent by themselve
 (winsec.dll's HID and WinRT GATT calls under the Mac's Ledger module: «connect my Ledger» reads one address from its Ethereum app and one from its Solana
 app, «use my Ledger» makes it sign every move on its screen with the same guard first, «show on the Ledger» to compare
 an address, and it can be a key of a multisig), the dApp browser
-(a window of its own for https sites, the Mac's toolbar across its top — back, forward, reload, the address with the
+(https sites beside the chat in the page panel, as the Mac's WebPanel — the panel moves by its header, widens by its
+edge, docks on a double click and keeps its place; «Move to its own window» takes the same page out — the Mac's toolbar across its top — back, forward, reload, the address with the
 site's check (known, a lookalike of which, unknown), «Connected · Disconnect», the wallet the site would get — as our own
 page in a webview of its own above the site's, with ihatecrypto as a Solana Wallet Standard wallet and an
 EIP-1193/EIP-6963 provider in the site; each connect, message, typed data or transaction is a card on the canvas — the Solana guard and simulation,
@@ -209,7 +231,7 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
 7. Process Explorer as the same user can't read the signer's memory (access denied).
 8. The mic in the chat field: Windows asks for the microphone once; Russian words with the Russian layout on, English
    with the English one; with Settings › Privacy & security › Speech › Online speech recognition off it says so.
-9. The browser: open jup.ag, connect, and a swap's card comes to the canvas with its simulated balances; on a site's
+9. The browser: open jup.ag (it opens beside the chat; «Move to its own window» keeps the page and its connection), connect, and a swap's card comes to the canvas with its simulated balances; on a site's
    page, `__TAURI_INTERNALS__.invoke('engine_send', …)` (or `browser_nav`, `browser_state`) in DevTools is refused; the
    toolbar's Disconnect takes the address away and reloads the page. Back and Forward turn on after a link and after a
    single-page app's route change; an unreachable site (jup.ag times out on some networks) shows the red line; a host on
@@ -251,4 +273,7 @@ page, dropping its focus. A programmatic focus on a click made it worse and is g
 The frame check on the same machine, 2026-10-24, in a development build: WebView2 gives a frame inside a site Tauri's
 IPC too, so the wallet's script now stays out of frames and `dapp_call` refuses a call whose Origin isn't the page's. A
 sandboxed frame got no wallet and its call was refused; a frame of the page's own origin got no wallet object either
-(its direct call reaches the card, as the page's would); the page's own connect came to the canvas.
+(its direct call reaches the card, as the page's would); the page's own connect came to the canvas. With `fetch`
+broken, as a strict Content-Security-Policy does (app.drift.trade has one), Tauri falls back to `chrome.webview.postMessage`:
+the page's call still came to the canvas, and neither frame's ever arrived — WebView2 hands only the page's messages to
+the webview, so a call without an Origin header is the page's own.

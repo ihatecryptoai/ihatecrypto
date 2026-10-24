@@ -2,13 +2,14 @@
 // host, Copy the link, open it with the wallet (ihatecrypto's browser), open it in the person's own browser, close. It
 // moves the page through the app's own commands and never sees the page's contents.
 
-import { h, icon, t, ui, store } from "./core.js";
+import { h, icon, t, ui } from "./core.js";
 import { loadError } from "./browser-words.js";
+import { follow, grip } from "./panel-grip.js";
 
 const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
-// WebView2 gives a page beside another webview no keyboard on a click: ask the app to move it here when it isn't.
 const head = document.getElementById("head");
+const edge = document.getElementById("edge");
 let s = null;
 let copied = false;
 let problem = "";
@@ -23,6 +24,8 @@ async function copyLink() {
 }
 
 function draw() {
+  edge.title = t("Drag to resize the page · double-click: its own width", "Потяни, чтобы изменить ширину · двойной щелчок: обычная ширина");
+  head.title = t("Drag to move · double-click: back beside the chat", "Потяни, чтобы сдвинуть · двойной щелчок: обратно к чату");
   const url = (() => { try { return new URL(s.url); } catch { return null; } })();
   const host = url?.host || "";
   const secure = url?.protocol === "https:";
@@ -57,13 +60,10 @@ async function refresh() {
 }
 tauri.event.listen("panel", () => { clearTimeout(timer); timer = setTimeout(refresh, 120); });
 
-/** Where the main page has the rail and the chat: this page shares its storage, and hears when either moves. */
-function place() {
-  invoke("page_layout", { folded: store("railCollapsed"), chat: store("chatWidth"), x: store("chatX"), y: store("chatY") }).catch(() => {});
-}
-window.addEventListener("storage", (e) => { if (["railCollapsed", "chatWidth", "chatX", "chatY"].includes(e.key)) place(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") go("close"); });
 
-place();
+// Where the main page has the rail and the chat (this page shares its storage); the header moves the panel, its edge sizes it.
+follow();
+grip(head, edge);
 draw();
 refresh();

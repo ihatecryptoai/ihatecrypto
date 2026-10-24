@@ -73,20 +73,29 @@ enum Vault {
 
     // MARK: Windows Hello
 
-    /// The person's Windows Hello signature of `challenge`, with `reason` in the signer's window meanwhile.
-    static func helloSign(_ challenge: Data, reason: String, create: Bool) throws -> Data {
+    /// The person's Windows Hello signature of `challenge`, with `reason` in the signer's window meanwhile. `within`:
+    /// the prompt closes by itself after that many seconds unanswered (a scheduled move, as a Mac's Touch ID prompt
+    /// closes after a minute), so no one away leaves it up with every other request waiting behind it.
+    static func helloSign(_ challenge: Data, reason: String, create: Bool, within: TimeInterval? = nil) throws -> Data {
         var out: UnsafeMutablePointer<UInt8>?
         var count = 0
         let name = Array(helloKey.utf8), text = Array(reason.utf8)
+        let ms = within.map { UInt32(min(max($0, 1), 86_400) * 1000) } ?? 0
+        let started = Date()
         let status = challenge.withUnsafeBytes { c in
-            winsec_hello_sign(name, name.count, c.bindMemory(to: UInt8.self).baseAddress, challenge.count, text, text.count, create ? 1 : 0, &out, &count)
+            winsec_hello_sign_within(name, name.count, c.bindMemory(to: UInt8.self).baseAddress, challenge.count, text, text.count, create ? 1 : 0, ms,
+                                     &out, &count)
         }
         switch status {
         case WINSEC_OK:
             guard let out else { throw WalletError("Windows Hello gave no signature: nothing was signed.") }
             defer { winsec_free(out, count) }
             return Data(bytes: out, count: count)
-        case WINSEC_CANCELLED: throw WalletError("Cancelled, or Windows Hello didn't match: nothing was signed.")
+        case WINSEC_CANCELLED:
+            if let within, Date().timeIntervalSince(started) >= within - 1 {
+                throw WalletError("No one answered Windows Hello within \(Int(within)) seconds, so it closed: nothing was signed.")
+            }
+            throw WalletError("Cancelled, or Windows Hello didn't match: nothing was signed.")
         case WINSEC_NOT_FOUND:
             throw WalletError("The Windows Hello key that seals your wallets is gone (Windows was reset, or its PIN removed): add the wallets again from their recovery phrases.")
         case WINSEC_UNAVAILABLE:
@@ -128,9 +137,9 @@ enum Vault {
 
     /// Windows Hello now, whatever session is open: the master key it gives. The first time (`fresh`), it makes the
     /// key in Windows Hello (one prompt) and signs (another).
-    static func unlock(reason: String) throws -> (key: SymmetricKey, fresh: Bool) {
+    static func unlock(reason: String, within: TimeInterval? = nil) throws -> (key: SymmetricKey, fresh: Bool) {
         if let m = master() {
-            var signature = try helloSign(m.challenge, reason: reason, create: false)
+            var signature = try helloSign(m.challenge, reason: reason, create: false, within: within)
             defer { SeedStore.wipe(&signature) }
             let key = masterKey(signature, challenge: m.challenge)
             guard checkValue(key) == m.check else {
@@ -143,7 +152,7 @@ enum Vault {
             var rng = SystemRandomNumberGenerator()
             for i in b.indices { b[i] = rng.next() }
         }
-        var signature = try helloSign(challenge, reason: reason, create: true)
+        var signature = try helloSign(challenge, reason: reason, create: true, within: within)
         defer { SeedStore.wipe(&signature) }
         let key = masterKey(signature, challenge: challenge)
         try write("master.json", JSONEncoder().encode(Master(challenge: challenge, check: checkValue(key))))
@@ -171,26 +180,28 @@ enum Vault {
 
     /// The master key for a move: the open session's, or Windows Hello with `reason`. The trusted settings are checked
     /// against it before it is handed out: a key never serves settings changed outside the signer.
-    static func key(reason: String, session useSession: Bool = true) throws -> SymmetricKey {
+    static func key(reason: String, session useSession: Bool = true, within: TimeInterval? = nil) throws -> SymmetricKey {
         if useSession, let key = currentKey {
             // The file may have changed since the session opened: checked again before the key serves.
             try Trusted.verify(with: key, fresh: false)
             scope?.key = key
             return key
         }
-        let (key, fresh) = try unlock(reason: reason)
+        let (key, fresh) = try unlock(reason: reason, within: within)
         try Trusted.verify(with: key, fresh: fresh)
         if useSession { lock.withLock { session = (key, Date()) } }
         scope?.key = key
+        AgentStore.openAll(key)
         return key
     }
 
     /// Windows Hello again, always: a fresh confirmation, whose key then serves the signature that follows.
-    static func confirm(_ reason: String) throws {
-        let (key, fresh) = try unlock(reason: reason)
+    static func confirm(_ reason: String, within: TimeInterval? = nil) throws {
+        let (key, fresh) = try unlock(reason: reason, within: within)
         try Trusted.verify(with: key, fresh: fresh)
         lock.withLock { session = (key, Date()) }
         scope?.key = key
+        AgentStore.openAll(key)
     }
 
     static func endSession() { lock.withLock { session = nil } }
@@ -270,10 +281,8 @@ enum SeedStore {
         return sealed.box
     }
 
-    /// Windows Hello with `reason`, always a fresh prompt.
-    /// ponytail: `within` (an automation wallet's prompt closing by itself) isn't kept on Windows: the prompt stays
-    /// until someone answers it; cancel the Windows Hello request from the Rust side if a task must not wait.
-    static func confirm(_ reason: String, within: TimeInterval? = nil) throws { try Vault.confirm(reason) }
+    /// Windows Hello with `reason`, always a fresh prompt; with `within`, it closes by itself when no one answers.
+    static func confirm(_ reason: String, within: TimeInterval? = nil) throws { try Vault.confirm(reason, within: within) }
 
     /// A confirmation in person, for the passcode (`CodeStore.set`), which Windows doesn't keep.
     struct Confirmation {}
@@ -423,11 +432,98 @@ enum AddressBookStore {
     static func save(_ book: [SignerAddress]) throws { try Trusted.mutate("save to your address book") { $0.book = book } }
 }
 
-/// The Hyperliquid trading key: DPAPI only, no prompt — it trades but can't withdraw.
+/// The Hyperliquid trading key. It trades but can't withdraw, and orders go out with no prompt, so on a Mac it's in the
+/// signer's Keychain group, which no other program reads. A Windows user's programs all open DPAPI, so here it is sealed
+/// as a seed is: AES-GCM under the Windows Hello key, opened once per signer run — with the first Windows Hello the signer
+/// asks for anything, or at the first order — and from then on kept only in the signer's memory, which the user's other
+/// programs can't read (`winsec_harden`). Its address sits beside it, so Settings shows the key without opening it.
+/// A wallet that signs with no one there (test, automation) keeps it under DPAPI only, as it keeps its seed.
 enum AgentStore {
-    static func file(_ id: String) -> String { "agent-\(Wallets.scoped("hyperliquid", id)).key" }
+    struct Sealed: Codable {
+        var version = 2
+        var address: String
+        /// AES-GCM of the key under the Windows Hello key's «agent» subkey, the address bound to it.
+        var box: Data
+    }
 
-    static func load(id: String = Wallets.activeID) -> Data? { Vault.read(file(id)).flatMap { try? Vault.unprotect($0) } }
+    static func name(_ id: String) -> String { "agent-\(Wallets.scoped("hyperliquid", id))" }
+    /// Sealed under Windows Hello.
+    static func file(_ id: String) -> String { name(id) + ".sealed" }
+    /// DPAPI only: a wallet that signs with no prompt, and every key before 2026-10-24.
+    static func plain(_ id: String) -> String { name(id) + ".key" }
+    /// Set in the sealed trusted state once a key of `id` is sealed: a DPAPI-only file for it is never taken again, so a
+    /// program can't put its own key there to be approved as the trading key.
+    static func record(_ id: String) -> String { name(id) + "-sealed" }
+
+    nonisolated(unsafe) private static var opened: [String: Data] = [:]
+    private static let lock = NSLock()
+
+    /// Sealed under Windows Hello: when the wallet's seed is (a Ledger's key too), and Windows Hello seals anything here.
+    static func sealedFor(_ id: String) -> Bool {
+        guard Vault.master() != nil else { return false }
+        return (try? SeedStore.sealed(SeedStore.file(id)))?.presence ?? true
+    }
+
+    /// The key that seals `name`'s trading key, from the Windows Hello key.
+    static func subkey(_ master: SymmetricKey, _ name: String) -> SymmetricKey { Vault.subkey(master, name) }
+
+    private static func readSealed(_ id: String) -> Sealed? {
+        guard let blob = Vault.read(file(id)), var json = try? Vault.unprotect(blob) else { return nil }
+        defer { SeedStore.wipe(&json) }
+        return try? JSONDecoder().decode(Sealed.self, from: json)
+    }
+
+    private static func open(_ s: Sealed, _ master: SymmetricKey, _ name: String) -> Data? {
+        guard let box = try? AES.GCM.SealedBox(combined: s.box) else { return nil }
+        return try? AES.GCM.open(box, using: subkey(master, name), authenticating: Data(s.address.utf8))
+    }
+
+    /// Whether there is a trading key for `id`, without opening it.
+    static func has(id: String = Wallets.activeID) -> Bool { Vault.exists(file(id)) || Vault.exists(plain(id)) }
+
+    /// Its address, without opening it (Settings, the status, the approval `enableAgent` signs). The file's address is
+    /// taken only as the trusted state recorded it when the key was sealed: a file with another address put there would
+    /// get that address approved. (A trusted state changed to match stops the approval's Windows Hello: `Trusted.verify`.)
+    static func address(id: String = Wallets.activeID) -> String? {
+        if let s = readSealed(id) { return Trusted.state.prefs[record(id)] == .string(s.address) ? s.address : nil }
+        return load(id: id, prompt: false).flatMap { try? EVMAccount.address(privateKey: $0) }
+    }
+
+    /// The key: from memory, or opened with Windows Hello's key — an open one, or one prompt (closing by itself after a
+    /// minute, so an order no one is there for doesn't hold the signer).
+    static func load(id: String = Wallets.activeID) -> Data? { load(id: id, prompt: true) }
+
+    private static func load(id: String, prompt: Bool) -> Data? {
+        if let key = lock.withLock({ opened[name(id)] }) { return key }
+        if let s = readSealed(id) {
+            guard prompt, let master = try? Vault.currentKey ?? Vault.key(
+                reason: "open your Hyperliquid trading key until ihatecrypto restarts: orders then go without Windows Hello; it can't withdraw money",
+                session: false, within: 60),
+                  let key = open(s, master, name(id)) else { return nil }
+            lock.withLock { opened[name(id)] = key }
+            return key
+        }
+        guard let blob = Vault.read(plain(id)), let key = try? Vault.unprotect(blob) else { return nil }
+        // A DPAPI-only key where a sealed one was kept: put there by someone else.
+        guard Trusted.state.prefs[record(id)] == nil else { return nil }
+        // Kept before keys were sealed: sealed now (that asks Windows Hello once), the old file gone.
+        if sealedFor(id), prompt {
+            guard (try? save(key, id: id)) != nil else { return nil }
+        }
+        return key
+    }
+
+    /// Every sealed trading key, opened with the key Windows Hello just gave: the first order after that asks nothing.
+    static func openAll(_ master: SymmetricKey) {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: Vault.folder.path)) ?? []
+        for f in files where f.hasPrefix("agent-") && f.hasSuffix(".sealed") {
+            let n = String(f.dropLast(".sealed".count))
+            guard lock.withLock({ opened[n] == nil }), let blob = Vault.read(f), var json = try? Vault.unprotect(blob) else { continue }
+            defer { SeedStore.wipe(&json) }
+            guard let s = try? JSONDecoder().decode(Sealed.self, from: json), let key = open(s, master, n) else { continue }
+            lock.withLock { opened[n] = key }
+        }
+    }
 
     /// 32 random bytes that make a valid secp256k1 key; retried in the vanishing case they don't.
     static func make() throws -> Data {
@@ -439,6 +535,35 @@ enum AgentStore {
         throw WalletError("Couldn't create the agent key.")
     }
 
-    static func save(_ key: Data, id: String = Wallets.activeID) throws { try Vault.write(file(id), Vault.protect(key)) }
-    static func delete(id: String) { Vault.remove(file(id)) }
+    static func save(_ key: Data, id: String = Wallets.activeID) throws {
+        guard sealedFor(id) else {
+            try Vault.write(plain(id), Vault.protect(key))
+            Vault.remove(file(id))
+            lock.withLock { opened[name(id)] = nil }
+            return
+        }
+        let address = try EVMAccount.address(privateKey: key)
+        let master = try Vault.currentKey ?? Vault.key(reason: "keep your Hyperliquid trading key under Windows Hello", session: false)
+        guard let box = try AES.GCM.seal(key, using: subkey(master, name(id)), authenticating: Data(address.utf8)).combined else {
+            throw WalletError("Couldn't seal the trading key.")
+        }
+        var json = try JSONEncoder().encode(Sealed(address: address, box: box))
+        defer { SeedStore.wipe(&json) }
+        try Vault.write(file(id), Vault.protect(json))
+        // With Windows Hello's key in hand: sealed into the trusted state at once.
+        try Trusted.mutate(nil) { $0.prefs[record(id)] = .string(address) }
+        Vault.remove(plain(id))
+        lock.withLock { opened[name(id)] = key }
+    }
+
+    static func delete(id: String) {
+        Vault.remove(file(id))
+        Vault.remove(plain(id))
+        lock.withLock {
+            if var key = opened.removeValue(forKey: name(id)) { SeedStore.wipe(&key) }
+        }
+    }
+
+    /// For tests: forget the opened keys, as a new signer process would.
+    static func forget() { lock.withLock { opened = [:] } }
 }

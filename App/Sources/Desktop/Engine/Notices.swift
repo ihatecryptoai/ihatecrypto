@@ -45,8 +45,11 @@ extension Engine {
     }
 
     /// One Windows notification, unless its kind is off. `whenAway`: only while the window isn't in front (a card the
-    /// person may not be looking at); main.rs checks that.
-    func notify(_ kind: Notice, _ title: String, _ body: String, failed: Bool = false, whenAway: Bool = false) {
+    /// person may not be looking at); main.rs checks that. `record`: what ihatecrypto did by itself (money arrived, an
+    /// alert, the guardian, a limit filled, HLP unlocked) is a History record too, notified or not, as the Mac's
+    /// notify(record:); a confirmed move has its own, and a card waiting or an update isn't one.
+    func notify(_ kind: Notice, _ title: String, _ body: String, failed: Bool = false, whenAway: Bool = false, record: Bool? = nil) {
+        if record ?? ![.moves, .confirm, .update].contains(kind) { recordAutomatic(title, body, failed: failed) }
         guard !(settings.noticesOff ?? []).contains(kind.rawValue) else { return }
         NoticeMemory.last = Date()
         var event = ["kind": kind.rawValue, "title": title, "body": body, "sound": kind.sound(failed: failed)]
@@ -71,8 +74,9 @@ extension Engine {
 
     /// A confirmed move's end: done or failed, with the chat saying why.
     func noticeMove(_ title: String, state: String?) {
-        let ok = state != "failed"
+        let ok = state != "failed" && state != "unknown"
         notify(.moves, title, ok ? say("Done — checked, signed and confirmed.", "Готово — проверено, подписано и подтверждено сетью.")
+                                 : state == "unknown" ? say("Sent, status unknown — check the links in the chat before doing it again.", "Отправлено, статус неизвестен — проверь ссылки в чате, прежде чем повторять.")
                                  : say("It didn’t go through; the chat says why.", "Не прошло — причина в чате."), failed: !ok)
     }
 

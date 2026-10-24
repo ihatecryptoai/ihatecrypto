@@ -26,3 +26,16 @@ body { background: var(--card); }
 .load-error { padding: 0 14px 6px; font-size: 10px; color: var(--loss); }
 @media (max-width: 760px) { .with-wallet span { display: none; } }
 @media (max-width: 620px) { .with-wallet { display: none; } }
+/* Beside the chat: the panel's own row over the toolbar («With your wallet», its own window, close), as the Mac's
+   WebPanel; the toolbar's wallet block moves up into it. */
+#panel-head { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--separator);
+  cursor: grab; user-select: none; }
+#panel-head[hidden] { display: none; }
+#panel-head button { cursor: default; }
+#panel-head > .ico { color: var(--accent-ink); flex: none; }
+#panel-head b { font-size: 12px; font-weight: 600; white-space: nowrap; }
+#panel-head span.one-line { font-size: 10px; color: var(--secondary); min-width: 0; }
+#panel-head .spacer { flex: 1; }
+#edge[hidden] { display: none; }
+.in-panel .bar-row .with-wallet { display: none; }
+.in-panel .bar-row { padding-right: 8px; }

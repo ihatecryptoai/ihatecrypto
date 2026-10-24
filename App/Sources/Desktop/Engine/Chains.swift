@@ -109,10 +109,15 @@ extension Engine {
             if c.amountQuestion != nil { asks = step; parsed.append(.said(step)); continue }
             if let missing = missingKey(c) { stop(missing); return true }
             if let off = Modules.current.refusal(c, ru: russian) { stop(off); return true }
-            // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm.
+            // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm: after the
+            // moves before it, its card comes for its own Confirm (the Mac's runSteps). One that comes first is asked alone.
             if case .contractCall = c {
-                stop(say("A contract call goes on its own card: ask for “\(step)” by itself.", "Вызов контракта идёт своей карточкой: попроси «\(step)» отдельно."))
-                return true
+                guard i > k else {
+                    stop(say("A contract call goes on its own card: ask for “\(step)” by itself, then the rest.", "Вызов контракта идёт своей карточкой: попроси «\(step)» отдельно, потом остальное."))
+                    return true
+                }
+                parsed.append(.said(step))
+                continue
             }
             // A Solana token is Jupiter-verified before the card, as a buy asked alone is.
             switch c {
@@ -125,19 +130,8 @@ extension Engine {
             default: break
             }
             if case .sendTo(let name, let amount, let network) = c {
-                guard var e = entry(name, network: network), e.network != "near", OneClick.Asset.across[e.network] == nil, e.memo.isEmpty || e.network != "solana" else {
-                    stop(say("“\(name)” can't take a USDC transfer in a chain: send it on its own.", "«\(name)» не может получить USDC в цепочке: отправь отдельно."))
-                    return true
-                }
-                // The network the message names wins; a 0x address saved on one EVM network is the same on another.
-                let evm = Self.evmPlaces.union(["hyperliquid"])
-                if let net = network, net != e.network {
-                    guard evm.contains(net), evm.contains(e.network) else {
-                        stop("“\(e.name)” is a \(e.network) address: it can't receive on \(net).")
-                        return true
-                    }
-                    e.network = net
-                }
+                let found = chainTransfer(name, network: network)
+                guard let e = found.entry else { stop(found.why ?? ""); return true }
                 // The first step reads the balances as they are now; later ones spend what the steps before bring.
                 if i == k, let short = transferShortfall(e.network, amount) { stop(short); return true }
                 parsed.append(.transfer(e, amount))
@@ -154,6 +148,22 @@ extension Engine {
                        "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
         reply(say("In steps: ", "По шагам: ") + parsed.map(\.title).joined(separator: " → ") + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена»."), note: note)
         return true
+    }
+
+    /// A USDC transfer to a saved name as a step of a chain: the entry on the network the step names (a 0x address saved
+    /// on one EVM network is the same on another), or why it can't be one.
+    func chainTransfer(_ name: String, network: String?) -> (entry: SignerAddress?, why: String?) {
+        guard var e = entry(name, network: network), e.network != "near", OneClick.Asset.across[e.network] == nil, e.memo.isEmpty || e.network != "solana" else {
+            return (nil, say("“\(name)” can't take a USDC transfer in a chain: send it on its own.", "«\(name)» не может получить USDC в цепочке: отправь отдельно."))
+        }
+        let evm = Self.evmPlaces.union(["hyperliquid"])
+        if let net = network, net != e.network {
+            guard evm.contains(net), evm.contains(e.network) else {
+                return (nil, say("“\(e.name)” is a \(e.network) address: it can't receive on \(net).", "«\(e.name)» — адрес в \(e.network): на \(net) он получить не может."))
+            }
+            e.network = net
+        }
+        return (e, nil)
     }
 
     /// The answer to a chain's «How much?»: that step with its amount, and the steps held behind it, go on as a chain again.
@@ -217,6 +227,8 @@ extension Engine {
                     try await move(c)
                     if let to = Self.arrives(c) { arrived.insert(to) }
                 case .transfer(let entry, let amount):
+                    // Its network switched off in Modules after the card was drawn: refused now (Consent.confirmRefusal).
+                    if let off = confirmRefusal(.transfer(entry, amount)) { throw ExecutionError(off) }
                     try await landed(landings, at: nil)
                     reply(try await transfer(amount, to: entry), note: "transfer")
                     recordFlow(-amount, "sent to \(entry.name)")
@@ -224,12 +236,21 @@ extension Engine {
                     try await landed(landings, at: nil)
                     let rest = steps[(i + 1)...].map(\.title)
                     guard try await runSaid(text, rest: rest) else { break steps }
+                    // It drew a card of its own (a contract call): that waits for its own Confirm, and the steps after it
+                    // with it.
+                    if pending != nil {
+                        if !rest.isEmpty {
+                            reply(say("“\(text)” waits for its own Confirm on its card, so the steps after it don’t run: ask for them once it’s through.",
+                                      "«\(text)» ждёт своего «Подтвердить» на своей карточке, поэтому следующие шаги не запускаю: попроси их, когда он пройдёт."))
+                        }
+                        break steps
+                    }
                 }
             } catch where i > 0 {
                 // Steps before went through: said, and the rest stop. Never «Try again» on the whole chain, which would
-                // lay out the steps already done once more.
-                updateBoard(runningBoard) { $0.state = "failed" }
+                // lay out the steps already done once more. Sent with no outcome is «unknown», never «failed».
                 let sent = (try? journal.unresolved())?.filter { $0.at >= started.addingTimeInterval(-1) } ?? []
+                updateBoard(runningBoard) { $0.state = sent.isEmpty ? "failed" : "unknown" }
                 reply(sent.isEmpty ? say("Failed: ", "Не вышло: ") + error.localizedDescription
                       : say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + error.localizedDescription + " "
                         + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.map { "\($0.chain) \($0.id)" }.joined(separator: " · "))

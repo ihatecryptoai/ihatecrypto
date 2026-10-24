@@ -7,6 +7,7 @@ import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast
 import { railEdge } from "./rail.js";
 import { blockTitle } from "./boards.js";
 import { templatePreview } from "./trade.js";
+import { goHome } from "./canvas.js";
 
 addIcons({
   bell: "M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4",
@@ -639,7 +640,7 @@ function composer(s) {
   });
   field.value = ui.composerText;
   setTimeout(() => { autosize(field, 140); drawHelpers(); }, 0);
-  const waiting = s.card;
+  const waiting = s.card, site = s.site;
   const listening = voice.on;
   return h("div", { class: "chat-composer" },
     !listening ? positionChips(s) : null,
@@ -653,7 +654,8 @@ function composer(s) {
     h("div", { id: "chat-helper", class: "chat-helper-slot" }),
     // Without a model the bar says how to get one; plain commands still work in the field under it.
     s.model.connected || listening ? null : connectBar(s),
-    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting ? " chat-waiting" : "") },
+    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting || site ? " chat-waiting" : "") },
+      site ? siteBar(site) : null,
       waiting ? waitingBar(waiting) : null,
       h("div", { class: "chat-entry" },
         h("button", { class: "chat-round-btn chat-glassy", title: t("Plan templates", "Шаблоны планов"), onclick: (e) => templatesMenu(e.currentTarget) }, icon("square.grid", 15)),
@@ -703,12 +705,27 @@ function waitingBar(card) {
     ? h("button", { class: "chat-pill-accent", disabled: busy, title: t("Ask for the price again; Confirm comes back for 15 s", "Спросить цену заново; «Подтвердить» вернётся на 15 с"), onclick: () => act("requote") },
       icon("arrow.clockwise", 13), t("Refresh", "Обновить"))
     : stateNow === "quoting" ? h("span", { class: "chat-pill-quiet" }, icon("hourglass", 13), t("Quoting…", "Котирую…"))
-    : h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm") }, icon("check", 13), card.confirm);
+    : h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm", { board: card.id }) }, icon("check", 13), card.confirm);
   return h("div", { class: "chat-waiting-bar" },
     h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
       h("div", {}, h("div", { class: "chat-waiting-title" }, title), h("div", { id: "chat-quote-line", class: "chat-waiting-line num" }, line))),
     h("div", { class: "chat-waiting-buttons" },
-      h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel") }, t("Cancel", "Отмена")), confirm));
+      h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel", { board: card.id }) }, t("Cancel", "Отмена")), confirm));
+}
+
+/** A site's request waiting, apart from the person's own card (the Mac's sheet for it): answered by its own id. With a
+ *  risk to tick it's approved only on its block, where the ticks are. */
+function siteBar(site) {
+  const busy = ui.state.thinking || !!ui.state.runningBoard;
+  const approve = site.ticks?.length
+    ? h("button", { class: "chat-pill-outline", title: t("Each risk is ticked on its block before it can be approved", "Каждый риск отмечается на блоке, прежде чем можно одобрить"),
+      onclick: () => { ui.view = "canvas"; render(); goHome(); } }, icon("eye", 13), t("Review on the canvas", "Посмотреть на холсте"))
+    : h("button", { class: "chat-pill-accent", disabled: busy, onclick: () => act("siteAnswer", { board: site.id, test: true, ticks: [] }) }, icon("check", 13), site.approve);
+  return h("div", { class: "chat-waiting-bar chat-site-bar" },
+    h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
+      h("div", {}, h("div", { class: "chat-waiting-title" }, site.title), h("div", { class: "chat-waiting-line one-line", title: site.origin }, site.origin || site.host))),
+    h("div", { class: "chat-waiting-buttons" },
+      h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("siteAnswer", { board: site.id, test: false }) }, t("Decline", "Отказать")), approve));
 }
 
 /** An open position under the chat: its usual changes, each put in the field to send (never sent by a button). */
@@ -729,13 +746,13 @@ function connectBar(s) {
   const size = m.sizes?.[model];
   const loading = m.downloads?.[model];
   const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
-  const way = (title, file) => h("button", { class: "chat-way-chip", onclick: () => openSettings() }, logo(file, 20), title);
+  const way = (title, file) => h("button", { class: "chat-way-chip", onclick: () => openSettings("model") }, logo(file, 20), title);
   const chip = (title, ico, run, accent = false, disabled = false) => h("button", { class: "chat-way-chip" + (accent ? " chat-accent" : ""), disabled, onclick: run }, icon(ico, 13), title);
   let head, line, actions = [];
   if (down) {
     head = t("Ollama isn't running", "Ollama не запущена");
     line = t("Open it to chat with a model on this PC — or connect a subscription instead.", "Открой её, чтобы общаться с моделью на этом ПК, — или подключи подписку.");
-    actions.push(m.installed ? chip(t("Open Ollama", "Открыть Ollama"), "play.circle", () => act("startOllama")) : chip(t("Get Ollama", "Скачать Ollama"), "arrow.down.circle", () => act("getOllama"), true));
+    actions.push(m.installed ? chip(t("Open Ollama", "Открыть Ollama"), "play.circle", () => act("startOllama")) : chip(t("Set up on this PC", "Поставить на этот ПК"), "arrow.down.circle", () => act("setUpLocal"), true));
     actions.push(chip(t("Check again", "Проверить снова"), "arrow.clockwise", () => act("refreshModels")));
   } else if (local) {
     head = t(`${name} isn't on this PC yet`, `${name} пока нет на этом ПК`);
@@ -745,7 +762,7 @@ function connectBar(s) {
     if (loading !== undefined) actions.push(chip(t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`), "arrow.down.circle", null, false, true));
     else if (!size || fits(size)) actions.push(chip(size ? t(`Download · ≈ ${size.toFixed(1)} GB`, `Скачать · ≈ ${size.toFixed(1)} ГБ`) : t("Download", "Скачать"), "arrow.down.circle", () => act("downloadModel", { model }), true));
     for (const have of (m.live?.ollama || []).filter((x) => !m.refusals?.[x]).slice(0, 2)) {
-      actions.push(chip(t(`Use ${modelName(have)}`, `Взять ${modelName(have)}`), "desktop", () => act("connectModel", { provider: "ollama", model: have })));
+      actions.push(chip(t(`Use ${modelName(have)}`, `Взять ${modelName(have)}`), "desktop", () => act("useAccount", { provider: "ollama", model: have })));
     }
   } else if (m.refusals?.[model]) {
     head = t(`${name} is too small for the chat`, `${name} слишком мала для чата`);
@@ -758,7 +775,7 @@ function connectBar(s) {
   return h("div", { class: "chat-connect-bar" },
     h("b", {}, head), h("div", { class: "small secondary" }, line),
     h("div", { class: "chat-way-chips" }, actions, way("ChatGPT", "llm-openai"), way("Claude", "llm-claude"), way("OpenRouter", "llm-openrouter"),
-      local ? null : chip(t("On this PC", "На этом ПК"), "desktop", () => act("connectModel", { provider: "ollama", model: m.recommended?.ollama || undefined }))));
+      local ? null : chip(t("On this PC", "На этом ПК"), "desktop", () => act("setUpLocal"))));
 }
 
 function openSettings(tab) { document.querySelector(".menu")?.remove(); if (tab) store("settingsTab", tab); ui.view = "settings"; render(); }
@@ -814,7 +831,10 @@ function send() {
   attachStack = [];
   ui.attached = null;
   lastAttached = null;
-  act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined });
+  // A route step sent to the chat goes as that step alone (the engine's stepBoard), as the Mac's «Send to chat».
+  const step = ui.attachedStep?.board === ids[0] ? ui.attachedStep.index : undefined;
+  ui.attachedStep = null;
+  act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined, step });
   render();
 }
 
@@ -1129,7 +1149,7 @@ function modelMenu(anchor) {
       const detail = p.unavailable ? t("not open to apps yet — use the API key", "пока закрыто для приложений — используй API-ключ")
         : p.connected ? t("connected", "подключено") + (p.existingLogin ? " · " + p.existingLogin : "") : t("sign-in needed", "нужен вход");
       return h("button", { class: "chat-model-row chat-way", disabled: !!p.unavailable, title: p.unavailable || p.note || "",
-        onclick: () => { close(); p.connected ? act("connectModel", { provider: p.id }) : openSettings(); } },
+        onclick: () => { close(); p.connected ? act("useAccount", { provider: p.id }) : openSettings("model"); } },
       icon(kindIcon, 13), h("span", { class: "chat-way-text" }, h("b", {}, p.name), h("span", { class: "small secondary" }, detail)), p.id === s.model.provider ? icon("check", 13) : null);
     }
     const local = p.kind === "local";
@@ -1141,7 +1161,7 @@ function modelMenu(anchor) {
     if (p.id === "ollama" && m.servers?.ollama === false) {
       rows.push(m.installed
         ? h("button", { class: "chat-model-row chat-sub-row", onclick: () => act("startOllama") }, icon("exclamationmark.triangle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Ollama isn't running", "Ollama не запущена")), h("span", { class: "small secondary" }, t("start it, then open this menu again", "запусти её и открой меню снова"))))
-        : h("button", { class: "chat-model-row chat-sub-row", onclick: () => act("getOllama") }, icon("arrow.down.circle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Get Ollama", "Скачать Ollama")), h("span", { class: "small secondary" }, t("free · then a model that fits this PC", "бесплатно · потом модель под этот ПК")))));
+        : h("button", { class: "chat-model-row chat-sub-row", onclick: () => { close(); act("setUpLocal"); } }, icon("arrow.down.circle", 12), h("span", { class: "chat-way-text" }, h("b", {}, t("Set up on this PC", "Поставить на этот ПК")), h("span", { class: "small secondary" }, t("Ollama, free · then a model that fits this PC", "Ollama, бесплатно · потом модель под этот ПК")))));
     }
     for (const id of models) {
       const off = m.refusals?.[id], absent = local && live && !live.includes(id);
@@ -1159,7 +1179,7 @@ function modelMenu(anchor) {
       rows.push(h("button", { class: "chat-model-row chat-sub-row" + (absent ? " chat-absent" : "") + (disabled ? " chat-faded" : ""), disabled,
         title: tooBig ? t(`Needs about ${Math.round(size * 1.2)} GB of memory; this PC has ${m.memoryGB} GB.`, `Нужно около ${Math.round(size * 1.2)} ГБ памяти; у этого ПК ${m.memoryGB} ГБ.`)
           : pullable ? t(`Downloads ${id} into Ollama on this PC; then pick it here.`, `Скачает ${id} в Ollama на этом ПК; потом выбери её здесь.`) : off || id,
-        onclick: () => { if (pullable) { act("downloadModel", { model: id }); return; } close(); act(p.id === s.model.provider ? "setModel" : "connectModel", p.id === s.model.provider ? { model: id } : { provider: p.id, model: id }); } },
+        onclick: () => { if (pullable) { act("downloadModel", { model: id }); return; } close(); act(p.id === s.model.provider ? "setModel" : "useAccount", p.id === s.model.provider ? { model: id } : { provider: p.id, model: id }); } },
       pullable && loading === undefined && !tooBig ? icon("arrow.down.circle", 12) : null,
       h("span", { class: "chat-way-text" }, h("span", { class: "one-line" }, modelName(id)), detail ? h("span", { class: "small secondary" }, detail) : null),
       chosen ? icon("check", 13) : null));
@@ -1170,7 +1190,7 @@ function modelMenu(anchor) {
   popover(anchor, h("div", { class: "chat-model-menu" },
     h("div", { class: "chat-model-cols" }, left, right),
     h("div", { class: "chat-model-foot" }, icon("lock.shield", 12), h("span", {}, t("The model never sees your wallet key.", "Модель никогда не видит ключ кошелька.")),
-      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings() }, t("Sign-ins…", "Входы…")))), "up", () => act("refreshModels"));
+      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings("model") }, t("Sign-ins…", "Входы…")))), "up", () => act("refreshModels"));
 }
 
 /** The networks the assistant may use, as on the Mac (NetworksChip): those switched on, three logos and «+N»; the menu

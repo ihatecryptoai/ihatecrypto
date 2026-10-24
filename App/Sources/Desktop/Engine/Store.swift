@@ -76,6 +76,8 @@ nonisolated struct Settings: Codable, Equatable {
     var appLanguage: String?
     var provider: String?
     var model: String?
+    /// The model chosen for each account (Models.model(of:)); `model` is a build before this one's choice.
+    var models: [String: String]?
     /// The second check (on unless turned off, as on the Mac): the model reads every command again, and a trade plan
     /// against the user's words, before a card is drawn.
     var secondCheck: Bool?

@@ -3,16 +3,21 @@
 
 import { h, icon, t, ui, addIcons } from "./core.js";
 import { loadError } from "./browser-words.js";
+import { follow, grip } from "./panel-grip.js";
 
 addIcons({
   "exclamationmark.octagon": "M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM12 7.5v5.5M12 16v.5",
   "hand.raised": "M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V5.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7 6 6 0 0 1-5-3l-2-3.5a1.5 1.5 0 0 1 2.5-1.6L8 15",
+  "macwindow.on.rectangle": "M7.5 8.5h13v11h-13zM7.5 11.5h13M3.5 4.5h13v4M3.5 4.5v11h4",
 });
 
 const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
-// WebView2 gives a page beside another webview no keyboard on a click: ask the app to move it here when it isn't.
 const bar = document.getElementById("bar");
+// Beside the chat (the Mac's WebPanel with the wallet): a row of the panel's own over the toolbar, which moves it, and
+// its left edge, which sizes it. In its own window neither shows.
+const head = document.getElementById("panel-head");
+const edge = document.getElementById("edge");
 
 /** The toolbar's last answer from the app, and the address being typed (kept while the field has focus). */
 let s = null;
@@ -81,6 +86,23 @@ function draw() {
       `${host} в списке фишинговых сайтов MetaMask, поэтому ihatecrypto его не открыл и не даёт ему кошелёк. Если ты вводил адрес сам, сверь его по буквам.`)) : null;
   const problem = error || (s?.blocked ? "" : loadError(s?.error));
   bar.replaceChildren(...[row, blocked, problem ? h("div", { class: "load-error" }, problem) : null].filter(Boolean));
+  const panel = !!s?.panel;
+  document.body.classList.toggle("in-panel", panel);
+  head.hidden = edge.hidden = !panel;
+  if (panel) {
+    edge.title = t("Drag to resize the page · double-click: its own width", "Потяни, чтобы изменить ширину · двойной щелчок: обычная ширина");
+    head.title = t("Drag to move · double-click: back beside the chat", "Потяни, чтобы сдвинуть · двойной щелчок: обратно к чату");
+    head.replaceChildren(
+      icon("wallet.pass", 14),
+      s.wallet ? h("b", {}, t("With your wallet", "С твоим кошельком")) : h("b", {}, t("No wallet here", "Без кошелька")),
+      h("span", { class: "one-line" }, s.wallet
+        ? `· ${t("wallet", "кошелёк")} ${s.wallet} · ${t("every signature is shown first", "каждую подпись сначала видишь ты")}`
+        : `· ${t("only watching: nothing here can sign", "только просмотр: подписывать нечем")}`),
+      h("span", { class: "spacer" }),
+      h("button", { class: "icon-btn", title: t("Move to its own window", "В отдельное окно"), onclick: () => go("window") }, icon("macwindow.on.rectangle", 15)),
+      h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => go("close") }, icon("xmark")),
+    );
+  }
   if (typing && document.activeElement !== field) {
     refocusing = true;
     field.focus({ preventScroll: true });
@@ -104,8 +126,12 @@ async function refresh() {
 /** Page loads, title changes and every state of the engine say «look again»; a burst of them is one look. */
 tauri.event.listen("browser", () => { clearTimeout(timer); timer = setTimeout(refresh, 150); });
 
-// The toolbar's height follows what it shows (the phishing banner, an error line): the site gets the rest.
-new ResizeObserver(() => invoke("browser_layout", { height: Math.ceil(bar.getBoundingClientRect().height) }).catch(() => {})).observe(bar);
+// The toolbar's height follows what it shows (the panel's row, the phishing banner, an error line): the site gets the rest.
+const top = document.getElementById("top");
+new ResizeObserver(() => invoke("browser_layout", { height: Math.ceil(top.getBoundingClientRect().height) }).catch(() => {})).observe(top);
 
+// Beside the chat it follows the rail and the chat (this page shares the main page's storage) and moves by its row.
+follow();
+grip(head, edge);
 draw();
 refresh();

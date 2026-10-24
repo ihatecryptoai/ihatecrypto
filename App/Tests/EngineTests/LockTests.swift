@@ -1,3 +1,4 @@
+import CWinSec
 import Foundation
 import Testing
 
@@ -6,7 +7,8 @@ import Testing
 @Suite(.serialized) struct LockTests {
     static func lock(_ state: [String: Any]?) -> [String: Any] { state?["lock"] as? [String: Any] ?? [:] }
 
-    @Test func aCodeLocksTheWindowAndOnlyTheCodeOrWindowsHelloOpensIt() throws {
+    // Windows Hello answers only the stand-in: a real one would wait for a person.
+    @Test(.enabled(if: winsec_is_stub() == 1)) func aCodeLocksTheWindowAndOnlyTheCodeOrWindowsHelloOpensIt() throws {
         let engine = try EngineTests.Engine()
         try engine.call("hello")
         let made = try engine.call("setCode", ["text": "481902"])
@@ -38,7 +40,8 @@ import Testing
         #expect(hello["locked"] as? Bool == false && hello["offerNewCode"] as? Bool == true && hello["codeSet"] as? Bool == false)
     }
 
-    @Test func aLaunchAfterACodeStartsLocked() throws {
+    // Windows Hello answers only the stand-in: a real one would wait for a person.
+    @Test(.enabled(if: winsec_is_stub() == 1)) func aLaunchAfterACodeStartsLocked() throws {
         // The settings say a code was set; this signer has none (its file gone): locked, and only Windows Hello opens it.
         let engine = try EngineTests.Engine(seed: ["settings.json": Data(#"{"codeSet":true}"#.utf8)])
         let first = Self.lock(try engine.call("hello").state)

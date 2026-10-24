@@ -11,6 +11,7 @@ import { planStatus, planHead, planExtras, planStepState, PLAN_CHIPS } from "./t
 import * as portfolio from "./portfolio.js";
 
 addIcons({
+  "exclamationmark.octagon": "M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM12 7.5v5.5M12 16v.5",
   hello: "M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M9 9.5v1M15 9.5v1M9 15c1.6 1.4 4.4 1.4 6 0",
   signature: "M3 16c3-6 5-9 7-9 2.5 0-1 9 1.5 9 1.5 0 2.5-3 4-3 1 0 1 2 2.5 2H21M3 20.5h18",
   "chart.line.uptrend": "M3 17l6-6 4 4 8-8M15 7h6v6",
@@ -47,8 +48,12 @@ export function planColumn() {
   const newest = boards.find((b) => b.kind === "move")?.id;
   const { chart, plan, at } = chartPlace(boards);
   const fade = (b, el) => { if (!seen.has(b.id)) { seen.add(b.id); if (seenReady) el.classList.add("fresh"); } return el; };
-  const items = boards.length ? boards.filter((b) => b !== chart || at === "column").map((b) =>
-    fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))) : [starter()];
+  // A watched token's card sits to the right of Favorites, not above it (the owner, 2026-10-16: «открывай справа сбоку»).
+  const favorites = boards.find((b) => b.kind === "favorites");
+  const beside = favorites && boards.find((b) => b.kind === "token" && b.data?.token?.favorite);
+  const items = boards.length ? boards.filter((b) => (b !== chart || at === "column") && b !== beside).map((b) =>
+    b === favorites && beside ? h("div", { class: "route-fav-row" }, fade(b, drawBoard(b)), fade(beside, tokenBlock(beside)))
+      : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))) : [starter()];
   // What was on the canvas when it opened is already there; only what comes after fades in.
   setTimeout(() => { seenReady = true; }, 0);
   const column = h("div", { class: "route-plan" }, items);
@@ -118,8 +123,10 @@ function menu(e, items) {
   items.filter(Boolean).forEach((it, n) => { if (it[2] === false) buttons[n].disabled = true; });
 }
 
-function attach(b) {
+function attach(b, step = null) {
   ui.attached = b.id;
+  // A route step's «Send to chat»: chat.js sends it as `step` with this block (the engine's stepBoard).
+  ui.attachedStep = step === null ? null : { board: b.id, index: step };
   render();
   document.getElementById("composer")?.focus();
 }
@@ -137,14 +144,14 @@ function moveBoard(b, newest, onChart) {
   // Running wins over the board's own state and the card: the engine can send both for a moment.
   const runningHere = s.runningBoard === b.id;
   const waitingHere = !runningHere && !!s.card && s.card.id === b.id;
-  const finished = !waitingHere && !runningHere;
+  // A site's request waits in a slot of its own, answered by its id, never by the card's Confirm (Consent.swift).
+  const siteHere = !runningHere && s.site?.id === b.id;
+  const finished = !waitingHere && !runningHere && !siteHere;
   // A click on a finished move flips it from how it shows by default: the newest open, the others folded.
   const open = !finished || newest !== ui.opened.has("move:" + b.id);
   const toggle = () => { ui.opened.has("move:" + b.id) ? ui.opened.delete("move:" + b.id) : ui.opened.add("move:" + b.id); render(); };
-  const menu = (e) => blockMenu(e, b, b.title, [
-    [t("Copy details", "Скопировать подробности"), () => copy(moveText(b))],
-    finished ? [t("Remove from the canvas", "Убрать с холста"), () => act("closeBoard", { board: b.id })] : null,
-  ].filter(Boolean));
+  // A move stays on its canvas once it's done (EarlierBoards, the owner's «nothing disappears»): no Remove here.
+  const menu = (e) => blockMenu(e, b, b.title, [[t("Copy details", "Скопировать подробности"), () => copy(moveText(b))]]);
   const steps = b.steps || [];
   const draft = waitingHere && s.multisigDraft;
   const states = steps.map((_, i) => stepState(b, i, waitingHere, runningHere));
@@ -155,36 +162,104 @@ function moveBoard(b, newest, onChart) {
     return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
       pill(b, open, toggle), open ? route : null, open ? notes(b) : null);
   }
-  const status = planStatus(b) || (waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
-    : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"]);
+  const status = planStatus(b) || (siteHere ? [t("waiting for your answer", "ждёт твоего ответа"), "route-accent"] : waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
+    : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], unknown: [t("sent, status unknown", "отправлено, статус неизвестен"), "route-amber"],
+      nothing: [t("nothing to do", "нечего делать"), "secondary"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"]);
   const head = h("div", { class: "route-move-head" },
       h("span", { class: "route-move-title" }, b.title),
       b.plan ? planHead(b) : null,
       h("span", { class: "route-status-chip " + status[1] }, status[0]),
       runningHere ? h("span", { class: "route-rc-spinner" }) : null,
       // A move left as it was (saved, never signed): only Refresh, which asks its request again for numbers of now.
-      finished && b.state !== "done" && b.state !== "failed" && b.state !== "plan" && b.request ? h("button", { class: "btn route-bordered route-refresh", disabled: s.thinking,
+      finished && !["done", "failed", "unknown", "nothing", "plan"].includes(b.state) && b.request ? h("button", { class: "btn route-bordered route-refresh", disabled: s.thinking,
         title: t(`Asks «${b.request}» again for fresh numbers`, `Спросит «${b.request}» снова, со свежими цифрами`), onclick: () => act("send", { text: b.request }) },
         icon("arrow.clockwise", 13), t("Refresh", "Обновить")) : null,
       // Right after the chip, not at the route's far end (the Mac's Spacer): a wide route would put Confirm under
       // «Add block» and Windows' caption buttons.
       waitingHere ? h("div", { class: "btns route-nowrap" },
-        h("button", { class: "btn route-large", onclick: () => act("cancel") }, t("Cancel", "Отмена")),
-        h("button", { class: "btn primary route-large", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("hello"), s.card.confirm)) : null);
+        h("button", { class: "btn route-large", onclick: () => act("cancel", { board: s.card.id }) }, t("Cancel", "Отмена")),
+        confirmButton(s.card)) : null);
   return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
     onChart ? planChart(b, onChart, head) : head,
     finished && b.state !== "plan" ? outcome(b) : null,
-    draft ? multisigSetup(draft) : route,
+    siteHere ? siteRequest(s.site) : draft ? multisigSetup(draft) : route,
     b.plan ? planExtras(b) : null,
+    // What will be signed and what's checked, read before Confirm (the Mac's route footer under the waiting move).
+    waitingHere && b.note ? h("div", { class: "route-footer", "data-no-pan": "" }, icon("signature", 15), h("div", {}, b.note)) : null,
     waitingHere && s.card.warnings.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
       h("div", {}, s.card.warnings.map((w) => h("div", {}, w)))) : null,
     runningHere ? signing(b) : null,
     notes(b));
 }
 
+/** The waiting move's Confirm (PendingButtons): a priced swap's holds 15 s after its quote, counting down, then turns into
+ * Refresh; while it's quoted, «Quoting…». The chat's field shows the same (chat.js waitingBar). */
+let confirmTimer = null;
+function confirmButton(card) {
+  const s = ui.state, q = s.quote;
+  const leftNow = () => Math.min(15, Math.max(0, Math.ceil(15 - (Date.now() - new Date(q.at).getTime()) / 1000)));
+  const left = q?.state === "fresh" && q.at ? leftNow() : 0;
+  const state = q?.state === "fresh" && left === 0 ? "stale" : q?.state;
+  const busy = s.thinking || !!s.runningBoard;
+  clearInterval(confirmTimer);
+  if (state === "stale") {
+    return h("button", { class: "btn primary route-large", disabled: busy, title: t("The price is over 15 seconds old: ask for it again", "Цене больше 15 секунд: спроси её снова"),
+      onclick: () => act("requote") }, icon("arrow.clockwise"), t("Refresh", "Обновить"));
+  }
+  if (state === "quoting") return h("span", { class: "route-quoting secondary" }, icon("hourglass", 13), t("Quoting…", "Котирую…"));
+  const label = h("span", { class: "num" }, state === "fresh" ? `${card.confirm} · ${left}` : card.confirm);
+  if (state === "fresh") {
+    confirmTimer = setInterval(() => {
+      const n = leftNow();
+      if (n === 0 || !document.body.contains(label)) { clearInterval(confirmTimer); if (n === 0) render(); return; }
+      label.textContent = `${card.confirm} · ${n}`;
+    }, 1000);
+  }
+  return h("button", { class: "btn primary route-large", disabled: busy, "aria-label": card.confirm, onclick: () => act("confirm", { board: card.id }) }, icon("hello"), label);
+}
+
+/** The ticks a site's request has had, by its id: Approve counts only once each risk it carries is ticked. */
+const siteTicks = new Map();
+
+/** A site's request as the Mac's ApprovalSheet: the site and its whole origin with how ihatecrypto knows it, what it asks
+ * for, the warnings, then a tick for each risk (a lookalike, a payee or a program not on the list, a contract it can't
+ * read, the second check's doubt) before Approve; Decline always. */
+function siteRequest(site) {
+  if (!siteTicks.has(site.id)) siteTicks.set(site.id, new Set());
+  const ticked = siteTicks.get(site.id);
+  const all = site.ticks.every((x) => ticked.has(x.id));
+  const chip = {
+    known: [t("Known site", "Знакомый сайт"), "profit", "checkmark.seal"],
+    unknown: [t("Unfamiliar site", "Незнакомый сайт"), "route-amber", "questionmark.circle"],
+    lookalike: [site.real ? t(`Lookalike of ${site.real}`, `Двойник ${site.real}`) : t("Lookalike", "Двойник"), "loss", "exclamationmark.octagon"],
+  }[site.check];
+  return h("div", { class: "route-site", "data-no-pan": "" },
+    h("div", { class: "route-site-head" },
+      h("span", { class: "route-site-letter" }, (site.host || "?").slice(0, 1).toUpperCase()),
+      h("div", { class: "route-site-name" },
+        h("div", { class: "route-site-host" }, h("b", { class: "one-line" }, site.host),
+          chip ? h("span", { class: "route-status-chip " + chip[1] }, icon(chip[2], 11), chip[0]) : null),
+        // The whole origin too: a phishing copy differs in what the big line leaves out.
+        h("div", { class: "route-site-origin selectable" }, site.origin))),
+    site.lines.length ? h("div", { class: "route-site-lines selectable" }, site.lines.map((l) => h("div", {}, l))) : null,
+    site.warnings.length ? h("div", { class: "route-warn-box" }, icon("exclamationmark.triangle", 14), h("div", {}, site.warnings.map((w) => h("div", {}, w)))) : null,
+    site.ticks.map((x) => h("div", { class: "route-site-tick" },
+      h("b", {}, x.title), h("span", { class: "secondary small" }, x.detail),
+      h("label", { class: "route-site-toggle" },
+        h("input", { type: "checkbox", checked: ticked.has(x.id), onchange: (e) => { e.target.checked ? ticked.add(x.id) : ticked.delete(x.id); render(); } }),
+        h("span", {}, x.toggle)))),
+    h("div", { class: "route-site-buttons" }, h("span", { class: "spacer" }),
+      h("button", { class: "btn route-large", onclick: () => { siteTicks.delete(site.id); act("siteAnswer", { board: site.id, test: false }); } }, t("Decline", "Отклонить")),
+      h("button", { class: "btn primary route-large", disabled: !all, title: all ? site.approve : t("Tick each box above first", "Сначала отметь каждый пункт выше"),
+        onclick: () => { const ids = [...ticked]; siteTicks.delete(site.id); act("siteAnswer", { board: site.id, test: true, ticks: ids }); } }, site.approve)));
+}
+
 /** «✓ Executed · Oct 22 at 10:38 PM» over a finished move's cards. */
 function outcome(b) {
-  const [text, cls, mark] = { done: [t("Executed", "Выполнено"), "profit", true], failed: [t("Failed", "Не вышло"), "loss", false] }[b.state]
+  // Sent with no answer back (the Mac's outcome.unknown): said so, and never offered again — it may have gone through.
+  const [text, cls, mark] = { done: [t("Executed", "Выполнено"), "profit", true], failed: [t("Failed", "Не вышло"), "loss", false],
+    unknown: [t("Sent, status unknown — check the links in the chat before doing it again", "Отправлено, статус неизвестен — проверь ссылки в чате, прежде чем повторять"), "route-amber", null],
+    nothing: [t("Nothing to do", "Нечего делать"), "secondary", null] }[b.state]
     || [t("Not signed", "Не подписано"), "secondary", null];
   const retry = b.state === "failed" && ui.state.retryBoard === b.id
     ? h("button", { class: "btn small route-retry", disabled: ui.state.thinking || !!ui.state.runningBoard, onclick: () => act("retry") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
@@ -437,7 +512,8 @@ function stepCard(b, step, i, state, compact, isOpen) {
     oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); menu(e, [
       [[icon("questionmark.circle", 14), t("Why this way?", "Почему так?")], () => act("whyStep", { board: b.id, index: i })],
       [[icon("pencil", 14), t("Edit step…", "Изменить шаг…")], () => openStep(b, i, true), !!editOf(b, state)],
-      [[mascot(14, "idle"), t("Send to chat", "Отправить в чат")], () => { closeStep(b, i); attach(b); }],
+      // That step goes with the next message, with its money and rows (the Mac's sendToChat), not the whole block.
+      [[mascot(14, "idle"), t("Send to chat", "Отправить в чат")], () => { closeStep(b, i); attach(b, i); }],
       null,
       [[icon("copy", 14), t("Copy details", "Скопировать подробности")], () => copy(stepText(step, i))],
     ]); },
@@ -455,6 +531,21 @@ export function openStep(b = ui.state.boards.find((x) => x.id === ui.state.card?
   render();
   if (focus) setTimeout(() => document.getElementById("route-amount")?.focus(), 0);
 }
+
+// A step's details: ← and → go to the step before and after, Esc closes them (the Mac's StepDetails keys); not while
+// an amount is being typed, where the arrows move the cursor.
+document.addEventListener("keydown", (e) => {
+  if (!["ArrowLeft", "ArrowRight", "Escape"].includes(e.key) || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) return;
+  const key = [...ui.opened].find((k) => k.startsWith("step:"));
+  if (!key || document.querySelector(".menu")) return;
+  const [, id, n] = key.split(":");
+  const count = ui.state?.boards?.find((x) => x.id === id)?.steps?.length || 0;
+  e.preventDefault();
+  e.stopPropagation();
+  ui.opened.delete(key);
+  if (e.key !== "Escape" && count > 1) ui.opened.add(`step:${id}:${(Number(n) + (e.key === "ArrowLeft" ? -1 : 1) + count) % count}`);
+  render();
+}, true);
 
 function closeStep(b, i) {
   if (ui.opened.delete("step:" + b.id + ":" + i)) render();
@@ -566,9 +657,9 @@ function stepDetails(b, steps, i, state, notch) {
         h("span", { class: "one-line" }, t(`Step ${i + 1} of ${steps.length} · ${step.title}`, `Шаг ${i + 1} из ${steps.length} · ${step.title}`))),
       h("span", { class: "spacer" }),
       openPlace(step),
-      steps.length > 1 ? [h("button", { class: "icon-btn", title: t("Previous step", "Предыдущий шаг"), onclick: () => go(-1) }, icon("chevron.left", 13)),
-        h("button", { class: "icon-btn", title: t("Next step", "Следующий шаг"), onclick: () => go(1) }, icon("chevron.right", 13))] : null,
-      h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: close }, icon("xmark", 13))),
+      steps.length > 1 ? [h("button", { class: "icon-btn", title: t("Previous step · ←", "Предыдущий шаг · ←"), onclick: () => go(-1) }, icon("chevron.left", 13)),
+        h("button", { class: "icon-btn", title: t("Next step · →", "Следующий шаг · →"), onclick: () => go(1) }, icon("chevron.right", 13))] : null,
+      h("button", { class: "icon-btn", title: t("Close · Esc", "Закрыть · Esc"), onclick: close }, icon("xmark", 13))),
     can && can.amount != null ? amountField(can, hint, save) : null,
     can && can.ways ? ways(can.quotes) : null,
     can && can.stock ? stockWays(can.quotes) : null,
@@ -822,6 +913,19 @@ const MULTISIG_NETWORKS = [["base", "Base", "base"], ["arbitrum", "Arbitrum", "a
   ["polygon", "Polygon", "pol"], ["bnb", "BNB Chain", "bnb"], ["hyperevm", "HyperEVM", "hyperevm"], ["robinhood", "Robinhood", "robinhood"], ["tempo", "Tempo", "tempo"]];
 
 /** The set-up card waiting for Confirm (MultisigSetupCard): the keys, how many must sign, where — each changes here. */
+/** What making it costs on each network picked (the engine's multisigFees, the Mac's), asked again when the networks or
+ * the keys change. */
+const msigFee = { key: null, fees: {} };
+function msigFees(d) {
+  const key = d.networks.join(",") + "/" + d.keys.length;
+  if (msigFee.key !== key) {
+    msigFee.key = key;
+    msigFee.fees = {};
+    engine("multisigFees").then((r) => { if (msigFee.key === key) { msigFee.fees = r || {}; render(); } }).catch(() => {});
+  }
+  return msigFee.fees;
+}
+
 function multisigSetup(d) {
   const n = d.keys.length, m = d.threshold, majority = Math.floor(n / 2) + 1;
   const names = (keys) => keys.map((k) => k.kind === "pc" ? t(`${presence()} on this PC`, `${presence()} на этом ПК`) : k.kind === "ledger" ? "Ledger" : k.name).join(t(" and ", " и "));
@@ -865,8 +969,9 @@ function multisigSetup(d) {
       h("div", { class: "route-msig-section" },
         h("div", { class: "route-section-label" }, h("span", {}, t("Networks · pick one or several", "Сети · одна или несколько")), h("span", {}, t("same address on each", "один адрес во всех"))),
         h("div", { class: "route-msig-networks" }, MULTISIG_NETWORKS.map(([key, name, logoName]) => {
-          const on = d.networks.includes(key);
-          return h("button", { class: "route-net-chip" + (on ? " route-on" : ""), onclick: () => act("multisigNetwork", { network: key }) }, logo(logoName, 18), name);
+          const on = d.networks.includes(key), fee = on ? msigFees(d)[key] : null;
+          return h("button", { class: "route-net-chip" + (on ? " route-on" : ""), onclick: () => act("multisigNetwork", { network: key }) }, logo(logoName, 18), name,
+            fee ? h("span", { class: "secondary small" }, fee) : null);
         })),
         h("div", { class: "route-msig-foot" }, t("Only networks where Safe runs. Add another later, or say it in the chat.", "Только сети, где работает Safe. Другую можно добавить позже или попросить в чате."))),
       d.address ? h("div", { class: "route-msig-address" }, h("span", { class: "secondary" }, t("Address", "Адрес")), h("span", { class: "address one-line" }, d.address),
@@ -972,20 +1077,31 @@ function reload(c, coin, range) {
 /** A coin's closes over the range, as the Mac's chart board: the price now (or under the pointer), the move, the range
  * picker, the line with its fill, the low and high. */
 function chartBlock(b) {
-  const c = b.chart;
-  const { coin, range, up, area, priceEl, changeEl, pick } = chartParts(b);
+  const c = b.chart, x = c.extras || {};
+  // The position's entry, its stop and take orders and the alerts across the line (the Mac's ChartBoard levels).
+  const { coin, range, up, area, priceEl, changeEl, pick } = chartParts(b, { levels: x.levels || [] });
   const badge = logo(coin, 38);
   badge.classList.add("route-asset-badge");
+  const network = x.network && x.network !== "hyperliquid" ? (ui.state.portfolio?.networks || []).find((n) => n.key === x.network)?.name || x.network : null;
+  const day = x.change24h === null || x.change24h === undefined ? null : Number(x.change24h);
   const el = h("div", { class: "route-block route-chart-block" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
     h("div", { class: "route-asset-head" }, badge,
-      h("div", { class: "route-asset-name" }, h("b", {}, coin), h("span", {}, t("Hyperliquid chart", "График Hyperliquid") + " · " + fmtDate(b.at))),
+      h("div", { class: "route-asset-name" }, h("b", {}, coin),
+        h("span", {}, [network, t("Hyperliquid chart", "График Hyperliquid"), rangeTitle(range), t("as of ", "на ") + fmtDate(b.at)].filter(Boolean).join(" · "))),
       h("span", { class: "spacer" }),
       h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => reload(c, coin, range) }, icon("arrow.clockwise")),
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
     h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick),
     area,
-    h("div", { class: "route-tiles" },
-      tile(t("Low", "Минимум"), c.low), tile(t("High", "Максимум"), c.high), tile(t("Change", "Изменение"), c.change, up ? "profit" : "loss")));
+    // The market's numbers, as the Mac's AssetStats; an older board with no market read keeps its low and high.
+    x.tiles?.length ? [
+      day !== null ? h("div", { class: "route-token-changes" }, h("span", { class: "route-change-chip" }, h("span", { class: "secondary" }, "24h "),
+        h("b", { class: day < 0 ? "loss" : "profit" }, (day < 0 ? "−" : "+") + Math.abs(day).toFixed(1) + "%"))) : null,
+      h("div", { class: "route-tiles" }, x.tiles.map((f) => tile(f.title, f.value)))]
+      : h("div", { class: "route-tiles" },
+        tile(t("Low", "Минимум"), c.low), tile(t("High", "Максимум"), c.high), tile(t("Change", "Изменение"), c.change, up ? "profit" : "loss")),
+    x.held ? heldCard(x.held, coin) : null,
+    assetActions(b, coin, coinTrades(c.coin || coin, x.network)));
   return el;
 }
 
@@ -1098,14 +1214,7 @@ function tokenBlock(b) {
   const pick = h("div", { class: "route-chart-range" }, TRANGES.map(([key, label]) => h("button", { class: key === c.range ? "route-on" : "", onclick: () => key !== c.range && act("tokenRange", { board: b.id, text: key }) }, label)));
   const priceEl = chart ? chart.priceEl : h("span", { class: "route-chart-price" }, c.price !== null && c.price !== undefined ? price(Number(c.price)) : "—");
   const changeEl = change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range));
-  // As the Mac's held card: since when the P/L counts, and under it what was bought, what came in and what it's worth.
-  const held = c.held ? h("div", { class: "route-held plan-held" },
-    h("div", {}, h("span", { class: "eyebrow" }, t("You hold", "У тебя") + (c.held.since ? " · " + c.held.since : "")), h("b", { class: "num" }, masked(`${c.held.amount} ${c.symbol}`)),
-      h("span", { class: "secondary small" }, c.held.how + (c.held.today !== null && c.held.today !== undefined ? " · " + t("today ", "сегодня ") + masked(signedUsd(c.held.today)) : ""))),
-    h("span", { class: "spacer" }),
-    h("div", { class: "route-held-value" }, h("b", { class: "num" }, masked(c.held.usd !== null && c.held.usd !== undefined ? usd(c.held.usd) : "—")),
-      c.held.pnl ? h("span", { class: "num small " + (Number(c.held.gain) < 0 ? "loss" : "profit") }, masked(c.held.pnl)) : null),
-    c.held.paid ? h("div", { class: "plan-held-paid secondary small" }, masked(c.held.paid)) : null) : null;
+  const held = c.held ? heldCard(c.held, c.symbol) : null;
   const phrases = tradePhrases(c.chain, c.address, c.symbol, { stock: c.stock, verified: c.verified === true, dollar: c.dollar });
   const watch = !c.favorite && !c.dollar ? [[t(`Watch ${c.symbol}`, `Следить за ${c.symbol}`), "star", `watch token ${c.address} on ${c.chain}`]] : [];
   return h("div", { class: "route-block route-chart-block route-token" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
@@ -1121,6 +1230,18 @@ function tokenBlock(b) {
       h("button", { class: "link-btn", title: c.address, onclick: () => copy(c.address) }, icon("copy", 11), c.address.slice(0, 6) + "…" + c.address.slice(-4)),
       c.links.map((l) => link(l.url, l.label))),
     assetActions(b, c.symbol, [...phrases, ...watch], "DexScreener · GeckoTerminal"));
+}
+
+/** «You hold» on a token's or a chart's card (HeldRow): since when the P/L counts, and under it what was bought, what
+ * came in and what it's worth. */
+function heldCard(held, symbol) {
+  return h("div", { class: "route-held plan-held" },
+    h("div", {}, h("span", { class: "eyebrow" }, t("You hold", "У тебя") + (held.since ? " · " + held.since : "")), h("b", { class: "num" }, masked(`${held.amount} ${symbol}`)),
+      h("span", { class: "secondary small" }, held.how + (held.today !== null && held.today !== undefined ? " · " + t("today ", "сегодня ") + masked(signedUsd(held.today)) : ""))),
+    h("span", { class: "spacer" }),
+    h("div", { class: "route-held-value" }, h("b", { class: "num" }, masked(held.usd !== null && held.usd !== undefined ? usd(held.usd) : "—")),
+      held.pnl ? h("span", { class: "num small " + (Number(held.gain) < 0 ? "loss" : "profit") }, masked(held.pnl)) : null),
+    held.paid ? h("div", { class: "plan-held-paid secondary small" }, masked(held.paid)) : null);
 }
 
 /** P/L (PnLBoard): the period picker, trading in the period, open positions, what's held, the portfolio's change, by
@@ -1202,7 +1323,7 @@ function moversBlock(b, m) {
   { width: 470, icon: "flame", extra: refresh(b) });
 }
 
-/** Token approvals (ApprovalsBoard): who may spend what, unlimited ones in red; Revoke puts the revoke in the chat. */
+/** Token approvals (ApprovalsBoard): who may spend what, unlimited ones in red; Revoke draws its card for Confirm, as the Mac's. */
 function approvalsBlock(b, a) {
   const open = a.list.filter((x) => x.unlimited).length;
   const sub = `${a.list.length} ` + t("active", "активных") + (open ? ` · ${open} ` + t("unlimited", "без лимита") : "") + t(" · ihatecrypto's own are exact and spent at once", " · свои ihatecrypto даёт точно и тратит сразу");
@@ -1214,7 +1335,7 @@ function approvalsBlock(b, a) {
       h("div", { class: "route-approval-text" }, h("b", { class: "one-line" }, `${x.symbol} → ${x.spenderName || x.spender.slice(0, 6) + "…" + x.spender.slice(-4)}`),
         h("span", { class: "small one-line " + (x.unlimited ? "loss" : "secondary") }, `${x.place}${x.permit2 ? t(" · through Permit2", " · через Permit2") : ""} · ${x.amount}`)),
       h("span", { class: "spacer" }),
-      h("button", { class: "btn small", title: t(`Sets it to zero: one ${x.place} transaction, nothing spent. Puts «${x.revoke}» in the chat`, `Обнуляет: одна транзакция в ${x.place}, ничего не тратится. Вставит «${x.revoke}» в чат`), onclick: () => suggest(x.revoke) }, t("Revoke", "Отозвать")))))
+      h("button", { class: "btn small", disabled: !!ui.state.thinking, title: t(`Sets it to zero: one ${x.place} transaction, nothing spent`, `Обнуляет: одна транзакция в ${x.place}, ничего не тратится`), onclick: () => act("send", { text: x.revoke }) }, t("Revoke", "Отозвать")))))
       : h("div", { class: "secondary" }, t("No token approvals left: nothing can spend your tokens but you.", "Разрешений не осталось: никто, кроме тебя, не может тратить твои токены.")),
     a.unread.length ? h("div", { class: "secondary small" }, t(`Couldn't read ${a.unread.join(", ")} now — try again in a minute.`, `Не удалось прочитать ${a.unread.join(", ")} — попробуй через минуту.`)) : null),
   { width: 520, icon: "checkmark.shield", extra: h("button", { class: "icon-btn", title: t("Read them again", "Прочитать заново"), onclick: () => act("refreshApprovals", { board: b.id }) }, icon("arrow.clockwise")) });
@@ -1229,7 +1350,7 @@ function dcaBlock(b, rows) {
       return h("div", { class: "route-dca" },
         h("div", { class: "route-dca-head" }, logo("usdc", 22), icon("arrow.right", 12), logo(o.coin, 22),
           h("b", { class: "one-line" }, t(`${o.perCycle} USDC → ${o.coin} every ${o.every}`, `${o.perCycle} USDC → ${o.coin} раз в ${o.every}`)), h("span", { class: "spacer" }),
-          h("button", { class: "link-btn loss", title: t(`Puts «${o.cancel}» in the chat`, `Вставит «${o.cancel}» в чат`), onclick: () => suggest(o.cancel) }, t("Cancel", "Отменить"))),
+          h("button", { class: "link-btn loss", disabled: !!ui.state.thinking, title: t("Its card comes for Confirm: what wasn't spent and the rent come back", "Придёт карточка на подтверждение: вернутся непотраченное и рента"), onclick: () => act("send", { text: o.cancel }) }, t("Cancel", "Отменить"))),
         h("div", { class: "route-progress" }, h("span", { style: `width:${(done * 100).toFixed(1)}%` })),
         h("div", { class: "route-dca-foot secondary small num" },
           h("span", {}, t(`spent ${o.used} of ${o.deposited} USDC · ${o.fills} ${o.fills === 1 ? "swap" : "swaps"}`, `потрачено ${o.used} из ${o.deposited} USDC · обменов: ${o.fills}`)),

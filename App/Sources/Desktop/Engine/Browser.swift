@@ -8,10 +8,12 @@ import TradeExecution
 import TxGuard
 import WalletCore
 
-/// A site's request waiting for the person: its card on the canvas, answered by Confirm or Cancel, once.
+/// A site's request waiting for the person (the Mac's SiteRequest): its own block on the canvas, apart from the person's
+/// card, answered once by its id (Consent.swift).
 final class SiteAsk {
+    let view: SiteAskView
     private var continuation: CheckedContinuation<Bool, Never>?
-    init(_ c: CheckedContinuation<Bool, Never>) { continuation = c }
+    init(_ view: SiteAskView, _ c: CheckedContinuation<Bool, Never>) { self.view = view; continuation = c }
     func answer(_ yes: Bool) {
         continuation?.resume(returning: yes)
         continuation = nil
@@ -62,11 +64,14 @@ extension Engine {
     static let readOnly: Set<String> = ["eth_call", "eth_blockNumber", "eth_getBalance", "eth_getCode", "eth_getTransactionCount", "eth_getTransactionReceipt",
                                         "eth_getTransactionByHash", "eth_estimateGas", "eth_gasPrice", "eth_feeHistory", "eth_getBlockByNumber",
                                         "eth_getLogs", "eth_maxPriorityFeePerGas", "eth_getStorageAt"]
+    /// The EVM networks a site may use, as the Mac's browser (Ethereum, Arbitrum, Base): where the balance simulation is
+    /// known to run, so a card never shows only «Unavailable».
+    static let siteChains: Set<UInt64> = [1, 42161, 8453]
     /// arb1 crashes on eth_simulateV1; publicnode runs it.
     static let simulationRPC: [UInt64: String] = [42161: "https://arbitrum-one-rpc.publicnode.com"]
 
     /// One call from a page: the answer as JSON text, or an error «code|message» for EIP-1193.
-    func dapp(_ method: String, params text: String, origin: String) async throws -> String {
+    func dapp(_ method: String, params text: String, origin: String, title: String = "") async throws -> String {
         guard let url = URL(string: origin), url.scheme == "https", let host = url.host() else { throw SiteError("Only https sites get the wallet.") }
         let params = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
         let eth = method == "eth"
@@ -86,12 +91,12 @@ extension Engine {
         func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed), as: UTF8.self) }
         switch method {
         case "eth":
-            return try await ethereum(params["method"] as? String ?? "", params["params"] as? String ?? "[]", origin: origin, host: host, site: site)
+            return try await ethereum(params["method"] as? String ?? "", params["params"] as? String ?? "[]", origin: origin, host: host, title: title, site: site)
         case "connect":
             guard let owner = wallet.solana else { throw SiteError(wallet.missing("solana") ?? "No Solana address.") }
             if !sites.solana.contains(origin) {
                 if params["silent"] as? Bool == true { return "null" }
-                guard await ask(host, site: site, title: say("\(host) asks to connect to your Solana wallet", "\(host) просит подключить твой кошелёк Solana"),
+                guard await ask(host, origin: origin, site: site, connect: true, title: say("\(host) asks to connect to your Solana wallet", "\(host) просит подключить твой кошелёк Solana"),
                                 lines: [say("It sees your address and can ask you to sign; nothing is signed without your Confirm.", "Сайт увидит адрес и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."), owner])
                 else { throw SiteError("The user declined.") }
                 sites.solana.insert(origin)
@@ -109,7 +114,7 @@ extension Engine {
         case "signMessage":
             guard sites.solana.contains(origin), let b64 = params["message"] as? String, let bytes = Data(base64Encoded: b64) else { throw SiteError("Connect the site first.") }
             let text = String(data: bytes, encoding: .utf8) ?? "(not text: \(bytes.count) bytes)"
-            guard await ask(host, site: site, title: say("\(host) asks to sign a message", "\(host) просит подписать сообщение"),
+            guard await ask(host, origin: origin, site: site, title: say("\(host) asks to sign a message", "\(host) просит подписать сообщение"),
                             lines: [text, say("Signing text doesn't move money. The signer refuses it if it's a hidden transaction.", "Подпись текста не двигает деньги. Подписант откажет, если это скрытая транзакция.")])
             else { throw SiteError("The user declined.") }
             let reply = try await SignerLink.shared.send(.signSolanaMessage(message: bytes))
@@ -120,15 +125,15 @@ extension Engine {
                 throw SiteError("Connect the site first.")
             }
             let send = method == "signAndSendTransaction"
-            let review = try await solanaReview(wire, owner: owner, host: host)
+            let review = try await solanaReview(wire, owner: owner, host: host, title: title)
             guard review.problems.isEmpty else {
                 pin("result", say("\(host): transaction refused", "\(host): транзакция отклонена"), lines: review.problems + review.lines)
                 reply(say("\(host) sent a transaction ihatecrypto won't sign: ", "\(host) прислал транзакцию, которую ihatecrypto не подпишет: ") + review.problems.joined(separator: " "), note: "browser")
                 throw SiteError("Transaction declined: " + review.problems.joined(separator: " "))
             }
-            guard await ask(host, site: site, title: (send ? say("\(host) asks to sign and send a transaction", "\(host) просит подписать и отправить транзакцию")
+            guard await ask(host, origin: origin, site: site, title: (send ? say("\(host) asks to sign and send a transaction", "\(host) просит подписать и отправить транзакцию")
                                                          : say("\(host) asks to sign a transaction", "\(host) просит подписать транзакцию")),
-                            lines: review.lines, warnings: review.warnings)
+                            lines: review.lines, warnings: review.warnings, ticks: review.ticks)
             else { throw SiteError("Transaction declined.") }
             let reply = try await SignerLink.shared.send(.signSolana(wire: wire, accounts: review.accounts, recipients: [], tokenOwners: review.tokenOwners,
                                                                      extraPrograms: review.unknownPrograms))
@@ -151,31 +156,41 @@ extension Engine {
         }
     }
 
-    /// A request waits on the canvas for Confirm; one at a time, so a page can't swap the one being read for another.
-    private func ask(_ host: String, site: SiteCheck.Verdict, title: String, lines: [String], warnings: [String] = []) async -> Bool {
-        if case .site? = pending { return false }
-        var warnings = warnings
+    /// A request waits on the canvas for the person (the Mac's ask): one at a time, so a page can't swap the one being
+    /// read for another, and never in the place of their own card — it has its block and its answer (Consent.swift),
+    /// with a tick for each risk it carries before Approve counts.
+    func ask(_ host: String, origin: String, site: SiteCheck.Verdict, connect: Bool = false, title: String, lines: [String],
+                     warnings: [String] = [], ticks: [SiteTick] = []) async -> Bool {
+        guard siteAsk == nil else { return false }
+        var warnings = warnings, ticks = ticks
+        var check = "known", real: String?
         switch site {
-        case .lookalike(let real): warnings.insert(say("This address looks like \(real) but isn't it: a lookalike site steals wallets.", "Адрес похож на \(real), но это не он: сайты-двойники крадут кошельки."), at: 0)
-        case .unknown: warnings.append(say("ihatecrypto doesn't know \(host): check the address bar.", "ihatecrypto не знает \(host): проверь адрес в строке."))
-        case .known, .local: break
+        case .lookalike(let r): check = "lookalike"; real = r; ticks.insert(Self.lookalikeTick(r, say: say), at: 0)
+        case .unknown: check = "unknown"; warnings.append(say("ihatecrypto doesn't know \(host): check the address bar.", "ihatecrypto не знает \(host): проверь адрес в строке."))
+        case .known: break
+        case .local: check = "local"
         }
+        let view = SiteAskView(id: UUID().uuidString, origin: origin, host: host, check: check, real: real, title: title, lines: lines, warnings: warnings,
+                               ticks: ticks, approve: connect ? say("Connect", "Подключить") : say("Sign", "Подписать"))
         out.event("showMain", ["why": "site"])
         notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."))
         return await withCheckedContinuation { c in
-            show(.site(SiteAsk(c)), title: title, lines: lines, warnings: warnings)
+            siteAsk = SiteAsk(view, c)
+            pin(Board(id: view.id, kind: "move", title: title, lines: (warnings + ticks.map(\.title)).map { "⚠ " + $0 },
+                      steps: [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)], state: "waiting"))
+            changed()
         }
     }
 
     /// EIP-1193 requests. Answers are JSON text; errors are «code|message».
-    private func ethereum(_ method: String, _ paramsJSON: String, origin: String, host: String, site: SiteCheck.Verdict) async throws -> String {
+    private func ethereum(_ method: String, _ paramsJSON: String, origin: String, host: String, title: String, site: SiteCheck.Verdict) async throws -> String {
         guard let address = activeWallet?.evm else { throw SiteError("4100|" + (activeWallet?.missing("evm") ?? "No EVM address.")) }
         let args = (try? JSONSerialization.jsonObject(with: Data(paramsJSON.utf8))) as? [Any] ?? []
         let chain = sites.chain[origin] ?? 42161
         func json(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed), as: UTF8.self) }
         func hex(_ s: EVMSignature) -> String { "0x" + s.r.hex + s.s.hex + String(format: "%02x", s.v) }
         func rpc() throws -> EVMRPC {
-            guard let n = EVMNetwork.all.first(where: { $0.rpc.chainId == chain }) else { throw SiteError("4901|No RPC for chain \(chain).") }
+            guard Self.siteChains.contains(chain), let n = EVMNetwork.all.first(where: { $0.rpc.chainId == chain }) else { throw SiteError("4901|No RPC for chain \(chain).") }
             return n.rpc
         }
         switch method {
@@ -184,7 +199,7 @@ extension Engine {
         case "eth_accounts": return try json(sites.evm.contains(origin) ? [address] : [])
         case "eth_requestAccounts":
             if !sites.evm.contains(origin) {
-                guard await ask(host, site: site, title: say("\(host) asks to connect to your EVM wallet", "\(host) просит подключить твой EVM-кошелёк"),
+                guard await ask(host, origin: origin, site: site, connect: true, title: say("\(host) asks to connect to your EVM wallet", "\(host) просит подключить твой EVM-кошелёк"),
                                 lines: [say("It sees your address and can ask you to sign; nothing is signed without your Confirm.", "Сайт увидит адрес и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."), address])
                 else { throw SiteError("4001|The user declined.") }
                 sites.evm.insert(origin)
@@ -192,8 +207,8 @@ extension Engine {
             return try json([address])
         case "wallet_switchEthereumChain":
             guard let id = (args.first as? [String: Any])?["chainId"] as? String, let n = UInt64(id.dropFirst(2), radix: 16),
-                  EVMNetwork.all.contains(where: { $0.rpc.chainId == n }) else {
-                throw SiteError("4902|ihatecrypto works with " + EVMNetwork.all.map(\.name).joined(separator: ", ") + ".")
+                  Self.siteChains.contains(n), EVMNetwork.all.contains(where: { $0.rpc.chainId == n }) else {
+                throw SiteError("4902|ihatecrypto works with Ethereum, Arbitrum and Base.")
             }
             sites.chain[origin] = n
             return "null"
@@ -201,7 +216,7 @@ extension Engine {
             guard sites.evm.contains(origin), let raw = args.first as? String else { throw SiteError("4100|Connect the site first.") }
             let message = raw.hasPrefix("0x") ? (Data(hex: raw) ?? Data(raw.utf8)) : Data(raw.utf8)
             guard !PersonalMessage.isBlindHash(message) else { throw SiteError("4001|The site asks to sign a hash, not text: ihatecrypto doesn't sign that.") }
-            guard await ask(host, site: site, title: say("\(host) asks to sign a message", "\(host) просит подписать сообщение"),
+            guard await ask(host, origin: origin, site: site, title: say("\(host) asks to sign a message", "\(host) просит подписать сообщение"),
                             lines: [String(data: message, encoding: .utf8) ?? "\(message.count) bytes",
                                     say("Signing text doesn't move money. The signer refuses it if it's a hidden transaction.", "Подпись текста не двигает деньги. Подписант откажет, если это скрытая транзакция.")])
             else { throw SiteError("4001|The user declined.") }
@@ -217,7 +232,7 @@ extension Engine {
                 reply("Site \(host) asked for a “\(typed.primaryType)” signature. Declined — \(refusal)", note: "browser")
                 throw SiteError("4001|" + refusal)
             }
-            guard await ask(host, site: site, title: say("\(host) asks to sign “\(typed.primaryType)”", "\(host) просит подписать «\(typed.primaryType)»"),
+            guard await ask(host, origin: origin, site: site, title: say("\(host) asks to sign “\(typed.primaryType)”", "\(host) просит подписать «\(typed.primaryType)»"),
                             lines: ["\(typed.primaryType) for “\(typed.domainName)”, chain \(typed.chainId)"] + typed.fields.map { "\($0.name): \($0.value)" }
                                 + [say("The signer computes what it signs from this same data, and refuses token permissions.", "Подписант считает подпись из этих же данных и отказывает в разрешениях на токены.")])
             else { throw SiteError("4001|The user declined.") }
@@ -235,15 +250,15 @@ extension Engine {
             let data = Data(hex: (p["data"] ?? p["input"]) as? String ?? "0x") ?? Data()
             guard let value = Self.quantity(p["value"]) else { throw SiteError("4200|The amount is larger than ihatecrypto will sign.") }
             let rpc = try rpc()
-            let review = await evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
+            let review = await evmReview(to: to, value: value, data: data, from: address, rpc: rpc, host: host, title: title)
             guard review.problems.isEmpty else {
                 pin("result", say("\(host): EVM transaction refused", "\(host): EVM-транзакция отклонена"), lines: review.problems + review.lines)
                 reply("Site \(host): EVM transaction declined — \(review.problems.joined(separator: " "))", note: "browser")
                 throw SiteError("4001|" + (review.problems.first ?? "Declined."))
             }
-            guard await ask(host, site: site, title: say("\(host) asks to send a transaction on \(EVMNetwork.all.first { $0.rpc.chainId == chain }?.name ?? "chain \(chain)")",
+            guard await ask(host, origin: origin, site: site, title: say("\(host) asks to send a transaction on \(EVMNetwork.all.first { $0.rpc.chainId == chain }?.name ?? "chain \(chain)")",
                                                          "\(host) просит отправить транзакцию в \(EVMNetwork.all.first { $0.rpc.chainId == chain }?.name ?? "сети \(chain)")"),
-                            lines: review.lines + review.changes.map { say("Balance: ", "Баланс: ") + $0 }, warnings: review.warnings)
+                            lines: review.lines + review.changes.map { say("Balance: ", "Баланс: ") + $0 }, warnings: review.warnings, ticks: review.ticks)
             else { throw SiteError("4001|The user declined.") }
             let nonce = try await rpc.nonce(address)
             let fees = try await rpc.fees()
@@ -288,10 +303,12 @@ extension Engine {
         var accounts: [String] = []
         var tokenOwners: [String: String] = [:]
         var unknownPrograms: [String] = []
+        /// What needs the person's tick before Approve counts (Consent.swift).
+        var ticks: [SiteTick] = []
     }
 
     /// Decodes the call, names the token, simulates our balances and estimates gas, as the Mac does. Problems mean «don't sign».
-    func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> SiteReview {
+    func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC, host: String = "", title: String = "") async -> SiteReview {
         let call = EVMCall.decode(data)
         var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
@@ -340,13 +357,15 @@ extension Engine {
             } catch { problems.append("Couldn't estimate gas: \(error.localizedDescription)") }
         }
         var warnings: [String] = []
-        if case .contract = call { warnings.append(say("ihatecrypto can't read this contract call: sign only if you trust the site.", "ihatecrypto не может прочитать этот вызов контракта: подписывай, только если доверяешь сайту.")) }
-        await siteSecondCheck(host: "", programs: ["EVM \(rpc.chainId): \(to)"], changes: lines + changes, lines: &lines, warnings: &warnings)
-        return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, recipients: recipients, gas: gas)
+        var unread = false
+        if case .contract = call { unread = true }
+        var ticks = [Self.payeeTick(to: to, recipients: recipients, unread: unread, say: say)].compactMap { $0 }
+        await siteSecondCheck(host: host, title: title, programs: ["EVM \(rpc.chainId): \(to)"], changes: lines + changes, lines: &lines, ticks: &ticks)
+        return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, recipients: recipients, gas: gas, ticks: ticks)
     }
 
     /// Programs, the guard's verdict and the simulated change of every balance of ours the transaction touches.
-    func solanaReview(_ wire: Data, owner: String, host: String) async throws -> SiteReview {
+    func solanaReview(_ wire: Data, owner: String, host: String, title: String = "") async throws -> SiteReview {
         let rpc = SolanaRPC()
         let message = try SolanaMessage.parse(transaction: wire)
         let accounts = try await rpc.resolveAccounts(message)
@@ -382,28 +401,24 @@ extension Engine {
         var lines = changes.map { say("Your balance, simulated: ", "Твой баланс, по симуляции: ") + $0 }
         lines.append(say("Calls: ", "Вызывает: ") + named.joined(separator: ", "))
         lines += verdict.checks.filter { !$0.hasPrefix("Calls unknown program") && seen.insert($0).inserted }
-        var warnings: [String] = []
-        if !unknown.isEmpty {
-            warnings.append(say("\(unknown.count == 1 ? "A program isn't" : "Programs aren't") on ihatecrypto's list: signing calls them the way the site built the transaction.",
-                                "\(unknown.count == 1 ? "Программы нет" : "Программ нет") в списке ihatecrypto: подпись вызовет их так, как сайт собрал транзакцию."))
-        }
-        await siteSecondCheck(host: host, programs: named, changes: changes, lines: &lines, warnings: &warnings)
-        return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown)
+        var ticks = [Self.programsTick(unknown, say: say)].compactMap { $0 }
+        await siteSecondCheck(host: host, title: title, programs: named, changes: changes, lines: &lines, ticks: &ticks)
+        return SiteReview(lines: lines, changes: changes, warnings: [], problems: problems, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown, ticks: ticks)
     }
 
     /// The second check on a site's transaction (the Mac's jevNote): its concern as a warning, and when it didn't answer
     /// or isn't connected the card says so — the code checks decide.
-    private func siteSecondCheck(host: String, programs: [String], changes: [String], lines: inout [String], warnings: inout [String]) async {
+    private func siteSecondCheck(host: String, title: String, programs: [String], changes: [String], lines: inout [String], ticks: inout [SiteTick]) async {
         guard let key = jevKey, secondCheck else {
             lines.append(say("The second check isn't connected (Settings › AI model › Second check). The code checks decide.",
                              "Вторая проверка не подключена (Настройки › Модель ИИ › Вторая проверка). Решают проверки кода."))
             return
         }
-        guard let r = try? await JevReviewer.site(host: host, title: "", programs: programs, changes: changes, apiKey: key) else {
+        guard let r = try? await JevReviewer.site(host: host, title: title, programs: programs, changes: changes, apiKey: key) else {
             lines.append(say("The second check didn't answer — the code checks decide.", "Вторая проверка не ответила — решают проверки кода."))
             return
         }
-        if r.concern { warnings.append("Jev: " + r.text) }
+        if r.concern { ticks.append(Self.jevTick(r.text, say: say)) }
     }
 
     /// Our token accounts, classic SPL and Token-2022 alike: address → mint, raw amount, decimals.

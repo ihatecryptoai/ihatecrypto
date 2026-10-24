@@ -25,7 +25,7 @@ extension Engine {
         guard goal.round + 1 < Self.agentRounds else { return }
         let said = messages.dropFirst(goal.mark).filter { !$0.fromUser }.suffix(8).map { String($0.text.prefix(800)) }
         let outcome = lastMove.flatMap { $0.at >= goal.since ? $0.state : nil }
-        let how = outcome == "done" ? "went through" : outcome == "failed" ? "didn't go through" : "ran"
+        let how = outcome == "done" ? "went through" : outcome == "failed" ? "didn't go through" : outcome == "unknown" ? "was sent, its outcome unknown yet" : "ran"
         thinking = true
         changed()
         defer { thinking = false; changed() }

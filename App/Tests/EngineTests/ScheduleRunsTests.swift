@@ -11,7 +11,7 @@ import Testing
     @Test func aRunGoesOnItsOwnCanvasAndComesBack() throws {
         // Due 40 minutes ago: past the half hour a task waits for the person to step away.
         let task: [String: Any] = ["id": UUID().uuidString, "steps": ["remember: its own canvas"], "next": Date().timeIntervalSinceReferenceDate - 2400]
-        let engine = try EngineTests.Engine(seed: ["tasks.json": try JSONSerialization.data(withJSONObject: [task])])
+        let engine = try EngineTests.Engine(seed: sealedTasks(try JSONSerialization.data(withJSONObject: [task])))
         let first = try #require(try engine.call("hello").state)
         let home = try #require(first["canvas"] as? String)
         let ran = try #require(try LiveTests.wait(engine) { !(($0["scheduleRuns"] as? [Any]) ?? []).isEmpty })

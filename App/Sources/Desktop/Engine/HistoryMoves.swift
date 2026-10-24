@@ -30,7 +30,7 @@ extension Engine {
     private var allMoves: [(row: MoveRow, line: MovedLine)] {
         let own = Set((status?.wallets ?? []).map(\.label))
         var out: [(MoveRow, MovedLine)] = []
-        for c in canvases {
+        for c in historyChats {
             var request: String?
             for m in c.messages {
                 if m.fromUser { request = m.text; continue }

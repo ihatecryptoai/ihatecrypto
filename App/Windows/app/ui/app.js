@@ -38,6 +38,10 @@ window.__TAURI__.event.listen("engine", (e) => {
   } else if (msg.event === "suggest") {
     // A phrase the engine hands the person (the guard's «save <address> as NAME on <network>»): into the field, not sent.
     suggest(msg.data.text);
+  } else if (msg.event === "openView") {
+    // Typed «top up» / «receive»: the Top up page, as the Mac's showReceive opens its board.
+    ui.view = msg.data?.view || msg.view;
+    render();
   } else if (msg.event === "whatsNew") {
     // «what's new» typed in the chat.
     import("./whatsnew.js").then((m) => m.openWhatsNew());
@@ -95,6 +99,10 @@ function draw() {
     parts.push(h("div", { class: "ground" }), page || canvasView(), rail(), windowControls());
   }
   app.replaceChildren(...parts);
+  // The page panel's webviews sit over this page: hidden while anything but the canvas fills it (Settings, a sheet,
+  // the lock, the first run), as the Mac's WebPanel shows only beside the canvas (panel-grip.js reads it).
+  const covered = parts.length !== 4 || ui.view === "settings" || ui.view === "history" || ui.view === "topup";
+  if (store("panelHidden") !== covered) store("panelHidden", covered);
   restore();
   if (focused) {
     const el = document.getElementById(focused);

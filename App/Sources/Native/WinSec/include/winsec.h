@@ -23,6 +23,11 @@ int32_t winsec_hello_available(void);
 /// signature goes to `out`, freed with winsec_free.
 int32_t winsec_hello_sign(const uint8_t *name, size_t name_len, const uint8_t *challenge, size_t challenge_len,
                           const uint8_t *reason, size_t reason_len, int32_t create, uint8_t **out, size_t *out_len);
+/// The same, with no one there perhaps: Windows Hello's prompt is called off after `timeout_ms` unanswered (0: it waits
+/// for an answer), and CANCELLED comes back.
+int32_t winsec_hello_sign_within(const uint8_t *name, size_t name_len, const uint8_t *challenge, size_t challenge_len,
+                                 const uint8_t *reason, size_t reason_len, int32_t create, uint32_t timeout_ms, uint8_t **out,
+                                 size_t *out_len);
 int32_t winsec_hello_in_tpm(const uint8_t *name, size_t name_len);
 
 int32_t winsec_protect(const uint8_t *data, size_t len, uint8_t **out, size_t *out_len);

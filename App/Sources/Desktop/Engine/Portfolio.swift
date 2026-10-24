@@ -36,6 +36,8 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         /// It looks real (Holding.looksReal): verified, or a real pool and a cent's worth. Shown unless the person hid it;
         /// the others are tucked until the person shows them.
         var real: Bool?
+        /// One of Robinhood Chain's stock tokens: its Buy and Sell name the stock, not the contract (the Mac's tokenPhrases).
+        var stock: Bool?
         /// A deposit managed on its own site (Jupiter's other platforms): a click opens it in the browser, as the Mac's
         /// opens it beside the chat.
         var site: String?
@@ -177,6 +179,12 @@ extension Engine {
     func noted(_ n: PortfolioView.Network) -> PortfolioView.Network {
         var n = n
         n.note = Self.note(n, russian: russian)
+        if n.key == "robinhood" {
+            // Robinhood's own registry tells a stock token from any other; read once, the rows marked from the next read on.
+            if let stocks = Self.stockRegistry.map({ Set($0.map { $0.address.lowercased() }) }) {
+                n.rows = n.rows.map { r in var r = r; if let c = r.contract?.lowercased(), stocks.contains(c) { r.stock = true }; return r }
+            } else { Task { _ = await robinhoodStock("") } }
+        }
         // A deposit's «earning» in the window's language; a vault's own name and rate stay as they are.
         if russian { n.rows = n.rows.map { r in var r = r; if r.note == "earning" { r.note = "приносит доход" }; return r } }
         return n
@@ -233,9 +241,10 @@ extension Engine {
             default: "\(chain):\(contract.lowercased())"
             }
         }
-        // A dollar has no day's move to show.
+        // A dollar has no day's move to show, and no P/L to keep; it keeps its contract, so USDT, USDS, USDe and DAI open
+        // their card and trade from their row as any token (the Mac's opener).
         return .init(symbol: symbol, amount: Fmt.num(amount, maxFraction: amount < 1 ? 6 : 4), value: amount, usd: usd, icon: icon?.absoluteString,
-                     key: key, contract: key == nil ? nil : contract, change24h: key == nil ? nil : change24h, verified: verified)
+                     key: key, contract: contract, change24h: key == nil ? nil : change24h, verified: verified)
     }
 
     /// A token found by listing the address, with its day's move and whether a market list vouches for it.
@@ -353,7 +362,8 @@ extension Engine {
         do {
             let b = try await Near.balance(account: account)
             let total = b.near + b.wrapped
-            var rows = total > 0 ? [row("NEAR", total)] : []
+            // Keyed «near:native» as the Mac's, so it has its P/L and isn't counted with the idle dollars.
+            var rows = total > 0 ? [row("NEAR", total, chain: "near", contract: "native")] : []
             rows += ((await Holdings.near(account: account)) ?? []).filter { $0.contract != "native" && $0.contract != "wrap.near" }.map(row)
             return .success(.init(key: "near", name: "NEAR", usd: 0, rows: rows))
         } catch {

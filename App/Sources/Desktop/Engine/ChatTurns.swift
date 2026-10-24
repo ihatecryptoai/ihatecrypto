@@ -381,6 +381,9 @@ extension Engine {
     /// Downloads a model into Ollama from the model menu or the connect bar, with its progress; the chat says when it's ready.
     func downloadModel(_ model: String) async {
         guard modelDownloads[model] == nil else { return }
+        // An Ollama older than its newest release is updated first: a new model wants a new Ollama (the Mac's pull).
+        if localSetup.ollamaVersion == nil { await readOllamaVersions() }
+        if localServers["ollama"] == true, needsNewOllama { await installOllama() }
         modelDownloads[model] = 0
         changed()
         defer { modelDownloads[model] = nil; changed() }

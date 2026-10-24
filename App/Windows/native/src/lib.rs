@@ -118,13 +118,42 @@ pub unsafe extern "C" fn winsec_hello_sign(
     name: *const u8, name_len: usize, challenge: *const u8, challenge_len: usize, reason: *const u8, reason_len: usize,
     create: i32, out: *mut *mut u8, out_len: *mut usize,
 ) -> i32 {
+    unsafe { winsec_hello_sign_within(name, name_len, challenge, challenge_len, reason, reason_len, create, 0, out, out_len) }
+}
+
+/// winsec_hello_sign for a move no one may be there for: after `timeout_ms` unanswered (0: never) the request is called
+/// off and Windows Hello's dialog closed, and CANCELLED comes back — as a Mac's Touch ID prompt for a scheduled move
+/// closes after a minute, so the signer isn't held by a prompt on an empty room.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn winsec_hello_sign_within(
+    name: *const u8, name_len: usize, challenge: *const u8, challenge_len: usize, reason: *const u8, reason_len: usize,
+    create: i32, timeout_ms: u32, out: *mut *mut u8, out_len: *mut usize,
+) -> i32 {
     let name = HSTRING::from(unsafe { text(name, name_len) });
     let challenge = unsafe { std::slice::from_raw_parts(challenge, challenge_len) }.to_vec();
     let reason = unsafe { text(reason, reason_len) };
     let result = with_details(&reason, move || -> Result<Vec<u8>, i32> {
         let key = credential(&name, create != 0)?;
         let data = CryptographicBuffer::CreateFromByteArray(&challenge).map_err(|_| FAILED)?;
-        let signed = key.RequestSignAsync(&data).and_then(|op| op.join()).map_err(|_| FAILED)?;
+        let op = key.RequestSignAsync(&data).map_err(|_| FAILED)?;
+        let signed = if timeout_ms == 0 { op.join().map_err(|_| FAILED)? } else {
+            let (answered, answer) = std::sync::mpsc::channel();
+            let waiting = op.clone();
+            std::thread::spawn(move || { let _ = answered.send(waiting.join()); });
+            match answer.recv_timeout(Duration::from_millis(timeout_ms as u64)) {
+                Ok(result) => result.map_err(|_| FAILED)?,
+                Err(_) => {
+                    let _ = op.Cancel();
+                    // Calling the request off may leave Windows' dialog up: closed too, as a person's Cancel would.
+                    unsafe {
+                        if let Ok(dialog) = FindWindowW(w!("Credential Dialog Xaml Host"), PCWSTR::null()) {
+                            let _ = PostMessageW(Some(dialog), WM_CLOSE, WPARAM(0), LPARAM(0));
+                        }
+                    }
+                    return Err(CANCELLED);
+                }
+            }
+        };
         let status = signed.Status().map_err(|_| FAILED)?;
         if status != KeyCredentialStatus::Success { return Err(status_code(status)) }
         let buffer = signed.Result().map_err(|_| FAILED)?;

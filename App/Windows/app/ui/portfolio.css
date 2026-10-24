@@ -172,3 +172,17 @@ button.pf-d-row:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 122, 47, 0.6); }
 .pf-d-action { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: none;
   background: rgba(255, 122, 47, 0.1); color: var(--accent-ink); font-size: 12px; font-weight: 600; }
 .pf-d-action:hover { background: rgba(255, 122, 47, 0.18); }
+
+/* Wave 5 (cards): the automation wallet's coins and its gas warning (the Mac's AutomationCard). */
+.pf-auto { display: flex; flex-direction: column; gap: 6px; padding: 0; border-radius: 16px; border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent); }
+.pf-auto > .pf-plain { flex-direction: column; align-items: stretch; gap: 8px; border: 0; }
+.pf-auto-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pf-auto-coin { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.pf-auto-coin.dim { opacity: 0.55; }
+.pf-auto-coin .one-line { min-width: 0; }
+.pf-auto-usd { min-width: 52px; text-align: right; }
+.pf-auto-gas { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0 9px 9px; padding: 7px 9px; border-radius: 10px;
+  background: color-mix(in srgb, var(--jev-ink) 10%, transparent); color: var(--jev-ink); font-size: 10.5px; font-weight: 600; }
+.pf-auto-gas > span { display: inline-flex; align-items: center; gap: 5px; }
+.pf-total.pf-last { opacity: 0.4; }
+.pf-limit-waiting { font-size: 10px; color: color-mix(in srgb, currentColor 70%, transparent); padding: 0 2px; }

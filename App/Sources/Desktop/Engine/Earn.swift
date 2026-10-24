@@ -54,18 +54,39 @@ extension Engine {
             let e = try executor()
             let (text, ready): (String, Bool)
             var route: (steps: [Board.Step], notes: [String])?
+            // With nothing to do: nothing free is said in words; a plan with nowhere to go, or a rebalance with nothing
+            // worth moving, is drawn with its reasons (the Mac's allocationPreview and RebalanceBoard).
+            var idle: String?
             switch command {
             case .allocate(let symbol, let share, let limit, let without, let from):
                 let r = try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: false)
                 (text, ready) = (r.text, r.ready && r.preview.free > 0)
                 route = allocationSteps(r.preview)
+                if !ready, r.preview.free > 0 { idle = say("Nowhere to put it now — see the canvas.", "Сейчас некуда положить — смотри холст.") }
             case .rebalance(let share):
                 let r = try await e.rebalance(maxShare: share ?? 50, execute: false)
                 (text, ready) = (r.text, r.ready)
                 route = rebalanceSteps(r.plan, maxShare: share ?? 50)
+                if !ready {
+                    idle = r.plan.moves.isEmpty && r.plan.skipped.isEmpty && r.plan.notes.first?.hasPrefix("Nothing is deposited") == true
+                        ? say("Nothing is deposited yet: «spread USDC across the best rates» puts free USDC to work.",
+                              "Депозитов пока нет: «разложи USDC по лучшим ставкам» пустит свободные USDC в работу.")
+                        : say("Nothing worth moving now — the reasons are on the canvas.", "Сейчас нечего перекладывать — причины на холсте.")
+                }
             default: return
             }
-            guard ready else { reply(text, note: note ?? "DeFi"); return }
+            guard ready else {
+                // A scheduled spread with nothing free says nothing (the Mac's quiet run).
+                quietCheck = true
+                if let idle {
+                    pin(Board(kind: "move", title: command.summary, lines: text.split(separator: "\n").map(String.init) + (route?.notes ?? []),
+                              steps: route?.steps.isEmpty == false ? route?.steps : nil, state: "nothing"))
+                    reply(idle, note: note ?? "DeFi")
+                } else {
+                    reply(text, note: note ?? "DeFi")
+                }
+                return
+            }
             show(.wallet(command), title: command.summary, lines: text.split(separator: "\n").map(String.init))
             // Drawn as the Mac's route cards (Blocks.swift): from each network, the bridges, into each place.
             if let route, !route.steps.isEmpty { updateBoard(card?.id) { $0.steps = route.steps; $0.lines += route.notes } }

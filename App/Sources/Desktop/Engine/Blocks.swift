@@ -168,6 +168,18 @@ nonisolated struct BlockData: Codable, Equatable {
 }
 
 /// A trade from Hyperliquid's fills closed in the last 7 days (the Mac's recentlyClosed, under the History block).
+/// What a chart board shows beside its candles (the Mac's ChartBoard): read for the window on each state, never kept.
+nonisolated struct ChartExtras: Codable, Equatable {
+    var network: String?
+    var change24h: Decimal?
+    var tiles: [BlockData.Fact] = []
+    var levels: [Level] = []
+    var held: BlockData.TokenCard.Held?
+
+    /// A line across the chart: the position's entry, its stop or take order, an alert.
+    struct Level: Codable, Equatable { var price: Double; var label: String; var tint: String; var dashed: Bool }
+}
+
 nonisolated struct ClosedTrade: Codable, Equatable {
     var coin: String
     var name: String
@@ -333,8 +345,10 @@ extension Engine {
     // MARK: A chart opened by a click
 
     /// A coin row or a mover opens its market's chart on the canvas, as the Mac's opener: no line in the chat.
-    func openChart(_ coin: String, range: ChartCommand.Range = .day) async throws -> [String: String] {
-        let line = try await chartLine(coin, range: range)
+    func openChart(_ coin: String, range: ChartCommand.Range = .day, network: String? = nil) async throws -> [String: String] {
+        var line = try await chartLine(coin, range: range)
+        // Opened again in another range it keeps the network it was opened from.
+        line.network = network ?? boards.first { $0.kind == "chart" && $0.chart?.coin == coin }?.chart?.network
         // The same coin's chart again is drawn anew and comes to the top, as the Mac's one chart place.
         if let old = boards.first(where: { $0.kind == "chart" && $0.chart?.coin == line.coin }) {
             updateBoard(old.id) { $0.chart = line; $0.title = line.title; $0.at = Date() }
@@ -351,6 +365,88 @@ extension Engine {
         let low = candles.map(\.low).min() ?? last.close, high = candles.map(\.high).max() ?? last.close
         return ChartLine(title: "\(IntentParser.pretty(coin)) · \(range.title)", closes: candles.map { NSDecimalNumber(decimal: $0.close).doubleValue },
                          low: Fmt.price(low), high: Fmt.price(high), change: signed(change), coin: coin)
+    }
+
+    /// Until the first full read: the wallet's last recorded total (equity.json), read only then.
+    var lastBalance: Decimal? {
+        // Kept by the address the portfolio records it under (Portfolio.refresh): Solana's, else the EVM one.
+        guard portfolio.updatedAt == nil, let wallet = [solanaAddress, evmAddress].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { return nil }
+        return Store.load([EquityPoint].self, "equity.json")?.last { $0.wallet == wallet }?.usd
+    }
+
+    /// One step of a route as its own block for the chat (the Mac's RouteCards.sendToChat): its name, money and rows.
+    func stepBoard(_ b: Board, _ i: Int) -> Board? {
+        guard let steps = b.steps, steps.indices.contains(i) else { return nil }
+        let s = steps[i]
+        let name = "Step \(i + 1) · \(s.label) · \(s.title)"
+        let facts = [s.title] + (s.money.map { ["\($0.place) \($0.was) → \($0.after) \($0.symbol)"] } ?? []) + s.lines.filter { !$0.isEmpty }.map { $0.replacingOccurrences(of: "\t", with: " ") }
+        return Board(kind: "result", title: name, lines: ["About the step «\(name)» of the route «\(b.title)» on the canvas (\(facts.joined(separator: " · ")))"])
+    }
+
+    /// With a trade plan on the canvas a price alert is for that plan: 2% its way from the price now, the plan as it
+    /// stands (the Mac's BlocksPanel example; Alerts.swift ties the two).
+    var planAlertExample: String? {
+        let managed = tradedPlan == intent || positions.contains { $0.coin == intent.asset }
+        guard intent != TradeIntent(), !managed, let mark = markets[intent.asset]?.markPx else { return nil }
+        let long = intent.side == .long
+        let level = mark * (long ? Decimal(string: "0.98")! : Decimal(string: "1.02")!)
+        let asset = intent.asset.hasPrefix("xyz:") ? String(intent.asset.dropFirst(4)) : intent.asset
+        return "when \(asset) is \(long ? "below" : "above") \(Fmt.price(level)): \(intent.command)"
+    }
+
+    // MARK: The chart's live parts
+
+    /// The chart boards as the Mac's ChartBoard reads them on screen: the market's numbers, the position's entry, its
+    /// stop and take orders and the alerts across the line, and what's held of the coin at Hyperliquid's price.
+    func withChartExtras(_ boards: [Board]) -> [Board] {
+        boards.map { b in
+            guard b.kind == "chart", var line = b.chart, let coin = line.coin else { return b }
+            var b = b
+            line.extras = chartExtras(coin, network: line.network)
+            b.chart = line
+            return b
+        }
+    }
+
+    func chartExtras(_ coin: String, network: String?) -> ChartExtras {
+        func d(_ x: Decimal) -> Double { NSDecimalNumber(decimal: x).doubleValue }
+        var x = ChartExtras(network: network)
+        let m = markets[coin]
+        if let m {
+            x.change24h = m.change24h
+            x.tiles = [.init(title: say("Volume 24h", "Объём 24ч"), value: m.volume24h > 0 ? Self.compactUSD(m.volume24h) : "—"),
+                       .init(title: say("Funding 1h", "Фандинг 1ч"), value: m.funding.map { "\(Fmt.num($0 * 100, maxFraction: 4))%" } ?? "—"),
+                       .init(title: say("Max leverage", "Макс. плечо"), value: "\(m.maxLeverage)×")]
+        }
+        if let p = positions.first(where: { $0.coin == coin }) {
+            x.levels.append(.init(price: d(p.entry), label: p.size > 0 ? say("Long entry", "Вход в лонг") : say("Short entry", "Вход в шорт"), tint: "entry", dashed: false))
+        }
+        for o in hlOrders where o.coin == coin && o.isTrigger {
+            guard let px = o.triggerPx else { continue }
+            let stop = (o.orderType ?? "").contains("Stop")
+            x.levels.append(.init(price: d(px), label: stop ? say("Stop", "Стоп") : say("Take", "Тейк"), tint: stop ? "loss" : "profit", dashed: false))
+        }
+        for a in alerts where a.coin == coin {
+            x.levels.append(.init(price: d(a.price), label: say("Alert", "Оповещение"), tint: "alert", dashed: true))
+        }
+        // A coin with one home network is held there all the same when the chart came from the chat.
+        let name = IntentParser.pretty(coin)
+        guard let home = network ?? ["NEAR": "near", "SOL": "solana"][coin],
+              let row = portfolio.networks.first(where: { $0.key == home })?.rows.first(where: { $0.symbol.uppercased() == name.uppercased() && $0.section == "tokens" }),
+              row.value > 0 else { return x }
+        let price = m?.markPx
+        let usd = price.map { row.value * $0 }
+        let basis = row.key.flatMap(cost)
+        let pnl = price.flatMap { basis?.pnl(held: row.value, price: $0) }
+        x.held = .init(amount: row.amount, usd: usd, how: price == nil ? say("no price yet", "цены пока нет") : say("valued at Hyperliquid's price", "по цене Hyperliquid"),
+                       pnl: pnl.map { "\(signedUSD($0.usd)) (\($0.pct >= 0 ? "+" : "")\(Fmt.num($0.pct, maxFraction: 1))%)" }, gain: pnl?.usd,
+                       today: usd.flatMap { u in m?.change24h.flatMap { $0 > -100 ? u - u / (1 + $0 / 100) : nil } })
+        if let key = row.key {
+            let told = Self.heldPaid(symbol: name, amount: row.value, gain: pnl?.usd, cost: cost(key), ru: russian)
+            x.held?.paid = told.paid
+            x.held?.since = told.since
+        }
+        return x
     }
 
     // MARK: P/L

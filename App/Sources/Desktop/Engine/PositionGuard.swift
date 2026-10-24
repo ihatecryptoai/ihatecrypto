@@ -92,6 +92,9 @@ extension Engine {
                     notify(.positions, title, body)
                 case .stopTo(let price)?:
                     _ = try await executor().manage(.stopTo(price), asset: coin, policy: policy, equity: ruleEquity)
+                    // Moves in a row are one record, a line each (the Mac's): a trend would otherwise fill the History.
+                    recordAutomatic(say("Trailing stop on \(name)", "Трейлинг-стоп по \(name)"),
+                                    "\(Fmt.time(Date())) · " + say("stop moved to \(Fmt.price(price))", "стоп передвинут на \(Fmt.price(price))"), coin: coin, merging: true)
                 case nil: break
                 }
             } catch {
