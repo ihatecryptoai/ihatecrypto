@@ -89,7 +89,9 @@ extension Engine {
                     _ = try await executor().manage(.stopToBreakeven, asset: coin, policy: policy, equity: ruleEquity)
                     let title = say("Partial profit taken on \(name)", "Частичная прибыль по \(name)"), body = say("Stop moved to breakeven.", "Стоп перенесён в безубыток.")
                     reply("\(title). \(body)", note: "guardian")
-                    notify(.positions, title, body)
+                    // Its record carries the coin, so History › Positions lists it with that trade (the Mac's activity).
+                    recordAutomatic(title, body, coin: coin)
+                    notify(.positions, title, body, record: false)
                 case .stopTo(let price)?:
                     _ = try await executor().manage(.stopTo(price), asset: coin, policy: policy, equity: ruleEquity)
                     // Moves in a row are one record, a line each (the Mac's): a trend would otherwise fill the History.
@@ -114,7 +116,10 @@ extension Engine {
     static var guardRefused: [String: String] = [:]
 
     /// «… ask again from 10:42 AM, …» and «… from 10:52 AM, …» are one reason: the words without the times and amounts.
-    nonisolated static func reasonOnly(_ why: String) -> String { String(why.filter { !$0.isNumber }) }
+    nonisolated static func reasonOnly(_ why: String) -> String {
+        // The time it asks again goes, «AM»/«PM» with it: 11:58 AM and 12:08 PM are the same reason.
+        String(why.replacing(/\d[\d:.\s]*(AM|PM|am|pm)?/, with: ""))
+    }
 
     /// A position gone while ihatecrypto wasn't closing it: its stop, take or a hand elsewhere closed it. Said once, in the
     /// chat and as a notification, as the Mac's closedByExchange.

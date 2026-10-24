@@ -475,24 +475,22 @@ function historyBody() {
       if (open) rows.push(h("div", { class: "live-hist-request" },
         m.request ? h("div", { class: "live-hist-asked" }, m.request) : null,
         h("div", { class: "live-hist-reply secondary small selectable" }, m.reply),
-        m.canvas !== ui.state.canvas ? h("button", { class: "link-btn", onclick: () => act("openCanvas", { wallet: m.canvas }) }, icon("arrow.up.right", 11), t("Open its canvas", "Открыть его холст")) : null));
+        m.canvas && m.canvas !== ui.state.canvas ? h("button", { class: "link-btn", onclick: () => act("openCanvas", { wallet: m.canvas }) }, icon("arrow.up.right", 11), t("Open its canvas", "Открыть его холст")) : null));
     });
     out.push(h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows));
   } else {
-    // Nothing moved yet: what was signed, from the journal.
-    const lines = s.history.slice(0, 14), rows = [];
-    lines.forEach((e, i) => {
-      const d = new Date(e.at);
-      if (i === 0 || new Date(lines[i - 1].at).toDateString() !== d.toDateString()) rows.push(h("div", { class: "live-day-head" }, dayName(d).toUpperCase()));
-      rows.push(h("div", { class: "live-hist-row" },
-        h("span", { class: "live-hist-icon" }, icon(kindIcon(e.kind), 13)),
-        h("span", { class: "live-hist-text" },
-          h("span", { class: "live-hist-note one-line" }, e.note || netName(e.chain)),
-          h("span", { class: "live-hist-sub one-line" }, time(d) + " · " + netName(e.chain) + " · " + e.kind)),
-        e.link ? h("button", { class: "icon-btn", title: t("See it on the explorer", "Открыть в обозревателе"), onclick: () => openLink(e.link) }, icon("arrow.up.right.square", 15)) : null));
-    });
-    out.push(rows.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows)
-      : note(t("Nothing yet. Every move from now on is listed here, with the request it came from.", "Пока ничего. Каждое движение отсюда и дальше будет здесь, с запросом, из которого оно.")));
+    // Nothing moved yet: the latest requests as they were, each with what it said and drew (the Mac's HistoryBoard).
+    const items = s.recentRequests || [];
+    out.push(items.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, items.map((a) => {
+      const d = new Date(a.at);
+      return h("div", { class: "live-hist-request" },
+        h("div", { class: "live-hist-sub secondary small" }, dayName(d) + " · " + time(d)),
+        a.request ? h("div", { class: "live-hist-asked" }, a.request) : a.title ? h("b", {}, a.title) : null,
+        a.bubbles?.length ? h("div", { class: "live-hist-sub small" }, a.bubbles.slice(0, 3).map((b) => [b.label, b.title].filter(Boolean).join(" · ")).join("  →  ")) : null,
+        a.lines?.length ? h("div", { class: "live-hist-reply secondary small selectable" }, a.lines.at(-1)) : null);
+    }))
+      : note(t("Nothing yet. Every move from now on is listed here, and every request keeps the bubbles it had on the canvas.",
+        "Пока ничего. Каждое движение отсюда и дальше будет здесь, а каждый запрос сохранит то, что было на холсте.")));
   }
   out.push(h("button", { class: "link-btn live-more", onclick: () => { ui.view = "history"; render(); } }, icon("clock", 12), t("All history: requests, positions, transfers, signatures", "Вся история: запросы, позиции, переводы, подписи")));
   return out;
@@ -1402,6 +1400,8 @@ function ledgerBody() {
     step(t("USB OR BLUETOOTH", "USB ИЛИ BLUETOOTH"), c?.model ? t(`${c.model} found`, `${c.model} найден`) : w ? t("Saved", "Сохранён") : null, !!(c?.model || w)),
     step(t("ETHEREUM APP · EVM", "ПРИЛОЖЕНИЕ ETHEREUM · EVM"), evm, !!evm, false),
     step(t("SOLANA APP", "ПРИЛОЖЕНИЕ SOLANA"), solana, !!solana, true),
+    // Orders without the buttons once the Ledger approves a key that can't withdraw (the Mac's LedgerBoard).
+    on && evm ? ledgerKeyRow(busy) : null,
     c ? h("div", { class: "live-ledger-status" + (busy ? "" : " done") }, icon(busy ? "hand.tap" : "checkmark.seal", 14), h("span", {}, ui.state.signer.ledger || c.status)) : null,
     c?.problem ? h("div", { class: "live-ledger-problem" }, icon("exclamationmark.triangle", 14), h("span", {}, c.problem),
       h("button", { class: "btn small", onclick: () => act("connectLedger") }, t("Try again", "Ещё раз"))) : null,
@@ -1413,6 +1413,21 @@ function ledgerBody() {
       h("button", { class: "btn", onclick: () => act("removeWallet", { wallet: "ledger" }) }, t("Forget", "Забыть"))) : null,
     ledgerFoot(),
   ];
+}
+
+/** The Ledger's Hyperliquid trading key: on, or off with «Approve on Ledger» (one approval on the device of a key that
+ *  trades but can't withdraw; withdrawals stay on the device). */
+function ledgerKeyRow(busy) {
+  const k = ui.state.trading?.key || {};
+  return h("div", { class: "live-ledger-step" + (k.active ? " done" : "") },
+    icon("key", 17),
+    h("span", { class: "live-ledger-step-text" }, h("span", { class: "live-alert-label" }, t("HYPERLIQUID TRADING KEY", "ТОРГОВЫЙ КЛЮЧ HYPERLIQUID")),
+      h("span", {}, k.active ? t("on · orders, stops and trailing without the buttons", "включён · ордера, стопы и трейлинг без кнопок")
+        : t("off · every order asks the Ledger", "выключен · каждый ордер спрашивает Ledger")),
+      !k.active && !busy ? h("div", { class: "btns" }, h("button", { class: "btn small",
+        title: t("The Ledger signs one approval of a key that can trade but not withdraw; withdrawals stay on the device",
+          "Ledger подписывает одно разрешение для ключа, который торгует, но не выводит; вывод остаётся на устройстве"),
+        onclick: () => act("tradingKey") }, t("Approve on Ledger", "Одобрить на Ledger"))) : null));
 }
 
 const ledgerFoot = () => h("div", { class: "live-hint" }, t("The keys never leave the Ledger. ihatecrypto checks every move first — only your own addresses, no unlimited approvals — then the Ledger shows it, and nothing is signed until you approve it on the device.",

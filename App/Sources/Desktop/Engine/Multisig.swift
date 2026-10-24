@@ -233,13 +233,8 @@ extension Engine {
         }
         multisigDraft = nil
         pin(Board(kind: "multisig", title: "multisig"))
-        // Money goes only to saved addresses: the signer shows the whole address while Windows Hello asks.
-        let entries = made.map { SignerAddress(name: "Multisig", network: $0, address: address, memo: "") }
-        if let saved = (try? await signerCall(.saveAddresses(entries)))?.addresses {
-            book = saved
-        } else {
-            reply(say("Couldn't save it in Addresses; save \(address) as «Multisig» to send money to it.", "Не сохранил его в адресах; сохрани \(address) как «Multisig», чтобы класть туда деньги."))
-        }
+        // Not saved in the book, as on the Mac: «Multisig» answers through multisigEntry, only on a network it's made on, and
+        // the signer asks Windows Hello with the whole address the first time money goes there.
         let nets = made.map(WalletCommand.placeName).joined(separator: ", ")
         return say("The multisig \(address) is made on \(nets): any \(d.threshold) of its \(d.keys.count) keys move its money. Put money in with «send 10 USDC on \(made.first ?? "base") to Multisig»; it's on the canvas.",
                    "Мультисиг \(address) создан в \(nets): деньги двигают любые \(d.threshold) из \(d.keys.count) ключей. Положить деньги: «отправь 10 USDC на \(made.first ?? "base") на Multisig»; он на холсте.")

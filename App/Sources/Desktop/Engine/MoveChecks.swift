@@ -419,8 +419,7 @@ extension Engine {
     func sendCautions(_ c: WalletCommand) -> [String] {
         let address: String?
         switch c {
-        case .sendSol(let name, _): address = entry(name, network: "solana")?.address
-        case .sendNear(let name, _), .closeNear(let name): address = entry(name, network: "near")?.address
+        case .sendSol, .sendNear, .closeNear: address = (try? nativeRecipient(c))?.address
         case .sendToken(let name, let token, _, let net):
             // Through NEAR Intents (Bitcoin, XRP, TRON…): an exchange's XRP address without its tag loses the money.
             if let r = try? acrossRecipient(name, token: token, network: net) {
@@ -729,8 +728,8 @@ extension Engine {
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(u, "USDC"), say("all goes in now", "вносится всё сразу"), moved("USDC", on: "solana", by: u.map { -$0 })),
                     st(say("EVERY ", "КАЖДЫЕ ") + WalletCommand.everyText(e).uppercased() + " · JUPITER DCA", "\(orders) × \(u.map { Fmt.num($0 / Decimal(orders)) } ?? "?") USDC → \(a.symbol)",
                        say("Jupiter's keepers buy on-chain, the first now · 0.1% fee · cancel any time", "Jupiter покупает на блокчейне, первая покупка сейчас · комиссия 0.1% · отменить можно в любой момент"))]
-        case .sendSol(let name, let x):
-            guard let e = entry(name, network: "solana") else { return nil }
+        case .sendSol(_, let x):
+            guard let e = try? nativeRecipient(c) else { return nil }
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(x, "SOL"), solSOL, moved("SOL", on: "solana", by: -x)),
                     st(say("TO · ", "КУДА · ") + say("SAVED ADDRESS", "СОХРАНЁННЫЙ АДРЕС"), e.name, AddressCheck.ends(e.address).start + " … " + AddressCheck.ends(e.address).end)]
         case .sendToken(let name, let token, let x, let net):

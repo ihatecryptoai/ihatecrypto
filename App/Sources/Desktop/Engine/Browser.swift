@@ -182,7 +182,8 @@ extension Engine {
         let said = [view.lead].compactMap { $0 } + view.balances.map { "\($0.symbol) \($0.amount)" + ($0.usd.map { " ≈ \($0)" } ?? "") + ($0.note.map { " · \($0)" } ?? "") }
             + lines + view.checks + [note].compactMap { $0 }
         out.event("showMain", ["why": "site"])
-        notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."))
+        // Only while the window isn't in front: in front, the request's own card is the ask (the Mac shows its sheet alone).
+        notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."), whenAway: true)
         // The window's call gives up after 900 s (main.rs dapp_call): declined before that, never signed for a page that left.
         Task { await expireSite(view.id) }
         return await withCheckedContinuation { c in

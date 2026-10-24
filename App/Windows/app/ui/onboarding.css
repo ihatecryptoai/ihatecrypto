@@ -248,3 +248,6 @@
 .ob-option { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .ob-key-found { display: flex; flex-direction: column; gap: 6px; min-height: 34px; }
 .ob-key-address { display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; border-radius: 12px; background: var(--fill); overflow-wrap: anywhere; }
+
+/* «Free, on this PC»: the Settings local-models panel inside its tile (the Mac embeds LocalModelsPanel). */
+.ob-local-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; min-width: 0; }

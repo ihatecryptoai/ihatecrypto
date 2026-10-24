@@ -105,12 +105,13 @@ import Testing
         try engine.removeCanvas(id)
         #expect(!engine.canvases.contains { $0.id == id })
         #expect(engine.historyActivities.contains { $0.request == words })
-        // A scheduled run is the app's record, not the person's request.
-        let run = "Scheduled: check \(UUID().uuidString.prefix(8))"
+        // A scheduled run is a request of its own, «Scheduled: …», with no coin (the Mac's Tasks.swift:130): never a
+        // «Guardian» step of a trade in History › Positions.
+        let run = "Scheduled: buy ETH \(UUID().uuidString.prefix(8))"
         engine.messages.append(Message(fromUser: true, text: run, note: "schedule"))
         engine.saveChat()
-        let record = try #require(engine.historyActivities.first { $0.title == run })
-        #expect(record.kind == "automatic" && record.request == nil)
+        let record = try #require(engine.historyActivities.first { $0.request == run })
+        #expect(record.kind == "request" && record.coin == nil)
     }
 
     @Test func whatTheAppDidByItselfIsARecord() {

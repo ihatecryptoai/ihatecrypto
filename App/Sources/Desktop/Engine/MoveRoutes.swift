@@ -465,7 +465,7 @@ extension Engine {
 
     /// NEAR to a saved NEAR account, or the whole NEAR account closed into it.
     private func nearOut(_ name: String, _ asked: Decimal?, close: Bool) -> [Board.Step]? {
-        guard let e = entry(name, network: "near"), e.network == "near" else { return nil }
+        guard let e = savedAddress(name, on: "near") else { return nil }
         let near = heldThere("NEAR", on: "near") ?? 0
         let amount = close ? near : asked ?? max(0, near - Decimal(string: "0.012")!)
         let usd = markets["NEAR"].map { amount * $0.markPx }

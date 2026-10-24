@@ -40,6 +40,7 @@ pub fn notify(app: &tauri::AppHandle, v: &serde_json::Value) {
         }
     }
     let (title, body) = (data["title"].as_str().unwrap_or("ihatecrypto"), data["body"].as_str().unwrap_or(""));
+    if let Ok(mut kind) = LAST_KIND.lock() { kind.clear(); kind.push_str(data["kind"].as_str().unwrap_or("")); }
     let _ = app.notification().builder().title(title).body(body).show();
     // Windows' toasts are silent: the Mac's sound for the kind plays here (the engine names it: coin, chime, knock).
     play(data["sound"].as_str().unwrap_or(""));
@@ -70,8 +71,18 @@ pub fn window_focus(app: &tauri::AppHandle, focused: bool) {
 pub fn on_notification_click(app: &tauri::AppHandle) {
     use tauri_plugin_notification::NotificationExt;
     let handle = app.clone();
-    let _ = app.notification().on_action(move |_| crate::show(&handle));
+    let _ = app.notification().on_action(move |_| {
+        crate::show(&handle);
+        // The update's notice opens Settings › About with Install, as the Mac's opens its update (the page's checkUpdates).
+        // ponytail: the last notice shown stands for the one clicked; a toast carrying its kind if they ever differ.
+        if LAST_KIND.lock().map(|k| k.as_str() == "update").unwrap_or(false) {
+            let _ = handle.emit_to("main", "engine", "{\"event\":\"checkUpdates\",\"data\":{}}");
+        }
+    });
 }
+
+/// The kind of the last notification shown (the engine's «update», «moves»…).
+static LAST_KIND: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// A line to the engine from the app itself (the crash line, the updater's news), as the page's engine_send.
 fn tell_engine(app: &tauri::AppHandle, request: serde_json::Value) {
@@ -234,7 +245,10 @@ pub fn tray_quit(webview: tauri::Webview) -> Result<(), String> {
     Ok(())
 }
 
+/// Quit Completely: Keep running's task rests first (the Mac's KeepRunning.pause), or it would start ihatecrypto again
+/// within a minute.
 pub fn quit(app: &tauri::AppHandle) {
+    pause_keep_running();
     QUITTING.store(true, Ordering::SeqCst);
     app.exit(0);
 }
@@ -277,10 +291,33 @@ pub fn report_login(app: &tauri::AppHandle) {
 
 /// Settings › Background › Keep always running (the Mac's KeepRunning): a scheduled task starts the app in the tray every
 /// minute while the user is signed in. Task Scheduler skips a start while the task's own copy runs, and a copy started
-/// some other way turns the next start into nothing (one instance, `--hidden` never opens the window). So a Quit or a
-/// crash comes back within a minute; turning it off quits for good.
+/// some other way turns the next start into nothing (one instance, `--hidden` never opens the window). So a crash comes
+/// back within a minute; Quit Completely rests the task until ihatecrypto is opened again or the next sign-in, as the
+/// Mac's agent rests until the next launch or login; turning it off quits for good.
 #[cfg(windows)]
 const KEEP_TASK: &str = "ihatecrypto keep running";
+/// The next sign-in starts ihatecrypto in the tray once, which wakes the rested task (HKCU, no administrator).
+#[cfg(windows)]
+const RUN_ONCE: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce";
+
+/// Quit Completely and an update's install: the task stops starting the app (the Mac's KeepRunning.pause).
+pub fn pause_keep_running() {
+    #[cfg(windows)]
+    if schtasks(&["/Query", "/TN", KEEP_TASK]) && schtasks(&["/Change", "/TN", KEEP_TASK, "/DISABLE"]) {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = command("reg", &["add", RUN_ONCE, "/v", KEEP_TASK, "/t", "REG_SZ", "/d", &format!("\"{}\" --hidden", exe.display()), "/f"]);
+        }
+    }
+}
+
+/// At launch: the task runs again if the switch is on (the Mac's KeepRunning.resume); already enabled is fine.
+pub fn resume_keep_running() {
+    #[cfg(windows)]
+    if schtasks(&["/Query", "/TN", KEEP_TASK]) {
+        let _ = schtasks(&["/Change", "/TN", KEEP_TASK, "/ENABLE"]);
+        let _ = command("reg", &["delete", RUN_ONCE, "/v", KEEP_TASK, "/f"]);
+    }
+}
 
 pub fn set_keep_running(app: &tauri::AppHandle, v: &serde_json::Value) {
     #[cfg(windows)]
@@ -288,6 +325,7 @@ pub fn set_keep_running(app: &tauri::AppHandle, v: &serde_json::Value) {
         let _ = if v["data"]["on"].as_str() == Some("1") {
             schtasks(&["/Create", "/TN", KEEP_TASK, "/SC", "MINUTE", "/MO", "1", "/TR", &format!("\"{}\" --hidden", exe.display()), "/F"])
         } else {
+            let _ = command("reg", &["delete", RUN_ONCE, "/v", KEEP_TASK, "/f"]);
             schtasks(&["/Delete", "/TN", KEEP_TASK, "/F"])
         };
     }
@@ -306,10 +344,13 @@ pub fn report_keep_running(app: &tauri::AppHandle) {
 }
 
 #[cfg(windows)]
-fn schtasks(args: &[&str]) -> bool {
+fn schtasks(args: &[&str]) -> bool { command("schtasks", args) }
+
+#[cfg(windows)]
+fn command(program: &str, args: &[&str]) -> bool {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("schtasks").args(args).creation_flags(CREATE_NO_WINDOW)
+    std::process::Command::new(program).args(args).creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
         .status().map(|s| s.success()).unwrap_or(false)
 }

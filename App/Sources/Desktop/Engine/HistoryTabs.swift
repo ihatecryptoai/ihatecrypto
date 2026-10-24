@@ -170,10 +170,11 @@ extension Engine {
                     }
                     return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
                 }
-                // A scheduled run's request is the app's, not the person's: one automatic record, with what it made.
+                // A scheduled run is a request of its own, «Scheduled: …», with no coin, so it isn't a «Guardian» step of a
+                // trade (the Mac's beginActivity(.request, request:, schedule:), Tasks.swift:130).
                 let run = q.note == "schedule"
-                out.append(HistoryTabs.Activity(kind: run ? "automatic" : "request", at: q.at, request: run ? nil : q.text, understood: q.understood,
-                                                title: run ? q.text : made.first { $0.kind == "move" }?.title, coin: IntentParser.namedAsset(q.text, markets: names),
+                out.append(HistoryTabs.Activity(kind: "request", at: q.at, request: q.text, understood: q.understood,
+                                                title: made.first { $0.kind == "move" }?.title, coin: run ? nil : IntentParser.namedAsset(q.text, markets: names),
                                                 bubbles: bubbles, lines: said, failed: run && made.contains { $0.state == "failed" }))
             }
         }

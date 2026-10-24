@@ -265,14 +265,16 @@ export async function checkUpdate() {
 }
 
 /** The version this is (Tauri's, once asked), and a newer one found and waiting for Install. */
-const update = { version: null, asked: false, found: null, installing: false };
+const update = { version: null, asked: false, found: null, installing: false, later: null };
 
-/** Settings › About (the Mac's): «ihatecrypto 0.1.0», then Check for updates, or the version found with Install. */
+/** Settings › About (the Mac's): «ihatecrypto 0.7.6», then Check for updates, or the version found with Install. */
 function aboutRow() {
   if (!update.asked) {
     update.asked = true;
     window.__TAURI__?.app?.getVersion?.().then((v) => { update.version = v; render(); }).catch(() => {});
   }
+  // The updater found one by itself (its notification): it waits here for Install, as the Mac's, unless put off.
+  if (!update.found && ui.state.updateReady && ui.state.updateReady !== update.later) update.found = ui.state.updateReady;
   const install = async () => {
     update.installing = true;
     render();
@@ -284,7 +286,7 @@ function aboutRow() {
         : t("A new version waits for you to press Install, and What's New shows what changed; the wallet, settings and canvases stay.",
           "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.")) },
     update.found ? h("div", { class: "btns" },
-      h("button", { class: "btn small", disabled: update.installing, onclick: () => { update.found = null; render(); } }, t("Later", "Позже")),
+      h("button", { class: "btn small", disabled: update.installing, onclick: () => { update.later = update.found; update.found = null; render(); } }, t("Later", "Позже")),
       h("button", { class: "btn small primary", disabled: update.installing, onclick: install }, update.installing ? t("Installing…", "Ставлю…") : t(`Install ${update.found}`, `Установить ${update.found}`)))
       : h("button", { class: "btn small", onclick: checkUpdate }, t("Check for updates", "Проверить обновления")));
 }
@@ -389,7 +391,9 @@ function modelTab(s) {
           about: t("The model reads every command and every trade plan again before a card is drawn. On a doubt nothing runs: you pick.", "Модель перечитывает каждую команду и каждый план сделки, прежде чем нарисовать карточку. При сомнении ничего не запускается — выбираешь ты.") },
           toggle("second-check", s.secondCheck, (on) => act("secondCheck", { test: on }))),
         row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key: the message goes there.", "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter: сообщение уходит туда.") },
-          jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
+          // The chat on OpenRouter: Jev reads there anyway, so no switch that could read Off (SettingsView.swift:840).
+          jevReady && s.model?.provider === "openrouter" ? pill(t("Your chat runs here", "Здесь работает твой чат"), true)
+          : jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
             : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: () => act("signInJev") }, t("Connect", "Подключить"))]))),
     section("server", t("Free, on this PC", "Бесплатно, на этом ПК"), t("No subscription needed: Ollama runs a model here, with no internet.", "Подписка не нужна: Ollama запускает модель здесь, без интернета."),
       group(h("div", { class: "pg-set-panel" }, localPanel(s)))),
@@ -405,6 +409,13 @@ function modelTab(s) {
 }
 
 let localAsked = false;
+
+/** The local-models panel for onboarding's «Free, on this PC» (the Mac's Onboarding localRow → LocalModelsPanel): Ollama's
+ *  state and this PC's memory read once, then Set up, Start, Switch or Download. */
+export function localModelsPanel(s) {
+  if (!localAsked) { localAsked = true; act("ollamaStatus"); act("refreshModels"); }
+  return localPanel(s);
+}
 
 /** Free, on this PC through Ollama: what it still needs (installed, running, new enough), this PC's memory, and the models —
  *  Switch to one it has, or Download one, with its size and the memory it runs in (the Mac's LocalModelsPanel). */

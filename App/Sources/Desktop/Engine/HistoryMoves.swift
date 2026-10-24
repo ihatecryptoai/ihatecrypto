@@ -15,7 +15,8 @@ nonisolated struct MoveRow: Encodable, Equatable {
     var link: String?
     var request: String?
     var reply: String
-    var canvas: String
+    /// The canvas it was said on; none for a recurring buy, which runs without one.
+    var canvas: String?
 }
 
 /// What the latest day did to the money: «−25 USDT to Automation · 5 sends», and the own wallets it went to.
@@ -40,7 +41,22 @@ extension Engine {
                 }
             }
         }
+        // A recurring buy runs with no canvas and no chat line: its run's swap line is the move (the Mac records it as an
+        // activity, Execution.swift:1147), so the block and the day's line count it too.
+        for r in scheduleRuns where r.canvas == nil && r.result == "done" {
+            for l in (r.line ?? "").split(separator: "\n").compactMap({ MovedLine(String($0)) }) {
+                out.append((MoveRow(at: r.at, kind: l.kind.rawValue, text: l.text, amount: l.amount, symbol: l.symbol, to: l.to, own: false,
+                                    link: l.link?.absoluteString, request: r.title, reply: r.line ?? "", canvas: nil), l))
+            }
+        }
         return out.sorted { $0.0.at > $1.0.at }
+    }
+
+    /// With nothing moved yet, the History block shows the latest three requests instead (the Mac's HistoryBoard):
+    /// each with what was said and drawn for it.
+    var recentRequests: [HistoryTabs.Activity] {
+        guard allMoves.isEmpty else { return [] }
+        return Array(historyActivities.reversed().filter { !$0.lines.isEmpty || !$0.bubbles.isEmpty || $0.request != nil }.prefix(3))
     }
 
     /// The block's rows: the newest 14.

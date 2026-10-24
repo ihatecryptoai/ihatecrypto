@@ -4,7 +4,8 @@ import WalletCore
 
 /// «chart ETH week», «what's moving»: the shared ChartCommand, drawn in the chat (the Mac draws it on the canvas).
 extension Engine {
-    func chart(_ command: ChartCommand, note: String?) async {
+    /// `quiet`: the movers' board only, without its list in the chat (the model's answer that opened it says it).
+    func chart(_ command: ChartCommand, note: String?, quiet: Bool = false) async {
         switch command {
         case .movers:
             if markets.isEmpty { markets = (try? await Hyperliquid.markets()) ?? [:] }
@@ -16,6 +17,7 @@ extension Engine {
             }
             pin("result", say("Movers · 24 h", "Движение · 24 ч"), lines: moving.prefix(6).map(line) + ["—"] + moving.suffix(6).reversed().map(line),
                 data: BlockData(movers: .init(up: moving.prefix(6).map(mover), down: moving.suffix(6).reversed().map(mover))))
+            if quiet { return }
             reply(say("Up the most today: ", "Сильнее всего выросли: ") + moving.prefix(6).map(line).joined(separator: ", ")
                   + say(".\nDown the most: ", ".\nСильнее всего упали: ") + moving.suffix(6).reversed().map(line).joined(separator: ", ") + ".", note: note ?? "Hyperliquid")
         case .chart(let coin, let range):

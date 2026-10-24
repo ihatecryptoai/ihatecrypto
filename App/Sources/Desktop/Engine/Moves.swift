@@ -106,6 +106,8 @@ extension Engine {
         guard let wallet = activeWallet, wallet.kind != "phrase" else { return nil }
         // The Mac's Wallets.missingKey(for:): a key wallet signs its own chain's moves only.
         let chains: [String] = switch command {
+        // The Mac handles these before missingKey (runCanonical): a send to a name and a contract call pick their network.
+        case .sendTo, .contractCall: []
         case .yields, .receive, .stopSchedules: []
         case .hlp: ["evm"]
         case .withdrawToSolana, .aave, .morpho, .baseToSolana, .arbitrumToSolana, .evmToSolana, .robinhoodToSolana, .solanaTo, .buyStock, .sellStock, .buyOn, .sellOn, .pay, .claimRewards, .sweepRewards: ["evm", "solana"]
@@ -157,21 +159,8 @@ extension Engine {
             reply(say("Top up is open\(sol.map { " — \($0) for USDC and SOL (recommended)" } ?? ""), plus Base for USDC and ETH. ihatecrypto can’t pull money in; send it there from an exchange or another wallet, on that network. It shows up within about a minute and I’ll tell you when it arrives. To put money you already have into a vault, say “deposit 1 USDC into Jupiter”.",
                       "Открыл «Пополнить»\(sol.map { " — \($0) для USDC и SOL (рекомендую)" } ?? ""), и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через минуту, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter»."), note: note)
             return
-        case .sendNear(let name, _), .closeNear(let name):
-            guard saved(name, on: "near") != nil else {
-                reply(say("There’s no NEAR address “\(name)” in Addresses. Save it there first.", "В адресах нет NEAR-адреса «\(name)». Сначала сохрани его."), note: note)
-                return
-            }
-        case .sendSol(let name, _):
-            guard let entry = saved(name, on: "solana"), entry.network == "solana" else {
-                reply(say("There’s no Solana address “\(name)” in Addresses. Save it there first.", "В адресах нет Solana-адреса «\(name)». Сначала сохрани его."), note: note)
-                return
-            }
-            guard entry.memo.isEmpty else {
-                reply(say("“\(entry.name)” needs a memo, and ihatecrypto can’t add one to this transfer — send it from the exchange’s app instead.",
-                          "«\(entry.name)» нужен memo, а ihatecrypto не может добавить его к этому переводу — отправь с приложения биржи."), note: note)
-                return
-            }
+        case .sendNear, .closeNear, .sendSol:
+            do { _ = try nativeRecipient(command) } catch { reply(error.localizedDescription, note: note); return }
         case .sendToken(let name, let token, let amount, let network):
             do {
                 if try acrossRecipient(name, token: token, network: network) != nil {
@@ -286,8 +275,12 @@ extension Engine {
             guard let network else { return true }
             return e.network == network || (evm.contains(network) && evm.contains(e.network))
         }
-        let named = book.filter { $0.name.lowercased() == key }
-        let near = key.isEmpty ? [] : book.filter { $0.name.lowercased().contains(key) }
+        // A multisig's address answers only on a network it's made on: elsewhere no Safe holds it, and money sent there is
+        // stuck (an older Windows build saved «Multisig» in the book; the Mac never does — multisigEntry decides).
+        let safes = Dictionary(multisigs.map { ($0.address.lowercased(), $0.networks) }, uniquingKeysWith: { a, b in a + b })
+        let usable = book.filter { e in safes[e.address.lowercased()].map { $0.contains(network ?? e.network) } ?? true }
+        let named = usable.filter { $0.name.lowercased() == key }
+        let near = key.isEmpty ? [] : usable.filter { $0.name.lowercased().contains(key) }
         return named.first(where: fits) ?? named.first ?? ownWallet(name, network: network) ?? multisigEntry(key, network: network)
             ?? near.first(where: fits) ?? near.first
     }
@@ -301,13 +294,59 @@ extension Engine {
         return SignerAddress(name: "Multisig", network: net, address: m.address, memo: "")
     }
 
+    /// A saved address on this network by its name, as the Mac's savedAddress: the exact name first, then another wallet here
+    /// (on Solana), then a name that contains it.
+    func savedAddress(_ name: String, on network: String) -> SignerAddress? {
+        let key = name.lowercased()
+        guard !key.isEmpty else { return nil }
+        let on = book.filter { $0.network == network }
+        return on.first { $0.name.lowercased() == key } ?? (network == "solana" ? ownWallet(name, network: "solana") : nil)
+            ?? on.first { $0.name.lowercased().contains(key) }
+    }
+
+    /// Whom a SOL or NEAR send pays, checked as the Mac's handleWallet does — before the card, and again at the move, which
+    /// a chain's step and a scheduled run reach too: an address that needs a memo or tag is refused, as ihatecrypto can't
+    /// add one. nil for any other command.
+    func nativeRecipient(_ c: WalletCommand) throws -> SignerAddress? {
+        let (name, network): (String, String)
+        switch c {
+        case .sendNear(let n, _), .closeNear(let n): (name, network) = (n, "near")
+        case .sendSol(let n, _): (name, network) = (n, "solana")
+        default: return nil
+        }
+        let title = network == "near" ? "NEAR" : "Solana"
+        guard let entry = savedAddress(name, on: network) else {
+            throw ExecutionError(say("There’s no \(title) address “\(name)” in Addresses. Save it first, e.g. “save <address> as \(name) on \(network)”.",
+                                     "В адресах нет \(title)-адреса «\(name)». Сначала сохрани его, например «save <адрес> as \(name) on \(network)»."))
+        }
+        guard entry.memo.isEmpty else {
+            throw ExecutionError(say("“\(entry.name)” needs a memo / tag, and ihatecrypto can’t add one to this transfer — send it from the exchange’s app instead.",
+                                     "«\(entry.name)» нужен memo, а ihatecrypto не может добавить его к этому переводу — отправь с приложения биржи."))
+        }
+        return entry
+    }
+
     /// Another wallet of this computer by its name («send 10 USDC to Automation»): the user's own, which the signer
     /// knows as ours, so it needs no saving first.
     func ownWallet(_ name: String, network: String?) -> SignerAddress? {
-        guard let w = status?.wallets?.first(where: { $0.label.lowercased() == name.lowercased() && $0.id != activeWallet?.id }) else { return nil }
+        let key = Self.ownKey(name)
+        if let l = ledger, l.active != true, Self.meansLedger(key, label: l.label) {
+            let net = network ?? (l.solana != nil ? "solana" : "base")
+            let address = net == "solana" ? l.solana : net == "near" ? nil : l.evm
+            return address.map { SignerAddress(name: l.label, network: net, address: $0, memo: "") }
+        }
+        guard let w = status?.wallets?.first(where: { $0.label.lowercased() == key && $0.id != activeWallet?.id }) else { return nil }
         let net = network ?? (w.solana != nil ? "solana" : "base")
         let address = net == "solana" ? w.solana : net == "near" ? w.near : w.evm
         return address.map { SignerAddress(name: w.label, network: net, address: $0, memo: "") }
+    }
+
+    /// «my Ledger» → «ledger»: a wallet's name as the person says it.
+    nonisolated static func ownKey(_ name: String) -> String { name.lowercased().replacing(/^(?:my|мой|моему|мою)\s+/, with: "") }
+
+    /// «ledger», «леджер», or what the Ledger is called here: the Ledger by what it is, whatever its name (the Mac's ownWallet).
+    nonisolated static func meansLedger(_ key: String, label: String) -> Bool {
+        key.contains(/^(?:ledger|л[еэ]дж[еэ]р\w*)$/) || key == label.lowercased()
     }
 
     func tokenRecipient(_ name: String, network: String?) throws -> (entry: SignerAddress, network: String) {
@@ -641,6 +680,8 @@ extension Engine {
             case .orders(let moves, let coin, let traded): reply(try await moveOrders(moves, coin: coin, intent: traded), note: "Hyperliquid")
             }
             noteSent(waiting)
+            // A contract call a chain held its next steps behind: they run now, on this Confirm (holdAfterCall).
+            if case .wallet(.contractCall) = waiting, let board = runningBoard { Task { await continueAfterCall(board) } }
         } catch {
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown»,
             // never «failed» (the Mac's finish(false, unknown:)).
@@ -656,6 +697,10 @@ extension Engine {
                 ] + rentFreeInstead(waiting) + [
                     ChatRouter.Option(title: say("Cancel", "Отмена"), comment: say("Nothing was signed", "Ничего не подписано"), command: Self.leaveCostly),
                 ]
+            } else if sent.isEmpty, case .address = waiting {
+                // A save the signer refused (a declined Windows Hello, its rule against a name that reads as an address) is
+                // said and left: never explained or routed around (the Mac's carryOut(.address)).
+                reply(say("Not saved: ", "Не сохранено: ") + error.localizedDescription)
             } else if sent.isEmpty {
                 reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
                 // Nothing went out: the same move can be laid out again with fresh quotes («Try again» on its block).
@@ -688,13 +733,41 @@ extension Engine {
         Self.savingExtras[key] = extra
     }
 
-    /// A site's apple-touch-icon as a small picture of the window's own kind (a PNG data URL, CanvasIcon.checked);
-    /// nil when it has none, isn't a PNG or is too big to keep inline.
+    /// A site's apple-touch-icon, else its favicon's largest PNG frame of 32 px or more (the Mac's AddressBook.logo), as a
+    /// small picture of the window's own kind (a PNG data URL, CanvasIcon.checked); nil when it has neither.
     nonisolated static func siteLogo(_ domain: String) async -> CanvasIcon? {
-        guard let url = URL(string: "https://\(domain)/apple-touch-icon.png"),
-              let (data, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
-              (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 58_000, data.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { return nil }
-        return CanvasIcon.checked(CanvasIcon(kind: "image", value: "data:image/png;base64," + data.base64EncodedString()))
+        func fetch(_ path: String) async -> Data? {
+            guard let url = URL(string: "https://\(domain)/\(path)"),
+                  let (data, response) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10)),
+                  (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return data
+        }
+        var png = await fetch("apple-touch-icon.png").flatMap { Self.isPNG($0) ? $0 : nil }
+        if png == nil, let ico = await fetch("favicon.ico") { png = Self.pngInIcon(ico) }
+        guard let png, png.count <= 58_000 else { return nil }
+        return CanvasIcon.checked(CanvasIcon(kind: "image", value: "data:image/png;base64," + png.base64EncodedString()))
+    }
+
+    nonisolated static func isPNG(_ d: Data) -> Bool { d.starts(with: [0x89, 0x50, 0x4E, 0x47]) }
+
+    /// The widest PNG frame of an .ico, 32 px or more (a BMP frame is left: only PNG is kept inline); a PNG served as
+    /// favicon.ico counts as it is.
+    nonisolated static func pngInIcon(_ ico: Data) -> Data? {
+        let b = [UInt8](ico)
+        if isPNG(ico) { return ico }
+        guard b.count > 6, b[0] == 0, b[1] == 0, b[2] == 1, b[3] == 0 else { return nil }
+        func u32(_ i: Int) -> Int { Int(b[i]) | Int(b[i + 1]) << 8 | Int(b[i + 2]) << 16 | Int(b[i + 3]) << 24 }
+        let count = Int(b[4]) | Int(b[5]) << 8
+        var best: (width: Int, data: Data)?
+        for n in 0..<count {
+            let e = 6 + n * 16
+            guard e + 16 <= b.count else { break }
+            let width = b[e] == 0 ? 256 : Int(b[e]), size = u32(e + 8), offset = u32(e + 12)
+            guard width >= 32, offset >= 0, size > 8, offset + size <= b.count else { continue }
+            let frame = ico.subdata(in: offset..<(offset + size))
+            if isPNG(frame), width > (best?.width ?? 0) { best = (width, frame) }
+        }
+        return best?.data
     }
 
     /// What «Send anyway» accepts for a loss the card named (the Mac's Agent.swift: × 1.25 + $0.05).
@@ -747,6 +820,8 @@ extension Engine {
     /// A confirmed wallet command, as the Mac's move(): each a call into the Executor.
     func move(_ command: WalletCommand) async throws {
         if let off = Modules.current.refusal(command, ru: russian) { throw ExecutionError(off) }
+        // A SOL or NEAR send's recipient first, wherever the move comes from (a card, a chain's step, a scheduled run).
+        _ = try nativeRecipient(command)
         let e = try executor()
         func nearAccount() async throws -> String {
             guard let account = try await SignerLink.shared.send(.nearAddress).nearAddress else { throw ExecutionError("The signer has no NEAR address.") }
@@ -766,14 +841,15 @@ extension Engine {
         case .hlp(let deposit, let amount): reply(try await e.hlp(deposit: deposit, amount: amount), note: "Hyperliquid · HLP")
         case .buyNear(let usdc): reply(try await e.buyNear(usdc: usdc ?? 0, account: try await nearAccount()), note: "NEAR Intents · 1Click")
         case .sellNear(let amount, let to): reply(try await e.sellNear(amount: amount, account: try await nearAccount(), to: try to.map(net)), note: "NEAR Intents · 1Click")
-        case .sendNear(let name, let amount):
-            guard let entry = saved(name, on: "near") else { throw ExecutionError("There’s no NEAR address “\(name)” in Addresses.") }
+        // The recipient checked again here, where a chain's step and a scheduled run arrive too: a memo/tag address refused.
+        case .sendNear(_, let amount):
+            guard let entry = try nativeRecipient(command) else { break }
             reply(try await e.sendNear(amount, to: entry.address, account: try await nearAccount(), label: entry.name), note: "NEAR")
-        case .closeNear(let name):
-            guard let entry = saved(name, on: "near") else { throw ExecutionError("There’s no NEAR address “\(name)” in Addresses.") }
+        case .closeNear:
+            guard let entry = try nativeRecipient(command) else { break }
             reply(try await e.closeNear(into: entry.address, account: try await nearAccount(), label: entry.name), note: "NEAR")
-        case .sendSol(let name, let amount):
-            guard let entry = saved(name, on: "solana") else { throw ExecutionError("There’s no Solana address “\(name)” in Addresses.") }
+        case .sendSol(_, let amount):
+            guard let entry = try nativeRecipient(command) else { break }
             reply(try await e.sendSOL(amount, to: entry.address, label: entry.name), note: "Solana")
         case .sendToken(let name, let token, let amount?, let network) where (try? acrossRecipient(name, token: token, network: network)) != nil:
             guard let r = try acrossRecipient(name, token: token, network: network) else { break }

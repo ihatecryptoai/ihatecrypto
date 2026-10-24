@@ -95,7 +95,12 @@ extension Engine {
     }
 
     /// The updater (main.rs) found a newer version.
+    /// The version the updater found, until this copy restarts into it.
+    nonisolated(unsafe) static var availableUpdate: String?
+
     func updateReady(_ version: String) {
+        Self.availableUpdate = version
+        changed()
         notify(.update, say("ihatecrypto \(version) is ready", "Готова ihatecrypto \(version)"),
                say("Click to open ihatecrypto and install it from Settings › About.", "Нажми, чтобы открыть ihatecrypto и поставить её в «Настройки › О приложении»."))
     }

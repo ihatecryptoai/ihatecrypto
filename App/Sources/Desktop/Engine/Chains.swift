@@ -11,6 +11,9 @@ import TradeExecution
 struct ChainState {
     var held: (command: WalletCommand, rest: [String])?
     var stopped = false
+    /// A contract call's card in a chain, and the steps after it: that card's Confirm names them, and once the call is
+    /// through they run on it (the Mac's runSteps → continueTask), on the same canvas within half an hour.
+    var afterCall: (board: String, canvas: String, rest: [String], since: Date)?
 }
 
 /// «withdraw 5 USDC to Solana then deposit 5 USDC to kamino», «chart SOL then buy SOL for 10 USDC»: the Mac's runSteps
@@ -65,7 +68,8 @@ extension Engine {
 
     /// Several steps from one message. False when a step isn't something ihatecrypto does (the caller says so).
     /// `first`: the first step as a command already (a «How much?» answered), its words only for the record.
-    func chain(_ steps: [String], first: WalletCommand? = nil, note: String?) async -> Bool {
+    /// `confirmed`: the steps a confirmed card named (a contract call's, holdAfterCall): their card is carried out at once.
+    func chain(_ steps: [String], first: WalletCommand? = nil, note: String?, confirmed: Bool = false) async -> Bool {
         func command(_ i: Int) -> WalletCommand? { i == 0 && first != nil ? first : WalletCommand.parse(steps[i]) }
         guard steps.indices.allSatisfy({ ($0 == 0 && first != nil) || knows(steps[$0]) }) else { return false }
         chainState.stopped = false
@@ -86,11 +90,13 @@ extension Engine {
         let rest = Array(steps[(k + 1)...])
         // One step with a card left: its own card, as when it's asked alone.
         if rest.isEmpty {
+            let before = card?.id
             switch command(k) {
             case .sendTo(let name, let amount, let net)?: prepareTransfer(amount, to: name, network: net, note: note)
             case let c?: await handleWallet(c, note: note)
             case nil: _ = await runCanonical(steps[k], userText: steps[k])
             }
+            if confirmed, let id = card?.id, id != before { await confirm(card: id) }
             return true
         }
         // The first move without its amount: asked now, the steps after it held for the answer.
@@ -109,11 +115,15 @@ extension Engine {
             if c.amountQuestion != nil { asks = step; parsed.append(.said(step)); continue }
             if let missing = missingKey(c) { stop(missing); return true }
             if let off = Modules.current.refusal(c, ru: russian) { stop(off); return true }
+            // A SOL or NEAR send's recipient before the card, as asked alone: a memo/tag address is refused here.
+            do { _ = try nativeRecipient(c) } catch { stop(error.localizedDescription); return true }
             // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm: after the
             // moves before it, its card comes for its own Confirm (the Mac's runSteps). One that comes first is asked alone.
             if case .contractCall = c {
                 guard i > k else {
-                    stop(say("A contract call goes on its own card: ask for “\(step)” by itself, then the rest.", "Вызов контракта идёт своей карточкой: попроси «\(step)» отдельно, потом остальное."))
+                    // First: its own card now, checked and simulated; the steps after it ride on that card's Confirm.
+                    await prepareContractCall(c, note: note)
+                    holdAfterCall(Array(steps[(i + 1)...]))
                     return true
                 }
                 parsed.append(.said(step))
@@ -177,9 +187,34 @@ extension Engine {
              lines: parsed.enumerated().map { "\($0.offset + 1). \(chainLine($0.element))" } + later
                 + [say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
                        "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
+        if confirmed { await confirm(card: card?.id); return true }
         reply(say("In steps: ", "По шагам: ", "Por pasos: ") + parsed.map(chainLine).joined(separator: " → ")
               + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена».", ". Pulsa Confirm o Cancel."), note: note)
         return true
+    }
+
+    /// A contract call's card just drawn with steps after it: its card names them, its Confirm covers them, and they run
+    /// once the call is through. Nothing is held when the call didn't get to its card.
+    func holdAfterCall(_ rest: [String]) {
+        guard !rest.isEmpty, case .wallet(.contractCall)? = pending, let id = card?.id else { return }
+        let then = [say("Then, on this Confirm, once the call is through: ", "Потом, на этом же «Подтвердить», когда вызов пройдёт: ")
+                    + rest.joined(separator: " → ")]
+        card?.lines += then
+        updateBoard(id) { $0.lines += then }
+        chainState.afterCall = (id, canvasID, rest, Date())
+        reply(say("The call waits on its card; its Confirm covers the steps after it too — they run once it’s through.",
+                  "Вызов ждёт на своей карточке; его «Подтвердить» распространяется и на следующие шаги — они пойдут, когда он пройдёт."))
+    }
+
+    /// The call's Confirm went through: the steps it named run now, as on the chain's own Confirm.
+    func continueAfterCall(_ board: String?) async {
+        guard let held = chainState.afterCall, held.board == board else { return }
+        chainState.afterCall = nil
+        // The call's own Confirm finishes first (its block marked, the signing session ended): then the rest.
+        for _ in 0..<100 where running != nil || runningBoard != nil { try? await Task.sleep(for: .milliseconds(100)) }
+        guard running == nil, runningBoard == nil else { return }
+        guard held.canvas == canvasID, Date().timeIntervalSince(held.since) < 1800 else { return }
+        _ = await chain(held.rest, note: nil, confirmed: true)
     }
 
     /// A step as the chain's card names it: a paid request with its price («pay 0.01 USDC to StableEnrich»).
@@ -275,12 +310,9 @@ extension Engine {
                     let rest = steps[(i + 1)...].map(\.title)
                     guard try await runSaid(text, rest: rest) else { break steps }
                     // It drew a card of its own (a contract call): that waits for its own Confirm, and the steps after it
-                    // with it.
+                    // run on it once the call is through (the Mac's continueTask).
                     if pending != nil {
-                        if !rest.isEmpty {
-                            reply(say("“\(text)” waits for its own Confirm on its card, so the steps after it don’t run: ask for them once it’s through.",
-                                      "«\(text)» ждёт своего «Подтвердить» на своей карточке, поэтому следующие шаги не запускаю: попроси их, когда он пройдёт."))
-                        }
+                        holdAfterCall(rest)
                         break steps
                     }
                 }

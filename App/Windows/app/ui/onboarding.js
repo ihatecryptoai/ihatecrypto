@@ -204,11 +204,9 @@ function modelStep() {
         if (await act("connectModel", { provider: flow.keyProvider, key }) !== null) render();
       } }, t("Save", "Сохранить"))))) : null;
   const local = s.providers.find((p) => p.kind === "local");
+  // The Mac's local row: the whole local-models panel — set up, start, switch to or download a model for this PC.
   const localRow = local ? tile(connected(local.id), h("span", { class: "ob-tile-ico" }, icon("ob.desktop", 16)),
-    tileText(t("Free, on this PC", "Бесплатно, на этом компьютере"), local.unavailable || local.note || local.name), h("span", { class: "spacer" }),
-    connected(local.id) ? h("span", { class: "ob-ok profit" }, icon("check", 14), t("Connected", "Подключено"))
-      // The one-click setup, as the Mac's local row: Ollama installed or updated, a model for this PC's memory, connected.
-      : h("button", { class: "btn small", disabled: flow.busy, onclick: () => act("setUpLocal") }, local.unavailable ? t("Set it up", "Установить") : t("Use it", "Выбрать"))) : null;
+    tileText(t("Free, on this PC", "Бесплатно, на этом компьютере"), null, h("div", { class: "ob-local-panel" }, pages.localModelsPanel(s)))) : null;
   // The person picks the model; the chat's menu changes it later. The catalog lists the provider's default first.
   const current = prov(m.provider);
   const list = m.models.includes(m.model) || !m.model ? m.models : [...m.models, m.model];

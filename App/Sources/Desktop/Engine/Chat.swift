@@ -204,7 +204,8 @@ extension Engine {
                       "Похоже на «да», но вторая проверка не уверена: \(doubt) Я ничего не подписывал. Если ты это и имел в виду — нажми «Подтвердить» на карточке."), note: model)
             return
         }
-        defer { offer(reading.options, userText: said ?? text, found: reading.found) }
+        // A card for the block the answer just opened isn't offered again beside it (the Mac's offer).
+        defer { offer(reading.options.filter { $0.command.isEmpty || $0.command != reading.show }, userText: said ?? text, found: reading.found) }
         // The block the answer points to opens with it (the Mac's show): a chart, the movers, a token's card, the rates.
         await show(reading, userText: said ?? text)
         switch reading.route {
@@ -233,6 +234,12 @@ extension Engine {
             reply(r, note: model)
         case .command(let canonical):
             noteUnderstood(canonical)
+            // A new command takes the place of the card that waited; a chart, P/L or the rates beside it don't (the Mac's
+            // dropWaiting): an old card never stays confirmable behind something else asked since.
+            if !Self.displays(canonical) {
+                if pending != nil { cancelPending() }
+                chainState.afterCall = nil
+            }
             guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.foundAllowed, markets: Set(markets.keys)) else {
                 reply(say("I read that as “\(canonical)”, but its address is neither in your message nor among your favorites, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет ни в твоём сообщении, ни в избранном, поэтому я его не использую. Вставь сам адрес."), note: model)
@@ -321,21 +328,23 @@ extension Engine {
             await handleWallet(command, note: note)
             return true
         }
-        if let command = PositionCommand.parse(canonical) {
-            guard let coin = targetCoin(for: canonical) else {
-                if positions.isEmpty && pendingEntry == nil {
-                    reply(say("There’s no open position, so nothing to \(canonical).", "Открытых позиций нет — «\(canonical)» не к чему применить."), note: note)
-                } else {
-                    askWhichPosition()
-                }
-                return true
-            }
+        if let command = PositionCommand.parse(canonical), let coin = targetCoin(for: canonical) {
             pendPosition(command, coin: coin, text: canonical)
             return true
         }
+        // With no position it's about, a plan change («trailing 2%», «stop 3%») goes to the plan, as on the Mac; «close ETH»,
+        // «move stop to breakeven» never make a new plan.
         let onlyPosition = canonical.lowercased().contains(/^\s*(?:close|cancel\s+orders|move\s+stop\s+to\s+breakeven)\b/)
-        guard !onlyPosition, let next = IntentParser.apply(canonical, to: planBase, markets: Set(markets.keys)) else { return false }
-        await plan(next.started, note: note)
+        if !onlyPosition, let next = IntentParser.apply(canonical, to: planBase, markets: Set(markets.keys)) {
+            await plan(next.started, note: note)
+            return true
+        }
+        guard PositionCommand.parse(canonical) != nil else { return false }
+        if positions.isEmpty && pendingEntry == nil {
+            reply(say("There’s no open position, so nothing to \(canonical).", "Открытых позиций нет — «\(canonical)» не к чему применить."), note: note)
+        } else {
+            askWhichPosition()
+        }
         return true
     }
 
@@ -445,7 +454,8 @@ extension Engine {
         } else if case .chart(let coin, let range)? = ChartCommand.parse(s, markets: Set(markets.keys)) {
             _ = try? await openChart(coin, range: range)
         } else if case .movers? = ChartCommand.parse(s, markets: Set(markets.keys)) {
-            await chart(.movers, note: model)
+            // The board only: the answer itself says what moved (the Mac shows the movers, no chat list).
+            await chart(.movers, note: model, quiet: true)
         } else if case .yields(let asset)? = WalletCommand.parse(s) {
             let rates = await loadYields(asset)
             guard !rates.isEmpty else { return }

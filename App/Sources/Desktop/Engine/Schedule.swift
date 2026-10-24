@@ -406,7 +406,8 @@ extension Engine {
             let long = positions.first { $0.coin == coin }.map { $0.size > 0 } ?? true
             return "\(long ? say("Long", "Лонг") : say("Short", "Шорт")) \(IntentParser.pretty(coin))"
         }
-        return tasks.first { "task:\($0.id)" == key }?.steps.joined(separator: " → ") ?? say("Scheduled task", "Задача по расписанию")
+        // A recurring buy kept by its mint reads as its symbol here too (shownStep), as in its row.
+        return tasks.first { "task:\($0.id)" == key }?.steps.map(shownStep).joined(separator: " → ") ?? say("Scheduled task", "Задача по расписанию")
     }
 
     func openSchedule(_ key: String) throws {

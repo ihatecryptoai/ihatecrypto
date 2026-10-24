@@ -1,6 +1,6 @@
 [package]
 name = "ihatecrypto"
-version = "0.1.0"
+version = "0.7.6"
 edition = "2024"
 publish = false
 description = "ihatecrypto for Windows: the window over the engine (ihatecrypto-engine) and the signer"

@@ -503,6 +503,8 @@ final class Engine {
         /// The History block's moves, newest first, and what the latest day did to the money (HistoryMoves.swift).
         var moves: [MoveRow]
         var movesDay: MovesDay?
+        /// Nothing moved yet: the latest three requests as they were (the Mac's HistoryBoard).
+        var recentRequests: [HistoryTabs.Activity]
         var automationBudget: AutomationBudget?
         /// Dollars without the fee coin (WalletOps.swift), for the onboarding's Top up.
         var stuck: [StuckView]
@@ -526,6 +528,8 @@ final class Engine {
         var lastBalance: Decimal?
         /// Settings › About's «Build …» behind ⓘ (the Mac's CFBundleVersion): when this engine was built.
         var build: String? = Engine.build
+        /// A newer version the updater found (Notices.updateReady): Settings › About offers Install without a check.
+        var updateReady: String? = Engine.availableUpdate
     }
 
     /// The engine program's own build time, «20261024.0831»: Windows has no bundle build number to show.
@@ -559,7 +563,7 @@ final class Engine {
             alerts: alerts.filter { $0.id != planAlert?.id }.map(alertView),
             tasks: { let marks = recurringBuys; return tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true,
                                                                 automatic: !marks.contains($0.id) && usesAutomation($0) && $0.movesMoney, next: $0.next,
-                                                                steps: $0.steps, every: $0.every?.words, pick: !marks.contains($0.id) && canPickPays($0),
+                                                                steps: $0.steps.map(shownStep), every: $0.every?.words, pick: !marks.contains($0.id) && canPickPays($0),
                                                                 moves: $0.movesMoney, buys: $0.buysCoins, sells: $0.sells, free: $0.spreadsUSDC ? taskFreeUSDC($0) : nil,
                                                                 freeOther: $0.spreadsUSDC && automationWallet != nil && $0.untrusted != true ? taskFreeUSDC(otherPayer($0)) : nil,
                                                                 untrusted: $0.untrusted == true, recurring: marks.contains($0.id)) } }(),
@@ -581,7 +585,7 @@ final class Engine {
             modules: modulesView(), trading: tradingView(), nodes: nodesView(),
             stepEdit: stepEdit,
             schedulePaused: settings.schedulePaused == true, scheduleRuns: recentRuns, multisigHeld: multisigHeld,
-            scheduleKey: scheduleKey, moves: historyMoves, movesDay: movesDay,
+            scheduleKey: scheduleKey, moves: historyMoves, movesDay: movesDay, recentRequests: recentRequests,
             automationBudget: automationBudgetNow,
             stuck: stuckView, places: placeFacts, notices: noticeViews, openAtLogin: settings.openAtLogin == true,
             topUp: TopUpPage.shared.view, appLanguage: settings.appLanguage ?? "system", localSetup: localSetupView,
