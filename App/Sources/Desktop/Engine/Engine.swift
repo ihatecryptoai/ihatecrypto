@@ -121,6 +121,8 @@ final class Engine {
     var meters: [String: Snapshot.Context] = [:]
     var refreshing = false
     var refreshingEveryMinute = false
+    /// The scheduled buys and tasks running now, beside the 30 s loop (startScheduledRun): one at a time.
+    var scheduledRun: Task<Void, Never>?
     /// When the user's last move ran: the balance change it made isn't announced as money arriving.
     var lastOwnMove = Date.distantPast
     /// The wallet the balances on screen were read for.
@@ -324,6 +326,11 @@ final class Engine {
     }
 
     func say(_ english: String, _ russian: String) -> String { self.russian ? russian : english }
+    /// The lines a conversation meets most, in Spanish too (the Mac's say with `spanish`): a Spanish chat isn't answered in
+    /// English there. Russian first, as the Mac's.
+    func say(_ english: String, _ russian: String, _ spanish: String) -> String {
+        self.russian ? russian : replyLanguage == "Spanish" ? spanish : english
+    }
 
     /// The window's own texts (Settings › General › App language), apart from the replies' language: System follows
     /// Windows' language, as the Mac's follows the Mac's.
@@ -660,7 +667,7 @@ final class Engine {
                         offerTradingKey()
                         await refreshLive()
                         await readClosed()
-                        await runDueTasks()
+                        startScheduledRun()
                         // Every 30 s, as the Mac's («Runs within half a minute»).
                         try? await Task.sleep(for: .seconds(30))
                     }

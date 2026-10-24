@@ -250,6 +250,9 @@ const siteTicks = new Map();
 /** A site's request as the Mac's ApprovalSheet: the site and its whole origin with how ihatecrypto knows it, what it asks
  * for, the warnings, then a tick for each risk (a lookalike, a payee or a program not on the list, a contract it can't
  * read, the second check's doubt) before Approve; Decline always. */
+/** The site requests whose checks are unfolded: kept across redraws, which build the card anew. */
+const openChecks = new Set();
+
 function siteRequest(site) {
   if (!siteTicks.has(site.id)) siteTicks.set(site.id, new Set());
   const ticked = siteTicks.get(site.id);
@@ -267,9 +270,25 @@ function siteRequest(site) {
           chip ? h("span", { class: "route-status-chip " + chip[1] }, icon(chip[2], 11), chip[0]) : null),
         // The whole origin too: a phishing copy differs in what the big line leaves out.
         h("div", { class: "route-site-origin selectable" }, site.origin))),
+    // A Solana transaction as the Mac's sheet reads it: what you send and get, each balance with its ≈ $, the checks folded.
+    site.lead ? h("div", { class: "route-site-lead" }, site.lead) : null,
+    site.balances?.length ? h("div", { class: "route-site-card" },
+      h("div", { class: "route-site-card-title" }, t("Your balances (simulated)", "Твои балансы (по симуляции)")),
+      site.balances.map((b) => h("div", { class: "route-site-balance" },
+        logo(b.symbol, 22),
+        h("div", { class: "route-site-balance-name" }, h("b", {}, b.symbol), b.note ? h("span", { class: "secondary" }, b.note) : null),
+        h("span", { class: "spacer" }),
+        h("div", { class: "route-site-balance-amount num" },
+          h("b", { class: b.up ? "profit" : b.note ? "" : "loss" }, b.amount),
+          b.usd ? h("span", { class: "secondary" }, "≈ " + b.usd) : null)))) : null,
     site.lines.length ? h("div", { class: "route-site-lines selectable" }, site.lines.map((l) => h("div", {}, l))) : null,
+    site.checks?.length ? h("details", { class: "route-site-checks", open: openChecks.has(site.id),
+      ontoggle: (e) => { if (e.target.open) openChecks.add(site.id); else openChecks.delete(site.id); } },
+      h("summary", {}, icon("checkmark.shield", 13), t(`${site.checks.length} ${site.checks.length === 1 ? "check" : "checks"} passed`, `Проверок пройдено: ${site.checks.length}`)),
+      site.checks.map((c) => h("div", { class: "secondary" }, "· " + c))) : null,
     site.warnings.length ? h("div", { class: "route-warn-box" }, icon("exclamationmark.triangle", 14), h("div", {}, site.warnings.map((w) => h("div", {}, w)))) : null,
     tickBoxes(site.id, site.ticks),
+    site.note ? h("div", { class: "route-site-note secondary" }, site.note) : null,
     h("div", { class: "route-site-buttons" }, h("span", { class: "spacer" }),
       h("button", { class: "btn route-large", onclick: () => { siteTicks.delete(site.id); act("siteAnswer", { board: site.id, test: false }); } }, t("Decline", "Отклонить")),
       h("button", { class: "btn primary route-large", disabled: !all, title: all ? site.approve : t("Tick each box above first", "Сначала отметь каждый пункт выше"),

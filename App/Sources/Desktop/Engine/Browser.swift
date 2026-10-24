@@ -74,6 +74,17 @@ extension Engine {
     func dapp(_ method: String, params text: String, origin: String, title: String = "") async throws -> String {
         guard let url = URL(string: origin), url.scheme == "https", let host = url.host() else { throw SiteError("Only https sites get the wallet.") }
         let params = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]
+        // Disconnect only takes access away, so it works whatever wallet is on — a Ledger, the automation wallet, none
+        // (the Mac's disconnectHere). The bar's takes the site's wallet on every chain; a page's own Solana disconnect
+        // leaves its EVM connection alone.
+        if method == "disconnect" {
+            sites.solana.remove(origin)
+            if params["everywhere"] as? Bool == true {
+                sites.evm.remove(origin)
+                sites.chain[origin] = nil
+            }
+            return "null"
+        }
         let eth = method == "eth"
         guard let wallet = activeWallet, wallet.automation != true else { throw SiteError((eth ? "4100|" : "") + say("Add a wallet first.", "Сначала добавь кошелёк.")) }
         guard !ledgerActive else {
@@ -102,15 +113,6 @@ extension Engine {
                 sites.solana.insert(origin)
             }
             return try json(["address": owner, "publicKey": try Base58.decode(owner).base64EncodedString()])
-        case "disconnect":
-            sites.solana.remove(origin)
-            // The bar's Disconnect takes the wallet away from the site on every chain, as the Mac's disconnectHere; a
-            // page's own Solana disconnect leaves its EVM connection alone. Either only takes access away.
-            if params["everywhere"] as? Bool == true {
-                sites.evm.remove(origin)
-                sites.chain[origin] = nil
-            }
-            return "null"
         case "signMessage":
             guard sites.solana.contains(origin), let b64 = params["message"] as? String, let bytes = Data(base64Encoded: b64) else { throw SiteError("Connect the site first.") }
             let text = String(data: bytes, encoding: .utf8) ?? "(not text: \(bytes.count) bytes)"
@@ -127,13 +129,16 @@ extension Engine {
             let send = method == "signAndSendTransaction"
             let review = try await solanaReview(wire, owner: owner, host: host, title: title)
             guard review.problems.isEmpty else {
-                pin("result", say("\(host): transaction refused", "\(host): транзакция отклонена"), lines: review.problems + review.lines)
+                pin("result", say("\(host): transaction refused", "\(host): транзакция отклонена"),
+                    lines: review.problems + [review.lead].compactMap { $0 } + review.changes.map { say("Your balance, simulated: ", "Твой баланс, по симуляции: ") + $0 } + review.lines)
                 reply(say("\(host) sent a transaction ihatecrypto won't sign: ", "\(host) прислал транзакцию, которую ihatecrypto не подпишет: ") + review.problems.joined(separator: " "), note: "browser")
                 throw SiteError("Transaction declined: " + review.problems.joined(separator: " "))
             }
             guard await ask(host, origin: origin, site: site, title: (send ? say("\(host) asks to sign and send a transaction", "\(host) просит подписать и отправить транзакцию")
                                                          : say("\(host) asks to sign a transaction", "\(host) просит подписать транзакцию")),
-                            lines: review.lines, warnings: review.warnings, ticks: review.ticks)
+                            lines: review.lines, warnings: review.warnings, ticks: review.ticks, review: review,
+                            note: send ? say("After signing, ihatecrypto sends the transaction to the network.", "После подписи ihatecrypto сам отправит транзакцию в сеть.")
+                                       : say("The site gets the signed transaction and sends it itself.", "Сайт получит подписанную транзакцию и отправит её сам."))
             else { throw SiteError("Transaction declined.") }
             let reply = try await SignerLink.shared.send(.signSolana(wire: wire, accounts: review.accounts, recipients: [], tokenOwners: review.tokenOwners,
                                                                      extraPrograms: review.unknownPrograms))
@@ -160,7 +165,7 @@ extension Engine {
     /// read for another, and never in the place of their own card — it has its block and its answer (Consent.swift),
     /// with a tick for each risk it carries before Approve counts.
     func ask(_ host: String, origin: String, site: SiteCheck.Verdict, connect: Bool = false, title: String, lines: [String],
-                     warnings: [String] = [], ticks: [SiteTick] = []) async -> Bool {
+                     warnings: [String] = [], ticks: [SiteTick] = [], review: SiteReview? = nil, note: String? = nil) async -> Bool {
         guard siteAsk == nil else { return false }
         var warnings = warnings, ticks = ticks
         var check = "known", real: String?
@@ -171,7 +176,11 @@ extension Engine {
         case .local: check = "local"
         }
         let view = SiteAskView(id: UUID().uuidString, origin: origin, host: host, check: check, real: real, title: title, lines: lines, warnings: warnings,
-                               ticks: ticks, approve: connect ? say("Connect", "Подключить") : say("Sign", "Подписать"))
+                               ticks: ticks, approve: connect ? say("Connect", "Подключить") : say("Sign", "Подписать"), canvas: canvasID,
+                               lead: review?.lead, balances: review?.balances ?? [], checks: review?.checks ?? [], note: note)
+        // Its block says the same in words: the lead, each balance and the checks, beside the lines.
+        let said = [view.lead].compactMap { $0 } + view.balances.map { "\($0.symbol) \($0.amount)" + ($0.usd.map { " ≈ \($0)" } ?? "") + ($0.note.map { " · \($0)" } ?? "") }
+            + lines + view.checks + [note].compactMap { $0 }
         out.event("showMain", ["why": "site"])
         notify(.confirm, host, say("Asks for your wallet: look at ihatecrypto's window.", "Просит кошелёк: посмотри в окно ihatecrypto."))
         // The window's call gives up after 900 s (main.rs dapp_call): declined before that, never signed for a page that left.
@@ -179,7 +188,7 @@ extension Engine {
         return await withCheckedContinuation { c in
             siteAsk = SiteAsk(view, c)
             pin(Board(id: view.id, kind: "move", title: title, lines: (warnings + ticks.map(\.title)).map { "⚠ " + $0 },
-                      steps: [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)], state: "waiting"))
+                      steps: [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: said)], state: "waiting"))
             changed()
         }
     }
@@ -202,7 +211,9 @@ extension Engine {
         case "eth_requestAccounts":
             if !sites.evm.contains(origin) {
                 guard await ask(host, origin: origin, site: site, connect: true, title: say("\(host) asks to connect to your EVM wallet", "\(host) просит подключить твой EVM-кошелёк"),
-                                lines: [say("It sees your address and can ask you to sign; nothing is signed without your Confirm.", "Сайт увидит адрес и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."), address])
+                                lines: [say("It sees your EVM address, which is also your Hyperliquid address, and can ask you to sign; nothing is signed without your Confirm.",
+                                            "Сайт увидит EVM-адрес — он же твой адрес на Hyperliquid — и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."),
+                                        say("ihatecrypto never signs token spending permissions (Permit).", "ihatecrypto никогда не подписывает разрешения на трату токенов (Permit)."), address])
                 else { throw SiteError("4001|The user declined.") }
                 sites.evm.insert(origin)
             }
@@ -260,7 +271,9 @@ extension Engine {
             }
             guard await ask(host, origin: origin, site: site, title: say("\(host) asks to send a transaction on \(EVMNetwork.all.first { $0.rpc.chainId == chain }?.name ?? "chain \(chain)")",
                                                          "\(host) просит отправить транзакцию в \(EVMNetwork.all.first { $0.rpc.chainId == chain }?.name ?? "сети \(chain)")"),
-                            lines: review.lines + review.changes.map { say("Balance: ", "Баланс: ") + $0 }, warnings: review.warnings, ticks: review.ticks)
+                            lines: review.lines + review.changes.map { say("Balance: ", "Баланс: ") + $0 }, warnings: review.warnings, ticks: review.ticks,
+                            note: say("Simulated on the latest block, before the network fee. A token names itself — check its address. The signer decodes the call again.",
+                                      "Симуляция на последнем блоке, без комиссии сети. Токен называет себя сам — проверь его адрес. Подписант разберёт вызов ещё раз."))
             else { throw SiteError("4001|The user declined.") }
             let nonce = try await rpc.nonce(address)
             let fees = try await rpc.fees()
@@ -307,6 +320,10 @@ extension Engine {
         var unknownPrograms: [String] = []
         /// What needs the person's tick before Approve counts (Consent.swift).
         var ticks: [SiteTick] = []
+        /// The card's lead, balances and folded checks (a Solana transaction, the Mac's sheet).
+        var lead: String?
+        var balances: [SiteBalance] = []
+        var checks: [String] = []
     }
 
     /// Decodes the call, names the token, simulates our balances and estimates gas, as the Mac does. Problems mean «don't sign».
@@ -444,30 +461,79 @@ extension Engine {
         let solBefore = try await rpc.balance(owner)
         let simulation = try await rpc.simulate(wire, watch: [owner] + touched.keys, sigVerify: false)
         var problems = verdict.problems
-        var changes: [String] = []
+        var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
         func signed(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 9) }
         if let error = simulation.error {
             problems.append("Simulation failed: \(error).")
         } else {
             let solAfter = simulation.after[owner]?.lamports ?? solBefore
-            changes.append("SOL: " + signed(Decimal(Int64(solAfter) - Int64(solBefore)) / 1_000_000_000))
+            deltas.append(("SOL", SpotAsset.all[0].mint, Decimal(Int64(solAfter) - Int64(solBefore)) / 1_000_000_000))
             for (address, t) in touched.sorted(by: { $0.key < $1.key }) {
                 let after = simulation.after[address]?.token ?? t.amount
                 let delta = Decimal(Int64(after) - Int64(t.amount)) / Decimal(sign: .plus, exponent: t.decimals, significand: 1)
                 if delta != 0 {
-                    let symbol = t.mint == SpotAsset.usdc.mint ? "USDC" : SpotAsset.all.first { $0.mint == t.mint }?.symbol ?? "token \(t.mint.prefix(6))…"
-                    changes.append("\(symbol): \(signed(delta))")
+                    deltas.append((t.mint == SpotAsset.usdc.mint ? "USDC" : SpotAsset.all.first { $0.mint == t.mint }?.symbol ?? "token \(t.mint.prefix(6))…", t.mint, delta))
                 }
             }
         }
-        let named = programs.sorted().map { SolanaGuard.knownPrograms[$0] ?? "\($0.prefix(4))…\($0.suffix(4))" + say(" (not on ihatecrypto's list)", " (нет в списке ihatecrypto)") }
+        let changes = deltas.map { "\($0.symbol): \(signed($0.amount))" }
+        let programNames = programs.sorted().map { (name: SolanaGuard.knownPrograms[$0] ?? "\($0.prefix(4))…\($0.suffix(4))", known: SolanaGuard.knownPrograms[$0] != nil) }
+        let named = programNames.map { $0.known ? $0.name : $0.name + say(" (not on ihatecrypto's list)", " (нет в списке ihatecrypto)") }
         var seen = Set<String>()
-        var lines = changes.map { say("Your balance, simulated: ", "Твой баланс, по симуляции: ") + $0 }
-        lines.append(say("Calls: ", "Вызывает: ") + named.joined(separator: ", "))
-        lines += verdict.checks.filter { !$0.hasPrefix("Calls unknown program") && seen.insert($0).inserted }
+        var lines = [Self.callsLine(programNames, say: say)]
+        let checks = verdict.checks.filter { !$0.hasPrefix("Calls unknown program") && seen.insert($0).inserted }
         var ticks = [Self.programsTick(unknown, say: say)].compactMap { $0 }
         await siteSecondCheck(host: host, title: title, programs: named, changes: changes, lines: &lines, ticks: &ticks)
-        return SiteReview(lines: lines, changes: changes, warnings: [], problems: problems, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown, ticks: ticks)
+        var review = SiteReview(lines: lines, changes: changes, warnings: [], problems: problems, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown, ticks: ticks)
+        review.lead = Self.solanaLead(deltas, programs: programNames.map(\.name), say: say)
+        review.balances = deltas.map { d in
+            let fee = Self.feeLike(d.symbol, d.amount, count: deltas.count)
+            let price: Decimal? = Stablecoins.isDollar(d.symbol) ? 1 : d.symbol == "SOL" ? markets["SOL"]?.markPx : heldSolanaPrice(d.mint)
+            return SiteBalance(symbol: d.symbol, amount: signed(d.amount), up: d.amount > 0, usd: price.map { Fmt.usd(abs(d.amount) * $0) },
+                               note: fee ? say("network fee and rent for new accounts", "комиссия сети и залог за новые счета") : nil)
+        }
+        review.checks = checks
+        return review
+    }
+
+    /// SOL that only pays the fee and rent beside a real move (the Mac's feeLike): said so, not read as a send.
+    nonisolated static func feeLike(_ symbol: String, _ amount: Decimal, count: Int) -> Bool {
+        symbol == "SOL" && amount < 0 && -amount < Decimal(string: "0.05")! && count > 1
+    }
+
+    /// «You send 5 USDC to Kamino Vault», «You send 5 USDC and get 0.02 SOL», «You get …», «Only the network fee» (the
+    /// Mac's summary): what leaves and arrives, fee-sized SOL left out, and the protocol it goes to.
+    nonisolated static func solanaLead(_ deltas: [(symbol: String, mint: String, amount: Decimal)], programs: [String], say: (String, String) -> String) -> String? {
+        let moved = deltas.filter { !feeLike($0.symbol, $0.amount, count: deltas.count) }
+        let out = moved.filter { $0.amount < 0 }.map { "\(Fmt.num(-$0.amount, maxFraction: 6)) \($0.symbol)" }
+        let into = moved.filter { $0.amount > 0 }.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }
+        // Programs of one protocol («Kamino Vault», «Kamino Farms») are that protocol: the money goes to Kamino.
+        let work = programs.filter { !solanaPlumbing.contains($0) && !$0.contains("…") }
+        let brands = Set(work.map { String($0.split(separator: " ").first ?? Substring($0)) })
+        let target = work.count > 1 && brands.count == 1 ? brands.first : work.first
+        func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + say(" and ", " и ") + items.last! }
+        switch (out.isEmpty, into.isEmpty) {
+        case (false, true): return say("You send \(list(out))", "Отправляешь \(list(out))") + (target.map { say(" to \($0)", " в \($0)") } ?? "")
+        case (false, false): return say("You send \(list(out)) and get \(list(into))", "Отдаёшь \(list(out)), получаешь \(list(into))")
+        case (true, false): return say("You get \(list(into))", "Получаешь \(list(into))")
+        case (true, true): return deltas.isEmpty ? nil : say("Only the network fee", "Только комиссия сети")
+        }
+    }
+
+    /// Solana's own programs: one quiet line after the ones that do the work.
+    nonisolated static let solanaPlumbing: Set<String> = ["System", "Compute Budget", "SPL Token", "Associated Token", "Address Lookup Table"]
+
+    /// «It calls: Kamino Vault · 7xKX…sAsU (not on ihatecrypto's list) · and Solana's own: System, Compute Budget».
+    nonisolated static func callsLine(_ programs: [(name: String, known: Bool)], say: (String, String) -> String) -> String {
+        let work = programs.filter { !solanaPlumbing.contains($0.name) }.map { $0.known ? $0.name : $0.name + say(" (not on ihatecrypto's list)", " (нет в списке ihatecrypto)") }
+        let plumbing = programs.map(\.name).filter { solanaPlumbing.contains($0) }
+        return say("It calls: ", "Вызывает: ") + (work + (plumbing.isEmpty ? [] : [say("and Solana's own: ", "и служебные Solana: ") + plumbing.joined(separator: ", ")])).joined(separator: " · ")
+    }
+
+    /// A held Solana token's price, from the portfolio's row for its mint: the ≈ $ beside a site's balance change.
+    func heldSolanaPrice(_ mint: String) -> Decimal? {
+        guard let row = portfolio.networks.first(where: { $0.key == "solana" })?.rows.first(where: { $0.contract == mint }), row.value > 0, let usd = row.usd else { return nil }
+        return usd / row.value
     }
 
     /// The second check on a site's transaction (the Mac's jevNote): its concern as a warning, and when it didn't answer

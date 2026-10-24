@@ -65,7 +65,7 @@ nonisolated struct AutomationBudget: Encodable, Equatable {
 /// notification.
 extension Engine {
     func taskText(_ t: ScheduledTask) -> String {
-        t.steps.joined(separator: " then ") + " · " + t.when + (t.paused == true ? say(" · paused", " · на паузе") : "")
+        t.steps.map(shownStep).joined(separator: " then ") + " · " + t.when + (t.paused == true ? say(" · paused", " · на паузе") : "")
     }
 
     /// The steps must be what this app runs.
@@ -251,6 +251,19 @@ extension Engine {
     /// The first task whose time has come, as the Mac's runDueTask: on a canvas of its own (the last run's makes way), and
     /// back to the canvas the person was on once it's done, unless it needs them (a Confirm, a failure). Only while nothing
     /// else is going on: a card waiting for Confirm, a reply being written, a move running.
+    /// The due recurring buys and tasks in a task of their own, beside the 30 s loop (the Mac's scheduledRun, d8cc366): an
+    /// unanswered Windows Hello holds only this run, while balances, «closed outside» and the trading-key offer go on. One
+    /// run at a time; a call while one runs leaves it be, and the next 30 s picks up what's due then.
+    func startScheduledRun() {
+        guard scheduledRun == nil else { return }
+        scheduledRun = Task { await scheduledRunBody() }
+    }
+
+    private func scheduledRunBody() async {
+        await runDueTasks()
+        scheduledRun = nil
+    }
+
     func runDueTasks() async {
         remindTopUp()
         // Recurring buys first: at their time, Windows Hello only, no canvas of their own (Automation.swift).
@@ -274,7 +287,7 @@ extension Engine {
         let before = Set(scheduleRuns.filter { $0.task == task.id.uuidString }.compactMap(\.canvas))
         for c in canvases where c.id != canvasID && before.contains(c.id) && c.schedule == nil && c.messages.filter(\.fromUser).count <= 1 { try? removeCanvas(c.id) }
         guard (try? newCanvas()) != nil else { return }
-        let request = (task.because.map { $0 + ": " } ?? say("Scheduled: ", "По расписанию: ")) + task.steps.joined(separator: say(", then ", ", потом "))
+        let request = (task.because.map { $0 + ": " } ?? say("Scheduled: ", "По расписанию: ")) + task.steps.map(shownStep).joined(separator: say(", then ", ", потом "))
         messages.append(Message(fromUser: true, text: request, note: "schedule"))
         nameCanvas(from: request)
         let started = Date(), mark = messages.count, canvas = canvasID
@@ -427,7 +440,10 @@ extension Engine {
         if tasks[i].every != nil, tasks[i].next > Date() { Self.keptNext[tasks[i].id.uuidString] = tasks[i].next }
         tasks[i].next = Date()
         Self.runNowKeys.insert(key)
-        await runDueTasks()
+        // After a run already going (one at a time), then this one.
+        await scheduledRun?.value
+        startScheduledRun()
+        await scheduledRun?.value
     }
 
     /// The item's block in words, for the model: what it is, when, how it signs, how its runs went.

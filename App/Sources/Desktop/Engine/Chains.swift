@@ -132,6 +132,22 @@ extension Engine {
                 c = .jupiterDCA(token, usdc: u, orders: o, every: e)
             default: break
             }
+            // A paid request first: its price asked now, so the chain's card shows what it pays (the Mac's runSteps →
+            // preparePayment); pay() takes this quote at Confirm.
+            if i == k, case .pay = c {
+                do {
+                    switch try await askPrice(c) {
+                    case .answered(let text):
+                        reply(text, note: note)
+                        stop(say("“\(step)” didn’t get to its Confirm, so the steps after it don’t run.", "«\(step)» не дошёл до подтверждения, поэтому следующие шаги не запускаю."))
+                        return true
+                    case .quoted(let q): payment = q
+                    }
+                } catch {
+                    stop(error.localizedDescription)
+                    return true
+                }
+            }
             if case .sendTo(let name, let amount, let network) = c {
                 let found = chainTransfer(name, network: network)
                 guard let e = found.entry else { stop(found.why ?? ""); return true }
@@ -157,12 +173,19 @@ extension Engine {
         }
         let later = asks.map { [say("“\($0)” asks how much when it's reached, then comes on a card of its own; the steps after it wait for that.",
                                     "«\($0)» спросит сумму, когда до него дойдёт, и придёт своей карточкой; шаги после него ждут этого.")] } ?? []
-        show(.chain(parsed), title: say("\(parsed.count) steps, one Confirm", "Шагов: \(parsed.count), одно подтверждение"),
-             lines: parsed.enumerated().map { "\($0.offset + 1). \($0.element.title)" } + later
+        show(.chain(parsed), title: say("\(parsed.count) steps, one Confirm", "Шагов: \(parsed.count), одно подтверждение", "\(parsed.count) pasos, un Confirm"),
+             lines: parsed.enumerated().map { "\($0.offset + 1). \(chainLine($0.element))" } + later
                 + [say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
                        "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
-        reply(say("In steps: ", "По шагам: ") + parsed.map(\.title).joined(separator: " → ") + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена»."), note: note)
+        reply(say("In steps: ", "По шагам: ", "Por pasos: ") + parsed.map(chainLine).joined(separator: " → ")
+              + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена».", ". Pulsa Confirm o Cancel."), note: note)
         return true
+    }
+
+    /// A step as the chain's card names it: a paid request with its price («pay 0.01 USDC to StableEnrich»).
+    func chainLine(_ s: ChainStep) -> String {
+        guard case .wallet(let c) = s, case .pay = c, let q = payment, q.command == c else { return s.title }
+        return say("pay \(Fmt.num(q.challenge.usdc, maxFraction: 6)) USDC to \(q.service)", "оплатить \(Fmt.num(q.challenge.usdc, maxFraction: 6)) USDC · \(q.service)")
     }
 
     /// A USDC transfer to a saved name as a step of a chain: the entry on the network the step names (a 0x address saved
@@ -273,7 +296,7 @@ extension Engine {
                     reply(say("“\(step.title)” didn’t go through, so the steps after it don’t run.", "«\(step.title)» не прошёл, поэтому следующие шаги не запускаю."))
                 }
                 // The model works out why and the way that works, as after a failed Confirm (not in a scheduled run).
-                if sent.isEmpty { noteRefusal(step.title, error.localizedDescription, note: nil) }
+                if sent.isEmpty { noteRefusal(step.title, error, note: nil) }
                 break
             }
             // The next step reads balances after this one.
@@ -316,7 +339,7 @@ extension Engine {
     /// it went. One that failed stops the chain.
     private func landed(_ landings: Landings, at place: String?) async throws {
         guard landings.count(at: place) > 0 else { return }
-        running?.lines.append(say("Waiting for the moves before to land", "Жду, пока придут деньги с прошлых шагов"))
+        running?.lines.append(say("Waiting for the moves before to land", "Жду, пока придут деньги с прошлых шагов", "Esperando a que lleguen los pasos anteriores"))
         changed()
         do {
             for line in try await landings.wait(for: place) { reply(line) }
@@ -336,7 +359,7 @@ extension Engine {
         guard have < need else { return }
         func card(_ have: Decimal) -> Board.Step {
             Board.Step(label: "ARRIVES · SOLANA", title: "\(Fmt.num(need)) USDC",
-                       lines: [say("on Solana now", "на Solana сейчас") + "\t\(Fmt.num(have)) USDC", say("Then: ", "Потом: ") + step])
+                       lines: [say("on Solana now", "на Solana сейчас", "en Solana ahora") + "\t\(Fmt.num(have)) USDC", say("Then: ", "Потом: ", "Luego: ") + step])
         }
         let id = runningBoard
         var at = 0
@@ -346,7 +369,7 @@ extension Engine {
             list.insert(card(have), at: at)
             b.steps = list
         }
-        running?.lines.append(say("Waiting for the deposit on Solana", "Жду депозит на Solana"))
+        running?.lines.append(say("Waiting for the deposit on Solana", "Жду депозит на Solana", "Esperando el depósito en Solana"))
         changed()
         for _ in 0..<60 {
             try? await Task.sleep(for: .seconds(2))

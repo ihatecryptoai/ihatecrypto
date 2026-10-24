@@ -488,6 +488,20 @@
 .route-status-chip.route-amber { background: var(--jev-tint); color: var(--jev-ink); }
 .route-site-origin { font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--secondary); overflow-wrap: anywhere; }
 .route-site-lines { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+/* A Solana transaction's lead and simulated balances, as the Mac's sheet. */
+.route-site-lead { font-size: 15px; font-weight: 700; line-height: 1.35; text-wrap: balance; overflow-wrap: anywhere; }
+.route-site-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px; background: var(--fill); }
+.route-site-card-title { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--secondary); }
+.route-site-balance { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.route-site-balance-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 13px; }
+.route-site-balance-name .secondary { font-size: 10.5px; }
+.route-site-balance-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 13.5px; white-space: nowrap; }
+.route-site-balance-amount .secondary { font-size: 10.5px; font-weight: 400; }
+.route-site-checks { font-size: 12px; }
+.route-site-checks summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; list-style: none; }
+.route-site-checks summary::-webkit-details-marker { display: none; }
+.route-site-checks > div { padding-left: 20px; margin-top: 3px; overflow-wrap: anywhere; }
+.route-site-note { font-size: 11.5px; }
 .route-site-tick { display: flex; flex-direction: column; gap: 4px; padding: 11px 13px; border-radius: 14px; background: var(--jev-tint); color: var(--jev-ink); }
 .route-site-tick b { font-size: 12.5px; }
 .route-site-tick .secondary { color: color-mix(in srgb, var(--jev-ink) 80%, transparent); overflow-wrap: anywhere; }

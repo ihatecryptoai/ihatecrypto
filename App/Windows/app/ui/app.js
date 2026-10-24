@@ -36,8 +36,8 @@ window.__TAURI__.event.listen("engine", (e) => {
   } else if (msg.event === "notify") {
     toast(msg.data.body);
   } else if (msg.event === "suggest") {
-    // A phrase the engine hands the person (the guard's «save <address> as NAME on <network>»): into the field, not sent.
-    suggest(msg.data.text);
+    // A phrase the engine hands the person (the guard's «save <address> as Name»): into the field, not sent.
+    suggest(msg.data.text, msg.data.select);
   } else if (msg.event === "openView") {
     // Typed «top up» / «receive»: the Top up page, as the Mac's showReceive opens its board.
     ui.view = msg.data?.view || msg.view;

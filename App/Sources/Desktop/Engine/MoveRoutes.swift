@@ -612,9 +612,14 @@ extension Engine {
         let net = e.network, free = usdcFree(on: net)
         let line = free.map { $0 < amount && net != "solana" ? say("\(Fmt.num(amount - $0)) USDC short: it comes from Solana first", "не хватает \(Fmt.num(amount - $0)) USDC: сначала придут с Solana")
             : net == "hyperliquid" ? say("perp balance · no bridge, no gas", "баланс perp · без моста и газа") : say("free: \(Fmt.num($0)) USDC", "свободно: \(Fmt.num($0)) USDC") } ?? ""
-        return [st(say("FROM · ", "ОТКУДА · ") + (AddressCheck.Network(rawValue: net)?.title ?? WalletCommand.placeName(net)).uppercased(), "\(Fmt.num(amount)) USDC", line,
-                   moved("USDC", on: net, by: -amount)),
-                st(savedLabel, e.name, ends(e.address))]
+        // What Solana gives when the money there is short (the Mac's `bridged`): its balance going down, a second row in the
+        // same box under this network's.
+        let short = max(0, amount - (free ?? amount))
+        let topUp = net != "solana" && short > 0 && (usdcFree(on: "solana") ?? 0) >= short ? moved("USDC", on: "solana", by: -short, approx: true) : nil
+        var from = st(say("FROM · ", "ОТКУДА · ") + (AddressCheck.Network(rawValue: net)?.title ?? WalletCommand.placeName(net)).uppercased(), "\(Fmt.num(amount)) USDC", line,
+                      moved("USDC", on: net, by: -amount))
+        if let m = topUp { from.lines.append("\(m.place)\t\(m.was) → \(m.after) \(m.symbol)") }
+        return [from, st(savedLabel, e.name, ends(e.address))]
     }
 
     /// A position closed (all or a share): what it makes or loses now, its size and entry, the USDC back on Hyperliquid.

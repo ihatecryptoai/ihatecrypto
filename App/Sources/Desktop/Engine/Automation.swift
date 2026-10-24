@@ -285,6 +285,25 @@ extension Engine {
         }
     }
 
+    /// The symbol each recurring buy kept by its mint goes by (its step names only the mint), from its first buy and each
+    /// run since: the Schedule's row and the notices say «SAMO», not the mint.
+    var tokenNames: [String: String] {
+        get { Store.load([String: String].self, "token-names.json") ?? [:] }
+        set { Store.save(newValue, "token-names.json") }
+    }
+
+    /// «buy token 7xKX… for 5 USDC» as the person reads it: «buy SAMO for 5 USDC».
+    func shownStep(_ step: String) -> String {
+        guard case .buy(let a, let u)? = WalletCommand.parse(step), !a.mint.isEmpty, let name = tokenNames[a.mint] else { return step }
+        return "buy \(name) for \(u.map { Fmt.num($0, maxFraction: 6) } ?? "all") USDC"
+    }
+
+    /// A recurring buy's coin by its symbol, kept as it's made: its step keeps only the mint.
+    func rememberName(_ buy: WalletCommand) {
+        guard case .buy(let a, _) = buy, !a.mint.isEmpty, !a.symbol.contains("…"), !SpotAsset.all.contains(where: { $0.mint == a.mint }) else { return }
+        tokenNames[a.mint] = a.symbol
+    }
+
     /// Recurring buys told once that they wait for the Ledger.
     static var ledgerWaitNotified: Set<UUID> = []
 
@@ -298,21 +317,27 @@ extension Engine {
     /// One run: no chat line when it goes through, a notification and its record either way (the Mac's notify with
     /// `schedule:`) — the Schedule's History, the task's own canvas and History › Agent list it.
     private func recurringBuy(_ asset: SpotAsset, usdc: Decimal, task: ScheduledTask) async {
-        let title = say("\(asset.symbol) purchase", "Покупка \(asset.symbol)")
+        // A coin kept by its mint shows the symbol it had (its step names only the mint).
+        var name = tokenNames[asset.mint] ?? asset.symbol
+        var title = say("\(name) purchase", "Покупка \(name)")
         let started = Date()
         func record(_ result: String, _ line: String) {
-            scheduleRuns.append(ScheduleRun(at: started, title: task.steps.joined(separator: " then "), result: result, line: String(line.prefix(300)), canvas: nil, task: task.id.uuidString))
+            scheduleRuns.append(ScheduleRun(at: started, title: task.steps.map(shownStep).joined(separator: " then "), result: result, line: String(line.prefix(300)), canvas: nil, task: task.id.uuidString))
             if scheduleRuns.count > 100 { scheduleRuns.removeFirst(scheduleRuns.count - 100) }
         }
         // Jupiter or Solana switched off: this run is skipped, the schedule stays.
         if let off = Modules.current.refusal(.buy(asset, usdc: usdc), ru: russian) {
-            notify(.moves, say("Scheduled \(asset.symbol) buy skipped", "Регулярная покупка \(asset.symbol) пропущена"), off, failed: true, record: true)
+            notify(.moves, say("Scheduled \(name) buy skipped", "Регулярная покупка \(name) пропущена"), off, failed: true)
             record("failed", off)
             return
         }
         guard let token = await spotToken(asset, note: "schedule") else {
             record("failed", messages.last { !$0.fromUser }?.text ?? title)
             return
+        }
+        if !asset.mint.isEmpty, token.symbol != name, !SpotAsset.all.contains(where: { $0.mint == asset.mint }) {
+            tokenNames[asset.mint] = token.symbol
+            (name, title) = (token.symbol, say("\(token.symbol) purchase", "Покупка \(token.symbol)"))
         }
         running = (title, [])
         changed()
@@ -321,13 +346,13 @@ extension Engine {
         let hello = watchForHello(title)
         do {
             let line = try await executor().swap(token, buy: true, amount: usdc, equity: portfolio.total)
-            notify(.moves, title, line, record: true)
+            notify(.moves, title, line)
             record("done", line)
         } catch {
-            let text = say("Scheduled \(asset.symbol) purchase failed: \(error.localizedDescription) Next one: \(Fmt.date(task.next)).",
-                           "Регулярная покупка \(asset.symbol) не прошла: \(error.localizedDescription) Следующая: \(Fmt.date(task.next)).")
+            let text = say("Scheduled \(name) purchase failed: \(error.localizedDescription) Next one: \(Fmt.date(task.next)).",
+                           "Регулярная покупка \(name) не прошла: \(error.localizedDescription) Следующая: \(Fmt.date(task.next)).")
             reply(text, note: "schedule")
-            notify(.moves, say("\(asset.symbol) purchase failed", "Покупка \(asset.symbol) не прошла"), text, failed: true, record: true)
+            notify(.moves, say("\(name) purchase failed", "Покупка \(name) не прошла"), text, failed: true)
             record("failed", text)
         }
         hello.cancel()

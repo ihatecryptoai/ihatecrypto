@@ -48,8 +48,10 @@ extension Engine {
                 // No pool and not a token the wallet holds: most likely a wallet, so its save goes into the field to be named.
                 let held = portfolio.networks.contains { ($0.rows + $0.hidden).contains { $0.contract?.lowercased() == address.lowercased() } }
                 if !isOwnWallet(address), !held {
-                    let net = address.hasPrefix("0x") ? "base" : "solana"
-                    out.event("suggest", ["text": say("save \(address) as NAME on \(net)", "сохрани \(address) как ИМЯ на \(net)")])
+                    // The Mac's line: «… as Name», on Base for an EVM address; a Solana address needs no network.
+                    let evm = address.hasPrefix("0x")
+                    out.event("suggest", ["text": say("save \(address) as Name" + (evm ? " on Base" : ""), "сохрани \(address) как Имя" + (evm ? " на Base" : "")),
+                                          "select": say("Name", "Имя")])
                     reply(say("No pool trades \(address), so it isn’t a token to watch. If it’s a wallet, give it a name — the line is in the field.",
                               "Ни один пул не торгует \(address), так что это не токен. Если это кошелёк, дай ему имя — строка уже в поле."), note: note)
                     return

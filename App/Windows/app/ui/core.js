@@ -310,14 +310,20 @@ export function popup(e, items, cls = "") {
 }
 
 /** A command a block offers goes into the chat field with its amount selected; the person sends it. */
-export function suggest(text) {
+/** A phrase into the field, never sent: the word to change selected — `select` when it's there («Name» in «save … as
+ *  Name»), else the first number on its own (not the digits inside an address). */
+export function suggest(text, select) {
   ui.composerText = text;
   render();
   const f = document.getElementById("composer");
   if (!f) return;
   f.focus();
-  const m = text.match(/\d+(?:\.\d+)?/);
-  if (m) f.setSelectionRange(m.index, m.index + m[0].length);
+  const at = select ? text.lastIndexOf(select) : -1;
+  if (at >= 0) f.setSelectionRange(at, at + select.length);
+  else {
+    const m = text.match(/(?<![\w.])\d+(?:\.\d+)?(?![\w])/);
+    if (m) f.setSelectionRange(m.index, m.index + m[0].length);
+  }
   autosize(f);
 }
 

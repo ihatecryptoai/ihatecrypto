@@ -100,9 +100,10 @@ extension Engine {
                 if action != nil { Self.guardRefused[coin] = nil }
             } catch {
                 // Once per reason (it runs every 10 s): said again only when the reason changes or after a move went through.
-                let why = error.localizedDescription
-                if Self.guardRefused[coin] != why {
-                    Self.guardRefused[coin] = why
+                // The reason without its numbers: the unopened trading key's says when it asks again, new every ten minutes.
+                let why = error.localizedDescription, reason = Self.reasonOnly(why)
+                if Self.guardRefused[coin] != reason {
+                    Self.guardRefused[coin] = reason
                     reply(say("The guardian couldn't move the \(name) stop: ", "Не получилось передвинуть стоп \(name): ") + why, note: "guardian")
                 }
             }
@@ -111,6 +112,9 @@ extension Engine {
 
     /// The last reason the guardian couldn't move a coin's stop, said once.
     static var guardRefused: [String: String] = [:]
+
+    /// «… ask again from 10:42 AM, …» and «… from 10:52 AM, …» are one reason: the words without the times and amounts.
+    nonisolated static func reasonOnly(_ why: String) -> String { String(why.filter { !$0.isNumber }) }
 
     /// A position gone while ihatecrypto wasn't closing it: its stop, take or a hand elsewhere closed it. Said once, in the
     /// chat and as a notification, as the Mac's closedByExchange.

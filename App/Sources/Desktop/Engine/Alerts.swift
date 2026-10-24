@@ -85,7 +85,8 @@ extension Engine {
             notify(.alerts, say("Price alert", "Ценовое оповещение"), text)
             reply(text + say(" The alert is done; set another any time.", " Оповещение сработало; поставь новое, когда захочешь."), note: "price alert")
         }
-        await runDueTasks()
+        // Its steps run as a task due now, in the scheduled run beside the loops (never twice at once).
+        startScheduledRun()
     }
 
     /// A step that is a trade plan («long SOL risk $0.3 …»), read as that plan; nil for any other command.

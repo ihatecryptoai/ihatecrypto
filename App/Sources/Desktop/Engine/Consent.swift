@@ -29,6 +29,23 @@ nonisolated struct SiteAskView: Encodable, Equatable {
     var ticks: [SiteTick]
     /// «Connect» or «Sign».
     var approve: String
+    /// The canvas its block is on: «Review on the canvas» opens that one.
+    var canvas: String = ""
+    /// A Solana transaction as the Mac's sheet reads it: «You send 5 USDC to Kamino Vault», each balance change with
+    /// its ≈ $, the checks folded to one line, and what happens after signing.
+    var lead: String?
+    var balances: [SiteBalance] = []
+    var checks: [String] = []
+    var note: String?
+}
+
+/// One balance a site's transaction changes, simulated: «−5» USDC ≈ $5.00; SOL that only pays the fee and rent says so.
+nonisolated struct SiteBalance: Encodable, Equatable {
+    var symbol: String
+    var amount: String
+    var up: Bool
+    var usd: String?
+    var note: String?
 }
 
 extension Engine {

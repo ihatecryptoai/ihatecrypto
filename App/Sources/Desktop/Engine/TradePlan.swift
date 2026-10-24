@@ -559,7 +559,7 @@ extension Engine {
             let list = planChecklist(next, r, e, blocks, market: market, atrRead: atrRead, ready: false, quoted: quoted, failed: error.localizedDescription)
             reply(lead + "\n" + list, note: note)
             // The model works out why and the way that works (the Mac's Execution.swift:334 noteFailure).
-            noteRefusal(title, error.localizedDescription, note: note)
+            noteRefusal(title, error, note: note)
         }
     }
 

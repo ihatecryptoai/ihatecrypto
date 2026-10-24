@@ -79,7 +79,7 @@ extension Engine {
         let declines = ChatWords.declines(text)
         if pending != nil, declines {
             cancelPending()
-            reply(say("Cancelled — nothing moved.", "Отменено — ничего не ушло."))
+            reply(say("Cancelled — nothing moved.", "Отменено — ничего не ушло.", "Cancelado: no se movió nada."))
             return
         }
         // The answer to «How much …?»: a bare number fills the waiting command; one in another unit is asked again.
@@ -219,7 +219,8 @@ extension Engine {
         case .cancel:
             let waited = pending != nil
             cancelPending()
-            reply(waited ? say("Cancelled — nothing moved.", "Отменено — ничего не ушло.") : say("OK — nothing was waiting, nothing moved.", "Хорошо — ничего не ждало подтверждения, ничего не ушло."), note: model)
+            reply(waited ? say("Cancelled — nothing moved.", "Отменено — ничего не ушло.", "Cancelado: no se movió nada.")
+                  : say("OK — nothing was waiting, nothing moved.", "Хорошо — ничего не ждало подтверждения, ничего не ушло.", "Vale: no había nada esperando, no se movió nada."), note: model)
         case .question: await answer(text, client: client)
         case .plan: await editPlan(text, client: client)
         case .chat(let r), .clarify(let r):

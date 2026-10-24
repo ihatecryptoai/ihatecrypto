@@ -62,7 +62,7 @@ extension Engine {
                 let r = try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: false)
                 (text, ready) = (r.text, r.ready && r.preview.free > 0)
                 route = allocationSteps(r.preview)
-                if !ready, r.preview.free > 0 { idle = say("Nowhere to put it now — see the canvas.", "Сейчас некуда положить — смотри холст.") }
+                if !ready, r.preview.free > 0 { idle = say("Nowhere to put it now — see the canvas.", "Сейчас некуда положить — смотри холст.", "Ahora no hay dónde ponerlo: mira el lienzo.") }
             case .rebalance(let share):
                 let r = try await e.rebalance(maxShare: share ?? 50, execute: false)
                 (text, ready) = (r.text, r.ready)
@@ -70,8 +70,10 @@ extension Engine {
                 if !ready {
                     idle = r.plan.moves.isEmpty && r.plan.skipped.isEmpty && r.plan.notes.first?.hasPrefix("Nothing is deposited") == true
                         ? say("Nothing is deposited yet: «spread USDC across the best rates» puts free USDC to work.",
-                              "Депозитов пока нет: «разложи USDC по лучшим ставкам» пустит свободные USDC в работу.")
-                        : say("Nothing worth moving now — the reasons are on the canvas.", "Сейчас нечего перекладывать — причины на холсте.")
+                              "Депозитов пока нет: «разложи USDC по лучшим ставкам» пустит свободные USDC в работу.",
+                              "Aún no hay depósitos: «reparte USDC en las mejores tasas» pone a trabajar los USDC libres.")
+                        : say("Nothing worth moving now — the reasons are on the canvas.", "Сейчас нечего перекладывать — причины на холсте.",
+                              "Ahora no vale la pena mover nada: los motivos están en el lienzo.")
                 }
             default: return
             }
@@ -90,7 +92,8 @@ extension Engine {
             show(.wallet(command), title: command.summary, lines: text.split(separator: "\n").map(String.init))
             // Drawn as the Mac's route cards (Blocks.swift): from each network, the bridges, into each place.
             if let route, !route.steps.isEmpty { updateBoard(card?.id) { $0.steps = route.steps; $0.lines += route.notes } }
-            reply(say("The plan is on the card. Press Confirm to make it, or ask about it.", "План на карточке. Нажми «Подтвердить» или спроси о нём."), note: note ?? "DeFi")
+            reply(say("The plan is on the card. Press Confirm to make it, or ask about it.", "План на карточке. Нажми «Подтвердить» или спроси о нём.",
+                      "El plan está en la tarjeta. Pulsa Confirm para hacerlo o pregunta por él."), note: note ?? "DeFi")
         } catch {
             reply(say("Failed: ", "Не вышло: ") + error.localizedDescription, note: note)
         }

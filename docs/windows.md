@@ -44,7 +44,9 @@ every change. Between the engine and the signer go the Mac's own `SignerRequest`
   never handed to the main key — and for ten minutes the key doesn't ask again for orders that only reduce (stops,
   takes, closes), so a stop retried every 10 s doesn't keep a prompt up or hold the signer. The stop and take on the
   exchange protect the position meanwhile. An order that opens or adds asks at once (someone just confirmed its card),
-  and any Windows Hello answered for anything opens the key.
+  and any Windows Hello answered for anything opens the key. With nobody at the computer that is one prompt every ten
+  minutes, each closing after a minute (the signer answers nothing else for that minute), and the guardian says its
+  reason in the chat once, not once a spell.
 - **Test and automation wallets** sign with no prompt, so they are under DPAPI only, with their trading keys: any program
   of the same user could read them. They are for a few dollars, as on the Mac.
 - **A scheduled move's Windows Hello** (the automation wallet asking for a new address) closes by itself after a minute
@@ -157,7 +159,7 @@ chat runs through the Executor (transfers, swaps, bridges, lending, Hyperliquid 
 rules with every signature on the card, managing open positions, the best rates and spreading or rebalancing money
 across them, Merkl's rewards (claim, or sweep them into USDC), token approvals with a revoke on each, Jupiter DCA,
 coins from networks without a wallet here (NEAR Intents' deposit address), several moves in one message under one Confirm,
-price alerts and scheduled tasks with recurring buys (checked every minute while the app runs, with a Windows
+price alerts and scheduled tasks with recurring buys (checked every 30 seconds while the app runs, beside the balances so an unanswered Windows Hello holds only that run, with a Windows
 notification), the automation wallet (a task the person switched on in the Schedule block spends from it without
 Windows Hello, only to their own wallets and confirmed addresses, and what it buys goes on to the main wallet; a sale
 and a recurring buy wait for Confirm on the wallet that's on; without it a task's moves come as cards), the tray (closing the window keeps it running, as the Mac's menu bar
@@ -219,6 +221,18 @@ contract, Robinhood's stock tokens, Aave's liquidation price, Jupiter Lend inste
 added to the plan as its first step; the position board's ruler, guardian and «Close X at market?»; Jupiter's staked
 JUP, perps and predictions in the portfolio; the token card's held P/L; the plan templates' preview; Skills' Study notes
 and Journal.
+
+A fourth and fifth audit's, all as on the Mac: a site's request in a slot of its own, never taking the person's card,
+with a tick for each risk (a lookalike, an unknown program, a payee or contract not yours, the second check's warning)
+and gone with its page; a trade the second check doubts needs its tick too; Confirm and Cancel name their card; a wallet
+switch drops what was built for the other one; wallets imported from a key move money; automation tasks run as one
+confirmed chain, and a step that names no amount stops the run instead of spending everything; the builder fee asked on
+the first Confirm; a trade confirmed late gets fresh numbers; «Sent, status unknown»; a waiting limit order; the guardian
+every 10 s; recurring buys at their time, per wallet, kept by mint; a model per canvas and per account, and an account
+connected never switching the chat; the plan, cards and skills kept per canvas; History in a store of its own; what the
+app does by itself recorded; the chart board, the move board's countdown, what gets signed under the route; nothing
+leaving the canvas; the «$» chip; Robinhood stock tokens at Robinhood's bid; Aave and Morpho with their rate and last
+reading; the dApp browser beside the chat in the page panel.
 
 Everything the Mac's window does is in the Windows app; what only a Windows machine can check is listed below.
 

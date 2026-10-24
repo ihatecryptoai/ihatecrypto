@@ -281,6 +281,17 @@ extension Engine {
         Task { await explainOnceFree(what, why) }
     }
 
+    /// A failure caught as an error. A stop by the guard, the signer or a scam check (GuardStop) and a costly move with its
+    /// own «Send anyway» (CostlyMove) get nothing offered around them (the Mac's noteFailure, a3f7edb).
+    func noteRefusal(_ what: String, _ error: any Error, note: String?) {
+        guard Self.explainsAfter(error) else { return }
+        noteRefusal(what, error.localizedDescription, note: note)
+    }
+
+    /// Whether the model may offer a way after this failure: not after the guard, the signer or a scam check, and not
+    /// after a costly move, which has its own «Send anyway» (the owner's rule, a3f7edb).
+    nonisolated static func explainsAfter(_ error: any Error) -> Bool { !(error is GuardStop) && !(error is CostlyMove) }
+
     private func explainOnceFree(_ what: String, _ why: String) async {
         // ponytail: polls the turn's end (30 s at most); a hook at the end of send() if it ever misses one.
         for _ in 0..<150 where thinking { try? await Task.sleep(for: .milliseconds(200)) }

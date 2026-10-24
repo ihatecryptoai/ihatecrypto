@@ -226,7 +226,8 @@ extension Engine {
         if checkedBeforeCard(&command, note: note) { return }
         show(.wallet(command), title: command.summary, lines: await preview(command), cautions: sendCautions(command))
         reply(say("Understood: \(command.summary). The card is above the field — press Confirm, then Windows Hello shows what is signed. Or Cancel.",
-                  "Понял: \(command.summary). Карточка над полем — нажми «Подтвердить», и Windows Hello покажет, что подписывается. Или «Отмена»."), note: note)
+                  "Понял: \(command.summary). Карточка над полем — нажми «Подтвердить», и Windows Hello покажет, что подписывается. Или «Отмена».",
+                  "Entendido: \(command.summary). La tarjeta está sobre el campo: pulsa Confirm y Windows Hello mostrará qué se firma. O Cancel."), note: note)
     }
 
     /// What the card says before Confirm: a quote where one is cheap to get.
@@ -274,15 +275,30 @@ extension Engine {
 
     static let evmPlaces: Set<String> = ["base", "arbitrum", "ethereum", "polygon", "robinhood", "tempo", "hyperevm", "optimism", "bnb"]
 
-    /// The entry a name means: the one that can receive on the network named first; a 0x address on one EVM network is the
-    /// same on another.
+    /// The entry a name means, as the Mac's savedEntry: the one that can receive on the network named first (a 0x address on
+    /// one EVM network is the same on another, Hyperliquid's included), then another wallet here, the multisig, and a name
+    /// that contains the word.
     func entry(_ name: String, network: String?) -> SignerAddress? {
-        let named = book.filter { $0.name.lowercased() == name.lowercased() }
+        let key = name.lowercased()
+        // Hyperliquid too: «… to Automation on hyperliquid», saved on Solana and Base, took the Solana entry and was refused.
+        let evm = Self.evmPlaces.union(["hyperliquid"])
         func fits(_ e: SignerAddress) -> Bool {
             guard let network else { return true }
-            return e.network == network || (Self.evmPlaces.contains(network) && (Self.evmPlaces.contains(e.network) || e.network == "hyperliquid"))
+            return e.network == network || (evm.contains(network) && evm.contains(e.network))
         }
-        return named.first(where: fits) ?? named.first ?? ownWallet(name, network: network)
+        let named = book.filter { $0.name.lowercased() == key }
+        let near = key.isEmpty ? [] : book.filter { $0.name.lowercased().contains(key) }
+        return named.first(where: fits) ?? named.first ?? ownWallet(name, network: network) ?? multisigEntry(key, network: network)
+            ?? near.first(where: fits) ?? near.first
+    }
+
+    /// The multisig as an address-book entry («send 10 USDC on base to the multisig»), only on a network it's made on; the
+    /// signer asks Windows Hello, with the whole address, the first time money goes there, as for any new address.
+    func multisigEntry(_ name: String, network: String?) -> SignerAddress? {
+        guard name.lowercased().wholeMatch(of: /(?:the\s+|my\s+)?(?:multisig|мультисиг\w*)/) != nil, let m = multisigs.last else { return nil }
+        let net = network ?? m.networks.first ?? "base"
+        guard m.networks.contains(net) else { return nil }
+        return SignerAddress(name: "Multisig", network: net, address: m.address, memo: "")
     }
 
     /// Another wallet of this computer by its name («send 10 USDC to Automation»): the user's own, which the signer
@@ -373,7 +389,8 @@ extension Engine {
             say("The whole address is on the Windows Hello window too: check it there.", "Весь адрес будет и в окне Windows Hello: сверь его там."),
         ], cautions: cautions)
         reply(say("The transfer is ready: \(Fmt.num(amount)) USDC to “\(entry.name)”. Press Confirm, or Cancel.",
-                  "Перевод готов: \(Fmt.num(amount)) USDC на «\(entry.name)». Нажми «Подтвердить» или «Отмена»."), note: note)
+                  "Перевод готов: \(Fmt.num(amount)) USDC на «\(entry.name)». Нажми «Подтвердить» или «Отмена».",
+                  "La transferencia está lista: \(Fmt.num(amount)) USDC a «\(entry.name)». Pulsa Confirm o Cancel."), note: note)
     }
 
     func addressBook(_ command: AddressBookCommand, userText: String) async {
@@ -602,7 +619,8 @@ extension Engine {
                           "Открыто: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) по \(Fmt.price(opened.entry)), стоп \(Fmt.price(opened.stop))")
                       + (opened.take.map { say(", take \(Fmt.price($0)).", ", тейк \(Fmt.price($0)).") } ?? "."), note: "Hyperliquid")
             case .recurring(let buy, let days):
-                try await move(buy)
+                // The schedule is kept by this Confirm before its first buy, so a first buy that fails still leaves it to run
+                // next period (the Mac's firstBuyOf, kept in carryOut before the move).
                 // The recurring buy of that coin makes way (the Mac's one schedule a symbol); a task the person scheduled stays.
                 let marked = recurringBuys
                 tasks.removeAll { t in
@@ -614,6 +632,8 @@ extension Engine {
                 recurring.fromActive = true
                 tasks.append(recurring)
                 recurringBuys.insert(recurring.id)
+                rememberName(buy)
+                try await move(buy)
             case .chain(let steps): try await runChain(steps)
             case .address(let entry):
                 try await saveAddress(entry)
@@ -642,7 +662,7 @@ extension Engine {
                 noteRetry(waiting)
                 // A stop by the guard, the signer or a scam check is never routed around; anything else gets a way that works.
                 // With a request the model carries on with, it hears the failure there instead.
-                if !(error is GuardStop), agentGoal == nil { await explainFailure(title, why: error.localizedDescription) }
+                if Self.explainsAfter(error), agentGoal == nil { await explainFailure(title, why: error.localizedDescription) }
             } else {
                 reply(say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + error.localizedDescription + " "
                       + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.map { "\($0.chain) \($0.id)" }.joined(separator: " · "))
@@ -703,7 +723,7 @@ extension Engine {
             \(said.joined(separator: " | ")). Work out why from that and the balances on every network (look them up if you need), \
             and answer with a short "chat" reply: what went wrong and why, in plain words, and the way that would work, as options \
             the user can press. Don't start a move yourself.
-            """, client: client, said: "")
+            """, client: client, said: "", round: Self.agentRounds - 1)
     }
 
     func transfer(_ amount: Decimal, to entry: SignerAddress) async throws -> String {
@@ -783,6 +803,8 @@ extension Engine {
         case .hlSpotSell(let symbol, let amount): reply(try await e.hlSpot(buy: false, symbol: symbol, usdc: nil, amount: amount), note: "Hyperliquid · spot")
         case .revokeApproval(let place, let token, let spender, let permit2):
             reply(try await e.revokeApproval(try net(place), token: token, spender: spender, permit2: permit2), note: "approvals")
+            // The approvals board reads again, so the one just revoked leaves it (the Mac's approvalsChanged).
+            for id in boards.filter({ $0.data?.approvals != nil }).map(\.id) { await refreshApprovals(id) }
         case .swapOn("solana", let from, let to, let amount):
             guard let a = await solanaAsset(from), let b = await solanaAsset(to) else { throw ExecutionError("Jupiter couldn't name both tokens of this swap. Nothing was signed.") }
             reply(try await e.convert(from: a, to: b, amount: amount, shown: shownOut(command)), note: "Solana · Jupiter")

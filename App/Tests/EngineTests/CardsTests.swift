@@ -208,7 +208,8 @@ import Testing
         let mom = SignerAddress(name: "Mom", network: "base", address: Self.mom)
         let transfer = engine.steps(for: .transfer(mom, 5), title: "Send 5 USDC to Mom", lines: [])
         #expect(transfer.map(\.label) == ["FROM · BASE", "TO · SAVED ADDRESS"])
-        #expect(transfer.first?.lines == ["3 USDC short: it comes from Solana first"])
+        // The Mac's FROM box: this network's balance and, under it, Solana's going down for what's short (its `bridged`).
+        #expect(transfer.first?.lines == ["3 USDC short: it comes from Solana first", "Solana\t50 → ≈ 47 USDC"], "\(transfer.first?.lines ?? [])")
 
         engine.positions = [HyperliquidAccount.Position(coin: "ETH", size: Decimal(string: "0.5")!, entry: 2000, unrealizedPnl: 25, liquidation: nil)]
         let close = engine.steps(for: .position(.close(1), coin: "ETH"), title: "close ETH", lines: [])

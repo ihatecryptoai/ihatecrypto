@@ -754,7 +754,13 @@ function siteBar(site) {
   const busy = ui.state.thinking || !!ui.state.runningBoard;
   const approve = site.ticks?.length
     ? h("button", { class: "chat-pill-outline", title: t("Each risk is ticked on its block before it can be approved", "Каждый риск отмечается на блоке, прежде чем можно одобрить"),
-      onclick: () => { ui.view = "canvas"; render(); goHome(); } }, icon("eye", 13), t("Review on the canvas", "Посмотреть на холсте"))
+      // Its block is on the canvas it came to, which may not be the one open now.
+      onclick: async () => {
+        ui.view = "canvas";
+        if (site.canvas && site.canvas !== ui.state.canvas) await act("openCanvas", { wallet: site.canvas });
+        render();
+        goHome();
+      } }, icon("eye", 13), t("Review on the canvas", "Посмотреть на холсте"))
     : h("button", { class: "chat-pill-accent", disabled: busy, onclick: () => act("siteAnswer", { board: site.id, test: true, ticks: [] }) }, icon("check", 13), site.approve);
   return h("div", { class: "chat-waiting-bar chat-site-bar" },
     h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
