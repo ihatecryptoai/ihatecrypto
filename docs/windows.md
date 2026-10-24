@@ -310,4 +310,7 @@ stalled on that output in two runs of three). By hand, in a development build: a
 no Safe there is refused; app.hyperliquid.xyz opens beside the chat with the wallet's row, and its connect stepping the
 panel aside for the request; inside the panel a sandboxed frame is refused and neither frame gets a wallet object;
 Quit Completely with Keep always running on leaves no process after 90 s, the task disabled and a RunOnce entry,
-the next launch turns the task back on and removes the entry, and switching Keep running off removes both.
+the next launch turns the task back on and removes the entry, and switching Keep running off removes both. The signer now runs in its engine's job object (kill on close): with the engine killed, the signer was gone
+too — before, a signer could outlive its engine, holding the pipes it was given and any Windows Hello prompt it had open.
+A full `swift test` there can still stall in its own output at about 74 KB, mid-way through the core's tests, with
+`swift-test` spinning; each engine suite run on its own passes, so check with `swift test --filter EngineTests.<Suite>`.

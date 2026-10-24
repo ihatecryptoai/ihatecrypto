@@ -26,6 +26,7 @@ use windows::Win32::Security::*;
 use windows::Win32::System::Diagnostics::ToolHelp::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Pipes::CreatePipe;
+use windows::Win32::System::JobObjects::*;
 use windows::Win32::System::Threading::*;
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -663,8 +664,9 @@ unsafe fn spawn(exe: &str, psd: PSECURITY_DESCRIPTOR, tsd: PSECURITY_DESCRIPTOR)
         let mut line = wide(&format!("\"{exe}\""));
         let app = wide(exe);
         let mut info = PROCESS_INFORMATION::default();
+        // Started held, put in this process's job, then let go: the signer never outlives the engine that started it.
         let started = CreateProcessW(PCWSTR(app.as_ptr()), Some(PWSTR(line.as_mut_ptr())), Some(&process_attributes), Some(&thread_attributes),
-                                     true, CREATE_NO_WINDOW, None, PCWSTR::null(), &startup, &mut info);
+                                     true, CREATE_NO_WINDOW | CREATE_SUSPENDED, None, PCWSTR::null(), &startup, &mut info);
         let _ = CloseHandle(child_in);
         let _ = CloseHandle(child_out);
         if started.is_err() {
@@ -672,6 +674,8 @@ unsafe fn spawn(exe: &str, psd: PSECURITY_DESCRIPTOR, tsd: PSECURITY_DESCRIPTOR)
             let _ = CloseHandle(our_out);
             return None;
         }
+        if let Some(job) = signer_job() { let _ = AssignProcessToJobObject(job, info.hProcess); }
+        ResumeThread(info.hThread);
         let _ = CloseHandle(info.hThread);
         // The full-rights handle CreateProcess gave this side goes; only waiting on it stays.
         let mut waiter = HANDLE::default();
@@ -682,6 +686,24 @@ unsafe fn spawn(exe: &str, psd: PSECURITY_DESCRIPTOR, tsd: PSECURITY_DESCRIPTOR)
         dup.ok()?;
         Some((info.dwProcessId, waiter, our_in, our_out))
     }
+}
+
+/// One job for the signers this process starts, closed only when this process ends: Windows then ends every process in
+/// it. Without it a signer whose engine was killed (or crashed) lived on, holding the pipes it was given — a Windows
+/// Hello prompt with no one to answer it, and a test run that never ended. Not a security boundary: a signer that
+/// couldn't be put in it still runs.
+fn signer_job() -> Option<HANDLE> {
+    static JOB: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+    let raw = *JOB.get_or_init(|| unsafe {
+        let Ok(job) = CreateJobObjectW(None, PCWSTR::null()) else { return 0 };
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let set = SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits as *const _ as *const core::ffi::c_void,
+                                          size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32);
+        if set.is_err() { let _ = CloseHandle(job); return 0 }
+        job.0 as isize
+    });
+    (raw != 0).then(|| HANDLE(raw as *mut core::ffi::c_void))
 }
 
 // MARK: Pipes
