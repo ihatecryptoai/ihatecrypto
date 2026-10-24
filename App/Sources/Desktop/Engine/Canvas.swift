@@ -115,6 +115,7 @@ extension Engine {
 
     func saveCanvases() {
         keepCanvasState()
+        keepBoardTitle()
         // The History keeps its own copy, so nothing said leaves it with a canvas (HistoryStore).
         HistoryStore.record(canvases)
         var kept = canvases

@@ -77,6 +77,8 @@ extension Engine {
         guard case .chain? = pending, let p = pending, card?.id == board else { return false }
         let steps = steps(for: p, title: "", lines: [])
         updateBoard(board) { $0.steps = steps }
+        // Its footer from the route as it is now (the way a quote picked, a contract's name), as the Mac's live route.
+        noteRoute(board, p)
         return true
     }
 
@@ -108,6 +110,10 @@ extension Engine {
         case .claimRewards, .sweepRewards:
             // What Merkl owes, by network, is the route itself.
             guard let me = evmAddress, let owed = try? await Merkl.rewards(user: me), !owed.isEmpty, card?.id == board else { return true }
+            claimOwed = (board, c, owed)
+            // Leading a chain, the claim is its first move's route and the later steps, title and footer stay (the Mac's
+            // route.steps + chainSteps()): Confirm still runs the whole chain.
+            if redrawChain(board) { return true }
             let steps = claimSteps(owed, c), note = claimNote(owed, c)
             // Its title names what's claimed (the Mac's claimRoute), not the command's words.
             let sweep: Bool = if case .sweepRewards = c { true } else { false }
@@ -757,6 +763,9 @@ extension Engine {
         func name(_ k: String) -> String { WalletCommand.placeName(k) }
         let confirm = say(" Press Confirm.", " Нажми «Подтвердить».")
         switch c {
+        case .claimRewards, .sweepRewards:
+            guard let o = claimOwed, o.command == c, o.board == card?.id else { return nil }
+            return claimNote(o.owed, c)
         case .buyOn(let place, _, let u?, let src): return hereNote(c, place, usdc: u, from: src, keep: false)
         case .sellOn(let place, _, _, let keep): return hereNote(c, place, usdc: nil, from: nil, keep: keep)
         case .buyStock(let s, let u?):

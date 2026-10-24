@@ -7,7 +7,7 @@ import { plainStep } from "./boards.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel, modelName } from "./chat.js";
 import { askMenu, askedClass } from "./portfolio.js";
-import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
+import { segmented, toggle, showImport, showImportKey, watchFields, noHello } from "./onboarding.js";
 import { codeMaker, lockAfterPicker } from "./lock.js";
 
 const back = () => { ui.view = "canvas"; render(); };
@@ -616,15 +616,20 @@ const passcode = { making: false, offered: 0 };
 function passcodeSection(l) {
   if (l.offerNewCode && passcode.offered !== l.newCodeOffers) Object.assign(passcode, { making: true, offered: l.newCodeOffers });
   const made = () => { passcode.making = false; render(); };
+  // The signer asks Windows Hello before it keeps a code (Vault.swift): without it, said here before six digits are typed
+  // twice, as the onboarding's Passcode step says it (a Mac without Touch ID makes it with its password).
+  const blocked = !l.codeSet && noHello();
   return section("lock", t("Passcode", "Код"), t("Opens ihatecrypto: balances, chat and history stay hidden until then.", "Открывает ihatecrypto: балансы, чат и история скрыты до этого."),
     group(
       row({ label: t("Passcode", "Код"), ico: "lock", about: t("6 digits, checked by the separate signer: five wrong in a row turn it off, and then only Windows Hello opens the app. Windows Hello opens it too; moves still sign with Windows Hello.",
         "6 цифр, их проверяет отдельный подписант: после пяти неверных подряд код выключается, и тогда приложение открывает только Windows Hello. Windows Hello открывает и так; движения по-прежнему подписываются Windows Hello.") },
         l.codeSet ? h("span", { class: "secondary" }, t("On", "Включён")) : null,
-        h("button", { class: "btn small", onclick: () => { passcode.making = !passcode.making; render(); } },
+        blocked ? null : h("button", { class: "btn small", onclick: () => { passcode.making = !passcode.making; render(); } },
           passcode.making ? t("Cancel", "Отмена") : l.codeSet ? t("Change…", "Изменить…") : t("Make a code…", "Задать код…")),
         l.codeSet ? h("button", { class: "btn small", onclick: () => act("clearCode") }, t("Turn off", "Выключить")) : null),
-      passcode.making ? codeMaker(l, made) : null,
+      blocked ? row({ label: t("Windows Hello isn't set up on this PC, and the code is confirmed with it. Turn on a face, fingerprint or PIN in Windows Settings › Accounts › Sign-in options, then make the code here.",
+          "Windows Hello на этом компьютере не настроен, а код подтверждается через него. Включи лицо, отпечаток или PIN в «Параметры Windows › Учетные записи › Варианты входа», потом задай код здесь."),
+        ico: "person", cls: "wrap note" }) : passcode.making ? codeMaker(l, made) : null,
       l.codeSet ? row({ label: t("Lock after", "Блокировать через"), ico: "clock", about: t("Minutes without touching the PC's keyboard or mouse. Sleep and a locked screen lock it at once.",
         "Минуты, когда никто не трогает клавиатуру и мышь компьютера. Сон и блокировка экрана закрывают сразу.") }, lockAfterPicker(l)) : null,
       l.codeSet ? row({ label: t("Lock the app now", "Заблокировать сейчас"), ico: "lock", about: t("Hides everything until the code or Windows Hello, and ends the signing session. Ctrl+L does the same.",

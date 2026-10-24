@@ -53,15 +53,20 @@ export function planColumn() {
   const favorites = boards.find((b) => b.kind === "favorites");
   const beside = favorites && boards.find((b) => b.kind === "token" && b.data?.token?.favorite);
   const s = ui.state;
-  // Every recurring buy's board on a canvas with no trade plan under way and no rates on it, as the Mac's (a
-  // ScheduleBoard per schedule, Studio.swift); not twice where its own is pinned. Not the canvas's, so it has no close.
+  // Every recurring buy's board, then the Jupiter DCA orders read this session, on a canvas with no trade plan under
+  // way, no rates since the last message and no spread or rebalance waiting for Confirm, as the Mac's (Studio.swift: a
+  // ScheduleBoard per schedule, JupiterDCABoard); not twice where one is pinned. Not the canvas's, so no close.
   const pinned = new Set(boards.filter((b) => b.kind === "recurring").map((b) => b.title.toUpperCase()));
-  const planning = (b) => b.kind === "move" && b.trade && (s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan");
-  const recurring = boards.some((b) => planning(b) || b.data?.rates) ? []
-    : (s.recurring || []).filter((r) => !pinned.has(r.symbol.toUpperCase())).map((r) => ({ id: "recurring:" + r.symbol, kind: "recurring", title: r.symbol, fixed: true }));
+  const lastAsk = Math.max(0, ...(s.chat || []).filter((m) => m.fromUser).map((m) => Date.parse(m.at) || 0));
+  // A spread's and a rebalance's card are titled by their command («… across the best rates», «move deposited USDC to the best rates»).
+  const spreading = !!s.card && /the best rates/.test(s.card.title || "");
+  const quiet = !boards.some((b) => planning(b) || (b.data?.rates && Date.parse(b.at) >= lastAsk)) && !spreading;
+  const recurring = !quiet ? [] : [
+    ...(s.recurring || []).filter((r) => !pinned.has(r.symbol.toUpperCase())).map((r) => ({ id: "recurring:" + r.symbol, kind: "recurring", title: r.symbol, fixed: true })),
+    ...(s.jupiterDCA && !boards.some((b) => b.title === "Jupiter DCA") ? [{ ...s.jupiterDCA, fixed: true }] : [])];
   const items = boards.length || recurring.length ? [...boards.filter((b) => (b !== chart || at === "column") && b !== beside).map((b) =>
     b === favorites && beside ? h("div", { class: "route-fav-row" }, fade(b, drawBoard(b)), fade(beside, tokenBlock(beside)))
-      : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))), ...recurring.map((b) => fade(b, liveBlock(b)))] : [starter()];
+      : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))), ...recurring.map((b) => fade(b, drawBoard(b)))] : [starter()];
   // What was on the canvas when it opened is already there; only what comes after fades in.
   setTimeout(() => { seenReady = true; }, 0);
   // Nothing waiting, running or done here yet: «Plan · waiting for a task» over the column, as the Mac's planHeader.
@@ -69,8 +74,20 @@ export function planColumn() {
   const head = idle ? h("div", { class: "route-move-head" }, h("span", { class: "route-move-title" }, t("Plan", "План")),
     h("span", { class: "route-status-chip secondary" }, t("waiting for a task", "ждёт задачи"))) : null;
   // The chart's own position (a position row's click opens its chart): its board with the controls first, as the Mac's.
-  const column = h("div", { class: "route-plan" }, head, held && live.positionCard ? live.positionCard(held) : null, items);
+  const column = h("div", { class: "route-plan" }, head, held && live.positionCard ? positionBlock(held) : null, items);
   return at === "beside" ? h("div", { class: "route-plan-row" }, column, h("div", { class: "route-beside" }, fade(chart, chartBlock(chart)))) : column;
+}
+
+/** A trade plan under way on the canvas: waiting for Confirm, running, or being made. */
+function planning(b) {
+  const s = ui.state;
+  return b.kind === "move" && b.trade && (s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan");
+}
+
+/** The chart's own position board with the Mac's block menu («Position · BTC»): asked about by its title, as a frame is. */
+function positionBlock(p) {
+  const title = t("Position · ", "Позиция · ") + (p.coin || "").replace(/^.*:/, "");
+  return h("div", { class: "route-pos-ask" + portfolio.askedClass(title), oncontextmenu: (e) => portfolio.askMenu(e, title) }, live.positionCard(p));
 }
 
 /** Where the newest chart goes (the Mac's chartPlace, the owner's picks, 2026-10-23): a trade plan of its coin waiting or
@@ -82,8 +99,9 @@ function chartPlace(boards) {
   const s = ui.state, live = (b) => s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan";
   const plan = boards.find((b) => b.kind === "move" && b.trade && live(b) && sameCoin(chart.chart, b.trade.coin));
   if (plan) return { chart, plan, at: "plan" };
-  // With no trade on the canvas, an open position of the chart's coin has its board here, and the chart goes beside it.
-  const held = !boards.some((b) => b.kind === "move" && b.trade) && (s.positions || []).find((p) => sameCoin(chart.chart, p.market || p.coin));
+  // With no trade plan under way, an open position of the chart's coin has its board here, and the chart goes beside it
+  // (the Mac's `nodes.isEmpty`): an earlier trade on the canvas doesn't keep it away.
+  const held = !boards.some(planning) && (s.positions || []).find((p) => sameCoin(chart.chart, p.market || p.coin));
   return { chart, held, at: held || boards.some((b) => b !== chart && b.kind !== "chart") ? "beside" : "column" };
 }
 
@@ -108,7 +126,9 @@ function drawBoard(b, newest) {
 
 /** A block's frame: the Mac's board card with its glyph and title, its own buttons and the close; right-click brings it into the chat. */
 export function blockFrame(b, title, body, { extra, width, tint, icon: glyph } = {}) {
-  const el = h("div", { class: "route-block" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, title) },
+  // A block drawn for every canvas (a recurring buy, Jupiter DCA) isn't a board of this one: asked about by its title.
+  const lit = b.fixed ? !!portfolio.askedClass(title) : isAttached(b.id);
+  const el = h("div", { class: "route-block" + (lit ? " route-attached" : ""), oncontextmenu: (e) => b.fixed ? portfolio.askMenu(e, title) : blockMenu(e, b, title) },
     h("div", { class: "route-block-head" }, glyph ? h("span", { class: "route-block-icon" }, icon(glyph, 16)) : null,
       h("b", { class: "route-block-title one-line" }, title), h("span", { class: "spacer" }), extra || null,
       b.fixed ? null : h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
@@ -1523,7 +1543,16 @@ function moversBlock(b, m) {
 
 /** Token approvals (ApprovalsBoard): who may spend what, unlimited ones in red; Revoke draws its card for Confirm, as the Mac's. */
 const readingApprovals = new Set();
+/** Approvals boards read again this window session because they were saved mid-read. */
+const staleRead = new Set();
+
 function approvalsBlock(b, a) {
+  // A board saved while it read (the app quit in those seconds) reads again once, as the Mac's board does when shown.
+  if (a.loading && !readingApprovals.has(b.id) && !staleRead.has(b.id) && Date.now() - (Date.parse(b.at) || 0) > 180000) {
+    staleRead.add(b.id);
+    readingApprovals.add(b.id);
+    setTimeout(() => act("refreshApprovals", { board: b.id }).finally(() => { readingApprovals.delete(b.id); render(); }), 0);
+  }
   // Read again: «Reading every network's approvals…» until they're back (the Mac's ApprovalsBoard while it loads).
   if (readingApprovals.has(b.id) || a.loading) return blockFrame(b, t("Token approvals", "Разрешения на токены"),
     h("div", { class: "route-loading secondary" }, h("span", { class: "route-rc-spinner" }), t("Reading every network's approvals…", "Читаю разрешения во всех сетях…")),
@@ -1544,6 +1573,17 @@ function approvalsBlock(b, a) {
   { width: 520, icon: "checkmark.shield", extra: h("button", { class: "icon-btn", title: t("Read them again", "Прочитать заново"), onclick: () => { readingApprovals.add(b.id); render(); act("refreshApprovals", { board: b.id }).finally(() => { readingApprovals.delete(b.id); render(); }); } }, icon("arrow.clockwise")) });
 }
 
+/** The engine's «day», «week», «2 days», «12 hours» (WalletCommand.everyText) in Russian. */
+function everyRu(every) {
+  const one = { minute: "раз в минуту", hour: "раз в час", day: "раз в день", week: "раз в неделю", month: "раз в месяц" }[every];
+  if (one) return one;
+  const [n, unit] = every.split(" ");
+  const k = Number(n), few = k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 12 || k % 100 > 14), many = !(k % 10 === 1 && k % 100 !== 11) && !few;
+  const words = { minutes: ["минуту", "минуты", "минут"], hours: ["час", "часа", "часов"], days: ["день", "дня", "дней"], weeks: ["неделю", "недели", "недель"],
+    months: ["месяц", "месяца", "месяцев"], seconds: ["секунду", "секунды", "секунд"] }[unit];
+  return words ? `${many || few ? "каждые" : "каждый"} ${k} ${words[many ? 2 : few ? 1 : 0]}` : `каждые ${every}`;
+}
+
 /** Jupiter DCA (JupiterDCABoard): each order's progress; Cancel puts the cancel in the chat. */
 function dcaBlock(b, rows) {
   return blockFrame(b, "Jupiter DCA", h("div", { class: "route-result" },
@@ -1552,7 +1592,7 @@ function dcaBlock(b, rows) {
       const done = Number(o.deposited) > 0 ? Math.min(Math.max(Number(o.used) / Number(o.deposited), 0), 1) : 0;
       return h("div", { class: "route-dca" },
         h("div", { class: "route-dca-head" }, logo("usdc", 22), icon("arrow.right", 12), logo(o.coin, 22),
-          h("b", { class: "one-line" }, t(`${o.perCycle} USDC → ${o.coin} every ${o.every}`, `${o.perCycle} USDC → ${o.coin} раз в ${o.every}`)), h("span", { class: "spacer" }),
+          h("b", { class: "one-line" }, t(`${o.perCycle} USDC → ${o.coin} every ${o.every}`, `${o.perCycle} USDC → ${o.coin} ${everyRu(o.every)}`)), h("span", { class: "spacer" }),
           h("button", { class: "link-btn loss", disabled: !!ui.state.thinking, title: t("Its card comes for Confirm: what wasn't spent and the rent come back", "Придёт карточка на подтверждение: вернутся непотраченное и рента"), onclick: () => act("send", { text: o.cancel }) }, t("Cancel", "Отменить"))),
         h("div", { class: "route-progress" }, h("span", { style: `width:${(done * 100).toFixed(1)}%` })),
         h("div", { class: "route-dca-foot secondary small num" },

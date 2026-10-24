@@ -370,13 +370,6 @@ extension Engine {
                          times: candles.map { $0.time.timeIntervalSince1970 }, low: Fmt.price(low), high: Fmt.price(high), change: signed(change), coin: coin)
     }
 
-    /// Until the first full read: the wallet's last recorded total (equity.json), read only then.
-    var lastBalance: Decimal? {
-        // Kept by the address the portfolio records it under (Portfolio.refresh): Solana's, else the EVM one.
-        guard portfolio.updatedAt == nil, let wallet = [solanaAddress, evmAddress].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { return nil }
-        return Store.load([EquityPoint].self, "equity.json")?.last { $0.wallet == wallet }?.usd
-    }
-
     /// One step of a route as its own block for the chat (the Mac's RouteCards.sendToChat): its name, money and rows.
     func stepBoard(_ b: Board, _ i: Int) -> Board? {
         guard let steps = b.steps, steps.indices.contains(i) else { return nil }

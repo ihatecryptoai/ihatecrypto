@@ -88,7 +88,8 @@ import Testing
         // loaded run a node may not answer at all, and then there's nothing to check here.
         var read = false
         for _ in 0..<30 where !read {
-            let portfolio = try engine.call("refresh").state?["portfolio"] as? [String: Any]
+            // A refresh that took longer than the helper waits (a node not answering under load) is a read that didn't come.
+            let portfolio = (try? engine.call("refresh"))?.state?["portfolio"] as? [String: Any]
             read = portfolio?["updatedAt"] != nil && (portfolio?["errors"] as? [String] ?? []).isEmpty
         }
         guard read else { return }

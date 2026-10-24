@@ -27,32 +27,64 @@ nonisolated struct SiteError: LocalizedError {
 }
 
 /// MetaMask's list of phishing sites (eth-phishing-detect), read once a day into phishing.json: a page on it gets no
-/// wallet. Until the first download the list is empty; the lookalike check runs either way.
-final class PhishingList {
-    static let shared = PhishingList()
+/// wallet. As the Mac's PhishingList: the saved copy first, a new one when it's a day old. One refresh at a time, and a
+/// check never reads an empty list while one runs: with a saved copy it reads that, with none it waits for the download.
+/// The lookalike check runs either way.
+actor PhishingList {
+    static let shared = PhishingList(file: Store.url("phishing.json"))
     static let source = URL(string: "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/main/src/config.json")!
+    private let file: URL
+    private let fetch: @Sendable () async -> Data?
     private var blocked: Set<String> = []
     private var allowed: Set<String> = []
-    private var read: Date?
+    private var loadedSaved = false
+    private var checked: Date?
+    private var refreshing: Task<Void, Never>?
+
+    init(file: URL, fetch: @escaping @Sendable () async -> Data? = {
+        guard let (data, response) = try? await URLSession.shared.data(from: PhishingList.source),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return data
+    }) {
+        self.file = file
+        self.fetch = fetch
+    }
 
     func contains(_ host: String) async -> Bool {
-        if read == nil || Date().timeIntervalSince(read!) > 86_400 { await refresh() }
+        if !loadedSaved {
+            loadedSaved = true
+            if let lists = Self.parse(try? Data(contentsOf: file)) { (blocked, allowed) = lists }
+        }
+        if checked.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true { startRefresh() }
+        // Nothing saved yet: the one download is the only list there is.
+        if blocked.isEmpty, let refreshing { await refreshing.value }
         return SiteCheck.listed(host: host, blocked: blocked, allowed: allowed)
     }
 
-    private func refresh() async {
-        read = Date()
-        let file = Store.url("phishing.json")
+    /// The engine's start: the saved copy read and the day's download begun before any site asks.
+    func warm() async { _ = await contains("") }
+
+    private func startRefresh() {
+        guard refreshing == nil else { return }
+        checked = Date()
+        let file = file, fetch = fetch
         let saved = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        var bytes = try? Data(contentsOf: file)
-        if saved.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true,
-           let (data, response) = try? await URLSession.shared.data(from: Self.source), (response as? HTTPURLResponse)?.statusCode == 200 {
-            bytes = data
-            try? data.write(to: file, options: .atomic)
+        guard saved.map({ Date().timeIntervalSince($0) > 86_400 }) ?? true else { return }
+        refreshing = Task {
+            if let data = await fetch(), let lists = Self.parse(data) {
+                try? data.write(to: file, options: .atomic)
+                self.take(lists)
+            }
+            self.done()
         }
-        guard let bytes, let j = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], let b = j["blacklist"] as? [String] else { return }
-        blocked = Set(b)
-        allowed = Set(j["whitelist"] as? [String] ?? [])
+    }
+
+    private func take(_ lists: (Set<String>, Set<String>)) { (blocked, allowed) = lists }
+    private func done() { refreshing = nil }
+
+    private static func parse(_ bytes: Data?) -> (Set<String>, Set<String>)? {
+        guard let bytes, let j = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], let b = j["blacklist"] as? [String] else { return nil }
+        return (Set(b), Set(j["whitelist"] as? [String] ?? []))
     }
 }
 

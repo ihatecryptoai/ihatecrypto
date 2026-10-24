@@ -11,7 +11,11 @@
   } catch {}
   let listener = null;
   let state = null;
-  const fixture = fetch("../preview/fixtures/" + (q.get("fixture") || "main") + ".json").then((r) => r.json()).then((s) => (state = s));
+  const fixture = fetch("../preview/fixtures/" + (q.get("fixture") || "main") + ".json").then((r) => r.json()).then((s) => {
+    // Fixtures written before the engine sent `ready` (the balance is whole) are whole once read.
+    if (s.portfolio && s.portfolio.ready === undefined) s.portfolio.ready = !!s.portfolio.updatedAt;
+    return (state = s);
+  });
   const emit = (obj) => listener && listener({ payload: JSON.stringify(obj) });
   window.__previewLog = [];
   const win = {

@@ -55,16 +55,33 @@ extension Engine {
         }
     }
 
-    /// What the list calls a canvas, as the Mac's: the person's own name, else its board as the Mac's canvasBubbles names
-    /// it on every save — the newest move (a plan, a spread, an address save), else a chart («Chart · BTC»), else the
-    /// rates — else its first message's words.
+    /// What the list calls a canvas, as the Mac's: the person's own name, else its board's name, else the name kept from
+    /// its last board (keepBoardTitle), else its first message's words.
     nonisolated static func shownTitle(_ c: CanvasDoc, boards: [Board]) -> String {
         if let name = c.name, !name.isEmpty { return name }
+        return boardTitle(boards) ?? c.title
+    }
+
+    /// A canvas's board named in the Mac's canvasBubbles order: a move (waiting, done, a spread, an address save), else a
+    /// chart while no plan or rates are there, else the rates, else the plan — «Take-profit choices» while it offers them.
+    nonisolated static func boardTitle(_ boards: [Board]) -> String? {
         let named = boards.filter { !$0.title.isEmpty }
-        if let move = named.first(where: { $0.kind == "move" }) { return move.title }
-        if let chart = named.first(where: { $0.kind == "chart" }) { return "Chart · " + (chart.chart?.coin.map(IntentParser.pretty) ?? chart.title) }
-        if let rates = named.first(where: { $0.kind == "result" && $0.data?.rates != nil }) { return rates.title }
-        return c.title
+        if let move = named.first(where: { $0.kind == "move" && $0.plan == nil }) { return move.title }
+        let plan = named.first { $0.kind == "move" && $0.plan != nil }
+        let rates = named.first { $0.kind == "result" && $0.data?.rates != nil }
+        if plan == nil, rates == nil, let chart = named.first(where: { $0.kind == "chart" }) {
+            return "Chart · " + (chart.chart?.coin.map(IntentParser.pretty) ?? chart.title)
+        }
+        if let rates { return rates.title }
+        guard let plan else { return nil }
+        return plan.plan?.takes?.isEmpty == false ? "Take-profit choices" : plan.title
+    }
+
+    /// The open canvas keeps its board's name, as the Mac writes it into the canvas on every save: closing the chart or
+    /// the rates later doesn't give the canvas its first words back.
+    func keepBoardTitle() {
+        let i = canvasIndex
+        if let title = Self.boardTitle(canvases[i].boards), canvases[i].title != title { canvases[i].title = title }
     }
 
     /// The window's folder and pin requests, one op each.

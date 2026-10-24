@@ -318,3 +318,11 @@ the next launch turns the task back on and removes the entry, and switching Keep
 too — before, a signer could outlive its engine, holding the pipes it was given and any Windows Hello prompt it had open.
 A full `swift test` there can still stall in its own output at about 74 KB, mid-way through the core's tests, with
 `swift-test` spinning; each engine suite run on its own passes, so check with `swift test --filter EngineTests.<Suite>`.
+
+At 0.7.7 (8f9e9f9, wave 13) on the same machine: the installer built and installed; every test target, every engine
+suite and the tests outside a suite pass one by one. In the release build a right-click in the chat field gives only
+editing items (Cut, Copy, Paste, Select all, Undo, emoji), on a block only the app's own menu, on the rail none. In a
+development build, from a site's page: `window.open` opens nothing and Edge never starts, a host on the phishing list
+gets the banner while the page stays; `alert`, `confirm` and `prompt` give undefined, false and null with no dialog; a
+file input opens no picker, from a script or a real click; a `beforeunload` handler can't hold the page; an http link
+leaves the red «https only» line and the open page's address.

@@ -150,6 +150,19 @@ extension Engine {
         HistoryStore.automatic(title, line, coin: coin, failed: failed, merging: merging, schedule: schedule)
     }
 
+    /// A card of the canvas as History keeps it (the Mac's ActivityBubble): each step of a route; rates as up to 8 small
+    /// cards, asset · place · APY (its `yield` bubbles); anything else as one card.
+    nonisolated static func bubbles(_ b: Board) -> [HistoryTabs.Bubble] {
+        let status = b.state == "failed" ? "blocked" : b.state == "done" ? "done" : "info"
+        if let steps = b.steps, !steps.isEmpty {
+            return steps.map { HistoryTabs.Bubble(kind: "step", label: $0.label, title: $0.title, lines: Array($0.lines.prefix(2)), status: status) }
+        }
+        if let rates = b.data?.rates, !rates.isEmpty {
+            return rates.prefix(8).map { HistoryTabs.Bubble(kind: "yield", label: $0.asset, title: $0.place, lines: ["\(Fmt.num($0.apy, maxFraction: 2))%"], status: status) }
+        }
+        return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
+    }
+
     /// The chats History reads: its own record (each save merges the canvases in; the first read of a launch does too, so
     /// the History a build before this one rebuilt from the canvases is all there).
     var historyChats: [CanvasDoc] {
@@ -168,13 +181,7 @@ extension Engine {
                 let until = i + 1 < asked.count ? asked[i + 1].at : .distantFuture
                 let said = c.messages.filter { !$0.fromUser && $0.at >= q.at && $0.at < until }.map(\.text)
                 let made = c.boards.filter { $0.at >= q.at && $0.at < until && !Self.liveBoards.contains($0.kind) && !["recurring", "scheduleItem"].contains($0.kind) }.sorted { $0.at < $1.at }
-                let bubbles = made.flatMap { b -> [HistoryTabs.Bubble] in
-                    let status = b.state == "failed" ? "blocked" : b.state == "done" ? "done" : "info"
-                    if let steps = b.steps, !steps.isEmpty {
-                        return steps.map { HistoryTabs.Bubble(kind: "step", label: $0.label, title: $0.title, lines: Array($0.lines.prefix(2)), status: status) }
-                    }
-                    return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
-                }
+                let bubbles = made.flatMap(Self.bubbles)
                 // A scheduled run is a request of its own, «Scheduled: …», with no coin, so it isn't a «Guardian» step of a
                 // trade (the Mac's beginActivity(.request, request:, schedule:), Tasks.swift:130).
                 let run = q.note == "schedule"

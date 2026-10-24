@@ -1,3 +1,4 @@
+import EVMChain
 import ExecutionCore
 import Foundation
 import IhatecryptoCore
@@ -233,6 +234,12 @@ final class Engine {
     var routeWay: (key: String, way: String)?
     /// Both ways of the waiting EVM trade as quoted for its step's details (RouteEdit.quoteWays), the better first.
     var wayQuotes: (command: WalletCommand, ways: [RouteEdit.Way])? { didSet { if wayQuotes?.ways.isEmpty == false { quotedAt = Date() } } }
+    /// What Merkl owes for the waiting card's claim or sweep, once read: that move's route and footer, alone or leading a
+    /// chain (MoveRoutes.swift quoteRoute).
+    var claimOwed: (board: String, command: WalletCommand, owed: [Merkl.Reward])?
+    /// The Jupiter DCA orders as last read this session (asked, placed or cancelled): drawn on every canvas with no plan,
+    /// as the Mac's jupiterDCAs (Earn.swift); nil when none run.
+    var jupiterDCA: Board?
     /// The Ledger's Hyperliquid trading key, and whether the account approved ihatecrypto's fee (TradingKey.swift).
     var ledgerAgent: SignerReply?
     var feeApproved: Bool?
@@ -464,6 +471,7 @@ final class Engine {
         var tasks: [TaskView]
         /// The recurring buys, as their boards draw them (Automation.recurringViews).
         var recurring: [RecurringView]
+        var jupiterDCA: Board?
         var automation: SignerWallet?
         var skills: [SkillView]
         var memory: [String]
@@ -587,6 +595,7 @@ final class Engine {
                                                                 freeOther: $0.spreadsUSDC && automationWallet != nil && $0.untrusted != true ? taskFreeUSDC(otherPayer($0)) : nil,
                                                                 untrusted: $0.untrusted == true, recurring: marks.contains($0.id)) } }(),
             recurring: recurringViews,
+            jupiterDCA: jupiterDCA,
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id),
                                                               journal: $0.id == Skill.tradingStudy.id ? Self.journalKept : nil) },
@@ -610,7 +619,7 @@ final class Engine {
             stuck: stuckView, places: placeFacts, notices: noticeViews, openAtLogin: settings.openAtLogin == true,
             topUp: TopUpPage.shared.view, appLanguage: settings.appLanguage ?? "system", localSetup: localSetupView,
             recentlyClosed: recentlyClosed, addressExtras: addressExtras, planAlertExample: planAlertExample, chipsPosition: chipsPosition,
-            lastBalance: lastBalance)
+            lastBalance: lastFullBalance)
     }
 
     // MARK: Requests from the window

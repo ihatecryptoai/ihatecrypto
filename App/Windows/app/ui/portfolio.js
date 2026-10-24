@@ -55,7 +55,7 @@ const amount = (text) => masked(text, String(text).replace(/\d/g, "•"));
 export function portfolioFrame() {
   const p = ui.state.portfolio;
   const title = t("Portfolio", "Портфель");
-  return h("div", { class: "portfolio" + askedClass(title), oncontextmenu: (e) => askMenu(e, title) }, p.updatedAt ? loaded(p) : loading());
+  return h("div", { class: "portfolio" + askedClass(title), oncontextmenu: (e) => askMenu(e, title) }, p.ready ? loaded(p) : loading());
 }
 
 /** A frame that goes with the next message lights its edge, as the Mac's (RouteCards.swift:1487-1489). */

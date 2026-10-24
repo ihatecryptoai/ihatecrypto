@@ -278,7 +278,9 @@ extension Engine {
                 if Self.ledgerWaitNotified.insert(id).inserted {
                     notify(.signature, say("Scheduled \(asset.symbol) buy waits for your Ledger", "Регулярная покупка \(asset.symbol) ждёт Ledger"),
                            say("Connect and unlock the Ledger: the buy runs then and asks you to approve it on the device.",
-                               "Подключи и разблокируй Ledger: покупка запустится и попросит подтверждение на устройстве."))
+                               "Подключи и разблокируй Ledger: покупка запустится и попросит подтверждение на устройстве."),
+                           // A run of that buy, as the Mac's `schedule: "buy:…"`: its LAST RUNS and the Schedule's History.
+                           schedule: id.uuidString)
                 }
                 continue
             }

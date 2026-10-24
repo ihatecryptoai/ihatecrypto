@@ -274,7 +274,7 @@ function tokenChip(token) {
   if (address) lookUp(token);
   const label = address ? found?.symbol || `${token.slice(0, 5)}…${token.slice(-4)}` : token.toUpperCase();
   const held = !address && heldRow(token.toUpperCase());
-  return h("span", { class: "chat-token-chip", title: address ? token : label }, logo(address ? (found?.symbol || "?") : token, 14, found?.image || held?.icon), label);
+  return h("span", { class: "chat-token-chip", title: address ? token : label }, logo(address ? (found?.symbol || "?") : token, 14, found?.image || held?.icon, !address), label);
 }
 
 /** The field's «$TOKEN» mentions as chips on the layer under it: the same text, glyph for glyph, so each chip sits on its
@@ -305,7 +305,7 @@ function fieldToken(token) {
   const found = address ? marketOf(token) : null;
   if (address) lookUp(token);
   const held = !address && heldRow(token.toUpperCase());
-  const mark = logo(address ? (found?.symbol || "?") : token, 13, found?.image || held?.icon);
+  const mark = logo(address ? (found?.symbol || "?") : token, 13, found?.image || held?.icon, !address);
   return h("span", { class: "chat-field-token" }, h("span", { class: "chat-field-dollar" }, "$", mark), token);
 }
 
@@ -959,6 +959,8 @@ function keys(e) {
     e.preventDefault();
     cardKey = e.key === "ArrowUp" ? Math.max(0, (cardKey ?? cards.length) - 1) : cardKey !== null && cardKey + 1 < cards.length ? cardKey + 1 : null;
     render();
+    // The highlighted card comes into view, so Return never picks one out of sight (the Mac's scrollTo on cardKey).
+    document.querySelector(".chat-option.chat-keyed")?.scrollIntoView({ block: "nearest" });
     return;
   }
   if ((e.key === "ArrowUp" && (empty || recalled !== null)) || (e.key === "ArrowDown" && recalled !== null)) {
@@ -1071,6 +1073,8 @@ function drawHelpers() {
   drawMirror(document.getElementById("composer"));
   const slot = document.getElementById("chat-helper");
   if (!slot) return;
+  // Nothing over the listening panel while dictating (the Mac's `if !voice.listening`).
+  if (voice.on) { slot.replaceChildren(); return; }
   const top = topUpDraft();
   const d = top === null ? draftAmount() : null;
   slot.replaceChildren(top !== null ? topUpBalances(top) : d ? amountSlider(d) : "");
@@ -1193,7 +1197,7 @@ function suggestionRows(el) {
     if (!found.length) return [row({ icon: "questionmark.circle", title: short, detail: t("no market knows it", "ни один рынок его не знает") }, put, dollar)];
     // One row per network, the deepest pool first (the engine's order), the network by its name.
     const seen = new Set();
-    return found.filter((f) => !seen.has(f.chain) && seen.add(f.chain)).map((f) => row({ icon: "circle.dotted", logo: f.symbol, src: f.image, title: f.symbol,
+    return found.filter((f) => !seen.has(f.chain) && seen.add(f.chain)).map((f) => row({ icon: "circle.dotted", pic: f.image || null, logo: f.image ? null : networkOf(f.chain)?.logo || null, title: f.symbol,
       detail: [f.name, networkName(f.chain), f.price, f.liquidity ? t(`liquidity ${f.liquidity}`, `ликвидность ${f.liquidity}`) : null].filter(Boolean).join(" · ") }, (dollar ? "$" : "") + f.address, dollar));
   }
   // «$» lists the tokens; «$5» is dollars.
@@ -1204,7 +1208,7 @@ function suggestionRows(el) {
   }
   // The address book with each network's logo, then the favourite tokens; all of them, as the Mac lists (it scrolls).
   const names = s.book.map((e) => row({ icon: "person", logo: networkOf(e.network)?.logo || null, title: e.name, detail: networkName(e.network) }, e.name));
-  const favs = (s.favorites || []).map((f) => row({ logo: f.symbol, src: f.image, title: f.symbol, detail: f.name + " · " + networkName(f.chain) }, f.symbol));
+  const favs = (s.favorites || []).map((f) => row({ icon: "star", pic: f.image || null, logo: f.image ? null : networkOf(f.chain)?.logo || null, title: f.symbol, detail: f.name + " · " + networkName(f.chain) }, f.symbol));
   return [...names, ...favs].filter((r) => !q || r.title.toLowerCase().includes(q));
 }
 
@@ -1223,7 +1227,8 @@ function drawSuggestions(rows) {
     h("div", { class: "chat-suggest-rows" }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); },
       // The pointer over a row picks it, as ↑↓ do (the Mac's onHover).
       onmouseenter: () => { if (pick !== i) { pick = i; for (const [n, b] of [...slot.querySelectorAll(".chat-suggest-row")].entries()) b.classList.toggle("chat-lit", n === i); } } },
-      r.logo ? logo(r.logo, 16, r.src) : icon(r.icon, 13), h("b", { class: "one-line" }, r.title), h("span", { class: "one-line secondary" }, r.detail)))),
+      // A market's picture is its own only (`pic`): never the app's logo for the symbol it claims.
+      r.pic ? logo(r.title, 16, r.pic, false) : r.logo ? logo(r.logo, 16, r.src) : icon(r.icon, 13), h("b", { class: "one-line" }, r.title), h("span", { class: "one-line secondary" }, r.detail)))),
     h("div", { class: "chat-suggest-foot" }, rows.length > 8
       ? t(`${rows.length} · scroll or ↑↓ · Return puts it in · Esc closes`, `${rows.length} · прокрути или ↑↓ · Return — вставить · Esc — закрыть`)
       : t("↑↓ choose · Return puts it in · Esc closes", "↑↓ — выбрать · Return — вставить · Esc — закрыть"))));
@@ -1291,7 +1296,7 @@ function companyTile(c, size = 28) {
 function modelChip(s) {
   const c = companyOf(s.model.provider);
   const name = s.model.model ? modelName(s.model.model) : s.model.name || t("No model", "Нет модели");
-  const chip = h("button", { class: "chat-chip-btn chat-model", title: t(`${s.model.name || ""} · ${s.model.model || ""}. The model for this canvas; it never sees your wallet key.`,
+  const chip = h("button", { class: "chat-chip-btn chat-model", "data-pop": "model", title: t(`${s.model.name || ""} · ${s.model.model || ""}. The model for this canvas; it never sees your wallet key.`,
       `${s.model.name || ""} · ${s.model.model || ""}. Модель этого холста; ключ кошелька она никогда не видит.`), onclick: () => modelMenu(chip) },
     c ? companyTile(c, 20) : null, h("span", { class: "one-line" }, name), icon("chevron.down", 9));
   return chip;
@@ -1388,10 +1393,10 @@ function modelMenu(anchor) {
     return rows;
   };
   draw();
-  popover(anchor, h("div", { class: "chat-model-menu" },
+  if (!popover(anchor, h("div", { class: "chat-model-menu" },
     h("div", { class: "chat-model-cols" }, left, right),
     h("div", { class: "chat-model-foot" }, icon("lock.shield", 12), h("span", {}, t("The model never sees your wallet key.", "Модель никогда не видит ключ кошелька.")),
-      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings("model") }, t("Sign-ins…", "Входы…")))), "up", closed);
+      h("span", { class: "spacer" }), h("button", { class: "link-btn", onclick: () => openSettings("model") }, t("Sign-ins…", "Входы…")))), "up", closed)) return;
   // Open first, then the face: a redraw before the menu is in the page would take it for closed.
   liveMenu = draw;
   tuning = "model";
@@ -1403,9 +1408,10 @@ function modelMenu(anchor) {
 function networksChip() {
   const all = ui.state.modules?.networks || [];
   const on = all.filter((n) => n.on);
-  const chip = h("button", { class: "chat-chip-btn", title: t("Networks the assistant may use: ", "Сети, где работает ассистент: ") + on.map((n) => n.name).join(", "),
+  const chip = h("button", { class: "chat-chip-btn", "data-pop": "networks", title: t("Networks the assistant may use: ", "Сети, где работает ассистент: ") + on.map((n) => n.name).join(", "),
     onclick: () => {
       const pop = popover(chip, networksMenu(), "up", () => { if (tuning === "networks" && netsPop === pop) tuning = null; render(); });
+      if (!pop) return;
       netsPop = pop; tuning = "networks"; render();
     } },
   on.length ? [h("span", { class: "chat-logo-stack" }, on.slice(0, 3).map((n) => logo(n.logo, 20))), on.length > 3 ? h("b", { class: "secondary" }, "+" + (on.length - 3)) : null]
@@ -1452,7 +1458,7 @@ function contextChip(s) {
   const rest = Math.max(0, c.used - (c.instructions || 0) - (c.chat || 0));
   const part = (cls, n) => n > 0 && c.window ? h("span", { class: cls, style: `width:${Math.max(2, (n / c.window) * 100)}%` }) : null;
   const line = (cls, name, value) => h("div", { class: "chat-context-line" }, cls ? h("i", { class: "chat-dot " + cls }) : null, h("span", { class: "one-line" }, name), h("span", { class: "spacer" }), h("b", {}, value));
-  const chip = h("button", { class: "chat-chip-btn chat-ctx" + (tight ? " chat-near" : ""),
+  const chip = h("button", { class: "chat-chip-btn chat-ctx" + (tight ? " chat-near" : ""), "data-pop": "context",
     title: paid ? t(`This chat's answers cost ${dollars(c.spent)} so far. Click for the context they read.`, `Ответы этого чата уже стоили ${dollars(c.spent)}. Нажми, чтобы увидеть, что они читали.`)
       : t("What the model read with your last message, of what its window holds.", "Что модель прочитала с последним сообщением — из того, что вмещает её окно."),
     onclick: () => popover(chip, h("div", { class: "chat-context-pop" },
@@ -1476,8 +1482,14 @@ function contextChip(s) {
 
 /** A card of our own beside an anchor, above it by default, kept in the window; Escape or a click outside closes it. */
 function popover(anchor, content, side = "up", onClose) {
-  document.querySelector(".menu")?.remove();
+  // A second click on the chip whose menu is open closes it (the Mac's chips toggle). A chip redrawn while its menu is
+  // open is a new element: `data-pop` names it across redraws.
+  const open = document.querySelector(".menu");
+  if (open && (open._from === anchor || (anchor.dataset.pop && open._pop === anchor.dataset.pop))) { open.remove(); return null; }
+  open?.remove();
   const pop = h("div", { class: "menu chat-pop" }, content);
+  pop._from = anchor;
+  pop._pop = anchor.dataset.pop;
   pop.addEventListener("click", (e) => e.stopPropagation());
   document.body.append(pop);
   const a = anchor.getBoundingClientRect(), w = pop.offsetWidth, hgt = pop.offsetHeight;
@@ -1601,6 +1613,16 @@ export function openContextMenu() { document.querySelector(".chat-ctx")?.click()
 export function showDraft() { suggest("send 120 USDC to Mom"); drawHelpers(); }
 /** The preview's and the console sweep's send: a message with nothing attached goes out (`&call=chat.sendDraft`). */
 export function sendDraft() { ui.composerText = "send 1 USDC to Mom"; send(); }
+/** The preview's look at a contract in the field (`&call=chat.contractDraft`): its chip and rows wear only its market's picture. */
+export function contractDraft() {
+  const f = document.getElementById("composer");
+  if (!f) return;
+  ui.composerText = f.value = "buy $0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  f.focus();
+  f.setSelectionRange(f.value.length, f.value.length);
+  refreshSuggestions(f);
+  drawMirror(f);
+}
 /** The preview's «$» chips in the field (`&call=chat.showMention`). */
 /** The preview's `&call=chat.showAbout`: a coin attached from outside the canvas, its chip over the field. */
 export function showAbout() { attachAbout({ title: "SOL · Solana", about: "About the coin «SOL on Solana; the wallet holds 0.0215»", logo: "SOL" }); }

@@ -14,7 +14,7 @@ import Testing
     static func wait(_ engine: EngineTests.Engine, tries: Int = 10, _ done: ([String: Any]) -> Bool) throws -> [String: Any]? {
         var last: [String: Any]?
         for _ in 0..<tries {
-            last = try engine.call("refresh").state ?? last
+            last = (try? engine.call("refresh"))?.state ?? last
             if let s = last, done(s) { return s }
         }
         return last

@@ -42,7 +42,7 @@ function draw() {
         h("span", { class: "secondary" }, quiet ? t("Nothing running", "Ничего не работает") : t("ihatecrypto keeps working here", "ihatecrypto работает здесь"))),
       h("span", { class: "spacer" }),
       h("div", { class: "tray-money" },
-        s.portfolio?.updatedAt ? h("b", { class: "num" }, masked(usd(total))) : h("span", { class: "tray-skeleton" }),
+        s.portfolio?.ready ? h("b", { class: "num" }, masked(usd(total))) : h("span", { class: "tray-skeleton" }),
         s.positionsPnl != null ? h("span", { class: "tray-pnl num " + (Number(s.positionsPnl) < 0 ? "loss" : "profit") },
           masked((Number(s.positionsPnl) < 0 ? "" : "+") + usd(s.positionsPnl)) + t(" in positions", " в позициях")) : null)),
     positions.map((p) => h("div", { class: "tray-position" },

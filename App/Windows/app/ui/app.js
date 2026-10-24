@@ -120,12 +120,20 @@ function draw() {
 }
 setRoot(draw);
 
+// A right-click inside a text field is the field's: its Cut / Copy / Paste (WebView2's menu, kept for fields in keys.rs),
+// never a block's «Ask or act in chat», as a text field keeps its own menu on the Mac. Stopped before any block hears it.
+const textField = "input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], input[type=email], input[type=url], textarea, [contenteditable]:not([contenteditable=false])";
+document.addEventListener("contextmenu", (e) => { if (e.target.closest?.(textField)) e.stopPropagation(); }, true);
+
 // A pinch (Ctrl+wheel in WebView2) zooms the canvas only, never the whole page.
 document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (document.querySelector(".menu")) { document.querySelector(".menu").remove(); return; }
+    // Under the lock screen, an Import sheet or the recovery words nothing behind changes: the Mac's are disabled under
+    // its lock or a window of their own, so Settings is still there after unlocking or Back.
+    if (ui.overlay || ui.state?.lock?.locked || ui.state?.phrase) return;
     // A field that owns Esc (a node's address, a rename) stops it, as the Mac's sheet closes alone. Settings is left from
     // any other control, as the Mac's hidden cancel button does; elsewhere Esc in a field stays the field's.
     if (e.defaultPrevented || (ui.view !== "settings" && e.target.closest?.("input, textarea, select, [contenteditable]"))) return;

@@ -170,9 +170,17 @@ extension Engine {
 
     func showJupiterDCA(note: String?) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { reply(say("Jupiter didn't answer.", "Jupiter не ответил."), note: note); return }
+        readDCA(orders)
         if !orders.isEmpty { pin("result", "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10))))) }
         reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
               : say("Running Jupiter DCA: \(orders.count).", "Запущено Jupiter DCA: \(orders.count)."), note: note ?? "Jupiter DCA")
+    }
+
+    /// The orders as read now, for every canvas's Jupiter DCA board (boards.js draws it where none is pinned).
+    func readDCA(_ orders: [JupiterRecurring.Order]) {
+        jupiterDCA = orders.isEmpty ? nil
+            : Board(id: "jupiter-dca", kind: "result", title: "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10)))))
+        changed()
     }
 
     func dcaLines(_ orders: [JupiterRecurring.Order]) -> [String] {
@@ -188,6 +196,7 @@ extension Engine {
     /// here gets one. Jupiter not answering leaves the block as it was.
     func refreshJupiterDCA(placed: Bool) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { return }
+        readDCA(orders)
         let lines = orders.isEmpty ? [say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")] : dcaLines(orders)
         let data = orders.isEmpty ? nil : BlockData(dca: dcaRows(Array(orders.prefix(10))))
         var list = boards, found = false

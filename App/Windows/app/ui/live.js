@@ -520,16 +520,11 @@ function historyBody() {
     });
     out.push(h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, rows));
   } else {
-    // Nothing moved yet: the latest requests as they were, each with what it said and drew (the Mac's HistoryBoard).
+    // Nothing moved yet: the latest requests as whole activity cards — «understood as», the cards they drew, the last
+    // lines and «All N lines» (the Mac's HistoryBoard draws ActivityCards).
     const items = s.recentRequests || [];
-    out.push(items.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" }, items.map((a) => {
-      const d = new Date(a.at);
-      return h("div", { class: "live-hist-request" },
-        h("div", { class: "live-hist-sub secondary small" }, dayName(d) + " · " + time(d)),
-        a.request ? h("div", { class: "live-hist-asked" }, a.request) : a.title ? h("b", {}, a.title) : null,
-        a.bubbles?.length ? h("div", { class: "live-hist-sub small" }, a.bubbles.slice(0, 3).map((b) => [b.label, b.title].filter(Boolean).join(" · ")).join("  →  ")) : null,
-        a.lines?.length ? h("div", { class: "live-hist-reply secondary small selectable" }, a.lines.at(-1)) : null);
-    }))
+    out.push(items.length ? h("div", { class: "live-hist-card scroll-own", "data-keep": "live-history" },
+      items.map((a, i) => h("div", { class: "live-hist-activity" }, activityBlock(a, "r" + i + a.at))))
       : note(t("Nothing yet. Every move from now on is listed here, and every request keeps the bubbles it had on the canvas.",
         "Пока ничего. Каждое движение отсюда и дальше будет здесь, а каждый запрос сохранит то, что было на холсте.")));
   }
@@ -1101,13 +1096,15 @@ function scheduleBody() {
         `Кошелёк автоматизации держит бюджет расписания и подписывает его задачи. Основной кошелёк по-прежнему спрашивает ${presence()}.`)),
       h("button", { class: "btn primary small", onclick: () => act("createAutomationWallet") }, icon("plus", 13), t("Create an automation wallet", "Создать кошелёк автоматизации")));
   const held = ui.state.schedulePaused === true;
+  // Open positions are the Schedule's entries too (the Mac's ScheduleFrame entries): Pause shows, no empty line.
+  const any = running.length || ui.state.positions.length;
   const tasksTab = [
-    running.length ? h("button", { class: "live-wide-btn" + (held ? " live-held" : ""), onclick: () => act("schedulePause", { test: !held }),
+    any ? h("button", { class: "live-wide-btn" + (held ? " live-held" : ""), onclick: () => act("schedulePause", { test: !held }),
       title: held ? t("Everything scheduled runs again", "Всё запланированное снова пойдёт") : t("Nothing scheduled runs until you resume; stops and takes stay on the exchange", "Ничего запланированного не запустится, пока не возобновишь; стопы и тейки остаются на бирже") },
       icon(held ? "play" : "pause", 13), held ? t("Resume schedule", "Возобновить расписание") : t("Pause schedule", "Приостановить расписание")) : null,
     running.map((x) => taskRow(x, a)),
     ui.state.positions.map(positionRow),
-    !running.length ? h("div", { class: "secondary small" }, paused.length ? t("Nothing running now.", "Сейчас ничего не идёт.") : t("Nothing scheduled. Say it in the chat, in any words:", "Ничего не запланировано. Скажи в чате любыми словами:")) : null,
+    !any ? h("div", { class: "secondary small" }, paused.length ? t("Nothing running now.", "Сейчас ничего не идёт.") : t("Nothing scheduled. Say it in the chat, in any words:", "Ничего не запланировано. Скажи в чате любыми словами:")) : null,
     h("button", { class: "live-wide-btn", title: t("Puts a start in the chat: say what to do and when", "Кладёт начало в чат: скажи, что и когда делать"), onclick: () => suggest(t("every day at 09:00: what to do", "каждый день в 09:00: что сделать"), t("what to do", "что сделать")) },
       icon("plus", 13), t("New schedule", "Новое расписание")),
     gasButton(a, bud),

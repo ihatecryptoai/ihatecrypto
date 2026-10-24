@@ -39,7 +39,8 @@ import Testing
     /// The first balance read: the one `createWallet` starts may still be running, and a second `refresh` returns at once.
     private func read(_ engine: EngineTests.Engine) throws {
         for _ in 0..<30 {
-            if (try engine.call("refresh").state?["portfolio"] as? [String: Any])?["updatedAt"] != nil { return }
+            // A refresh slower than the helper waits (a node not answering under load) is tried again.
+            if ((try? engine.call("refresh"))?.state?["portfolio"] as? [String: Any])?["updatedAt"] != nil { return }
         }
         Issue.record("the balances were never read")
     }

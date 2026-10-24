@@ -71,6 +71,7 @@ window.addEventListener("resize", () => {
 export const railEdge = () => 10 + (collapsed ? NARROW : WIDE);
 
 export function rail() {
+  if (profileRedraw && !profileRedraw()) profileRedraw = null;
   const width = collapsed ? NARROW : WIDE;
   const from = drawnWidth ?? width;
   drawnWidth = width;
@@ -153,7 +154,7 @@ function totals() {
   const p = ui.state.portfolio;
   const main = Number(p.total) || 0;
   const auto = Number(ui.state.automationUSD) || 0;
-  return { main, auto, all: main + auto, ready: !!p.updatedAt };
+  return { main, auto, all: main + auto, ready: !!p.ready };
 }
 
 /** The balance, or a grey block with a light sweep until every network answered (Skeleton). */
@@ -908,7 +909,9 @@ function profileMenu(anchor, side) {
   // Which servers on this PC run and what they have, read again as the menu opens; GitHub is asked only once Ollama answers.
   act("refreshModels");
   const body = h("div", { class: "rail-profile-menu" });
+  let last = [];
   const draw = (signingOut, open) => {
+    last = [signingOut, open];
     const s = ui.state;
     if (signingOut) {
       body.replaceChildren(h("b", { class: "rail-pm-title" }, t(`Sign out of ${shortName(signingOut)}?`, `Выйти из ${shortName(signingOut)}?`)),
@@ -949,7 +952,10 @@ function profileMenu(anchor, side) {
   };
   draw();
   popover(anchor, side, body, "rail-profile-pop");
+  // Redrawn with the state while it's open, as the Mac's menu observes it: a server that starts or stops, a re-read.
+  profileRedraw = () => body.isConnected && (draw(...last), true);
 }
+let profileRedraw = null;
 
 // MARK: Folded
 

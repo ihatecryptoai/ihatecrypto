@@ -99,11 +99,15 @@ pub fn go(webview: &tauri::Webview, back: bool) -> tauri::Result<()> {
 }
 
 /// WebView2's events for a webview of ours: its history changed (a page's pushState too), a load finished or failed,
-/// its page's process ended. The header hears each.
+/// its page's process ended. The header hears each. And WebView2's own prompts never show: a permission a page asks for
+/// (notifications, location, camera, microphone, clipboard…) is denied and an HTTP sign-in is cancelled, as the Mac's
+/// WKWebView has no handler for either and shows nothing.
 #[cfg(windows)]
 pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
-    use webview2_com::{HistoryChangedEventHandler, NavigationCompletedEventHandler, ProcessFailedEventHandler};
+    use webview2_com::{BasicAuthenticationRequestedEventHandler, HistoryChangedEventHandler, NavigationCompletedEventHandler,
+                       PermissionRequestedEventHandler, ProcessFailedEventHandler};
+    use windows::core::Interface;
     let (label, app) = (webview.label().to_string(), app.clone());
     let _ = webview.with_webview(move |w| {
         let Ok(core) = (unsafe { w.controller().CoreWebView2() }) else { return };
@@ -140,11 +144,22 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
             }
             Ok(())
         }));
+        // A frame's request that its own handler doesn't take comes here too.
+        let permission = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args { unsafe { let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY); } }
+            Ok(())
+        }));
+        let sign_in = BasicAuthenticationRequestedEventHandler::create(Box::new(|_, args| {
+            if let Some(args) = args { unsafe { let _ = args.SetCancel(true); } }
+            Ok(())
+        }));
         let mut token = 0i64;
         unsafe {
             let _ = core.add_HistoryChanged(&history, &mut token);
             let _ = core.add_NavigationCompleted(&completed, &mut token);
             let _ = core.add_ProcessFailed(&failed, &mut token);
+            let _ = core.add_PermissionRequested(&permission, &mut token);
+            if let Ok(core) = core.cast::<ICoreWebView2_10>() { let _ = core.add_BasicAuthenticationRequested(&sign_in, &mut token); }
         }
     });
 }

@@ -263,7 +263,7 @@ function modelStep() {
 
 /** The signer's own note when Windows Hello isn't set up (Signer/Windows/Host.swift presence()): then only a test
  * wallet can be made, as nothing could ask before a move. The Mac adapts its texts to a Mac without Touch ID. */
-const noHello = () => (ui.state.signer?.notes || []).some((n) => n.startsWith("Windows Hello isn't set up"));
+export const noHello = () => (ui.state.signer?.notes || []).some((n) => n.startsWith("Windows Hello isn't set up"));
 const helloMissing = () => factRow("person", t("Windows Hello isn't set up on this PC", "Windows Hello на этом компьютере не настроен"),
   t("So only a test wallet can be made, and a phrase or key can't be brought: nothing could ask before a move. Turn on a face, fingerprint or PIN in Windows Settings › Accounts › Sign-in options, then come back.",
     "Поэтому можно создать только тестовый кошелёк, а фразу или ключ не принести: перед движением некому было бы спросить. Включи лицо, отпечаток или PIN в «Параметры Windows › Учетные записи › Варианты входа» и вернись."));
@@ -626,7 +626,7 @@ function networksStep() {
 function moneyStep() {
   const s = ui.state, p = s.portfolio;
   // Only once read, or a first read would look like money landing; a landing the board already showed isn't new.
-  if (!flow.money && p.updatedAt) flow.money = { landed: null, more: false, stale: s.topUp?.arrived ?? null };
+  if (!flow.money && p.ready) flow.money = { landed: null, more: false, stale: s.topUp?.arrived ?? null };
   const m = flow.money;
   // As the Mac: «Money landed» comes from the Top up board's own watched coin, never any row rising (P/L, HLP, yields).
   const landed = (text) => { if (m && !m.landed && text !== m.stale) { m.landed = text; render(); } };

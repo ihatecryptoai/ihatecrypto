@@ -206,11 +206,13 @@ export function mascot(size = 34, mood = "idle") {
   return g;
 }
 
-/** A chain's or token's logo from the bundled set (logos/), by ticker or name; a lettered disc when there's none. */
-export function logo(name, size = 28, src) {
+/** A chain's or token's logo from the bundled set (logos/), by ticker or name; a lettered disc when there's none.
+ *  `own = false`: `src` only, never the bundled file for `name` (a contract's market picture: a look-alike calling itself
+ *  USDC never gets the app's USDC logo, as the Mac's ComposerField.picture). */
+export function logo(name, size = 28, src, own = true) {
   const key = (name || "").toLowerCase().split(":").pop();
   const alias = { ubtc: "btc", ueth: "eth", usol: "sol", usdt0: "usdt", "bnb chain": "bnb", "hyperliquid": "hype", "robinhood chain": "robinhood" }[key] || key;
-  const file = logoFiles.get(alias);
+  const file = own ? logoFiles.get(alias) : null;
   const box = h("span", { class: "logo", style: `width:${size}px;height:${size}px` });
   // As the Mac's TokenLogo: Hyperliquid's mint mark sits on its dark tile, Uniswap's pink unicorn on a white disc
   // (neither has a background of its own, and on the dark theme they floated).

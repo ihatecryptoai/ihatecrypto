@@ -807,6 +807,10 @@ extension Engine {
             return [st(say("FROM · ", "ОТКУДА · ") + place.uppercased(), n(x, token.uppercased()), heldThere(token, on: network).map { say("held: \(Fmt.num($0, maxFraction: 6))", "есть: \(Fmt.num($0, maxFraction: 6))") } ?? "",
                        moved(token, on: network, by: x.map { -$0 })),
                     st(say("TO · ", "КУДА · ") + say("SAVED ADDRESS", "СОХРАНЁННЫЙ АДРЕС"), e.name, AddressCheck.ends(e.address).start + " … " + AddressCheck.ends(e.address).end)]
+        // What Merkl owes, once read for the waiting card (quoteRoute): before that, one step with the command's words.
+        case .claimRewards, .sweepRewards:
+            guard let o = claimOwed, o.command == c, o.board == card?.id else { return nil }
+            return claimSteps(o.owed, c)
         case .sweepDust(let under):
             let dust = dustTokens(under: under)
             guard !dust.isEmpty else { return nil }

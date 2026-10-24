@@ -60,11 +60,15 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 /// In every frame of a site and of a page beside the chat: a file input and the File System Access pickers open nothing,
 /// as the Mac's web views have no open panel (no UI delegate), so a page can't ask for a «keystore backup» and read it.
-// ponytail: a page script, so a page that reaches a realm without it (a fresh about:blank frame) or a closed shadow root
-// it declares in HTML could still ask; WebView2 has no file-chooser event to refuse it at the host. Dropping a file onto
-// the page stays, as it needs the person's drag.
+// An input is told by the platform's own getters, not `instanceof` or its own properties: one made in another frame's
+// realm and moved here, or with `type` redefined on it, is still a file input.
+// ponytail: a page script, so a page that calls a fresh about:blank frame's own `showPicker` (a realm without this
+// script) or uses a closed shadow root it declares in HTML could still ask; WebView2 has no file-chooser event to refuse
+// it at the host. Dropping a file onto the page stays, as it needs the person's drag.
 pub const NO_FILE_PICKER: &str = r#"(() => {
-  const file = (el) => el instanceof HTMLInputElement && el.type === "file";
+  const nameOf = Object.getOwnPropertyDescriptor(Element.prototype, "localName").get;
+  const typeOf = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type").get;
+  const file = (el) => { try { return nameOf.call(el) === "input" && typeOf.call(el) === "file"; } catch { return false; } };
   const stop = (e) => { if (file(e.composedPath()[0])) { e.preventDefault(); e.stopImmediatePropagation(); } };
   addEventListener("click", stop, true);
   // Inside a closed shadow root the window never sees the input itself: each root gets the same guard.
