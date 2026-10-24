@@ -454,7 +454,7 @@ extension Engine {
         let fills = (try? await fillsCall) ?? [], funding = (try? await fundingCall) ?? []
         let unrealized = Dictionary(positions.map { ($0.coin, $0.unrealizedPnl) }, uniquingKeysWith: +)
         let points = (Store.load([EquityPoint].self, "equity.json") ?? []).filter { $0.wallet == wallet }.map { (at: $0.at, usd: $0.usd) }
-            + (portfolio.updatedAt != nil ? [(at: Date(), usd: portfolio.total)] : [])
+            + (portfolio.updatedAt != nil ? [(at: Date(), usd: ruleEquity ?? 0)] : [])
         let flows = (Store.load([PnL.Flow].self, "flows.json") ?? []).filter { $0.wallet == wallet }
         var reports: [BlockData.PnLCard.Report] = []
         for period in PnL.Period.allCases {

@@ -30,12 +30,13 @@ import Testing
     }
 
     /// R8-1: a confirmed run (the steps held behind a card, run on its Confirm) carries out only what the Mac's runSteps
-    /// would — a move, a transfer, a position, an address — and leaves a contract call, a trade plan and a recurring buy's
-    /// first buy waiting on their own cards.
+    /// would — a move, a transfer, a position, an address, a recurring buy's first buy — and leaves a contract call and a
+    /// trade plan waiting on their own cards.
     @Test func aConfirmCarriesOutOnlyWhatTheMacsRunStepsWould() throws {
         let call = try #require(WalletCommand.parse("call base \(Self.safe) claim()"))
         #expect(!Engine.carriedOnChain(.wallet(call)))
-        #expect(!Engine.carriedOnChain(.recurring(.buy(.usdc, usdc: 5), days: 7)))
+        // A recurring buy's first buy is carried out on the earlier Confirm, as the Mac's carryOut (audit9 T11).
+        #expect(Engine.carriedOnChain(.recurring(.buy(.usdc, usdc: 5), days: 7)))
         #expect(!Engine.carriedOnChain(nil))
         #expect(Engine.carriedOnChain(.wallet(.sendSol(name: "Mom", amount: 1))))
         #expect(Engine.carriedOnChain(.transfer(SignerAddress(name: "Mom", network: "base", address: Self.safe), 5)))

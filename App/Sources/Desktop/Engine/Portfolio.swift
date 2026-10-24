@@ -111,7 +111,8 @@ extension Engine {
         portfolio = withProfit(next)
         portfolioOwner = owner
         Task { await loadCosts() }
-        if errors.isEmpty { recordEquity(next.total, wallet: me.solana.isEmpty ? me.evm : me.solana) }
+        // The history and the 7-day line measure what the P/L does, the gas coins left out (the Mac's equity).
+        if errors.isEmpty { recordEquity(ruleEquity ?? 0, wallet: me.solana.isEmpty ? me.evm : me.solana) }
         loadEquity()
         // A read that failed keeps the last one: read as it came, the balance would drop by Automation's money.
         if automationWallet == nil { automationUSD = nil } else if let m = await automationRead { automationUSD = m.dollars + m.sol * (markets["SOL"]?.markPx ?? 0) }

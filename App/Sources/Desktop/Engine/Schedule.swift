@@ -268,8 +268,13 @@ extension Engine {
         remindTopUp()
         // Recurring buys first: at their time, Windows Hello only, no canvas of their own (Automation.swift).
         await runRecurringBuys()
-        guard settings.schedulePaused != true, pending == nil, card == nil, running == nil, !thinking else { return }
-        guard let i = tasks.firstIndex(where: { $0.paused != true && $0.next <= Date() }) else { return }
+        // As the Mac's runDueTask: nothing else going on — a card, a reply, a move, a «How much?», steps held behind a
+        // card or running after it (a scheduled card in their middle could be taken for theirs).
+        guard settings.schedulePaused != true, pending == nil, card == nil, running == nil, !thinking, awaitingAmount == nil,
+              !chainState.runningHeld else { return }
+        // A recurring buy has its own runs (runRecurringBuys): one waiting for a Ledger stays due there, never a card here.
+        let marked = recurringBuys
+        guard let i = tasks.firstIndex(where: { $0.paused != true && $0.next <= Date() && !marked.contains($0.id) }) else { return }
         let key = "task:\(tasks[i].id)"
         // With the person at the computer a clock task waits for them to step away (half an hour at most), so the canvas
         // doesn't change under them. An alert's steps and «Run now» go at once.

@@ -24,7 +24,7 @@ extension Engine {
         let since = Date().addingTimeInterval(-7 * 86_400)
         let week = (Store.load([EquityPoint].self, "equity.json") ?? []).filter { $0.wallet == wallet && $0.at >= since }.sorted { $0.at < $1.at }
         var points = Self.thinned(week.map { PortfolioView.Point(at: $0.at, usd: $0.usd) }, to: portfolio.updatedAt == nil ? 200 : 199)
-        if let now = portfolio.updatedAt { points.append(.init(at: now, usd: portfolio.total)) }
+        if let now = portfolio.updatedAt { points.append(.init(at: now, usd: ruleEquity ?? 0)) }
         portfolio.equity = points
         portfolio.change7d = points.count > 2 ? points[points.count - 1].usd - points[0].usd : nil
     }
@@ -51,7 +51,7 @@ extension Engine {
         let fills = (try? await fillsCall) ?? [], funding = (try? await fundingCall) ?? []
         let unrealized = Dictionary(positions.map { ($0.coin, $0.unrealizedPnl) }, uniquingKeysWith: +)
         let points = (Store.load([EquityPoint].self, "equity.json") ?? []).filter { $0.wallet == wallet }.map { (at: $0.at, usd: $0.usd) }
-            + (portfolio.updatedAt != nil ? [(at: Date(), usd: portfolio.total)] : [])
+            + (portfolio.updatedAt != nil ? [(at: Date(), usd: ruleEquity ?? 0)] : [])
         let flows = (Store.load([PnL.Flow].self, "flows.json") ?? []).filter { $0.wallet == wallet }
         return PnL.report(command.period, coin: command.coin, fills: fills, funding: funding, unrealized: unrealized, equity: points, flows: flows)
     }

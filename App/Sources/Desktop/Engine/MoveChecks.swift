@@ -547,6 +547,7 @@ extension Engine {
         guard let p = parked.removeValue(forKey: canvasID) else { return }
         guard Date().timeIntervalSince(p.at) < 15 * 60 else {
             updateBoard(p.card.id) { $0.state = "cancelled"; $0.lines.append(say("Waited a quarter of an hour: nothing was signed.", "Ждала четверть часа: ничего не подписано.")) }
+            if chainState.afterCall?.board == p.card.id { chainState.afterCall = nil }
             return
         }
         pending = p.pending

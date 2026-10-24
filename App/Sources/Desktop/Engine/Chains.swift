@@ -16,6 +16,8 @@ struct ChainState {
     var afterCall: (board: String, canvas: String, rest: [String], since: Date)?
     /// The steps held behind a card are running now: the model's request waits for them to end (continueAgent).
     var runningHeld = false
+    /// Cards drawn so far (show()): a held step's Confirm takes only the one card it drew itself.
+    var cardsDrawn = 0
 }
 
 /// «withdraw 5 USDC to Solana then deposit 5 USDC to kamino», «chart SOL then buy SOL for 10 USDC»: the Mac's runSteps
@@ -92,7 +94,7 @@ extension Engine {
         let rest = Array(steps[(k + 1)...])
         // One step with a card left: its own card, as when it's asked alone.
         if rest.isEmpty {
-            let before = card?.id
+            let before = card?.id, drawn = chainState.cardsDrawn
             switch command(k) {
             case .sendTo(let name, let amount, let net)?: prepareTransfer(amount, to: name, network: net, note: note)
             case let c?: await handleWallet(c, note: note)
@@ -100,7 +102,9 @@ extension Engine {
             }
             // Carried out on the Confirm that named it only when the Mac's runSteps would: a contract call or a trade plan
             // waits on its own card, so one Confirm never signs what no card showed.
-            if confirmed, let id = card?.id, id != before, Self.carriedOnChain(pending) { await confirm(card: id) }
+            // And only the card this step drew itself: exactly one drawn meanwhile (nothing else may draw while a held run
+            // is busy, but a card that isn't provably the step's waits for its own Confirm).
+            if confirmed, let id = card?.id, id != before, chainState.cardsDrawn == drawn + 1, Self.carriedOnChain(pending) { await confirm(card: id) }
             return true
         }
         // The first move without its amount: asked now, the steps after it held for the answer.
@@ -112,7 +116,7 @@ extension Engine {
         }
         var parsed: [ChainStep] = []
         // The first move's cautions on the chain's card, as when it's asked alone (the Mac's runSteps draws its card).
-        var cautions: [String] = []
+        var cautions: [String] = [], cautioned = false
         // A later move without its amount: asked when it's reached; it and the steps after it run by their words.
         var asks: String?
         for i in k..<steps.count {
@@ -144,6 +148,10 @@ extension Engine {
                 parsed.append(.said(step))
                 continue
             }
+            // A multisig made or paid from: its own card, checked as when asked alone (prepareMultisig/-Send); the steps
+            // after it ride on that card's Confirm (the Mac's runSteps → continueTask). Later in a chain: by its words.
+            if case .multisigCreate = c { if await multisigStep(c, step, i: i, k: k, steps, note: note, stop: stop) { return true }; parsed.append(.said(step)); continue }
+            if case .multisigSend = c { if await multisigStep(c, step, i: i, k: k, steps, note: note, stop: stop) { return true }; parsed.append(.said(step)); continue }
             // A Solana token is Jupiter-verified before the card, as a buy asked alone is.
             switch c {
             case .buy(let a, let u) where !a.resolved:
@@ -182,9 +190,11 @@ extension Engine {
                     noteRefusal(step, short, note: note)
                     return true
                 }
-                if i == k {
+                // The chain's first move carries its cautions, a plan or another card before it or not (T13).
+                if !cautioned {
                     let savedFor = entry(name, network: network)?.network ?? e.network
                     cautions = [otherNetworkWarning(saved: savedFor, sent: e.network), firstSendWarning(e.address)].compactMap { $0 }
+                    cautioned = true
                 }
                 parsed.append(.transfer(e, amount))
             } else {
@@ -196,8 +206,8 @@ extension Engine {
                         noteRefusal(c.summary, why, note: note)
                         return true
                     }
-                    cautions = sendCautions(c)
                 }
+                if !cautioned { cautions = sendCautions(c); cautioned = true }
                 parsed.append(.wallet(c))
             }
         }
@@ -211,6 +221,23 @@ extension Engine {
         if confirmed { await confirm(card: card?.id); return true }
         reply(say("In steps: ", "По шагам: ", "Por pasos: ") + parsed.map(chainLine).joined(separator: " → ")
               + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена».", ". Pulsa Confirm o Cancel."), note: note)
+        return true
+    }
+
+    /// A multisig step: first in the chain, its own card now with the rest held behind it (true: the chain is handled);
+    /// later, false — it runs by its words once reached and draws its card then.
+    private func multisigStep(_ c: WalletCommand, _ step: String, i: Int, k: Int, _ steps: [String], note: String?, stop: (String) -> Void) async -> Bool {
+        guard i == k else { return false }
+        let before = card?.id
+        await handleWallet(c, note: note)
+        let drawn: Bool = switch pending { case .wallet(.multisigCreate)?, .wallet(.multisigSend)?: card?.id != before; default: false }
+        guard drawn else {
+            if i + 1 < steps.count {
+                stop(say("“\(step)” didn’t get to its Confirm, so the steps after it don’t run.", "«\(step)» не дошёл до подтверждения, поэтому следующие шаги не запускаю."))
+            } else { chainState.stopped = true }
+            return true
+        }
+        holdAfterCall(Array(steps[(i + 1)...]))
         return true
     }
 
@@ -233,24 +260,31 @@ extension Engine {
     }
 
     /// What a confirmed run carries out on the Confirm that named it, as the Mac's runSteps carries out a pendingAction: a
-    /// move, a transfer, a position, its orders, an address — never a contract call (its own simulated card waits), a trade
-    /// plan (its own route and checklist) or a recurring buy's first buy.
+    /// move, a transfer, a position, its orders, an address, a recurring buy's first buy (Execution.swift:684-703) — never
+    /// a contract call (its own simulated card waits) or a trade plan (its own route and checklist).
     nonisolated static func carriedOnChain(_ p: Pending?) -> Bool {
         switch p {
-        case .wallet(.contractCall)?: false
-        case .wallet?, .transfer?, .position?, .address?, .orders?: true
-        case .trade?, .recurring?, .chain?, nil: false
+        // A multisig's own card (its keys, networks and cost; its payment's check) waits, as the Mac's.
+        case .wallet(.contractCall)?, .wallet(.multisigCreate)?, .wallet(.multisigSend)?: false
+        case .wallet?, .transfer?, .position?, .address?, .orders?, .recurring?: true
+        case .trade?, .chain?, nil: false
         }
     }
 
     /// The call's Confirm went through: the steps it named run now, as on the chain's own Confirm.
     func continueAfterCall(_ board: String?) async {
-        guard let held = chainState.afterCall, held.board == board else { return }
+        // Busy for the whole run, as the Mac's runSteps holds `thinking`: no scheduled run (runDueTasks reads
+        // runningHeld) and no message lands in the middle, so the card a held step draws is the only one there is.
         chainState.runningHeld = true
+        defer { chainState.runningHeld = false }
+        guard let held = chainState.afterCall, held.board == board else { return }
         chainState.afterCall = nil
+        thinking = true
+        changed()
         // The request the model carries on waits for the held steps, then hears how they went (the Mac's afterMove).
         defer {
-            chainState.runningHeld = false
+            thinking = false
+            changed()
             if agentGoal != nil { Task { await continueAgent() } }
         }
         // The call's own Confirm finishes first (its block marked, the signing session ended): then the rest.

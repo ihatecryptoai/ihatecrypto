@@ -482,10 +482,12 @@ enum AgentStore {
             + "The stop and take on the exchange still protect the position." + when + " and any move you confirm with \(Presence.name) opens it."
     }
 
-    /// Sealed under Windows Hello: when the wallet's seed is (a Ledger's key too), and Windows Hello seals anything here.
+    /// Sealed under Windows Hello: when the wallet's seed is, and a Ledger's key always (it has no seed here). A Ledger used
+    /// before anything asked Windows Hello makes the Windows Hello key with its trading key (one prompt): kept DPAPI-only,
+    /// a file another program put there would be the key the Ledger approves, and the signer's own was lost at the first
+    /// Windows Hello after. Only a wallet that signs with no one there (test, automation) keeps it under DPAPI.
     static func sealedFor(_ id: String) -> Bool {
-        guard Vault.master() != nil else { return false }
-        return (try? SeedStore.sealed(SeedStore.file(id)))?.presence ?? true
+        (try? SeedStore.sealed(SeedStore.file(id)))?.presence ?? true
     }
 
     /// The key that seals `name`'s trading key, from the Windows Hello key.

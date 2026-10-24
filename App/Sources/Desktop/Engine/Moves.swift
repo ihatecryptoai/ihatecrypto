@@ -76,6 +76,7 @@ extension Engine {
         // A card waiting before this one stays on the canvas, marked: nothing of it was signed.
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Replaced by the next card: nothing was signed.", "Заменена следующей карточкой: ничего не подписано.")) }
         self.pending = pending
+        chainState.cardsDrawn += 1
         // A warning on the card is read before the button: the button says it goes ahead despite it.
         let id = UUID().uuidString
         card = Card(id: id, title: title, lines: lines, warnings: warnings + cautions,
@@ -95,6 +96,8 @@ extension Engine {
         if let id, id != card?.id { return }
         updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Cancelled: nothing was signed.", "Отменено: ничего не подписано.")) }
         if case .wallet(.multisigCreate)? = pending { multisigDraft = nil }
+        // The steps held behind this card go with it (the Mac's decline drops taskQueue): the model carries on again.
+        if chainState.afterCall?.board == card?.id { chainState.afterCall = nil }
         pending = nil
         card = nil
         awaitingAmount = nil
@@ -690,7 +693,8 @@ extension Engine {
             }
             noteSent(waiting)
             // A card a chain held its next steps behind: they run now, on this Confirm (holdAfterCall).
-            if let board = runningBoard, chainState.afterCall?.board == board { Task { await continueAfterCall(board) } }
+            // Marked held now, not when the task starts: nothing scheduled may start in between (runDueTasks).
+            if let board = runningBoard, chainState.afterCall?.board == board { chainState.runningHeld = true; Task { await continueAfterCall(board) } }
         } catch {
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown»,
             // never «failed» (the Mac's finish(false, unknown:)).

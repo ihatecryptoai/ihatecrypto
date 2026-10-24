@@ -86,7 +86,13 @@ enum Signer {
                 r.codeSet = true
                 return r
             case .off:
-                var r = SignerReply(ok: false, error: "\(CodeStore.tries) wrong codes: the code is off. Only \(CodeStore.fallback) opens ihatecrypto" + (CodeStore.canSign ? " and signs" : "") + " now.")
+                #if canImport(CWinSec)
+                // Windows: the code never signs there (Windows Hello does), so «and signs» only where it would.
+                let off = "\(CodeStore.tries) wrong codes: the code is off. Only \(CodeStore.fallback) opens ihatecrypto" + (CodeStore.canSign ? " and signs" : "") + " now."
+                #else
+                let off = "\(CodeStore.tries) wrong codes: the code is off. Only your Mac password opens ihatecrypto and signs now."
+                #endif
+                var r = SignerReply(ok: false, error: off)
                 (r.codeSet, r.codeOff) = (false, true)
                 return r
             }

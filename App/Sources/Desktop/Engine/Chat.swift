@@ -496,7 +496,8 @@ extension Engine {
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) \(Fmt.num(abs($0.size), maxFraction: 6)) at \(Fmt.price($0.entry)), unrealized \(Fmt.usd($0.unrealizedPnl))" }
         c.addressBook = book.map { "\($0.name) (\(AddressCheck.Network(rawValue: $0.network)?.title ?? $0.network))" }
         c.balances = portfolioFacts()
-        c.capital = Fmt.usd(portfolio.total)
+        // The capital the risk rules measure, gas coins left out (the Mac's equity): «risk 1% of capital» is that 1%.
+        c.capital = ruleEquity.map { Fmt.usd($0) }
         c.replyLanguage = replyLanguage
         c.off = Modules.current.offSummary
         c.safeSearch = safeSearch

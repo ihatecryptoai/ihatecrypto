@@ -60,14 +60,6 @@ extension Engine {
         settings.contractCap = usd == 50 ? nil : usd
     }
 
-    /// The plan with what the person left to the rules filled in (Plan.resolve: «by the book» risk, the stop by
-    /// volatility, the take, the leverage cap), as the Mac's Workspace.planned resolves it before it's checked.
-    func resolved(_ intent: TradeIntent, market: Market?) async -> (intent: TradeIntent, market: Market?) {
-        guard var m = market else { return (intent, market) }
-        if m.atrPct == nil { m.atrPct = await planATR(m.name) }
-        return (Plan.resolve(intent, market: m, equity: portfolio.total > 0 ? portfolio.total : nil, policy: policy).intent, m)
-    }
-
     /// Capital the risk rules measure against, as the Mac's `equity`: everything on show but the networks' own coins (SOL,
     /// ETH and the other gas coins) — the user's money, in the balance, but no trade may spend it. NEAR counts, as on the
     /// Mac. The plan, a stop change and a Solana buy all measure against this.

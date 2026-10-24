@@ -39,8 +39,11 @@ every change. Between the engine and the signer go the Mac's own `SignerRequest`
   order — then kept only in the signer's memory. Its address is kept beside it and recorded in the trusted settings, so
   Settings shows it without opening it. A DPAPI-only key file beside a wallet whose keys are sealed is never read: one
   another program puts there is neither shown, used for an order nor approved — turning the key on makes a new one
-  inside the signer and removes that file. (Keys kept DPAPI-only by builds before 2026-10-24 were on test machines;
-  they are left, and the key is approved again once.)
+  inside the signer and removes that file. A Ledger's trading key is sealed the same way, even when nothing has asked
+  Windows Hello yet (a Ledger brought in at the first run skips the steps that do): turning it on makes the Windows
+  Hello key then, one prompt, so a file put there first is never the key the Ledger is asked to approve, and the key
+  stays after the Windows Hello prompts that come later. (Keys kept DPAPI-only by builds before 2026-10-24 were on test
+  machines; they are left, and the key is approved again once.)
 - **After a restart, until that first Windows Hello**, the guardian can't move a stop by itself, as it can on a Mac. Its
   first try asks for the trading key, a prompt that closes after a minute; unanswered, that order is refused with why —
   never handed to the main key — and for ten minutes the key doesn't ask again for orders that only reduce (stops,
@@ -299,3 +302,12 @@ sandboxed frame got no wallet and its call was refused; a frame of the page's ow
 broken, as a strict Content-Security-Policy does (app.drift.trade has one), Tauri falls back to `chrome.webview.postMessage`:
 the page's call still came to the canvas, and neither frame's ever arrived — WebView2 hands only the page's messages to
 the webview, so a call without an Origin header is the page's own.
+
+Later on 2026-10-24, the same machine at 00a8388 and after: the whole package's tests pass there (a full run took about
+two and a half minutes once engines inside the test process stopped writing their states — before, `swift test`
+stalled on that output in two runs of three). By hand, in a development build: a typed message sends and is answered
+(it hadn't since 3543cc1: the page's send() threw with nothing attached); «send 10 USDC on arbitrum to Multisig» with
+no Safe there is refused; app.hyperliquid.xyz opens beside the chat with the wallet's row, and its connect stepping the
+panel aside for the request; inside the panel a sandboxed frame is refused and neither frame gets a wallet object;
+Quit Completely with Keep always running on leaves no process after 90 s, the task disabled and a RunOnce entry,
+the next launch turns the task back on and removes the entry, and switching Keep running off removes both.
