@@ -10,8 +10,15 @@ SWAPS = [("Touch ID", "Windows Hello"), ("this Mac", "this PC"), ("the Mac's", "
          ("the menu bar", "the tray"), ("menu bar", "tray"), ("⌥⌘Q", "Ctrl+Shift+Q"), ("⌘Q", "Ctrl+Q"), ("⌘L", "Ctrl+L"),
          ("⌘,", "Ctrl+,"), ("⌘", "Ctrl+")]
 
+# Whole phrases that are only the Mac's, said as the PC does it (after the swaps above): a PC has no «PC password» way in
+# and no Keychain.
+PHRASES = [(", Windows Hello or your PC password.", " or Windows Hello."),
+           ("On a PC without Windows Hello, prompts say «your PC password».", "Prompts name Windows Hello, the way this PC asks."),
+           ("and the key stays in this PC's Keychain.", "and its key is kept encrypted for your Windows user.")]
+
 def said(text):
     for a, b in SWAPS: text = text.replace(a, b)
+    for a, b in PHRASES: text = text.replace(a, b)
     return text
 
 releases = json.load(open(src, encoding="utf-8"))
