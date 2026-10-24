@@ -52,8 +52,8 @@ contracts ihatecrypto's own moves call that way go without it: Relay's depositor
 exchange and fee manager, Safe's factory. A call read by its selector alone (a swap, a vault, a claim) is that protocol's
 only at that protocol's own contract; elsewhere it is asked about like an unread call. Some acts ask in person afresh
 whatever session is open: running a Solana program not on the signer's list (a site's), turning the Hyperliquid
-trading key on or renewing its 7 days, approving ihatecrypto's Hyperliquid fee, a deposit into a Hyperliquid vault,
-and Relay's v3 payment by signature. The prompt shows the amounts and addresses the signer parsed itself (token
+trading key on or renewing its 7 days, approving ihatecrypto's Hyperliquid fee, and a deposit into a Hyperliquid
+vault. The prompt shows the amounts and addresses the signer parsed itself (token
 transfers with their amount, Hyperliquid orders and transfers with theirs), so an app that lies about a transaction is
 visible there.
 
@@ -105,11 +105,11 @@ Hyperliquid what you trade with. Turning each one on asks in person.
   Permit or nested types, with bytes to run as the wallet, or with any address but the wallet's (the zero address
   included: an open order) beside a number that isn't a nonce or a time, is refused; so is a 32-byte message or a bare
   hash to sign. The one payment by signature it makes is its own: an EIP-3009 authorization it builds
-  itself, for USDC (or Robinhood Chain's USDG) by the token's own domain, from the user's wallet, to Relay's approval
-  proxy only, valid an hour at most. Relay's solver pays the gas, so dollars on a network with no gas coin can still
-  move out. On Relay's v3.2 proxy the payment comes with a second signature over the calls the proxy runs with the
-  money: the signer reads them itself (one deposit through Relay's router into its depository, for the user's wallet),
-  computes the nonce that binds them and signs both; a changed call breaks the pair on-chain. On BNB Chain, whose dollar
+  itself, for USDC (or Robinhood Chain's USDG) by the token's own domain, from the user's wallet, to Relay's v3.2
+  approval proxy only, valid an hour at most, always paired with a second signature over the calls the proxy runs with
+  the money: the signer reads them itself (one deposit through Relay's router into its depository, for the user's
+  wallet, naming an order it checked), computes the nonce that binds them and signs both; a changed call breaks the
+  pair on-chain. Relay's solver pays the gas, so dollars on a network with no gas coin can still move out. On BNB Chain, whose dollar
   has no payment by signature, it signs one more zero-fee transaction it builds itself: a plain transfer of that dollar
   (to Relay's deposit address, approved like any new address) that BNB Chain's paymaster, MegaFuel, pays the gas for.
 
@@ -151,7 +151,8 @@ unpaid, as the protocol has it). Address book icons come from each entry's own s
   New recipients still need Touch ID, and no money goes to an account only a lookup table names.
 - Relay's approval proxy runs Relay's own calls with the exact amount approved to it (a same-network swap, a token sold
   through Relay): the signer can't read those calls, so what such a swap pays out rests on Relay and the app's
-  simulation. Relay's v3 payment by signature names no order either (v3.2's does); it asks in person every time.
+  simulation. Relay's v3 payment by signature names no order, so it is refused: dollars leave a network with no gas only
+through v3.2's pair, whose deposit names an order the signer checks.
 - A transfer to a Relay or 1Click deposit address is a plain transfer to a new address: it asks in person with that
   address, and what the deposit address does after is the bridge's.
 - A Solana or EVM key is in the signer's memory while it signs. Copies inside the derivation and secp256k1 code can't

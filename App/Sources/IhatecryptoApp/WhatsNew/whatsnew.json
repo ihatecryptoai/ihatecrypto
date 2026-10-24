@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.7.7",
+    "date": "2026-10-24",
+    "stories": [
+      {
+        "title": "A bridge pays only where you said",
+        "text": "Every Relay bridge is now checked by the signer itself: it recomputes the order from Relay's quote and signs the deposit only when that order pays you, or an address you approved, and refunds only you. Dollars leave a network with no gas only by a signature that names such an order.",
+        "symbol": "arrow.triangle.swap",
+        "color": "0A84FF"
+      },
+      {
+        "title": "Six reviewers, every finding fixed",
+        "text": "Claude, Codex, Kimi and GLM read the code again. On Solana an account named only by a lookup table is never taken for yours, every Jupiter swap form pays only your account, and a site's own program asks Touch ID each time. On EVM a multisig's own call, a swap paying two addresses and an NFT approval of token 0 are caught; a site's signature with someone else beside a number is refused. Scheduled tasks changed outside the app load paused.",
+        "symbol": "checkmark.shield.fill",
+        "color": "30D158"
+      }
+    ]
+  },
+  {
     "version": "0.7.6",
     "date": "2026-10-24",
     "stories": [

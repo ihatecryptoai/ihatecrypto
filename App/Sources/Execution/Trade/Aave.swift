@@ -408,15 +408,11 @@ extension Executor {
             guard mine.refusal(owner: me, now: now) == nil, (try? mine.digest()) == m.permit.nonce else { return nil }
             return mine
         }
-        let single = v32 != nil ? nil : quote.permit.flatMap { p -> (Relay.Permit, Permit3009)? in
-            let permit = Permit3009(chainId: p.chainId, token: p.token.lowercased(), from: p.from, to: p.to, value: amount, validBefore: p.validBefore, nonce: p.nonce)
-            guard p.chainId == net.rpc.chainId, permit.token == net.usdc, p.value == units, p.validAfter == 0, permit.refusal(owner: me, now: now) == nil,
-                  p.domainName == known?.name, p.domainVersion == known?.version else { return nil }
-            return (p, permit)
-        }
-        guard v32 != nil || single != nil else {
-            throw ExecutionError("There's no \(net.gasCoin) on \(net.name) for gas, and Relay won't take its USDC by signature right now (it asks for a transaction). "
-                                 + "Add a little \(net.gasCoin) to \(net.name); nothing was signed.")
+        // Only v3.2: v3's single EIP-3009 item names no order, so whom Relay pays would be its quote's word alone (the owner,
+        // 2026-10-24: «Выключить v3»). Relay switches to v3.2 on 2026-10-26.
+        guard v32 != nil else {
+            throw ExecutionError("There's no \(net.gasCoin) on \(net.name) for gas, and Relay's payment by signature that ihatecrypto can check (v3.2) isn't "
+                                 + "offered here yet. Add a little \(net.gasCoin) to \(net.name); nothing was signed.")
         }
         let arriving = Decimal(string: quote.amountOutFormatted) ?? 0, spend = Decimal(amount) / 1_000_000
         let worth = sol ? Decimal(string: quote.amountOutUSD) ?? 0 : arriving
@@ -428,10 +424,6 @@ extension Executor {
             // Relay takes the MulticallAuthorization first; the EIP-3009 one before it is refused.
             try await Relay.postSignature(endpoint: m.endpoint, body: m.body, signature: hex(signatures[0]))
             try await Relay.postPermit(m.permit, signature: hex(signatures[1]))
-        } else if let (p, permit) = single {
-            let signature = try await signer.signReceiveAuthorization(permit)
-            try journal.append(.init(chain: "relay", id: quote.requestId, kind: .signed, note: "\(net.name) USDC→\(there) \(show(amount)) by signature"))
-            try await Relay.postPermit(p, signature: hex(signature))
         }
         report("Signed: Relay takes \(show(amount)) USDC on \(net.name) by signature and pays the gas there; ≈ \(Fmt.num(arriving, maxFraction: 6)) \(stable) to \(there).")
         return try await relayArrival(quote.requestId, link: "https://relay.link/transaction/\(quote.requestId)", from: net, to: dest, hyperliquid: hyperliquid,

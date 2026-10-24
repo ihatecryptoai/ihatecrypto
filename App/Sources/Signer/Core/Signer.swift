@@ -566,21 +566,12 @@ enum Signer {
             r.checks = verdict.checks
             return r
 
-        case .signReceiveAuthorization(let chainId, let token, let to, let value, let validBefore, let nonce):
-            let permit = Permit3009(chainId: chainId, token: token, from: try address("evm"), to: to, value: value, validBefore: validBefore, nonce: nonce)
-            if let refusal = permit.refusal(owner: permit.from, now: UInt64(Date().timeIntervalSince1970)) {
-                var v = Verdict()
-                v.problems.append(refusal)
-                return refused(v)
-            }
-            let digest = try permit.typed().parts().digest
-            // Relay's v3 proxy: nothing this signature covers names the order, so whom Relay pays is only its quote's word,
-            // which the signer can't check here (v3.2's MulticallAuthorization binds it). Never inside an open session.
-            try confirmAfresh(permit.summary + "\nwhom Relay pays it to is set by its quote, which the signer can't check on this kind of payment")
-            var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: permit.summary) { try EVMSigner.sign(digest: digest, privateKey: $0) }
-            r.checks = ["The signer built the payment by signature itself: a dollar it knows, from this wallet, to Relay's approval proxy, valid under an hour."]
-            return r
+        case .signReceiveAuthorization:
+            // Relay's v3 proxy alone: nothing this signature covers names the order, so whom Relay pays would be only its
+            // quote's word. Off (the owner, 2026-10-24); v3.2's pair (signRelayMulticallPermit) binds the order and signs.
+            var v = Verdict()
+            v.problems.append("A payment by signature that names no Relay order: whom it pays can't be checked, so ihatecrypto doesn't sign it.")
+            return refused(v)
 
         case .signSponsoredTransfer(let chainId, let nonce, let gasLimit, let token, let to, let amount, let recipients):
             let owner = try address("evm")
