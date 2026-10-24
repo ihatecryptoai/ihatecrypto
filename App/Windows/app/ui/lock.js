@@ -13,13 +13,12 @@ const LENGTH = 6;
 let typed = "";
 
 /** The lock screen while the window is locked, else null: app.js draws it instead of the window. */
-let offered = false;
+let offered = 0;
 export function lockScreen() {
   const l = ui.state?.lock;
-  // Windows Hello stood in for a code that's off: Settings › Wallet opens on making a new one, once.
-  if (l?.offerNewCode && !l.locked && !offered) { offered = true; store("settingsTab", "wallet"); ui.view = "settings"; }
-  // A later «Forgot the code?» opens it again: the offer is said once each time it's made.
-  if (!l?.offerNewCode) offered = false;
+  // Windows Hello stood in for a code that's off: Settings › Wallet opens on making a new one, once for each offer (a
+  // later «Forgot the code?» opens it again).
+  if (l?.offerNewCode && !l.locked && l.newCodeOffers !== offered) { offered = l.newCodeOffers; store("settingsTab", "wallet"); ui.view = "settings"; }
   if (!l?.locked) return null;
   // An open dialog (an import, a rename) goes, as the Mac closes its import window: nothing typed there survives the lock.
   ui.overlay = null;

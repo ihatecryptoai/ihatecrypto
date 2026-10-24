@@ -14,5 +14,7 @@ export function loadError(code) {
     crashed: t("The page's process stopped. Press Reload.", "Процесс страницы остановился. Нажми «Обновить»."),
     https: t("That link went to an http page or another app: ihatecrypto's browser opens https sites only, so it stayed here.",
       "Эта ссылка вела на http-страницу или в другое приложение: браузер ihatecrypto открывает только https-сайты, поэтому остался здесь."),
+    unchecked: t("ihatecrypto couldn't check this site against MetaMask's list of phishing sites, so it didn't open it. Try again in a moment.",
+      "ihatecrypto не смог сверить этот сайт со списком фишинговых сайтов MetaMask, поэтому не открыл его. Попробуй ещё раз чуть позже."),
   }[code] || lead + t(`WebView2 error ${code.replace("other:", "")}. Press Reload.`, `ошибка WebView2 ${code.replace("other:", "")}. Нажми «Обновить».`);
 }

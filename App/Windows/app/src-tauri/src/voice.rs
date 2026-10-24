@@ -166,12 +166,20 @@ pub fn listen_live(heard: impl Fn(String) + Send + Sync + 'static) -> Result<Str
             Ok(both(&settled, &guess))
         }
         Ended::Stop(false) => { let _ = session.CancelAsync().and_then(|op| op.join()); Ok(String::new()) }
-        Ended::Completed(SpeechRecognitionResultStatus::MicrophoneUnavailable) => Err("No microphone is available.".into()),
-        Ended::Completed(SpeechRecognitionResultStatus::Success | SpeechRecognitionResultStatus::TimeoutExceeded
-            | SpeechRecognitionResultStatus::UserCanceled | SpeechRecognitionResultStatus::PauseLimitExceeded) => Ok(both(&settled, &guess)),
-        Ended::Completed(SpeechRecognitionResultStatus::NetworkFailure) =>
-            Err("Windows' online speech recognition didn't answer: check the internet connection and try again.".into()),
-        Ended::Completed(_) => Err("Windows couldn't make out the words; try again.".into()),
+        // Windows ended it by itself: what was heard goes into the field, and an error is said only when nothing was
+        // (the Mac's Voice: «Didn't catch that» with an empty transcript).
+        Ended::Completed(status) => {
+            let words = both(&settled, &guess);
+            match status {
+                _ if !words.is_empty() => Ok(words),
+                SpeechRecognitionResultStatus::MicrophoneUnavailable => Err("No microphone is available.".into()),
+                SpeechRecognitionResultStatus::Success | SpeechRecognitionResultStatus::TimeoutExceeded
+                    | SpeechRecognitionResultStatus::UserCanceled | SpeechRecognitionResultStatus::PauseLimitExceeded => Ok(words),
+                SpeechRecognitionResultStatus::NetworkFailure =>
+                    Err("Windows' online speech recognition didn't answer: check the internet connection and try again.".into()),
+                _ => Err("Windows couldn't make out the words; try again.".into()),
+            }
+        }
     };
     let _ = session.RemoveResultGenerated(result);
     let _ = session.RemoveCompleted(completed);

@@ -100,7 +100,7 @@ export const releases = [
   "stories": [
    {
     "title": "The fee's settings, named right",
-    "text": "The fee's approval on a trade plan and What's New now point to Settings › Wallet › Hyperliquid, where ihatecrypto's fee shows with its Revoke button, and a Ledger names the referral code when it signs it. Every release also rebuilds byte for byte on GitHub's Mac now, not only on ours.",
+    "text": "The fee's approval on a trade plan and What's New now point to Settings › Wallet › Hyperliquid, where ihatecrypto's fee shows with its Revoke button, and a Ledger names the referral code when it signs it. Every Mac release also rebuilds byte for byte on GitHub's Mac now, not only on ours.",
     "symbol": "wrench.and.screwdriver.fill",
     "color": "5856D6"
    }
@@ -148,13 +148,13 @@ export const releases = [
    },
    {
     "title": "Updates wait for you",
-    "text": "A new version shows a small window — Install Update, Remind Me Later or Skip This Version. Nothing downloads or installs until you press Install.",
+    "text": "A new version shows a notification, and Settings › About has Install and Later. Nothing downloads or installs until you press Install.",
     "symbol": "arrow.down.circle.fill",
     "color": "5856D6"
    },
    {
-    "title": "Open source, rebuilt byte for byte",
-    "text": "ihatecrypto's code is public under GPL-3.0, and every release rebuilds from its tag byte for byte apart from the signatures, so anyone can check the app is that code. The signer now proves each of your own addresses with the key at every signature, checks what Uniswap and Jupiter pay out, and caps leverage.",
+    "title": "Open source, the Mac app rebuilt byte for byte",
+    "text": "ihatecrypto's code is public under GPL-3.0, and every Mac release rebuilds from its tag byte for byte apart from the signatures, so anyone can check that app is that code. The Windows installer isn't rebuilt and compared that way. The signer now proves each of your own addresses with the key at every signature, checks what Uniswap and Jupiter pay out, and caps leverage.",
     "symbol": "checkmark.seal.fill",
     "color": "34C759"
    },
@@ -310,7 +310,7 @@ export const releases = [
    },
    {
     "title": "Smoother canvas",
-    "text": "Pinch and Ctrl+-scroll zoom stay at full frame rate. The glowing edge of a busy canvas breathes a few times and then stays lit, and the coin's face is played as a film, so the PC does far less work while the chat thinks.",
+    "text": "Pinch and Ctrl+scroll zoom stay at full frame rate.",
     "symbol": "gauge.with.dots.needle.67percent",
     "color": "5856D6"
    },
@@ -898,7 +898,7 @@ export const releases = [
   "stories": [
    {
     "title": "Updates come by themselves",
-    "text": "This copy looks at updates.ihatecrypto.ai once a day. A new version downloads in the background and goes in at «Restart to update»; the wallet, settings and canvases stay.",
+    "text": "This copy looks for a new version every six hours. It goes in when you press Install in Settings › About; the wallet, settings and canvases stay.",
     "try": "check for updates",
     "symbol": "arrow.down.circle.fill",
     "color": "FF7A2F"
@@ -936,7 +936,7 @@ export const releases = [
   "stories": [
    {
     "title": "Updates by themselves",
-    "text": "ihatecrypto looks for a new version once a day. When one is ready you get a notification; Install shows what changed first.",
+    "text": "ihatecrypto looks for a new version every six hours. When one is ready you get a notification; Install is in Settings › About, and What's New shows what changed once it restarts.",
     "try": "check for updates",
     "symbol": "arrow.down.circle.fill",
     "color": "FF7A2F"

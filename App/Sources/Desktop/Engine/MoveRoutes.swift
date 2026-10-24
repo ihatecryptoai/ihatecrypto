@@ -63,10 +63,21 @@ extension Engine {
     /// The route drawn again from what is known now: a quote that came lands on its step, and the footer says the way it
     /// takes now (a cross swap found through NEAR Intents, Tempo's exchange or Relay's swap there).
     func redrawRoute(_ board: String, _ c: WalletCommand) {
+        if redrawChain(board) { return }
         guard let steps = routeSteps(c) else { changed(); return }
         let note = routeNote(c)
         updateBoard(board) { b in b.steps = steps; if let note { b.note = note } }
         nameTokens(board, c)
+    }
+
+    /// A chain's waiting card drawn again whole (Canvas.swift steps(for:)) once its first move's quote or a token's
+    /// symbol comes: the Mac quotes and names the chain's first move as any card's (WithdrawBoard, chainSteps).
+    @discardableResult
+    func redrawChain(_ board: String) -> Bool {
+        guard case .chain? = pending, let p = pending, card?.id == board else { return false }
+        let steps = steps(for: p, title: "", lines: [])
+        updateBoard(board) { $0.steps = steps }
+        return true
     }
 
     /// A move's title with each token it names by contract as people read it, «⚠ USDC (0x3C44…93BC)» (the Mac's
@@ -223,7 +234,7 @@ extension Engine {
     private func learnedName(_ contract: String) async {
         guard let symbol = try? await TokenLookup.lookup(contract).first?.symbol else { return }
         ContractNames.known[contract.lowercased()] = symbol
-        if case .wallet(let c)? = pending, let id = card?.id { redrawRoute(id, c) }
+        if case .wallet(let c)? = pending, let id = card?.id { redrawRoute(id, c) } else if let id = card?.id { redrawChain(id) }
     }
 
     /// A token that arrives: what's held of it now (0 when none) and that plus what arrives, «≈».
@@ -557,17 +568,31 @@ extension Engine {
                 st(savedLabel, r.entry.name, ends(r.entry.address) + " · " + (AddressCheck.Network(rawValue: r.entry.network)?.title ?? r.entry.network))]
     }
 
-    /// A paid request (MPP): USDC on Tempo (a dollar's float from Solana first when short), the payment, the service.
+    /// Where a top-up of Tempo comes from, as the executor's ensureEVM decides (the Mac's tempoSource): nil = Solana, when
+    /// it holds enough; else the EVM network that does, with what it sends (a dollar over for Relay).
+    func tempoSource(_ need: Decimal) -> (net: EVMNetwork, send: Decimal)? {
+        EVMNetwork.source(arrive: need, onSolana: usdcFree(on: "solana") ?? 0, target: "tempo", held: { self.usdcFree(on: $0) })
+    }
+
+    /// What's short on Tempo for a paid request: a dollar's float and a cent for fees (Executor.tempoFloat); nil when enough.
+    func tempoNeed(_ price: Decimal) -> Decimal? {
+        let float = Decimal(Executor.tempoFloat) / 1_000_000
+        return tempoUSDC < price + Decimal(string: "0.01")! ? max(price, float) - tempoUSDC + Decimal(string: "0.01")! : nil
+    }
+
+    /// A paid request (MPP): USDC on Tempo (a dollar's float first when short, from Solana or the network holding it),
+    /// the payment, the service.
     private func payment(_ c: WalletCommand) -> [Board.Step]? {
         guard case .pay(_, let url, _) = c, let q = payment, q.command == c else { return nil }
         let ch = q.challenge, host = URL(string: url)?.host ?? ch.realm, price = Fmt.num(ch.usdc, maxFraction: 6)
         let there = tempoUSDC, float = Decimal(Executor.tempoFloat) / 1_000_000
-        let first: Board.Step
-        if there < ch.usdc + Decimal(string: "0.01")! {
-            let need = max(ch.usdc, float) - there + Decimal(string: "0.01")!
+        var first: Board.Step
+        if let need = tempoNeed(ch.usdc) {
             let requests = NSDecimalNumber(decimal: (max(ch.usdc, float) / ch.usdc).rounded(0, .down)).intValue
-            first = st(say("FROM · SOLANA → TEMPO", "ОТКУДА · SOLANA → TEMPO"), "\(Fmt.num(need, maxFraction: 6)) USDC",
-                       say("a float for ≈ \(requests) requests like this · Relay ≈ $0.02", "запас на ≈ \(requests) таких запросов · Relay ≈ $0.02"), moved("USDC", on: "solana", by: -need))
+            let src = tempoSource(need), key = src?.net.key ?? "solana", name = src?.net.name ?? "Solana", sends = src?.send ?? need
+            first = st(say("FROM · ", "ОТКУДА · ") + name.uppercased() + " → TEMPO", "\(Fmt.num(sends, maxFraction: 6)) USDC",
+                       say("a float for ≈ \(requests) requests like this · Relay ≈ $0.02", "запас на ≈ \(requests) таких запросов · Relay ≈ $0.02"), moved("USDC", on: key, by: -sends))
+            first.lines.append(usdcFree(on: key).map { say("\(Fmt.num($0)) USDC on \(name)", "\(Fmt.num($0)) USDC в \(name)") } ?? say("from your Solana USDC", "из твоих USDC на Solana"))
         } else {
             first = st(from("tempo"), "\(price) USDC", say("your USDC on Tempo", "твои USDC в Tempo"),
                        Board.Money(place: "Tempo", symbol: "USDC", was: Self.amount(there, "USDC"), after: Self.amount(max(0, there - ch.usdc), "USDC")))
@@ -780,14 +805,21 @@ extension Engine {
         case .pay:
             guard let q = payment, q.command == c else { return nil }
             let ch = q.challenge, host: String = { if case .pay(_, let url, _) = c { return URL(string: url)?.host ?? ch.realm } else { return ch.realm } }()
-            let price = Fmt.num(ch.usdc, maxFraction: 6), e = AddressCheck.ends(ch.payee), short = tempoUSDC < ch.usdc + Decimal(string: "0.01")!
+            let price = Fmt.num(ch.usdc, maxFraction: 6), e = AddressCheck.ends(ch.payee), need = tempoNeed(ch.usdc)
+            let src = need.flatMap(tempoSource)?.net.name ?? "Solana"
             return say("One Tempo transfer of \(price) USDC to the address \(host) named (\(e.start) … \(e.end)); ", "Один перевод в Tempo на \(price) USDC по адресу, который назвал \(host) (\(e.start) … \(e.end)); ")
-                + (short ? say("what's short comes from Solana over Relay first; ", "недостающее сначала придёт с Solana через Relay; ") : "")
+                + (need != nil ? say("what's short comes from \(src) over Relay first; ", "недостающее сначала придёт из \(src) через Relay; ") : "")
                 + say("the fee, ≈ $0.001, comes out of the USDC. Then the request goes again with the payment's hash.", "комиссия ≈ $0,001 — из этих USDC. Потом запрос уходит снова с хешем платежа.") + confirm
         case .aave(true, let x?, let net), .morpho(true, let x?, let net):
-            // The Mac's lendRoute footer: Solana's part only when Base is short, and Ethereum's gas said.
+            // The Mac's lendingRoute footer: Solana's part when the USDC or the gas there is short, and Ethereum's gas said.
             let morpho: Bool = if case .morpho = c { true } else { false }
-            let n = name(net), coin = EVMNetwork.named(net)?.gasCoin ?? "ETH", short = (usdcFree(on: net) ?? 0) < x
+            let n = name(net), coin = EVMNetwork.named(net)?.gasCoin ?? "ETH", short = (usdcFree(on: net) ?? 0) < x || gasLow(on: net)
+            if net == "base" {
+                return (short ? say("One Solana signature for the bridge, then two", "Одна подпись в Solana для моста, потом две") : say("Two", "Две"))
+                    + say(" on Base: approve exactly \(Fmt.num(x)) USDC, then \(morpho ? "deposit; the shares come to this wallet only" : "supply"). \(morpho ? "The vault’s asset is" : "Pool and rate are") re-read from Base first.",
+                          " транзакции в Base: разрешение ровно на \(Fmt.num(x)) USDC, потом \(morpho ? "депозит — доли приходят только на этот кошелёк" : "вклад"). \(morpho ? "Актив хранилища" : "Пул и ставка") сначала перечитываются из Base.")
+                    + confirm
+            }
             return (short ? say("What's missing on \(n) comes from Solana over Relay, with \(coin) for gas when there's none; then two",
                                 "Недостающее на \(n) придёт с Solana через Relay, с \(coin) на газ, если его нет; потом две")
                           : say("Two", "Две"))

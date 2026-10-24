@@ -100,6 +100,8 @@ nonisolated struct BlockData: Codable, Equatable {
             var usd: Decimal?
             var gain: Decimal?
             var paid: Decimal?
+            /// «(0.5 of it)»: the cost counts only this much of what's held (the Mac's partly).
+            var counted: String? = nil
         }
     }
 
@@ -121,6 +123,8 @@ nonisolated struct BlockData: Codable, Equatable {
     struct ApprovalsCard: Codable, Equatable {
         var list: [Approval]
         var unread: [String]
+        /// Drawn before the first read is back: «Reading every network's approvals…» (the Mac's ApprovalsBoard loading).
+        var loading: Bool? = nil
         struct Approval: Codable, Equatable {
             var chain: String
             var place: String
@@ -475,8 +479,10 @@ extension Engine {
             let symbol = (coin.split(separator: ":").last.map(String.init) ?? coin).uppercased()
             for n in portfolio.networks {
                 for row in n.rows where row.symbol.uppercased() == symbol && row.value > 0 {
+                    let basis = row.key.flatMap(cost)
+                    let partly = row.gain != nil && (basis?.amount ?? 0) > 0 && basis!.amount < row.value * Decimal(string: "0.999")!
                     held.append(.init(symbol: row.symbol, network: n.key, place: n.name, amount: row.amount, usd: row.usd, gain: row.gain,
-                                      paid: row.gain.flatMap { g in row.usd.map { $0 - g } }))
+                                      paid: row.gain.flatMap { g in row.usd.map { $0 - g } }, counted: partly ? Fmt.num(basis!.amount, maxFraction: 6) : nil))
                 }
             }
         }
@@ -501,8 +507,26 @@ extension Engine {
     func refreshApprovals(_ id: String) async {
         guard let e = try? executor() else { return }
         let (list, unread) = await e.approvals()
+        fillApprovals(id, list, unread: unread)
+    }
+
+    /// The approvals board at once, saying it reads every network, as the Mac's does on the first ask; `fillApprovals`
+    /// puts what was read into it.
+    func readingApprovals() -> String {
+        var b = Board(kind: "result", title: say("Approvals", "Разрешения"))
+        b.data = BlockData(approvals: .init(list: [], unread: [], loading: true))
+        b.request = lastRequest
+        return pin(b)
+    }
+
+    func fillApprovals(_ id: String, _ list: [TokenApproval], unread: [String]) {
         updateBoard(id) { b in
-            b.lines = list.prefix(30).map { "\($0.symbol) on \($0.chain) → \($0.spenderName ?? $0.spender)" + ($0.unlimited ? " · unlimited" : "") }
+            b.lines = list.isEmpty ? [say("No token approvals.", "Разрешений нет.")]
+                : list.prefix(30).map { "\($0.symbol) on \($0.chain) → \($0.spenderName ?? $0.spender)" + ($0.unlimited ? " · unlimited" : "") }
+            b.actions = list.isEmpty ? nil : list.prefix(12).map { a in
+                Board.Action(title: say("Revoke \(a.symbol) · \(a.chain)", "Отозвать \(a.symbol) · \(a.chain)"),
+                             command: WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2).summary)
+            }
             b.data = BlockData(approvals: approvalsCard(list, unread: unread))
             b.at = Date()
         }

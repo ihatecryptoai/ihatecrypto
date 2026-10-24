@@ -86,9 +86,10 @@ extension Engine {
             return
         }
         do {
+            // Off the Ledger only once the signer said yes (the Mac's switchWallet): a cancelled Windows Hello leaves it on.
             if wallet.id == LedgerAccount.id { useLedger(true) } else {
+                if status?.activeWallet != wallet.id { try await signerCall(.setActiveWallet(id: wallet.id)) }
                 useLedger(false)
-                try await signerCall(.setActiveWallet(id: wallet.id))
             }
             reply(say("Now signing with «\(wallet.label)»: \(Self.describe(wallet, say: say)).", "Теперь подписывает «\(wallet.label)»: \(Self.describe(wallet, say: say))."))
         } catch {

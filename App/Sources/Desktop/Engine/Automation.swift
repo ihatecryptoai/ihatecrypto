@@ -71,8 +71,10 @@ extension Engine {
                 }
             }
             pin(Board(kind: "schedule", title: "schedule"))
-            reply(say("Made «\(automationWallet?.label ?? "Automation")»: scheduled tasks spend from it without Windows Hello. Keep only their budget there — send it USDC and a little SOL (its address is on the Schedule block).",
-                      "Создан «\(automationWallet?.label ?? "Automation")»: задачи по расписанию тратят с него без Windows Hello. Держи там только их бюджет — отправь на него USDC и немного SOL (адрес на блоке «Расписание»).")
+            // Its key is under Windows' data protection for this account only (docs/windows.md § Keys): the Mac's «if this
+            // Mac's keychain is lost, so is what's on it» (Tasks.swift:493-495), said for this PC.
+            reply(say("Made «\(automationWallet?.label ?? "Automation")»: scheduled tasks spend from it without Windows Hello. Keep only their budget there: if this PC's Windows account is lost, so is what's on it. Send it USDC and a little SOL (its address is on the Schedule block).",
+                      "Создан «\(automationWallet?.label ?? "Automation")»: задачи по расписанию тратят с него без Windows Hello. Держи там только их бюджет: если учётная запись Windows на этом ПК пропадёт, пропадёт и то, что на нём. Отправь на него USDC и немного SOL (адрес на блоке «Расписание»).")
                   + (held.isEmpty ? "" : say(" Tasks made before it would now spend from it by themselves, so they’re paused (\(held.count)): each starts only when you switch it on in the Schedule.",
                                              " Задачи, созданные раньше, теперь тратили бы с него сами, поэтому они на паузе (\(held.count)): каждая начнёт работать, только когда ты включишь её в «Расписании».")),
                   note: note)

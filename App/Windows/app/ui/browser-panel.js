@@ -44,7 +44,7 @@ function draw() {
       disabled: !url, onclick: copyLink }, icon(copied ? "check" : "link", 15)),
     h("button", { class: "icon-btn", title: t("Open with your wallet: the site can ask to connect and to sign", "Открыть с кошельком: сайт сможет попросить подключиться и подписать"),
       disabled: !secure, onclick: () => go("wallet") }, icon("wallet.pass", 15)),
-    h("button", { class: "icon-btn", title: t("Open in your browser", "Открыть в своём браузере"), disabled: !secure, onclick: () => go("system") }, icon("globe", 15)),
+    h("button", { class: "icon-btn", title: t("Open in your browser", "Открыть в своём браузере"), disabled: !/^https?:$/.test(url?.protocol || ""), onclick: () => go("system") }, icon("globe", 15)),
     h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => go("close") }, icon("xmark")),
   );
 }

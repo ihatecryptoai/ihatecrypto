@@ -6,8 +6,10 @@
   font: 700 21px "DynaPuff", "Onest", sans-serif; }
 .ob-column { max-width: 660px; margin: 0 auto; padding: 104px 24px 40px; }
 
-/* The flow's top: the logo, the rail of stages in the middle (clear of Windows' caption buttons at the corner). */
-.ob-top { position: absolute; left: 28px; right: 28px; top: 40px; display: flex; align-items: center; gap: 12px; }
+/* The flow's top: the logo, the rail of stages in the middle (clear of Windows' caption buttons at the corner). In the
+   page's flow, so a rail wrapped on a narrow window pushes the card down instead of covering its title. */
+.ob-top { margin: 40px 28px 0; display: flex; align-items: center; gap: 12px; }
+.ob-top + .ob-column { padding-top: 32px; }
 .ob-top-brand { width: 190px; flex: none; display: flex; align-items: center; gap: 9px; font: 700 21px "DynaPuff", "Onest", sans-serif; }
 .ob-top-pad { width: 190px; flex: none; }
 .ob-rail { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; color: var(--tertiary); }

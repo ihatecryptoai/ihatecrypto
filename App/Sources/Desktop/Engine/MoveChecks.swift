@@ -33,6 +33,13 @@ extension Engine {
         }
     }
 
+    /// The network's own coin under the floor a lending card reads, as the Mac's: Base's aaveRoute by 0.000005 ETH, the
+    /// other networks' lendingRoute by the network's gas floor. Unread counts as none.
+    func gasLow(on net: String) -> Bool {
+        let gas = rowsRead(net)?.filter { $0.contract == "native" }.reduce(0) { $0 + $1.value } ?? 0
+        return gas < (net == "base" ? Decimal(string: "0.000005")! : EVMNetwork.named(net).map { Decimal($0.gasFloor) / 1_000_000_000_000_000_000 } ?? 0)
+    }
+
     /// What a deposit row holds: «Jupiter Lend», «Kamino Lend», «Kamino» (a vault), «Aave», «Morpho».
     private func depositThere(_ names: [String], on net: String) -> Decimal {
         rowsRead(net)?.filter { $0.section == "defi" && names.contains($0.symbol) }.reduce(0) { $0 + $1.value } ?? 0
@@ -640,6 +647,14 @@ extension Engine {
         default:
             let keys = ["solana", "hyperliquid", "near"] + EVMNetwork.all.map(\.key)
             guard let key = keys.first(where: { WalletCommand.placeName($0).uppercased() == place || $0.uppercased() == place }) else { return nil }
+            // A contract as tokenName writes it, «AI (0x2E8c…1e18)» (⚠ before a lookalike): its row by the contract's ends.
+            if let m = unit.firstMatch(of: /\((0x[0-9a-fA-F]{4})…([0-9a-fA-F]{4})\)$/) {
+                let (head, tail) = (String(m.1).lowercased(), String(m.2).lowercased())
+                return rowsRead(key).map { rows in
+                    rows.filter { $0.section == "tokens" && ($0.contract.map { $0.lowercased().hasPrefix(head) && $0.lowercased().hasSuffix(tail) } ?? false) }
+                        .reduce(0) { $0 + $1.value }
+                }
+            }
             return heldThere(unit, on: key)
         }
     }
@@ -682,10 +697,32 @@ extension Engine {
         case .aave(true, let x?, let net), .morpho(true, let x?, let net):
             let morpho: Bool = if case .morpho = c { true } else { false }
             let name = WalletCommand.placeName(net), what = morpho ? "Morpho" : "Aave"
-            let have = usdcFree(on: net) ?? 0, short = max(0, x - have)
-            let from: [Board.Step] = short > 0
-                ? [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(max(short, Decimal(string: "0.5")!), "USDC"), solUSDC, moved("USDC", on: "solana", by: -max(short, Decimal(string: "0.5")!), approx: true)),
-                   bridged(say("USDC → \(name)", "USDC → \(name)"), say("+ gas when there's none · ≈ 2 s", "+ газ, если его нет · ≈ 2 с"))]
+            let have = usdcFree(on: net) ?? 0, short = max(0, x - have), needGas = gasLow(on: net)
+            if net == "base" {
+                // The Mac's aaveRoute on Base: what Solana sends with Relay's fee, the gas coming along, the rate read.
+                let over = max(short, needGas ? Decimal(string: "0.5")! : 0), sends = over + (needGas ? Decimal(string: "0.14")! : Decimal(string: "0.03")!)
+                let rate = placeFacts.rates[morpho ? "morpho" : "aave"].map { say("≈ \(Fmt.num($0))% a year", "≈ \(Fmt.num($0))% в год") } ?? say("rate from the pool", "ставка пула")
+                let from: [Board.Step] = short > 0 || needGas
+                    ? [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), usdcFree(on: "solana").map { "\(Fmt.num($0)) USDC" } ?? "—",
+                          say("sends ≈ \(Fmt.num(sends)) USDC", "отправит ≈ \(Fmt.num(sends)) USDC"), moved("USDC", on: "solana", by: -sends, approx: true)),
+                       st(say("BRIDGE · RELAY", "МОСТ · RELAY"), "\(Fmt.num(over)) USDC → Base",
+                          needGas ? say("+ $0.03 of ETH for gas · ≈ 2 s", "+ $0.03 в ETH на газ · ≈ 2 с") : say("≈ 2 s", "≈ 2 с"), moved("USDC", on: "base", by: over, approx: true))]
+                      + (needGas ? [st(say("GAS · COMES ALONG", "ГАЗ · ПРИДЁТ С МОСТОМ"), say("≈ $0.03 of ETH", "≈ $0.03 в ETH"),
+                                       say("there’s no ETH on Base yet · it comes with the bridge", "ETH на Base пока нет · он придёт с мостом"))] : [])
+                    : [st(say("ON BASE", "В BASE"), "\(Fmt.num(have)) USDC", say("already there, gas too", "уже там, газ тоже"), moved("USDC", on: net, by: -x))]
+                return from + [approve(n(x, "USDC"), for: what),
+                               st(morpho ? "MORPHO · " + MorphoVault.name.uppercased() : "AAVE V3 · BASE", n(x, "USDC"), rate,
+                                  into(what, "USDC", was: depositThere([what], on: net), by: x))]
+            }
+            let coin = EVMNetwork.named(net)?.gasCoin ?? "ETH", arrive = max(short, Decimal(string: "0.5")!)
+            // The Mac's lendingRoute: no gas there brings it from Solana too, with half a dollar at least.
+            let from: [Board.Step] = short > 0 || needGas
+                ? [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(arrive, "USDC"),
+                      (have > 0 ? say("\(Fmt.num(have)) already on \(name) · ", "\(Fmt.num(have)) уже в \(name) · ") : "") + solUSDC,
+                      moved("USDC", on: "solana", by: -arrive)),
+                   st(say("BRIDGE · RELAY", "МОСТ · RELAY"), "USDC → \(name)",
+                      needGas ? say("+ \(coin) for gas · ≈ 2 s", "+ \(coin) на газ · ≈ 2 с") : say("≈ 2 s", "≈ 2 с"),
+                      moved("USDC", on: net, by: arrive, approx: true))]
                 : [st(say("ON ", "В ") + name.uppercased(), "\(Fmt.num(have)) USDC", say("already there, gas too", "уже там, газ тоже"), moved("USDC", on: net, by: -x))]
             return from + [approve(n(x, "USDC"), for: what),
                            st((morpho ? "MORPHO · " : "AAVE V3 · ") + name.uppercased(), n(x, "USDC"), say("rate from the \(morpho ? "vault" : "pool")", "ставка \(morpho ? "хранилища" : "пула")"),

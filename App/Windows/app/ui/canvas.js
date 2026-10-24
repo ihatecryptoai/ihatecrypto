@@ -71,6 +71,19 @@ function zoomAbout(px, py, factor) {
 function setZoom(z) { cam.z = clamp(Math.round(z * 10) / 10, Z_MIN, Z_MAX); place(); saveCam(); }
 function fitHome() { Object.assign(cam, { x: 0, y: 0, z: 1 }); place(); saveCam(); }
 
+/** Pans the camera until `el`, on the canvas, is in view (the Mac scrolls its canvas to a form opened from elsewhere): the
+ * canvas is a transform, so the browser's scrollIntoView moves nothing. */
+export function reveal(el) {
+  if (!world || !el || !world.contains(el)) return;
+  camera();
+  const r = el.getBoundingClientRect();
+  const left = railEdge(), right = Math.max(left + 1, window.innerWidth - CHAT_COLUMN);
+  if (r.left < left || r.right > right) cam.x += (left + right) / 2 - (r.left + r.right) / 2;
+  if (r.top < 0 || r.bottom > window.innerHeight) cam.y += window.innerHeight / 2 - (r.top + r.bottom) / 2;
+  place();
+  saveCam();
+}
+
 /** The rail's Portfolio button: back to the portfolio at 100 %; already there, the window's edge pulses once instead. */
 export function goHome() {
   camera();

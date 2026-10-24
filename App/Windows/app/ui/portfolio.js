@@ -54,8 +54,12 @@ const amount = (text) => masked(text, String(text).replace(/\d/g, "•"));
 
 export function portfolioFrame() {
   const p = ui.state.portfolio;
-  return h("div", { class: "portfolio", oncontextmenu: (e) => askMenu(e, t("Portfolio", "Портфель")) }, p.updatedAt ? loaded(p) : loading());
+  const title = t("Portfolio", "Портфель");
+  return h("div", { class: "portfolio" + askedClass(title), oncontextmenu: (e) => askMenu(e, title) }, p.updatedAt ? loaded(p) : loading());
 }
+
+/** A frame that goes with the next message lights its edge, as the Mac's (RouteCards.swift:1487-1489). */
+export const askedClass = (title) => (ui.attachedAbout || []).some((a) => a.title === title) ? " pf-asked" : "";
 
 /** Right-click on a frame that isn't a block of the plan (the Mac's BlockMenu on the portfolio, a place's details, Top up,
  *  History): the chat about it, or «What's going on here?» straight away. A row with its own menu keeps it. */
@@ -65,7 +69,9 @@ export function askMenu(e, title) {
   const s = ui.state, can = !s.thinking && !!s.model?.connected;
   const el = popup(e, [
     // A chip over the field, as the Mac's attach: the frame goes with the next message, the question is the person's.
-    [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attachAbout({ title, about: t(`About «${title}» on the canvas`, `Про «${title}» на холсте`) })],
+    askedClass(title)
+      ? [[icon("xmark.circle", 14), t("Take out of the chat", "Убрать из чата")], () => { ui.attachedAbout = ui.attachedAbout.filter((a) => a.title !== title); render(); }]
+      : [[icon("bubble.left", 14), t("Ask or act in chat", "Спросить или поручить в чате")], () => attachAbout({ title, about: t(`About «${title}» on the canvas`, `Про «${title}» на холсте`) })],
     [[icon("questionmark.bubble", 14), t("What's going on here?", "Что здесь происходит?")],
       () => act("send", { text: t(`What's going on in «${title}»?`, `Что происходит в «${title}»?`) })],
   ], "route-menu");
@@ -223,7 +229,7 @@ function scheduleTop3() {
   const held = s.schedulePaused === true;
   const dated = s.tasks.map((x) => ({ key: "task:" + x.id, task: x, paused: !!x.paused, next: x.next }))
     .sort((a, b) => (a.next ? Date.parse(a.next) : Infinity) - (b.next ? Date.parse(b.next) : Infinity));
-  const perps = (s.positions || []).map((p) => ({ key: "perp:" + p.coin, perp: p, paused: false }));
+  const perps = (s.positions || []).map((p) => ({ key: "perp:" + (p.market || p.coin), perp: p, paused: false }));
   const entries = [...dated, ...perps];
   const running = entries.filter((e) => !e.paused);
   const next = running.slice(0, 3);
@@ -253,7 +259,7 @@ function scheduleTop3() {
         onclick: () => act("openSchedule", { name: e.key }), oncontextmenu: (ev) => menu(ev, e) },
         e.perp ? h("div", { class: "pf-date-tile" }, h("div", { class: "pf-date-icon" }, icon("chart.line", 14))) : dateTile(e.next),
         h("div", { class: "pf-task-text" },
-          h("div", { class: "pf-task-title" }, e.perp ? (e.perp.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + e.perp.coin.split(":").pop() : e.task.text),
+          h("div", { class: "pf-task-title" }, e.perp ? (e.perp.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + (e.perp.market || e.perp.coin).split(":").pop() : e.task.text),
           h("div", { class: "pf-task-next" }, e.perp ? t("stop and take on the exchange", "стоп и тейк на бирже") : nextLine(e.task))),
         h("span", { class: "pf-mark " + (mark === "itself" || mark === "exchange" ? "auto" : "hello"), title: SIGNERS[mark][1]() }, icon(SIGNERS[mark][0], 14)));
     }),
@@ -261,19 +267,17 @@ function scheduleTop3() {
       icon(SIGNERS[m][0], 11), SIGNERS[m][1]()))) : null);
 }
 
-/** «Recurring buys · SOL for $5.00 · Oct 25»: every recurring buy at the portfolio's foot (the Mac's Studio portfolio). */
+/** «Recurring buys · SOL for $5.00 · Oct 25, 09:00»: every recurring buy at the portfolio's foot (the Mac's Studio
+ *  portfolio), from the engine's own view of each: its symbol, even for a coin kept by its mint, and its next run. */
 function recurringBox() {
-  const buys = ui.state.tasks.filter((x) => x.recurring);
+  const buys = ui.state.recurring || [];
   if (!buys.length) return null;
   const locale = ui.state.russian ? "ru-RU" : "en-US";
-  const line = (x) => {
-    const m = /^buy\s+(.+?)\s+for\s+([\d.,]+)\s*USDC/i.exec(x.steps?.[0] || x.text);
-    const next = x.next ? new Date(x.next).toLocaleDateString(locale, { month: "short", day: "numeric" }) : "";
-    return (m ? t(`${m[1]} for ${usd(Number(m[2].replace(",", ".")))}`, `${m[1]} на ${usd(Number(m[2].replace(",", ".")))}`) : x.text) + (next ? " · " + next : "");
-  };
+  const day = (iso) => { const d = new Date(iso); return d.toLocaleDateString(locale, { month: "short", day: "numeric" }) + ", " + d.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" }); };
   return h("div", { class: "pf-recurring" },
     h("div", { class: "pf-recurring-head" }, icon("arrow.triangle.2.circlepath", 11), t("Recurring buys", "Регулярные покупки")),
-    buys.map((x) => h("div", { class: "secondary num pf-recurring-row" }, line(x))));
+    buys.map((r) => h("div", { class: "secondary num pf-recurring-row" },
+      t(`${r.symbol} for ${usd(Number(r.usdc))}`, `${r.symbol} на ${usd(Number(r.usdc))}`) + " · " + day(r.next))));
 }
 
 // MARK: Network cards
@@ -474,7 +478,7 @@ function coinMenu(e, r, n) {
 function positions() {
   return ui.state.positions.map((x) => {
     const loss = String(x.pnl).trim().startsWith("-") || String(x.pnl).includes("−");
-    return h("div", { class: "pf-position pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.coin }) },
+    return h("div", { class: "pf-position pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.market || x.coin }) },
       h("div", { class: "pf-row" }, h("b", { class: "one-line" }, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`), h("span", { class: "spacer" }),
         h("b", { class: "num " + (loss ? "pos-loss" : "pos-gain") }, masked(x.pnl))),
       h("div", { class: "pf-position-line" }, masked(x.summary || `${x.size} @ ${x.entry}`)),
@@ -624,7 +628,7 @@ function logoDisc(name, size) {
 const OPENS = new Set(["solana", "hyperliquid", "robinhood", "base", "arbitrum", "near"]);
 /** A deposit managed on its site (Jupiter's staked JUP, perps…): that site in the browser, with the wallet. */
 const openSite = (site) => invoke("open_browser", { url: "https://" + site }).catch(() => {});
-const depositPlace = (symbol) => ({ "Jupiter Lend": "jupiter", "Kamino Lend": "kamino", Kamino: "kamino", Aave: "aave", Morpho: "morpho" })[symbol] || null;
+const depositPlace = (symbol) => ({ "Jupiter Lend": "jupiter", "Kamino Lend": "kamino", Aave: "aave", Morpho: "morpho" })[symbol] || null;
 
 /** The place open in its details board, above the plan (Workspace.detail): one at a time; a second click closes it. */
 let detail = null;
@@ -650,7 +654,7 @@ const places = {
     actions: () => [[t("Lend on Aave", "Дать в долг на Aave"), "lend 1 USDC on Aave on Arbitrum", "plus"], [t("Move to Solana", "Перевести в Solana"), "move USDC from Arbitrum to Solana", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
   jupiter: { logo: "jup", deposit: ["Jupiter Lend"], title: () => "Jupiter Lend", about: () => t("lending vaults on Solana · withdraw any time", "займы в Solana · вывести можно в любой момент"),
     actions: () => [[t("Deposit", "Положить"), "deposit 1 USDC into Jupiter", "plus"], [t("Withdraw", "Вывести"), "withdraw 1 USDC from Jupiter", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
-  kamino: { logo: "kamino", deposit: ["Kamino Lend", "Kamino"], title: () => "Kamino Lend", about: () => t("lending on Solana · withdraw any time", "займы в Solana · вывести можно в любой момент"),
+  kamino: { logo: "kamino", deposit: ["Kamino Lend"], title: () => "Kamino Lend", about: () => t("lending on Solana · withdraw any time", "займы в Solana · вывести можно в любой момент"),
     actions: () => [[t("Withdraw all", "Вывести всё"), "withdraw USDC from Kamino", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
   aave: { logo: "aave", deposit: ["Aave"], title: () => "Aave v3 · Base", about: () => t("lending on Base · withdraw any time", "займы в Base · вывести можно в любой момент"),
     actions: () => [[t("Lend more", "Дать ещё"), "lend 1 USDC on Aave", "plus"], [t("Withdraw to Solana", "Вывести в Solana"), "withdraw USDC from Aave", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
@@ -694,7 +698,7 @@ export function placeDetail() {
       : t(`USDC rate now ≈ ${pct(rate)} a year.`, `Ставка USDC сейчас ≈ ${pct(rate)} годовых.`)));
   if (!rows.length) rows.push(h("div", { class: "pf-d-note" }, t("Nothing here yet.", "Пока пусто.")));
   const url = explorer(detail);
-  return h("div", { class: "pf-detail", "data-no-pan": "", oncontextmenu: (e) => askMenu(e, place.title()) },
+  return h("div", { class: "pf-detail" + askedClass(place.title()), "data-no-pan": "", oncontextmenu: (e) => askMenu(e, place.title()) },
     h("div", { class: "pf-d-head" }, logo(place.logo, 34),
       h("div", { class: "pf-d-title" }, h("b", {}, place.title()), h("span", { class: "secondary" }, place.about())),
       h("span", { class: "spacer" }),
@@ -726,7 +730,7 @@ function hyperliquidRows() {
       hl.hlpLockedUntil ? t(`locked until ${when(hl.hlpLockedUntil)} · 4 days after a deposit`, `заблокировано до ${when(hl.hlpLockedUntil)} · 4 дня после депозита`)
         : t("earning · withdraw any time", "приносит доход · вывести можно в любой момент")));
   }
-  for (const x of s.positions) out.push(h("button", { class: "pf-d-row pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.coin }) },
+  for (const x of s.positions) out.push(h("button", { class: "pf-d-row pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.market || x.coin }) },
     logoDisc(x.coin, 24), h("div", { class: "pf-d-name" }, h("b", {}, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`),
       h("span", { class: "secondary" }, masked(x.summary || `${x.size} @ ${x.entry}`)), x.guardian ? h("span", { class: "secondary" }, x.guardian) : null),
     h("span", { class: "spacer" }), h("b", { class: "num" }, masked(x.pnl)), icon("chevron.right", 10)));
@@ -748,10 +752,19 @@ function detailCoin(r, n) {
     h("span", { class: "spacer" }), h("b", { class: "num" }, r.usd !== null && r.usd !== undefined ? amount(usd(r.usd)) : "—"), icon("chevron.right", 10));
 }
 
+/** A deposit in a place's details, as the Mac's lineRow: in its own coin with ≈ its dollars, and a click opens what the
+ *  card's row opens — the site it's managed on (a Kamino vault, Jupiter's platforms), else that place's own board. */
 function detailDeposit(r, n) {
   const place = depositPlace(r.symbol);
-  return h(place && place !== detail ? "button" : "div", { class: "pf-d-row" + (place && place !== detail ? " pf-lit" : ""), onclick: place && place !== detail ? () => toggleDetail(place) : null },
-    logo(r.symbol, 24),
+  const go = r.site ? () => openSite(r.site) : place && place !== detail ? () => toggleDetail(place) : null;
+  const usdLike = /^[\d.,]+$/.test(r.amount ?? "") && Math.abs(Number(r.amount.replace(/,/g, "")) - Number(r.usd ?? 0)) < 0.02;
+  const dollars = typeof r.amount === "string" && r.amount.startsWith("$");
+  return h(go ? "button" : "div", { class: "pf-d-row" + (go ? " pf-lit" : ""), onclick: go,
+    title: r.site ? t(`Managed on ${r.site}: a click opens it beside the chat`, `Управляется на ${r.site}: клик откроет его рядом с чатом`) : null },
+    logo(r.symbol, 24, r.icon),
     h("div", { class: "pf-d-name" }, h("b", { class: "one-line" }, r.symbol + (n ? ` · ${n.name}` : "")), r.note ? h("span", { class: "secondary one-line" }, r.note) : null),
-    h("span", { class: "spacer" }), h("b", { class: "num" }, amount(usd(r.usd ?? 0))), place && place !== detail ? icon("chevron.right", 10) : null);
+    h("span", { class: "spacer" }),
+    h("span", { class: "pf-d-value" }, h("b", { class: "num" }, amount(usdLike ? `${r.amount} USDC` : r.amount || usd(r.usd ?? 0))),
+      !usdLike && !dollars && r.usd ? h("span", { class: "secondary num" }, amount("≈ " + usd(r.usd))) : null),
+    go ? icon("chevron.right", 10) : null);
 }

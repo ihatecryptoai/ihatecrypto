@@ -3,9 +3,10 @@
 // Receive.swift). Settings cover the chat while open; History and Top up keep it floating, as the canvas does.
 
 import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, mascot, toast, copy, link, store, invoke, when, presence, qrCode, usd, popup } from "./core.js";
+import { plainStep } from "./boards.js";
 import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel, modelName } from "./chat.js";
-import { askMenu } from "./portfolio.js";
+import { askMenu, askedClass } from "./portfolio.js";
 import { segmented, toggle, showImport, showImportKey, watchFields } from "./onboarding.js";
 import { codeMaker, lockAfterPicker } from "./lock.js";
 
@@ -152,16 +153,40 @@ function general(s) {
 const NOTICE_ICONS = { incoming: "arrow.down.circle", positions: "chart.line", orders: "checkmark.circle", alerts: "bell", moves: "arrow.left.arrow.right",
   hlp: "lock.open", signature: "lock", confirm: "hand.raised", update: "arrow.clockwise" };
 const noticeList = { open: false };
+// What Windows allows (the Mac's NoticePermission): read when Settings shows it and whenever the window comes back to
+// the front (from Windows' settings). Windows never asks: the switch is always in Settings › System › Notifications.
+const toasts = { setting: null, reading: false };
+async function readToasts() {
+  if (toasts.reading) return;
+  toasts.reading = true;
+  const was = toasts.setting;
+  try { toasts.setting = (await invoke("notification_setting")) || "on"; } catch { toasts.setting = "unknown"; }
+  toasts.reading = false;
+  if (toasts.setting !== was) render();
+}
+window.addEventListener("focus", () => { if (toasts.setting !== null) readToasts(); });
+function toastLabel() {
+  return { on: t("Notifications are on", "Уведомления включены"),
+    app: t("Windows keeps ihatecrypto quiet: turn on its notifications in Windows settings", "Windows не даёт ihatecrypto писать: включи его уведомления в настройках Windows"),
+    user: t("Windows keeps every app quiet: turn on Notifications in Windows settings", "Windows глушит все приложения: включи «Уведомления» в настройках Windows"),
+    policy: t("Your organization's policy turns notifications off on this PC", "Уведомления на этом ПК выключены политикой организации"),
+    manifest: t("Windows doesn't let ihatecrypto show notifications", "Windows не даёт ihatecrypto показывать уведомления"),
+  }[toasts.setting] || (toasts.setting === null ? t("Checking…", "Проверяю…") : "");
+}
 function noticeSection(s) {
   const list = s.notices || [];
   const on = list.filter((n) => n.on).length;
+  if (toasts.setting === null) readToasts();
+  // A read that failed («unknown») shows no pill and keeps the test, as before Windows was asked.
+  const allowed = toasts.setting === "on" || toasts.setting === "unknown";
   return section("bell", t("Notifications", "Уведомления"), t("When the assistant taps you, even with the window closed.", "Когда ассистент зовёт тебя, даже при закрытом окне."),
     group(
-      row({ label: t("Notifications", "Уведомления"), ico: "bell", about: t("They show while the window is in the tray or behind others; click one to come back to it. Windows decides whether they can appear at all: Settings › System › Notifications › ihatecrypto.",
-          "Они появляются, когда окно в трее или за другими; нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows: «Параметры › Система › Уведомления › ihatecrypto».") },
-        // «Sent» for a moment once it went, as the Mac's button says.
-        h("button", { class: "btn small", onclick: async (e) => { const b = e.currentTarget; if (await act("noticeTest") !== null) { b.textContent = t("Sent", "Отправлено"); setTimeout(() => { b.textContent = t("Send a test", "Отправить тест"); }, 2000); } } },
-          t("Send a test", "Отправить тест")),
+      row({ label: t("Notifications", "Уведомления"), ico: "bell", about: (toastLabel() ? toastLabel() + ". " : "") + t("They show while the window is in the tray or behind others; click one to come back to it. Windows decides whether they can appear at all.",
+          "Они появляются, когда окно в трее или за другими; нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows.") },
+        toasts.setting === "unknown" ? null : pill(toasts.setting === null ? t("Checking…", "Проверяю…") : allowed ? t("On", "Включены") : t("Off", "Выключены"), allowed),
+        // «Sent» for a moment once it went, as the Mac's button says; only while Windows lets them show.
+        allowed ? h("button", { class: "btn small", onclick: async (e) => { const b = e.currentTarget; if (await act("noticeTest") !== null) { b.textContent = t("Sent", "Отправлено"); setTimeout(() => { b.textContent = t("Send a test", "Отправить тест"); }, 2000); } } },
+          t("Send a test", "Отправить тест")) : null,
         h("button", { class: "btn small", onclick: () => invoke("open_notification_settings").catch((x) => toast(String(x))) }, t("Windows settings…", "Настройки Windows…"))),
       row({ label: t("Which events", "Какие события"), ico: "bell" },
         h("button", { class: "btn small", onclick: () => { noticeList.open = !noticeList.open; render(); } }, t(`${on} of ${list.length}`, `${on} из ${list.length}`), icon(noticeList.open ? "chevron.up" : "chevron.down", 10))),
@@ -415,7 +440,7 @@ function modelTab(s) {
           jevReady && s.model?.provider === "openrouter" ? pill(t("Your chat runs here", "Здесь работает твой чат"), true)
           : jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
             : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", disabled: jevStatus === "waiting", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: signInJev }, t("Connect", "Подключить"))]),
-        jevStatus ? row({ label: jevStatus === "waiting" ? t("Waiting for the sign-in in the browser…", "Жду вход в браузере…")
+        jevStatus ? row({ label: jevStatus === "waiting" ? t("Waiting for the sign-in in the browser…", "Жду входа в браузере…")
           : jevStatus === "done" ? t("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель.") : jevStatus,
           ico: "info.circle", cls: "wrap note" + (jevStatus !== "waiting" && jevStatus !== "done" ? " loss" : "") }) : null)),
     section("server", t("Free, on this PC", "Бесплатно, на этом ПК"), t("No subscription needed: Ollama runs a model here, with no internet.", "Подписка не нужна: Ollama запускает модель здесь, без интернета."),
@@ -433,7 +458,6 @@ function modelTab(s) {
   ];
 }
 
-let localAsked = false;
 /** The second check's OpenRouter sign-in, said where it was pressed (the Mac's jevStatus): waiting, done, or the error. */
 let jevStatus = null;
 async function signInJev() {
@@ -443,22 +467,19 @@ async function signInJev() {
 }
 
 /** The local-models panel for onboarding's «Free, on this PC» (the Mac's Onboarding localRow → LocalModelsPanel): Ollama's
- *  state and this PC's memory read once, then Set up, Start, Switch or Download. */
+ *  state and its models read as it appears, then Set up, Start, Switch or Download. */
 export function localModelsPanel(s) {
   askLocal();
   return localPanel(s);
 }
 
-/** Ollama's state read again each time the panel comes back on screen (the Mac's .task on appear), the models once:
- *  a panel not drawn for 5 s was off screen. Nothing is started to read them.
+/** Ollama's state, the servers and their models read again each time the panel comes back on screen (the Mac's .task →
+ *  refreshLocalModels on appear): a panel not drawn for 5 s was off screen. Nothing is started to read them.
  *  ponytail: «off screen» is a gap between draws; a panel left open on an idle window reads Ollama again on its next draw. */
 let localDrawnAt = 0;
 function askLocal() {
   const now = Date.now();
-  if (now - localDrawnAt > 5000) {
-    act("ollamaStatus");
-    if (!localAsked) { localAsked = true; act("refreshModels"); }
-  }
+  if (now - localDrawnAt > 5000) { act("refreshModels"); act("ollamaStatus"); }
   localDrawnAt = now;
 }
 
@@ -546,11 +567,11 @@ function walletTab(s) {
       group(
         way("bolt", t("Create a new wallet", "Создать новый кошелёк"), t("12 new words, made inside the signer", "12 новых слов, созданных внутри подписанта"), () => { creating.open = !creating.open; render(); }, creating.open),
         creating.open ? h("div", { class: "pg-set-panel" },
-          h("div", { class: "secondary small" }, t(`ihatecrypto makes a new 12-word recovery phrase inside the signer and keeps the key sealed by Windows Hello and the TPM. Every signature asks for ${presence()}.`,
-            `ihatecrypto создаёт новую фразу из 12 слов внутри подписанта и хранит ключ, запечатанный Windows Hello и TPM. Каждая подпись спрашивает ${presence()}.`) + (s.wallets.length ? t(" It is added next to your other wallets.", " Он добавится рядом с другими кошельками.") : "")),
+          h("div", { class: "secondary small" }, t(`ihatecrypto makes a new 12-word recovery phrase inside the signer, from this PC's random number generator, and keeps the key sealed by Windows Hello and the TPM. Every signature asks for ${presence()}.`,
+            `ihatecrypto создаёт новую фразу из 12 слов внутри подписанта, генератором случайных чисел этого ПК, и хранит ключ, запечатанный Windows Hello и TPM. Каждая подпись спрашивает ${presence()}.`) + (s.wallets.length ? t(" It is added next to your other wallets and signs until you switch back.", " Он добавится рядом с другими кошельками и будет подписывать, пока не переключишься обратно.") : "")),
           h("div", { class: "pg-set-option" }, h("span", {}, t(`Test wallet: signs without ${presence()}`, `Тестовый кошелёк: подписывает без ${presence()}`)), h("span", { class: "spacer" }),
             toggle("new-test", creating.test, (on) => { creating.test = on; render(); })),
-          creating.test ? h("div", { class: "small pg-jev-ink" }, t("For trying things out: keep only a few dollars on it.", "Для проб: держи на нём только несколько долларов.")) : null,
+          creating.test ? h("div", { class: "small pg-jev-ink" }, t(`For trying things out, and for Claude to test ihatecrypto without asking you: keep only a few dollars on it. It can't be made from an imported phrase, and adding it still asks for ${presence()} once.`, `Для проб и чтобы Claude проверял ihatecrypto, не спрашивая тебя: держи на нём только несколько долларов. Из импортированной фразы его не сделать, а при создании ${presence()} всё равно спросит один раз.`)) : null,
           // Busy while the signer works, as the Mac's: a second press would ask Windows Hello for a second wallet.
           h("div", {}, h("button", { class: "btn primary", disabled: !!creating.busy, onclick: async () => {
             if (creating.busy) return;
@@ -591,9 +612,9 @@ function walletTab(s) {
 }
 
 /** Settings › Wallet › Passcode (the Mac's PasscodeSettings): make, change or turn off the code; how soon it locks; lock now. */
-const passcode = { making: false, offered: false };
+const passcode = { making: false, offered: 0 };
 function passcodeSection(l) {
-  if (l.offerNewCode && !passcode.offered) Object.assign(passcode, { making: true, offered: true });
+  if (l.offerNewCode && passcode.offered !== l.newCodeOffers) Object.assign(passcode, { making: true, offered: l.newCodeOffers });
   const made = () => { passcode.making = false; render(); };
   return section("lock", t("Passcode", "Код"), t("Opens ihatecrypto: balances, chat and history stay hidden until then.", "Открывает ihatecrypto: балансы, чат и история скрыты до этого."),
     group(
@@ -880,13 +901,6 @@ const signedMoney = (v) => (Number(v) < 0 ? "−" + usd(Math.abs(Number(v))) : "
 const dayTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 
-/** A card of the canvas frozen in time: its label, title and two lines. */
-function historyBubble(b) {
-  return h("div", { class: "page-hb page-hb-" + b.status },
-    h("div", { class: "eyebrow one-line" }, b.label),
-    h("b", { class: "page-hb-title" }, b.title),
-    (b.lines || []).slice(0, 2).map((l) => h("div", { class: "page-hb-line secondary" }, l)));
-}
 
 function activityCard(a, key) {
   const open = history.open.has(key);
@@ -898,7 +912,7 @@ function activityCard(a, key) {
       h("span", { class: "spacer" }), h("span", { class: "secondary small num" }, when(a.at))),
     a.request ? h("div", { class: "page-act-ask selectable" }, a.request) : null,
     a.understood ? h("div", { class: "page-act-read secondary" }, icon("character.bubble", 12), t(`understood as “${a.understood}”`, `понял как «${a.understood}»`)) : null,
-    a.bubbles.length ? h("div", { class: "page-act-bubbles" }, a.bubbles.map(historyBubble)) : null,
+    a.bubbles.length ? h("div", { class: "page-act-bubbles" }, a.bubbles.map(plainStep)) : null,
     lines.map((l) => h("div", { class: "page-act-line secondary selectable" }, l)),
     a.lines.length > 2 ? h("button", { class: "link-btn", onclick: () => { open ? history.open.delete(key) : history.open.add(key); render(); } },
       open ? t("Less", "Меньше") : t(`All ${a.lines.length} lines`, `Все строки: ${a.lines.length}`)) : null);
@@ -1009,7 +1023,7 @@ const num = (v, digits) => Number(v).toLocaleString(ui.state.russian ? "ru-RU" :
 /** The Top up page: the panel in its card, with its title and close. */
 export function topUpPage() {
   return h("div", { class: "page-pane", style: `left:${railEdge()}px` },
-    h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, h("div", { class: "page-topup card", oncontextmenu: (e) => askMenu(e, t("Top up", "Пополнить")) },
+    h("div", { class: "page-scroll", "data-keep": "topup" }, h("div", { class: "page-topup-place" }, h("div", { class: "page-topup card" + askedClass(t("Top up", "Пополнить")), oncontextmenu: (e) => askMenu(e, t("Top up", "Пополнить")) },
       h("div", { class: "page-tu-head" }, h("span", { class: "accent-ink" }, icon("arrow.down.circle", 20)), h("b", {}, t("Top up ihatecrypto", "Пополнить ihatecrypto")),
         h("span", { class: "spacer" }), h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: back }, icon("xmark", 14))),
       topUpPanel()))), chatPanel());

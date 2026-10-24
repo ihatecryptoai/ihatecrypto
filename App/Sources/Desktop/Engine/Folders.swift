@@ -55,11 +55,15 @@ extension Engine {
         }
     }
 
-    /// What the list calls a canvas, as the Mac's: the person's own name, else its newest move's title (the Mac names a
-    /// canvas after its board on every save), else its first message's words.
+    /// What the list calls a canvas, as the Mac's: the person's own name, else its board as the Mac's canvasBubbles names
+    /// it on every save — the newest move (a plan, a spread, an address save), else a chart («Chart · BTC»), else the
+    /// rates — else its first message's words.
     nonisolated static func shownTitle(_ c: CanvasDoc, boards: [Board]) -> String {
         if let name = c.name, !name.isEmpty { return name }
-        if let move = boards.first(where: { $0.kind == "move" && !$0.title.isEmpty }) { return move.title }
+        let named = boards.filter { !$0.title.isEmpty }
+        if let move = named.first(where: { $0.kind == "move" }) { return move.title }
+        if let chart = named.first(where: { $0.kind == "chart" }) { return "Chart · " + (chart.chart?.coin.map(IntentParser.pretty) ?? chart.title) }
+        if let rates = named.first(where: { $0.kind == "result" && $0.data?.rates != nil }) { return rates.title }
         return c.title
     }
 

@@ -31,7 +31,7 @@ window.__TAURI__.event.listen("engine", (e) => {
     ui.state = msg.data;
     render();
   } else if (msg.event === "openURL") {
-    // A sign-in page the engine asks for (ChatGPT, OpenRouter): https only, in the default browser.
+    // A sign-in page the engine asks for (ChatGPT, OpenRouter), in the default browser (a web page only, main.rs open_link).
     invoke("open_link", { url: msg.data.url }).catch((x) => toast(String(x)));
   } else if (msg.event === "notify") {
     toast(msg.data.body);
@@ -126,9 +126,9 @@ document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (document.querySelector(".menu")) { document.querySelector(".menu").remove(); return; }
-    // Esc in a field is that field's (a node's address, a rename): it doesn't leave the page as well, as the Mac's sheet
-    // closes alone.
-    if (e.defaultPrevented || e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    // A field that owns Esc (a node's address, a rename) stops it, as the Mac's sheet closes alone. Settings is left from
+    // any other control, as the Mac's hidden cancel button does; elsewhere Esc in a field stays the field's.
+    if (e.defaultPrevented || (ui.view !== "settings" && e.target.closest?.("input, textarea, select, [contenteditable]"))) return;
     if (ui.view !== "canvas") { ui.view = "canvas"; render(); }
   }
 });

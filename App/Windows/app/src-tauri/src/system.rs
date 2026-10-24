@@ -385,13 +385,43 @@ pub fn open_notification_settings(webview: tauri::Webview) -> Result<(), String>
     Ok(())
 }
 
+/// Settings › Notifications' pill (the Mac's authorizationStatus): «on», or who keeps them off — «app» (its own switch in
+/// Windows' settings), «user» (all notifications), «policy» or «manifest». Read for the app id the notification plugin
+/// gives its toasts: the bundle identifier when installed, PowerShell's in a build run from target\.
+#[tauri::command]
+pub fn notification_setting(app: tauri::AppHandle, webview: tauri::Webview) -> Result<String, String> {
+    from_main(&webview)?;
+    toast_setting(&app)
+}
+
+#[cfg(windows)]
+fn toast_setting(app: &tauri::AppHandle) -> Result<String, String> {
+    use windows::UI::Notifications::{NotificationSetting, ToastNotificationManager};
+    let dir = std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|d| d.display().to_string()).unwrap_or_default();
+    let id = if dir.ends_with("\\target\\debug") || dir.ends_with("\\target\\release") {
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe".to_string()
+    } else { app.config().identifier.clone() };
+    let setting = ToastNotificationManager::CreateToastNotifierWithId(&windows::core::HSTRING::from(id))
+        .and_then(|n| n.Setting()).map_err(|e| e.to_string())?;
+    Ok(match setting {
+        NotificationSetting::Enabled => "on",
+        NotificationSetting::DisabledForApplication => "app",
+        NotificationSetting::DisabledForUser => "user",
+        NotificationSetting::DisabledByGroupPolicy => "policy",
+        _ => "manifest",
+    }.into())
+}
+
+#[cfg(not(windows))]
+fn toast_setting(_: &tauri::AppHandle) -> Result<String, String> { Ok("on".into()) }
+
 /// Started at login (`--hidden`): the window stays in the tray until it's opened.
 pub fn started_hidden() -> bool { std::env::args().any(|a| a == "--hidden") }
 
 /// The lock came down (the engine's `locked`): the browser's own window closes, as the Mac closes its browser window on
 /// lock. What's beside the chat stays, as the Mac's stays under its lock screen: the lock screen hides the panel's webviews
 /// (app.js `panelHidden`), and they come back as they were once it opens. The engine declines a site's waiting request on
-/// its own lock and answers nothing else while locked.
+/// its own lock and, while locked, answers only the phishing check, so the page kept here never loads a listed host.
 pub fn locked(app: &tauri::AppHandle) {
     if let Some(window) = app.get_window(crate::BROWSER_WINDOW) {
         if !crate::web::wallet_in_panel(app) { crate::site_closed(app); }

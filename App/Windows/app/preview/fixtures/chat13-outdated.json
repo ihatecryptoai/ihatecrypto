@@ -1823,6 +1823,7 @@
   "ollamaState": "outdated",
   "ollamaVersion": "0.11.2",
   "ollamaLatest": "0.13.0",
-  "ollamaInstall": null
+  "ollamaInstall": null,
+  "ollamaOutdated": true
  }
 }

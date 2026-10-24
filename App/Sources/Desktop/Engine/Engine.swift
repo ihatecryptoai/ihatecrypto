@@ -405,6 +405,8 @@ final class Engine {
             var guardian: String? = nil
             /// The position board's price ruler and guardian line (TradePlan.swift).
             var ruler: PositionRuler? = nil
+            /// The exchange's own name, «xyz:TSLA», where `coin` reads «Tesla (xyz:TSLA)»: what a trade is matched by.
+            var market: String? = nil
         }
         var signer: Signer
         var wallets: [SignerWallet]
@@ -667,7 +669,9 @@ final class Engine {
     nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus", "composing", "onboarding", "openStudyFiles", "keyAddress", "phraseAccounts", "multisigFees"]
 
     private func run(_ r: Request) async throws -> [String: String] {
-        if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }
+        if lock.locked, !Self.whileLocked.contains(r.op), !Self.browserWhileLocked.contains(r.op) {
+            throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован."))
+        }
         switch r.op {
         case "unlock": await unlock(code: r.text ?? "")
         case "unlockHello": await unlockWithHello(forgot: r.test == true)
@@ -736,13 +740,7 @@ final class Engine {
         case "keyAddress": return try keyAddress(r.key ?? "")
         case "phraseAccounts": return try phraseAccounts(r.phrase ?? "", passphrase: r.passphrase ?? "")
         case "multisigFees": return await multisigFees()
-        case "switchWallet":
-            // The rail's «Switch» and Settings' «Use» say it in the chat, a refusal too, as the Mac's switchWallet.
-            guard let w = switchableWallets.first(where: { $0.id == r.wallet }) else { throw WalletError(say("That wallet isn't here any more.", "Этого кошелька здесь больше нет.")) }
-            await switchWallet(to: w)
-            // The chat said why; a caller that goes on only after a switch (the onboarding's Ledger) still hears it failed.
-            let now = ledgerActive ? LedgerAccount.id : status?.activeWallet
-            if now != w.id { throw WalletError(say("The wallet wasn't switched.", "Кошелёк не переключён.")) }
+        case "switchWallet": try await useWallet(r.wallet ?? "")
         case "connectLedger": Task { await connectLedger() }
         case "showOnLedger": await showOnLedger(solana: r.test == true)
         case "renameWallet": try await signerCall(.renameWallet(id: r.wallet ?? "", label: r.label ?? ""))
@@ -752,7 +750,7 @@ final class Engine {
         case "sessionLength": try await signerCall(.setSessionLength(seconds: r.seconds ?? SignerSession.standard))
         case "saveAddress":
             try await saveAddress(SignerAddress(name: r.name ?? "", network: r.network ?? "", address: r.address ?? "", memo: r.memo ?? ""))
-        case "removeAddress": try await removeAddress(name: r.name ?? "", network: r.network ?? "")
+        case "removeAddress": try await deleteAddress(name: r.name ?? "", network: r.network ?? "")
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
         case "taskOn": setTask(r.wallet ?? "", on: r.test == true)

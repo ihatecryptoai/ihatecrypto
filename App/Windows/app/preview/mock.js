@@ -38,10 +38,12 @@
           await fixture;
           setTimeout(() => {
             if (req.op === "hello") emit({ event: "state", data: state });
-            else { emit({ id: req.id, ok: true, result: null }); emit({ event: "state", data: state }); }
+            else { emit({ id: req.id, ok: true, result: state.results?.[req.op] ?? null }); emit({ event: "state", data: state }); }
           }, 0);
           return null;
         }
+        // Settings › Notifications: what Windows allows, «&toasts=app» to see it off.
+        if (cmd === "notification_setting") return new URLSearchParams(location.search).get("toasts") || "on";
         return null;
       },
     },

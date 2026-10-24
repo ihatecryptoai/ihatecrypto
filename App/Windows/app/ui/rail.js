@@ -3,7 +3,7 @@
 // round glass buttons. The collapse button, the strip's expand button or a drag of the right edge switch the two; a
 // window narrower than 1140 folds it, and widening again brings back what it folded.
 
-import { ui, act, invoke, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest, toast } from "./core.js";
+import { ui, act, engine, invoke, render, t, h, svg, icon, addIcons, mascot, logo, usd, signedUsd, masked, store, popup, copyButton, suggest, toast } from "./core.js";
 import { logoFiles } from "./logos.js";
 // The canvas module draws the rail too; read through the namespace so neither waits on the other to load.
 import * as canvas from "./canvas.js";
@@ -289,7 +289,7 @@ function walletMenu(anchor, compact, start) {
         h("div", {}, title, h("div", { class: "secondary rail-wm-how" }, current ? t("Current wallet · ", "Текущий кошелёк · ") + how : how[0].toUpperCase() + how.slice(1))),
         h("span", { class: "spacer" }),
         current ? null : h("button", { class: "btn primary", title: t("Switching asks for Windows Hello.", "Переключение спросит Windows Hello."),
-          onclick: () => { closePopover(); act("switchWallet", { wallet: w.id }); } }, t(`Switch to ${w.label}`, `Переключить на «${w.label}»`))),
+          onclick: () => { closePopover(); engine("switchWallet", { wallet: w.id }).catch(() => {}); } }, t(`Switch to ${w.label}`, `Переключить на «${w.label}»`))),
       nets.map(([n, note, lg, address]) => h("div", { class: "rail-wm-net" + (address ? "" : " missing") },
         h("span", { class: "rail-wm-net-name", title: n === "EVM" ? EVM_NETWORKS.map(netName).join(", ") : n }, logo(lg, 20), h("span", {}, h("b", {}, n), note ? h("span", { class: "secondary small" }, note) : null)),
         address ? [h("span", { class: "address rail-wm-address" }, address), copyButton(address)]
@@ -878,11 +878,11 @@ function shortName(p) {
 }
 const kindName = (p) => p.kind === "subscription" ? t("Subscription", "Подписка") : p.kind === "local" ? t("On this PC · free", "На этом ПК · бесплатно") : t("API key", "API-ключ");
 
-/** The accounts the chat can use: logins and keys kept, and a model on this PC whose server is up with a model in it
- *  (the Mac's accounts: Ollama shows while it runs, in use or not; LM Studio, which says nothing of itself here, while in use). */
+/** The accounts the chat can use: logins and keys kept, and a server on this PC that isn't known to be down with a model
+ *  downloaded, in use or not (the Mac's accounts, Workspace.swift:777-783). */
 function accounts() {
-  const s = ui.state;
-  const localUp = (p) => p.id === "ollama" ? s.localSetup?.ollamaState === "ready" : p.id === s.model.provider;
+  const s = ui.state, m = s.models || {};
+  const localUp = (p) => m.servers?.[p.id] !== false && (m.live?.[p.id]?.length ?? 0) > 0;
   const list = s.providers.filter((p) => !p.unavailable && p.connected && (p.kind !== "local" || localUp(p)));
   const current = list.find((p) => p.id === s.model.provider);
   return current ? [current, ...list.filter((p) => p !== current)] : list;
@@ -905,8 +905,8 @@ function profileRow() {
 
 function profileMenu(anchor, side) {
   const go = (run) => () => { closePopover(); run(); };
-  // Whether the model on this PC runs, read again as the menu opens (the Mac re-reads its accounts there).
-  act("ollamaStatus");
+  // Which servers on this PC run and what they have, read again as the menu opens; GitHub is asked only once Ollama answers.
+  act("refreshModels");
   const body = h("div", { class: "rail-profile-menu" });
   const draw = (signingOut, open) => {
     const s = ui.state;
@@ -972,7 +972,7 @@ function narrow() {
     roundButton("plus", t("New", "Новый"), { dashed: true, help: t("New canvas", "Новый холст"), run: () => { if (!canSwitch()) { toast(busyTip()); return; } ui.view = "canvas"; act("newCanvas"); } }),
     h("div", { class: "spacer" }),
     roundButton("sidebar.left", null, { plain: true, help: t("Expand the sidebar", "Развернуть панель"), run: () => { foldedForRoom = false; setCollapsed(false); } }),
-    roundButton("person.fill", t("Profile", "Профиль"), { help: t("Chat accounts, Settings, the browser", "Аккаунты чата, настройки, браузер"),
+    roundButton("person.fill", t("Profile", "Профиль"), { help: t("Chat accounts, Settings, the browser, What's new", "Аккаунты чата, настройки, браузер, «Что нового»"),
       run: (e) => { e.stopPropagation(); profileMenu(e.currentTarget, "right"); } }),
   );
 }

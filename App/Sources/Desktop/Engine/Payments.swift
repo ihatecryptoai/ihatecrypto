@@ -78,10 +78,11 @@ extension Engine {
                 if case .pay(_, let url, _) = command, let h = URL(string: url)?.host { host = h }
                 let c = q.challenge, service = q.service
                 let price = Fmt.num(c.usdc, maxFraction: 6), short = tempoUSDC < c.usdc + Decimal(string: "0.01")!
+                let src = tempoNeed(c.usdc).flatMap(tempoSource)?.net.name ?? "Solana"
                 show(.wallet(command), title: say("Pay \(price) USDC · \(service)", "Оплатить \(price) USDC · \(service)"), lines: [
                     say("One Tempo transfer of \(price) USDC to the address \(host) named: \(c.payee)", "Один перевод \(price) USDC на Tempo, на адрес, который назвал \(host): \(c.payee)"),
-                    short ? say("What's short comes from Solana over Relay first: a dollar, so the next requests don't each need a bridge.",
-                                "Сначала с Solana через Relay придёт доллар, чтобы следующие запросы не гоняли мост каждый раз.")
+                    short ? say("What's short comes from \(src) over Relay first: a dollar, so the next requests don't each need a bridge.",
+                                "Сначала из \(src) через Relay придёт доллар, чтобы следующие запросы не гоняли мост каждый раз.")
                           : say("From your USDC on Tempo; the fee, ≈ $0.001, comes out of the USDC.", "Из твоих USDC на Tempo; комиссия ≈ $0.001 — из тех же USDC."),
                     c.purpose.map { say("For: ", "За: ") + $0 } ?? say("For one request.", "За один запрос."),
                 ])

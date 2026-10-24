@@ -36,9 +36,12 @@ struct BrowserPage {
     bar: f64,
     wallet: Option<String>,
     russian: bool,
-    /// The address last opened: what the toolbar shows while WebView2 still says about:blank (loading, or a site that
-    /// doesn't answer).
+    /// The address last opened or typed: what the toolbar shows while WebView2 still says about:blank (loading, or a site
+    /// that doesn't answer), and after the phishing list refused it.
     asked: Option<tauri::Url>,
+    /// The site's last page that loaded and passed the check: where Profile › Browser opens it again once its own window
+    /// closed with its webview, as the Mac's browser keeps the page it showed.
+    last: Option<tauri::Url>,
     /// WebView2's own word on the history, a page's pushState included (web.rs); off Windows both stay on, as the Mac's
     /// Back is.
     back: bool,
@@ -135,7 +138,7 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
                     tauri::async_runtime::spawn(open_browser(handle.clone(), url));
                 }
             }
-            // The lock: the browser and the page panel close behind it.
+            // The lock: the browser's own window closes, and what's beside the chat hides under the lock screen.
             if line.contains("\"event\":\"locked\"") { system::locked(&handle); }
             // Settings or the onboarding turned Open at login on or off.
             if line.contains("\"event\":\"openAtLogin\"") {
@@ -227,9 +230,29 @@ fn site_closed(app: &tauri::AppHandle) {
     site_gone(app, origin);
 }
 
+/// The engine's word in a siteState answer: Some(true) the host is on MetaMask's phishing list, Some(false) it isn't,
+/// None it wasn't checked (the engine refused or failed) — which the browser takes as a no, never as a yes.
+fn listed(answer: &serde_json::Value) -> Option<bool> {
+    if answer["ok"].as_bool() != Some(true) { return None }
+    let blocked = &answer["result"]["blocked"];
+    Some(blocked == true || blocked == "true")
+}
+
+/// A listed host refused: the banner names it. The field, the badge and the connection stay the open page's, as the
+/// Mac's (browser_state).
+fn refuse(app: &tauri::AppHandle, host: &str) {
+    if let Some(engine) = app.try_state::<Engine>() {
+        if let Ok(mut page) = engine.browser.lock() {
+            page.blocked = Some(host.to_string());
+            page.refused.insert(host.to_string());
+        }
+    }
+    let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+}
+
 /// Whether the browser may go to `url`: https (or a blank page), and not a host on MetaMask's phishing list, which never
 /// loads, as on the Mac. The engine has the list; asked here before the page starts, briefly, and a slow answer lets it
-/// start: the check when it finishes loading turns it back.
+/// start: the check when it finishes loading turns it back. An answer that isn't a check stops it here.
 fn site_allowed(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
     if url.as_str() == "about:blank" { return true }
     let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else {
@@ -245,19 +268,25 @@ fn site_allowed(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
     };
     let Some(engine) = app.try_state::<Engine>() else { return true };
     let known = engine.browser.lock().map(|p| p.refused.contains(host)).unwrap_or(false);
-    let listed = known || engine_call_now(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_millis(400))
-        .map(|v| v["result"]["blocked"] == "true" || v["result"]["blocked"] == true).unwrap_or(false);
-    if let Ok(mut page) = engine.browser.lock() {
-        if listed {
-            page.blocked = Some(host.to_string());
-            page.refused.insert(host.to_string());
-            page.asked = Some(url.clone());
-        } else {
-            page.blocked = None;
-        }
+    let verdict = if known { Some(true) } else {
+        // No answer in time: the page starts, and the check once it has loaded decides (site_allowed_late).
+        engine_call_now(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_millis(400))
+            .map(|v| listed(&v)).unwrap_or(Some(false))
+    };
+    match verdict {
+        Some(true) => refuse(app, host),
+        Some(false) => { if let Ok(mut page) = engine.browser.lock() { page.blocked = None; } }
+        None => unchecked(app),
     }
-    if listed { let _ = app.emit_to(EventTarget::webview(BAR), "browser", ()); }
-    !listed
+    verdict == Some(false)
+}
+
+/// The phishing list couldn't be asked: the page isn't shown, and the toolbar says why.
+fn unchecked(app: &tauri::AppHandle) {
+    if let Some(engine) = app.try_state::<Engine>() {
+        if let Ok(mut page) = engine.browser.lock() { page.blocked = None; page.error = Some("unchecked".into()); }
+    }
+    let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
 }
 
 /// The origin a page's calls are for, from its webview's own address: https only.
@@ -348,12 +377,12 @@ fn engine_send(state: tauri::State<'_, Engine>, line: String) -> Result<(), Stri
 // window stays white (wry #583).
 #[tauri::command]
 async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    // No address: the site the browser had (put away or not), else the last one asked for, else jup.ag, as the Mac's
-    // Profile › Browser opens straight on its last site.
+    // No address: the site the browser has (put away or not), else the last page it showed before its window closed, else
+    // the last one asked for, else jup.ag, as the Mac's Profile › Browser opens straight on its last site.
     let url = if url.trim().is_empty() {
         let had = app.get_webview(SITE).and_then(|s| s.url().ok()).filter(|u| u.scheme() == "https");
-        let asked = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().and_then(|p| p.asked.clone()));
-        had.or(asked).unwrap_or_else(|| "https://jup.ag/".parse().expect("jup.ag"))
+        let kept = app.try_state::<Engine>().and_then(|e| e.browser.lock().ok().and_then(|p| p.last.clone().or(p.asked.clone())));
+        had.or(kept).unwrap_or_else(|| "https://jup.ag/".parse().expect("jup.ag"))
     } else { site_url(&url)? };
     if let Some(engine) = app.try_state::<Engine>() {
         if let Ok(mut page) = engine.browser.lock() { page.asked = Some(url.clone()); }
@@ -418,14 +447,16 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
     let (loads, titles, goes, opens) = (app.clone(), app.clone(), app.clone(), app.clone());
     tauri::webview::WebviewBuilder::new(SITE, tauri::WebviewUrl::External(url))
         .initialization_script(include_str!("provider.js"))
+        // No file picker in any frame, as the Mac's browser has none (keys.rs; its alerts are off there too).
+        .initialization_script_for_all_frames(keys::NO_FILE_PICKER)
         // Pages stay on https; anything else (a file, a custom scheme) isn't opened here, nor a phishing site.
         .on_navigation(move |u| site_allowed(&goes, u))
-        // A link for a new window: an https page goes to the person's own browser once the phishing list has been asked —
-        // a listed host gets the banner instead, as a navigation does; the browser stays one page, as the Mac's.
+        // A link for a new window opens nothing, anywhere, as the Mac's browser has no window to give it (no UI
+        // delegate); one to a host on the phishing list gets the banner, as a navigation does.
         .on_new_window(move |u, _| {
-            if u.scheme() == "https" {
+            if let (Some(host), "https") = (u.host_str().map(str::to_string), u.scheme()) {
                 let (app, url) = (opens.clone(), u.clone());
-                tauri::async_runtime::spawn(async move { if site_allowed_late(&app, &url).await { let _ = open_link(url.to_string()); } });
+                tauri::async_runtime::spawn(async move { if site_listed(&app, &url).await == Some(true) { refuse(&app, &host); } });
             }
             tauri::webview::NewWindowResponse::Deny
         })
@@ -438,7 +469,8 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
                 if let Ok(mut page) = engine.browser.lock() {
                     page.loading = started;
                     if started {
-                        page.error = None;
+                        // The blank page a refused one gives way to keeps the line that says why.
+                        if payload.url().scheme() != "about" { page.error = None; }
                         // Another origin's page: the one that asked is gone, and so is its waiting request.
                         // ponytail: a reload of the same origin keeps it, as the contract with the engine says (siteGone).
                         let now = origin_of(payload.url());
@@ -448,11 +480,18 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
                 }
             }
             site_gone(&loads, gone);
-            // A page the quick check let through while the engine was slow: looked at again once it's loaded.
+            // A page the quick check let through while the engine was slow: looked at again once it's loaded. One that
+            // passes is the page Profile › Browser comes back to.
             if !started {
                 let (app, url) = (loads.clone(), payload.url().clone());
                 tauri::async_runtime::spawn(async move {
-                    if !site_allowed_late(&app, &url).await { let _ = site.navigate("about:blank".parse().expect("blank")); }
+                    if site_allowed_late(&app, &url).await {
+                        if url.scheme() == "https" {
+                            if let Some(engine) = app.try_state::<Engine>() { if let Ok(mut page) = engine.browser.lock() { page.last = Some(url); } }
+                        }
+                    } else {
+                        let _ = site.navigate("about:blank".parse().expect("blank"));
+                    }
                 });
             }
             let _ = loads.emit_to(EventTarget::webview(BAR), "browser", ());
@@ -465,21 +504,22 @@ fn site_view(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::Webview
         })
 }
 
-/// The check after a page loaded, with all the time the engine needs.
+/// The engine's word on an https page's host, with all the time it needs (the day's first check downloads the list);
+/// None when it couldn't be asked. Anything else has no host to check.
+async fn site_listed(app: &tauri::AppHandle, url: &tauri::Url) -> Option<bool> {
+    let Some(origin) = origin_of(url) else { return Some(false) };
+    let engine = app.try_state::<Engine>()?;
+    let answer = engine_call(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_secs(20)).await;
+    answer.ok().and_then(|v| listed(&v))
+}
+
+/// The check after a page loaded: a listed host or one that couldn't be checked doesn't stay.
 async fn site_allowed_late(app: &tauri::AppHandle, url: &tauri::Url) -> bool {
-    let (Some(origin), Some(host)) = (origin_of(url), url.host_str()) else { return true };
-    let Some(engine) = app.try_state::<Engine>() else { return true };
-    let listed = engine_call(&engine, serde_json::json!({ "op": "siteState", "address": origin }), std::time::Duration::from_secs(20)).await
-        .map(|v| v["result"]["blocked"] == "true" || v["result"]["blocked"] == true).unwrap_or(false);
-    if listed {
-        if let Ok(mut page) = engine.browser.lock() {
-            page.blocked = Some(host.to_string());
-            page.refused.insert(host.to_string());
-            page.asked = Some(url.clone());
-        }
-        let _ = app.emit_to(EventTarget::webview(BAR), "browser", ());
+    match site_listed(app, url).await {
+        Some(false) => true,
+        Some(true) => { refuse(app, url.host_str().unwrap_or_default()); false }
+        None => { unchecked(app); false }
     }
-    !listed
 }
 
 /// Whether the window's screen fits it with the taskbar and some margin; a small laptop or a VM opens it maximized.
@@ -552,17 +592,22 @@ async fn browser_nav(webview: tauri::Webview, state: tauri::State<'_, Engine>, a
 async fn browser_state(webview: tauri::Webview, state: tauri::State<'_, Engine>) -> Result<serde_json::Value, String> {
     if webview.label() != BAR { return Err("only the browser's toolbar".into()) }
     let site = webview.app_handle().get_webview(SITE).ok_or("No page is open.")?;
-    let mut url = site.url().map_err(|e| e.to_string())?;
+    let open = site.url().map_err(|e| e.to_string())?;
+    let mut url = open.clone();
     let mut out = {
         let page = state.browser.lock().map_err(|_| "the engine is gone")?;
-        // While WebView2 says about:blank, and after a refused phishing page (the last one stays, the field shows what was asked).
-        if url.scheme() != "https" || page.blocked.is_some() { if let Some(asked) = &page.asked { url = asked.clone(); } }
+        // The field shows what was asked while WebView2 says about:blank, and after the list refused what was typed (the
+        // page stays). A link or a new window it refused leaves the page's own address, as the Mac's field changes only
+        // with what's typed or shown.
+        let typed_refused = page.blocked.is_some() && page.asked.as_ref().and_then(|a| a.host_str()) == page.blocked.as_deref();
+        if url.scheme() != "https" || typed_refused { if let Some(asked) = &page.asked { url = asked.clone(); } }
         serde_json::json!({ "url": url.as_str(), "title": page.title, "loading": page.loading, "wallet": page.wallet, "watching": page.watching, "russian": page.russian,
                             "connected": false, "check": "local", "real": null, "blocked": page.blocked.is_some(), "blockedHost": page.blocked,
                             "back": page.back || !web::NATIVE_HISTORY, "forward": page.forward || !web::NATIVE_HISTORY, "error": page.error,
                             "panel": web::wallet_in_panel(webview.app_handle()) })
     };
-    if let Some(origin) = origin_of(&url) {
+    // The badge and «Connected» are the open page's, as the Mac's read the shown page's host; the field's while none shows.
+    if let Some(origin) = origin_of(if open.scheme() == "https" { &open } else { &url }) {
         out["check"] = "unknown".into();
         // An engine without the request yet, or slow to answer: the site stays «unknown», not connected.
         let line = serde_json::json!({ "op": "siteState", "address": origin });
@@ -617,33 +662,32 @@ async fn dapp_call(webview: tauri::Webview, request: tauri::ipc::Request<'_>, st
     }
 }
 
-/// `http://127.0.0.1:<port>/<32 lowercase hex>` and nothing else: the Top up page the engine serves on loopback for a
-/// browser wallet (TopUp.swift), under a one-time token. Safe to hand to the person's browser: this machine only, no
-/// other host, no query, no path beyond the token — a shell or the browser can read nothing more into it.
-fn loopback_top_up(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://127.0.0.1:") else { return false };
-    let Some((port, token)) = rest.split_once('/') else { return false };
-    let port_ok = !port.is_empty() && port.len() <= 5 && port.bytes().all(|b| b.is_ascii_digit()) && !port.starts_with('0')
-        && port.parse::<u32>().is_ok_and(|p| p <= 65535);
-    port_ok && token.len() == 32 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+/// A web page for the person's own browser, as the URL parser writes it back: http or https with a host (the Mac's
+/// NSWorkspace opens any page), and nothing a command line could read as more than one address — the parser leaves no
+/// quote, space or control character in it. The engine's loopback Top up page is one of them.
+fn web_link(url: &str) -> Option<String> {
+    let parsed = tauri::Url::parse(url.trim()).ok().filter(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())?;
+    let link = parsed.to_string();
+    (link.len() <= 2048 && link.chars().all(|c| c.is_ascii_graphic() && c != '"')).then_some(link)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::loopback_top_up;
+    use super::web_link;
 
     #[test]
-    fn only_the_top_up_page_on_loopback_passes() {
-        let token = "0123456789abcdef0123456789abcdef";
-        assert!(loopback_top_up(&format!("http://127.0.0.1:51123/{token}")));
-        for bad in [
-            format!("http://127.0.0.1:51123/{token}/"), format!("http://127.0.0.1:51123/{token}?x=1"), format!("http://127.0.0.1:51123/{token}0"),
-            format!("http://127.0.0.1:51123/{}", token.to_uppercase()), format!("http://localhost:51123/{token}"), format!("http://127.0.0.2:51123/{token}"),
-            format!("http://127.0.0.1/{token}"), format!("http://127.0.0.1:0/{token}"), format!("http://127.0.0.1:70000/{token}"),
-            format!("http://127.0.0.1:51123@evil.com/{token}"), format!("https://127.0.0.1:51123/{token}"), format!("http://127.0.0.1:51123/../{token}"),
-        ] {
-            assert!(!loopback_top_up(&bad), "{bad}");
+    fn a_web_page_whole_and_nothing_else() {
+        // Links people click about in a page, the loopback Top up page, an http page the panel shows.
+        for good in ["https://solscan.io/tx/5x?cluster=mainnet&ref=a%20b", "http://127.0.0.1:51123/0123456789abcdef0123456789abcdef", "http://example.com/"] {
+            assert_eq!(web_link(good).as_deref(), Some(good), "{good}");
         }
+        // Quotes and spaces come back escaped, so the address stays one argument; a host in another script, as punycode.
+        assert_eq!(web_link("https://example.com/a\"b c").as_deref(), Some("https://example.com/a%22b%20c"));
+        assert_eq!(web_link("https://exämple.com/").as_deref(), Some("https://xn--exmple-cua.com/"));
+        for bad in ["javascript:alert(1)", "file:///C:/Windows/System32/calc.exe", "ms-settings:privacy", "C:\\Windows\\notepad.exe", "https://", "about:blank", "data:text/html,x"] {
+            assert_eq!(web_link(bad), None, "{bad}");
+        }
+        assert_eq!(web_link(&format!("https://example.com/{}", "a".repeat(3000))), None);
     }
 }
 
@@ -653,12 +697,11 @@ fn protect(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
     window.set_content_protected(on).map_err(|e| e.to_string())
 }
 
-/// An explorer link in the default browser: https only, nothing that a shell could read as more than a link — and the
-/// engine's one-time Top up page for a browser wallet (`loopback_top_up`).
+/// A link in the default browser (an explorer, a sign-in page, Settings' links, the Top up page, the page panel's «Open
+/// in your browser»): a web page only (`web_link`).
 #[tauri::command]
 fn open_link(url: String) -> Result<(), String> {
-    let plain = url.starts_with("https://") && url.len() < 512 && url.chars().all(|c| c.is_ascii_graphic() && !"\"'`<>|^%&".contains(c));
-    if !plain && !loopback_top_up(&url) { return Err("not a plain https link".into()) }
+    let url = web_link(&url).ok_or("Not a web page's address.")?;
     #[cfg(windows)]
     {
         use windows::Win32::UI::Shell::ShellExecuteW;
@@ -902,7 +945,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![engine_send, protect, open_link, copy_secret, clear_secret, update_check, update_install, listen, open_browser, dapp_call,
             browser_nav, browser_state, browser_layout, web::open_page, web::page_nav, web::page_state, web::page_layout,
             system::tray_layout, system::tray_state, system::tray_open, system::tray_quit, system::tray_hide, system::hide_main, system::quit_app,
-            system::open_notification_settings, listen_live, listen_stop])
+            system::open_notification_settings, system::notification_setting, listen_live, listen_stop])
         .build(tauri::generate_context!())
         .expect("ihatecrypto's window didn't start")
         .run(|app, event| {

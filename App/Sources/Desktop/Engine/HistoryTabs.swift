@@ -27,6 +27,9 @@ nonisolated struct HistoryTabs: Encodable {
         var bubbles: [Bubble] = []
         var lines: [String] = []
         var failed = false
+        /// The Schedule item it ran for («perp:BTC»), as the Mac's Activity.schedule: that item's LAST RUNS and the
+        /// Schedule's History list it, without its coin putting it in a position's story.
+        var schedule: String? = nil
     }
     struct Event: Encodable {
         /// «open», «close» or «activity».
@@ -116,12 +119,12 @@ nonisolated struct HistoryTabs: Encodable {
 
     /// What ihatecrypto did by itself. `merging`: a trailing stop moving again is one more line on its record, as the
     /// Mac keeps a trend from filling the History.
-    static func automatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false) {
+    static func automatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false, schedule: String? = nil) {
         if merging, var last = saved.automatic.last, last.title == title {
             last.lines.append(line)
             saved.automatic[saved.automatic.count - 1] = last
         } else {
-            saved.automatic.append(HistoryTabs.Activity(kind: "automatic", at: Date(), title: title, coin: coin, lines: [line], failed: failed))
+            saved.automatic.append(HistoryTabs.Activity(kind: "automatic", at: Date(), title: title, coin: coin, lines: [line], failed: failed, schedule: schedule))
         }
         trim()
         Store.save(saved, "history.json")
@@ -143,8 +146,8 @@ nonisolated struct HistoryTabs: Encodable {
 
 extension Engine {
     /// What ihatecrypto did by itself, kept in the History (the Mac's notify(record:)).
-    func recordAutomatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false) {
-        HistoryStore.automatic(title, line, coin: coin, failed: failed, merging: merging)
+    func recordAutomatic(_ title: String, _ line: String, coin: String? = nil, failed: Bool = false, merging: Bool = false, schedule: String? = nil) {
+        HistoryStore.automatic(title, line, coin: coin, failed: failed, merging: merging, schedule: schedule)
     }
 
     /// The chats History reads: its own record (each save merges the canvases in; the first read of a launch does too, so

@@ -131,7 +131,7 @@ extension Engine {
             let text = say("\(coin) position closed outside ihatecrypto (stop, take-profit or by hand) at \(Fmt.price(close.price)): \(close.pnl >= 0 ? "profit" : "loss") \(Fmt.usd(abs(close.pnl))).",
                            "Позиция \(coin) закрылась вне ihatecrypto (стоп, тейк или вручную) по \(Fmt.price(close.price)): \(close.pnl >= 0 ? "прибыль" : "убыток") \(Fmt.usd(abs(close.pnl))).")
             reply(text, note: "exchange")
-            notify(.positions, coin, text)
+            notify(.positions, coin, text, schedule: "perp:" + coin)
         }
     }
 
@@ -144,7 +144,7 @@ extension Engine {
                   entry: Fmt.price(p.entry), pnl: Fmt.usd(p.unrealizedPnl), liquidation: p.liquidation.map(Fmt.price),
                   summary: Self.summary(coin: p.coin, size: p.size, entry: p.entry, orders: hlOrders, say: words),
                   guardian: rules[p.coin].map { Self.duties($0, say: words).joined(separator: " ") },
-                  ruler: positionRuler(p, rules: rules[p.coin]))
+                  ruler: positionRuler(p, rules: rules[p.coin]), market: p.coin)
         }
     }
 

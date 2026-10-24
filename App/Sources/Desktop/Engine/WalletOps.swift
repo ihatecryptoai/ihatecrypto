@@ -100,6 +100,24 @@ extension Engine {
         stuckDollars.map { StuckView(network: $0.network, key: $0.key, coin: $0.coin, usd: $0.usd, usdc: $0.usdc, ways: $0.ways.count) }
     }
 
+    /// The rail's «Switch» and Settings' «Use»: said in the chat, a refusal too, as the Mac's switchWallet. The automation
+    /// wallet goes to the signer as on the Mac, so its refusal says why («signs only scheduled tasks' moves»), with the
+    /// Ledger left as it was. A refusal throws the chat's own line: Settings, which covers the chat here, shows it as its
+    /// toast, and the onboarding's Ledger goes on only after a switch; the rail, beside the chat, leaves it there.
+    func useWallet(_ id: String) async throws {
+        if let w = switchableWallets.first(where: { $0.id == id }) {
+            await switchWallet(to: w)
+        } else if status?.wallets?.contains(where: { $0.id == id }) == true {
+            do { try await signerCall(.setActiveWallet(id: id)) } catch {
+                reply(say("The wallet wasn't switched: ", "Кошелёк не переключён: ") + error.localizedDescription)
+            }
+        } else {
+            reply(say("That wallet isn't here any more.", "Этого кошелька здесь больше нет."))
+        }
+        let now = ledgerActive ? LedgerAccount.id : status?.activeWallet
+        if now != id { throw WalletError(messages.last { !$0.fromUser }?.text ?? say("The wallet wasn't switched.", "Кошелёк не переключён.")) }
+    }
+
     func importKey(_ key: String) async throws {
         try await signerCall(.importPrivateKey(key: key.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
@@ -115,11 +133,17 @@ extension Engine {
         if let extra = Self.savingExtras.removeValue(forKey: key), extra != AddressExtra(), addressExtras[key] == nil { addressExtras[key] = extra }
     }
 
+    /// Out of the signer's book only: an edit (editAddress) moves the picture, the «from chat» mark and the star to the new
+    /// name after this, as the Mac's edit keeps them on the same entry.
     func removeAddress(name: String, network: String) async throws {
-        let gone = book.first { $0.name.lowercased() == name.lowercased() && $0.network == network }
         let reply = try await signerCall(.removeAddress(name: name, network: network))
         book = reply.addresses ?? book
-        // Its picture, category, note and star go with it, as the Mac's removal does.
+    }
+
+    /// The book's Delete: the entry, and its picture, category, note and star with it, as the Mac's removal does.
+    func deleteAddress(name: String, network: String) async throws {
+        let gone = book.first { $0.name.lowercased() == name.lowercased() && $0.network == network }
+        try await removeAddress(name: name, network: network)
         var extras = addressExtras
         extras[Self.extraKey(name: name, network: network)] = nil
         addressExtras = extras

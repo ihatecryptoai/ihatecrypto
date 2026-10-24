@@ -148,21 +148,18 @@ extension Engine {
     /// Who may still spend the wallet's tokens, on each network; each one can be revoked from its card.
     func showApprovals(note: String?) async {
         guard let e = try? executor() else { return }
+        // Its board at once, «Reading every network's approvals…», filled when the read is back (Blocks.swift).
+        let board = readingApprovals()
         let (list, unread) = await e.approvals()
+        fillApprovals(board, list, unread: unread)
         guard !list.isEmpty else {
             reply(say("No token approvals: nothing may spend this wallet's tokens.", "Разрешений нет: никто не может тратить токены этого кошелька.")
                   + (unread.isEmpty ? "" : say(" Not read: ", " Не прочитано: ") + unread.joined(separator: ", ") + "."), note: note)
-            // Its board says so too, as the Mac's ApprovalsBoard with nothing in it.
-            pin("result", say("Approvals", "Разрешения"), lines: [say("No token approvals.", "Разрешений нет.")], data: BlockData(approvals: approvalsCard([], unread: unread)))
             return
         }
         reply(say("Token approvals:\n", "Разрешения на токены:\n") + list.prefix(20).map { a in
             "\(a.symbol) on \(a.chain) → \(a.spenderName ?? a.spender)" + (a.unlimited ? say(" · unlimited", " · без лимита") : "") + (a.permit2 ? " · Permit2" : "")
         }.joined(separator: "\n"), note: note ?? say("approvals", "разрешения"))
-        pin("result", say("Approvals", "Разрешения"), lines: list.prefix(30).map { "\($0.symbol) on \($0.chain) → \($0.spenderName ?? $0.spender)" + ($0.unlimited ? " · unlimited" : "") },
-            actions: list.prefix(12).map { a in Board.Action(title: say("Revoke \(a.symbol) · \(a.chain)", "Отозвать \(a.symbol) · \(a.chain)"),
-                                                             command: WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2).summary) },
-            data: BlockData(approvals: approvalsCard(list, unread: unread)))
         options = list.prefix(6).map { a in
             let c = WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2)
             return ChatRouter.Option(title: say("Revoke \(a.symbol) for \(a.spenderName ?? String(a.spender.prefix(10)))", "Отозвать \(a.symbol) у \(a.spenderName ?? String(a.spender.prefix(10)))"),

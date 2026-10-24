@@ -196,7 +196,6 @@ extension Engine {
         let credential = try await p.signIn(open: { url in out.event("openURL", ["url": url.absoluteString]) })
         Store.setCredential(credential, for: "openrouter")
         settings.jevOpenRouter = true
-        reply(say("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель."))
     }
 
     var secondCheck: Bool { settings.secondCheck ?? true }

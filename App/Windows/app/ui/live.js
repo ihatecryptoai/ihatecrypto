@@ -6,7 +6,8 @@
 // in the chat field (`suggest`), and the chat's card waits for Confirm.
 
 import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, usd, signedUsd, masked, popup, suggest, store, presence, invoke, toast, qrCode } from "./core.js";
-import { blockFrame, tradePhrases } from "./boards.js";
+import { blockFrame, tradePhrases, plainStep } from "./boards.js";
+import { reveal } from "./canvas.js";
 import { attachAbout } from "./chat.js";
 // The picture picker and its drawing are the rail's (wallets and canvases use them too); read when drawn.
 import * as rail from "./rail.js";
@@ -300,8 +301,8 @@ function editAddress(e) {
   checkForm(0);
   const reach = () => {
     const field = document.getElementById("book-name");
-    field?.scrollIntoView({ block: "center", behavior: "smooth" });
-    field?.focus();
+    reveal(field);
+    field?.focus({ preventScroll: true });
   };
   // The form lives in the Address book block: from Favorites › Wallets it's brought onto the canvas first.
   if (ui.state.boards.some((x) => x.kind === "addresses")) reach();
@@ -441,9 +442,7 @@ function activityBlock(a, key) {
       h("span", { class: "spacer" }), h("span", { class: "secondary small num" }, dayName(new Date(a.at)) + " · " + new Date(a.at).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" }))),
     a.request ? h("div", { class: "page-act-ask selectable" }, a.request) : null,
     a.understood ? h("div", { class: "page-act-read secondary" }, icon("character.bubble", 12), t(`understood as “${a.understood}”`, `понял как «${a.understood}»`)) : null,
-    a.bubbles?.length ? h("div", { class: "page-act-bubbles" }, a.bubbles.map((b) => h("div", { class: "page-hb page-hb-" + b.status },
-      h("div", { class: "eyebrow one-line" }, b.label), h("b", { class: "page-hb-title" }, b.title),
-      (b.lines || []).slice(0, 2).map((l) => h("div", { class: "page-hb-line secondary" }, l))))) : null,
+    a.bubbles?.length ? h("div", { class: "page-act-bubbles" }, a.bubbles.map(plainStep)) : null,
     lines.map((l) => h("div", { class: "page-act-line secondary selectable" }, l)),
     all.length > 2 ? h("button", { class: "link-btn", onclick: () => { more ? openLines.delete(key) : openLines.add(key); render(); } },
       more ? t("Less", "Меньше") : t(`All ${all.length} lines`, `Все строки: ${all.length}`)) : null);
@@ -826,16 +825,17 @@ function drawFavAdd() {
               h("input", { id: "fav-add-name", value: favAdd.name, placeholder: "Bybit", oninput: (e) => (favAdd.name = e.target.value) })),
             h("div", { class: "field" }, h("label", { for: "fav-add-network" }, t("Network", "Сеть")),
               h("select", { id: "fav-add-network", onchange: (e) => { favAdd.network = e.target.value; checkFav(f.address); } }, networks.map((n) => h("option", { value: n, selected: n === favAdd.network }, netName(n)))))),
-          // As the address book's form: an exchange's memo or tag, a category and a note.
+          // As the address book's form (the Mac's editor): an exchange's memo or tag, a note, and a category of the
+          // person's own words or one of the chips.
           h("div", { class: "live-field-row" },
             h("div", { class: "field" }, h("label", { for: "fav-add-memo" }, t("Memo / tag", "Memo / тег")),
               h("input", { id: "fav-add-memo", value: favAdd.memo || "", placeholder: t("If the exchange asks for one", "Если биржа его просит"), oninput: (e) => (favAdd.memo = e.target.value) })),
-            h("div", { class: "field" }, h("label", { for: "fav-add-category" }, t("Category", "Категория")),
-              h("select", { id: "fav-add-category", onchange: (e) => { favAdd.category = e.target.value; drawFavStatus(f.address); } },
-                h("option", { value: "", selected: !favAdd.category }, "—"),
-                categories.map(([en, ru]) => { const c = t(en, ru); return h("option", { value: c, selected: favAdd.category === c }, c); })))),
-          h("div", { class: "field" }, h("label", { for: "fav-add-note" }, t("Note", "Заметка")),
-            h("input", { id: "fav-add-note", value: favAdd.note || "", oninput: (e) => (favAdd.note = e.target.value) })),
+            h("div", { class: "field" }, h("label", { for: "fav-add-note" }, t("Note", "Заметка")),
+              h("input", { id: "fav-add-note", value: favAdd.note || "", placeholder: t("optional", "необязательно"), oninput: (e) => (favAdd.note = e.target.value) }))),
+          h("div", { class: "field" }, h("label", { for: "fav-add-category" }, t("Category", "Категория")),
+            h("div", { class: "live-book-cats" },
+              h("input", { id: "fav-add-category", value: favAdd.category || "", placeholder: t("optional", "необязательно"), oninput: (e) => { favAdd.category = e.target.value; drawFavStatus(f.address); } }),
+              categories.map(([en, ru]) => { const c = t(en, ru); return h("button", { class: "live-cat" + (favAdd.category === c ? " on" : ""), onclick: () => { favAdd.category = favAdd.category === c ? "" : c; drawFavAdd(); } }, c); }))),
           // The address book editor's lines (AddressForm.status): valid for the network with its ends to compare, what's
           // wrong before Save, and an exchange's «only on the network it shows».
           h("div", { id: "fav-add-status", class: "live-book-status" }, favStatus(f.address)),
@@ -1048,6 +1048,9 @@ function taskRow(x, a) {
     ? h("span", { class: "live-signer-mark", title: t(`Runs by itself: a test wallet, no ${presence()}`, `Идёт сама: тестовый кошелёк, без ${presence()}`) }, icon("bolt", 14))
     : s.active === "ledger"
     ? h("span", { class: "live-signer-mark ask", title: t("Asks your Ledger: approve each run on the device", "Спрашивает Ledger: каждый запуск подтверждается на устройстве") }, icon("drive", 14))
+    // A test wallet signs with no prompt: its money move waits for Confirm only (the Mac's .confirm, «Waits for Confirm»).
+    : test && !x.recurring
+    ? h("span", { class: "live-signer-mark ask", title: t("Waits for Confirm: each move waits on its canvas", "Ждёт «Подтвердить»: каждое движение ждёт на холсте") }, icon("hand.tap", 14))
     : h("span", { class: "live-signer-mark ask", title: x.recurring ? t(`Each buy asks for ${presence()} at its time`, `Каждая покупка спросит ${presence()} в своё время`)
       : t(`A money move waits for Confirm and ${presence()}`, `Перевод ждёт «Подтвердить» и ${presence()}`) }, icon("hand.tap", 14));
   const key = "task:" + x.id;
@@ -1127,10 +1130,10 @@ function scheduleBody() {
 
 /** An open position in the Schedule (the Mac's «perp:» entry): its stop and take are on the exchange; it opens its canvas. */
 function positionRow(p) {
-  const key = "perp:" + p.coin;
+  const key = "perp:" + (p.market || p.coin);
   return h("button", { class: "live-task-row live-pos-row" + (ui.state.scheduleKey === key ? " lit" : ""), onclick: () => act("openSchedule", { name: key }) },
     h("span", { class: "live-date-tile" }, h("span", { class: "live-date-icon" }, icon("chart.line", 13))),
-    h("span", { class: "live-task-text" }, h("span", { class: "live-task-title" }, (p.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + p.coin.split(":").pop()),
+    h("span", { class: "live-task-text" }, h("span", { class: "live-task-title" }, (p.side === "long" ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + (p.market || p.coin).split(":").pop()),
       h("span", { class: "live-task-next" }, t("stop and take on the exchange", "стоп и тейк на бирже"))),
     h("span", { class: "live-pos-pnl small num " + (negative(p.pnl) ? "loss" : "profit") }, masked(p.pnl)));
 }
@@ -1258,7 +1261,7 @@ function scheduleItemBody(b) {
         h("span", { class: "live-run-time secondary small num" }, `${dayName(new Date(r.at))} ${new Date(r.at).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" })}`),
         h("span", { class: "live-run-icon " + cls, title: word }, icon(ic, 14)),
         h("span", { class: "live-run-title one-line" }, r.line || r.title),
-        canvas ? h("span", { class: "link-btn", title: t("Open the canvas it ran on", "Открыть холст, где она шла"), onclick: (e) => { e.stopPropagation(); act("openCanvas", { wallet: canvas.id }); } },
+        canvas ? h("span", { class: "link-btn", title: t("Open the canvas it ran on", "Открыть холст, где она шла"), onclick: (e) => { e.stopPropagation(); act("openCanvas", { wallet: canvas.id }).then((r) => { if (r !== null) act("addBoard", { name: "schedule" }); }); } },
           icon("arrow.up.right", 11), t("Its canvas", "Её холст")) : null,
         icon(open ? "chevron.up" : "chevron.down", 10)),
       // Its canvas's request as History keeps it: the cards it drew and every line (the Mac's ActivityCard).
@@ -1267,7 +1270,7 @@ function scheduleItemBody(b) {
   }) : [];
   const head = h("div", { class: "live-section" }, h("span", {}, runs.length ? t(`LAST RUNS · ${runs.length}`, `ПОСЛЕДНИЕ ЗАПУСКИ · ${runs.length}`) : t("HASN'T RUN YET", "ЕЩЁ НЕ ЗАПУСКАЛАСЬ")));
   if (key.startsWith("perp:")) {
-    const p = s.positions.find((x) => x.coin === key.slice(5));
+    const p = s.positions.find((x) => (x.market || x.coin) === key.slice(5));
     const last = runs.length ? [head, h("div", { class: "live-item-runs" }, runRows)] : [];
     return p ? [positionCard(p), h("div", { class: "secondary small" }, t("Its stop and take sit on the exchange: they work with ihatecrypto closed.", "Стоп и тейк стоят на бирже: работают, даже когда ihatecrypto закрыт.")), ...last]
       : [note(t("Closed — nothing open on this market now.", "Закрыта — на этом рынке сейчас ничего не открыто.")), ...last];
@@ -1375,7 +1378,7 @@ function positionsBody() {
 let closeAsk = null;
 
 export function positionCard(x) {
-    const name = x.coin.split(":").pop();
+    const name = (x.market || x.coin).split(":").pop();
     const long = x.side === "long";
     const lost = negative(x.pnl);
     const r = x.ruler;
@@ -1400,7 +1403,7 @@ export function positionCard(x) {
       actions,
       h("div", { class: "live-pos-card plan-pos-card" },
         h("div", { class: "plan-pos-head" },
-          assetBadge(x.coin, 40),
+          assetBadge(x.market || x.coin, 40),
           h("span", { class: "live-pos-text" },
             h("b", {}, (long ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + name),
             h("span", { class: "live-pos-sub" }, `${masked(x.size, "•••")} ${t("at", "по")} ${x.entry}` + (r?.nowText ? ` · ${t("now", "сейчас")} ${r.nowText}` : "")
@@ -1565,7 +1568,7 @@ function ledgerBody() {
     (c?.notes || []).map((n) => h("div", { class: "live-ledger-note" }, icon("gear", 13), h("span", {}, n))),
     w && !busy ? h("div", { class: "btns" },
       on ? h("span", { class: "live-ledger-on" }, icon("check", 13), t("It signs every move now", "Подписывает каждое движение"))
-        : h("button", { class: "btn primary", onclick: () => act("switchWallet", { wallet: "ledger" }) }, icon("signature", 14), t("Sign with Ledger", "Подписывать через Ledger")),
+        : h("button", { class: "btn primary", onclick: () => engine("switchWallet", { wallet: "ledger" }).catch(() => {}) }, icon("signature", 14), t("Sign with Ledger", "Подписывать через Ledger")),
       h("button", { class: "btn", onclick: () => act("connectLedger") }, t("Connect again", "Подключить снова")),
       h("button", { class: "btn", onclick: () => act("removeWallet", { wallet: "ledger" }) }, t("Forget", "Забыть"))) : null,
     ledgerFoot(),

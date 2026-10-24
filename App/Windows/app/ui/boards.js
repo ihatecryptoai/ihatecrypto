@@ -47,21 +47,29 @@ export function planColumn() {
   const boards = ui.state.boards;
   // The newest move is shown whole, as the Mac's board of the canvas; the ones before it fold to pills.
   const newest = boards.find((b) => b.kind === "move")?.id;
-  const { chart, plan, at } = chartPlace(boards);
+  const { chart, plan, at, held } = chartPlace(boards);
   const fade = (b, el) => { if (!seen.has(b.id)) { seen.add(b.id); if (seenReady) el.classList.add("fresh"); } return el; };
   // A watched token's card sits to the right of Favorites, not above it (the owner, 2026-10-16: «открывай справа сбоку»).
   const favorites = boards.find((b) => b.kind === "favorites");
   const beside = favorites && boards.find((b) => b.kind === "token" && b.data?.token?.favorite);
-  const items = boards.length ? boards.filter((b) => (b !== chart || at === "column") && b !== beside).map((b) =>
+  const s = ui.state;
+  // Every recurring buy's board on a canvas with no trade plan under way and no rates on it, as the Mac's (a
+  // ScheduleBoard per schedule, Studio.swift); not twice where its own is pinned. Not the canvas's, so it has no close.
+  const pinned = new Set(boards.filter((b) => b.kind === "recurring").map((b) => b.title.toUpperCase()));
+  const planning = (b) => b.kind === "move" && b.trade && (s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan");
+  const recurring = boards.some((b) => planning(b) || b.data?.rates) ? []
+    : (s.recurring || []).filter((r) => !pinned.has(r.symbol.toUpperCase())).map((r) => ({ id: "recurring:" + r.symbol, kind: "recurring", title: r.symbol, fixed: true }));
+  const items = boards.length || recurring.length ? [...boards.filter((b) => (b !== chart || at === "column") && b !== beside).map((b) =>
     b === favorites && beside ? h("div", { class: "route-fav-row" }, fade(b, drawBoard(b)), fade(beside, tokenBlock(beside)))
-      : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))) : [starter()];
+      : fade(b, b === plan ? moveBoard(b, b.id === newest, chart) : drawBoard(b, b.id === newest))), ...recurring.map((b) => fade(b, liveBlock(b)))] : [starter()];
   // What was on the canvas when it opened is already there; only what comes after fades in.
   setTimeout(() => { seenReady = true; }, 0);
   // Nothing waiting, running or done here yet: «Plan · waiting for a task» over the column, as the Mac's planHeader.
-  const s = ui.state, idle = !boards.some((b) => b.kind === "move") && !s.card && !s.runningBoard && !s.scheduleKey;
+  const idle = !boards.some((b) => b.kind === "move") && !s.card && !s.runningBoard && !s.scheduleKey;
   const head = idle ? h("div", { class: "route-move-head" }, h("span", { class: "route-move-title" }, t("Plan", "План")),
     h("span", { class: "route-status-chip secondary" }, t("waiting for a task", "ждёт задачи"))) : null;
-  const column = h("div", { class: "route-plan" }, head, items);
+  // The chart's own position (a position row's click opens its chart): its board with the controls first, as the Mac's.
+  const column = h("div", { class: "route-plan" }, head, held && live.positionCard ? live.positionCard(held) : null, items);
   return at === "beside" ? h("div", { class: "route-plan-row" }, column, h("div", { class: "route-beside" }, fade(chart, chartBlock(chart)))) : column;
 }
 
@@ -74,7 +82,9 @@ function chartPlace(boards) {
   const s = ui.state, live = (b) => s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan";
   const plan = boards.find((b) => b.kind === "move" && b.trade && live(b) && sameCoin(chart.chart, b.trade.coin));
   if (plan) return { chart, plan, at: "plan" };
-  return { chart, at: boards.some((b) => b !== chart && b.kind !== "chart") ? "beside" : "column" };
+  // With no trade on the canvas, an open position of the chart's coin has its board here, and the chart goes beside it.
+  const held = !boards.some((b) => b.kind === "move" && b.trade) && (s.positions || []).find((p) => sameCoin(chart.chart, p.market || p.coin));
+  return { chart, held, at: held || boards.some((b) => b !== chart && b.kind !== "chart") ? "beside" : "column" };
 }
 
 /** A chart's coin is the plan's: by Hyperliquid's name, or for a chart drawn before it had one, by its title. */
@@ -101,7 +111,7 @@ export function blockFrame(b, title, body, { extra, width, tint, icon: glyph } =
   const el = h("div", { class: "route-block" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, title) },
     h("div", { class: "route-block-head" }, glyph ? h("span", { class: "route-block-icon" }, icon(glyph, 16)) : null,
       h("b", { class: "route-block-title one-line" }, title), h("span", { class: "spacer" }), extra || null,
-      h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
+      b.fixed ? null : h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
     body);
   if (width) el.style.width = width + "px";
   if (tint) el.style.background = tint;
@@ -171,7 +181,7 @@ function moveBoard(b, newest, onChart) {
   // The newest trade done here manages its position (the Mac's managesPosition): «Position · long ETH», open or
   // closed, and that position's own card under the route while it's open.
   const managed = newest && finished && b.trade && b.state === "done";
-  const position = managed ? (s.positions || []).find((p) => p.coin === b.trade.coin) : null;
+  const position = managed ? (s.positions || []).find((p) => (p.market || p.coin) === b.trade.coin) : null;
   const status = managed ? (position ? [t("position open", "позиция открыта"), "profit"] : [t("done · position closed", "готово · позиция закрыта"), "profit"])
     : planStatus(b) || (siteHere ? [t("waiting for your answer", "ждёт твоего ответа"), "route-accent"]
     // An address to save signs nothing: the Mac's «waiting for your confirmation».
@@ -599,6 +609,23 @@ function stepCard(b, step, i, state, compact, isOpen) {
     h("div", { class: "route-step-pic" }, scene(kind, state, step, w), state !== "plain" && kind !== "result" ? stateChip(state, compact) : null),
     stepInfo(step, state, kind, place, compact, isOpen),
     state === "now" || state === "touch" ? h("span", { class: "route-ring" + (state === "touch" ? " route-touch" : "") }) : null);
+}
+
+/** A History bubble (the Mac's HistoryBubble): a step drawn as the canvas's card, plain and a bit smaller, with no click
+ *  and no menu; a chart, rates or a choice as a box with its label, title and two lines. A signature is the Mac's
+ *  «SIGN · CONFIRM» card: the check's colours. */
+export function plainStep(b) {
+  if (["chart", "rates", "yield", "choice"].includes(b.kind)) return h("div", { class: "page-hb page-hb-" + b.status },
+    h("div", { class: "eyebrow one-line" }, b.label), h("b", { class: "page-hb-title" }, b.title),
+    (b.lines || []).slice(0, 2).map((l) => h("div", { class: "page-hb-line secondary" }, l)));
+  const step = { label: b.label.toUpperCase(), title: b.title, lines: (b.lines || []).slice(0, 2) };
+  const kind = stepKind(step.label, step.title);
+  const parts = step.label.split("·").map((x) => x.trim());
+  const place = parts.length > 1 ? pretty(parts.slice(1).join(" · ")) : null;
+  const fill = b.kind === "signed" ? "check" : fillFor(place || "", parts[0]);
+  const cls = ["route-step", "route-plain-card", "route-fill-" + fill, "route-kind-" + kind, "route-state-plain", "route-compact", DARK_FILLS.has(fill) && "route-dark"]
+    .filter(Boolean).join(" ");
+  return h("div", { class: cls }, h("div", { class: "route-step-pic" }, scene(kind, "plain", step, SMALL.w)), stepInfo(step, "plain", kind, place, true, false));
 }
 
 /** Opens a step's details, as its click does; by default the first step of the move waiting for Confirm. */
@@ -1120,7 +1147,7 @@ const RANGES = [["day", "24h"], ["week", "7d"], ["month", "30d"]];
 /** A chart's moving parts (AssetPrice + AssetChart): the price now or under the pointer, the move, the range picker and
  * the line with its fill; with a plan's levels across it and its loss and gain as bands (ChartZone), the domain
  * stretched to show them, as the Mac's. Drawn from numbers only. */
-function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
+function chartParts(b, { levels = [], zones = [], H = 190, move } = {}) {
   const c = b.chart, pts = c.closes, times = c.times?.length === pts.length ? c.times : null;
   const coin = c.title.split("·")[0].trim();
   // The engine's titles: «ETH · 24 h», «ETH · 7 days», «ETH · 30 days» («7 days» has «day» in it, so day is what's left).
@@ -1150,7 +1177,7 @@ function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
     ...xTicks.map((x) => svg("path", { d: `M${(x.at * W).toFixed(1)} 0V${H}`, class: "route-chart-grid" })));
   plot.style.height = H + "px";
   const priceEl = h("span", { class: "route-chart-price" }, price(pts.at(-1)));
-  const moveText = c.change + " · " + rangeTitle(range);
+  const moveText = move || c.change + " · " + rangeTitle(range);
   const changeEl = h("span", { class: "route-chart-change " + (up ? "profit" : "loss") }, moveText);
   plot.addEventListener("mousemove", (e) => {
     const r = plot.getBoundingClientRect();
@@ -1370,10 +1397,12 @@ function tokenBlock(b) {
     !c.loading ? h("button", { class: "icon-btn", title: t("Read the market again", "Прочитать рынок снова"), onclick: () => act("tokenRange", { board: b.id, text: c.range }) }, icon("arrow.clockwise")) : null,
     h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark")));
   const change = c.change === null || c.change === undefined ? null : Number(c.change);
-  const chart = c.closes.length > 1 ? chartParts({ id: b.id, chart: { title: `${c.symbol} · ${c.range}`, closes: c.closes, times: c.times, change: (change < 0 ? "−" : "+") + Math.abs(change ?? 0).toFixed(2) + "%" } }) : null;
+  const moved = change === null ? null : (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range);
+  // Its move under the price, and the pointer's time there instead while over the line (the Mac's PointerPrice).
+  const chart = c.closes.length > 1 ? chartParts({ id: b.id, chart: { title: `${c.symbol} · ${c.range}`, closes: c.closes, times: c.times, change: (change < 0 ? "−" : "+") + Math.abs(change ?? 0).toFixed(2) + "%" } }, { move: moved || " " }) : null;
   const pick = h("div", { class: "route-chart-range" }, TRANGES.map(([key, label]) => h("button", { class: key === c.range ? "route-on" : "", onclick: () => key !== c.range && act("tokenRange", { board: b.id, text: key }) }, label)));
   const priceEl = chart ? chart.priceEl : h("span", { class: "route-chart-price" }, c.price !== null && c.price !== undefined ? price(Number(c.price)) : "—");
-  const changeEl = change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range));
+  const changeEl = chart ? chart.changeEl : change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, moved);
   const held = c.held ? heldCard(c.held, c.symbol) : null;
   const phrases = tradePhrases(c.chain, c.address, c.symbol, { stock: c.stock, verified: c.verified === true, dollar: c.dollar });
   // Only where there's nothing to trade, as the Mac's TokenBoard (which always has its trades): Favorites' «+» watches a token.
@@ -1441,7 +1470,7 @@ function pnlBlock(b, p) {
       p.held.map((x) => h("div", { class: "route-pnl-row" }, logo(logoKey(x.network) || x.network, 22),
         h("div", { class: "route-pnl-name" }, h("b", { class: "one-line" }, `${x.symbol} · ${x.place}`),
           h("span", { class: "secondary small one-line" }, masked(x.amount + (x.usd !== null && x.usd !== undefined ? ` ≈ ${usd(x.usd)}` : "")
-            + (x.paid !== null && x.paid !== undefined ? t(` · bought for ${usd(x.paid)}`, ` · куплено за ${usd(x.paid)}`) : t(" · cost unknown", " · цена покупки неизвестна"))))),
+            + (x.paid !== null && x.paid !== undefined ? t(` · bought for ${usd(x.paid)}`, ` · куплено за ${usd(x.paid)}`) + (x.counted ? t(` (${x.counted} of it)`, ` (${x.counted} из них)`) : "") : t(" · cost unknown", " · цена покупки неизвестна"))))),
         h("span", { class: "spacer" }),
         h("b", { class: "num " + (x.gain !== null && x.gain !== undefined ? tone(x.gain) : "") }, masked(x.gain !== null && x.gain !== undefined ? signedUsd(x.gain) + heldPct(x) : x.usd !== null && x.usd !== undefined ? usd(x.usd) : t("no price", "нет цены")))))) : null,
     !p.coin ? (r.change !== null && r.change !== undefined && r.changeSince
@@ -1496,7 +1525,7 @@ function moversBlock(b, m) {
 const readingApprovals = new Set();
 function approvalsBlock(b, a) {
   // Read again: «Reading every network's approvals…» until they're back (the Mac's ApprovalsBoard while it loads).
-  if (readingApprovals.has(b.id)) return blockFrame(b, t("Token approvals", "Разрешения на токены"),
+  if (readingApprovals.has(b.id) || a.loading) return blockFrame(b, t("Token approvals", "Разрешения на токены"),
     h("div", { class: "route-loading secondary" }, h("span", { class: "route-rc-spinner" }), t("Reading every network's approvals…", "Читаю разрешения во всех сетях…")),
     { width: 520, icon: "checkmark.shield" });
   const open = a.list.filter((x) => x.unlimited).length;

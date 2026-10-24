@@ -571,6 +571,11 @@ extension Engine {
 }
 
 extension Engine {
+    /// What the window's own part asks while the app is locked: the phishing check, which the Mac's browser makes whatever
+    /// the lock (its decidePolicyFor). The page beside the chat stays alive under the lock screen, and a check refused
+    /// there would read as one the window couldn't make, so nothing loads.
+    nonisolated static let browserWhileLocked: Set<String> = ["siteState"]
+
     /// What the browser's bar shows for the page open in it: whether this run connected it, how ihatecrypto knows the
     /// site («known», «lookalike» of `real`, «unknown», «local»), and whether MetaMask's list names it as phishing.
     /// Strings, as every answer: «true» or «false».

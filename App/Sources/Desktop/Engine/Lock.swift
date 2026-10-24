@@ -21,6 +21,8 @@ nonisolated struct LockView: Encodable, Equatable {
     var checking = false
     /// Windows Hello stood in for a forgotten code: Settings › Wallet opens on making a new one.
     var offerNewCode = false
+    /// How many times it was offered: each «Forgot the code?» opens Settings › Wallet again, as each Mac password unlock does.
+    var newCodeOffers = 0
     /// Scheduled tasks keep running while it's locked: the lock screen says so.
     var tasksRun = false
 }
@@ -130,6 +132,7 @@ extension Engine {
         if wasOff || forgot {
             settings.codeOff = nil
             lock.offerNewCode = true
+            lock.newCodeOffers += 1
         }
         changed()
     }

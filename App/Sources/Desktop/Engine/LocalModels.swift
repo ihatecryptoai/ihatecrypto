@@ -37,6 +37,9 @@ nonisolated struct LocalSetupView: Encodable {
     var ollamaLatest: String?
     /// The Mac's localState: noOllama, notRunning, outdated, missing, ready.
     var ollamaState: String
+    /// A download said this Ollama is too old (the Mac's ollamaOutdated): the chat's bar says so only then, not when
+    /// Ollama is merely behind its newest release.
+    var ollamaOutdated: Bool
     var ollamaInstall: String?
     var claudeInstall: String?
     /// Claude Code found on this PC: «Sign in in a terminal» runs its own sign-in.
@@ -52,7 +55,7 @@ extension Engine {
         }
         return LocalSetupView(thinking: settings.thinking == true, examProgress: localSetup.examProgress, examTotal: ModelExam.questions.count,
                               examFor: localSetup.examFor, status: localSetup.status, scores: scores, ollamaVersion: localSetup.ollamaVersion,
-                              ollamaLatest: localSetup.ollamaLatest, ollamaState: ollamaState, ollamaInstall: localSetup.ollamaInstall,
+                              ollamaLatest: localSetup.ollamaLatest, ollamaState: ollamaState, ollamaOutdated: localSetup.ollamaOutdated, ollamaInstall: localSetup.ollamaInstall,
                               claudeInstall: localSetup.claudeInstall, claudeFound: provider("claude-code")?.existingLogin() != nil,
                               keepRunning: settings.keepRunning)
     }
@@ -132,13 +135,13 @@ extension Engine {
 
     // MARK: Ollama
 
-    /// Its version here (when it runs) and its newest release, for «Update» and the outdated state.
+    /// Its version here and its newest release, for «Update» and the outdated state. GitHub is asked only once Ollama
+    /// answers, and only until it has said (the Mac's refreshLocalModels): no Ollama, no request.
     func readOllamaVersions() async {
-        async let latest = OllamaSetup.latest()
-        let version = await OllamaSetup.version()
+        guard let version = await OllamaSetup.version() else { return }
         // An updated Ollama may take the model now.
         if version != localSetup.ollamaVersion { localSetup.ollamaVersion = version; localSetup.ollamaOutdated = false }
-        localSetup.ollamaLatest = await latest
+        if localSetup.ollamaLatest == nil { localSetup.ollamaLatest = await OllamaSetup.latest() }
     }
 
     /// Older than its newest release (and not just updated), or a model said it's too old.

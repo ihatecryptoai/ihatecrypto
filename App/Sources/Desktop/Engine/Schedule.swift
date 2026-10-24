@@ -250,18 +250,22 @@ extension Engine {
 
     /// The History tab: the newest 30 runs first.
     var recentRuns: [ScheduleRun] {
-        // The guardian's moves on a position (partial profit, the trailing stop) are runs of its item too — the Mac's
-        // activities with schedule «perp:…» (Execution.swift:1194,1203). History keeps them with their coin; only it does.
+        // The guardian's moves on a position (partial profit, the trailing stop), a position closed outside ihatecrypto and
+        // a limit that filled are runs of its item too — the Mac's activities with schedule «perp:…» (Execution.swift:1194,
+        // 1203, 1219; Workspace.swift:2134-2138). The guardian's carry their coin, the others the item.
         let guarded = HistoryStore.saved.automatic.suffix(60).compactMap { a in
-            a.coin.map { ScheduleRun(at: a.at, title: a.title ?? "", result: a.failed ? "failed" : "done", line: a.lines.last, canvas: nil, task: "perp:" + $0) }
+            (a.schedule ?? a.coin.map { "perp:" + $0 }).map { ScheduleRun(at: a.at, title: a.title ?? "", result: a.failed ? "failed" : "done", line: a.lines.last, canvas: nil, task: $0) }
         }
         var runs = Array((scheduleRuns.suffix(30) + guarded).sorted { $0.at > $1.at }.prefix(30))
-        guard runs.contains(where: { $0.canvas != nil }), boards.contains(where: { $0.kind == "scheduleItem" }) else { return runs }
-        // A run's canvas starts with its «Scheduled: …» request, said as the run starts.
-        let asked = historyActivities.filter { $0.kind == "request" && $0.request != nil }
-        for i in runs.indices where runs[i].canvas != nil {
-            let at = runs[i].at
-            runs[i].activity = asked.filter { abs($0.at.timeIntervalSince(at)) < 3 }.min { abs($0.at.timeIntervalSince(at)) < abs($1.at.timeIntervalSince(at)) }
+        guard boards.contains(where: { $0.kind == "scheduleItem" }) else { return runs }
+        // A run's canvas starts with its «Scheduled: …» request, said as the run starts; a run with no canvas (a recurring
+        // buy, the guardian) opens to what it said, as the Mac's automatic ActivityCard.
+        let asked = runs.contains { $0.canvas != nil } ? historyActivities.filter { $0.kind == "request" && $0.request != nil } : []
+        for i in runs.indices {
+            let r = runs[i]
+            runs[i].activity = r.canvas == nil
+                ? HistoryTabs.Activity(kind: "automatic", at: r.at, title: r.title, lines: r.line.map { [$0] } ?? [], failed: r.result == "failed")
+                : asked.filter { abs($0.at.timeIntervalSince(r.at)) < 3 }.min { abs($0.at.timeIntervalSince(r.at)) < abs($1.at.timeIntervalSince(r.at)) }
         }
         return runs
     }

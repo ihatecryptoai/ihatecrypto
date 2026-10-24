@@ -370,7 +370,11 @@ extension Engine {
             liveModels[id] = Array(list.prefix(4))
         }
         for p in LLMCatalog.all where p.info.kind == .local && p.info.unavailable == nil && p.info.id != "apple" {
-            if p.info.id == "ollama", let tags = await Self.ollamaDownloaded() { for (name, gb) in tags { modelSizes[name] = gb } }
+            if p.info.id == "ollama", let tags = await Self.ollamaDownloaded() {
+                for (name, gb) in tags { modelSizes[name] = gb }
+                // Its version, as the Mac reads it here: an Ollama updated outside the app takes the model again.
+                await readOllamaVersions()
+            }
             guard let list = try? await p.models(nil) else { localServers[p.info.id] = false; continue }
             localServers[p.info.id] = true
             liveModels[p.info.id] = list.filter { !$0.lowercased().contains("embed") }
@@ -433,11 +437,21 @@ extension Engine {
     /// «Open Ollama»: its app, when it's installed but not running.
     func startOllama() {
         #if os(Windows)
-        let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] ?? ""
-        let app = local + "\\Programs\\Ollama\\ollama app.exe"
-        guard FileManager.default.fileExists(atPath: app) else { return }
+        // Every place ollamaInstalled counts: the tray app first, else the server alone.
+        let env = ProcessInfo.processInfo.environment
+        let local = env["LOCALAPPDATA"] ?? ""
+        let program = env["ProgramFiles"] ?? "C:\\Program Files"
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: app)
+        if let app = [local + "\\Programs\\Ollama\\ollama app.exe", program + "\\Ollama\\ollama app.exe"]
+            .first(where: { FileManager.default.fileExists(atPath: $0) }) {
+            p.executableURL = URL(fileURLWithPath: app)
+        } else if let server = [local + "\\Programs\\Ollama\\ollama.exe", program + "\\Ollama\\ollama.exe"]
+            .first(where: { FileManager.default.fileExists(atPath: $0) }) {
+            p.executableURL = URL(fileURLWithPath: server)
+            p.arguments = ["serve"]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+        } else { return }
         try? p.run()
         #endif
     }

@@ -68,7 +68,11 @@ extension Engine {
                     held.append("\(row.amount) \(row.symbol) " + say("on", "в") + " \(n.name)" + (row.usd.map { " (\(Fmt.usd($0)))" } ?? ""))
                 }
             }
-            if held.isEmpty, r.closedTrades == 0, r.trading == 0, r.unrealized == 0 {
+            // In no period at all, as the Mac's (PnLBoard.traded over every period): a trade last month still counts today.
+            func traded(_ r: PnL.Report) -> Bool { r.realized != 0 || r.funding != 0 || r.unrealized != 0 || !r.byAsset.isEmpty }
+            var ever = traded(r)
+            if !ever, command.period != .all, let all = await pnlReport(PnLCommand(period: .all, coin: coin)) { ever = traded(all) }
+            if held.isEmpty, !ever {
                 let name = IntentParser.pretty(coin)
                 reply(say("No \(name) in the wallet on any network, and no Hyperliquid trades in it: nothing to count.",
                           "\(name) нет в кошельке ни в одной сети, и сделок по нему на Hyperliquid не было — считать нечего."), note: note)

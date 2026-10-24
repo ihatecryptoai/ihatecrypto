@@ -48,8 +48,9 @@ extension Engine {
     /// person may not be looking at); main.rs checks that. `record`: what ihatecrypto did by itself (money arrived, an
     /// alert, the guardian, a limit filled, HLP unlocked) is a History record too, notified or not, as the Mac's
     /// notify(record:); a confirmed move has its own, and a card waiting or an update isn't one.
-    func notify(_ kind: Notice, _ title: String, _ body: String, failed: Bool = false, whenAway: Bool = false, record: Bool? = nil) {
-        if record ?? ![.moves, .confirm, .update].contains(kind) { recordAutomatic(title, body, failed: failed) }
+    /// `schedule`: the Schedule item it's about («perp:BTC»), as the Mac's notify(schedule:).
+    func notify(_ kind: Notice, _ title: String, _ body: String, failed: Bool = false, whenAway: Bool = false, record: Bool? = nil, schedule: String? = nil) {
+        if record ?? ![.moves, .confirm, .update].contains(kind) { recordAutomatic(title, body, failed: failed, schedule: schedule) }
         guard !(settings.noticesOff ?? []).contains(kind.rawValue) else { return }
         NoticeMemory.last = Date()
         var event = ["kind": kind.rawValue, "title": title, "body": body, "sound": kind.sound(failed: failed)]
@@ -125,7 +126,8 @@ extension Engine {
             for p in positions where !before.contains(p.coin) && NoticeMemory.entries.contains(p.coin) {
                 notify(.orders, say("Limit filled: \(IntentParser.pretty(p.coin))", "Лимитка исполнилась: \(IntentParser.pretty(p.coin))"),
                        say("\(p.size > 0 ? "Long" : "Short") \(Fmt.num(abs(p.size), maxFraction: 6)) at \(Fmt.price(p.entry)); its stop and take are on the exchange.",
-                           "\(p.size > 0 ? "Лонг" : "Шорт") \(Fmt.num(abs(p.size), maxFraction: 6)) по \(Fmt.price(p.entry)); стоп и тейк стоят на бирже."))
+                           "\(p.size > 0 ? "Лонг" : "Шорт") \(Fmt.num(abs(p.size), maxFraction: 6)) по \(Fmt.price(p.entry)); стоп и тейк стоят на бирже."),
+                       schedule: "perp:" + p.coin)
             }
         }
         // ponytail: its own read of the open orders, one more request a minute; the guardian's `hlOrders` can feed it.

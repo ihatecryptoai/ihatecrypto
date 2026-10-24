@@ -75,11 +75,13 @@ function sheet(card) { return h("div", { class: "ob-page" }, brandCorner(), h("d
 const brandCorner = () => h("div", { class: "ob-brand" }, mascot(28), h("span", {}, "ihatecrypto"));
 
 // Return presses the step's orange button (the Mac's `.keyboardShortcut(.defaultAction)`), as long as the button is on
-// and the key isn't for the field it was pressed in: several lines, a list, the API key's own Save, the code's digits.
+// and the key isn't for the field it was pressed in: a list, the API key's own Save, the code's digits. The flow's text
+// areas hold one phrase or key, wrapped: Return never adds a line there, as in the Mac's one-line fields.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.shiftKey || e.isComposing || !onboardingRunning() || ui.overlay) return;
   const at = e.target;
-  if (at?.tagName === "TEXTAREA" || at?.tagName === "SELECT" || at?.tagName === "BUTTON" || at?.closest?.(".ob-key-row, .lk-maker, .ob-local-panel")) return;
+  if (at?.tagName === "SELECT" || at?.tagName === "BUTTON" || at?.closest?.(".ob-key-row, .lk-maker, .ob-local-panel")) return;
+  if (at?.tagName === "TEXTAREA") e.preventDefault();
   const primary = document.querySelector(".ob-card .ob-primary");
   if (primary && !primary.disabled) { e.preventDefault(); primary.click(); }
 });
@@ -417,11 +419,19 @@ function secureStep() {
 function passcodeStep() {
   const l = ui.state.lock, made = !!l?.codeSet;
   const after = l?.lockAfter === 60 ? t("an hour", "час") : t(`${l?.lockAfter ?? 5} min`, `${l?.lockAfter ?? 5} мин`);
+  // The signer asks Windows Hello before it keeps a code (Vault.swift): without it, said here, not after the code is typed
+  // twice — as the Mac adapts this step to a Mac without Touch ID.
+  const hello = !noHello();
   return stepCard({
     mood: made ? "done" : "tuning", title: made ? t("Your code is set", "Код задан") : t("Lock ihatecrypto when you step away", "Блокируй ihatecrypto, когда отходишь"),
     subtitle: made ? t(`ihatecrypto locks after ${after} away, and when the PC sleeps. Change it in Settings › Wallet.`, `ihatecrypto блокируется после ${after} без тебя и когда компьютер засыпает. Изменить — в «Настройки › Кошелёк».`)
-      : t("Six digits open it again. Windows Hello opens it too.", "Шесть цифр открывают его снова. Windows Hello тоже открывает."),
-    content: made ? null : h("div", { class: "ob-content" }, lock?.codeMaker && l ? lock.codeMaker(l, () => render())
+      : hello ? t("Six digits open it again. Windows Hello opens it too.", "Шесть цифр открывают его снова. Windows Hello тоже открывает.")
+      : t("Six digits open it again. A code is confirmed with Windows Hello, so it can be made once Windows Hello is set up.",
+        "Шесть цифр открывают его снова. Код подтверждается через Windows Hello, поэтому задать его можно, когда Windows Hello будет настроен."),
+    content: made ? null : !hello ? h("div", { class: "ob-content" }, factRow("person", t("Windows Hello isn't set up on this PC", "Windows Hello на этом компьютере не настроен"),
+        t("Turn on a face, fingerprint or PIN in Windows Settings › Accounts › Sign-in options, then make the code in Settings › Wallet. Skip it for now.",
+          "Включи лицо, отпечаток или PIN в «Параметры Windows › Учетные записи › Варианты входа», потом задай код в «Настройки › Кошелёк». Пока пропусти.")))
+      : h("div", { class: "ob-content" }, lock?.codeMaker && l ? lock.codeMaker(l, () => render())
       : statusLine(t("The code is made in Settings › Wallet once the lock screen is there; skip it for now.", "Код задаётся в «Настройки › Кошелёк», когда появится экран блокировки; пока пропусти."))),
     primary: t("Continue", "Дальше"), enabled: made, onPrimary: () => go("networks"),
     quiet: [quietButton(t("Back", "Назад"), back), made ? null : quietButton(t("Skip for now", "Пропустить"), () => go("networks"))],
@@ -557,6 +567,15 @@ function compareTable(accounts) {
       accounts.map((x, i) => [h("span", { class: "secondary" }, String(i)), h("span", { class: "address selectable" }, x.evm), h("span", { class: "address selectable" }, x.solana)])));
 }
 
+/** Leaving the Ledger step: the block its search pinned closes, so the search stops and nothing stays on the canvas (the
+ *  Mac sets ledgerConnect nil on Back and after «Use this Ledger»; Engine's closeBoard does the same here). */
+function leaveLedger() {
+  const looked = flow.ledgerLooked;
+  flow.ledgerLooked = false;
+  const b = looked ? (ui.state.boards || []).find((x) => x.kind === "ledger") : null;
+  if (b) act("closeBoard", { board: b.id });
+}
+
 /** A Ledger: the keys stay on the device (LedgerStep). */
 function ledgerStep() {
   const lc = flow.ledgerLooked ? ui.state.ledgerConnect : null;
@@ -573,9 +592,9 @@ function ledgerStep() {
     primary: connected ? t("Use this Ledger", "Работать с этим Ledger") : !lc ? t("Look for it", "Найти его") : t("Try again", "Ещё раз"), busy: !!lc?.busy,
     onPrimary: async () => {
       if (!connected) { flow.ledgerLooked = true; await act("connectLedger"); return; }
-      if (await act("switchWallet", { wallet: "ledger" }) !== null) go("networks");
+      if (await act("switchWallet", { wallet: "ledger" }) !== null) { leaveLedger(); go("networks"); }
     },
-    quiet: quietButton(t("Back", "Назад"), () => { flow.ledgerLooked = false; back(); }),
+    quiet: quietButton(t("Back", "Назад"), () => { leaveLedger(); back(); }),
   });
 }
 

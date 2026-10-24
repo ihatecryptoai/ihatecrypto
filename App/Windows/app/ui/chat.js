@@ -154,6 +154,11 @@ export function chatPanel() {
   // the open menu draws again from each state, so a download's percent or a finished sign-in shows in it.
   if (!modelsAsked) { modelsAsked = true; act("refreshModels"); }
   if (liveMenu) liveMenu();
+  // Cards come under a reply already shown: when they don't all fit, the reply they answer stays in view from its top
+  // (the Mac's onChange(of: nextSteps?.message)) — after app.js has put a following chat at its end; not at launch.
+  const cardsFor = liveMessage()?.id || null;
+  if (cardsShownFor !== undefined && cardsFor && cardsFor !== cardsShownFor) queueMicrotask(() => replyInView(cardsFor));
+  cardsShownFor = cardsFor;
   const mood = moodNow();
   const head = h("div", { class: "chat-head", title: t("Drag to move · double-click: back to its corner", "Перетащи, чтобы подвинуть · двойной клик — на место"),
       onpointerdown: (e) => moveBy(e, panel), ondblclick: (e) => { if (!e.target.closest("button")) dock(); } },
@@ -210,7 +215,9 @@ function conversation(s) {
   s.chat.forEach((m, i) => {
     // A move's steps as it ran: one card; the reply right after it is what the move came to.
     if (m.steps) { items.push(stepsCard(m.steps, false)); return; }
-    items.push(m.fromUser ? userMessage(m) : reply(m, i > 0 && !!s.chat[i - 1].steps));
+    const el = m.fromUser ? userMessage(m) : reply(m, i > 0 && !!s.chat[i - 1].steps);
+    if (m.id) el.dataset.msg = m.id;
+    items.push(el);
     // The cards a reply offered stay under it: the last reply's live, older ones folded with their pick.
     if (!m.fromUser && m.options?.length) items.push(answers(m));
   });
@@ -561,6 +568,14 @@ function optionIcon(title) {
     : c.startsWith("pay") ? "creditcard" : "arrow.right.circle";
 }
 
+/** The reply whose cards just came, at the top of the chat, only while the chat follows its end (scrolled up, it stays). */
+let cardsShownFor;
+function replyInView(id) {
+  const list = document.querySelector(".chat-scroll"), el = list?.querySelector(`[data-msg="${CSS.escape(id)}"]`);
+  if (!el || list.scrollHeight - list.scrollTop - list.clientHeight > 40) return;
+  list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top;
+}
+
 /** The live set: the last reply's cards, under 30 minutes old, while nothing is under way. */
 function liveMessage() {
   const s = ui.state;
@@ -674,7 +689,7 @@ const lookups = new Map();
 let catalogRows = null;
 let modelsAsked = false;
 /** The model menu's draw while it's open (redrawn with each state), and which of the chat's menus is open. */
-let liveMenu = null, tuning = null;
+let liveMenu = null, tuning = null, netsPop = null;
 let quoteTimer = null;
 
 /** Every block the next message is about, the newest last. Each right-click adds one; one taken out elsewhere goes. */
@@ -861,7 +876,7 @@ function connectBar(s) {
   const down = local && m.servers?.[s.model.provider] === false;
   const ollama = s.model.provider === "ollama";
   const setup = s.localSetup || {};
-  const outdated = local && ollama && setup.ollamaState === "outdated";
+  const outdated = local && ollama && setup.ollamaOutdated === true;
   // An install or update under way says how far it is, and its button waits (the Mac's ollamaInstall).
   const installing = setup.ollamaInstall || null;
   const size = m.sizes?.[model];
@@ -1313,8 +1328,10 @@ function modelMenu(anchor) {
     const c = list.find((x) => x.name === shown) || list[0];
     right.replaceChildren(h("div", { class: "chat-caption" }, c.name), ...s.providers.filter((p) => c.ids.includes(p.id)).map(way).flat(Infinity));
   };
-  const close = () => { document.querySelector(".menu")?.remove(); closed(); };
-  const closed = () => { if (liveMenu === draw) liveMenu = null; if (tuning === "model") tuning = null; act("refreshModels"); render(); };
+  // The popover's watch calls `closed` once it's gone.
+  const close = () => document.querySelector(".menu")?.remove();
+  // Only while it's the live one: a model menu opened in its place keeps its face.
+  const closed = () => { if (liveMenu === draw) { liveMenu = null; if (tuning === "model") tuning = null; } act("refreshModels"); render(); };
   // «<model> · connected», «any model by key · sign-in needed», «<model> · on this PC» (the Mac's detail(info)).
   const wayDetail = (p) => {
     const state = p.kind === "local" ? t("on this PC", "на этом ПК") : p.connected ? t("connected", "подключено") : t("sign-in needed", "нужен вход");
@@ -1387,7 +1404,10 @@ function networksChip() {
   const all = ui.state.modules?.networks || [];
   const on = all.filter((n) => n.on);
   const chip = h("button", { class: "chat-chip-btn", title: t("Networks the assistant may use: ", "Сети, где работает ассистент: ") + on.map((n) => n.name).join(", "),
-    onclick: () => { popover(chip, networksMenu(), "up", () => { if (tuning === "networks") tuning = null; render(); }); tuning = "networks"; render(); } },
+    onclick: () => {
+      const pop = popover(chip, networksMenu(), "up", () => { if (tuning === "networks" && netsPop === pop) tuning = null; render(); });
+      netsPop = pop; tuning = "networks"; render();
+    } },
   on.length ? [h("span", { class: "chat-logo-stack" }, on.slice(0, 3).map((n) => logo(n.logo, 20))), on.length > 3 ? h("b", { class: "secondary" }, "+" + (on.length - 3)) : null]
     : h("b", { class: "chat-no-nets" }, t("No networks", "Нет сетей")),
   icon("chevron.down", 9));
@@ -1465,7 +1485,17 @@ function popover(anchor, content, side = "up", onClose) {
   const top = side === "up" && a.top - hgt - 8 > 8 ? a.top - hgt - 8 : Math.min(a.bottom + 8, window.innerHeight - hgt - 8);
   pop.style.left = left + "px";
   pop.style.top = Math.max(8, top) + "px";
-  setTimeout(() => document.addEventListener("click", function off(ev) { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", off); onClose?.(); } }), 0);
+  // However it goes — a click outside, Escape (app.js), a pick, another menu, Settings — it says so once and stops
+  // listening, so the coin's «Picking a model» goes with it (the Mac's onChange(of: open)).
+  const outside = (ev) => { if (!pop.contains(ev.target)) pop.remove(); };
+  const gone = new MutationObserver(() => {
+    if (pop.isConnected) return;
+    gone.disconnect();
+    document.removeEventListener("click", outside);
+    onClose?.();
+  });
+  gone.observe(document.body, { childList: true });
+  setTimeout(() => { if (pop.isConnected) document.addEventListener("click", outside); }, 0);
   return pop;
 }
 

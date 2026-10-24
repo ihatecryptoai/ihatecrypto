@@ -120,9 +120,12 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
                     let _ = args.IsSuccess(&mut ok);
                     let _ = args.WebErrorStatus(&mut status);
                 }
-                // A load the next one replaced isn't a failure.
-                let error = (!ok.as_bool() && status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED).then(|| reason(status));
-                set(&a, &l, |p| p.error = error);
+                // A load the next one replaced isn't a failure, nor one the app stopped itself (an http link, a phishing
+                // host, a check it couldn't make): that one keeps the line it set.
+                if status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                    let error = (!ok.as_bool()).then(|| reason(status));
+                    set(&a, &l, |p| p.error = error);
+                }
             }
             if let Some(core) = sender { read_history(&a, &l, &core); }
             Ok(())
@@ -213,6 +216,8 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     window.add_child(header, tauri::LogicalPosition::new(bar[0], bar[1]), tauri::LogicalSize::new(bar[2], bar[3])).map_err(|e| e.to_string())?;
     let (loads, titles, opens) = (app.clone(), app.clone(), app.clone());
     let page = tauri::webview::WebviewBuilder::new(PANEL, tauri::WebviewUrl::External(url))
+        // No file picker and no alerts, as the Mac's panel has neither (keys.rs).
+        .initialization_script_for_all_frames(crate::keys::NO_FILE_PICKER)
         .on_navigation(|u| matches!(u.scheme(), "http" | "https" | "about" | "blob" | "data"))
         // A link that asks for a new window opens here instead.
         .on_new_window(move |u, _| {

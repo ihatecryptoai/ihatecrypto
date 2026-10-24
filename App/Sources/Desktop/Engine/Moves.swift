@@ -85,6 +85,8 @@ extension Engine {
         jupiterShown = nil
         noticeCard(title)
         if case .wallet(let command) = pending { Task { await quoteCard(command, board: id) } }
+        // A chain's first move is quoted as its own card would be (a cross swap, Tempo or NEAR, 1Click): the Mac's is.
+        if case .chain(let list) = pending, case .wallet(let first)? = list.first { Task { _ = await quoteRoute(first, board: id) } }
         // A Base or Arbitrum trade's two ways for its step's way picker, a Robinhood Chain trade's to take the best;
         // the route's note for «Why this way?» (RouteEdit.swift).
         if case .wallet(let c) = pending, RouteEdit.quoted(c) { Task { await quoteWays(c) } }

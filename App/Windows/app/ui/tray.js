@@ -30,7 +30,8 @@ function draw() {
   const positions = s.positions || [];
   const scheduled = (s.tasks || []).filter((task) => task.next && !task.paused);
   const alerts = s.alerts || [];
-  const quiet = !positions.length && !scheduled.length && !alerts.length;
+  // As the Mac's: anything on the Schedule counts, a paused task too.
+  const quiet = !positions.length && !(s.tasks || []).length && !alerts.length;
   const runs = s.scheduleRuns || [];
   // By the task's id, as the Mac's matches its schedule's id (a run keeps its task, Schedule.swift); by its words only for
   // runs older than that.
