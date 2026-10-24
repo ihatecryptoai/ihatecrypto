@@ -565,6 +565,13 @@ function stepCard(b, step, i, state, compact, isOpen) {
 }
 
 /** Opens a step's details, as its click does; by default the first step of the move waiting for Confirm. */
+/** The preview's look at a step's own menu («Why this way?», «Edit step…»): `&call=boards.openStepMenu`. */
+export function openStepMenu() {
+  const card = document.querySelector('[title^="Details · right-click"], [title^="Подробности · правый"]');
+  const r = card?.getBoundingClientRect();
+  card?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: (r?.left || 0) + 40, clientY: (r?.top || 0) + 60 }));
+}
+
 export function openStep(b = ui.state.boards.find((x) => x.id === ui.state.card?.id), i = 0, focus = false) {
   if (!b) return;
   for (const k of [...ui.opened]) if (k.startsWith("step:" + b.id + ":")) ui.opened.delete(k);
