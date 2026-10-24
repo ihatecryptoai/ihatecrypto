@@ -1,3 +1,4 @@
+import CWinSec
 import EVMChain
 import Foundation
 import IhatecryptoCore
@@ -60,6 +61,21 @@ extension Engine {
     func schedule(_ task: ScheduledTask, note: String?) {
         if let bad = task.steps.first(where: { !runnable($0) }) {
             reply(say("“\(bad)” isn't something the Windows app can do yet. Nothing was scheduled.", "«\(bad)» Windows-версия пока не умеет. Ничего не запланировано."), note: note)
+            return
+        }
+        let what = task.steps.joined(separator: say(", then ", ", потом "))
+        // The same steps at the same times again (a repeated message, a test run twice) would run them twice.
+        if let same = tasks.first(where: { $0.steps == task.steps && $0.every == task.every && abs($0.next.timeIntervalSince(task.next)) < 60 }) {
+            pin(Board(kind: "schedule", title: "schedule"))
+            if same.paused == true, waitsForSwitch(same) {
+                reply(say("That’s scheduled and paused: \(what) — \(same.when). It starts only when you switch it on in the Schedule.",
+                          "Это уже запланировано и стоит на паузе: \(what) — \(same.when). Задача начнёт работать, только когда ты включишь её в «Расписании»."), note: note)
+            } else if same.paused == true {
+                setTask(same.id.uuidString, on: true)
+                reply(say("That was scheduled and paused: \(what) — \(same.when). It’s on again.", "Это уже было запланировано и стояло на паузе: \(what) — \(same.when). Снова включено."), note: note)
+            } else {
+                reply(say("That’s already scheduled: \(what) — \(same.when). It’s on the canvas.", "Это уже запланировано: \(what) — \(same.when). Это на холсте."), note: note)
+            }
             return
         }
         var task = task
@@ -202,42 +218,98 @@ extension Engine {
     /// The History tab: the newest 30 runs first.
     var recentRuns: [ScheduleRun] { Array(scheduleRuns.suffix(30).reversed()) }
 
-    /// Tasks that are due run now, one at a time: not over a card already waiting for Confirm, which they'd replace.
+    /// The first task whose time has come, as the Mac's runDueTask: on a canvas of its own (the last run's makes way), and
+    /// back to the canvas the person was on once it's done, unless it needs them (a Confirm, a failure). Only while nothing
+    /// else is going on: a card waiting for Confirm, a reply being written, a move running.
     func runDueTasks() async {
-        guard settings.schedulePaused != true, pending == nil, running == nil, !thinking else { return }
-        guard var task = tasks.first(where: { $0.paused != true && $0.next <= Date() }) else { return }
-        tasks.removeAll { $0.id == task.id }
+        remindTopUp()
+        guard settings.schedulePaused != true, pending == nil, card == nil, running == nil, !thinking else { return }
+        guard let i = tasks.firstIndex(where: { $0.paused != true && $0.next <= Date() }) else { return }
+        let key = "task:\(tasks[i].id)"
+        // With the person at the computer a clock task waits for them to step away (half an hour at most), so the canvas
+        // doesn't change under them. An alert's steps and «Run now» go at once.
+        let asked = Self.runNowKeys.contains(key) || tasks[i].because != nil
+        guard asked || Self.userAway || Date().timeIntervalSince(tasks[i].next) > 1800 else { return }
+        Self.runNowKeys.remove(key)
+        var task = tasks[i]
         if task.advance() {
             // «Run now» on a repeating one keeps its next run as it was (the Mac's TaskRun.kept).
             if let kept = Self.keptNext.removeValue(forKey: task.id.uuidString), kept > Date() { task.next = kept }
-            tasks.append(task)
-        }
+            tasks[i] = task
+        } else { tasks.remove(at: i) }
+        let back = canvasID
+        // The runs before left their canvases; what they did stays in the History. One the person wrote on stays.
+        let before = Set(scheduleRuns.filter { $0.task == task.id.uuidString }.compactMap(\.canvas))
+        for c in canvases where c.id != canvasID && before.contains(c.id) && c.schedule == nil && c.messages.filter(\.fromUser).count <= 1 { try? removeCanvas(c.id) }
+        guard (try? newCanvas()) != nil else { return }
+        let request = (task.because.map { $0 + ": " } ?? say("Scheduled: ", "По расписанию: ")) + task.steps.joined(separator: say(", then ", ", потом "))
+        messages.append(Message(fromUser: true, text: request, note: "schedule"))
+        nameCanvas(from: request)
         let started = Date(), mark = messages.count, canvas = canvasID
         var ran = true, stepFailed = false
-        defer { logRun(task, started: started, mark: mark, canvas: canvas, ran: ran, failed: stepFailed) }
-        // A check says something only when its condition is met: then that is the notification.
-        if task.steps.allSatisfy({ AgentCheck.parse($0) != nil }) {
-            let mark = messages.count
+        let check = task.steps.allSatisfy { AgentCheck.parse($0) != nil }
+        if check {
+            // A check says something only when its condition is met.
             quietCheck = false
             for step in task.steps { _ = await runCanonical(step, userText: step) }
             ran = !quietCheck
-            if !quietCheck, let said = messages.dropFirst(mark).last(where: { !$0.fromUser }) {
-                notify(.alerts, say("Check", "Проверка"), String(said.text.prefix(200)))
-            }
-            return
-        }
-        // A price alert's steps come as a task due now: said with what fired it.
-        let text = (task.because.map { "🔔 \($0): " } ?? "⏰ ") + task.steps.joined(separator: " then ")
-        notify(usesAutomation(task) && automationWallet != nil && task.movesMoney ? .moves : .signature, say("Scheduled", "По расписанию"), text)
-        reply(text, note: "schedule")
-        if usesAutomation(task), let automation = automationWallet, task.movesMoney {
+        } else if usesAutomation(task), let automation = automationWallet, task.movesMoney {
             await runOnAutomation(task, automation)
+            await refreshAutomationBudget()
         } else if task.steps.count > 1 {
             if !(await chain(task.steps, note: "schedule")) { stepFailed = true }
         } else if let step = task.steps.first, !(await runCanonical(step, userText: step)) {
             reply(say("“\(step)” didn't run.", "«\(step)» не выполнилось."), note: "schedule")
             stepFailed = true
         }
+        logRun(task, started: started, mark: mark, canvas: canvas, ran: ran, failed: stepFailed)
+        let failed = scheduleRuns.last?.result == "failed"
+        // A card waits for Confirm the way the Mac's move waits on its canvas.
+        let waits = card != nil || pending != nil
+        let told = messages.dropFirst(mark).last { !$0.fromUser }?.text ?? ""
+        // A check with nothing to tell stays quiet: the run is in the History with a grey mark.
+        if ran {
+            notify(check ? .alerts : waits ? .confirm : .moves, request,
+                   waits ? say("Ready on its canvas — press Confirm.", "Готово на своём холсте — нажми «Подтвердить».") : String(told.prefix(200)), failed: failed)
+        }
+        // Nothing here for the person: back where they were. «Run now» and an alert's task stay to be seen.
+        guard !asked, !waits, !failed, canvasID == canvas, messages.filter(\.fromUser).count <= 1,
+              canvases.contains(where: { $0.id == back }) else { return }
+        try? openCanvas(back)
+    }
+
+    /// «Run now» pressed: these go at once, even with the person at the computer.
+    static var runNowKeys: Set<String> = []
+
+    /// Nobody at the computer: no key or mouse for five minutes (winsec reads the whole session's input), or ihatecrypto's
+    /// window not in front for that long, as the Mac counts another app in front (main.rs sends `windowFocus`).
+    static var userAway: Bool { Int(winsec_idle_ms()) >= 300_000 || (!windowFront && Date().timeIntervalSince(windowLeft) >= 300) }
+    nonisolated(unsafe) static var windowFront = true
+    nonisolated(unsafe) static var windowLeft = Date()
+
+    /// The day before the automation wallet runs short for its buys, once a day: a notification, and with no one at the
+    /// computer the Schedule comes up. The wallet that's on signs only with Windows Hello, so a top-up can't go by itself;
+    /// asked ahead, a week of buys then runs while the computer is left alone.
+    func remindTopUp() {
+        guard let w = automationWallet, let b = automationBudgetNow, let short = b.shortForWeek else { return }
+        let need = automationSpend(until: Date().addingTimeInterval(86_400))
+        let today = Date().formatted(.iso8601.year().month().day())
+        guard need > b.total, Store.load(String.self, "top-up-asked.json") != today else { return }
+        Store.save(today, "top-up-asked.json")
+        let main = activeWallet?.label ?? "Main"
+        notify(.confirm, say("«\(w.label)» is short for the next buys", "На «\(w.label)» не хватит на ближайшие покупки"),
+               say("The buys in the next 24 hours need \(Fmt.num(need)) USDC; it has \(Fmt.num(b.total)). Top it up with \(Fmt.num(short)) USDC for the week from «\(main)»: Confirm and Windows Hello once, then they run by themselves.",
+                   "Покупкам в ближайшие сутки нужно \(Fmt.num(need)) USDC, на нём \(Fmt.num(b.total)). Пополни его на \(Fmt.num(short)) USDC на неделю с «\(main)»: один раз «Подтвердить» и Windows Hello, дальше покупки пойдут сами."))
+        if Self.userAway { pin(Board(kind: "schedule", title: "schedule")) }
+    }
+
+    /// Where a task pays from: the wallet that's on (Confirm and Windows Hello each run) or the automation wallet. Only
+    /// a money task typed in this window that sells nothing can pick, and only with an automation wallet.
+    func canPickPays(_ t: ScheduledTask) -> Bool { t.movesMoney && t.untrusted != true && !t.sells && automationWallet != nil }
+
+    func setFromActive(_ id: String, _ on: Bool) {
+        guard let i = tasks.firstIndex(where: { $0.id.uuidString == id }), canPickPays(tasks[i]) else { return }
+        tasks[i].fromActive = on ? true : nil
     }
 
     /// A run in the log: failed when one of its moves did (or a step didn't run at all), «nothing» when a check had
@@ -303,6 +375,7 @@ extension Engine {
         guard let i = tasks.firstIndex(where: { "task:\($0.id)" == key }) else { return }
         if tasks[i].every != nil, tasks[i].next > Date() { Self.keptNext[tasks[i].id.uuidString] = tasks[i].next }
         tasks[i].next = Date()
+        Self.runNowKeys.insert(key)
         await runDueTasks()
     }
 

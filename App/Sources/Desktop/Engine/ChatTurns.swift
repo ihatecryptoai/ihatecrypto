@@ -185,7 +185,7 @@ extension Engine {
             guard let best = w.ways.first else { return QuoteView(state: "stale") }
             return state(c, gets: best.gets)
         }
-        if jupiterShown?.command == c, let title = boards.first(where: { $0.id == card?.id })?.steps?.first?.title, title.hasPrefix("≈") {
+        if jupiterShown?.command == c, let title = boards.first(where: { $0.id == card?.id })?.steps?.last?.title, title.hasPrefix("≈") {
             return state(c, gets: String(title.dropFirst()).trimmingCharacters(in: .whitespaces))
         }
         return QuoteView(state: "quoting")

@@ -43,6 +43,14 @@ nonisolated struct Board: Codable, Equatable, Identifiable {
     var note: String? = nil
     /// A trade plan's levels and numbers, for drawing it on its coin's chart (RouteEdit.swift).
     var trade: TradeView? = nil
+    /// A note's card shown on another canvas: the note canvas «Open» goes to (ChatCommands.folderCommand).
+    var opens: String? = nil
+    /// What a result board draws, as data (Blocks.swift); `lines` stay what the model reads about it.
+    var data: BlockData? = nil
+    /// The message that drew it: Refresh on a board left from before asks it again (the Mac's StudioNodeView).
+    var request: String? = nil
+    /// A trade plan's route extras: what stops it and its fix, the take-profit ways, the market picker (TradePlan.swift).
+    var plan: PlanView? = nil
 }
 
 /// One canvas: its own chat and its own blocks, as on the Mac.
@@ -104,6 +112,9 @@ extension Engine {
     /// A block on top of the canvas. A live block that's already there moves to the top instead of showing twice.
     @discardableResult
     func pin(_ board: Board) -> String {
+        var board = board
+        // A move keeps the request that drew it: Refresh asks it again once it's left unsigned (Blocks.swift).
+        if board.kind == "move", board.request == nil { board.request = lastRequest }
         var list = boards
         if Self.liveBoards.contains(board.kind), let i = list.firstIndex(where: { $0.kind == board.kind }) {
             var b = list.remove(at: i)
@@ -117,8 +128,12 @@ extension Engine {
         return board.id
     }
 
-    func pin(_ kind: String, _ title: String, lines: [String] = [], chart: ChartLine? = nil, actions: [Board.Action]? = nil) {
-        pin(Board(kind: kind, title: title, lines: lines, chart: chart, actions: actions))
+    func pin(_ kind: String, _ title: String, lines: [String] = [], chart: ChartLine? = nil, actions: [Board.Action]? = nil, data: BlockData? = nil) {
+        var b = Board(kind: kind, title: title, lines: lines, chart: chart, actions: actions)
+        b.data = data
+        // The request that drew it, not a «yes» or «cancel» said after.
+        b.request = lastRequest
+        pin(b)
     }
 
     func updateBoard(_ id: String?, _ change: (inout Board) -> Void) {
@@ -171,7 +186,7 @@ extension Engine {
     /// A running move stays where it was started; a waiting card stays on its canvas, marked as not confirmed.
     private func leaveCanvas() throws {
         guard running == nil else { throw WalletError(say("A move is running: wait for it to finish.", "Идёт перевод: дождись, пока он закончится.")) }
-        if card != nil {
+        if card != nil, !parkPending() {
             updateBoard(card?.id) { $0.state = "cancelled"; $0.lines.append(say("Left without Confirm: nothing was signed.", "Ушёл без «Подтвердить»: ничего не подписано.")) }
             pending = nil
             card = nil
@@ -183,6 +198,7 @@ extension Engine {
     }
 
     private func afterSwitch() {
+        unparkPending()
         settings.canvas = canvasID
         saveCanvases()
         changed()
@@ -206,6 +222,7 @@ extension Engine {
         case "multisig": multisigs.map { "\($0.address): any \($0.threshold) of \($0.keys.map(\.name).joined(separator: ", ")) on \($0.networks.joined(separator: ", "))" }
         case "history": history().prefix(10).map { "\($0.note) (\($0.chain))" }
         case "scheduleItem": scheduleItemFacts(b.title)
+        case "note": ["\(b.opens == nil ? "this canvas is" : "a card opens") \(b.lines.count == 1 ? "a note" : "\(b.lines.count) notes") in folder «\(b.title)»"]
         default: []
         }
         let steps = (b.steps ?? []).map { s in "\(s.label): \(s.title)" + (s.money.map { " (\($0.place) \($0.was) → \($0.after) \($0.symbol))" } ?? "") }
@@ -233,10 +250,10 @@ extension Engine {
                 }
             }
         case .wallet(let c), .recurring(let c, _):
-            return [Board.Step(label: label(c), title: title, lines: lines, money: money(c))]
+            return routeSteps(c) ?? [Board.Step(label: label(c), title: title, lines: lines, money: money(c))]
         case .transfer(_, let amount):
             return [Board.Step(label: say("SEND · ", "ПЕРЕВОД · ") + networkName("solana"), title: title, lines: lines, money: money(spending: amount, "USDC", on: "solana"))]
-        case .position: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
+        case .position, .orders: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
         case .trade: return [Board.Step(label: say("TRADE · Hyperliquid", "СДЕЛКА · Hyperliquid"), title: title, lines: lines)]
         case .address(let e): return [Board.Step(label: say("SAVE · ", "СОХРАНИТЬ · ") + networkName(e.network), title: title, lines: lines)]
         case .site: return [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)]

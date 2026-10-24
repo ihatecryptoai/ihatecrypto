@@ -340,3 +340,37 @@
 .live-item-fact { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 14px; background: var(--fill); min-width: 0; }
 .live-item-steps { display: flex; flex-direction: column; gap: 4px; }
 .live-item-foot { display: flex; align-items: center; gap: 8px; }
+
+/* «Pays from» picked on its tile (the Mac's menu): the value with a chevron, a soft fill under the pointer. */
+.live-pays-pick { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: none; color: inherit; text-align: left; border-radius: 6px; }
+.live-pays-pick b { font-size: 15px; }
+.live-pays-pick .ico { color: var(--secondary); }
+.live-pays-pick:hover { background: var(--fill); }
+
+/* «Closed · 7 days» over the History block (ClosedTrades). */
+.live-closed { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border-radius: 22px; background: var(--card); border: 1px solid var(--card-border); }
+.live-closed-head { display: flex; align-items: center; font-size: 10.5px; margin-bottom: 2px; }
+.live-closed-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border: none; background: none; text-align: left; cursor: pointer; min-width: 0; }
+.live-closed-row:hover .live-closed-text b { color: var(--accent-ink); }
+.live-closed-text { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.live-closed-text .secondary { font-size: 10px; }
+.live-closed-more { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 4px 0; border: none; background: none; font-size: 10.5px; font-weight: 600; color: var(--secondary); cursor: pointer; }
+
+/* The address book's form (AddressEditor): categories, Paste, the check under the address, the picture. */
+.live-book-cats { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.live-book-cats input { flex: 1 1 120px; min-width: 0; }
+.live-cat { padding: 3px 8px; border: none; border-radius: 999px; background: var(--fill); font-size: 10.5px; color: var(--text); cursor: pointer; }
+.live-cat.on { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.live-book-paste { display: flex; gap: 6px; align-items: center; }
+.live-book-paste input { flex: 1; min-width: 0; }
+.live-book-status { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.live-book-status:not(:empty) { margin: -4px 0 12px; }
+.live-book-line { display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
+.live-book-line .ico { flex: none; margin-top: 1px; }
+.live-book-line.live-warn { color: var(--jev-ink, var(--accent-ink)); }
+.live-book-fav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; }
+.live-addr-form .live-book-fav input { width: auto; margin: 0; }
+.live-addr-img { border-radius: 50%; object-fit: cover; }
+.live-book-pic { position: relative; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; }
+.live-book-pen { position: absolute; right: -3px; bottom: -3px; display: inline-flex; padding: 2px; border-radius: 50%; background: var(--accent); color: #fff; }
+.live-addr-note { font-size: 11px; }

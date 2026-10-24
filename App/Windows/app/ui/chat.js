@@ -1142,7 +1142,8 @@ function modelMenu(anchor) {
         : tooBig ? t(`≈ ${size.toFixed(1)} GB · too big for this PC`, `≈ ${size.toFixed(1)} ГБ · слишком велика для этого ПК`)
         : pullable ? t(`Download · ${size !== undefined ? `≈ ${size.toFixed(1)} GB` : "not on this PC yet"}`, `Скачать · ${size !== undefined ? `≈ ${size.toFixed(1)} ГБ` : "пока не на этом ПК"}`)
         : absent ? t("not downloaded", "не скачана") : off ? t("too small for the chat", "слишком мала для чата")
-        : [id === m.recommended?.[p.id] ? t("recommended", "рекомендую") : null, local && size !== undefined ? t(`≈ ${Math.round(size * 1.2)} GB memory`, `≈ ${Math.round(size * 1.2)} ГБ памяти`) : null].filter(Boolean).join(" · ");
+        : [id === m.recommended?.[p.id] ? t("recommended", "рекомендую") : null, local && size !== undefined ? t(`≈ ${Math.round(size * 1.2)} GB memory`, `≈ ${Math.round(size * 1.2)} ГБ памяти`) : null,
+           s.localSetup?.scores?.[p.id + "/" + id] ? (s.localSetup.scores[p.id + "/" + id].good ? "✓ " : "⚠ ") + s.localSetup.scores[p.id + "/" + id].short : null].filter(Boolean).join(" · ");
       const chosen = p.id === s.model.provider && id === s.model.model;
       const disabled = !!off || (absent && (!pullable || tooBig || loading !== undefined));
       rows.push(h("button", { class: "chat-model-row chat-sub-row" + (absent ? " chat-absent" : "") + (disabled ? " chat-faded" : ""), disabled,

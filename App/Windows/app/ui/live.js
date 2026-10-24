@@ -5,8 +5,10 @@
 // (Multisig.swift) and the Ledger's connect board (Ledger.swift). A button here never moves money: it puts the command
 // in the chat field (`suggest`), and the chat's card waits for Confirm.
 
-import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, usd, masked, popup, suggest, store, presence, invoke, toast, qrCode } from "./core.js";
-import { blockFrame } from "./boards.js";
+import { ui, act, engine, render, t, h, svg, icon, addIcons, logo, usd, signedUsd, masked, popup, suggest, store, presence, invoke, toast, qrCode } from "./core.js";
+import { blockFrame, tradePhrases } from "./boards.js";
+// The picture picker and its drawing are the rail's (wallets and canvases use them too); read when drawn.
+import * as rail from "./rail.js";
 
 addIcons({
   bell: "M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
@@ -37,6 +39,10 @@ addIcons({
   "clock.arrow": "M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4M12 8v4.5l3 2",
   "xmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
   "minus.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12h8",
+  "xmark.octagon": "M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3zM9.5 9.5l5 5M14.5 9.5l-5 5",
+  "person.crop.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6.5 18.2c1.2-2 3.2-3 5.5-3s4.3 1 5.5 3",
+  pencil: "M15 4.5l4.5 4.5L8.5 20H4v-4.5zM13 6.5l4.5 4.5",
+  photo: "M4 5h16v14H4zM4 16l5-5 4 4 2.5-2.5L20 17M15.5 9a1.5 1.5 0 1 0 0-.01",
   repeat: "M17 3l4 4-4 4M3 11V10a3 3 0 0 1 3-3h15M7 21l-4-4 4-4M21 13v1a3 3 0 0 1-3 3H3",
 });
 
@@ -180,22 +186,45 @@ function receiveBody() {
 const openRows = new Set();
 const bookKey = (e) => e.network + ":" + e.address.toLowerCase();
 
+/** What the book keeps beside a saved address (its picture, category, note): the engine's address-extras. */
+const extraOf = (e) => ui.state.addressExtras?.[e.network + ":" + e.name.toLowerCase()] || {};
+
+/** A saved address's picture: the one picked (drawn as the rail draws canvas pictures), else its first letter. */
+function addressPic(e, size) {
+  const ic = extraOf(e).icon;
+  if (ic && rail.pickedIcon) return rail.pickedIcon(ic, size, e.name);
+  if (ic?.kind === "logo") return logo(ic.value, size);
+  if (ic?.kind === "image") return h("img", { class: "live-addr-img", src: ic.value, alt: "", draggable: "false", style: `width:${size}px;height:${size}px` });
+  if (ic?.kind === "emoji") return h("span", { class: "live-letter-disc", style: `font-size:${Math.round(size * 0.56)}px` }, ic.value);
+  return h("span", { class: "live-letter-disc" }, (e.name || "?").slice(0, 1).toUpperCase());
+}
+
+/** Opens the rail's picture picker beside `anchor` for a saved address; a pick is kept at once. */
+function pickPicture(anchor, e) {
+  if (!rail.iconPicker) return toast(t("Pictures for addresses need the newer rail.", "Картинки для адресов появятся с новой панелью."));
+  rail.iconPicker(anchor, extraOf(e).icon, e.name, { name: e.name, network: e.network }, "addressIcon");
+}
+
 /** An address as a row (AddressCard): its picture, name and network; a click opens the whole address with Copy and
  * what to do with it. `own`: one of the wallet's own addresses, read-only. */
 function addressCard(e, b, { own = false } = {}) {
   const key = b.id + ":" + (own ? "own:" : "") + e.network + ":" + e.name;
   const open = openRows.has(key);
   const starred = !own && ui.state.starred.includes(bookKey(e));
+  const extra = own ? {} : extraOf(e);
   const toggle = () => { open ? openRows.delete(key) : openRows.add(key); render(); };
   const sendPhrase = `send 10 USDC to ${e.name}` + (e.address.startsWith("0x") ? ` on ${e.network}` : "");
   const menu = (ev) => {
     ev.preventDefault();
+    const row = ev.currentTarget;
     popup(ev, [
       ...(own ? [] : [[t("Send…", "Отправить…"), () => suggest(sendPhrase)]]),
       [t("Ask in chat", "Спросить в чате"), () => askAbout(b)],
       [t("Copy address", "Скопировать адрес"), () => navigator.clipboard.writeText(e.address).catch(() => {})],
       ...(own ? [] : [null,
         [starred ? t("Unpin from the top", "Открепить") : t("Pin to the top", "Закрепить наверху"), () => act("star", { name: e.name, network: e.network, test: !starred })],
+        [t("Edit…", "Изменить…"), () => editAddress(e)],
+        [t("Change picture…", "Сменить картинку…"), () => pickPicture(row, e)],
         [t("Delete", "Удалить"), () => act("removeAddress", { name: e.name, network: e.network })]]),
     ]);
   };
@@ -203,11 +232,12 @@ function addressCard(e, b, { own = false } = {}) {
     h("div", { class: "live-addr-row" },
       h("button", { class: "live-addr-main", onclick: toggle, "aria-expanded": open ? "true" : "false" },
         h("span", { class: "live-addr-pic" },
-          own ? netLogo(e.network, 30) : h("span", { class: "live-letter-disc" }, (e.name || "?").slice(0, 1).toUpperCase()),
+          own ? netLogo(e.network, 30) : addressPic(e, 30),
           own ? null : h("span", { class: "live-addr-net" }, netLogo(e.network, 14))),
         h("span", { class: "live-addr-text" },
           h("span", { class: "live-addr-name one-line" }, e.name),
-          h("span", { class: "live-addr-sub one-line" }, own ? t("Your wallet", "Твой кошелёк") + " · " + netName(e.network) : netName(e.network) + (e.memo ? " · memo" : ""))),
+          h("span", { class: "live-addr-sub one-line" }, own ? t("Your wallet", "Твой кошелёк") + " · " + netName(e.network)
+            : [extra.category, netName(e.network), e.memo ? "memo" : null].filter(Boolean).join(" · "))),
         own ? null : h("span", { class: "live-addr-shield", title: t(`Saved with ${presence()}`, `Сохранён через ${presence()}`) }, icon("shield.check", 13)),
         h("span", { class: "live-addr-chevron" }, icon(open ? "chevron.up" : "chevron.down", 11))),
       own ? null : h("button", { class: "icon-btn live-star-btn" + (starred ? " on" : ""), title: starred ? t("Unpin from the top", "Открепить") : t("Pin to the top", "Закрепить наверху"),
@@ -216,6 +246,7 @@ function addressCard(e, b, { own = false } = {}) {
       addressLines(e.address, 32),
       copyAddress(e.address),
       e.memo ? h("div", { class: "live-addr-memo" }, "# ", t("Memo / tag: ", "Memo / тег: "), h("span", { class: "selectable" }, e.memo)) : null,
+      extra.note ? h("div", { class: "live-addr-note secondary" }, extra.note) : null,
       own ? null : h("div", { class: "live-addr-ok" }, icon("shield.check", 12),
         t(`Saved with ${presence()}: money goes only to this address`, `Сохранён через ${presence()}: деньги уходят только на этот адрес`)),
       h("div", { class: "btns" },
@@ -223,6 +254,7 @@ function addressCard(e, b, { own = false } = {}) {
           : h("button", { class: "btn primary small", title: t(`Puts «${sendPhrase}» in the chat, the amount selected`, `Кладёт «${sendPhrase}» в чат, сумма выделена`), onclick: () => suggest(sendPhrase) },
             icon("paperplane", 13), t("Send", "Отправить")),
         h("button", { class: "btn small", onclick: () => askAbout(b) }, icon("bubble", 13), t("Ask in chat", "Спросить в чате")),
+        own ? null : h("button", { class: "btn small", onclick: () => editAddress(e) }, icon("pencil", 13), t("Edit", "Изменить")),
         own ? null : h("button", { class: "btn small live-danger", onclick: () => act("removeAddress", { name: e.name, network: e.network }) }, icon("trash", 13), t("Delete", "Удалить")))) : null);
 }
 
@@ -231,37 +263,127 @@ const list = (rows) => h("div", { class: "live-list" }, rows);
 
 const networks = ["solana", "base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperliquid", "hyperevm", "robinhood", "tempo", "near",
   "bitcoin", "tron", "xrp", "dogecoin", "zcash", "sui"];
-/** Kept across redraws while the person types; cleared after a save. */
-const addressForm = { name: "", network: "solana", address: "", memo: "" };
+const categories = [["Exchange", "Биржа"], ["Wallet", "Кошелёк"], ["Friend", "Друг"], ["DeFi", "DeFi"], ["Work", "Работа"]];
+/** Kept across redraws while the person types; cleared after a save. `editing`: the saved entry being changed. */
+const blankForm = { name: "", network: "solana", address: "", memo: "", category: "", note: "", favorite: false, editing: null, check: null };
+const addressForm = { ...blankForm };
+
+/** The form takes a saved address to change (the Mac's Edit…): every field filled, the address checked again. */
+function editAddress(e) {
+  const x = extraOf(e);
+  Object.assign(addressForm, { ...blankForm, name: e.name, network: e.network, address: e.address, memo: e.memo || "", category: x.category || "", note: x.note || "",
+    favorite: ui.state.starred.includes(bookKey(e)), editing: { name: e.name, network: e.network } });
+  render();
+  checkForm(0);
+  const field = document.getElementById("book-name");
+  field?.scrollIntoView({ block: "center", behavior: "smooth" });
+  field?.focus();
+}
+
+/** The line under the address as it's typed (AddressForm.status): what's wrong with it, or its ends to compare with the
+ * source, a duplicate, the wallet's own, and an exchange's network warning. Never corrects the address. */
+function addressStatus() {
+  const f = addressForm, c = f.check;
+  const line = (ic, cls, text) => h("div", { class: "live-book-line " + cls }, icon(ic, 12), h("span", {}, text));
+  if (!f.address.trim()) return [line("doc.on.clipboard", "secondary", t("Copy the address from the exchange or wallet itself, then press Paste.", "Скопируй адрес в самой бирже или кошельке, потом нажми «Вставить»."))];
+  if (!c) return [];
+  if (c.problem) return [line("xmark.octagon", "loss", c.problem)];
+  return [
+    line("checkmark.seal", "profit", t(`Valid ${netName(f.network)} address. Compare it with the source: starts ${c.start}, ends ${c.end}.`,
+      `Адрес ${netName(f.network)} верный. Сверь его с источником: начало ${c.start}, конец ${c.end}.`)),
+    c.duplicate ? line("exclamationmark.triangle", "live-warn", t(`Already saved as «${c.duplicate}».`, `Уже сохранён как «${c.duplicate}».`)) : null,
+    c.own ? line("person.crop.circle", "secondary", t("This is your own wallet.", "Это твой собственный кошелёк.")) : null,
+    /exchange|бирж/i.test(f.category) ? line("exclamationmark.triangle", "secondary", t("An exchange credits a deposit only on the network it shows. Sent on another network, the money can be lost.",
+      "Биржа зачисляет пополнение только в той сети, которую показывает. Отправленные в другой сети деньги могут пропасть.")) : null,
+  ].filter(Boolean);
+}
+
+const canSave = () => !!addressForm.name.trim() && !!addressForm.check && !addressForm.check.problem && !addressForm.check.duplicate;
+
+/** The status line and Save follow the typing in place: a redraw would take the focus from the field. */
+function drawStatus() {
+  document.getElementById("book-status")?.replaceChildren(...addressStatus());
+  const save = document.getElementById("book-save");
+  if (save) save.disabled = !canSave();
+}
+
+let checkTimer = 0, checkSeq = 0;
+/** The engine checks the address for its network, its duplicates and the wallet's own (reads only). */
+function checkForm(delay = 200) {
+  clearTimeout(checkTimer);
+  const seq = ++checkSeq, f = addressForm;
+  if (!f.address.trim()) { f.check = null; drawStatus(); return; }
+  checkTimer = setTimeout(async () => {
+    let r = null;
+    try { r = await engine("checkAddress", { address: f.address.trim(), network: f.network, label: f.editing?.name }); } catch { r = null; }
+    if (seq !== checkSeq) return;
+    f.check = r;
+    drawStatus();
+  }, delay);
+}
+
+/** A new entry, or a changed name, address, network or memo, goes into the signer's book first (Windows Hello, the
+ * whole address on its window); the category, the note and the star change at once. */
+async function saveForm() {
+  const f = addressForm, entry = { name: f.name.trim(), network: f.network, address: f.address.trim(), memo: f.memo.trim() };
+  const done = f.editing ? await act("editAddress", { ...entry, label: f.editing.name, text: f.editing.network }) : await act("saveAddress", entry);
+  if (done === null) return;
+  await act("addressExtra", { name: entry.name, network: entry.network, label: f.category.trim(), text: f.note.trim() });
+  if (f.favorite !== ui.state.starred.includes(bookKey(entry))) await act("star", { name: entry.name, network: entry.network, test: f.favorite });
+  Object.assign(addressForm, { ...blankForm, network: f.network });
+  toast(t("Saved.", "Сохранено."));
+  render();
+}
+
+async function pasteAddress() {
+  const field = document.getElementById("book-address");
+  try { addressForm.address = (await navigator.clipboard.readText()).trim(); } catch { field?.focus(); toast(t("Press Ctrl+V in the field.", "Нажми Ctrl+V в поле.")); return; }
+  if (field) field.value = addressForm.address;
+  checkForm(0);
+}
 
 function addressesBody(b) {
   const form = addressForm;
   const starred = new Set(ui.state.starred);
   const saved = [...ui.state.book].sort((x, y) => (starred.has(bookKey(y)) - starred.has(bookKey(x))) || x.name.localeCompare(y.name));
+  const exchange = /exchange|бирж/i.test(form.category);
+  const editing = form.editing && ui.state.book.find((e) => e.name.toLowerCase() === form.editing.name.toLowerCase() && e.network === form.editing.network);
+  // The check runs again after a redraw with an address typed but not checked yet (a new state, a reopened block).
+  if (form.address.trim() && !form.check) queueMicrotask(() => checkForm(0));
   return [
     h("p", { class: "live-lead" }, t(`Money goes only to saved addresses. Saving one asks ${presence()} with the whole address on its window: check every character.`,
       `Деньги уходят только на сохранённые адреса. Сохранение спрашивает ${presence()}, и в его окне весь адрес — сверь каждый символ.`)),
     saved.length ? list(saved.map((e) => addressCard(e, b)))
       : note(t("No saved addresses yet. Save an exchange's deposit address, another wallet or a friend's — with a name, so you never paste a wrong one.",
         "Сохранённых адресов пока нет. Сохрани адрес пополнения биржи, другой кошелёк или адрес друга — с именем, чтобы никогда не вставить чужой.")),
-    section(t("Add an address", "Добавить адрес")),
+    section(editing ? t(`Edit «${editing.name}»`, `Изменить «${editing.name}»`) : t("Add an address", "Добавить адрес"),
+      editing ? h("button", { class: "live-book-pic", title: t("Choose a picture: a logo, an emoji or your own image", "Выбрать картинку: логотип, эмодзи или своё изображение"),
+        onclick: (ev) => pickPicture(ev.currentTarget, editing) }, addressPic(editing, 26), h("span", { class: "live-book-pen" }, icon("pencil", 9))) : null),
     h("div", { class: "live-addr-form" },
       h("div", { class: "live-field-row" },
         h("div", { class: "field" }, h("label", { for: "book-name" }, t("Name", "Имя")),
-          h("input", { id: "book-name", value: form.name, placeholder: "Bybit", oninput: (e) => (form.name = e.target.value) })),
+          h("input", { id: "book-name", value: form.name, placeholder: t("e.g. Bybit · USDC deposit", "например, Bybit · пополнение USDC"), oninput: (e) => { form.name = e.target.value; drawStatus(); } })),
         h("div", { class: "field" }, h("label", { for: "book-network" }, t("Network", "Сеть")),
-          h("select", { id: "book-network", onchange: (e) => (form.network = e.target.value) }, networks.map((n) => h("option", { value: n, selected: n === form.network }, netName(n)))))),
+          h("select", { id: "book-network", onchange: (e) => { form.network = e.target.value; checkForm(0); } }, networks.map((n) => h("option", { value: n, selected: n === form.network }, netName(n)))))),
+      h("div", { class: "field" }, h("label", { for: "book-category" }, t("Category", "Категория")),
+        h("div", { class: "live-book-cats" },
+          h("input", { id: "book-category", value: form.category, placeholder: t("optional", "необязательно"), oninput: (e) => { form.category = e.target.value; drawStatus(); } }),
+          categories.map(([en, ru]) => { const c = t(en, ru); return h("button", { class: "live-cat" + (form.category === c ? " on" : ""), onclick: () => { form.category = form.category === c ? "" : c; render(); } }, c); }))),
       h("div", { class: "field" }, h("label", { for: "book-address" }, t("Address", "Адрес")),
-        h("input", { id: "book-address", class: "address", value: form.address, autocomplete: "off", spellcheck: "false", oninput: (e) => (form.address = e.target.value.trim()) })),
-      h("div", { class: "field" }, h("label", { for: "book-memo" }, t("Memo / tag (exchanges)", "Memo / тег (для бирж)")),
-        h("input", { id: "book-memo", value: form.memo, oninput: (e) => (form.memo = e.target.value.trim()) })),
-      h("button", { class: "btn primary", onclick: async () => {
-        if (await act("saveAddress", { ...form }) !== null) {
-          Object.assign(addressForm, { name: "", address: "", memo: "" });
-          toast(t("Saved.", "Сохранено."));
-          render();
-        }
-      } }, icon("shield.check", 14), t(`Save with ${presence()}`, `Сохранить через ${presence()}`))),
+        h("div", { class: "live-book-paste" },
+          h("input", { id: "book-address", class: "address", value: form.address, autocomplete: "off", spellcheck: "false", oninput: (e) => { form.address = e.target.value; checkForm(); } }),
+          h("button", { class: "btn small", onclick: pasteAddress }, t("Paste", "Вставить")))),
+      h("div", { id: "book-status", class: "live-book-status" }, addressStatus()),
+      h("div", { class: "field" }, h("label", { for: "book-memo" }, t("Memo / tag", "Memo / тег")),
+        h("input", { id: "book-memo", value: form.memo, placeholder: exchange ? t("only if the exchange shows one", "только если биржа его показывает") : t("optional", "необязательно"),
+          oninput: (e) => (form.memo = e.target.value) })),
+      h("div", { class: "field" }, h("label", { for: "book-note" }, t("Note", "Заметка")),
+        h("input", { id: "book-note", value: form.note, placeholder: t("optional", "необязательно"), oninput: (e) => (form.note = e.target.value) })),
+      h("label", { class: "live-book-fav" }, h("input", { type: "checkbox", checked: form.favorite, onchange: (e) => (form.favorite = e.target.checked) }), t("Pin to the top", "Закрепить наверху")),
+      h("div", { class: "btns" },
+        form.editing || form.name || form.address ? h("button", { class: "btn", onclick: () => { Object.assign(addressForm, { ...blankForm }); render(); } }, t("Cancel", "Отмена")) : null,
+        h("button", { id: "book-save", class: "btn primary", disabled: !canSave(), onclick: saveForm }, icon("shield.check", 14),
+          form.editing ? t("Save changes", "Сохранить изменения") : t(`Save with ${presence()}`, `Сохранить через ${presence()}`)))),
   ];
 }
 
@@ -273,7 +395,7 @@ const kindIcon = (k) => ({ transfer: "arrow.up.right", send: "arrow.up.right", r
 function dayName(d) {
   const today = new Date(), y = new Date(today); y.setDate(today.getDate() - 1);
   const same = (a, b) => a.toDateString() === b.toDateString();
-  return same(d, today) ? t("Today", "Сегодня") : same(d, y) ? t("Yesterday", "Вчера") : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return same(d, today) ? t("Today", "Сегодня") : same(d, y) ? t("Yesterday", "Вчера") : d.toLocaleDateString(dateLocale(), { day: "numeric", month: "short" });
 }
 
 /** The History block (the Mac's HistoryBoard): what the latest day did to the money with a question for the chat, then
@@ -282,10 +404,36 @@ const openMoves = new Set();
 const moveIcon = (k) => ({ sent: "arrow.up.right", received: "arrow.down.left", swapped: "arrow.left.arrow.right", bought: "arrow.left.arrow.right",
   sold: "arrow.left.arrow.right", moved: "arrow.right", deposited: "building", withdrew: "arrow.down.left", closed: "xmark" }[k] || "signature");
 
+/** «Closed · 7 days» (the Mac's ClosedTrades): Hyperliquid's trades closed this week and what they made; a row opens
+ * History › Positions. */
+let closedAll = false;
+function closedTrades() {
+  const list = ui.state.recentlyClosed || [];
+  if (!list.length) return null;
+  const total = list.reduce((sum, x) => sum + Number(x.realized), 0);
+  const when = (iso) => {
+    const d = new Date(iso), l = dateLocale();
+    return d.toLocaleDateString(l, { month: "short", day: "numeric" }) + (ui.state.russian ? " в " : " at ") + d.toLocaleTimeString(l, { hour: "numeric", minute: "2-digit" });
+  };
+  return h("div", { class: "live-closed" },
+    h("div", { class: "live-closed-head" }, h("span", { class: "secondary" }, t("Closed · 7 days", "Закрыто · 7 дней")), h("span", { class: "spacer" }),
+      h("b", { class: "num " + (total < 0 ? "loss" : "profit") }, masked(signedUsd(total)))),
+    (closedAll ? list : list.slice(0, 4)).map((x) => h("button", { class: "live-closed-row", title: t("Open in History → Positions", "Открыть в Истории → Позиции"),
+      onclick: () => { store("historyTab", "positions"); ui.view = "history"; render(); } },
+      assetBadge(x.coin, 20),
+      h("span", { class: "live-closed-text" }, h("b", { class: "one-line" }, `${x.long ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.name}`), h("span", { class: "secondary" }, when(x.closed))),
+      h("span", { class: "spacer" }),
+      h("b", { class: "num " + (Number(x.realized) < 0 ? "loss" : "profit") }, masked(signedUsd(x.realized))))),
+    list.length > 4 ? h("button", { class: "live-closed-more", onclick: () => { closedAll = !closedAll; render(); } }, icon(closedAll ? "chevron.up" : "chevron.down", 10),
+      closedAll ? t("Show less", "Свернуть") : t(`Show ${list.length - 4} more`, `Показать ещё ${list.length - 4}`)) : null);
+}
+
 function historyBody() {
   const s = ui.state, moves = s.moves || [], day = s.movesDay;
-  const time = (d) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const time = (d) => d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
   const out = [];
+  const closed = closedTrades();
+  if (closed) out.push(closed);
   if (day) {
     const d = new Date(day.day), today = new Date(), y = new Date(today); y.setDate(today.getDate() - 1);
     const when = d.toDateString() === today.toDateString() ? t("today", "сегодня") : d.toDateString() === y.toDateString() ? t("yesterday", "вчера") : dayName(d);
@@ -386,10 +534,22 @@ function tokensTab(b) {
     store("tokenSort", tokenSort); store("tokenSortUp", tokenUp); render();
   } }, title, tokenSort === key ? icon(tokenUp ? "arrow.up" : "arrow.down", 8) : null);
   const heldSum = rows.map((r) => r.held).filter((x) => x > 0);
+  // As the Mac's favorite row: a click opens the token's card; its menu asks with the card attached, then Buy and Sell
+  // (by ticker for a Solana token the wallet holds and a list vouches for, else by contract).
+  const heldVerified = (f) => (ui.state.portfolio?.networks || []).find((n) => n.key === f.chain)?.rows
+    .find((r) => r.contract?.toLowerCase() === f.address.toLowerCase())?.verified === true;
+  const open = (f) => act("openToken", { address: f.address, network: f.chain });
+  const ask = async (f) => {
+    const a = await open(f);
+    if (!a?.board) return;
+    ui.attached = a.board;
+    render();
+    document.getElementById("composer")?.focus();
+  };
   const actions = (ev, f) => popup(ev, [
-    [t(`Buy ${f.symbol}…`, `Купить ${f.symbol}…`), () => suggest(`buy 10 USDC of ${f.symbol} on ${f.chain}`)],
-    [t(`Sell ${f.symbol}…`, `Продать ${f.symbol}…`), () => suggest(`sell all ${f.symbol} on ${f.chain}`)],
-    [t("Ask in chat", "Спросить в чате"), () => suggest(t(`What about ${f.symbol} (${f.address} on ${f.chain})?`, `Что с ${f.symbol} (${f.address} в ${f.chain})?`))],
+    [[icon("info.circle", 14), t("Details", "Подробности")], () => open(f)],
+    [[icon("bubble.left", 14), t("Ask in chat", "Спросить в чате")], () => ask(f)],
+    ...tradePhrases(f.chain, f.address, f.symbol, { verified: heldVerified(f) }).map(([title, glyph, phrase]) => [[icon(glyph, 14), title], () => suggest(phrase)]),
     null,
     [t("Copy contract", "Скопировать контракт"), () => navigator.clipboard.writeText(f.address).catch(() => {})],
     [t("Remove from favorites", "Убрать из избранного"), () => act("removeFavorite", { wallet: f.chain + ":" + f.address.toLowerCase() })],
@@ -398,7 +558,8 @@ function tokensTab(b) {
     h("div", { class: "live-token-table" },
       h("div", { class: "live-token-head" }, col(t("TOKEN", "ТОКЕН"), "name", "live-c-name"), col(t("PRICE", "ЦЕНА"), "price", "live-c-price"), col(t("24 H", "24 Ч"), "change", "live-c-change"),
         col(t("LIQUIDITY", "ЛИКВ."), "liquidity", "live-c-liq"), col(t("YOU HOLD", "У ТЕБЯ"), "held", "live-c-held")),
-      rows.map(({ f, held }) => h("button", { class: "live-token-row", title: `${f.name} · ${netName(f.chain)}`, onclick: (ev) => actions(ev, f), oncontextmenu: (ev) => { ev.preventDefault(); actions(ev, f); } },
+      rows.map(({ f, held }) => h("button", { class: "live-token-row", title: t(`${f.name} on ${netName(f.chain)}: chart, buy, sell`, `${f.name} в ${netName(f.chain)}: график, покупка, продажа`),
+        onclick: () => open(f), oncontextmenu: (ev) => { ev.preventDefault(); actions(ev, f); } },
         h("span", { class: "live-c-name" }, logo(f.symbol, 26, f.image || undefined),
           h("span", { class: "live-tok-text" }, h("b", { class: "one-line" }, f.symbol), h("span", { class: "secondary small one-line" }, netName(f.chain)))),
         h("span", { class: "live-c-price num" }, price(f.price)),
@@ -620,13 +781,16 @@ let scheduleTab = store("scheduleTab") || "tasks";
 let showPaused = false;
 let walletNet = "solana";
 
+/** The interface's language for dates, not Windows' (a Russian window on an English Windows says «окт», «Сегодня 13:40»). */
+const dateLocale = () => (ui.state?.russian ? "ru-RU" : "en-US");
+
 /** A run's day as a calendar leaf (DateTile): the month on a strip, orange when it's today, the day under it. */
 function dateTile(iso) {
   if (!iso) return h("span", { class: "live-date-tile" }, h("span", { class: "live-date-icon" }, icon("calendar", 13)));
   const d = new Date(iso), now = new Date();
   const today = d <= now || d.toDateString() === now.toDateString();
   return h("span", { class: "live-date-tile" },
-    h("span", { class: "live-date-month" + (today ? " today" : "") }, d.toLocaleDateString(undefined, { month: "short" }).replace(".", "").toUpperCase()),
+    h("span", { class: "live-date-month" + (today ? " today" : "") }, d.toLocaleDateString(dateLocale(), { month: "short" }).replace(".", "").toUpperCase()),
     h("span", { class: "live-date-day num" }, String(d.getDate())));
 }
 
@@ -635,10 +799,10 @@ function nextLine(x) {
   if (x.paused) return t("paused", "на паузе");
   if (!x.next) return "";
   const d = new Date(x.next), now = new Date();
-  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
   const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
   const day = d.toDateString() === now.toDateString() ? t("Today", "Сегодня") : d.toDateString() === tomorrow.toDateString() ? t("Tomorrow", "Завтра")
-    : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    : d.toLocaleDateString(dateLocale(), { weekday: "short", day: "numeric", month: "short" });
   const left = d - now;
   const tail = left <= 0 ? t("any moment", "вот-вот") : left < 86_400_000
     ? (left < 3_600_000 ? t(`in ${Math.max(1, Math.round(left / 60_000))} min`, `через ${Math.max(1, Math.round(left / 60_000))} мин`)
@@ -751,7 +915,7 @@ function runsTab() {
       : ["checkmark.circle", "profit", t("Done", "Готово")];
     const canvas = r.canvas && ui.state.canvases.find((c) => c.id === r.canvas);
     rows.push(h("div", { class: "live-run-row" },
-      h("span", { class: "live-run-time secondary small num" }, d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })),
+      h("span", { class: "live-run-time secondary small num" }, d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" })),
       h("span", { class: "live-run-icon " + cls, title: word }, icon(ic, 14)),
       h("span", { class: "live-run-title one-line", title: r.line || r.title }, r.title),
       canvas ? h("button", { class: "icon-btn", title: t("Open the canvas it ran on", "Открыть холст, где это шло"), onclick: () => act("openCanvas", { wallet: canvas.id }) }, icon("arrow.up.right", 13)) : null));
@@ -854,7 +1018,7 @@ function scheduleItemBody(b) {
     const [ic, cls, word] = r.result === "failed" ? ["xmark.circle", "loss", t("Failed", "Не вышло")] : r.result === "nothing" ? ["minus.circle", "secondary", t("Nothing to do", "Нечего делать")]
       : ["checkmark.circle", "profit", t("Done", "Готово")];
     return h("div", { class: "live-run-row" },
-      h("span", { class: "live-run-time secondary small num" }, `${dayName(new Date(r.at))} ${new Date(r.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`),
+      h("span", { class: "live-run-time secondary small num" }, `${dayName(new Date(r.at))} ${new Date(r.at).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" })}`),
       h("span", { class: "live-run-icon " + cls, title: word }, icon(ic, 14)),
       h("span", { class: "live-run-title one-line", title: r.line || r.title }, r.line || r.title));
   }) : [];
@@ -879,7 +1043,16 @@ function scheduleItemBody(b) {
         h("span", { class: "secondary small" }, x.paused ? t("paused — switch it on to run", "на паузе — включи, чтобы шла") : held ? t("the whole schedule is paused", "всё расписание на паузе")
           : x.every ? t("then again ", "потом снова ") + everyWords(x.every) : t("once, then it's off the schedule", "один раз, потом уходит из расписания")))) : null,
     h("div", { class: "live-item-facts" },
-      fact(t("PAYS FROM", "ПЛАТИТ С"), x.automatic && a ? a.label : wallet, x.automatic ? t("the automation wallet's budget", "бюджет кошелька автоматизации") : null),
+      // With an automation wallet a money task picks where it pays from, on the tile itself (the Mac's PAYS FROM menu).
+      x.pick && a ? h("div", { class: "live-item-fact" }, h("span", { class: "live-alert-label" }, t("PAYS FROM", "ПЛАТИТ С")),
+        h("button", { class: "live-pays-pick", title: x.automatic ? t(`Pay from «${wallet}» instead: each run waits for Confirm and ${presence()}`, `Платить с «${wallet}»: каждый запуск ждёт «Подтвердить» и ${presence()}`)
+          : t(`Pay from «${a.label}» instead: runs by itself`, `Платить с «${a.label}»: пойдёт сама`),
+          onclick: (e) => popup(e, [
+            [t(`«${a.label}» · by itself, no ${presence()}`, `«${a.label}» · сама, без ${presence()}`), () => act("taskPays", { wallet: x.id, test: false })],
+            [t(`«${wallet}» · Confirm and ${presence()} each run`, `«${wallet}» · «Подтвердить» и ${presence()} каждый запуск`), () => act("taskPays", { wallet: x.id, test: true })],
+          ]) }, h("b", {}, x.automatic ? a.label : wallet), icon("chevron.updown", 10)),
+        x.automatic ? h("span", { class: "secondary small" }, t("the automation wallet's budget", "бюджет кошелька автоматизации")) : null)
+        : fact(t("PAYS FROM", "ПЛАТИТ С"), x.automatic && a ? a.label : wallet, x.automatic ? t("the automation wallet's budget", "бюджет кошелька автоматизации") : null),
       x.automatic ? fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("By itself", "Сама"), t(`no ${presence()}`, `без ${presence()}`))
         : fact(t("SIGNS", "ПОДПИСЫВАЕТ"), t("Your Confirm", "Твоё «Подтвердить»"), t("each move waits on its canvas", "каждое движение ждёт на холсте"))),
     x.steps.length > 1 ? h("div", { class: "live-item-steps" }, x.steps.map((st, i) => h("div", { class: "small" }, h("b", { class: "num" }, `${i + 1}. `), st))) : null,

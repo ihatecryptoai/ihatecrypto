@@ -677,7 +677,7 @@ function symbolGlyph(name, size) {
 
 /** A picture from the library: a logo, a glyph or an emoji on a soft disc, the person's own picture in a circle, or the
  * name's first letter. */
-function pickedIcon(ic, size, letter = "") {
+export function pickedIcon(ic, size, letter = "") {
   const disc = (kids, cls = "") => h("span", { class: "rail-picked " + cls, style: `width:${size}px;height:${size}px;font-size:${size * 0.56}px` }, kids);
   switch (ic?.kind) {
     case "logo": return logo(ic.value, size);
@@ -690,12 +690,12 @@ function pickedIcon(ic, size, letter = "") {
 
 /** Logos, glyphs and emoji in sections with a search and jumps, and the person's own picture: a file, a pasted image or a
  * site's icon. A pick applies at once; «Default» goes back to the sign of what it holds. `target`: {wallet} or {name}. */
-function iconPicker(anchor, current, name, target) {
+export function iconPicker(anchor, current, name, target, op = "setIcon") {
   let chosen = current || null, query = "", error = "";
   const body = h("div", { class: "rail-picker" });
   const pick = async (ic) => {
     error = "";
-    if (await act("setIcon", { ...target, text: ic ? JSON.stringify(ic) : "" }) !== null) chosen = ic;
+    if (await act(op, { ...target, text: ic ? JSON.stringify(ic) : "" }) !== null) chosen = ic;
     draw();
   };
   const kind = (ic) => !ic ? t("Default", "По умолчанию") : ic.kind === "logo" ? t("Logo · ", "Логотип · ") + ic.value.toUpperCase()

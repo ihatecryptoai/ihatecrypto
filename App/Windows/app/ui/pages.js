@@ -136,7 +136,7 @@ function general(s) {
         h("button", { class: "btn small", onclick: () => act("clearChat") }, t("Clear", "Очистить"))))),
     noticeSection(s),
     section("power", t("Background", "Фон"), t("Alerts and scheduled tasks with the window closed.", "Оповещения и задачи по расписанию при закрытом окне."),
-      group(loginRow(s), row({ label: t("Closing the window", "Закрытие окна"), ico: "power", about: t("ihatecrypto stays in the tray: price alerts, balances and scheduled tasks go on. Quit from the tray icon's menu ends it.", "ihatecrypto остаётся в трее: оповещения, балансы и задачи продолжают работать. «Выход» в меню значка в трее закрывает его совсем.") },
+      group(keepRow(s), loginRow(s), row({ label: t("Closing the window", "Закрытие окна"), ico: "power", about: t("ihatecrypto stays in the tray: price alerts, balances and scheduled tasks go on. Quit from the tray icon's menu ends it.", "ihatecrypto остаётся в трее: оповещения, балансы и задачи продолжают работать. «Выход» в меню значка в трее закрывает его совсем.") },
         h("span", { class: "secondary" }, t("Keeps it in the tray", "Оставляет в трее"))))),
     s.nodes ? nodesSection(s.nodes) : null,
     s.nodes ? oneClickSection(s.nodes) : null,
@@ -166,6 +166,15 @@ function noticeSection(s) {
 }
 
 /** Open at login (the engine's `openAtLogin`; main.rs sets the registry's Run key and says back how Windows has it). */
+/** Keep always running (LocalModels.swift's wish, main.rs's scheduled task, said back as `localSetup.keepRunning`). */
+function keepRow(s) {
+  const on = s.localSetup?.keepRunning;
+  return row({ label: t("Keep always running", "Всегда работать"), ico: "power",
+      about: t("Starts within a minute after you sign in, and comes back within a minute after Quit or a crash — in the tray, its window closed. Turn this off to quit for good. Nothing runs while the PC sleeps; due tasks run when it wakes.",
+        "Запускается в течение минуты после входа в Windows и возвращается в течение минуты после «Выйти» или сбоя — в трее, с закрытым окном. Выключи, чтобы выйти совсем. Пока компьютер спит, ничего не работает; задачи, чей срок прошёл, выполнятся после пробуждения.") },
+    toggle("keep-running", on === true, (v) => act("keepRunning", { test: v }), on === undefined));
+}
+
 function loginRow(s) {
   return row({ label: t("Open at login", "Открывать при входе"), ico: "power", about: t("Starts ihatecrypto in the tray when you log in to Windows, its window closed: the schedule, alerts and stops go on. Stop and take-profit orders already on the exchange keep working either way.",
       "Запускает ihatecrypto в трее при входе в Windows, с закрытым окном: расписание, оповещения и стопы продолжают работать. Стоп и тейк, уже стоящие на бирже, работают в любом случае.") },
@@ -240,7 +249,9 @@ function oneClickSection(v) {
         ["https://partners.near-intents.org", t("Open partners.near-intents.org", "Открыть partners.near-intents.org")], "eyJ…", save, true) : null));
 }
 
-async function checkUpdate() {
+/** Settings › About › Check for updates, and the chat's «check for updates» (the engine's `checkUpdates` event): it needs
+ *  no page open, and says how it went in a toast. */
+export async function checkUpdate() {
   try {
     const version = await invoke("update_check");
     if (!version) { toast(t("ihatecrypto is up to date.", "Установлена последняя версия.")); return; }
@@ -295,6 +306,12 @@ function modelTab(s) {
     render();
   };
   const jevReady = providers.some((p) => p.id === "openrouter" && p.connected);
+  const local = s.localSetup || {};
+  const checkModel = modelForm.model || (isChat ? s.model.model : shown.defaultModel) || "";
+  const examKey = checkModel ? `${shown.id}/${checkModel}` : null;
+  const score = examKey ? local.scores?.[examKey] : null;
+  // Ollama's version and what this PC has, read once when the tab first shows (nothing is started to read them).
+  if (!localAsked) { localAsked = true; act("ollamaStatus"); act("refreshModels"); }
   return [
     section("sparkles", t("Chat model", "Модель чата"), t("Lets you write freely, in any language. Connect one or more; the chat uses one at a time.", "Позволяет писать свободно, на любом языке. Подключи одну или несколько; чат пользуется одной."),
       group(known.map(([p, title, line]) => wayRow(p, title(), line())), others.length ? other : null),
@@ -310,7 +327,11 @@ function modelTab(s) {
             toast(t("Finish the sign-in in the browser.", "Закончи вход в браузере."));
             if (await act("signIn", { provider: shown.id }) !== null) toast(t("Signed in.", "Вход выполнен."));
           } }, t("Sign in with the browser", "Войти через браузер")) : null,
-          !shown.existingLogin && !shown.signIn ? h("span", { class: "secondary" }, shown.kind === "local" ? t("No key needed", "Ключ не нужен") : t("Use an API key below", "Используй API-ключ ниже")) : null),
+          shown.id === "claude-code" ? (local.claudeFound
+            ? h("button", { class: "btn small", title: t("Runs Claude Code's own browser sign-in in a terminal", "Запускает вход Claude Code через браузер в терминале"), onclick: () => act("claudeSignIn") }, t("Sign in in a terminal", "Войти в терминале"))
+            : h("button", { class: "btn small", disabled: !!local.claudeInstall, title: t("Anthropic's own installer, for this user", "Установщик самой Anthropic, для этого пользователя"), onclick: () => act("installClaudeCode") },
+              local.claudeInstall && local.claudeInstall !== "…" ? local.claudeInstall : t("Install Claude Code", "Установить Claude Code"))) : null,
+          !shown.existingLogin && !shown.signIn && shown.id !== "claude-code" ? h("span", { class: "secondary" }, shown.kind === "local" ? t("No key needed", "Ключ не нужен") : t("Use an API key below", "Используй API-ключ ниже")) : null),
         shown.takesKey ? row({ label: t("API key", "API-ключ"), ico: "lock" },
           h("input", { id: "model-key", type: "password", autocomplete: "off", class: "pg-set-input", placeholder: t("API key", "API-ключ"), value: modelForm.key, oninput: (e) => (modelForm.key = e.target.value) }),
           h("button", { class: "btn small", onclick: () => modelForm.key ? connect() : toast(t("Paste the key first.", "Сначала вставь ключ.")) }, t("Save", "Сохранить"))) : null,
@@ -319,8 +340,18 @@ function modelTab(s) {
           isChat && s.model.models.length ? h("datalist", { id: "model-list" }, s.model.models.map((m) => h("option", { value: m }))) : null,
           isChat ? h("button", { class: "btn small", onclick: () => act("setModel", { model: modelForm.model || undefined }) }, t("Use", "Выбрать"))
             : !shown.connected && (shown.kind === "local") ? h("button", { class: "btn small", onclick: () => connect() }, t("Connect", "Подключить")) : null),
-        shown.connected ? row({ label: t("Connection", "Подключение"), ico: "link" },
-          h("button", { class: "btn small", onclick: () => act("disconnectModel", { provider: shown.id }) }, t("Disconnect", "Отключить"))) : null)),
+        row({ label: t("Connection", "Подключение"), ico: "dial",
+          about: t(`Check asks the model ${local.examTotal || 10} requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat; fewer, and it will misread.`,
+            `«Проверить» задаёт модели ${local.examTotal || 10} обычных запросов — купить, перевести, положить под процент, график, лонг, вопрос, DCA — и считает, сколько она поняла верно. 8 и больше — для чата хорошо; меньше — она будет путать.`) },
+          examKey && local.examFor === examKey ? h("span", { class: "secondary num" }, `${local.examProgress || 0}/${local.examTotal || 10}`)
+            : score ? pill(score.short, score.good) : null,
+          h("button", { class: "btn small", disabled: local.examProgress != null || !shown.connected, onclick: () => act("checkModel", { provider: shown.id, model: checkModel || undefined }) }, t("Check", "Проверить")),
+          shown.connected ? h("button", { class: "btn small", onclick: () => act("disconnectModel", { provider: shown.id }) }, t("Disconnect", "Отключить")) : null),
+        local.status ? row({ label: local.status, ico: "info.circle", cls: "wrap note" }) : null),
+      group(row({ label: t("Think before answering", "Думать перед ответом"), ico: "wand",
+          about: t("The model reasons before it answers: steadier on a muddled or tricky request, but each reply takes longer, often several times as long (a message can take a few model calls). Off by default. A model that can't reason answers as usual.",
+            "Модель рассуждает, прежде чем ответить: надёжнее на запутанном или хитром запросе, но каждый ответ дольше, часто в несколько раз (на одно сообщение бывает несколько обращений к модели). По умолчанию выключено. Модель, которая не умеет рассуждать, отвечает как обычно.") },
+        toggle("model-thinking", local.thinking === true, (on) => act("thinking", { test: on }))))),
     section("checkmark.seal", t("Second check", "Вторая проверка"), t("A second reader. It can only stop, never approve.", "Второй читатель. Он может только остановить, но не одобрить."),
       group(
         row({ label: t("Check commands and plans twice", "Проверять команды и планы дважды"), ico: "checkmark.seal",
@@ -329,6 +360,8 @@ function modelTab(s) {
         row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key: the message goes there.", "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter: сообщение уходит туда.") },
           jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
             : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", onclick: () => pick("openrouter") }, t("Connect", "Подключить"))]))),
+    section("server", t("Free, on this PC", "Бесплатно, на этом ПК"), t("No subscription needed: Ollama runs a model here, with no internet.", "Подписка не нужна: Ollama запускает модель здесь, без интернета."),
+      group(h("div", { class: "pg-set-panel" }, localPanel(s)))),
     section("lock", t("Safety", "Безопасность"), t("A model reads your words. It cannot approve a move.", "Модель читает твои слова. Одобрить движение она не может."),
       group(
         row({ label: t(`Money moves only after Confirm + ${presence()}`, `Деньги двигаются только после «Подтвердить» и ${presence()}`), ico: "person",
@@ -338,6 +371,43 @@ function modelTab(s) {
     s.memory.length ? section("doc", t("What the chat remembers", "Что помнит чат"), t("Facts it keeps across canvases. Forget any of them.", "Факты, которые он помнит между холстами. Любой можно забыть."),
       group(s.memory.map((m) => row({ label: m, ico: "doc", cls: "wrap" }, h("button", { class: "btn small", onclick: () => act("forget", { text: m }) }, t("Forget", "Забыть")))))) : null,
   ];
+}
+
+let localAsked = false;
+
+/** Free, on this PC through Ollama: what it still needs (installed, running, new enough), this PC's memory, and the models —
+ *  Switch to one it has, or Download one, with its size and the memory it runs in (the Mac's LocalModelsPanel). */
+function localPanel(s) {
+  const L = s.localSetup || {}, m = s.models || {};
+  const memory = m.memoryGB || "?";
+  const downloads = Object.entries(m.downloads || {});
+  const line = (text) => h("div", { class: "secondary small" }, text);
+  const setUp = h("button", { class: "btn small primary", disabled: !!L.ollamaInstall || downloads.length > 0, onclick: () => act("setUpLocal") },
+    L.ollamaInstall && L.ollamaInstall !== "…" ? L.ollamaInstall
+      : downloads.length ? t(`Downloading · ${Math.round(downloads[0][1] * 100)}%`, `Скачиваю · ${Math.round(downloads[0][1] * 100)}%`)
+      : t("Set up on this PC", "Настроить на этом ПК"));
+  const recheck = h("button", { class: "btn small", onclick: () => { act("refreshModels"); act("ollamaStatus"); } }, t("Check again", "Проверить снова"));
+  if (L.ollamaState === "noOllama") return [line(t(`One click: the newest Ollama (free, runs models here with no internet), then the best model for this PC's ${memory} GB.`, `Одним нажатием: новейшая Ollama (бесплатно, модели работают здесь без интернета), потом лучшая модель для ${memory} ГБ этого ПК.`)), h("div", { class: "btns" }, setUp, recheck)];
+  if (L.ollamaState === "notRunning") return [line(t("Ollama is installed but not running.", "Ollama установлена, но не запущена.")), h("div", { class: "btns" }, h("button", { class: "btn small", onclick: () => act("startOllama") }, t("Start Ollama", "Запустить Ollama")), setUp, recheck)];
+  if (L.ollamaState === "outdated") return [line(t(`Ollama ${L.ollamaVersion || ""} is too old for these models. One click updates it to the newest${L.ollamaLatest ? ", " + L.ollamaLatest : ""} and downloads the model.`, `Ollama ${L.ollamaVersion || ""} слишком старая для этих моделей. Одно нажатие обновит её до новейшей${L.ollamaLatest ? ", " + L.ollamaLatest : ""} и скачает модель.`)), h("div", { class: "btns" }, setUp, recheck)];
+  const fits = (gb) => gb * 1.2 <= (m.memoryGB || 0) * 1.073741824 * 0.7;
+  const have = (m.live?.ollama || []).filter((x) => !m.refusals?.[x]);
+  const suggested = (s.providers.find((p) => p.id === "ollama")?.models || []).filter((x) => !have.includes(x));
+  const sized = (x) => m.sizes?.[x] === undefined || fits(m.sizes[x]);
+  const choices = [...have, ...suggested.filter(sized), ...suggested.filter((x) => !sized(x))].slice(0, 4);
+  return [line(t(`This PC has ${memory} GB of memory. A model runs in about 1.2× its size.`, `У этого ПК ${memory} ГБ памяти. Модель работает примерно в 1,2× своего размера.`)),
+    choices.map((x) => {
+      const size = m.sizes?.[x], ok = size === undefined || fits(size), loading = m.downloads?.[x], score = L.scores?.["ollama/" + x];
+      const chat = s.model.provider === "ollama" && s.model.model === x && have.includes(x);
+      return h("div", { class: "pg-local-model" },
+        h("b", {}, x),
+        size !== undefined ? h("span", { class: "small " + (ok ? "secondary" : "loss") }, t(`≈ ${size.toFixed(1)} GB · runs in ≈ ${Math.round(size * 1.2)} GB`, `≈ ${size.toFixed(1)} ГБ · работает в ≈ ${Math.round(size * 1.2)} ГБ`) + (ok ? "" : t(" · too big", " · слишком велика"))) : null,
+        score ? pill(score.short, score.good) : null, h("span", { class: "spacer" }),
+        chat ? chatsModel()
+          : have.includes(x) ? h("button", { class: "btn small", onclick: () => act("connectModel", { provider: "ollama", model: x }) }, t("Switch", "Переключить"))
+          : loading !== undefined ? h("span", { class: "small num" }, t(`Downloading · ${Math.round(loading * 100)}%`, `Скачиваю · ${Math.round(loading * 100)}%`))
+          : ok && m.servers?.ollama === true ? h("button", { class: "btn small", onclick: () => act("downloadModel", { model: x }) }, t("Download", "Скачать")) : null);
+    })];
 }
 
 const chatsModel = () => h("span", { class: "pg-set-chat-model profit", title: t("The chat answers with this account", "Чат отвечает этим аккаунтом") }, icon("check", 13), t("Chat model", "Модель чата"));

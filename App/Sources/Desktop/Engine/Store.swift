@@ -110,4 +110,10 @@ nonisolated struct Settings: Codable, Equatable {
     var noticesOff: [String]?
     /// Settings › Background › Open at login, as Windows has it (main.rs sets the registry's Run key and says back how it is).
     var openAtLogin: Bool?
+    /// Settings › AI model: every request reasons first (LocalModels.swift, the Mac's «Think before answering»).
+    var thinking: Bool?
+    /// The models' Check results, by «provider/model» (ModelExam).
+    var modelScores: [String: ModelExam.Result]?
+    /// Settings › Background › Keep always running, as Windows has it (main.rs keeps a scheduled task and says back).
+    var keepRunning: Bool?
 }

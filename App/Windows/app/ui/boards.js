@@ -3,9 +3,10 @@
 // step's face, the state in words on it, the balance it changes — with Cancel and Confirm while it waits; an earlier move
 // folded to a one-line pill. Live blocks (receive, schedule, favorites…) are live.js's, in this file's frame.
 
-import { ui, act, engine, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence } from "./core.js";
+import { ui, act, engine, h, svg, icon, addIcons, mascot, logo, t, suggest, popup, copy, render, presence, usd, signedUsd, masked, qrCode, link, store } from "./core.js";
 import { liveBlock, liveKinds, liveTitle } from "./live.js";
 import { isAttached } from "./chat.js";
+import { planStatus, planHead, planExtras, planStepState, PLAN_CHIPS } from "./trade.js";
 // A namespace, so a step's «Open <place>» shows only once portfolio.js exports toggleDetail (its place details board).
 import * as portfolio from "./portfolio.js";
 
@@ -24,6 +25,14 @@ addIcons({
   "bubble.left": "M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z",
   "questionmark.bubble": "M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM10 9a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.4M12 13.8v.2",
   "xmark.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
+  cart: "M3 4h2.5l2 11h10.5l2-7.5H6.5M9.5 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM17 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+  "arrow.down.right.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 10v5h-5",
+  "arrow.triangle.2.circlepath": "M4 12a8 8 0 0 1 13.7-5.7L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.7L4 15.5M4 20v-4.5h4.5",
+  "checkmark.shield": "M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6zM9 12l2 2 4-4",
+  "minus.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12h8",
+  "arrow.up.right": "M7 17L17 7M9 7h8v8",
+  flame: "M12 21c-3.6 0-6-2.5-6-5.8 0-3.6 3.2-5.5 4-9.2 2.6 1.6 3.9 4 3.6 6.2 1-.6 1.7-1.6 1.9-2.8 1.6 1.6 2.5 3.6 2.5 5.8 0 3.3-2.4 5.8-6 5.8z",
+  "arrow.down.circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5v8.5M8.5 12.5 12 16l3.5-3.5",
 });
 
 // MARK: The column
@@ -52,7 +61,7 @@ export function planColumn() {
 function chartPlace(boards) {
   const chart = boards.find((b) => b.kind === "chart" && b.chart);
   if (!chart) return {};
-  const s = ui.state, live = (b) => s.card?.id === b.id || s.runningBoard === b.id;
+  const s = ui.state, live = (b) => s.card?.id === b.id || s.runningBoard === b.id || b.state === "plan";
   const plan = boards.find((b) => b.kind === "move" && b.trade && live(b) && sameCoin(chart.chart, b.trade.coin));
   if (plan) return { chart, plan, at: "plan" };
   return { chart, at: boards.some((b) => b !== chart && b.kind !== "chart") ? "beside" : "column" };
@@ -70,6 +79,8 @@ export function blockTitle(b) {
 
 function drawBoard(b, newest) {
   if (b.kind === "move") return moveBoard(b, newest);
+  if (b.kind === "token" && b.data?.token) return tokenBlock(b);
+  if (b.kind === "note") return noteBlock(b);
   if (liveKinds.includes(b.kind)) return liveBlock(b);
   if (b.kind === "chart" && b.chart) return chartBlock(b);
   return resultBlock(b);
@@ -139,17 +150,22 @@ function moveBoard(b, newest, onChart) {
   const states = steps.map((_, i) => stepState(b, i, waitingHere, runningHere));
   const route = !steps.length || draft ? null : routeCards(b, steps, states);
 
-  if (finished && !newest) {
+  if (finished && !newest && b.state !== "plan") {
     // An earlier move: its pill, and its route under it once opened.
     return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
       pill(b, open, toggle), open ? route : null, open ? notes(b) : null);
   }
-  const status = waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
-    : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"];
+  const status = planStatus(b) || (waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
+    : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"]);
   const head = h("div", { class: "route-move-head" },
       h("span", { class: "route-move-title" }, b.title),
+      b.plan ? planHead(b) : null,
       h("span", { class: "route-status-chip " + status[1] }, status[0]),
       runningHere ? h("span", { class: "route-rc-spinner" }) : null,
+      // A move left as it was (saved, never signed): only Refresh, which asks its request again for numbers of now.
+      finished && b.state !== "done" && b.state !== "failed" && b.state !== "plan" && b.request ? h("button", { class: "btn route-bordered route-refresh", disabled: s.thinking,
+        title: t(`Asks «${b.request}» again for fresh numbers`, `Спросит «${b.request}» снова, со свежими цифрами`), onclick: () => act("send", { text: b.request }) },
+        icon("arrow.clockwise", 13), t("Refresh", "Обновить")) : null,
       // Right after the chip, not at the route's far end (the Mac's Spacer): a wide route would put Confirm under
       // «Add block» and Windows' caption buttons.
       waitingHere ? h("div", { class: "btns route-nowrap" },
@@ -157,8 +173,9 @@ function moveBoard(b, newest, onChart) {
         h("button", { class: "btn primary route-large", disabled: s.thinking || !!s.runningBoard, onclick: () => act("confirm") }, icon("hello"), s.card.confirm)) : null);
   return h("div", { class: "route-move" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: menu },
     onChart ? planChart(b, onChart, head) : head,
-    finished ? outcome(b) : null,
+    finished && b.state !== "plan" ? outcome(b) : null,
     draft ? multisigSetup(draft) : route,
+    b.plan ? planExtras(b) : null,
     waitingHere && s.card.warnings.length ? h("div", { class: "route-warn-box", "data-no-pan": "" }, icon("exclamationmark.triangle", 14),
       h("div", {}, s.card.warnings.map((w) => h("div", {}, w)))) : null,
     runningHere ? signing(b) : null,
@@ -209,6 +226,8 @@ function stepState(b, i, waitingHere, runningHere) {
     const current = currentStep(b.steps, ui.state.running?.lines || []);
     return i < current ? "done" : i > current ? "next" : ui.state.signer.waiting ? "touch" : "now";
   }
+  const planned = planStepState(b, i, waitingHere);
+  if (planned) return planned;
   if (waitingHere) return "ready";
   return { done: "done", failed: "failed" }[b.state] || "plain";
 }
@@ -369,6 +388,7 @@ const CHIPS = {
   next: () => [t("Next", "Дальше"), "#6A6A72", "#D9D9DE", "idle"],
   failed: () => [t("Failed", "Не вышло"), "#B42A20", "#FFB3A8", "error"],
 };
+Object.assign(CHIPS, PLAN_CHIPS);
 
 function stateChip(state, compact) {
   // A state the chip has no word for (a newer engine's) draws no chip, as a plain card.
@@ -385,7 +405,9 @@ function stepCard(b, step, i, state, compact, isOpen) {
   const kind = stepKind(step.label, step.title);
   const parts = step.label.split("·").map((x) => x.trim());
   const place = parts.length > 1 ? pretty(parts.slice(1).join(" · ")) : null;
-  const fill = fillFor(place || "", parts[0]);
+  // An approval wears its spender's colour: the next step's place (the Mac's route colours APPROVE · EXACT so).
+  const next = kind === "approve" ? b.steps?.[i + 1]?.label.split("·").map((x) => x.trim()) : null;
+  const fill = next ? fillFor(next.length > 1 ? pretty(next.slice(1).join(" · ")) : "", next[0]) : fillFor(place || "", parts[0]);
   const pale = state === "next";
   const w = compact ? SMALL.w : CARD.w;
   const cls = ["route-step", "route-fill-" + fill, "route-kind-" + kind, "route-state-" + state, compact && "route-compact", pale && "route-pale", !pale && DARK_FILLS.has(fill) && "route-dark", isOpen && "route-open"]
@@ -858,11 +880,26 @@ function keyholes(total, lit) {
 
 /** A block of lines from the engine (rates, P/L, a token, a site's refusal): rows, and its buttons that fill the chat field. */
 function resultBlock(b) {
+  const d = b.data || {};
+  if (d.pnl) return pnlBlock(b, d.pnl);
+  if (d.rates) return ratesBlock(b, d.rates);
+  if (d.movers) return moversBlock(b, d.movers);
+  if (d.approvals) return approvalsBlock(b, d.approvals);
+  if (d.dca) return dcaBlock(b, d.dca);
+  if (d.receive) return receiveBlock(b, d.receive);
+  if (d.service) return serviceBlock(b, d.service);
   const rows = (b.lines || []).map((l) => l === "—" ? h("div", { class: "route-result-divider" }) : h("div", { class: "route-result-row selectable" }, l));
   return blockFrame(b, b.title, h("div", { class: "route-result" },
     rows.length ? h("div", { class: "route-result-rows" }, rows) : null,
     b.actions && b.actions.length ? h("div", { class: "btns" }, b.actions.map((a) => h("button", { class: "btn route-bordered", title: a.command, onclick: () => suggest(a.command) }, a.title))) : null),
-  { width: 520 });
+  { width: 520, extra: refresh(b) });
+}
+
+/** ↻ on a board drawn by a request: asks it again, for numbers of now (the Mac's Refresh on a board left as it was). */
+function refresh(b) {
+  if (!b.request) return null;
+  return h("button", { class: "icon-btn", title: t(`Ask again: «${b.request}»`, `Спросить снова: «${b.request}»`), disabled: ui.state.thinking,
+    onclick: () => act("send", { text: b.request }) }, icon("arrow.clockwise"));
 }
 
 const RANGES = [["day", "24h"], ["week", "7d"], ["month", "30d"]];
@@ -909,8 +946,13 @@ function chartParts(b, { levels = [], zones = [], H = 190 } = {}) {
   // A level's name and price over its line, in its color (the Mac's annotation): HTML, so the stretched drawing doesn't stretch it.
   const area = h("div", { class: "route-chart-area" }, plot,
     shown.map((l) => { const el = h("span", { class: "route-level-label route-" + l.tint }, `${l.label} ${price(l.price)}`); el.style.top = `calc(${(Y(l.price) / H) * 100}% - 15px)`; return el; }));
-  const pick = h("div", { class: "route-chart-range" }, RANGES.map(([key, label]) => h("button", { class: key === range ? "route-on" : "", onclick: () => key !== range && act("send", { text: `chart ${coin} ${key}` }) }, label)));
+  const pick = h("div", { class: "route-chart-range" }, RANGES.map(([key, label]) => h("button", { class: key === range ? "route-on" : "", onclick: () => key !== range && reload(c, coin, key) }, label)));
   return { coin, range, up, area, priceEl, changeEl, pick };
+}
+
+/** The chart again in a range, in place (the Mac's picker); an older board without its market's name asks the chat. */
+function reload(c, coin, range) {
+  return c.coin ? act("openChart", { name: c.coin, text: range }) : act("send", { text: `chart ${coin} ${range}` });
 }
 
 /** A coin's closes over the range, as the Mac's chart board: the price now (or under the pointer), the move, the range
@@ -924,7 +966,7 @@ function chartBlock(b) {
     h("div", { class: "route-asset-head" }, badge,
       h("div", { class: "route-asset-name" }, h("b", {}, coin), h("span", {}, t("Hyperliquid chart", "График Hyperliquid") + " · " + fmtDate(b.at))),
       h("span", { class: "spacer" }),
-      h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => act("send", { text: `chart ${coin} ${range}` }) }, icon("arrow.clockwise")),
+      h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => reload(c, coin, range) }, icon("arrow.clockwise")),
       h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark"))),
     h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick),
     area,
@@ -950,7 +992,7 @@ function planChart(b, chart, head) {
   return h("div", { class: "route-block route-chart-block route-plan-chart", "data-no-pan": "" },
     head,
     h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick,
-      h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => act("send", { text: `chart ${coin} ${range}` }) }, icon("arrow.clockwise")),
+      h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => reload(chart.chart, coin, range) }, icon("arrow.clockwise")),
       h("button", { class: "icon-btn", title: t("Hide the chart; the plan stays", "Скрыть график; план останется"), onclick: () => act("closeBoard", { board: chart.id }) }, icon("xmark"))),
     area,
     h("div", { class: "route-tiles route-five" },
@@ -974,6 +1016,269 @@ function price(p) {
   if (!Number.isFinite(p)) return "—";
   const digits = p >= 1000 ? 2 : p >= 1 ? 2 : p >= 0.01 ? 4 : 8;
   return "$" + p.toLocaleString("en-US", { minimumFractionDigits: Math.min(digits, 2), maximumFractionDigits: digits });
+}
+
+// MARK: Rich result boards (the Mac's TokenBoard, PnLBoard, YieldBubbles, MoversBoard, ApprovalsBoard, JupiterDCABoard,
+// ReceiveAcrossBoard, ServiceAnswerBoard), drawn from the engine's data; their lines are what the model reads.
+
+/** A network's coin: what its Buy and Sell put in the chat (the Mac's coinTrades). */
+const GAS = { base: "ETH", arbitrum: "ETH", ethereum: "ETH", optimism: "ETH", robinhood: "ETH", polygon: "POL", bnb: "BNB", hyperevm: "HYPE" };
+export function coinTrades(coin, chain) {
+  const c = coin.toUpperCase(), pair = (buy, sell) => [[t(`Buy ${c}`, `Купить ${c}`), "cart", buy], [t("Sell", "Продать"), "arrow.down.right.circle", sell]];
+  if (c === "SOL" && (!chain || chain === "solana")) return pair("buy SOL for 2 USDC", "sell 0.01 SOL");
+  if (c === "NEAR") return pair("buy NEAR for 2 USDC", "sell 1 NEAR");
+  if (chain === "hyperliquid") return pair(`buy ${c} on hyperliquid spot for 10 USDC`, `sell all ${c} on hyperliquid spot`);
+  const net = GAS[chain] === c ? chain : Object.keys(GAS).find((k) => GAS[k] === c && k !== "robinhood");
+  if (net) {
+    const some = { POL: "5", BNB: "0.002", HYPE: "0.02" }[c] || "0.001", dollar = net === "robinhood" ? "USDG" : "USDC";
+    return pair(`swap 2 ${dollar} for ${c} on ${net}`, `swap ${some} ${c} for ${dollar} on ${net}`);
+  }
+  return pair(`buy ${c} for 2 USDC`, `sell all ${c}`);
+}
+
+/** A token's Buy and Sell by its network, as the chat takes them (the Mac's tokenPhrases): stock tokens by ticker, a
+ * verified Solana token by ticker, everything else by contract; bridged USDC.e first swaps to Circle's own; the network's own
+ * dollar (`dollar`) is bought by selling the network's coin. */
+export function tradePhrases(chain, address, symbol, { stock = false, verified = false, dollar = false } = {}) {
+  if (dollar) {
+    const coin = coinTrades(chain === "solana" ? "SOL" : GAS[chain] || "ETH", chain);
+    return [[t(`Buy ${symbol}`, `Купить ${symbol}`), "cart", coin[1][2]], [t("Sell", "Продать"), "arrow.down.right.circle", coin[0][2]]];
+  }
+  const [buy, sell] = chain === "robinhood" ? (stock ? [`buy ${symbol} stock for 2 USDC`, `sell ${symbol} stock`] : [`buy token ${address} for 2 USDC`, `sell token ${address}`])
+    : chain === "solana" ? (verified ? [`buy ${symbol} on solana for 2 USDC`, `sell ${symbol} on solana`] : [`buy token ${address} for 2 USDC`, `sell tokens ${address}`])
+    : chain === "tempo" ? [`swap 2 USDC for ${symbol} on tempo`, `swap all ${symbol} for USDC on tempo`]
+    : nets.has(chain) ? [`buy token ${address} on ${chain} for 2 USDC`, `sell tokens ${address} on ${chain}`] : [`buy ${symbol} for 2 USDC`, `sell all ${symbol}`];
+  const bridged = symbol === "USDC.e" ? [[t("Swap to Circle's USDC", "Обменять на USDC от Circle"), "arrow.triangle.2.circlepath", `swap all USDC.e for USDC on ${chain}`]] : [];
+  return [...bridged, [t(`Buy ${symbol}`, `Купить ${symbol}`), "cart", buy], [t("Sell", "Продать"), "arrow.down.right.circle", sell]];
+}
+const nets = new Set(["base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperevm", "robinhood", "tempo"]);
+
+/** The pills under a card: ask in the chat with it attached, then each phrase put in the chat's field. */
+function assetActions(b, symbol, phrases, source) {
+  return h("div", { class: "route-asset-actions" },
+    h("button", { class: "btn small route-bordered", onclick: () => attach(b) }, icon("bubble.left", 13), t(`Ask about ${symbol}`, `Спросить про ${symbol}`)),
+    phrases.map(([title, ic, phrase]) => h("button", { class: "btn small" + (ic === "cart" ? " route-buy" : ""), title: t(`Puts «${phrase}» in the chat`, `Вставит «${phrase}» в чат`), onclick: () => suggest(phrase) }, icon(ic, 13), title)),
+    source ? h("span", { class: "route-asset-source" }, source) : null);
+}
+
+const TRANGES = [["day", "24h"], ["week", "7d"], ["month", "30d"]];
+
+/** One token on the canvas (TokenBoard): its price and chart in a range, the pool's numbers, what you hold, links, then
+ * ask, buy, sell or watch. */
+function tokenBlock(b) {
+  const c = b.data.token;
+  // A token nobody vouches for never wears the famous logo of its ticker: its own picture, else its letter.
+  const letter = () => { const el = h("span", { class: "logo letter route-token-pic" }, (c.symbol || "?").slice(0, 1).toUpperCase()); el.style.cssText = "width:38px;height:38px;font-size:17px"; return el; };
+  const fallback = () => (c.verified === false ? letter() : logo(c.symbol, 38));
+  const head = h("div", { class: "route-asset-head" },
+    c.image ? h("img", { class: "route-token-pic", src: c.image, alt: "", referrerpolicy: "no-referrer", onerror: (e) => e.target.replaceWith(fallback()) }) : fallback(),
+    h("div", { class: "route-asset-name" },
+      h("b", { title: c.fullName }, c.name, c.verified === true ? h("span", { class: "route-verified", title: t(`Verified by ${c.verifiedBy || "a token list"}`, `Проверен: ${c.verifiedBy || "список токенов"}`) }, icon("checkmark.seal", 13))
+        : c.verified === false ? h("span", { class: "route-unverified", title: t(`${c.verifiedBy || "The list"} hasn't verified it: it may be a copy under a famous name`, `${c.verifiedBy || "Список"} его не проверил: это может быть копия под известным именем`) }, t("not verified", "не проверен")) : null),
+      h("span", {}, c.subtitle)),
+    h("span", { class: "spacer" }),
+    !c.loading ? h("button", { class: "icon-btn", title: t("Read the market again", "Прочитать рынок снова"), onclick: () => act("tokenRange", { board: b.id, text: c.range }) }, icon("arrow.clockwise")) : null,
+    h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark")));
+  const change = c.change === null || c.change === undefined ? null : Number(c.change);
+  const chart = c.closes.length > 1 ? chartParts({ id: b.id, chart: { title: `${c.symbol} · ${c.range}`, closes: c.closes, change: (change < 0 ? "−" : "+") + Math.abs(change ?? 0).toFixed(2) + "%" } }) : null;
+  const pick = h("div", { class: "route-chart-range" }, TRANGES.map(([key, label]) => h("button", { class: key === c.range ? "route-on" : "", onclick: () => key !== c.range && act("tokenRange", { board: b.id, text: key }) }, label)));
+  const priceEl = chart ? chart.priceEl : h("span", { class: "route-chart-price" }, c.price !== null && c.price !== undefined ? price(Number(c.price)) : "—");
+  const changeEl = change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range));
+  const held = c.held ? h("div", { class: "route-held" },
+    h("div", {}, h("span", { class: "eyebrow" }, t("You hold", "У тебя")), h("b", { class: "num" }, masked(`${c.held.amount} ${c.symbol}`)),
+      h("span", { class: "secondary small" }, c.held.how + (c.held.today !== null && c.held.today !== undefined ? " · " + t("today ", "сегодня ") + masked(signedUsd(c.held.today)) : ""))),
+    h("span", { class: "spacer" }),
+    h("div", { class: "route-held-value" }, h("b", { class: "num" }, masked(c.held.usd !== null && c.held.usd !== undefined ? usd(c.held.usd) : "—")),
+      c.held.pnl ? h("span", { class: "num small " + (Number(c.held.gain) < 0 ? "loss" : "profit") }, masked(c.held.pnl)) : null)) : null;
+  const phrases = tradePhrases(c.chain, c.address, c.symbol, { stock: c.stock, verified: c.verified === true, dollar: c.dollar });
+  const watch = !c.favorite && !c.dollar ? [[t(`Watch ${c.symbol}`, `Следить за ${c.symbol}`), "star", `watch token ${c.address} on ${c.chain}`]] : [];
+  return h("div", { class: "route-block route-chart-block route-token" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },
+    head,
+    h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick),
+    c.loading ? h("div", { class: "route-token-loading secondary" }, t("Reading its market…", "Читаю его рынок…"))
+      : chart ? chart.area : h("div", { class: "route-token-loading secondary" }, c.error || t("No chart for this period.", "Нет графика за этот период.")),
+    c.changes.length ? h("div", { class: "route-token-changes" }, c.changes.map((x) => h("span", { class: "route-change-chip" }, h("span", { class: "secondary" }, x.title + " "),
+      h("b", { class: Number(x.value) < 0 ? "loss" : "profit" }, (Number(x.value) < 0 ? "−" : "+") + Math.abs(Number(x.value)).toFixed(1) + "%")))) : null,
+    c.tiles.length ? h("div", { class: "route-tiles" }, c.tiles.map((x) => tile(x.title, x.value))) : null,
+    held,
+    h("div", { class: "route-token-links" },
+      h("button", { class: "link-btn", title: c.address, onclick: () => copy(c.address) }, icon("copy", 11), c.address.slice(0, 6) + "…" + c.address.slice(-4)),
+      c.links.map((l) => link(l.url, l.label))),
+    assetActions(b, c.symbol, [...phrases, ...watch], "DexScreener · GeckoTerminal"));
+}
+
+/** P/L (PnLBoard): the period picker, trading in the period, open positions, what's held, the portfolio's change, by
+ * market, the best and the worst trade. */
+const pnlPeriod = new Map();
+function pnlBlock(b, p) {
+  const traded = p.reports.some((r) => Number(r.realized) || Number(r.funding) || Number(r.unrealized) || r.byAsset.length);
+  const onlyHeld = p.held.length > 0 && !traded;
+  const key = pnlPeriod.get(b.id) || p.period, r = p.reports.find((x) => x.period === key) || p.reports[0];
+  const tone = (v) => (Number(v) < 0 ? "loss" : "profit");
+  const line = (title, value, detail) => h("div", { class: "route-pnl-line" },
+    h("div", {}, h("b", {}, title), h("span", { class: "secondary small" }, masked(detail))), h("span", { class: "spacer" }), h("b", { class: "num " + tone(value) }, masked(signedUsd(value))));
+  const picker = onlyHeld ? null : h("div", { class: "route-chart-range" }, p.reports.map((x) =>
+    h("button", { class: x.period === r.period ? "route-on" : "", onclick: () => { pnlPeriod.set(b.id, x.period); render(); } }, x.title)));
+  const priced = p.held.filter((x) => x.gain !== null && x.gain !== undefined);
+  const worth = p.held.reduce((a, x) => a + Number(x.usd || 0), 0), gain = priced.reduce((a, x) => a + Number(x.gain), 0);
+  const body = h("div", { class: "route-pnl" },
+    onlyHeld
+      ? h("div", { class: "route-pnl-head" }, h("span", { class: "secondary small" }, t("Held now · every network", "Сейчас в кошельке · все сети")),
+          h("b", { class: "route-pnl-big num " + (priced.length ? tone(gain) : "") }, masked(priced.length ? signedUsd(gain) : usd(worth))),
+          h("span", { class: "secondary small" }, masked(t(`worth ${usd(worth)}`, `стоит ${usd(worth)}`) + (priced.length ? t(` · bought for ${usd(priced.reduce((a, x) => a + Number(x.paid || 0), 0))}`, ` · куплено за ${usd(priced.reduce((a, x) => a + Number(x.paid || 0), 0))}`) : t(" · cost unknown", " · цена покупки неизвестна")))))
+      : h("div", { class: "route-pnl-head" }, h("span", { class: "secondary small" }, t("Trading · ", "Торговля · ") + r.title),
+          h("b", { class: "route-pnl-big num " + tone(r.trading) }, masked(signedUsd(r.trading))),
+          h("span", { class: "secondary small" }, masked(t(`realized after fees ${signedUsd(r.realized)} · funding ${signedUsd(r.funding)}`, `реализовано после комиссий ${signedUsd(r.realized)} · фандинг ${signedUsd(r.funding)}`))
+            + t(` · ${r.closed} closed, ${r.wins} in profit`, ` · закрыто ${r.closed}, в плюсе ${r.wins}`))),
+    onlyHeld ? null : line(t("Open positions now", "Открытые позиции сейчас"), r.unrealized, t("not realized yet", "ещё не реализовано")),
+    p.held.length ? h("div", { class: "route-pnl-section" }, h("span", { class: "eyebrow" }, t("Held now", "Сейчас в кошельке")),
+      p.held.map((x) => h("div", { class: "route-pnl-row" }, logo(logoKey(x.network) || x.network, 22),
+        h("div", { class: "route-pnl-name" }, h("b", { class: "one-line" }, `${x.symbol} · ${x.place}`),
+          h("span", { class: "secondary small one-line" }, masked(x.amount + (x.usd !== null && x.usd !== undefined ? ` ≈ ${usd(x.usd)}` : "")
+            + (x.paid !== null && x.paid !== undefined ? t(` · bought for ${usd(x.paid)}`, ` · куплено за ${usd(x.paid)}`) : t(" · cost unknown", " · цена покупки неизвестна"))))),
+        h("span", { class: "spacer" }),
+        h("b", { class: "num " + (x.gain !== null && x.gain !== undefined ? tone(x.gain) : "") }, masked(x.gain !== null && x.gain !== undefined ? signedUsd(x.gain) : x.usd !== null && x.usd !== undefined ? usd(x.usd) : t("no price", "нет цены")))))) : null,
+    !p.coin ? (r.change !== null && r.change !== undefined && r.changeSince
+      ? line(t(`Portfolio since ${fmtDate(r.changeSince)}`, `Портфель с ${fmtDate(r.changeSince)}`), r.change,
+          Number(r.flows) === 0 ? t("prices, yield and trading together", "цены, доходность и торговля вместе") : t(`without ${signedUsd(r.flows)} you moved in or out`, `без ${signedUsd(r.flows)}, которые ты завёл или вывел`))
+      : h("div", { class: "secondary small" }, t("No portfolio history for this period yet: it builds up every ten minutes while the app is open.", "Истории портфеля за этот период пока нет: она копится каждые десять минут, пока приложение открыто."))) : null,
+    r.byAsset.length ? h("div", { class: "route-pnl-section" }, h("span", { class: "eyebrow" }, t("By market", "По рынкам")),
+      r.byAsset.map((a) => h("div", { class: "route-pnl-row" }, logo(a.coin.replace(/^.*:/, ""), 22), h("b", { class: "one-line" }, a.name),
+        h("span", { class: "secondary small" }, t(`${a.closed} closed`, `закрыто ${a.closed}`)), h("span", { class: "spacer" }), h("b", { class: "num " + tone(a.realized) }, masked(signedUsd(a.realized)))))) : null,
+    [r.best && Number(r.best.realized) > 0 ? [t("Best", "Лучшая"), r.best] : null, r.worst && Number(r.worst.realized) < 0 ? [t("Worst", "Худшая"), r.worst] : null].filter(Boolean).map(([label, x]) =>
+      h("div", { class: "route-pnl-row" }, h("span", { class: "eyebrow route-pnl-tag" }, label),
+        h("span", { class: "small one-line" }, `${x.long ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.name} · ${fmtDate(x.closed)}`), h("span", { class: "spacer" }),
+        h("b", { class: "num " + tone(x.realized) }, masked(signedUsd(x.realized))))),
+    h("div", { class: "secondary small" }, onlyHeld
+      ? t("The cost is what the wallet paid in stablecoins in the same transaction, read from the network. A token that came some other way has no cost.", "Цена покупки — сколько кошелёк заплатил стейблкоинами в той же транзакции, по данным сети. У токена, пришедшего иначе, цены покупки нет.")
+      : t("Trading comes from Hyperliquid itself. Lending yield isn't counted separately: it's inside the portfolio change. Money that arrived while the app was closed can look like gain.", "Торговля — по данным самого Hyperliquid. Доход от депозитов отдельно не считается: он внутри изменения портфеля. Деньги, пришедшие, пока приложение было закрыто, могут выглядеть как прибыль.")));
+  return blockFrame(b, "P/L" + (p.coin ? " · " + (onlyHeld ? p.held[0].symbol : p.coin.replace(/^.*:/, "")) : ""), body, { width: 470, extra: h("span", { class: "route-pnl-tools" }, picker, refresh(b)) });
+}
+
+/** Where money earns now (YieldBubbles): a bubble a rate, its size by the rate; a tap puts its phrase in the chat. */
+const BUBBLE = [["Jupiter", "#131D27", "#C7F284"], ["Kamino", "#082A56", "#ffffff"], ["Jito", "#1F9D6A", "#ffffff"], ["HLP", "var(--hl)", "var(--hl-mint)"]];
+function ratesBlock(b, rates) {
+  const top = Math.max(...rates.map((o) => Number(o.apy)), 0.0001);
+  const rateLogo = (p) => { const n = p.toLowerCase(); return n.includes("jupiter") ? "jup" : n.includes("kamino") ? "kamino" : n.includes("jito") ? "jitosol" : n.includes("hlp") ? "hype" : n.includes("aave") ? "aave" : n.includes("morpho") ? "morpho" : "usdc"; };
+  return blockFrame(b, b.title, h("div", { class: "route-result" },
+    h("span", { class: "eyebrow" }, t("Rates now · tap to put the phrase in the chat", "Ставки сейчас · нажми, чтобы вставить фразу в чат")),
+    h("div", { class: "route-bubbles" }, rates.map((o) => {
+      const size = 96 + 70 * (Number(o.apy) / top);
+      const [, fill, ink] = BUBBLE.find(([k]) => o.place.includes(k)) || [null, "var(--solana-tint)", "var(--text)"];
+      const el = h("button", { class: "route-bubble" + (o.how ? "" : " route-off"), title: o.note || o.how || "", disabled: !o.how, onclick: () => o.how && suggest(o.how) },
+        logo(rateLogo(o.place), 26), h("b", { class: "num" + (size > 140 ? " route-big" : "") }, Number(o.apy).toFixed(2) + "%"), h("span", { class: "one-line" }, o.place), h("span", { class: "route-bubble-asset" }, o.asset));
+      el.style.cssText = `width:${size}px;height:${size}px;background:${fill};color:${ink}`;
+      return el;
+    })),
+    h("div", { class: "secondary small" }, t("Tip: don’t keep everything in one protocol — say “spread USDC across the best rates”.", "Совет: не держи всё в одном протоколе — скажи «разложи USDC по лучшим ставкам»."))),
+  { width: 520, extra: refresh(b) });
+}
+
+/** Movers · 24 h (MoversBoard): up and down, each opens its chart. */
+function moversBlock(b, m) {
+  const col = (title, rows, up) => h("div", { class: "route-movers-col" }, h("span", { class: "eyebrow " + (up ? "profit" : "loss") }, title),
+    rows.map((r) => h("button", { class: "route-mover " + (Number(r.change) < 0 ? "route-down" : "route-up"), title: t(`Open the ${r.name} chart`, `Открыть график ${r.name}`), onclick: () => act("openChart", { name: r.coin }) },
+      logo(r.coin.replace(/^.*:/, ""), 24), h("span", { class: "route-mover-name" }, h("b", { class: "one-line" }, r.name), h("span", { class: "secondary num" }, r.price)),
+      h("span", { class: "spacer" }), h("b", { class: "num " + (Number(r.change) < 0 ? "loss" : "profit") }, (Number(r.change) < 0 ? "−" : "+") + Math.abs(Number(r.change)).toFixed(1) + "%"))));
+  return blockFrame(b, b.title, h("div", { class: "route-result" },
+    h("div", { class: "route-movers" }, col(t("Up", "Рост"), m.up, true), col(t("Down", "Падение"), m.down, false)),
+    h("div", { class: "tertiary small" }, t("Hyperliquid markets with over $1M traded today: crypto, stocks, commodities. Tap one for its chart.", "Рынки Hyperliquid с оборотом больше $1M за сегодня: крипта, акции, сырьё. Нажми на рынок — откроется график."))),
+  { width: 470, icon: "flame", extra: refresh(b) });
+}
+
+/** Token approvals (ApprovalsBoard): who may spend what, unlimited ones in red; Revoke puts the revoke in the chat. */
+function approvalsBlock(b, a) {
+  const open = a.list.filter((x) => x.unlimited).length;
+  const sub = `${a.list.length} ` + t("active", "активных") + (open ? ` · ${open} ` + t("unlimited", "без лимита") : "") + t(" · ihatecrypto's own are exact and spent at once", " · свои ihatecrypto даёт точно и тратит сразу");
+  return blockFrame(b, t("Token approvals", "Разрешения на токены"), h("div", { class: "route-result" },
+    h("span", { class: "secondary small" }, sub),
+    a.list.length ? h("div", { class: "route-result-rows" }, a.list.map((x) => h("div", { class: "route-approval" + (x.unlimited ? " route-danger" : ""),
+      title: t(`${x.spender} may spend ${x.unlimited ? "all of" : "up to this much"} ${x.symbol} (${x.token}) of yours on ${x.place}`, `${x.spender} может тратить ${x.unlimited ? "все" : "до этой суммы"} ${x.symbol} (${x.token}) в ${x.place}`) },
+      logo(logoKey(x.chain) || x.chain, 22),
+      h("div", { class: "route-approval-text" }, h("b", { class: "one-line" }, `${x.symbol} → ${x.spenderName || x.spender.slice(0, 6) + "…" + x.spender.slice(-4)}`),
+        h("span", { class: "small one-line " + (x.unlimited ? "loss" : "secondary") }, `${x.place}${x.permit2 ? t(" · through Permit2", " · через Permit2") : ""} · ${x.amount}`)),
+      h("span", { class: "spacer" }),
+      h("button", { class: "btn small", title: t(`Sets it to zero: one ${x.place} transaction, nothing spent. Puts «${x.revoke}» in the chat`, `Обнуляет: одна транзакция в ${x.place}, ничего не тратится. Вставит «${x.revoke}» в чат`), onclick: () => suggest(x.revoke) }, t("Revoke", "Отозвать")))))
+      : h("div", { class: "secondary" }, t("No token approvals left: nothing can spend your tokens but you.", "Разрешений не осталось: никто, кроме тебя, не может тратить твои токены.")),
+    a.unread.length ? h("div", { class: "secondary small" }, t(`Couldn't read ${a.unread.join(", ")} now — try again in a minute.`, `Не удалось прочитать ${a.unread.join(", ")} — попробуй через минуту.`)) : null),
+  { width: 520, icon: "checkmark.shield", extra: h("button", { class: "icon-btn", title: t("Read them again", "Прочитать заново"), onclick: () => act("refreshApprovals", { board: b.id }) }, icon("arrow.clockwise")) });
+}
+
+/** Jupiter DCA (JupiterDCABoard): each order's progress; Cancel puts the cancel in the chat. */
+function dcaBlock(b, rows) {
+  return blockFrame(b, "Jupiter DCA", h("div", { class: "route-result" },
+    h("span", { class: "route-status-chip profit route-dca-chip" }, rows.length === 1 ? t("1 running", "1 идёт") : t(`${rows.length} running`, `идёт: ${rows.length}`)),
+    rows.map((o) => {
+      const done = Number(o.deposited) > 0 ? Math.min(Math.max(Number(o.used) / Number(o.deposited), 0), 1) : 0;
+      return h("div", { class: "route-dca" },
+        h("div", { class: "route-dca-head" }, logo("usdc", 22), icon("arrow.right", 12), logo(o.coin, 22),
+          h("b", { class: "one-line" }, t(`${o.perCycle} USDC → ${o.coin} every ${o.every}`, `${o.perCycle} USDC → ${o.coin} раз в ${o.every}`)), h("span", { class: "spacer" }),
+          h("button", { class: "link-btn loss", title: t(`Puts «${o.cancel}» in the chat`, `Вставит «${o.cancel}» в чат`), onclick: () => suggest(o.cancel) }, t("Cancel", "Отменить"))),
+        h("div", { class: "route-progress" }, h("span", { style: `width:${(done * 100).toFixed(1)}%` })),
+        h("div", { class: "route-dca-foot secondary small num" },
+          h("span", {}, t(`spent ${o.used} of ${o.deposited} USDC · ${o.fills} ${o.fills === 1 ? "swap" : "swaps"}`, `потрачено ${o.used} из ${o.deposited} USDC · обменов: ${o.fills}`)),
+          h("span", {}, t(`bought ${o.received} ${o.coin}`, `куплено ${o.received} ${o.coin}`))));
+    }),
+    h("div", { class: "secondary small" }, t("On-chain: Jupiter's keepers buy even with ihatecrypto closed. Cancel returns what wasn't spent and the rent.", "В сети: Jupiter покупает, даже когда ihatecrypto закрыт. Отмена вернёт непотраченное и ренту."))),
+  { width: 520, extra: refresh(b) });
+}
+
+/** Coins from a network without a wallet here (ReceiveAcrossBoard): the address, its QR, the least it takes, until when,
+ * what lands on Solana, and 1Click's word on it. */
+function receiveBlock(b, d) {
+  const until = d.until ? new Date(d.until).toLocaleTimeString(ui.state.russian ? "ru-RU" : "en-US", { hour: "numeric", minute: "2-digit" }) : null;
+  return blockFrame(b, t(`Receive ${d.amount} ${d.token} from ${d.title}`, `Получить ${d.amount} ${d.token} из ${d.title}`), h("div", { class: "route-result" },
+    h("span", { class: "secondary small" }, t(`through NEAR Intents · lands as ≈ ${d.arrives} USDC on Solana`, `через NEAR Intents · придёт ≈ ${d.arrives} USDC на Solana`)),
+    h("div", { class: "route-receive" },
+      h("div", { class: "route-receive-qr" }, qrCode(d.address, "route-qr")),
+      h("div", { class: "route-receive-text" },
+        h("span", { class: "secondary small" }, t(`Send ${d.token} on ${d.title} to`, `Отправь ${d.token} в сети ${d.title} на`)),
+        h("div", { class: "route-receive-address selectable" }, d.address),
+        h("button", { class: "btn small", onclick: () => copy(d.address) }, icon("copy", 13), t("Copy address", "Скопировать адрес")),
+        h("div", { class: "secondary small" }, t(`At least ${d.minimum} ${d.token}`, `Не меньше ${d.minimum} ${d.token}`) + (until ? t(`, until ${until}`, `, до ${until}`) : "")
+          + t(`. Only ${d.token} on ${d.title} — anything else sent here is lost.`, `. Только ${d.token} в сети ${d.title} — всё остальное, отправленное сюда, пропадёт.`)))),
+    h("div", { class: "route-receive-state" }, icon("arrow.down.circle", 13), "1Click · " + d.state),
+    h("div", { class: "secondary small" }, t("If it can't be swapped, 1Click returns it to your NEAR Intents account, under this wallet's NEAR key.", "Если обменять не выйдет, 1Click вернёт это на твой счёт NEAR Intents, под NEAR-ключ этого кошелька."))),
+  { width: 520 });
+}
+
+/** A page in the panel beside the chat, as an explorer link opens. */
+const openUrl = (url) => link(url, "").click();
+
+/** A paid (or free) service's answer (ServiceAnswerBoard): who answered and what it cost, with the payment on Tempo, then
+ * its writing, results as rows (pictures as pictures) or its values; Copy takes the whole answer. */
+function serviceBlock(b, sv) {
+  const a = sv.answer || {};
+  const row = (item) => {
+    const url = item.url, isImage = url && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url);
+    let host = ""; try { host = new URL(url).host; } catch {}
+    return h("div", { class: "route-service-item" + (url ? " route-link" : ""), onclick: url && !isImage ? () => openUrl(url) : null },
+      isImage ? h("img", { class: "route-service-img", src: url, alt: "", referrerpolicy: "no-referrer", loading: "lazy", onerror: (e) => e.target.remove() }) : null,
+      h("b", {}, item.title), host ? h("span", { class: "route-service-host" }, host) : null, item.detail ? h("span", { class: "secondary small" }, item.detail) : null);
+  };
+  const body = a.writing
+    ? [h("div", { class: "route-service-writing selectable" }, a.writing), (a.links || []).slice(0, 6).map((l) => row({ title: (() => { try { const u = new URL(l); return u.host + u.pathname; } catch { return l; } })(), url: l }))]
+    : (a.items || []).length ? (a.items || []).map(row)
+    : (a.facts || []).length ? (a.facts || []).map((f) => h("div", { class: "route-service-fact" }, h("span", { class: "secondary" }, f.key), h("b", { class: "selectable" }, f.value)))
+    : [h("div", { class: "selectable" }, a.text || t("The service sent nothing back.", "Сервис ничего не вернул."))];
+  return blockFrame(b, sv.service, h("div", { class: "route-result" },
+    h("span", { class: "secondary small" }, sv.usdc !== null && sv.usdc !== undefined ? t(`paid ${sv.usdc} USDC on Tempo`, `оплачено ${sv.usdc} USDC в Tempo`) : t("free answer", "бесплатный ответ")),
+    h("div", { class: "route-service" }, body)),
+  { width: 520, extra: h("span", { class: "route-pnl-tools" },
+    sv.proof ? h("button", { class: "link-btn", title: t("The payment on Tempo's explorer", "Оплата в обозревателе Tempo"), onclick: () => openUrl(sv.proof) }, "Tempo", icon("arrow.up.right", 11)) : null,
+    h("button", { class: "icon-btn", title: t("Copy the whole answer", "Скопировать весь ответ"), onclick: () => copy(sv.raw) }, icon("copy", 14))) });
+}
+
+/** A note from the chat (NoteBoard): a card per note, newest at the bottom, «Open» on the first when it's another canvas's. */
+function noteBlock(b) {
+  const head = (i) => h("div", { class: "route-block-head" }, h("span", { class: "route-block-icon" }, icon("doc", 15)),
+    h("b", { class: "route-block-title one-line secondary" }, b.title ? t(`Note · ${b.title}`, `Заметка · ${b.title}`) : t("Note", "Заметка")),
+    h("span", { class: "spacer" }),
+    i === 0 && b.opens ? h("button", { class: "btn small", title: t("The note's own canvas, in its folder", "Холст заметки, в её папке"),
+      disabled: !!ui.state.runningBoard, onclick: () => act("openCanvas", { wallet: b.opens }) }, t("Open", "Открыть")) : null,
+    i === 0 ? h("button", { class: "icon-btn", title: t("Close", "Закрыть"), onclick: () => act("closeBoard", { board: b.id }) }, icon("xmark")) : null);
+  return h("div", { class: "route-notes", oncontextmenu: (e) => blockMenu(e, b, b.title) },
+    (b.lines || []).map((text, i) => h("div", { class: "route-block route-note-card" + (isAttached(b.id) ? " route-attached" : "") }, head(i), h("div", { class: "route-note-text selectable" }, text))));
 }
 
 // MARK: An empty canvas

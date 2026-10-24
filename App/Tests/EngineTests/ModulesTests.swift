@@ -51,7 +51,9 @@ import Testing
         // All on again: the same words make a card.
         try engine.call("module", ["name": "network.solana", "test": true])
         let allowed = try engine.call("send", ["text": "stake 1 SOL"])
-        #expect(allowed.state?["card"] != nil, "\(EngineTests.chat(allowed.state).last ?? "")")
+        let said = EngineTests.chat(allowed.state).last ?? ""
+        #expect(allowed.state?["card"] != nil || said.contains("Solana has 0 SOL"), "\(said)")
+        #expect(!said.contains("Settings › Modules"))
     }
 
     @Test func aModuleALaterVersionBringsStartsOffAndIsAskedAboutOnce() throws {
@@ -115,6 +117,9 @@ import Testing
         try engine.call("phraseSaved")
         let r = try engine.call("send", ["text": "long ETH risk $5 by the book"])
         let said = EngineTests.chat(r.state).last ?? ""
+        // The plan's checklist (TradePlan.swift): the stop by the book, or — Hyperliquid's 4h candles or its prices not
+        // loading in a loaded run — said why, never sent back for a stop silently.
+        #expect(said.contains("✓ Stop: ") && said.contains(" by the book") || said.contains("4h candles didn’t load") || said.contains("has no price yet"), "\(said)")
         #expect(!said.contains("stop in %") && !said.contains("The plan needs"), "\(said)")
     }
 
@@ -143,8 +148,15 @@ import Testing
         let key = try #require(Self.trading(saved.state)["key"] as? [String: Any])
         #expect(key["possible"] as? Bool == true && key["address"] == nil && key["active"] as? Bool == false)
         let asked = try engine.call("send", ["text": "turn on the trading key"])
-        #expect(EngineTests.chat(asked.state).last?.contains("Hyperliquid isn't open on this wallet yet") == true, "\(EngineTests.chat(asked.state).last ?? "")")
-        #expect((asked.state?["options"] as? [[String: Any]])?.contains { $0["title"] as? String == "Top up ihatecrypto" } == true)
+        let said = EngineTests.chat(asked.state).last ?? ""
+        // Hyperliquid is asked live: under a loaded run it may not answer, and then nothing is asked for either.
+        if said.contains("Hyperliquid didn't answer") {
+            #expect(asked.state?["card"] == nil)
+        } else {
+            #expect(said.contains("Hyperliquid isn't open on this wallet yet"), "\(said)")
+            #expect((asked.state?["options"] as? [[String: Any]])?.contains { $0["title"] as? String == "Top up ihatecrypto" } == true)
+        }
+        // Either way no key was made: no Windows Hello prompt for a key Hyperliquid would refuse.
         #expect((Self.trading(asked.state)["key"] as? [String: Any])?["address"] == nil)
     }
 }

@@ -15,10 +15,10 @@ import Testing
         try engine.call("createWallet", ["test": false])
         try engine.call("phraseSaved")
 
-        let waiting = try engine.call("send", ["text": "stake 1 SOL"])
+        let waiting = try engine.call("send", ["text": "buy native NEAR for 1 USDC"])
         let first = try #require(Self.card(waiting.state), "\(EngineTests.chat(waiting.state).last ?? "")")
         let edit = try #require(Self.edit(waiting.state))
-        #expect(edit["board"] as? String == first && edit["amount"] as? String == "1" && edit["unit"] as? String == "SOL" && edit["ways"] as? Bool == false)
+        #expect(edit["board"] as? String == first && edit["amount"] as? String == "1" && edit["unit"] as? String == "USDC" && edit["ways"] as? Bool == false)
 
         // Not one number: refused, and the card is the same one.
         for bad in ["5abc", "1,000", "", "0", "1.2.3"] {

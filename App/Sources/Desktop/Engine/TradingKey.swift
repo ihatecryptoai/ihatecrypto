@@ -56,12 +56,28 @@ extension Engine {
         if ledgerActive, agentAddress == nil { await enableLedgerAgent() } else if agentAddress == nil { await enableAgent() } else { await resumeTradingKey() }
     }
 
+    /// Whether Hyperliquid has this account, so its key can be approved: asked twice, since an answer that didn't come
+    /// (a refused or slow request) isn't an open account. A new one gets what opens it; no answer is said, before any
+    /// Windows Hello prompt for a key Hyperliquid would refuse.
+    func hyperliquidOpens(_ evm: String) async -> Bool {
+        for attempt in 0..<2 {
+            if let new = try? await Hyperliquid.isNewAccount(evm) {
+                if new { offerOpeningHyperliquid() }
+                return !new
+            }
+            if attempt == 0 { try? await Task.sleep(for: .seconds(2)) }
+        }
+        reply(say("Hyperliquid didn't answer, so the trading key wasn't asked for. Try again in a minute.",
+                  "Hyperliquid не ответил, поэтому торговый ключ не запрошен. Попробуй ещё раз через минуту."), note: "Hyperliquid")
+        return false
+    }
+
     /// The signer makes a key and signs its approval with the main key; it goes to Hyperliquid, and only when the exchange
     /// accepts it do orders switch to the key.
     func enableAgent() async {
         guard !watching, let evm = activeWallet?.evm else { reply(watching ? watchOnly : say("Add a wallet first.", "Сначала добавь кошелёк.")); return }
         // Hyperliquid refuses a key for an account that never had a deposit: what opens it, and the way, before any prompt.
-        if (try? await Hyperliquid.isNewAccount(evm)) == true { offerOpeningHyperliquid(); return }
+        guard await hyperliquidOpens(evm) else { return }
         do {
             let answer = try await signerCall(.enableAgent)
             guard let action = answer.action, let signature = answer.signature, let nonce = answer.nonce, let agent = answer.agentAddress else {
@@ -84,7 +100,7 @@ extension Engine {
                       "Сначала переключись на Ledger («используй мой Ledger»): торговый ключ принадлежит его аккаунту Hyperliquid."))
             return
         }
-        if (try? await Hyperliquid.isNewAccount(wallet.evm)) == true { offerOpeningHyperliquid(); return }
+        guard await hyperliquidOpens(wallet.evm) else { return }
         if ledgerConnect == nil {
             ledgerConnect = LedgerConnect(model: account.model, evm: account.evm, solana: account.solana, status: say("Making the trading key…", "Делаю торговый ключ…"), busy: true)
         }

@@ -58,12 +58,25 @@ extension Engine {
             // A task made before this wallet would now spend from it by itself: each waits for its switch, as a new one does.
             let held = tasks.indices.filter { tasks[$0].paused != true && waitsForSwitch(tasks[$0]) }
             for i in held { tasks[i].paused = true }
+            // Into Addresses on Solana and Base, so «send 20 USDC to Automation» tops it up: the signer counts its own
+            // wallets as known, so no Windows Hello for these.
+            if let w = automationWallet {
+                for (address, network) in [(w.solana, "solana"), (w.evm, "base")] {
+                    guard let address, !book.contains(where: { $0.address.lowercased() == address.lowercased() && $0.network == network }) else { continue }
+                    try? await saveAddress(SignerAddress(name: w.label, network: network, address: address, memo: ""))
+                }
+            }
             pin(Board(kind: "schedule", title: "schedule"))
             reply(say("Made «\(automationWallet?.label ?? "Automation")»: scheduled tasks spend from it without Windows Hello. Keep only their budget there — send it USDC and a little SOL (its address is on the Schedule block).",
                       "Создан «\(automationWallet?.label ?? "Automation")»: задачи по расписанию тратят с него без Windows Hello. Держи там только их бюджет — отправь на него USDC и немного SOL (адрес на блоке «Расписание»).")
                   + (held.isEmpty ? "" : say(" Tasks made before it would now spend from it by themselves, so they’re paused (\(held.count)): each starts only when you switch it on in the Schedule.",
                                              " Задачи, созданные раньше, теперь тратили бы с него сами, поэтому они на паузе (\(held.count)): каждая начнёт работать, только когда ты включишь её в «Расписании».")),
                   note: note)
+            if let w = automationWallet {
+                options = [ChatRouter.Option(title: say("Top up 20 USDC", "Пополнить на 20 USDC"),
+                                             comment: say("From your wallet on Solana: Windows Hello once for the new address.", "С твоего кошелька на Solana: Windows Hello один раз на новый адрес."),
+                                             command: "send 20 USDC to \(w.label)", recommended: true)]
+            }
         } catch {
             reply(say("No automation wallet: ", "Кошелёк автоматизации не создан: ") + error.localizedDescription, note: note)
         }
@@ -137,6 +150,7 @@ extension Engine {
     /// A task's steps on the automation wallet: each move carried out at once, drawn on the canvas as it runs; the first
     /// that fails stops the rest.
     func runOnAutomation(_ task: ScheduledTask, _ automation: SignerWallet) async {
+        let started = Date()
         reply(say("From the automation wallet «\(automation.label)», no Windows Hello.", "С кошелька автоматизации «\(automation.label)», без Windows Hello."), note: "schedule")
         await TaskRun.$automation.withValue(automation) {
             for step in task.steps {
@@ -173,10 +187,15 @@ extension Engine {
                 await refresh()
             }
         }
-        // Short of SOL, it fails the same way every run: said with what to do.
-        if let a = automation.solana, let sol = try? await Solana.balance(owner: a).sol, sol < TaskRun.solFloor {
-            reply(say("«\(automation.label)» has \(Fmt.num(sol, maxFraction: 6)) SOL — too little for Solana's fees. Send it 0.02 SOL from your main wallet.",
-                      "На «\(automation.label)» \(Fmt.num(sol, maxFraction: 6)) SOL — мало для комиссий Solana. Отправь на него 0.02 SOL с основного кошелька."), note: "schedule")
+        // Short of SOL, it fails the same way every run: said with what its tasks need for 4 weeks, and that as a card.
+        if boards.contains(where: { $0.kind == "move" && $0.state == "failed" && $0.at >= started }),
+           let a = automation.solana, let sol = try? await Solana.balance(owner: a).sol, sol < TaskRun.solFloor {
+            let need = Fmt.num(max(solShort(sol), TaskRun.solFloor - sol), maxFraction: 9)
+            reply(say("The automation wallet «\(automation.label)» has \(Fmt.num(sol, maxFraction: 6)) SOL — too little for Solana’s fees and the accounts a move opens. Send it \(need) SOL: enough for its tasks for the next 4 weeks.",
+                      "На кошельке автоматизации «\(automation.label)» \(Fmt.num(sol, maxFraction: 6)) SOL — мало для комиссий Solana и счетов, которые открывает движение. Отправь на него \(need) SOL — хватит на его задачи на 4 недели вперёд."), note: "schedule")
+            options = [ChatRouter.Option(title: say("Send \(need) SOL to \(automation.label)", "Отправить \(need) SOL на \(automation.label)"),
+                                         comment: say("From your main wallet: Confirm and Windows Hello.", "С основного кошелька: «Подтвердить» и Windows Hello."),
+                                         command: "send \(need) SOL to \(automation.label)", recommended: true)]
         }
         await sendBoughtToMain(from: automation)
     }

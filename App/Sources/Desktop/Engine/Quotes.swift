@@ -23,12 +23,13 @@ extension Engine {
                 guard card?.id == board else { return }
                 jupiterShown = (command, q.outAmount)
                 let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
+                // The step that gets it: the last of the route (the token bought, or the USDC back), the only one of one.
                 updateBoard(board) { b in
-                    guard var step = b.steps?.first else { return }
+                    guard let last = b.steps?.indices.last, var step = b.steps?[last] else { return }
                     step.title = "≈ \(Fmt.num(out, maxFraction: 6)) \(to.symbol)"
                     let route = "Jupiter: \(from.symbol) → \(to.symbol)"
                     if !step.lines.contains(route) { step.lines.insert(route, at: 0) }
-                    b.steps?[0] = step
+                    b.steps?[last] = step
                 }
                 return
             }

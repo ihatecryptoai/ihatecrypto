@@ -43,13 +43,16 @@ import Testing
         #expect(kept.map { abs($0.timeIntervalSinceReferenceDate - next) < 2 } == true, "\(t)")
         #expect(t["every"] is String, "\(t)")
 
-        // Opened again: the same canvas, not a second one.
-        try engine.call("closeSchedule")
+        // «Run now» ran on a canvas of its own, as any run does on the Mac, and stays there to be seen: the first canvas,
+        // the item's and the run's.
+        #expect((ran["canvases"] as? [Any])?.count == 3)
+        #expect(ran["scheduleKey"] == nil || ran["scheduleKey"] is NSNull)
+        // Opened again: the same item canvas, not a second one.
         let again = try #require(try engine.call("openSchedule", ["name": key]).state)
-        #expect((again["canvases"] as? [Any])?.count == 2)
+        #expect((again["canvases"] as? [Any])?.count == 3)
         let closed = try #require(try engine.call("closeSchedule").state)
         #expect(closed["scheduleKey"] == nil || closed["scheduleKey"] is NSNull)
-        #expect((closed["canvases"] as? [Any])?.count == 1, "an item's canvas nothing was written on leaves the list")
+        #expect((closed["canvases"] as? [Any])?.count == 2, "an item's canvas nothing was written on leaves the list")
         #expect(try engine.call("openSchedule", ["name": "nonsense"]).answer["ok"] as? Bool == false)
     }
 

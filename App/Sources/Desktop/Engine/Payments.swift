@@ -114,7 +114,8 @@ extension Engine {
         if let client = llmClient(), let said = try? await MPP.reply(to: ask, service: service, data: data, language: replyLanguage, client: client, model: model), !said.isEmpty {
             text = said
         }
-        pin("result", service, lines: text.split(separator: "\n").prefix(20).map(String.init))
+        pin("result", service, lines: text.split(separator: "\n").prefix(20).map(String.init),
+            data: BlockData(service: .init(service: service, usdc: usdc, proof: proof, answer: MPP.Answer(data), raw: MPP.shown(data, limit: 20_000))))
         let cost = usdc.map { say("Paid \(Fmt.num($0, maxFraction: 6)) USDC to \(service) on Tempo", "Оплачено \(Fmt.num($0, maxFraction: 6)) USDC · \(service) · Tempo") }
         return text + (cost.map { "\n\n\($0) \(proof ?? "")" } ?? "")
     }

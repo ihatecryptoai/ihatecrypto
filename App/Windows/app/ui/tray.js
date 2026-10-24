@@ -52,7 +52,7 @@ function draw() {
     scheduled.slice(0, 6).map((task) => {
       const last = lastRun(task);
       const failed = last?.result === "failed";
-      return h("button", { class: "tray-task", onclick: open },
+      return h("button", { class: "tray-task", onclick: () => open("task:" + task.id) },
         icon(task.automatic ? "bolt" : "clock", 12),
         h("div", { class: "tray-title" }, h("b", { class: "one-line" }, task.text),
           h("span", { class: "one-line " + (failed ? "loss" : "secondary") },
@@ -70,7 +70,8 @@ function draw() {
   measure();
 }
 
-function open() { invoke("tray_open").catch(() => {}); }
+/** Opens the window; a task's row opens its own canvas too. */
+function open(schedule) { invoke("tray_open", typeof schedule === "string" ? { schedule } : {}).catch(() => {}); }
 
 /** The window takes the panel's height, kept by the icon. */
 function measure() {

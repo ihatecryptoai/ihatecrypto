@@ -4,6 +4,7 @@
 // A row opens the coin (its board or chart) through the chat field; nothing here moves money by itself.
 
 import { ui, h, svg, act, engine, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link } from "./core.js";
+import { coinTrades, tradePhrases } from "./boards.js";
 
 addIcons({
   bell: "M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
@@ -286,9 +287,28 @@ function pnlPct(r) {
   return m ? m[1].replace("-", "−") : null;
 }
 
-/** What a click on a coin opens: its board by contract, or the chart of a coin everyone knows by name. */
-function opener(r, n) {
-  return r.contract ? `show token ${r.contract}` : `chart ${r.symbol} day`;
+/** How a held coin opens and trades (the Mac's opener and TokenMenu): a token by its contract, and the network's own
+ * dollar, open their card; a network's own coin or a Hyperliquid spot token, its market's chart; other dollars, nothing. */
+function coinKind(r, n) {
+  if (r.section === "defi") return null;
+  if (stables.has(r.symbol.toUpperCase())) return !r.contract && n.key !== "hyperliquid" && (r.symbol === "USDC" || r.symbol === "USDG") ? "dollar" : r.contract ? "token" : null;
+  return n.key === "hyperliquid" || !r.contract || r.contract === "native" || (n.key === "solana" && r.symbol === "SOL") ? "coin" : "token";
+}
+
+/** Opens the coin's card or chart on the canvas; resolves to the engine's answer (`board`: the block's id). */
+function openCoin(r, n) {
+  const kind = coinKind(r, n);
+  return kind === "coin" ? act("openChart", { name: r.symbol })
+    : kind ? act("openToken", { address: kind === "token" ? r.contract : "", network: n.key }) : Promise.resolve(null);
+}
+
+/** «Ask in chat»: the coin's card (or chart) opens and goes into the chat with the next message. */
+async function askCoin(r, n) {
+  const a = await openCoin(r, n);
+  if (!a?.board) return suggest(t(`What about my ${r.symbol} on ${n.name}?`, `Что с моим ${r.symbol} в ${n.name}?`));
+  ui.attached = a.board;
+  render();
+  document.getElementById("composer")?.focus();
 }
 
 function coinRow(r, n, dim) {
@@ -298,7 +318,7 @@ function coinRow(r, n, dim) {
   const verified = r.verified === true ? h("span", { class: "pf-verified", title: t("Verified by the token list: the real token, not a copy under its name", "Проверен по списку токенов: настоящий, а не копия с тем же именем") }, seal())
     : r.verified === false ? h("span", { class: "pf-unverified" }, t("unverified", "не проверен")) : null;
   return h("div", { class: "pf-coin pf-lit" + (dim ? " dim" : ""), title: `${r.symbol}: ` + t("details and chart · right-click to ask the chat, buy or sell", "подробности и график · правый клик — спросить чат, купить или продать"),
-    onclick: () => suggest(opener(r, n)), oncontextmenu: (e) => coinMenu(e, r, n) },
+    onclick: () => openCoin(r, n), oncontextmenu: (e) => coinMenu(e, r, n) },
     logoRound(r.symbol, 20, r.verified === false ? undefined : r.icon),
     h("div", { class: "pf-coin-name" },
       h("div", { class: "pf-coin-symbol" }, h("span", { class: "one-line" }, r.symbol), verified),
@@ -331,23 +351,24 @@ function depositRow(r, n) {
 function coinMenu(e, r, n) {
   e.preventDefault();
   e.stopPropagation();
-  const on = n.key === "solana" ? "" : n.key === "hyperliquid" ? " on hyperliquid" : ` on ${n.key}`;
+  const kind = coinKind(r, n);
+  const phrases = kind === "coin" ? coinTrades(r.symbol, n.key)
+    : kind ? tradePhrases(n.key, r.contract || "", r.symbol, { verified: r.verified === true, dollar: kind === "dollar" }) : [];
   popup(e, [
-    [t("Details and chart", "Подробности и график"), () => suggest(opener(r, n))],
-    [t(`Ask the chat about ${r.symbol}`, `Спросить чат про ${r.symbol}`), () => suggest(t(`What about my ${r.symbol} on ${n.name}?`, `Что с моим ${r.symbol} в ${n.name}?`))],
-    null,
-    [t(`Buy ${r.symbol}…`, `Купить ${r.symbol}…`), () => suggest(`buy ${r.symbol}${on} for 10 USDC`)],
-    [t(`Sell ${r.symbol}…`, `Продать ${r.symbol}…`), () => suggest(`sell all ${r.symbol}${on}`)],
+    ...(kind ? [[[icon(kind === "coin" ? "chart.xyaxis.line" : "info.circle", 14), kind === "coin" ? t("Chart", "График") : t("Details", "Подробности")], () => openCoin(r, n)]] : []),
+    [[icon("bubble.left", 14), t("Ask in chat", "Спросить в чате")], () => askCoin(r, n)],
+    ...(phrases.length ? [null] : []),
+    ...phrases.map(([title, glyph, phrase]) => [[icon(glyph, 14), title], () => suggest(phrase)]),
     ...(r.id ? [null, (n.hidden || []).includes(r) ? [t(`Show ${r.symbol}`, `Показывать ${r.symbol}`), () => act("showToken", { address: r.id, test: true })]
       : [t(`Hide ${r.symbol}`, `Скрыть ${r.symbol}`), () => act("showToken", { address: r.id, test: false })]] : []),
   ]);
 }
 
-/** Hyperliquid's open positions on its card; a click puts the coin's chart into the chat. */
+/** Hyperliquid's open positions on its card; a click opens the coin's chart. */
 function positions() {
   return ui.state.positions.map((x) => {
     const loss = String(x.pnl).trim().startsWith("-") || String(x.pnl).includes("−");
-    return h("div", { class: "pf-position pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => suggest(`chart ${x.coin} day`) },
+    return h("div", { class: "pf-position pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.coin }) },
       h("div", { class: "pf-row" }, h("b", { class: "one-line" }, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`), h("span", { class: "spacer" }),
         h("b", { class: "num " + (loss ? "pos-loss" : "pos-gain") }, masked(x.pnl))),
       h("div", { class: "pf-position-line" }, masked(x.summary || `${x.size} @ ${x.entry}`)),
@@ -549,7 +570,7 @@ function hyperliquidRows() {
       hl.hlpLockedUntil ? t(`locked until ${when(hl.hlpLockedUntil)} · 4 days after a deposit`, `заблокировано до ${when(hl.hlpLockedUntil)} · 4 дня после депозита`)
         : t("earning · withdraw any time", "приносит доход · вывести можно в любой момент")));
   }
-  for (const x of s.positions) out.push(h("button", { class: "pf-d-row pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => suggest(`chart ${x.coin} day`) },
+  for (const x of s.positions) out.push(h("button", { class: "pf-d-row pf-lit", title: t(`Open the ${x.coin} chart`, `Открыть график ${x.coin}`), onclick: () => act("openChart", { name: x.coin }) },
     logoDisc(x.coin, 24), h("div", { class: "pf-d-name" }, h("b", {}, `${x.side === "long" ? t("Long", "Лонг") : t("Short", "Шорт")} ${x.coin}`),
       h("span", { class: "secondary" }, masked(x.summary || `${x.size} @ ${x.entry}`)), x.guardian ? h("span", { class: "secondary" }, x.guardian) : null),
     h("span", { class: "spacer" }), h("b", { class: "num" }, masked(x.pnl)), icon("chevron.right", 10)));
@@ -564,7 +585,7 @@ function hyperliquidRows() {
 
 function detailCoin(r, n) {
   const price = r.usd !== null && r.usd !== undefined && Number(r.value) > 0 ? Number(r.usd) / Number(r.value) : null;
-  return h("button", { class: "pf-d-row pf-lit", onclick: () => suggest(opener(r, n)) },
+  return h("button", { class: "pf-d-row pf-lit", onclick: () => openCoin(r, n) },
     logoDisc(r.symbol, 24),
     h("div", { class: "pf-d-name" }, h("b", { class: "one-line" }, r.symbol + (r.verified === false ? t(" · unverified", " · не проверен") : "")),
       h("span", { class: "secondary num" }, amount(r.amount) + " · " + (price === null ? t("no price", "нет цены") : "$" + (price >= 1 ? price.toFixed(2) : price.toPrecision(3))))),

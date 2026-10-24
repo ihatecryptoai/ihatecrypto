@@ -34,8 +34,7 @@ extension Engine {
                           "DexScreener не знает этот токен\(chain.map { " на \($0)" } ?? ""): ни один пул им не торгует, цены нет."), note: note)
                 return
             }
-            pin("result", "\(info.symbol) · \(info.chain)", lines: [describe(info), info.address],
-                actions: [.init(title: say("Add to favorites", "В избранное"), command: "add \(info.address) to favorites")])
+            _ = await openToken(info.address, chain: info.chain)
             reply(describe(info) + say(" It’s a contract, not an address to send money to.", " Это контракт, а не адрес для перевода денег."), note: note ?? "DexScreener")
         case .unfavorite(let symbol):
             let before = favorites.count

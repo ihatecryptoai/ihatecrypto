@@ -41,6 +41,28 @@ pub fn notify(app: &tauri::AppHandle, v: &serde_json::Value) {
     }
     let (title, body) = (data["title"].as_str().unwrap_or("ihatecrypto"), data["body"].as_str().unwrap_or(""));
     let _ = app.notification().builder().title(title).body(body).show();
+    // Windows' toasts are silent: the Mac's sound for the kind plays here (the engine names it: coin, chime, knock).
+    play(data["sound"].as_str().unwrap_or(""));
+}
+
+/// The sound from the app itself, unless Windows holds notifications back (Focus, presenting, a full-screen app).
+#[cfg(windows)]
+fn play(sound: &str) {
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_ACCEPTS_NOTIFICATIONS};
+    static COIN: &[u8] = include_bytes!("../sounds/coin.wav");
+    static CHIME: &[u8] = include_bytes!("../sounds/chime.wav");
+    static KNOCK: &[u8] = include_bytes!("../sounds/knock.wav");
+    let wav = match sound { "coin" => COIN, "chime" => CHIME, "knock" => KNOCK, _ => return };
+    if unsafe { SHQueryUserNotificationState() }.map(|s| s != QUNS_ACCEPTS_NOTIFICATIONS).unwrap_or(false) { return }
+    unsafe { let _ = PlaySoundW(windows::core::PCWSTR(wav.as_ptr() as *const u16), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT); }
+}
+#[cfg(not(windows))]
+fn play(_sound: &str) {}
+
+/// The main window came to the front or left it: the engine counts «stepped away» by it too, as the Mac does.
+pub fn window_focus(app: &tauri::AppHandle, focused: bool) {
+    tell_engine(app, serde_json::json!({ "op": "windowFocus", "test": focused }));
 }
 
 /// A click on a notification (while it's on screen) brings the window back; one in the Action Center starts the app
@@ -191,12 +213,16 @@ pub fn tray_state(webview: tauri::Webview) -> Result<String, String> {
     Ok(LAST_STATE.lock().map(|s| s.clone()).unwrap_or_default())
 }
 
-/// «Open ihatecrypto» (and a click on a scheduled task) in the panel.
+/// «Open ihatecrypto» in the panel; a scheduled task's row opens that task's own canvas too (the Mac's
+/// openScheduleCanvas), the engine checking the key.
 #[tauri::command]
-pub fn tray_open(webview: tauri::Webview) -> Result<(), String> {
+pub fn tray_open(webview: tauri::Webview, schedule: Option<String>) -> Result<(), String> {
     from_panel(&webview)?;
     if let Some(panel) = webview.app_handle().get_webview_window(TRAY) { let _ = panel.hide(); }
     crate::show(webview.app_handle());
+    if let Some(key) = schedule.filter(|k| k.len() <= 80 && (k.starts_with("task:") || k.starts_with("perp:"))) {
+        tell_engine(webview.app_handle(), serde_json::json!({ "op": "openSchedule", "name": key }));
+    }
     Ok(())
 }
 
@@ -247,6 +273,45 @@ pub fn set_login(app: &tauri::AppHandle, v: &serde_json::Value) {
 pub fn report_login(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
     if let Ok(on) = app.autolaunch().is_enabled() { tell_engine(app, serde_json::json!({ "op": "loginState", "test": on })); }
+}
+
+/// Settings › Background › Keep always running (the Mac's KeepRunning): a scheduled task starts the app in the tray every
+/// minute while the user is signed in. Task Scheduler skips a start while the task's own copy runs, and a copy started
+/// some other way turns the next start into nothing (one instance, `--hidden` never opens the window). So a Quit or a
+/// crash comes back within a minute; turning it off quits for good.
+#[cfg(windows)]
+const KEEP_TASK: &str = "ihatecrypto keep running";
+
+pub fn set_keep_running(app: &tauri::AppHandle, v: &serde_json::Value) {
+    #[cfg(windows)]
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = if v["data"]["on"].as_str() == Some("1") {
+            schtasks(&["/Create", "/TN", KEEP_TASK, "/SC", "MINUTE", "/MO", "1", "/TR", &format!("\"{}\" --hidden", exe.display()), "/F"])
+        } else {
+            schtasks(&["/Delete", "/TN", KEEP_TASK, "/F"])
+        };
+    }
+    #[cfg(not(windows))]
+    let _ = v;
+    report_keep_running(app);
+}
+
+/// At launch and after each change: the switch shows what Task Scheduler has.
+pub fn report_keep_running(app: &tauri::AppHandle) {
+    #[cfg(windows)]
+    let on = schtasks(&["/Query", "/TN", KEEP_TASK]);
+    #[cfg(not(windows))]
+    let on = false;
+    tell_engine(app, serde_json::json!({ "op": "keepRunningState", "test": on }));
+}
+
+#[cfg(windows)]
+fn schtasks(args: &[&str]) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("schtasks").args(args).creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Settings › Notifications › Windows settings: where Windows turns ihatecrypto's notifications on or off.

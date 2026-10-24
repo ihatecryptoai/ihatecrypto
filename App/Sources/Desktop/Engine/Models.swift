@@ -37,11 +37,14 @@ extension Engine {
 
     var model: String { settings.model ?? provider(providerID)?.info.defaultModel ?? "" }
 
-    /// The model client, or nil when none is connected: then the chat reads plain commands only.
-    func llmClient() -> (any LLMClient)? {
-        guard let p = provider(providerID), p.info.unavailable == nil else { return nil }
+    /// The model client (the chat's account, or `id`'s for Settings' Check), or nil when it isn't connected: then the chat
+    /// reads plain commands only.
+    func llmClient(_ asked: String? = nil) -> (any LLMClient)? {
+        guard let p = provider(asked ?? providerID), p.info.unavailable == nil else { return nil }
         let id = p.info.id, credential = Store.credentials()[id]
-        guard credential != nil || p.info.kind == .local, let client = try? p.client(credential, save: { Store.setCredential($0, for: id) }) else { return nil }
+        guard credential != nil || p.info.kind == .local, let made = try? p.client(credential, save: { Store.setCredential($0, for: id) }) else { return nil }
+        // Settings › AI model › «Think before answering»: every request reasons first (the Mac's ThinkingClient).
+        let client: any LLMClient = settings.thinking == true ? ThinkingClient(made) : made
         // Every answer says what it read: the chip over the chat's field, as the Mac's ContextMeter.
         // ponytail: counted on the canvas open when the answer ends; a scheduled check answering in the background counts there too.
         return MeteredClient(client) { [weak self] usage, request in

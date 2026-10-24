@@ -21,6 +21,12 @@ nonisolated enum Notice: String, CaseIterable, Codable {
         case .update: say("A new version of ihatecrypto is ready", "Готова новая версия ihatecrypto")
         }
     }
+
+    /// The Mac's sounds (App/Tools/make-sounds.py): a coin when money arrived or moved, a chime when something wants a
+    /// look, a low knock when a move failed. The window plays it (main.rs), its toast silent.
+    func sound(failed: Bool = false) -> String {
+        failed ? "knock" : [.incoming, .orders, .moves, .hlp].contains(self) ? "coin" : "chime"
+    }
 }
 
 /// The last notices' memory: Hyperliquid's positions and resting entries at the last read, and when one last went out.
@@ -43,7 +49,7 @@ extension Engine {
     func notify(_ kind: Notice, _ title: String, _ body: String, failed: Bool = false, whenAway: Bool = false) {
         guard !(settings.noticesOff ?? []).contains(kind.rawValue) else { return }
         NoticeMemory.last = Date()
-        var event = ["kind": kind.rawValue, "title": title, "body": body]
+        var event = ["kind": kind.rawValue, "title": title, "body": body, "sound": kind.sound(failed: failed)]
         if failed { event["failed"] = "1" }
         if whenAway { event["whenAway"] = "1" }
         out.event("notify", event)
@@ -58,7 +64,7 @@ extension Engine {
 
     /// Settings' «Send a test»: always goes out, whatever is switched off.
     func noticeTest() {
-        out.event("notify", ["kind": "test", "title": "ihatecrypto",
+        out.event("notify", ["kind": "test", "title": "ihatecrypto", "sound": Notice.incoming.sound(),
                              "body": say("Notifications work: scheduled tasks, stops, alerts and moves waiting for Confirm show up here.",
                                          "Уведомления работают: задачи по расписанию, стопы, оповещения и действия, ждущие подтверждения, появятся здесь.")])
     }

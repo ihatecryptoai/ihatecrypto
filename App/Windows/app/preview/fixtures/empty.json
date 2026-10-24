@@ -1738,6 +1738,53 @@
   "gasShort": "SOL",
   "waiting": false
  },
+ "notices": [
+  {
+   "id": "incoming",
+   "title": "Money arrived",
+   "on": true
+  },
+  {
+   "id": "positions",
+   "title": "A position closed, or its stop moved",
+   "on": true
+  },
+  {
+   "id": "orders",
+   "title": "A limit order filled",
+   "on": true
+  },
+  {
+   "id": "alerts",
+   "title": "A price alert fired",
+   "on": true
+  },
+  {
+   "id": "moves",
+   "title": "A confirmed move finished or failed",
+   "on": true
+  },
+  {
+   "id": "hlp",
+   "title": "The HLP deposit unlocked",
+   "on": false
+  },
+  {
+   "id": "signature",
+   "title": "A scheduled move waits for Windows Hello",
+   "on": true
+  },
+  {
+   "id": "confirm",
+   "title": "A move or a trade waits for your Confirm",
+   "on": true
+  },
+  {
+   "id": "update",
+   "title": "A new version of ihatecrypto is ready",
+   "on": true
+  }
+ ],
  "favorites": [
   {
    "chain": "solana",

@@ -1,0 +1,63 @@
+/* A trade plan's own parts on its route board (trade.js). */
+
+/* A step a rule stops: red edge and red words; one that wants a look (a detail missing, the second check's doubt): orange. */
+.route-step.route-state-blocked::after { border: 2px solid var(--loss); }
+.route-step.route-state-attention::after { border: 2px solid var(--accent); }
+.route-step.route-state-blocked .route-step-line { color: var(--loss); font-weight: 600; }
+.route-step.route-state-blocked .route-step-note { color: var(--loss); }
+.route-status-chip.trade-look { --route-tint: var(--accent-ink); }
+
+/* «ETH · Hyperliquid ▾» */
+.trade-market { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 8px; border: none;
+  background: var(--fill); color: var(--text); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.trade-market:hover:not(:disabled) { background: var(--fill-strong); }
+.trade-market:disabled { opacity: 0.6; cursor: default; }
+.trade-market-place { color: var(--secondary); font-weight: 500; }
+.menu.trade-menu { max-height: min(60vh, 520px); overflow-y: auto; }
+.menu.trade-menu .item { justify-content: flex-start; }
+.menu.trade-menu .trade-menu-name { flex: 1; text-align: left; }
+.menu.trade-menu-long { min-width: 180px; }
+.btn.trade-locked { opacity: 0.55; }
+
+/* What stops it, in one sentence under the route. */
+.trade-stopped { display: flex; align-items: flex-start; gap: 7px; max-width: 560px; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.45;
+  font-weight: 600; user-select: text; }
+.trade-stopped.loss { color: var(--loss); background: color-mix(in srgb, var(--loss) 9%, transparent); }
+.trade-stopped.trade-look { color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.trade-stopped .ico { margin-top: 2px; flex: none; stroke-width: 2.6; }
+
+/* WHAT NEXT, and the take-profit ways */
+.trade-next, .trade-takes { display: flex; flex-direction: column; gap: 8px; width: min(470px, 100%); }
+.trade-caption { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; color: var(--secondary); }
+.trade-hint { font-size: 10.5px; color: var(--secondary); }
+.trade-option, .trade-take { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 18px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--card-border); color: var(--text); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.trade-take { align-items: center; gap: 14px; border-radius: 20px; }
+.trade-option:hover:not(:disabled), .trade-take:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
+.trade-option:disabled, .trade-take:disabled { opacity: 0.5; cursor: default; }
+.trade-option.trade-rec, .trade-take.trade-rec { border: 2px solid var(--accent); padding: 11px; }
+.trade-option-icon { width: 32px; height: 32px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.trade-option-text, .trade-take-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.trade-option-title, .trade-take-title { font-size: 14px; font-weight: 800; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.trade-take-title { font-size: 15px; }
+.trade-rec-chip { font-size: 10px; font-weight: 700; color: var(--on-accent); background: var(--accent); padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.trade-option-comment { font-size: 11px; color: var(--secondary); }
+.trade-take-line { font-size: 10.5px; color: var(--secondary); }
+.trade-payoff { font-size: 16px; font-weight: 800; color: var(--profit); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trade-sketch { flex: none; width: 96px; height: 64px; border-radius: 12px; background: var(--fill); display: inline-flex; align-items: center; justify-content: center; }
+.trade-sketch svg { overflow: visible; }
+.trade-level { fill: none; stroke-width: 1.5; stroke-dasharray: 3 3; }
+.trade-level.loss { stroke: var(--loss); }
+.trade-level.profit { stroke: var(--profit); }
+.trade-level.trade-half { opacity: 0.6; }
+.trade-level.trade-trail { stroke: #6a4fd0; }
+.trade-price { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* What Confirm does, under the route */
+.trade-footer { max-width: 560px; }
+
+@media (max-width: 520px) {
+  .trade-take { flex-wrap: wrap; }
+  .trade-payoff { margin-left: auto; }
+}

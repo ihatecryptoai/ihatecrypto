@@ -12,7 +12,7 @@
 //   pages.js       Settings, History and Top up, which take the canvas's place
 //   onboarding.js  the first run, the recovery phrase, importing, watching, small dialogs
 
-import { ui, answered, engine, invoke, render, setRoot, t, toast, h } from "./core.js";
+import { ui, answered, engine, invoke, render, setRoot, t, toast, h, suggest } from "./core.js";
 import { rail } from "./rail.js";
 import { windowControls } from "./chrome.js";
 import { canvasView } from "./canvas.js";
@@ -35,6 +35,15 @@ window.__TAURI__.event.listen("engine", (e) => {
     invoke("open_link", { url: msg.data.url }).catch((x) => toast(String(x)));
   } else if (msg.event === "notify") {
     toast(msg.data.body);
+  } else if (msg.event === "suggest") {
+    // A phrase the engine hands the person (the guard's «save <address> as NAME on <network>»): into the field, not sent.
+    suggest(msg.data.text);
+  } else if (msg.event === "whatsNew") {
+    // «what's new» typed in the chat.
+    import("./whatsnew.js").then((m) => m.openWhatsNew());
+  } else if (msg.event === "checkUpdates") {
+    // «check for updates» typed in the chat: what Settings › About does.
+    import("./pages.js").then((m) => { if (m.checkUpdate) m.checkUpdate(); else { ui.view = "settings"; render(); } });
   } else if (msg.event === "engineStopped") {
     toast(t("The engine stopped. Restart ihatecrypto.", "Движок остановился. Перезапусти ihatecrypto."));
   } else {

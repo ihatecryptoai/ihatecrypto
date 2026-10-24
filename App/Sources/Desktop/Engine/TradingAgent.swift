@@ -64,7 +64,7 @@ extension Engine {
     /// volatility, the take, the leverage cap), as the Mac's Workspace.planned resolves it before it's checked.
     func resolved(_ intent: TradeIntent, market: Market?) async -> (intent: TradeIntent, market: Market?) {
         guard var m = market else { return (intent, market) }
-        if m.atrPct == nil { m.atrPct = try? await Hyperliquid.atrPct(coin: m.name) }
+        if m.atrPct == nil { m.atrPct = await planATR(m.name) }
         return (Plan.resolve(intent, market: m, equity: portfolio.total > 0 ? portfolio.total : nil, policy: policy).intent, m)
     }
 

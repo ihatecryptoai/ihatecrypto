@@ -22,9 +22,18 @@ public struct ClaudeCodeSubscription: LLMProvider {
     }
 
     public func existingLogin() -> Credential? {
+        #if os(Windows)
+        // Anthropic's Windows installer puts claude.exe in %USERPROFILE%\.local\bin; PATH is split by «;» there.
+        // ponytail: npm's claude.cmd isn't taken — a .cmd needs cmd.exe to run, and the native installer is Anthropic's way.
+        let env = ProcessInfo.processInfo.environment
+        let home = env["USERPROFILE"] ?? NSHomeDirectory()
+        let fromPATH = (env["Path"] ?? env["PATH"] ?? "").split(separator: ";").map { "\($0)\\claude.exe" }
+        let found = ([home + "\\.local\\bin\\claude.exe"] + fromPATH).first { FileManager.default.fileExists(atPath: $0) }
+        #else
         let fromPATH = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { "\($0)/claude" }
         let found = (Self.candidates.map { NSString(string: $0).expandingTildeInPath } + fromPATH)
             .first { FileManager.default.isExecutableFile(atPath: $0) }
+        #endif
         return found.map { .external(path: $0) }
     }
 

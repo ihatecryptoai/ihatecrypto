@@ -43,7 +43,8 @@ extension Engine {
         }.joined(separator: "\n"), note: note ?? "DeFi")
         options = rates.prefix(4).compactMap { o in o.how.map { ChatRouter.Option(title: "\(o.place) · \(Fmt.num(o.apy.rounded(2, .plain)))%", comment: o.note, command: $0) } }
         pin("result", say("Rates", "Ставки") + (asset.map { " · \($0)" } ?? ""), lines: rates.prefix(12).map { "\($0.place) (\($0.asset)) · \(Fmt.num($0.apy.rounded(2, .plain)))%" },
-            actions: rates.prefix(4).compactMap { o in o.how.map { Board.Action(title: "\(o.place) · \(Fmt.num(o.apy.rounded(2, .plain)))%", command: $0) } })
+            actions: rates.prefix(4).compactMap { o in o.how.map { Board.Action(title: "\(o.place) · \(Fmt.num(o.apy.rounded(2, .plain)))%", command: $0) } },
+            data: BlockData(rates: rates.prefix(8).map { .init(place: $0.place, asset: $0.asset, apy: $0.apy, how: $0.how, note: $0.note) }))
         changed()
     }
 
@@ -52,17 +53,22 @@ extension Engine {
         do {
             let e = try executor()
             let (text, ready): (String, Bool)
+            var route: (steps: [Board.Step], notes: [String])?
             switch command {
             case .allocate(let symbol, let share, let limit, let without, let from):
                 let r = try await e.allocate(symbol, maxShare: share ?? 50, limit: limit, without: without, from: from, execute: false)
                 (text, ready) = (r.text, r.ready && r.preview.free > 0)
+                route = allocationSteps(r.preview)
             case .rebalance(let share):
                 let r = try await e.rebalance(maxShare: share ?? 50, execute: false)
                 (text, ready) = (r.text, r.ready)
+                route = rebalanceSteps(r.plan, maxShare: share ?? 50)
             default: return
             }
             guard ready else { reply(text, note: note ?? "DeFi"); return }
             show(.wallet(command), title: command.summary, lines: text.split(separator: "\n").map(String.init))
+            // Drawn as the Mac's route cards (Blocks.swift): from each network, the bridges, into each place.
+            if let route, !route.steps.isEmpty { updateBoard(card?.id) { $0.steps = route.steps; $0.lines += route.notes } }
             reply(say("The plan is on the card. Press Confirm to make it, or ask about it.", "План на карточке. Нажми «Подтвердить» или спроси о нём."), note: note ?? "DeFi")
         } catch {
             reply(say("Failed: ", "Не вышло: ") + error.localizedDescription, note: note)
@@ -101,7 +107,11 @@ extension Engine {
             let r = try await executor().receiveAcross(token, amount: amount, network: network, nearAccount: account)
             pin("result", say("Receive \(token.uppercased()) from \(title)", "Получить \(token.uppercased()) из \(title)"),
                 lines: [say("Send \(Fmt.num(amount)) \(token.uppercased()) on \(title) within an hour to:", "Отправь \(Fmt.num(amount)) \(token.uppercased()) в сети \(title) в течение часа на:"), r.deposit,
-                        say("≈ \(r.quote.amountOutFormatted) USDC lands on Solana", "На Solana придёт ≈ \(r.quote.amountOutFormatted) USDC")])
+                        say("≈ \(r.quote.amountOutFormatted) USDC lands on Solana", "На Solana придёт ≈ \(r.quote.amountOutFormatted) USDC")],
+                data: BlockData(receive: .init(network: network, title: title, token: token.uppercased(), amount: amount, address: r.deposit, minimum: r.minimum,
+                                               until: r.quote.deadline.flatMap { try? Date($0, strategy: .iso8601) }, arrives: r.quote.amountOutFormatted,
+                                               state: say("waiting for your deposit", "жду твой перевод"))))
+            if let id = boards.first?.id { Task { await followAcross(id, address: r.deposit) } }
             reply(say("Send \(Fmt.num(amount)) \(token.uppercased()) on \(title) within an hour to:\n\(r.deposit)\n≈ \(r.quote.amountOutFormatted) USDC lands on Solana (at least \(Fmt.num(r.minimum)) \(token.uppercased())).",
                       "Отправь \(Fmt.num(amount)) \(token.uppercased()) в сети \(title) в течение часа на:\n\(r.deposit)\nНа Solana придёт ≈ \(r.quote.amountOutFormatted) USDC (не меньше \(Fmt.num(r.minimum)) \(token.uppercased()))."),
                   note: note ?? "NEAR Intents · \(title)")
@@ -124,7 +134,8 @@ extension Engine {
         }.joined(separator: "\n"), note: note ?? say("approvals", "разрешения"))
         pin("result", say("Approvals", "Разрешения"), lines: list.prefix(30).map { "\($0.symbol) on \($0.chain) → \($0.spenderName ?? $0.spender)" + ($0.unlimited ? " · unlimited" : "") },
             actions: list.prefix(12).map { a in Board.Action(title: say("Revoke \(a.symbol) · \(a.chain)", "Отозвать \(a.symbol) · \(a.chain)"),
-                                                             command: WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2).summary) })
+                                                             command: WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2).summary) },
+            data: BlockData(approvals: approvalsCard(list, unread: unread)))
         options = list.prefix(6).map { a in
             let c = WalletCommand.revokeApproval(a.chain, token: a.token, spender: a.spender, permit2: a.permit2)
             return ChatRouter.Option(title: say("Revoke \(a.symbol) for \(a.spenderName ?? String(a.spender.prefix(10)))", "Отозвать \(a.symbol) у \(a.spenderName ?? String(a.spender.prefix(10)))"),
@@ -140,7 +151,7 @@ extension Engine {
             pin("result", "Jupiter DCA", lines: orders.prefix(10).map { o in
                 "\(Fmt.num(o.used, maxFraction: 2)) / \(Fmt.num(o.deposited, maxFraction: 2)) \(symbol(o.inputMint)) → \(Fmt.num(o.received, maxFraction: 6)) \(symbol(o.outputMint)) · "
                     + say("\(o.fills) swaps, every \(o.every / 3600) h", "\(o.fills) обменов, раз в \(o.every / 3600) ч")
-            })
+            }, data: BlockData(dca: dcaRows(Array(orders.prefix(10)))))
         }
         reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
               : say("Running Jupiter DCA: \(orders.count).", "Запущено Jupiter DCA: \(orders.count)."), note: note ?? "Jupiter DCA")

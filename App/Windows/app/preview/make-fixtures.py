@@ -120,6 +120,7 @@ def state(**over):
         "folders": [], "stuck": [], "moves": [], "movesDay": None, "scheduleRuns": [], "schedulePaused": False, "scheduleKey": None,
         "stepEdit": None, "multisigHeld": {}, "appLanguage": "system",
         "topUp": json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "money3-topup.json")))["topUp"],
+        "notices": json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "system3-settings.json")))["notices"],
         "favorites": [{"chain": "solana", "address": "DoVAVzViX8Bjy3r15nwikSaSbzE6dV4ovd28aWpJpump", "name": "Higgs", "symbol": "HIGGS", "image": None, "price": 0.0000866, "change24h": -23.9, "liquidity": 51000}],
         "canvases": [{"id": "c1", "title": "Withdraw · 23 USDC to Solana", "at": iso(now - dt.timedelta(hours=1))},
                      {"id": "c2", "title": "Send 150 USDC to HL wallet", "at": iso(now - dt.timedelta(hours=15))},

@@ -382,3 +382,92 @@
 .route-way.route-stock:hover { background: none; }
 .route-way.route-stock.route-on:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .route-edit-foot { font-size: 10px; color: var(--secondary); }
+
+/* A note from the chat (NoteBoard): a card per note. */
+.route-notes { display: flex; flex-direction: column; gap: 10px; }
+.route-note-card { padding: 18px; border-radius: 26px; }
+.route-note-card .route-block-title { font-size: 13px; font-weight: 600; }
+.route-note-text { font-size: 16px; font-weight: 500; line-height: 1.4; white-space: pre-wrap; user-select: text; }
+
+/* The token card (TokenBoard). */
+.route-token { width: 470px; display: flex; flex-direction: column; gap: 12px; }
+.route-token .route-asset-head { margin-bottom: 0; }
+.route-token-pic { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex: none; }
+.route-verified { display: inline-flex; margin-left: 5px; color: var(--profit); vertical-align: -2px; }
+.route-unverified { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 9.5px; font-weight: 600; color: var(--loss); background: color-mix(in srgb, var(--loss) 10%, transparent); vertical-align: 2px; }
+.route-token-loading { display: flex; align-items: center; justify-content: center; height: 150px; border-radius: 14px; background: color-mix(in srgb, var(--text) 3%, transparent); font-size: 12px; text-align: center; padding: 0 20px; }
+.route-token-changes { display: flex; flex-wrap: wrap; gap: 6px; }
+.route-change-chip { padding: 3px 9px; border-radius: 999px; background: var(--fill); font-size: 11px; font-variant-numeric: tabular-nums; }
+.route-held { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.route-held > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.route-held-value { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.route-token-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 11.5px; }
+.route-token-links a { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
+.route-token-links a:hover { text-decoration: underline; }
+.route-asset-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.route-asset-actions .btn.route-buy { background: var(--accent); color: #fff; border-color: transparent; }
+.route-asset-source { margin-left: auto; font-size: 9.5px; color: var(--tertiary, var(--secondary)); }
+.route-refresh { flex: none; }
+
+/* P/L (PnLBoard). */
+.route-pnl { display: flex; flex-direction: column; gap: 12px; }
+.route-pnl-tools { display: inline-flex; align-items: center; gap: 6px; }
+.route-pnl-head { display: flex; flex-direction: column; gap: 3px; }
+.route-pnl-big { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; }
+.route-pnl-line { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.route-pnl-line > div:first-child { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 12.5px; }
+.route-pnl-section { display: flex; flex-direction: column; gap: 6px; }
+.route-pnl-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; }
+.route-pnl-name { display: flex; flex-direction: column; min-width: 0; }
+.route-pnl-tag { flex: none; width: 52px; }
+
+/* Rates as bubbles (YieldBubbles). */
+.route-bubbles { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; }
+.route-bubble { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px; border: none; border-radius: 50%;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12); font-size: 10.5px; text-align: center; cursor: pointer; transition: transform 0.12s ease; }
+.route-bubble:hover:not(:disabled) { transform: scale(1.04); }
+.route-bubble.route-off { cursor: default; opacity: 0.75; }
+.route-bubble b { font-size: 16px; }
+.route-bubble b.route-big { font-size: 21px; }
+.route-bubble > span { max-width: 90%; }
+.route-bubble-asset { font-size: 9px; opacity: 0.7; }
+
+/* Movers (MoversBoard). */
+.route-movers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.route-movers-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.route-mover { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: none; border-radius: 10px; background: none; text-align: left; min-width: 0; cursor: pointer; }
+.route-mover:hover { background: var(--fill); }
+.route-mover-name { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.route-mover-name .secondary { font-size: 10.5px; }
+
+/* Token approvals (ApprovalsBoard). */
+.route-approval { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.route-approval.route-danger { background: color-mix(in srgb, var(--loss) 8%, transparent); }
+.route-approval-text { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; }
+
+/* Jupiter DCA (JupiterDCABoard). */
+.route-dca-chip { align-self: flex-start; }
+.route-dca { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.route-dca-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.route-progress { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.route-progress > span { display: block; height: 100%; border-radius: 3px; background: var(--profit); }
+.route-dca-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; }
+
+/* Coins from a network without a wallet here (ReceiveAcrossBoard). */
+.route-receive { display: flex; gap: 14px; align-items: flex-start; }
+.route-receive-qr { flex: none; padding: 6px; border-radius: 12px; background: #fff; }
+.route-qr { display: block; width: 132px; height: 132px; }
+.route-receive-text { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.route-receive-address { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.route-receive-state { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--fill); font-size: 12px; font-weight: 600; }
+
+/* A paid service's answer (ServiceAnswerBoard). */
+.route-service { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.route-service-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 4%, transparent); font-size: 12.5px; overflow-wrap: anywhere; }
+.route-service-item.route-link { cursor: pointer; }
+.route-service-item.route-link:hover { background: var(--fill); }
+.route-service-img { max-width: 100%; max-height: 260px; border-radius: 10px; object-fit: contain; align-self: flex-start; }
+.route-service-host { font-size: 10px; color: var(--accent-ink); }
+.route-service-writing { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.route-service-fact { display: flex; justify-content: space-between; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--separator); font-size: 12.5px; }
+.route-service-fact b { text-align: right; overflow-wrap: anywhere; }

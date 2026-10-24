@@ -25,11 +25,15 @@ extension Engine {
         addedSkills.append(s)
     }
 
+    /// The person's last own message: a scheduled run's request on its canvas (note «schedule») is the task's steps, which
+    /// a model may have written, so a «remember» or a journal entry in it is never kept as theirs.
+    var ownWords: String { messages.last { $0.fromUser && $0.note != "schedule" }?.text ?? "" }
+
     func memoryCommand(_ c: MemoryCommand, note: String?) {
         switch c {
         case .remember(let words):
             // Only words of their own last message: a page, a note or a token's name can't plant a preference.
-            guard MemoryCommand.inTheirWords(words, messages.last(where: \.fromUser)?.text ?? "") else {
+            guard MemoryCommand.inTheirWords(words, ownWords) else {
                 reply(say("I keep only your own words. Write «remember: …» and I'll keep exactly that.",
                           "Запоминаю только твои собственные слова. Напиши «запомни: …» — сохраню ровно это."), note: note)
                 return
@@ -49,7 +53,7 @@ extension Engine {
     }
 
     func journalCommand(_ j: JournalCommand, note: String?) async {
-        guard MemoryCommand.inTheirWords(j.words, messages.last(where: \.fromUser)?.text ?? "") else {
+        guard MemoryCommand.inTheirWords(j.words, ownWords) else {
             reply(say("The journal keeps only your own words: write the entry yourself and I'll save exactly that.",
                       "В журнал записываю только твои слова: напиши запись сам — сохраню ровно её."), note: note)
             return

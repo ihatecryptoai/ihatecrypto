@@ -54,6 +54,8 @@ enum Pending {
     case recurring(WalletCommand, days: Int)
     /// A site in the browser asks for the wallet or a signature: Confirm lets that one request through.
     case site(SiteAsk)
+    /// «stop 2%» after a trade: that position's stop and take moved on the exchange, the traded plan kept (TradePlan.swift).
+    case orders([PositionCommand], coin: String, intent: TradeIntent)
 }
 
 enum ChainStep {
@@ -150,6 +152,8 @@ final class Engine {
     var draft: String?
     var pending: Pending?
     var card: Card?
+    /// Hyperliquid's trades closed in the last 7 days (Blocks.swift).
+    var recentlyClosed: [ClosedTrade] = []
     /// A Solana swap's output as its card showed it, in the token's units (Quotes.swift).
     var jupiterShown: (command: WalletCommand, out: UInt64)? { didSet { if jupiterShown != nil { quotedAt = Date() } } }
     var options: [ChatRouter.Option] = [] { didSet { pinOptions() } }
@@ -168,6 +172,8 @@ final class Engine {
         didSet { Store.save(liveModels, "live-models.json") }
     }
     var localServers: [String: Bool] = [:]
+    /// Settings › AI model's model check and installers, while they run (LocalModels.swift).
+    var localSetup = LocalSetup()
     var modelSizes: [String: Double] = [:]
     var modelDownloads: [String: Double] = [:]
     var modelFacts: [String: ModelFacts] = [:]
@@ -197,6 +203,12 @@ final class Engine {
     var ledgerConnect: LedgerConnect?
     var ledgerPrompt: String?
     var awaitingAmount: WalletCommand?
+    /// A recurring buy whose two ways were offered: picked again, it goes straight (MoveChecks.swift).
+    var dcaChoice: WalletCommand?
+    /// A new Hyperliquid account's way in, as picked on its cards: NEAR Intents (true) or Relay (false); nil not asked yet.
+    var openVia1Click: Bool?
+    /// A card left waiting on a canvas the user switched away from: it waits there a quarter of an hour.
+    var parked: [String: (pending: Pending, card: Card, intent: TradeIntent, at: Date)] = [:]
     /// The way picked in a route step's details for the waiting trade (RouteEdit), taken at its Confirm.
     var routeWay: (key: String, way: String)?
     /// Both ways of the waiting EVM trade as quoted for its step's details (RouteEdit.quoteWays), the better first.
@@ -210,6 +222,10 @@ final class Engine {
     var inTransit: [TransitView] = []
     /// The trade plan the chat is building: a perp on Hyperliquid.
     var intent = TradeIntent()
+    /// The plan's board on the canvas, stopped, previewed or the card (TradePlan.swift); the plan of the trade last opened,
+    /// which «stop 2%» edits while its position is open.
+    var planBoard: String?
+    var tradedPlan: TradeIntent?
     /// Price alerts, checked against Hyperliquid's marks at every refresh while the app is open.
     var alerts: [PriceAlert] = Store.load([PriceAlert].self, "alerts.json") ?? [] {
         didSet { Store.save(alerts, "alerts.json") }
@@ -382,6 +398,8 @@ final class Engine {
             var id: String; var text: String; var paused: Bool; var automatic: Bool; var next: Date?
             /// Its steps one by one, and how often («3 days»; nil: once), for its own canvas's block.
             var steps: [String] = []; var every: String? = nil
+            /// It can pay from the wallet that's on or the automation wallet («Pays from» on its block).
+            var pick = false
         }
         /// Tokens the model read with the canvas's last message, and its window when the service or the catalog says.
         /// Of `used`: the instructions and the chat's lines; how many lines went of how many; dollars an API key paid.
@@ -454,6 +472,11 @@ final class Engine {
         /// Top up's balance, gas and the money it watches for (TopUp.swift); Settings › General › App language.
         var topUp: TopUpView?
         var appLanguage: String
+        var localSetup: LocalSetupView
+        /// Hyperliquid's trades closed in the last 7 days, newest first (Blocks.swift), and the address book's pictures,
+        /// categories and notes by «network:name».
+        var recentlyClosed: [ClosedTrade]
+        var addressExtras: [String: AddressExtra]
     }
 
     func snapshot() -> Snapshot {
@@ -476,7 +499,7 @@ final class Engine {
             language: settings.language ?? "auto", russian: appRussian, book: book, history: history(),
             alerts: alerts.map(alertView),
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next,
-                                                                steps: $0.steps, every: $0.every?.words) },
+                                                                steps: $0.steps, every: $0.every?.words, pick: canPickPays($0)) },
             automation: automationWallet,
             skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
             memory: memory, favorites: favorites,
@@ -496,7 +519,8 @@ final class Engine {
             scheduleKey: scheduleKey, moves: historyMoves, movesDay: movesDay,
             automationBudget: automationBudgetNow,
             stuck: stuckView, places: placeFacts, notices: noticeViews, openAtLogin: settings.openAtLogin == true,
-            topUp: TopUpPage.shared.view, appLanguage: settings.appLanguage ?? "system")
+            topUp: TopUpPage.shared.view, appLanguage: settings.appLanguage ?? "system", localSetup: localSetupView,
+            recentlyClosed: recentlyClosed, addressExtras: addressExtras)
     }
 
     // MARK: Requests from the window
@@ -544,7 +568,7 @@ final class Engine {
         if !Self.answersOnly.contains(r.op) { changed() }
     }
 
-    static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded"]
+    nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus"]
 
     private func run(_ r: Request) async throws -> [String: String] {
         if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }
@@ -572,6 +596,7 @@ final class Engine {
                         await refresh()
                         offerTradingKey()
                         await refreshLive()
+                        await readClosed()
                         await runDueTasks()
                         try? await Task.sleep(for: .seconds(60))
                     }
@@ -628,6 +653,10 @@ final class Engine {
         case "removeAlert": alerts.removeAll { $0.id.uuidString == r.wallet }
         case "removeTask": tasks.removeAll { $0.id.uuidString == r.wallet }
         case "taskOn": setTask(r.wallet ?? "", on: r.test == true)
+        case "windowFocus":
+            if Self.windowFront != (r.test ?? true) { Self.windowFront = r.test ?? true; if !Self.windowFront { Self.windowLeft = Date() } }
+            return [:]
+        case "taskPays": setFromActive(r.wallet ?? "", r.test == true)
         case "createAutomationWallet": await createAutomationWallet()
         case "addSkill": try addSkill(r.text ?? "", fileName: r.name ?? "skill.md")
         case "removeSkill": addedSkills.removeAll { $0.id == r.wallet }; skillsOff.remove(r.wallet ?? "")
@@ -636,6 +665,15 @@ final class Engine {
         case "forget": memory.removeAll { $0 == r.text }
         case "removeFavorite": favorites.removeAll { $0.id == r.wallet }
         case "showToken": showToken(r.address ?? "", shown: r.test == true)
+        case "openToken": return await openToken(r.address ?? "", chain: r.network ?? "")
+        case "tokenRange": if let id = r.board { await loadToken(id, range: ChartCommand.Range(rawValue: r.text ?? "") ?? .day) }
+        case "openChart": return try await openChart(r.name ?? "", range: ChartCommand.Range(rawValue: r.text ?? "") ?? .day)
+        case "refreshApprovals": if let id = r.board { await refreshApprovals(id) }
+        case "checkAddress": return checkAddress(r.address ?? "", network: r.network ?? "", editing: r.label)
+        case "editAddress":
+            try await editAddress(from: (r.label ?? "", r.text ?? ""), to: SignerAddress(name: r.name ?? "", network: r.network ?? "", address: r.address ?? "", memo: r.memo ?? ""))
+        case "addressExtra": try setAddressExtra(name: r.name ?? "", network: r.network ?? "", icon: r.key, category: r.label, note: r.text)
+        case "addressIcon": try setAddressExtra(name: r.name ?? "", network: r.network ?? "", icon: r.text ?? "", category: nil, note: nil)
         case "transitState": return ["state": await transitState(chain: r.name ?? "", id: r.address ?? "")]
         case "lookToken": return await lookToken(r.address ?? "")
         case "addFavorite": await tokenCommand(.favorite(address: r.address ?? "", chain: r.network), note: nil)
@@ -643,6 +681,7 @@ final class Engine {
         case "notice": setNotice(r.name ?? "", on: r.test == true)
         case "noticeTest": noticeTest()
         case "openAtLogin": setOpenAtLogin(r.test == true)
+        case "thinking", "checkModel", "installClaudeCode", "claudeSignIn", "installOllama", "ollamaStatus", "setUpLocal", "keepRunning", "keepRunningState": return try await localOp(r)
         // main.rs, at launch and after each change: how Windows has it now.
         case "loginState": settings.openAtLogin = r.test == true
         case "updateReady": updateReady(r.text ?? "")
@@ -685,6 +724,7 @@ final class Engine {
             pin(Board(kind: kind, title: kind))
         case "editStep": try await editStep(board: r.board, amount: r.text, way: r.name)
         case "whyStep": try whyStep(board: r.board, index: r.index)
+        case "planMarkets", "planMarket", "planTake", "planCancel": return await planOp(r)
         case "closeBoard":
             guard r.board != card?.id, r.board != runningBoard else { throw WalletError(say("Confirm or cancel the move first.", "Сначала подтверди или отмени перевод.")) }
             boards.removeAll { $0.id == r.board }

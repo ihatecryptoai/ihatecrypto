@@ -67,7 +67,7 @@ extension Engine {
 
     // MARK: Cards
 
-    func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = []) {
+    func show(_ pending: Pending, title: String, lines: [String] = [], warnings: [String] = [], cautions: [String] = []) {
         // A site's request that waited is declined: a new card takes its place.
         if case .site(let ask)? = self.pending { ask.answer(false) }
         // A card waiting before this one stays on the canvas, marked: nothing of it was signed.
@@ -75,9 +75,9 @@ extension Engine {
         self.pending = pending
         // A warning on the card is read before the button: the button says it goes ahead despite it.
         let id = UUID().uuidString
-        card = Card(id: id, title: title, lines: lines, warnings: warnings,
+        card = Card(id: id, title: title, lines: lines, warnings: warnings + cautions,
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
-        pin(Board(id: id, kind: "move", title: title, lines: warnings.map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
+        pin(Board(id: id, kind: "move", title: title, lines: (warnings + cautions).map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))
         jupiterShown = nil
         noticeCard(title)
         if case .wallet(let command) = pending { Task { await quoteCard(command, board: id) } }
@@ -160,6 +160,7 @@ extension Engine {
                 }
             } catch { reply(error.localizedDescription, note: note); return }
         case .schedule(let asset, let usdc, let days):
+            if offerRecurringWays(command, note: note) { return }
             // A recurring buy: the task buys later, each time as a card for Confirm; the first buy is a card now.
             guard days > 0 else { reply(say("A recurring buy needs at least a day between buys.", "Между регулярными покупками нужен хотя бы день."), note: note); return }
             // The first buy is a card; the schedule exists only once that buy is confirmed and goes through.
@@ -194,10 +195,11 @@ extension Engine {
         }
         if let question = command.amountQuestion {
             awaitingAmount = command
-            reply(say(question, "Сколько? Напиши число."), note: note)
+            reply(say(question, "Сколько? Напиши число.") + amountHint(command), note: note)
             return
         }
-        show(.wallet(command), title: command.summary, lines: await preview(command))
+        if checkedBeforeCard(&command, note: note) { return }
+        show(.wallet(command), title: command.summary, lines: await preview(command), cautions: sendCautions(command))
         reply(say("Understood: \(command.summary). The card is above the field — press Confirm, then Windows Hello shows what is signed. Or Cancel.",
                   "Понял: \(command.summary). Карточка над полем — нажми «Подтвердить», и Windows Hello покажет, что подписывается. Или «Отмена»."), note: note)
     }
@@ -318,6 +320,7 @@ extension Engine {
             reply(say("“\(entry.name)” is reached through NEAR Intents: say “send <amount> <coin> to \(entry.name)”.", "«\(entry.name)» доступен через NEAR Intents: скажи «send <сумма> <монета> to \(entry.name)»."), note: note)
             return
         }
+        let savedFor = entry.network
         if let net = network, net != entry.network {
             let evm = Self.evmPlaces.union(["hyperliquid"])
             guard evm.contains(net), evm.contains(entry.network) else {
@@ -333,10 +336,12 @@ extension Engine {
         }
         if let off = ModuleNetwork(place: entry.network).flatMap({ Modules.current.refusal(network: $0, ru: russian) }) { reply(off, note: note); return }
         let title = say("Send \(Fmt.num(amount)) USDC to “\(entry.name)”", "Отправить \(Fmt.num(amount)) USDC на «\(entry.name)»")
+        // The first time money goes to someone else's address, and an entry saved for another network: said on the card.
+        let cautions = [otherNetworkWarning(saved: savedFor, sent: entry.network), firstSendWarning(entry.address)].compactMap { $0 }
         show(.transfer(entry, amount), title: title, lines: [
             "\(AddressCheck.Network(rawValue: entry.network)?.title ?? entry.network): \(entry.address)",
             say("The whole address is on the Windows Hello window too: check it there.", "Весь адрес будет и в окне Windows Hello: сверь его там."),
-        ])
+        ], cautions: cautions)
         reply(say("The transfer is ready: \(Fmt.num(amount)) USDC to “\(entry.name)”. Press Confirm, or Cancel.",
                   "Перевод готов: \(Fmt.num(amount)) USDC на «\(entry.name)». Нажми «Подтвердить» или «Отмена»."), note: note)
     }
@@ -402,32 +407,8 @@ extension Engine {
     /// A trade plan by the risk rules, prepared with a fresh quote and simulation: its signatures and what each balance
     /// becomes go on the card.
     func plan(_ next: TradeIntent, note: String? = nil, said: String = "") async {
-        intent = next
-        if markets.isEmpty { markets = (try? await Hyperliquid.markets()) ?? [:] }
-        let market = markets[next.asset]
-        // What «by the book» leaves to the rules is filled in first (Settings › Trading agent), as the Mac plans it.
-        let resolved = await resolved(next, market: market)
-        let evaluation = Plan.evaluate(resolved.intent, market: resolved.market)
-        if let problem = evaluation.problem { reply((said.isEmpty ? "" : said + " ") + problem, note: note); return }
-        if !evaluation.missing.isEmpty {
-            reply((said.isEmpty ? "" : said + " ") + say("The plan needs: ", "Для плана нужно: ") + evaluation.missing.joined(separator: ", ") + ".", note: note)
-            return
-        }
-        if let off = Modules.current.refusal(trade: market?.dex != nil, bridges: next.amountUSDC != nil, ru: russian) { reply(off, note: note); return }
-        // Code first, second check on or off: the plan never holds more money or more risk than its command named.
-        var warnings: [String] = []
-        if let market, let sizing = evaluation.sizing, let why = Plan.moneyProblem(named: next, sizing: sizing, market: market) { warnings.append(why) }
-        do {
-            let p = try await executor().prepare(next, policy: policy)
-            if warnings.isEmpty, secondCheck, let review = await reviewPlan(next, p) { warnings.append(review) }
-            show(.trade(p), title: "\(next.side == .long ? "Long" : "Short") \(IntentParser.pretty(next.asset))",
-                 lines: p.steps + p.changes, warnings: warnings)
-            drawTrade(card?.id, resolved.intent, evaluation.sizing, market: resolved.market)
-            reply((said.isEmpty ? "" : said + "\n") + say("The trade is on the card with every signature in order. Press Confirm, or change it in words.",
-                                                          "Сделка на карточке, все подписи по порядку. Нажми «Подтвердить» или измени её словами."), note: note)
-        } catch {
-            reply(say("Can't open it: ", "Не получится открыть: ") + error.localizedDescription, note: note)
-        }
+        // The route, the checklist and the card, drawn whether the rules stop it or not (TradePlan.swift).
+        await planTrade(next, note: note, said: said)
     }
 
     /// Several moves read from one message: each must be a money command this app runs, with its amount, to a saved
@@ -549,6 +530,7 @@ extension Engine {
                 let opened = try await executor().execute(p)
                 keepExitRules(opened, intent: p.intent)
                 intent = TradeIntent()
+                tradedPlan = p.intent; planBoard = nil
                 reply(say("Opened: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))",
                           "Открыто: \(Fmt.num(opened.size, maxFraction: 6)) \(IntentParser.pretty(opened.asset)) по \(Fmt.price(opened.entry)), стоп \(Fmt.price(opened.stop))")
                       + (opened.take.map { say(", take \(Fmt.price($0)).", ", тейк \(Fmt.price($0)).") } ?? "."), note: "Hyperliquid")
@@ -576,7 +558,9 @@ extension Engine {
                 try await saveAddress(entry)
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))
             case .site(let ask): ask.answer(true) // answered above; kept for the switch
+            case .orders(let moves, let coin, let traded): reply(try await moveOrders(moves, coin: coin, intent: traded), note: "Hyperliquid")
             }
+            noteSent(waiting)
         } catch {
             updateBoard(runningBoard) { $0.state = "failed" }
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice.
@@ -743,6 +727,7 @@ extension Engine {
         case .multisigCreate: reply(try await runMultisigCreate(), note: "Safe · multisig")
         case .multisigSend: reply(try await runMultisigSend(command), note: "Safe · multisig")
         case .sweepRewards(let min, let into): reply(try await e.sweepRewards(minUSD: min, into: into), note: "Merkl · Uniswap")
+        case .sweepDust(let under): reply(try await e.sweepDust(dustTokens(under: under)), note: "Uniswap · dust into USDC")
         default:
             throw ExecutionError(say("“\(command.summary)” isn't in the Windows app yet. Nothing was signed.", "«\(command.summary)» в Windows-версии пока нет. Ничего не подписано."))
         }

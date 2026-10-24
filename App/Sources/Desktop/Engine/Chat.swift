@@ -13,7 +13,7 @@ import WalletCore
 /// and only the window's Confirm carries it out.
 extension Engine {
     func send(_ raw: String, shown: String? = nil, about board: String? = nil) async {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !thinking else { return }
         // A recovery phrase is never shown, kept or sent anywhere: not even into the chat's history.
         if SeedGuard.containsMnemonic(text) {
@@ -42,6 +42,9 @@ extension Engine {
         changed()
         defer { thinking = false; draft = nil; attached = nil; alsoAttached = []; agentStep = nil; changed() }
 
+        // An address already saved in Addresses is that entry, as if its name were written («send 2 USDC to 0x5333…» goes
+        // to «main wallet»): only a saved, confirmed one; any other still never becomes a recipient (MoveChecks.swift).
+        text = savedNames(in: text)
         // Before the parser or any model sees it. Jev reads a message that may hold a paste (an address, a link, or more
         // than anyone types as a command), told it is the user's own.
         let pasted = text.count >= 100 || text.contains(/0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|https?:\/\/|www\./)
@@ -51,14 +54,15 @@ extension Engine {
             let found = InjectionHeuristics.findings(text)
             // Their own «send 2 USDC to 0x…»: no attack, just the rule that money goes to saved addresses only.
             if screen.problems.count == 1, found.commands.isEmpty, found.transferVerb, let address = found.addresses.first {
-                reply(say("Money goes only to saved addresses, so a swapped address can't receive it. Save this one first (Addresses › Add, \(address)), check it on the Windows Hello window, then say “send <amount> USDC to <name>”.",
-                          "Деньги уходят только на сохранённые адреса — так подменённый адрес ничего не получит. Сначала сохрани этот (Адреса › Добавить, \(address)), сверь его в окне Windows Hello, потом скажи «переведи <сумма> USDC <имя>»."),
-                      note: "guard: sends go to saved addresses")
+                // The save goes into the field, ready; the address becomes a recipient only on its card.
+                offerSave(address, in: text)
                 return
             }
+            let pastedAddress = text.contains(/0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/)
             reply(say("This looks like an attempt to steer the assistant or swap an address. ", "Похоже на попытку управлять ассистентом или подменить адрес. ")
                   + screen.problems.joined(separator: " ")
-                  + say(" The message was not passed to the model and changed nothing.", " Сообщение не ушло модели и ничего не изменило."),
+                  + say(" The message was not passed to the model and changed nothing.", " Сообщение не ушло модели и ничего не изменило.")
+                  + (pastedAddress ? say(" To keep an address, save it in the Address book — Add block › Address book.", " Чтобы сохранить адрес, добавь его в адресную книгу — «Добавить блок › Адресная книга».") : ""),
                   note: "guard")
             return
         }
@@ -76,12 +80,11 @@ extension Engine {
             reply(say("Cancelled — nothing moved.", "Отменено — ничего не ушло."))
             return
         }
-        // The answer to «How much …?»: a bare number fills the waiting command.
-        if let waiting = awaitingAmount {
-            awaitingAmount = nil
-            if declines { reply(say("OK, not doing that.", "Хорошо, не делаю.")); return }
-            if let value = WalletCommand.amountAnswer(text, for: waiting) { await handleWallet(waiting.with(amount: value)); return }
-        }
+        // The answer to «How much …?»: a bare number fills the waiting command; one in another unit is asked again.
+        if await answeredAmount(text, declines: declines) { return }
+        if await appCommand(text) { return }
+        if await openingRouteCommand(text) { return }
+        if await askTakeChoices(text) { return }
         if text.lowercased().wholeMatch(of: /\s*(?:lock|lock\s+(?:it|the\s+wallet|signing)|заблокируй\w*|блокир\w*)\s*[.!]?\s*/) != nil {
             do { try await signerCall(.lock); reply(say("Locked: the next signature asks Windows Hello again, and the trading key is paused.", "Заблокировано: следующая подпись снова спросит Windows Hello, торговый ключ на паузе.")) }
             catch { reply(error.localizedDescription) }
@@ -104,6 +107,7 @@ extension Engine {
         if let task = ScheduledTask.parse(text) { schedule(task, note: nil); return }
         if let steps = ChatRouter.steps(text), await chain(steps, note: nil) { return }
         if let command = TokenCommand.parse(text) { await tokenCommand(command, note: nil); return }
+        if let command = FolderCommand.parse(text) { folderCommand(command); return }
         if let command = AddressBookCommand.parse(text) { await addressBook(command, userText: text); return }
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) { await alert(command, note: nil); return }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(text) { prepareTransfer(amount, to: name, network: net); return }
@@ -114,8 +118,10 @@ extension Engine {
             if let coin = targetCoin(for: text) { pendPosition(command, coin: coin, text: text) } else { askWhichPosition() }
             return
         }
+        // A question gets an answer from the portfolio and the history; it never becomes a plan.
+        if IntentParser.isQuestion(text) { await answerWithoutModel(text); return }
         let names = Set(markets.keys)
-        if intent != TradeIntent() || IntentParser.startsPlan(text, markets: names), let next = IntentParser.apply(text, to: intent, markets: names) {
+        if planBase != TradeIntent() || IntentParser.startsPlan(text, markets: names), let next = IntentParser.apply(text, to: planBase, markets: names) {
             await plan(next.started)
             return
         }
@@ -156,6 +162,7 @@ extension Engine {
         let checker = check
         var reading: ChatRouter.Reading?
         var failure = ""
+        var unreadable = false
         stopRequested = false
         // A call Stop cuts off (ChatTurns.modelCall): nothing it would have led to runs.
         for _ in 0..<2 where reading == nil && !stopRequested {
@@ -167,6 +174,7 @@ extension Engine {
             } catch {
                 if stopRequested { break }
                 failure = error.localizedDescription
+                unreadable = error is ChatRouter.Unreadable
             }
         }
         if stopRequested {
@@ -175,8 +183,7 @@ extension Engine {
             return
         }
         guard let reading else {
-            reply(say("I couldn’t reach \(model) (\(failure.prefix(140))), so I didn’t act on this — nothing moved. Send it again, or pick another model in Settings.",
-                      "Не достучался до \(model) (\(failure.prefix(140))), поэтому ничего не сделал — ничего не ушло. Отправь ещё раз или выбери другую модель в настройках."), note: model)
+            await modelUnreachable(text, failure: failure, unreadable: unreadable, typedByUser: said == nil)
             return
         }
         // The second reader still disagrees after the model tried again: nothing runs, the user picks.
@@ -207,7 +214,11 @@ extension Engine {
         case .plan: await editPlan(text, client: client)
         case .chat(let r), .clarify(let r):
             // A scheduled check with nothing to tell stays quiet.
-            if reading.quiet, r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { quietCheck = true; return }
+            if reading.quiet {
+                quietCheck = true
+                reply(say("Checked: nothing to tell you now.", "Проверил: сейчас сообщать нечего.") + (r.isEmpty ? "" : " " + r), note: model)
+                return
+            }
             reply(r, note: model)
         case .command(let canonical):
             noteUnderstood(canonical)
@@ -236,6 +247,7 @@ extension Engine {
         // A paid request before any other reading: its body is free text, where a contract or «then» belongs to the question.
         if case .pay? = WalletCommand.parse(canonical), let command = WalletCommand.parse(canonical) { await handleWallet(command, note: note); return true }
         if let command = MemoryCommand.parse(canonical) { memoryCommand(command, note: note); return true }
+        if let command = FolderCommand.parse(canonical) { folderCommand(command, note: note); return true }
         if let entry = JournalCommand.parse(canonical) { await journalCommand(entry, note: note); return true }
         if let study = StudyNote.parse(canonical) { studyNote(study, note: note); return true }
         if ScheduledTask.cancelsAll(canonical) { cancelTasks(note: note); return true }
@@ -254,9 +266,7 @@ extension Engine {
             await createAutomationWallet(note: note)
             return true
         case "clear the plan":
-            intent = TradeIntent()
-            cancelPending()
-            reply(say("The plan is cleared.", "План очищен."), note: note)
+            clearPlan(note: note)
             return true
         default: break
         }
@@ -303,7 +313,7 @@ extension Engine {
             return true
         }
         let onlyPosition = canonical.lowercased().contains(/^\s*(?:close|cancel\s+orders|move\s+stop\s+to\s+breakeven)\b/)
-        guard !onlyPosition, let next = IntentParser.apply(canonical, to: intent, markets: Set(markets.keys)) else { return false }
+        guard !onlyPosition, let next = IntentParser.apply(canonical, to: planBase, markets: Set(markets.keys)) else { return false }
         await plan(next.started, note: note)
         return true
     }
@@ -325,22 +335,27 @@ extension Engine {
 
     /// A question gets an answer from the portfolio and the positions, never a plan.
     func answer(_ question: String, client: any LLMClient) async {
-        var facts = portfolioFacts() + (await pnlFacts())
-        if let coin = IntentParser.namedAsset(question, markets: Set(markets.keys)), let line = marketLine(coin) { facts.append(line) }
+        let (facts, stories) = await answerFacts(question)
         let system = """
-        You are ihatecrypto, the user's crypto assistant. Answer the question using ONLY the facts below — balances, open positions \
-        and markets. The user may write in any language; answer in \(replyLanguage), in 1–4 short sentences with the numbers. If the \
-        facts don't contain the answer, say so. Never invent trades, prices or addresses. The decision is the user's; never promise an outcome.
+        You are ihatecrypto, the user's crypto trading assistant. Answer the question using ONLY the facts below — balances, open positions, \
+        closed positions with results, markets, ihatecrypto's rule checks and recent activity. The user may write in any language; answer in \
+        \(replyLanguage), in 1–4 short sentences with the numbers. If the facts don't contain the answer, say so and point to History (the clock \
+        button in the rail). Never invent trades, prices or addresses.
+        If the user asks whether to open, close or keep a trade, give a clear view from these facts — the day's move, the chart, \
+        volatility, funding and the rule checks — say what would make a better entry (for example a pullback) and what is lost at \
+        the stop by the book. The decision is the user's; never promise an outcome.
         """
         let request = LLMRequest(model: model, messages: [
             LLMMessage(.system, system), LLMMessage(.user, "Facts:\n" + facts.joined(separator: "\n") + "\n\nQuestion: " + question),
         ])
         do {
             let text = try await modelCall { try await client.complete(request) }
-            reply(text.trimmingCharacters(in: .whitespacesAndNewlines), note: "\(model) · from your portfolio")
+            if !text.isEmpty { reply(text.trimmingCharacters(in: .whitespacesAndNewlines), note: "\(model) · from your portfolio and history"); return }
         } catch {
-            reply(say("The model is unavailable: ", "Модель недоступна: ") + error.localizedDescription, note: model)
+            if stopRequested { stopRequested = false; reply(say(Self.stoppedLine.0, Self.stoppedLine.1), note: model); return }
         }
+        // The model didn't answer: the same facts, read directly.
+        reply(Self.localAnswer(question, positions: positions, stories: stories, markets: Set(markets.keys), say: say), note: say("from your portfolio and history", "по портфелю и истории"))
     }
 
     /// The cards offered after a reply: each one's command must parse, and its addresses come from the user's own words.
@@ -439,10 +454,13 @@ extension Engine {
         switch l.tool {
         case "portfolio": found = (portfolioFacts() + (await pnlFacts())).joined(separator: "\n")
         case "market":
-            guard let coin = IntentParser.namedAsset(l.arg, markets: Set(markets.keys)), let line = marketLine(coin) else {
+            guard let coin = IntentParser.namedAsset(l.arg, markets: Set(markets.keys)), markets[coin] != nil else {
                 return "No Hyperliquid market for «\(l.arg)». For a token by its contract or name use the token lookup."
             }
-            found = line
+            found = await marketFacts(coin)
+        case "rates": found = await ratesFacts(l.arg)
+        case "gas": found = await gasFacts(l.arg)
+        case "movers": found = moversFacts()
         case "token": found = await TokenResearch.report(l.arg)
         // A skill is instructions the user added themselves: not screened, as on the Mac.
         case "skill": return await skillLookup(l)
@@ -452,7 +470,7 @@ extension Engine {
         case let tool where AgentReads.tools.contains(tool):
             found = await AgentReads.answer(tool, l.arg, me: .init(evm: evmAddress, solana: solanaAddress))
         default:
-            return "The Windows app has no «\(l.tool)» lookup yet. Lookups here: portfolio, market <ASSET>, token <ADDRESS or NAME>, skill <ID>, trades <ADDRESS|me>, journal, study, services <WORDS>, service <ID>, call, rpc, hl, fetch."
+            return "There is no «\(l.tool)» lookup. Lookups: portfolio, market <ASSET>, token <ADDRESS or NAME>, rates <USDC|SOL>, gas [<NETWORK>], movers, services <WORDS>, service <ID>, skill <ID>, trades <ADDRESS|me>, journal, study, call, rpc, hl, fetch."
         }
         let outside = ["token", "services", "service"].contains(l.tool) || AgentReads.tools.contains(l.tool)
         let classifier: (any TextClassifier)? = outside ? jevKey.map { JevClassifier(apiKey: $0) } : nil

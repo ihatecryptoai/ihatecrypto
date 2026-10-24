@@ -125,6 +125,10 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
             if line.contains("\"event\":\"openAtLogin\"") {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) { system::set_login(&handle, &v); }
             }
+            // Settings turned Keep always running on or off.
+            if line.contains("\"event\":\"keepRunning\"") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) { system::set_keep_running(&handle, &v); }
+            }
             // A site's request is on the canvas: the main window comes forward to show it.
             if line.contains("\"event\":\"showMain\"") { show(&handle); }
             // The signer is about to ask Windows Hello: only the window in front may let it come forward.
@@ -701,7 +705,8 @@ fn main() {
     tauri::Builder::default()
         // One copy only, as on the Mac: a second one would run the schedule and the stops twice. Starting it again (a
         // notification in the Action Center, the Start menu) brings this one's window back.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show(app)))
+        // A second start shows the first copy's window, unless it's Keep always running's minutely start (`--hidden`).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| if !args.iter().any(|a| a == "--hidden") { show(app) }))
         // Settings › Background › Open at login: the registry's Run key, starting in the tray.
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         // Updates come signed with the key in tauri.conf.json (plugins.updater.pubkey); anything else is refused.
@@ -714,6 +719,7 @@ fn main() {
             system::on_notification_click(app.handle());
             system::report_crash(app.handle());
             system::report_login(app.handle());
+            system::report_keep_running(app.handle());
             system::watch_updates(app.handle());
             #[cfg(debug_assertions)]
             ui_eval(app.handle());
@@ -728,6 +734,7 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Focused(focused) if window.label() == "main" => system::window_focus(window.app_handle(), *focused),
             // The main window closes to the tray; the browser closes for real.
             tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
                 api.prevent_close();
