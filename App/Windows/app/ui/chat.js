@@ -873,7 +873,9 @@ function send() {
   ui.attached = null;
   lastAttached = null;
   // A route step sent to the chat goes as that step alone (the engine's stepBoard), as the Mac's «Send to chat».
-  const step = ui.attachedStep?.board === ids[0] ? ui.attachedStep.index : undefined;
+  // Only when a step was sent and it's that step's block going with the message: with nothing attached both sides are
+  // undefined, and reading .index of nothing stopped every message from being sent.
+  const step = ui.attachedStep && ids[0] && ui.attachedStep.board === ids[0] ? ui.attachedStep.index : undefined;
   ui.attachedStep = null;
   act("send", { text, board: ids[0], boards: ids.length > 1 ? ids : undefined, step });
   render();
@@ -1393,5 +1395,7 @@ export function openModelMenu() { document.querySelector(".chat-model")?.click()
 export function openNetworksMenu() { document.querySelectorAll(".chat-chips .chat-chip-btn")[1]?.click(); }
 export function openContextMenu() { document.querySelector(".chat-ctx")?.click(); }
 export function showDraft() { suggest("send 120 USDC to Mom"); drawHelpers(); }
+/** The preview's and the console sweep's send: a message with nothing attached goes out (`&call=chat.sendDraft`). */
+export function sendDraft() { ui.composerText = "send 1 USDC to Mom"; send(); }
 /** The preview's «$» chips in the field (`&call=chat.showMention`). */
 export function showMention() { suggest("buy $SOL for 5 USDC, then swap half to $JUP"); drawHelpers(); }
