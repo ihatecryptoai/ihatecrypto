@@ -7,6 +7,8 @@ import JupiterSwap
 /// 1% less than the card showed (`shown`).
 extension Engine {
     func quoteCard(_ command: WalletCommand, board: String) async {
+        // Everything but Jupiter's: the bridge, the swap off Solana, Aave's health factor, a coin's cost (MoveRoutes.swift).
+        if await quoteRoute(command, board: board) { return }
         let pair: (SpotAsset, SpotAsset, Decimal)?
         switch command {
         case .buy(let asset, let usdc?): pair = (.usdc, asset, usdc)

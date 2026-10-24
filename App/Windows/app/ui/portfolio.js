@@ -3,7 +3,7 @@
 // and Robinhood first, the others by money, those with $100 or less folded under «Other networks».
 // A row opens the coin (its board or chart) through the chat field; nothing here moves money by itself.
 
-import { ui, h, svg, act, engine, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link } from "./core.js";
+import { ui, h, svg, act, engine, invoke, icon, addIcons, t, logo, usd, signedUsd, pct, masked, suggest, popup, render, when, copyButton, link } from "./core.js";
 import { coinTrades, tradePhrases } from "./boards.js";
 
 addIcons({
@@ -337,7 +337,7 @@ function coinRow(r, n, dim) {
 function depositRow(r, n) {
   const usdLike = /^[\d.,]+$/.test(r.amount) && Math.abs(Number(r.amount.replace(/,/g, "")) - Number(r.usd ?? 0)) < 0.02;
   const place = depositPlace(r.symbol);
-  return h("div", { class: "pf-coin pf-lit", onclick: () => place ? toggleDetail(place) : suggest(t(`What's my ${r.symbol} deposit doing?`, `Что с моим депозитом в ${r.symbol}?`)), oncontextmenu: (e) => coinMenu(e, r, n) },
+  return h("div", { class: "pf-coin pf-lit", onclick: () => r.site ? openSite(r.site) : place ? toggleDetail(place) : suggest(t(`What's my ${r.symbol} deposit doing?`, `Что с моим депозитом в ${r.symbol}?`)), oncontextmenu: (e) => coinMenu(e, r, n) },
     logo(r.symbol, 20, r.icon),
     h("div", { class: "pf-coin-name" }, h("div", { class: "pf-coin-symbol" }, h("span", { class: "one-line" }, r.symbol)),
       r.note ? h("div", { class: "pf-coin-amount secondary one-line" }, r.note) : null),
@@ -471,6 +471,8 @@ function logoDisc(name, size) {
 
 /** The networks whose card opens their details (NetworkCard.opens), and the deposits that do. */
 const OPENS = new Set(["solana", "hyperliquid", "robinhood", "base", "arbitrum", "near"]);
+/** A deposit managed on its site (Jupiter's staked JUP, perps…): that site in the browser, with the wallet. */
+const openSite = (site) => invoke("open_browser", { url: "https://" + site }).catch(() => {});
 const depositPlace = (symbol) => ({ "Jupiter Lend": "jupiter", "Kamino Lend": "kamino", Kamino: "kamino", Aave: "aave", Morpho: "morpho" })[symbol] || null;
 
 /** The place open in its details board, above the plan (Workspace.detail): one at a time; a second click closes it. */

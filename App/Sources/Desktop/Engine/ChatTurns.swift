@@ -174,7 +174,11 @@ extension Engine {
     /// A swap whose card shows a price: Jupiter's on Solana, the two ways of a Base or Arbitrum trade, a stock's.
     func priced(_ c: WalletCommand) -> Bool {
         switch c {
-        case .buy(_, _?), .sell(_, _?), .swapOn("solana", _, _, _?): true
+        case .buy(_, _?), .sell(_, _?), .swapOn("solana", _, _, _?), .hlSpotBuy(_, _?), .hlSpotSell(_, _?), .crossSwap: true
+        // The Mac's quoteSwap prices every place's swap and a coin sent through NEAR Intents (pricedCommand).
+        case .swapOn("hyperliquid", _, _, let x), .swapOn("near", _, _, let x): x != nil
+        case .swapOn(let place, _, _, _): EVMNetwork.named(place) != nil
+        case .sendToken(let name, let token, _?, let net): (try? acrossRecipient(name, token: token, network: net)) != nil
         default: RouteEdit.wayKey(c) != nil || c.isStockTrade
         }
     }
@@ -202,8 +206,9 @@ extension Engine {
               let out = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: "")), out > 0 else { return "You get ≈ \(gets)" }
         let got = String(m.2)
         let pays: (amount: Decimal, symbol: String)? = switch c {
-        case .buy(_, let u?), .buyOn(_, _, let u?, _), .buyStock(_, let u?): (u, "USDC")
+        case .buy(_, let u?), .buyOn(_, _, let u?, _), .buyStock(_, let u?), .hlSpotBuy(_, let u?): (u, "USDC")
         case .sell(let a, let x?): (x, a.symbol)
+        case .hlSpotSell(let s, let x?): (x, s.uppercased())
         case .sellOn(_, let t, let x?, _): (x, t.hasPrefix("0x") ? "\(t.prefix(6))…" : t.uppercased())
         case .sellStock(let s, let x?): (x, s)
         case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?): (x, a.uppercased())

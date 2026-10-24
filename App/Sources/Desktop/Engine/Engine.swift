@@ -61,11 +61,14 @@ enum Pending {
 enum ChainStep {
     case wallet(WalletCommand)
     case transfer(SignerAddress, Decimal)
+    /// A step run by its words once the moves before it are through: a chart, a position, a move asked «How much?» then (Chains.swift).
+    case said(String)
 
     var title: String {
         switch self {
         case .wallet(let c): c.summary
         case .transfer(let e, let amount): "send \(Fmt.num(amount)) USDC to \(e.name)"
+        case .said(let text): text
         }
     }
 }
@@ -203,6 +206,8 @@ final class Engine {
     var ledgerConnect: LedgerConnect?
     var ledgerPrompt: String?
     var awaitingAmount: WalletCommand?
+    /// A chain's «How much?» and the steps it holds (Chains.swift).
+    var chainState = ChainState()
     /// A recurring buy whose two ways were offered: picked again, it goes straight (MoveChecks.swift).
     var dcaChoice: WalletCommand?
     /// A new Hyperliquid account's way in, as picked on its cards: NEAR Intents (true) or Relay (false); nil not asked yet.
@@ -358,7 +363,9 @@ final class Engine {
         struct AlertStep: Encodable {
             var plan: Bool; var coin: String?; var title: String; var line: String?
         }
-        struct SkillView: Encodable { var id: String; var name: String; var about: String; var text: String; var builtIn: Bool; var on: Bool }
+        struct SkillView: Encodable { var id: String; var name: String; var about: String; var text: String; var builtIn: Bool; var on: Bool
+            /// The Trading study's journal is kept (Skills.swift): its «Journal» button opens it.
+            var journal: Bool? = nil }
         struct Running: Encodable { var title: String; var lines: [String] }
         struct Position: Encodable {
             var coin: String
@@ -370,6 +377,8 @@ final class Engine {
             /// «0.05 at $2,412.50 · stop $2,300 · take $2,600» and the guardian's line (PositionGuard.swift).
             var summary: String? = nil
             var guardian: String? = nil
+            /// The position board's price ruler and guardian line (TradePlan.swift).
+            var ruler: PositionRuler? = nil
         }
         var signer: Signer
         var wallets: [SignerWallet]
@@ -497,11 +506,12 @@ final class Engine {
             plan: intent == TradeIntent() ? nil : intent.command,
             model: modelView, providers: providerViews, secondCheck: secondCheck, jevOpenRouter: settings.jevOpenRouter == true,
             language: settings.language ?? "auto", russian: appRussian, book: book, history: history(),
-            alerts: alerts.map(alertView),
+            alerts: alerts.filter { $0.id != planAlert?.id }.map(alertView),
             tasks: tasks.sorted { $0.next < $1.next }.map { .init(id: $0.id.uuidString, text: taskText($0), paused: $0.paused == true, automatic: usesAutomation($0) && $0.movesMoney, next: $0.next,
                                                                 steps: $0.steps, every: $0.every?.words, pick: canPickPays($0)) },
             automation: automationWallet,
-            skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id)) },
+            skills: (Skill.builtIn + addedSkills).map { .init(id: $0.id, name: $0.name, about: $0.about, text: $0.text, builtIn: $0.builtIn, on: !skillsOff.contains($0.id),
+                                                              journal: $0.id == Skill.tradingStudy.id ? Self.journalKept : nil) },
             memory: memory, favorites: favorites,
             canvases: canvasRows, folders: folderViews, canvas: canvasID, boards: boardsShown,
             runningBoard: runningBoard, multisigs: multisigs, multisigDraft: multisigDraft, candidates: multisigCandidates, ledgerConnect: ledgerConnect, starred: starred.sorted(),
@@ -568,7 +578,7 @@ final class Engine {
         if !Self.answersOnly.contains(r.op) { changed() }
     }
 
-    nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus"]
+    nonisolated static let answersOnly: Set<String> = ["siteState", "historyTabs", "transitState", "blockCatalog", "hlFunded", "checkAddress", "planMarkets", "windowFocus", "openStudyFiles"]
 
     private func run(_ r: Request) async throws -> [String: String] {
         if lock.locked, !Self.whileLocked.contains(r.op) { throw WalletError(say("ihatecrypto is locked.", "ihatecrypto заблокирован.")) }
@@ -660,6 +670,7 @@ final class Engine {
         case "createAutomationWallet": await createAutomationWallet()
         case "addSkill": try addSkill(r.text ?? "", fileName: r.name ?? "skill.md")
         case "removeSkill": addedSkills.removeAll { $0.id == r.wallet }; skillsOff.remove(r.wallet ?? "")
+        case "openStudyFiles": try openStudyFiles(journal: r.test == true)
         case "skillOn":
             if r.test == true { skillsOff.remove(r.wallet ?? "") } else { skillsOff.insert(r.wallet ?? "") }
         case "forget": memory.removeAll { $0 == r.text }

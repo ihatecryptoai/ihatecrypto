@@ -81,6 +81,7 @@ extension Engine {
             return
         }
         // The answer to «How much …?»: a bare number fills the waiting command; one in another unit is asked again.
+        if await answeredChainAmount(text, declines: declines) { return }
         if await answeredAmount(text, declines: declines) { return }
         if await appCommand(text) { return }
         if await openingRouteCommand(text) { return }
@@ -203,7 +204,11 @@ extension Engine {
         if let show = reading.show, let command = ChartCommand.parse(show, markets: Set(markets.keys)) { await chart(command, note: model) }
         switch reading.route {
         case .confirm:
-            reply(pending != nil
+            // A number or a change in the message («add another 300», once read as a yes) is said to be one (the Mac's).
+            reply(ChatWords.mayChange(said ?? text)
+                  ? say("That reads like a yes, but it has a number or a change in it, so nothing was signed and the card keeps waiting. If it's a change, say it as one («make it 800»); if not, press Confirm on the card.",
+                        "Похоже на «да», но в сообщении есть число или изменение — я ничего не подписывал, карточка ждёт. Если это изменение, скажи его так («сделай 800»); если нет — нажми «Подтвердить» на карточке.")
+                  : pending != nil
                   ? say("Press Confirm on the card to go ahead — a typed «yes» never moves money. The card keeps waiting.", "Нажми Confirm на карточке — напечатанное «да» деньги не двигает. Карточка ждёт.")
                   : say("Nothing is waiting for a confirmation right now.", "Сейчас нечего подтверждать."), note: model)
         case .cancel:
@@ -223,8 +228,8 @@ extension Engine {
         case .command(let canonical):
             noteUnderstood(canonical)
             guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading.found, displays: Self.displays, markets: Set(markets.keys)) else {
-                reply(say("I read that as “\(canonical)”, but its address isn’t in your message, so I won’t use it. Paste the address itself.",
-                          "Я понял это как «\(canonical)», но этого адреса нет в твоём сообщении, поэтому я его не использую. Вставь сам адрес."), note: model)
+                reply(say("I read that as “\(canonical)”, but its address is neither in your message nor among your favorites, so I won’t use it. Paste the address itself.",
+                          "Я понял это как «\(canonical)», но этого адреса нет ни в твоём сообщении, ни в избранном, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
             }
             let mark = messages.count

@@ -59,6 +59,9 @@ nonisolated struct BlockData: Codable, Equatable {
             var pnl: String?
             var gain: Decimal?
             var today: Decimal?
+            /// «Bought 0.3968 NEAR for $2.00 at $5.04 · … · worth $2.39 now» and «since you bought on Oct 10» (Portfolio.swift).
+            var paid: String? = nil
+            var since: String? = nil
         }
     }
 
@@ -261,6 +264,11 @@ extension Engine {
         if let h = held {
             card.held = .init(amount: h.amount, usd: h.usd, how: h.usd == nil ? say("no price yet", "цены пока нет") : card.dollar ? say("not earning", "не приносит дохода") : card.stock ? say("valued at Robinhood's bid", "по цене покупки Robinhood") : say("valued at the pool price", "по цене пула"),
                               pnl: h.pnl, gain: h.gain, today: h.usd.flatMap { usd in h.change24h.flatMap { $0 > -100 ? usd - usd / (1 + $0 / 100) : nil } })
+            if !card.dollar, let key = h.key {
+                let told = Self.heldPaid(symbol: card.symbol, amount: h.value, gain: h.gain, cost: cost(key), ru: russian)
+                card.held?.paid = told.paid
+                card.held?.since = told.since
+            }
         }
         card.favorite = favorites.contains { $0.chain == chain && $0.address.lowercased() == address.lowercased() }
         card.loading = false

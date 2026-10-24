@@ -104,7 +104,8 @@ extension Engine {
             if let ways = try? await e.swapQuotes(net, token, usdc: usdc, sell: sell, from: from, keep: keep), !ways.isEmpty {
                 guard case .wallet(let still)? = pending, still == command else { return }
                 wayQuotes = (command, ways.map { RouteEdit.Way(way: $0.way, gets: $0.gets, worth: Fmt.usd($0.worth)) })
-                changed()
+                // The best way and what it gets, on the step it names (MoveRoutes.swift).
+                if let id = card?.id { redrawRoute(id, command) } else { changed() }
                 return
             }
             try? await Task.sleep(for: .seconds(15))
@@ -127,15 +128,8 @@ extension Engine {
                 wayQuotes = (command, ways.enumerated().map { i, q in
                     RouteEdit.Way(way: q.way, gets: q.gets, worth: Fmt.usd(q.worth), less: i == 0 ? nil : Fmt.usd(best.worth - q.worth))
                 })
-                let others = ways.dropFirst().map { "\(RouteEdit.stockWayName($0.way)) ≈ \($0.gets)" }
-                let line = say("\(RouteEdit.stockWayName(best.way)) · best ≈ \(best.gets)", "\(RouteEdit.stockWayName(best.way)) · лучший ≈ \(best.gets)")
-                    + (others.isEmpty ? say(" · the only way that quotes it", " · единственный путь с котировкой") : " · " + others.joined(separator: " · "))
-                updateBoard(id) { b in
-                    guard var step = b.steps?.first else { return }
-                    step.lines.removeAll { $0.contains("≈") && ($0.contains("Uniswap") || $0.contains("Relay swap")) }
-                    step.lines.insert(line, at: 0)
-                    b.steps?[0] = step
-                }
+                // The best names the BUY (or SELL) step, the others are its line (MoveRoutes.swift, the Mac's stockBuyStep).
+                redrawRoute(id, command)
                 return
             }
             try? await Task.sleep(for: .seconds(15))

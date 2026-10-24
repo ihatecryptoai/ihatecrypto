@@ -335,6 +335,7 @@ extension Engine {
             return
         }
         if let off = ModuleNetwork(place: entry.network).flatMap({ Modules.current.refusal(network: $0, ru: russian) }) { reply(off, note: note); return }
+        if let short = transferShortfall(entry.network, amount) { reply(short, note: note); return }
         let title = say("Send \(Fmt.num(amount)) USDC to “\(entry.name)”", "Отправить \(Fmt.num(amount)) USDC на «\(entry.name)»")
         // The first time money goes to someone else's address, and an entry saved for another network: said on the card.
         let cautions = [otherNetworkWarning(saved: savedFor, sent: entry.network), firstSendWarning(entry.address)].compactMap { $0 }
@@ -411,46 +412,13 @@ extension Engine {
         await planTrade(next, note: note, said: said)
     }
 
-    /// Several moves read from one message: each must be a money command this app runs, with its amount, to a saved
-    /// name; then one card lists them all.
-    func chain(_ steps: [String], note: String?) async -> Bool {
-        var parsed: [ChainStep] = []
-        for step in steps {
-            guard let command = WalletCommand.parse(step) else { return false }
-            if let missing = missingKey(command) { reply(missing, note: note); return true }
-            if let off = Modules.current.refusal(command, ru: russian) { reply(off, note: note); return true }
-            if command.amountQuestion != nil {
-                reply(say("Each step needs its amount: “\(step)” has none.", "У каждого шага должна быть сумма: в «\(step)» её нет."), note: note)
-                return true
-            }
-            // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm.
-            if case .contractCall = command, steps.count > 1 {
-                reply(say("A contract call goes on its own card: ask for “\(step)” by itself.", "Вызов контракта идёт своей карточкой: попроси «\(step)» отдельно."), note: note)
-                return true
-            }
-            if case .sendTo(let name, let amount, let network) = command {
-                guard let e = entry(name, network: network), e.network != "near", OneClick.Asset.across[e.network] == nil, e.memo.isEmpty || e.network != "solana" else {
-                    reply(say("“\(name)” can't take a USDC transfer in a chain: send it on its own.", "«\(name)» не может получить USDC в цепочке: отправь отдельно."), note: note)
-                    return true
-                }
-                parsed.append(.transfer(e, amount))
-            } else {
-                parsed.append(.wallet(command))
-            }
-        }
-        show(.chain(parsed), title: say("\(parsed.count) steps, one Confirm", "\(parsed.count) шага, одно подтверждение"),
-             lines: parsed.enumerated().map { "\($0.offset + 1). \($0.element.title)" }
-                + [say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
-                       "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
-        reply(say("In steps: ", "По шагам: ") + parsed.map(\.title).joined(separator: " → ") + say(". Press Confirm, or Cancel.", ". Нажми «Подтвердить» или «Отмена»."), note: note)
-        return true
-    }
+    // A chain of steps («… then …»): Chains.swift.
 
     /// The second check of a trade: the chat's model reads the plan against the user's words (Jev too, when allowed),
     /// and its signatures with their balance changes. It can only warn.
     func reviewPlan(_ intent: TradeIntent, _ p: Executor.Prepared) async -> String? {
         let requests = messages.filter(\.fromUser).suffix(6).map(\.text)
-        let lines = [intent.command] + p.steps
+        let lines = [intent.command] + planAlertFacts() + p.steps
         if let client = llmClient(), let why = try? await ChatRouter.verifyPlan(requests: requests, plan: lines, language: replyLanguage, client: client, model: model) {
             return why
         }
@@ -541,19 +509,7 @@ extension Engine {
                 var recurring = ScheduledTask(steps: [buy.summary], next: Date().addingTimeInterval(TimeInterval(days) * 86_400), every: .days(days))
                 recurring.fromActive = true
                 tasks.append(recurring)
-            case .chain(let steps):
-                for (i, step) in steps.enumerated() {
-                    running?.lines.append(say("Step \(i + 1): ", "Шаг \(i + 1): ") + step.title)
-                    changed()
-                    switch step {
-                    case .wallet(let command): try await move(command)
-                    case .transfer(let entry, let amount):
-                reply(try await transfer(amount, to: entry), note: "transfer")
-                recordFlow(-amount, "sent to \(entry.name)")
-                    }
-                    // The next step reads balances after this one landed.
-                    await refresh()
-                }
+            case .chain(let steps): try await runChain(steps)
             case .address(let entry):
                 try await saveAddress(entry)
                 reply(say("Saved “\(entry.name)” in Addresses, confirmed with Windows Hello.", "«\(entry.name)» сохранён в адресах, подтверждено Windows Hello."))
@@ -572,6 +528,7 @@ extension Engine {
                 options = [
                     ChatRouter.Option(title: say("Send anyway · ≈ \(Fmt.usd(loss.lost)) lost", "Отправить всё равно · потеря ≈ \(Fmt.usd(loss.lost))"),
                                       comment: loss.localizedDescription, command: Self.sendAnyway),
+                ] + rentFreeInstead(waiting) + [
                     ChatRouter.Option(title: say("Cancel", "Отмена"), comment: say("Nothing was signed", "Ничего не подписано"), command: Self.leaveCostly),
                 ]
             } else if sent.isEmpty {

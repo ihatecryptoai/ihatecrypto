@@ -6,6 +6,7 @@
 import { ui, act, engine, render, t, h, svg, icon, addIcons, mascot, logo, toast, invoke, store, suggest, autosize, link, presence } from "./core.js";
 import { railEdge } from "./rail.js";
 import { blockTitle } from "./boards.js";
+import { templatePreview } from "./trade.js";
 
 addIcons({
   bell: "M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4",
@@ -1041,12 +1042,21 @@ function choose(row, el) {
   drawHelpers();
 }
 
+/** The preview's `&call=chat.openTemplates`: the templates menu over its button. */
+export function openTemplates() {
+  const button = [...document.querySelectorAll(".chat-round-btn")].find((b) => b.title === t("Plan templates", "Шаблоны планов"));
+  if (button) templatesMenu(button);
+}
+
 function templatesMenu(anchor) {
-  popover(anchor, h("div", { class: "chat-tpl-panel" },
+  // Beside the grid, the scheme of the template under the pointer (trade.js templatePreview), the first one at first.
+  const preview = h("div", {}, templatePreview(templates[0][0], templates[0][1], templates[0][6]));
+  popover(anchor, h("div", { class: "plan-tpl-row" }, h("div", { class: "chat-tpl-panel" },
     h("b", {}, t("Plan templates", "Шаблоны планов")),
-    h("div", { class: "chat-tpl-grid" }, templates.map(([en, ru, phrase, , , , colors]) => h("button", { class: "chat-tpl", onclick: () => { document.querySelector(".menu")?.remove(); suggest(phrase); } },
+    h("div", { class: "chat-tpl-grid" }, templates.map(([en, ru, phrase, , , , colors]) => h("button", { class: "chat-tpl", onclick: () => { document.querySelector(".menu")?.remove(); suggest(phrase); },
+      onmouseenter: () => preview.replaceChildren(templatePreview(en, ru, colors)) },
       h("span", { class: "chat-tpl-colors" }, colors.map((c, i) => [i ? h("span", { class: "chat-tpl-joint" }) : null, h("span", { class: "chat-tpl-swatch", style: `background:${c}` })])),
-      h("b", {}, t(en, ru)), h("span", { class: "small secondary" }, "«" + phrase + "»"))))), "up");
+      h("b", {}, t(en, ru)), h("span", { class: "small secondary" }, "«" + phrase + "»"))))), preview), "up");
 }
 
 // MARK: Over the field: the model, the networks, the context

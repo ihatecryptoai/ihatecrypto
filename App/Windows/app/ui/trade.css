@@ -61,3 +61,38 @@
   .trade-take { flex-wrap: wrap; }
   .trade-payoff { margin-left: auto; }
 }
+
+/* The position board (live.js positionCard): the head, the price ruler, the guardian's line, the close asked first. */
+.plan-pos-card { flex-direction: column; align-items: stretch; gap: 14px; }
+.plan-pos-head { display: flex; align-items: center; gap: 12px; }
+.plan-ruler { position: relative; width: 100%; }
+.plan-ruler-track, .plan-ruler-seg { position: absolute; top: 14px; height: 8px; border-radius: 4px; }
+.plan-ruler-track { left: 0; right: 0; background: rgba(255, 255, 255, 0.14); }
+.plan-ruler-seg.loss { background: rgba(255, 120, 104, 0.45); }
+.plan-ruler-seg.profit { background: rgba(151, 252, 228, 0.4); }
+.plan-ruler-now { position: absolute; top: 5px; width: 4px; height: 26px; border-radius: 2px; background: #fff; }
+.plan-ruler-label { position: absolute; font-size: 10px; font-weight: 600; white-space: nowrap; color: var(--hl-soft); }
+.plan-ruler-label.stop { color: #ff9c8f; }
+.plan-ruler-label.take { color: var(--hl-mint); }
+.plan-pos-guard { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--hl-soft); }
+.plan-close-ask { align-items: center; }
+.plan-close-q { flex: 1; min-width: 0; padding: 0 6px; font-size: 12px; font-weight: 600; color: #fff; }
+.live-pos-chip.plan-close-yes { background: #b42a20; color: #fff; }
+.live-pos-chip.plan-close-yes:hover { background: #c8382d; }
+
+/* The token card's held P/L (boards.js): what was bought, what came in, what it's worth, on its own line. */
+.route-held.plan-held { flex-wrap: wrap; }
+.plan-held-paid { flex-basis: 100%; line-height: 1.4; }
+
+/* The templates menu's preview (trade.js templatePreview, beside chat.js's grid). */
+.plan-tpl-row { display: flex; align-items: flex-start; gap: 16px; }
+.plan-tpl-preview { width: 230px; flex: none; display: flex; flex-direction: column; gap: 6px; }
+.plan-tpl-head { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--secondary); }
+.plan-tpl-sub { font-size: 10px; color: var(--tertiary); }
+.plan-tpl-arrow { padding-left: 14px; color: var(--tertiary); display: flex; }
+.plan-tpl-step { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 12px; background: var(--fill); }
+.plan-tpl-bar { width: 6px; height: 30px; border-radius: 3px; flex: none; }
+.plan-tpl-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.plan-tpl-label { font-size: 9px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: var(--secondary); }
+.plan-tpl-text b { font-size: 12px; font-weight: 600; }
+.plan-tpl-foot { padding-top: 4px; font-size: 10px; color: var(--secondary); }

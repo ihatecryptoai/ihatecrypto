@@ -699,6 +699,12 @@ function skillsTab(s) {
           h("span", { class: "spacer" }), toggle("skill-" + k.id, k.on, (on) => act("skillOn", { wallet: k.id, test: on }))),
         h("div", { class: "pg-skill-actions" },
           k.text ? h("button", { class: "link-btn accent-ink", onclick: () => { reading = reading === k.id ? null : k.id; render(); } }, reading === k.id ? t("Hide the text", "Скрыть текст") : t("Read the text", "Читать текст")) : null,
+          // The Trading study's own files in Explorer, as the Mac opens them in Finder: its notes, and its journal once kept.
+          k.journal !== undefined && k.journal !== null ? [
+            h("button", { class: "link-btn accent-ink", title: t("The study's files — profile, playbook, hypotheses… — in Explorer", "Файлы исследования — профиль, плейбук, гипотезы… — в Проводнике"),
+              onclick: () => act("openStudyFiles", { test: false }) }, t("Study notes", "Заметки исследования")),
+            h("button", { class: "link-btn accent-ink", disabled: !k.journal, title: t("Your journal entries with the market at the time of each", "Записи журнала и рынок в момент каждой"),
+              onclick: () => act("openStudyFiles", { test: true }) }, t("Journal", "Журнал"))] : null,
           k.builtIn ? null : h("button", { class: "link-btn loss", onclick: () => act("removeSkill", { wallet: k.id }) }, t("Remove", "Удалить"))),
         reading === k.id ? h("pre", { class: "pg-skill-body selectable", "data-keep": "skill-" + k.id }, k.text) : null)),
       h("div", { class: "btns" },

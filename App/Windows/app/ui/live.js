@@ -1085,24 +1085,81 @@ function positionsBody() {
   return list.map(positionCard);
 }
 
+/** The close the board asks about («Close SOL at market?»): the coin and whether it's half; one at a time. */
+let closeAsk = null;
+
 function positionCard(x) {
     const name = x.coin.split(":").pop();
     const long = x.side === "long";
     const lost = negative(x.pnl);
+    const r = x.ruler;
     const chip = (label, ic, phrase, cls = "") => h("button", { class: "live-pos-chip " + cls, title: t("Puts it in the chat; the chat's card waits for Confirm", "Кладёт в чат; карточка ждёт «Подтвердить»"),
       onclick: () => suggest(phrase) }, icon(ic, 12), label);
+    // A close is asked here first, as the Mac's dialog; then it goes in the chat, and its card waits for Confirm.
+    const ask = (half) => h("button", { class: "live-pos-chip" + (half ? "" : " close"), onclick: () => { closeAsk = { coin: x.coin, half }; render(); } },
+      icon(half ? "minus" : "xmark", 12), half ? t("Close ½", "Закрыть ½") : t("Close", "Закрыть"));
+    const asking = closeAsk?.coin === x.coin ? closeAsk : null;
+    const actions = asking
+      ? h("div", { class: "live-pos-actions plan-close-ask" },
+          h("span", { class: "plan-close-q" }, asking.half ? t(`Close half of ${name} at market?`, `Закрыть половину ${name} по рынку?`) : t(`Close ${name} at market?`, `Закрыть ${name} по рынку?`)),
+          h("button", { class: "live-pos-chip", onclick: () => { closeAsk = null; render(); } }, t("Cancel", "Отмена")),
+          h("button", { class: "live-pos-chip plan-close-yes", title: t("Puts it in the chat; the chat's card waits for Confirm", "Кладёт в чат; карточка ждёт «Подтвердить»"),
+            onclick: () => { closeAsk = null; suggest(asking.half ? `close half ${name}` : `close ${name}`); } },
+            asking.half ? t("Close half", "Закрыть половину") : t("Close position", "Закрыть позицию")))
+      : h("div", { class: "live-pos-actions" },
+          chip(t("Stop to breakeven", "Стоп в безубыток"), "shield.check", `move stop to breakeven on ${name}`, "lead"),
+          chip(t("Trailing 2%", "Трейлинг 2%"), "arrow.up.right", `trail 2% on ${name}`),
+          ask(true), ask(false));
     return h("div", { class: "live-position" },
-      h("div", { class: "live-pos-actions" },
-        chip(t("Stop to breakeven", "Стоп в безубыток"), "shield.check", `move stop to breakeven on ${name}`, "lead"),
-        chip(t("Trailing 2%", "Трейлинг 2%"), "arrow.up.right", `trail 2% on ${name}`),
-        chip(t("Close ½", "Закрыть ½"), "minus", `close half ${name}`),
-        chip(t("Close", "Закрыть"), "xmark", `close ${name}`, "close")),
-      h("div", { class: "live-pos-card" },
-        assetBadge(x.coin, 40),
-        h("span", { class: "live-pos-text" },
-          h("b", {}, (long ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + name),
-          h("span", { class: "live-pos-sub" }, `${masked(x.size, "•••")} ${t("at", "по")} ${x.entry}` + (x.liquidation ? ` · ${t("liq.", "ликв.")} ${x.liquidation}` : ""))),
-        h("span", { class: "live-pos-pnl num " + (lost ? "loss" : "profit") }, masked(x.pnl))));
+      actions,
+      h("div", { class: "live-pos-card plan-pos-card" },
+        h("div", { class: "plan-pos-head" },
+          assetBadge(x.coin, 40),
+          h("span", { class: "live-pos-text" },
+            h("b", {}, (long ? t("Long ", "Лонг ") : t("Short ", "Шорт ")) + name),
+            h("span", { class: "live-pos-sub" }, `${masked(x.size, "•••")} ${t("at", "по")} ${x.entry}` + (r?.nowText ? ` · ${t("now", "сейчас")} ${r.nowText}` : "")
+              + (x.liquidation ? ` · ${t("liq.", "ликв.")} ${x.liquidation}` : ""))),
+          h("span", { class: "live-pos-pnl num " + (lost ? "loss" : "profit") }, masked(x.pnl))),
+        r ? priceRuler(r) : null,
+        r?.guardLine ? h("div", { class: "plan-pos-guard" }, icon("shield.check", 11), r.guardLine) : null));
+}
+
+/** The preview's `&call=live.askClose`: the first position's close question. */
+export function askClose() { const p = ui.state.positions[0]; if (p) { closeAsk = { coin: p.coin, half: false }; render(); } }
+
+/** Take, entry, now and stop on one line (the Mac's PriceRuler): red between entry and stop, green to the farthest take,
+ * labels in the first row where they don't overlap and never past either end. */
+const RULER_W = 428;
+let rulerMeasure;
+function rulerTextWidth(text) {
+  rulerMeasure ??= document.createElement("canvas").getContext("2d");
+  rulerMeasure.font = "600 10px Onest, sans-serif";
+  return Math.ceil(rulerMeasure.measureText(text).width);
+}
+
+function priceRuler(r) {
+  const values = r.points.map((p) => p.at).concat(r.now != null ? [r.now] : []);
+  const low = Math.min(...values), span = Math.max(Math.max(...values) - low, 0.0001);
+  const x = (v) => (v - low) / span * (RULER_W - 24) + 12;
+  const pct = (px) => (px / RULER_W * 100).toFixed(2) + "%";
+  const entry = r.points.find((p) => p.kind === "entry"), stop = r.points.find((p) => p.kind === "stop");
+  const far = r.points.filter((p) => p.kind === "take").reduce((a, b) => !a || Math.abs(b.at - entry.at) > Math.abs(a.at - entry.at) ? b : a, null);
+  const seg = (to, cls) => h("span", { class: "plan-ruler-seg " + cls, style: `left:${pct(Math.min(x(entry.at), x(to.at)))};width:${pct(Math.abs(x(to.at) - x(entry.at)))}` });
+  const ends = [];
+  const labels = r.points.map((p) => ({ p, at: x(p.at) })).sort((a, b) => a.at - b.at).map(({ p, at }) => {
+    const w = rulerTextWidth(p.text);
+    const start = Math.min(Math.max(0, at - w / 2), Math.max(0, RULER_W - w));
+    let row = ends.findIndex((e) => e + 6 < start);
+    if (row < 0) { row = ends.length; ends.push(start + w); } else ends[row] = start + w;
+    const edge = start + w >= RULER_W ? "right:0" : `left:${pct(start)}`;
+    return h("span", { class: "plan-ruler-label " + p.kind, style: `${edge};top:${30 + row * 14}px` }, p.text);
+  });
+  return h("div", { class: "plan-ruler", style: `height:${Math.max(76, 44 + ends.length * 14)}px`, "aria-hidden": "true" },
+    h("span", { class: "plan-ruler-track" }),
+    stop ? seg(stop, "loss") : null,
+    far ? seg(far, "profit") : null,
+    r.now != null ? h("span", { class: "plan-ruler-now", style: `left:calc(${pct(x(r.now))} - 2px)` }) : null,
+    labels);
 }
 
 // MARK: Multisig

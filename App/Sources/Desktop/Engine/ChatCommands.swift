@@ -56,11 +56,15 @@ extension Engine {
 
     /// The plan goes, with its card if one waited; a move's card stays (it isn't the plan).
     func clearPlan(note: String? = nil) {
+        // The price alert that waited to prepare this plan goes with it (Alerts.swift).
+        let alert = planAlert
+        if let alert { alerts.removeAll { $0.id == alert.id } }
         intent = TradeIntent()
         if case .trade? = pending { cancelPending() }
         // Its board goes too, and the plan a trade came from is forgotten (TradePlan.swift), as Cancel does.
         dropPlanBoard()
-        reply(say("The plan is cleared. Tell me what to do next.", "План очищен. Скажи, что дальше."), note: note)
+        reply(alert == nil ? say("The plan is cleared. Tell me what to do next.", "План очищен. Скажи, что дальше.")
+                           : say("The plan is cleared, and its price alert with it. Tell me what to do next.", "План очищен, и его алерт тоже. Скажи, что дальше."), note: note)
     }
 
     /// The wallets a name can switch to: this PC's own (never the automation wallet) and a connected Ledger.

@@ -341,9 +341,7 @@ extension Engine {
         }
         var warnings: [String] = []
         if case .contract = call { warnings.append(say("ihatecrypto can't read this contract call: sign only if you trust the site.", "ihatecrypto не может прочитать этот вызов контракта: подписывай, только если доверяешь сайту.")) }
-        if let key = jevKey, secondCheck, let r = try? await JevReviewer.site(host: "", title: "", programs: ["EVM \(rpc.chainId): \(to)"], changes: lines + changes, apiKey: key), r.concern {
-            warnings.append("Jev: " + r.text)
-        }
+        await siteSecondCheck(host: "", programs: ["EVM \(rpc.chainId): \(to)"], changes: lines + changes, lines: &lines, warnings: &warnings)
         return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, recipients: recipients, gas: gas)
     }
 
@@ -389,10 +387,23 @@ extension Engine {
             warnings.append(say("\(unknown.count == 1 ? "A program isn't" : "Programs aren't") on ihatecrypto's list: signing calls them the way the site built the transaction.",
                                 "\(unknown.count == 1 ? "Программы нет" : "Программ нет") в списке ihatecrypto: подпись вызовет их так, как сайт собрал транзакцию."))
         }
-        if let key = jevKey, secondCheck, let r = try? await JevReviewer.site(host: host, title: "", programs: named, changes: changes, apiKey: key), r.concern {
-            warnings.append("Jev: " + r.text)
-        }
+        await siteSecondCheck(host: host, programs: named, changes: changes, lines: &lines, warnings: &warnings)
         return SiteReview(lines: lines, changes: changes, warnings: warnings, problems: problems, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown)
+    }
+
+    /// The second check on a site's transaction (the Mac's jevNote): its concern as a warning, and when it didn't answer
+    /// or isn't connected the card says so — the code checks decide.
+    private func siteSecondCheck(host: String, programs: [String], changes: [String], lines: inout [String], warnings: inout [String]) async {
+        guard let key = jevKey, secondCheck else {
+            lines.append(say("The second check isn't connected (Settings › AI model › Second check). The code checks decide.",
+                             "Вторая проверка не подключена (Настройки › Модель ИИ › Вторая проверка). Решают проверки кода."))
+            return
+        }
+        guard let r = try? await JevReviewer.site(host: host, title: "", programs: programs, changes: changes, apiKey: key) else {
+            lines.append(say("The second check didn't answer — the code checks decide.", "Вторая проверка не ответила — решают проверки кода."))
+            return
+        }
+        if r.concern { warnings.append("Jev: " + r.text) }
     }
 
     /// Our token accounts, classic SPL and Token-2022 alike: address → mint, raw amount, decimals.

@@ -341,16 +341,24 @@ extension Engine {
                    "Сохранён для \(a), отправка в \(b) на тот же адрес. Твой кошелёк там тоже есть, а адрес биржи может не принимать \(b) — проверь.")
     }
 
-    /// The cautions on a send's card: whom it goes to, the first time, and the network it was saved for.
+    /// The cautions on a move's card: whom a send goes to the first time, an XRP exchange address without its tag, and
+    /// what the move itself risks (MoveRoutes.swift).
     func sendCautions(_ c: WalletCommand) -> [String] {
         let address: String?
         switch c {
         case .sendSol(let name, _): address = entry(name, network: "solana")?.address
         case .sendNear(let name, _), .closeNear(let name): address = entry(name, network: "near")?.address
-        case .sendToken(let name, _, _, let net): address = (try? tokenRecipient(name, network: net))?.entry.address
+        case .sendToken(let name, let token, _, let net):
+            // Through NEAR Intents (Bitcoin, XRP, TRON…): an exchange's XRP address without its tag loses the money.
+            if let r = try? acrossRecipient(name, token: token, network: net) {
+                if let tag = xrpTagWarning(r.entry) { return [tag] }
+                address = r.entry.address
+            } else {
+                address = (try? tokenRecipient(name, network: net))?.entry.address
+            }
         default: address = nil
         }
-        return address.flatMap(firstSendWarning).map { [$0] } ?? []
+        return (address.flatMap(firstSendWarning).map { [$0] } ?? []) + moveCautions(c)
     }
 
     /// After a move that paid someone: the address is known from now on.
@@ -360,7 +368,8 @@ extension Engine {
         case .transfer(let e, _): to = [e.address]
         case .wallet(.sendSol(let name, _)): to = entry(name, network: "solana").map { [$0.address] } ?? []
         case .wallet(.sendNear(let name, _)), .wallet(.closeNear(let name)): to = entry(name, network: "near").map { [$0.address] } ?? []
-        case .wallet(.sendToken(let name, _, _, let net)): to = (try? tokenRecipient(name, network: net)).map { [$0.entry.address] } ?? []
+        case .wallet(.sendToken(let name, let token, _, let net)):
+            to = ((try? acrossRecipient(name, token: token, network: net))?.entry.address ?? (try? tokenRecipient(name, network: net))?.entry.address).map { [$0] } ?? []
         case .chain(let steps): to = steps.compactMap { if case .transfer(let e, _) = $0 { e.address } else { nil } }
         default: break
         }
@@ -471,7 +480,7 @@ extension Engine {
     // MARK: The route, step by step (6)
 
     /// A balance a step changes, read now: `symbol` on `place` and what `delta` makes of it (nil: all of it leaves).
-    private func moved(_ symbol: String, on place: String, by delta: Decimal?, approx: Bool = false) -> Board.Money? {
+    func moved(_ symbol: String, on place: String, by delta: Decimal?, approx: Bool = false) -> Board.Money? {
         guard let was = heldThere(symbol, on: place) else { return nil }
         let after = max(0, was + (delta ?? -was))
         return Board.Money(place: WalletCommand.placeName(place), symbol: symbol.count > 12 ? (portfolio.networks.first { $0.key == place }?.rows.first { $0.contract == symbol }?.symbol ?? symbol) : symbol,
@@ -484,11 +493,11 @@ extension Engine {
         return Board.Money(place: place, symbol: symbol, was: Fmt.num(was, maxFraction: 6), after: Fmt.num(max(0, was + delta), maxFraction: 6))
     }
 
-    private func st(_ label: String, _ title: String, _ line: String = "", _ money: Board.Money? = nil) -> Board.Step {
+    func st(_ label: String, _ title: String, _ line: String = "", _ money: Board.Money? = nil) -> Board.Step {
         Board.Step(label: label, title: title, lines: line.isEmpty ? [] : [line], money: money)
     }
 
-    private func approve(_ amount: String, for spender: String) -> Board.Step {
+    func approve(_ amount: String, for spender: String) -> Board.Step {
         st(say("APPROVE · EXACT", "РАЗРЕШЕНИЕ · ТОЧНО"), amount, say("exactly this · only \(spender) may take it", "ровно столько · взять может только \(spender)"))
     }
 
@@ -521,11 +530,14 @@ extension Engine {
         case .bridge(let from, let to, let x):
             let a = WalletCommand.placeName(from), b = WalletCommand.placeName(to)
             let moving = x ?? usdcFree(on: from)
+            // The bridge it goes by once quoted (Relay, unless CCTP or 1Click lands more), with what each costs and lands.
+            let ways = quotes(c), taken = ways?.first?.way ?? "relay"
             return [st(say("FROM · ", "ОТКУДА · ") + a.uppercased(), n(moving, "USDC"), usdcFree(on: from).map { say("free there: \(Fmt.num($0)) USDC", "свободно там: \(Fmt.num($0)) USDC") } ?? "",
                        moved("USDC", on: from, by: moving.map { -$0 })),
-                    approve(n(moving, "USDC"), for: "Relay"),
-                    bridged(n(moving, "USDC"), say("\(a) → \(b) · no stop on Solana", "\(a) → \(b) · без остановки на Solana")),
-                    st(say("TO · ", "КУДА · ") + b.uppercased(), moving.map { "≈ \(Fmt.num($0)) USDC" } ?? "USDC", own, moving.flatMap { moved("USDC", on: to, by: $0, approx: true) })]
+                    approve(n(moving, "USDC"), for: taken == "cctp" ? "Circle's CCTP" : taken == "1click" ? "NEAR Intents" : "Relay"),
+                    bridgeStep(ways, title: n(moving, "USDC"), fallback: (say("BRIDGE · RELAY", "МОСТ · RELAY"), say("\(a) → \(b) · no stop on Solana", "\(a) → \(b) · без остановки на Solana"))),
+                    st(say("TO · ", "КУДА · ") + b.uppercased(), ways?.first?.gets.components(separatedBy: " · ").first ?? moving.map { "≈ \(Fmt.num($0)) USDC" } ?? "USDC", own,
+                       moving.flatMap { moved(to == "robinhood" ? "USDG" : "USDC", on: to, by: $0, approx: true) })]
         case .aave(true, let x?, let net), .morpho(true, let x?, let net):
             let morpho: Bool = if case .morpho = c { true } else { false }
             let name = WalletCommand.placeName(net), what = morpho ? "Morpho" : "Aave"
@@ -604,6 +616,7 @@ extension Engine {
             return [st(say("FROM · SOLANA", "ОТКУДА · SOLANA"), n(x, "SOL"), solSOL, moved("SOL", on: "solana", by: -x)),
                     st(say("TO · ", "КУДА · ") + say("SAVED ADDRESS", "СОХРАНЁННЫЙ АДРЕС"), e.name, AddressCheck.ends(e.address).start + " … " + AddressCheck.ends(e.address).end)]
         case .sendToken(let name, let token, let x, let net):
+            if let r = try? acrossRecipient(name, token: token, network: net) { return acrossSteps(c, r, x) }
             guard let (e, network) = try? tokenRecipient(name, network: net) else { return nil }
             let place = WalletCommand.placeName(network)
             return [st(say("FROM · ", "ОТКУДА · ") + place.uppercased(), n(x, token.uppercased()), heldThere(token, on: network).map { say("held: \(Fmt.num($0, maxFraction: 6))", "есть: \(Fmt.num($0, maxFraction: 6))") } ?? "",
@@ -623,15 +636,20 @@ extension Engine {
                     bridged("\(Fmt.usd(u)) of \(coin)", say("+ 0.5 USDC along · a few seconds", "+ 0.5 USDC вместе · несколько секунд")),
                     st(say("GAS · ", "ГАЗ · ") + name.uppercased(), "≈ \(Fmt.usd(u)) of \(coin)", say("for the fees of the next moves there", "на комиссии следующих действий там"))]
         case .hlSpotBuy(let symbol, let u?):
+            let gets = quotes(c)?.first?.gets
             return [st(say("FROM · HYPERLIQUID", "ОТКУДА · HYPERLIQUID"), n(u, "USDC"), say("spot balance · perp tops it up when short", "спотовый баланс · при нехватке доливается с perp")),
-                    st(say("BUY · SPOT ORDER", "ПОКУПКА · СПОТ"), symbol.uppercased(), say("IOC · at most 1% over the mid", "IOC · не дороже середины на 1%")),
-                    st(say("TO · SPOT BALANCE", "КУДА · СПОТОВЫЙ БАЛАНС"), symbol.uppercased(), say("on Hyperliquid, yours ✓", "на Hyperliquid, твой ✓"))]
+                    st(say("BUY · SPOT ORDER", "ПОКУПКА · СПОТ"), symbol.uppercased(), gets.map { say("≈ \($0) · at most 1% over the mid", "≈ \($0) · не дороже середины на 1%") }
+                       ?? say("IOC · at most 1% over the mid", "IOC · не дороже середины на 1%")),
+                    st(say("TO · SPOT BALANCE", "КУДА · СПОТОВЫЙ БАЛАНС"), symbol.uppercased(), say("on Hyperliquid, yours ✓", "на Hyperliquid, твой ✓"),
+                       Self.quotedAmount(gets).map { gained(symbol, symbol.uppercased(), on: "hyperliquid", by: $0) })]
         case .hlSpotSell(let symbol, let x):
-            return [st(say("FROM · SPOT BALANCE", "ОТКУДА · СПОТОВЫЙ БАЛАНС"), n(x, symbol.uppercased()), say("on Hyperliquid", "на Hyperliquid")),
-                    st(say("SELL · SPOT ORDER", "ПРОДАЖА · СПОТ"), "→ USDC", say("IOC · at most 1% under the mid", "IOC · не дешевле середины на 1%")),
+            let gets = quotes(c)?.first?.gets
+            return [st(say("FROM · SPOT BALANCE", "ОТКУДА · СПОТОВЫЙ БАЛАНС"), n(x, symbol.uppercased()), say("on Hyperliquid", "на Hyperliquid"), moved(symbol, on: "hyperliquid", by: x.map { -$0 })),
+                    st(say("SELL · SPOT ORDER", "ПРОДАЖА · СПОТ"), "→ USDC", gets.map { say("≈ \($0) · at most 1% under the mid", "≈ \($0) · не дешевле середины на 1%") }
+                       ?? say("IOC · at most 1% under the mid", "IOC · не дешевле середины на 1%")),
                     st(say("TO · SPOT USDC", "КУДА · СПОТ USDC"), "USDC", say("on Hyperliquid, yours ✓", "на Hyperliquid, твой ✓"))]
         default:
-            return nil
+            return cardRoute(c)
         }
     }
 

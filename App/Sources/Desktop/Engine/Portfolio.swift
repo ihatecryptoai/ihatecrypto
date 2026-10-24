@@ -36,6 +36,9 @@ nonisolated struct PortfolioView: Encodable, Equatable {
         /// It looks real (Holding.looksReal): verified, or a real pool and a cent's worth. Shown unless the person hid it;
         /// the others are tucked until the person shows them.
         var real: Bool?
+        /// A deposit managed on its own site (Jupiter's other platforms): a click opens it in the browser, as the Mac's
+        /// opens it beside the chat.
+        var site: String?
     }
     struct Network: Encodable, Equatable {
         var key: String
@@ -253,11 +256,38 @@ extension Engine {
         return r
     }
 
+    /// Jupiter's portfolio API (its own platforms only), as the Mac's jupiterPositions: every element but Earn, which
+    /// Jupiter Lend already reads. nil when it doesn't answer.
+    nonisolated static func jupiterPlatforms(_ wallet: String) async -> [PortfolioView.Row]? {
+        struct Answer: Decodable {
+            struct Element: Decodable { var fetcherId: String?; var platformId: String?; var name: String?; var label: String?; var value: Double?; var netApy: Double? }
+            var elements: [Element]
+        }
+        guard let url = URL(string: "https://api.jup.ag/portfolio/v1/positions/\(wallet)"),
+              let (data, _) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 20)),
+              let answer = try? JSONDecoder().decode(Answer.self, from: data) else { return nil }
+        return jupiterRows(answer.elements.map { ($0.fetcherId, $0.platformId, $0.name, $0.label, $0.value, $0.netApy) })
+    }
+
+    /// The rows for Jupiter's elements: «Jupiter», its name and label, its rate a year when it earns one.
+    nonisolated static func jupiterRows(_ elements: [(fetcher: String?, platform: String?, name: String?, label: String?, value: Double?, apy: Double?)]) -> [PortfolioView.Row] {
+        elements.compactMap { e in
+            guard e.fetcher != "jupiter-exchange-earn", let value = e.value, value.isFinite else { return nil }
+            let name = [e.name, e.label].compactMap { $0 }.joined(separator: " · ")
+            let apy = e.apy.flatMap { $0 > 0 ? " · \(Fmt.num((Decimal($0) * 100).rounded(2, .plain)))%" : nil } ?? ""
+            var row = deposit("Jupiter", usd: Decimal(value).rounded(2, .plain), note: (name.isEmpty ? e.platform ?? "position" : name) + apy)
+            row.icon = "logos/jup.png"
+            row.site = "jup.ag"
+            return row
+        }
+    }
+
     nonisolated static func solana(_ owner: String) async -> Read {
         do {
             async let lendRead = try? JupiterLend.positions(user: owner)
             async let kaminoRead = try? Kamino.positions(wallet: owner)
             async let vaultsRead = try? Kamino.vaultPositions(wallet: owner)
+            async let jupiterRead = jupiterPlatforms(owner)
             let b = try await Solana.balance(owner: owner)
             var rows: [PortfolioView.Row] = []
             if b.usdc > 0 { rows.append(row("USDC", b.usdc, usd: b.usdc)) }
@@ -272,6 +302,8 @@ extension Engine {
             for v in (await vaultsRead) ?? [] where v.valueUSD >= cent {
                 rows.append(deposit("Kamino", usd: v.valueUSD, note: "\(v.name) · \(Fmt.num(v.apy.rounded(2, .plain)))%"))
             }
+            // Jupiter's other platforms (staked JUP, perps, predictions…), so a deposit made on its site still shows.
+            rows += ((await jupiterRead) ?? []).filter { ($0.usd ?? 0) >= cent }
             return .success(.init(key: "solana", name: "Solana", usd: 0, rows: rows))
         } catch {
             return .failure("solana", "Solana: \(error.localizedDescription)")
@@ -327,5 +359,50 @@ extension Engine {
         } catch {
             return .failure("near", "NEAR: \(error.localizedDescription)")
         }
+    }
+}
+
+// MARK: The token card's P/L
+
+extension Engine {
+    /// The token card's held P/L as the Mac's TokenBoard says it under the number: «Bought 0.3968 NEAR for $2.00 at
+    /// $5.04 · 0.0766 more came in from elsewhere, counted at the price then: $5.10 · worth $2.39 now», and since when
+    /// («since you bought on Oct 10»; «since Oct 13» when some of it came in unpaid).
+    nonisolated static func heldPaid(symbol: String, amount: Decimal, gain: Decimal?, cost: CostBasis?, ru: Bool) -> (paid: String, since: String?) {
+        func say(_ en: String, _ r: String) -> String { ru ? r : en }
+        guard let gain, let cost, cost.amount > 0 else { return (say("No price yet to count its P/L from", "Пока нет цены, от которой считать прибыль"), nil) }
+        let counted = min(amount, cost.amount), share = counted / cost.amount
+        let came = (cost.received ?? 0) * share, cameUSD = (cost.receivedUSD ?? 0) * share
+        let bought = counted - came, spent = cost.usd * share - cameUSD
+        var parts: [String] = []
+        if bought > 0 {
+            parts.append(say("Bought \(Fmt.num(bought, maxFraction: 4)) \(symbol) for \(Fmt.usd(spent)) at \(tokenPrice(spent / bought))",
+                             "Куплено \(Fmt.num(bought, maxFraction: 4)) \(symbol) за \(Fmt.usd(spent)) по \(tokenPrice(spent / bought))"))
+        }
+        if came > 0 {
+            parts.append(say("\(Fmt.num(came, maxFraction: 4)) \(bought > 0 ? "more" : symbol) came in from elsewhere, counted at the price then: \(tokenPrice(cameUSD / came))",
+                             "\(bought > 0 ? "ещё " : "")\(Fmt.num(came, maxFraction: 4))\(bought > 0 ? "" : " " + symbol) пришло со стороны, по цене того дня: \(tokenPrice(cameUSD / came))"))
+        }
+        parts.append(say("worth \(Fmt.usd(cost.usd * share + gain)) now", "сейчас стоит \(Fmt.usd(cost.usd * share + gain))"))
+        if amount > counted {
+            parts.append(say("\(Fmt.num(amount - counted, maxFraction: 4)) more not counted: no price for it", "ещё \(Fmt.num(amount - counted, maxFraction: 4)) не посчитано: для них нет цены"))
+        }
+        let since = cost.since.map { day in
+            let f = DateFormatter()
+            f.locale = Locale(identifier: ru ? "ru_RU" : "en_US")
+            f.calendar = Calendar(identifier: .gregorian)
+            f.setLocalizedDateFormatFromTemplate("d MMM")
+            let d = f.string(from: day)
+            return (cost.received ?? 0) > 0 ? say("since \(d)", "с \(d)") : say("since you bought on \(d)", "с покупки \(d)")
+        }
+        return (parts.joined(separator: " · "), since)
+    }
+
+    /// A token's price with the digits a small one needs: $5.04, $0.0001234 (the Mac's tokenPrice).
+    nonisolated static func tokenPrice(_ d: Decimal) -> String {
+        if d >= 1 { return Fmt.usd(d) }
+        var digits = 2, x = d
+        while x < 1, x > 0, digits < 10 { x *= 10; digits += 1 }
+        return "$" + Fmt.num(d, maxFraction: min(digits + 2, 12))
     }
 }

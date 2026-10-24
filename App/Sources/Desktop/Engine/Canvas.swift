@@ -242,18 +242,21 @@ extension Engine {
     func steps(for pending: Pending, title: String, lines: [String]) -> [Board.Step] {
         switch pending {
         case .chain(let list):
-            return list.map { step in
+            return list.flatMap { step -> [Board.Step] in
                 switch step {
-                case .wallet(let c): Board.Step(label: label(c), title: c.summary, money: money(c))
-                case .transfer(_, let amount): Board.Step(label: say("SEND · ", "ПЕРЕВОД · ") + networkName("solana"), title: step.title,
-                                                              money: money(spending: amount, "USDC", on: "solana"))
+                case .wallet(let c): [Board.Step(label: label(c), title: c.summary, money: money(c))]
+                // From its own network, with that network's balance, to the saved name (MoveRoutes.swift).
+                case .transfer(let e, let amount): transferSteps(e, amount)
+                case .said(let text): [saidStep(text)]
                 }
             }
         case .wallet(let c), .recurring(let c, _):
             return routeSteps(c) ?? [Board.Step(label: label(c), title: title, lines: lines, money: money(c))]
-        case .transfer(_, let amount):
-            return [Board.Step(label: say("SEND · ", "ПЕРЕВОД · ") + networkName("solana"), title: title, lines: lines, money: money(spending: amount, "USDC", on: "solana"))]
-        case .position, .orders: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
+        case .transfer(let entry, let amount): return transferSteps(entry, amount)
+        case .position(let command, let coin):
+            if case .close(let share) = command, let steps = closeSteps(share, coin: coin) { return steps }
+            return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
+        case .orders: return [Board.Step(label: "HYPERLIQUID", title: title, lines: lines)]
         case .trade: return [Board.Step(label: say("TRADE · Hyperliquid", "СДЕЛКА · Hyperliquid"), title: title, lines: lines)]
         case .address(let e): return [Board.Step(label: say("SAVE · ", "СОХРАНИТЬ · ") + networkName(e.network), title: title, lines: lines)]
         case .site: return [Board.Step(label: say("SITE · browser", "САЙТ · браузер"), title: title, lines: lines)]

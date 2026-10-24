@@ -135,3 +135,24 @@ nonisolated struct WalletErrorText: LocalizedError {
     init(_ text: String) { self.text = text }
     var errorDescription: String? { text }
 }
+
+extension Engine {
+    /// The study's journal is kept: Settings › Skills' «Journal» opens it (greyed out before the first entry, as on the Mac).
+    static var journalKept: Bool { FileManager.default.fileExists(atPath: Store.url("journal.json").path) }
+
+    /// Settings › Skills: the study's notes folder, or its journal, in Explorer (the Mac opens them in Finder). Only these
+    /// two fixed paths, never one the page names.
+    func openStudyFiles(journal: Bool) throws {
+        guard !journal || Self.journalKept else { throw WalletErrorText(say("No journal entries yet.", "В журнале пока нет записей.")) }
+        let target = journal ? Store.url("journal.json") : Self.studyFolder
+        let path = target.withUnsafeFileSystemRepresentation { $0.map { String(cString: $0) } } ?? target.path
+        let p = Process()
+        #if os(Windows)
+        p.executableURL = URL(fileURLWithPath: (ProcessInfo.processInfo.environment["SystemRoot"] ?? "C:\\Windows") + "\\explorer.exe")
+        #else
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        #endif
+        p.arguments = [path]
+        try p.run()
+    }
+}

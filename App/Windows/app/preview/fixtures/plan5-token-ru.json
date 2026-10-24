@@ -1,0 +1,1449 @@
+{
+ "signer": {
+  "ready": true,
+  "error": null,
+  "notes": [
+   "Keys under Windows Hello with this PC's TPM",
+   "Signer checks passed"
+  ],
+  "waiting": false,
+  "sessionLength": 300,
+  "ledger": null
+ },
+ "wallets": [
+  {
+   "id": "w-main",
+   "label": "Main",
+   "kind": "phrase",
+   "solana": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+   "evm": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+  },
+  {
+   "id": "w-auto",
+   "label": "Automation",
+   "kind": "phrase",
+   "solana": null,
+   "evm": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+   "automation": true
+  }
+ ],
+ "active": "w-main",
+ "addresses": {
+  "solana": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+  "evm": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "hyperliquid": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "near": "ihatecrypto-demo.near"
+ },
+ "phrase": null,
+ "portfolio": {
+  "networks": [
+   {
+    "key": "solana",
+    "name": "Solana",
+    "usd": 787.11,
+    "note": "idle $741.30 · earning $2.51",
+    "rows": [
+     {
+      "symbol": "USDC",
+      "amount": "741.30",
+      "value": 741.3,
+      "usd": 741.3,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SPCX",
+      "amount": "0.1201",
+      "value": 0.1201,
+      "usd": 18.25,
+      "icon": null,
+      "pnl": "−$1.74 (−8.7%)",
+      "gain": -1.74,
+      "change24h": -3.7,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "HIGGS",
+      "amount": "41,250.75",
+      "value": 41250.75,
+      "usd": 3.86,
+      "icon": null,
+      "pnl": "−$125.10 (−97.4%)",
+      "gain": -125.1,
+      "change24h": -23.9,
+      "verified": false,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SOL",
+      "amount": "0.0215",
+      "value": 0.0215,
+      "usd": 2.38,
+      "icon": null,
+      "pnl": "−$0.39 (−14.2%)",
+      "gain": -0.39,
+      "change24h": 0.6,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "RAY",
+      "amount": "1.0412",
+      "value": 1.0412,
+      "usd": 1.98,
+      "icon": null,
+      "pnl": "−$0.02 (−0.9%)",
+      "gain": -0.02,
+      "change24h": -0.7,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "STONK",
+      "amount": "4.0518",
+      "value": 4.0518,
+      "usd": 0.53,
+      "icon": null,
+      "pnl": "−$0.48 (−47.5%)",
+      "gain": -0.48,
+      "change24h": 11.1,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "Kamino",
+      "amount": "2.51",
+      "value": 2.51,
+      "usd": 2.51,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "defi",
+      "note": "Allez USDC · 5.42%"
+     }
+    ]
+   },
+   {
+    "key": "hyperliquid",
+    "name": "Hyperliquid",
+    "usd": 301.45,
+    "note": "$0.01 · margin",
+    "rows": [
+     {
+      "symbol": "HYPE",
+      "amount": "3.7124",
+      "value": 3.7124,
+      "usd": 298.48,
+      "icon": null,
+      "pnl": "+$1.49 (+0.5%)",
+      "gain": 1.49,
+      "change24h": 0.4,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDC",
+      "amount": "2.871",
+      "value": 2.871,
+      "usd": 2.96,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": true,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "robinhood",
+    "name": "Robinhood",
+    "usd": 359.83,
+    "note": "idle $0.89",
+    "rows": [
+     {
+      "symbol": "AI",
+      "amount": "4,012.5",
+      "value": 4012.5,
+      "usd": 326.91,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 1.2,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SPCX",
+      "amount": "0.1287",
+      "value": 0.1287,
+      "usd": 19.69,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -3.9,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "TSLA",
+      "amount": "0.0139",
+      "value": 0.0139,
+      "usd": 5.33,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 3.1,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "MOO",
+      "amount": "1,050.2",
+      "value": 1050.2,
+      "usd": 2.54,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -10.1,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "ETH",
+      "amount": "0.00095",
+      "value": 0.00095,
+      "usd": 2.37,
+      "icon": null,
+      "pnl": "−$0.27 (−10.3%)",
+      "gain": -0.27,
+      "change24h": -0.3,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "SHROOM",
+      "amount": "548.1",
+      "value": 548.1,
+      "usd": 2.1,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -18.4,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDG",
+      "amount": "0.89",
+      "value": 0.89,
+      "usd": 0.89,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "near",
+    "name": "NEAR",
+    "usd": 1196.3,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "NEAR",
+      "amount": "455.6",
+      "value": 455.6,
+      "usd": 1196.3,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": 2.4,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "base",
+    "name": "Base",
+    "usd": 563.4,
+    "note": "idle $0.92",
+    "rows": [
+     {
+      "symbol": "ETH",
+      "amount": "0.2044",
+      "value": 0.2044,
+      "usd": 562.48,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -0.3,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "USDC",
+      "amount": "0.9017",
+      "value": 0.9017,
+      "usd": 0.92,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "arbitrum",
+    "name": "Arbitrum",
+    "usd": 99.65,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "USDT",
+      "amount": "2.39",
+      "value": 2.39,
+      "usd": 2.46,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     },
+     {
+      "symbol": "ARB",
+      "amount": "301.2",
+      "value": 301.2,
+      "usd": 97.19,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": -1.2,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   },
+   {
+    "key": "tempo",
+    "name": "Tempo",
+    "usd": 0.12,
+    "note": null,
+    "rows": [
+     {
+      "symbol": "USDC",
+      "amount": "0.12",
+      "value": 0.12,
+      "usd": 0.12,
+      "icon": null,
+      "pnl": null,
+      "gain": null,
+      "change24h": null,
+      "verified": null,
+      "section": "tokens",
+      "note": null
+     }
+    ]
+   }
+  ],
+  "total": 3307.86,
+  "updatedAt": "2026-10-23T13:40:00Z",
+  "errors": [],
+  "equity": [
+   {
+    "at": "2026-10-16T13:40:00Z",
+    "usd": 3647.01
+   },
+   {
+    "at": "2026-10-16T14:40:00Z",
+    "usd": 3660.6
+   },
+   {
+    "at": "2026-10-16T15:40:00Z",
+    "usd": 3672.87
+   },
+   {
+    "at": "2026-10-16T16:40:00Z",
+    "usd": 3682.72
+   },
+   {
+    "at": "2026-10-16T17:40:00Z",
+    "usd": 3689.36
+   },
+   {
+    "at": "2026-10-16T18:40:00Z",
+    "usd": 3692.36
+   },
+   {
+    "at": "2026-10-16T19:40:00Z",
+    "usd": 3691.74
+   },
+   {
+    "at": "2026-10-16T20:40:00Z",
+    "usd": 3687.91
+   },
+   {
+    "at": "2026-10-16T21:40:00Z",
+    "usd": 3681.66
+   },
+   {
+    "at": "2026-10-16T22:40:00Z",
+    "usd": 3674.02
+   },
+   {
+    "at": "2026-10-16T23:40:00Z",
+    "usd": 3666.13
+   },
+   {
+    "at": "2026-10-17T00:40:00Z",
+    "usd": 3659.09
+   },
+   {
+    "at": "2026-10-17T01:40:00Z",
+    "usd": 3653.79
+   },
+   {
+    "at": "2026-10-17T02:40:00Z",
+    "usd": 3650.84
+   },
+   {
+    "at": "2026-10-17T03:40:00Z",
+    "usd": 3650.44
+   },
+   {
+    "at": "2026-10-17T04:40:00Z",
+    "usd": 3652.38
+   },
+   {
+    "at": "2026-10-17T05:40:00Z",
+    "usd": 3656.05
+   },
+   {
+    "at": "2026-10-17T06:40:00Z",
+    "usd": 3660.56
+   },
+   {
+    "at": "2026-10-17T07:40:00Z",
+    "usd": 3664.8
+   },
+   {
+    "at": "2026-10-17T08:40:00Z",
+    "usd": 3667.66
+   },
+   {
+    "at": "2026-10-17T09:40:00Z",
+    "usd": 3668.11
+   },
+   {
+    "at": "2026-10-17T10:40:00Z",
+    "usd": 3665.38
+   },
+   {
+    "at": "2026-10-17T11:40:00Z",
+    "usd": 3659.07
+   },
+   {
+    "at": "2026-10-17T12:40:00Z",
+    "usd": 3649.19
+   },
+   {
+    "at": "2026-10-17T13:40:00Z",
+    "usd": 3636.18
+   },
+   {
+    "at": "2026-10-17T14:40:00Z",
+    "usd": 3620.84
+   },
+   {
+    "at": "2026-10-17T15:40:00Z",
+    "usd": 3604.26
+   },
+   {
+    "at": "2026-10-17T16:40:00Z",
+    "usd": 3587.69
+   },
+   {
+    "at": "2026-10-17T17:40:00Z",
+    "usd": 3572.34
+   },
+   {
+    "at": "2026-10-17T18:40:00Z",
+    "usd": 3559.29
+   },
+   {
+    "at": "2026-10-17T19:40:00Z",
+    "usd": 3549.33
+   },
+   {
+    "at": "2026-10-17T20:40:00Z",
+    "usd": 3542.84
+   },
+   {
+    "at": "2026-10-17T21:40:00Z",
+    "usd": 3539.79
+   },
+   {
+    "at": "2026-10-17T22:40:00Z",
+    "usd": 3539.76
+   },
+   {
+    "at": "2026-10-17T23:40:00Z",
+    "usd": 3541.93
+   },
+   {
+    "at": "2026-10-18T00:40:00Z",
+    "usd": 3545.27
+   },
+   {
+    "at": "2026-10-18T01:40:00Z",
+    "usd": 3548.65
+   },
+   {
+    "at": "2026-10-18T02:40:00Z",
+    "usd": 3550.98
+   },
+   {
+    "at": "2026-10-18T03:40:00Z",
+    "usd": 3551.38
+   },
+   {
+    "at": "2026-10-18T04:40:00Z",
+    "usd": 3549.28
+   },
+   {
+    "at": "2026-10-18T05:40:00Z",
+    "usd": 3544.51
+   },
+   {
+    "at": "2026-10-18T06:40:00Z",
+    "usd": 3537.31
+   },
+   {
+    "at": "2026-10-18T07:40:00Z",
+    "usd": 3528.31
+   },
+   {
+    "at": "2026-10-18T08:40:00Z",
+    "usd": 3518.44
+   },
+   {
+    "at": "2026-10-18T09:40:00Z",
+    "usd": 3508.81
+   },
+   {
+    "at": "2026-10-18T10:40:00Z",
+    "usd": 3500.57
+   },
+   {
+    "at": "2026-10-18T11:40:00Z",
+    "usd": 3494.74
+   },
+   {
+    "at": "2026-10-18T12:40:00Z",
+    "usd": 3492.1
+   },
+   {
+    "at": "2026-10-18T13:40:00Z",
+    "usd": 3493.06
+   },
+   {
+    "at": "2026-10-18T14:40:00Z",
+    "usd": 3497.6
+   },
+   {
+    "at": "2026-10-18T15:40:00Z",
+    "usd": 3505.29
+   },
+   {
+    "at": "2026-10-18T16:40:00Z",
+    "usd": 3515.32
+   },
+   {
+    "at": "2026-10-18T17:40:00Z",
+    "usd": 3526.6
+   },
+   {
+    "at": "2026-10-18T18:40:00Z",
+    "usd": 3537.91
+   },
+   {
+    "at": "2026-10-18T19:40:00Z",
+    "usd": 3548.05
+   },
+   {
+    "at": "2026-10-18T20:40:00Z",
+    "usd": 3555.95
+   },
+   {
+    "at": "2026-10-18T21:40:00Z",
+    "usd": 3560.87
+   },
+   {
+    "at": "2026-10-18T22:40:00Z",
+    "usd": 3562.44
+   },
+   {
+    "at": "2026-10-18T23:40:00Z",
+    "usd": 3560.71
+   },
+   {
+    "at": "2026-10-19T00:40:00Z",
+    "usd": 3556.14
+   },
+   {
+    "at": "2026-10-19T01:40:00Z",
+    "usd": 3549.56
+   },
+   {
+    "at": "2026-10-19T02:40:00Z",
+    "usd": 3542.01
+   },
+   {
+    "at": "2026-10-19T03:40:00Z",
+    "usd": 3534.62
+   },
+   {
+    "at": "2026-10-19T04:40:00Z",
+    "usd": 3528.47
+   },
+   {
+    "at": "2026-10-19T05:40:00Z",
+    "usd": 3524.43
+   },
+   {
+    "at": "2026-10-19T06:40:00Z",
+    "usd": 3523.04
+   },
+   {
+    "at": "2026-10-19T07:40:00Z",
+    "usd": 3524.47
+   },
+   {
+    "at": "2026-10-19T08:40:00Z",
+    "usd": 3528.43
+   },
+   {
+    "at": "2026-10-19T09:40:00Z",
+    "usd": 3534.27
+   },
+   {
+    "at": "2026-10-19T10:40:00Z",
+    "usd": 3541.05
+   },
+   {
+    "at": "2026-10-19T11:40:00Z",
+    "usd": 3547.63
+   },
+   {
+    "at": "2026-10-19T12:40:00Z",
+    "usd": 3552.86
+   },
+   {
+    "at": "2026-10-19T13:40:00Z",
+    "usd": 3555.7
+   },
+   {
+    "at": "2026-10-19T14:40:00Z",
+    "usd": 3555.38
+   },
+   {
+    "at": "2026-10-19T15:40:00Z",
+    "usd": 3551.5
+   },
+   {
+    "at": "2026-10-19T16:40:00Z",
+    "usd": 3544.07
+   },
+   {
+    "at": "2026-10-19T17:40:00Z",
+    "usd": 3533.52
+   },
+   {
+    "at": "2026-10-19T18:40:00Z",
+    "usd": 3520.68
+   },
+   {
+    "at": "2026-10-19T19:40:00Z",
+    "usd": 3506.61
+   },
+   {
+    "at": "2026-10-19T20:40:00Z",
+    "usd": 3492.53
+   },
+   {
+    "at": "2026-10-19T21:40:00Z",
+    "usd": 3479.62
+   },
+   {
+    "at": "2026-10-19T22:40:00Z",
+    "usd": 3468.92
+   },
+   {
+    "at": "2026-10-19T23:40:00Z",
+    "usd": 3461.16
+   },
+   {
+    "at": "2026-10-20T00:40:00Z",
+    "usd": 3456.66
+   },
+   {
+    "at": "2026-10-20T01:40:00Z",
+    "usd": 3455.35
+   },
+   {
+    "at": "2026-10-20T02:40:00Z",
+    "usd": 3456.74
+   },
+   {
+    "at": "2026-10-20T03:40:00Z",
+    "usd": 3459.99
+   },
+   {
+    "at": "2026-10-20T04:40:00Z",
+    "usd": 3464.04
+   },
+   {
+    "at": "2026-10-20T05:40:00Z",
+    "usd": 3467.75
+   },
+   {
+    "at": "2026-10-20T06:40:00Z",
+    "usd": 3470.05
+   },
+   {
+    "at": "2026-10-20T07:40:00Z",
+    "usd": 3470.08
+   },
+   {
+    "at": "2026-10-20T08:40:00Z",
+    "usd": 3467.3
+   },
+   {
+    "at": "2026-10-20T09:40:00Z",
+    "usd": 3461.59
+   },
+   {
+    "at": "2026-10-20T10:40:00Z",
+    "usd": 3453.23
+   },
+   {
+    "at": "2026-10-20T11:40:00Z",
+    "usd": 3442.9
+   },
+   {
+    "at": "2026-10-20T12:40:00Z",
+    "usd": 3431.56
+   },
+   {
+    "at": "2026-10-20T13:40:00Z",
+    "usd": 3420.36
+   },
+   {
+    "at": "2026-10-20T14:40:00Z",
+    "usd": 3410.46
+   },
+   {
+    "at": "2026-10-20T15:40:00Z",
+    "usd": 3402.89
+   },
+   {
+    "at": "2026-10-20T16:40:00Z",
+    "usd": 3398.42
+   },
+   {
+    "at": "2026-10-20T17:40:00Z",
+    "usd": 3397.45
+   },
+   {
+    "at": "2026-10-20T18:40:00Z",
+    "usd": 3399.95
+   },
+   {
+    "at": "2026-10-20T19:40:00Z",
+    "usd": 3405.49
+   },
+   {
+    "at": "2026-10-20T20:40:00Z",
+    "usd": 3413.25
+   },
+   {
+    "at": "2026-10-20T21:40:00Z",
+    "usd": 3422.16
+   },
+   {
+    "at": "2026-10-20T22:40:00Z",
+    "usd": 3431.02
+   },
+   {
+    "at": "2026-10-20T23:40:00Z",
+    "usd": 3438.66
+   },
+   {
+    "at": "2026-10-21T00:40:00Z",
+    "usd": 3444.07
+   },
+   {
+    "at": "2026-10-21T01:40:00Z",
+    "usd": 3446.56
+   },
+   {
+    "at": "2026-10-21T02:40:00Z",
+    "usd": 3445.81
+   },
+   {
+    "at": "2026-10-21T03:40:00Z",
+    "usd": 3441.93
+   },
+   {
+    "at": "2026-10-21T04:40:00Z",
+    "usd": 3435.46
+   },
+   {
+    "at": "2026-10-21T05:40:00Z",
+    "usd": 3427.24
+   },
+   {
+    "at": "2026-10-21T06:40:00Z",
+    "usd": 3418.35
+   },
+   {
+    "at": "2026-10-21T07:40:00Z",
+    "usd": 3409.94
+   },
+   {
+    "at": "2026-10-21T08:40:00Z",
+    "usd": 3403.09
+   },
+   {
+    "at": "2026-10-21T09:40:00Z",
+    "usd": 3398.65
+   },
+   {
+    "at": "2026-10-21T10:40:00Z",
+    "usd": 3397.13
+   },
+   {
+    "at": "2026-10-21T11:40:00Z",
+    "usd": 3398.66
+   },
+   {
+    "at": "2026-10-21T12:40:00Z",
+    "usd": 3402.92
+   },
+   {
+    "at": "2026-10-21T13:40:00Z",
+    "usd": 3409.25
+   },
+   {
+    "at": "2026-10-21T14:40:00Z",
+    "usd": 3416.64
+   },
+   {
+    "at": "2026-10-21T15:40:00Z",
+    "usd": 3423.97
+   },
+   {
+    "at": "2026-10-21T16:40:00Z",
+    "usd": 3430.05
+   },
+   {
+    "at": "2026-10-21T17:40:00Z",
+    "usd": 3433.88
+   },
+   {
+    "at": "2026-10-21T18:40:00Z",
+    "usd": 3434.68
+   },
+   {
+    "at": "2026-10-21T19:40:00Z",
+    "usd": 3432.07
+   },
+   {
+    "at": "2026-10-21T20:40:00Z",
+    "usd": 3426.08
+   },
+   {
+    "at": "2026-10-21T21:40:00Z",
+    "usd": 3417.17
+   },
+   {
+    "at": "2026-10-21T22:40:00Z",
+    "usd": 3406.14
+   },
+   {
+    "at": "2026-10-21T23:40:00Z",
+    "usd": 3394.07
+   },
+   {
+    "at": "2026-10-22T00:40:00Z",
+    "usd": 3382.16
+   },
+   {
+    "at": "2026-10-22T01:40:00Z",
+    "usd": 3371.56
+   },
+   {
+    "at": "2026-10-22T02:40:00Z",
+    "usd": 3363.25
+   },
+   {
+    "at": "2026-10-22T03:40:00Z",
+    "usd": 3357.9
+   },
+   {
+    "at": "2026-10-22T04:40:00Z",
+    "usd": 3355.79
+   },
+   {
+    "at": "2026-10-22T05:40:00Z",
+    "usd": 3356.79
+   },
+   {
+    "at": "2026-10-22T06:40:00Z",
+    "usd": 3360.34
+   },
+   {
+    "at": "2026-10-22T07:40:00Z",
+    "usd": 3365.56
+   },
+   {
+    "at": "2026-10-22T08:40:00Z",
+    "usd": 3371.36
+   },
+   {
+    "at": "2026-10-22T09:40:00Z",
+    "usd": 3376.58
+   },
+   {
+    "at": "2026-10-22T10:40:00Z",
+    "usd": 3380.14
+   },
+   {
+    "at": "2026-10-22T11:40:00Z",
+    "usd": 3381.2
+   },
+   {
+    "at": "2026-10-22T12:40:00Z",
+    "usd": 3379.23
+   },
+   {
+    "at": "2026-10-22T13:40:00Z",
+    "usd": 3374.15
+   },
+   {
+    "at": "2026-10-22T14:40:00Z",
+    "usd": 3366.25
+   },
+   {
+    "at": "2026-10-22T15:40:00Z",
+    "usd": 3356.24
+   },
+   {
+    "at": "2026-10-22T16:40:00Z",
+    "usd": 3345.1
+   },
+   {
+    "at": "2026-10-22T17:40:00Z",
+    "usd": 3333.99
+   },
+   {
+    "at": "2026-10-22T18:40:00Z",
+    "usd": 3324.05
+   },
+   {
+    "at": "2026-10-22T19:40:00Z",
+    "usd": 3316.31
+   },
+   {
+    "at": "2026-10-22T20:40:00Z",
+    "usd": 3311.51
+   },
+   {
+    "at": "2026-10-22T21:40:00Z",
+    "usd": 3310.03
+   },
+   {
+    "at": "2026-10-22T22:40:00Z",
+    "usd": 3311.82
+   },
+   {
+    "at": "2026-10-22T23:40:00Z",
+    "usd": 3316.4
+   },
+   {
+    "at": "2026-10-23T00:40:00Z",
+    "usd": 3322.96
+   },
+   {
+    "at": "2026-10-23T01:40:00Z",
+    "usd": 3330.43
+   },
+   {
+    "at": "2026-10-23T02:40:00Z",
+    "usd": 3337.61
+   },
+   {
+    "at": "2026-10-23T03:40:00Z",
+    "usd": 3343.37
+   },
+   {
+    "at": "2026-10-23T04:40:00Z",
+    "usd": 3346.73
+   },
+   {
+    "at": "2026-10-23T05:40:00Z",
+    "usd": 3347.05
+   },
+   {
+    "at": "2026-10-23T06:40:00Z",
+    "usd": 3344.07
+   },
+   {
+    "at": "2026-10-23T07:40:00Z",
+    "usd": 3337.98
+   },
+   {
+    "at": "2026-10-23T08:40:00Z",
+    "usd": 3329.35
+   },
+   {
+    "at": "2026-10-23T09:40:00Z",
+    "usd": 3319.06
+   },
+   {
+    "at": "2026-10-23T10:40:00Z",
+    "usd": 3308.25
+   },
+   {
+    "at": "2026-10-23T11:40:00Z",
+    "usd": 3298.07
+   },
+   {
+    "at": "2026-10-23T12:40:00Z",
+    "usd": 3289.61
+   },
+   {
+    "at": "2026-10-23T13:40:00Z",
+    "usd": 3307.86
+   }
+  ],
+  "change7d": -318.4
+ },
+ "positions": [],
+ "positionsPnl": null,
+ "automationUSD": 4.24,
+ "chat": [
+  {
+   "id": "m1",
+   "fromUser": true,
+   "text": "отправь 150 USDC на HL wallet",
+   "at": "2026-10-22T22:37:00Z"
+  },
+  {
+   "id": "m2",
+   "fromUser": false,
+   "text": "Sent 150 USDC to HL wallet on Hyperliquid, plus 1 USDC Hyperliquid kept once for opening their account.",
+   "note": "transfer",
+   "at": "2026-10-22T22:40:00Z"
+  },
+  {
+   "id": "m3",
+   "fromUser": true,
+   "text": "отправь газ на хайпер 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+   "at": "2026-10-22T22:41:00Z"
+  },
+  {
+   "id": "m4",
+   "fromUser": false,
+   "text": "Торговому счёту Hyperliquid газ не нужен: переводы и сделки там идут без него, и 150 USDC на HL wallet уже дошли. Газ в HyperEVM (сеть 999) платится в HYPE. Могу докинуть на HL wallet ещё USDC: от 10 USDC на нём можно купить HYPE на споте. Что тебе нужно?",
+   "note": "claude-opus-5-5",
+   "at": "2026-10-22T22:42:00Z"
+  }
+ ],
+ "thinking": false,
+ "draft": null,
+ "card": null,
+ "options": [],
+ "running": null,
+ "plan": null,
+ "model": {
+  "provider": "claude-code",
+  "name": "Claude (subscription via Claude Code)",
+  "model": "claude-opus-5-5",
+  "connected": true,
+  "models": [
+   "claude-opus-5-5",
+   "claude-sonnet-5-5"
+  ]
+ },
+ "providers": [
+  {
+   "id": "claude-code",
+   "name": "Claude (subscription via Claude Code)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Claude Code",
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "chatgpt",
+   "name": "ChatGPT (subscription)",
+   "kind": "subscription",
+   "takesKey": false,
+   "existingLogin": "Codex",
+   "signIn": "chatgpt",
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "anthropic",
+   "name": "Anthropic API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "openrouter",
+   "name": "OpenRouter",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  },
+  {
+   "id": "openai",
+   "name": "OpenAI API",
+   "kind": "apiKey",
+   "takesKey": true,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": false
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama on this PC",
+   "kind": "local",
+   "takesKey": false,
+   "existingLogin": null,
+   "signIn": null,
+   "note": "",
+   "unavailable": null,
+   "connected": true
+  }
+ ],
+ "secondCheck": true,
+ "jevOpenRouter": false,
+ "language": "ru",
+ "russian": true,
+ "book": [
+  {
+   "name": "HL wallet",
+   "network": "hyperliquid",
+   "address": "0x3c44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+   "memo": ""
+  },
+  {
+   "name": "Mom",
+   "network": "base",
+   "address": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+   "memo": ""
+  }
+ ],
+ "history": [
+  {
+   "at": "2026-10-22T22:40:00Z",
+   "chain": "hyperliquid",
+   "kind": "transfer",
+   "note": "Sent 150 USDC to HL wallet",
+   "link": null
+  },
+  {
+   "at": "2026-10-22T13:40:00Z",
+   "chain": "solana",
+   "kind": "swap",
+   "note": "Bought SOL for 10 USDC",
+   "link": "https://solscan.io/tx/demo"
+  }
+ ],
+ "alerts": [
+  {
+   "id": "a1",
+   "text": "BTC above $120,000"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t1",
+   "text": "Every day at 9:00: buy SOL for 5 USDC",
+   "paused": true,
+   "automatic": true,
+   "next": "2026-10-24T08:40:00Z"
+  },
+  {
+   "id": "t2",
+   "text": "Every Monday: check the yields",
+   "paused": true,
+   "automatic": false,
+   "next": "2026-10-26T13:40:00Z"
+  }
+ ],
+ "automation": {
+  "id": "w-auto",
+  "label": "Automation",
+  "kind": "phrase",
+  "solana": null,
+  "evm": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "automation": true
+ },
+ "skills": [
+  {
+   "id": "trading-study",
+   "name": "Trading study",
+   "about": "Keeps a journal of your trades and studies them with you",
+   "text": "",
+   "builtIn": true,
+   "on": true
+  }
+ ],
+ "memory": [
+  "The user's HL wallet is their Hyperliquid account"
+ ],
+ "favorites": [
+  {
+   "chain": "solana",
+   "address": "DoVAVzViX8Bjy3r15nwikSaSbzE6dV4ovd28aWpJpump",
+   "name": "Higgs",
+   "symbol": "HIGGS",
+   "image": null,
+   "price": 8.66e-05,
+   "change24h": -23.9,
+   "liquidity": 51000
+  }
+ ],
+ "canvases": [
+  {
+   "id": "c1",
+   "title": "Withdraw · 23 USDC to Solana",
+   "at": "2026-10-23T12:40:00Z"
+  },
+  {
+   "id": "c2",
+   "title": "Send 150 USDC to HL wallet",
+   "at": "2026-10-22T22:40:00Z"
+  },
+  {
+   "id": "c3",
+   "title": "Gas · $1.00 of BNB on BNB Chain",
+   "at": "2026-10-21T13:40:00Z"
+  }
+ ],
+ "canvas": "c2",
+ "boards": [
+  {
+   "id": "b-token",
+   "kind": "token",
+   "title": "BONK · Solana",
+   "at": "2026-10-23T13:40:00Z",
+   "lines": [
+    "Bonk (BONK), contract DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263 on Solana."
+   ],
+   "data": {
+    "token": {
+     "chain": "solana",
+     "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+     "symbol": "BONK",
+     "name": "Bonk",
+     "fullName": "Bonk",
+     "image": null,
+     "subtitle": "BONK · Solana · Raydium · SOL pool",
+     "verified": true,
+     "verifiedBy": "Jupiter",
+     "stock": false,
+     "favorite": false,
+     "dollar": false,
+     "price": 2.214e-05,
+     "range": "day",
+     "closes": [
+      2.12e-05,
+      2.14745e-05,
+      2.16686e-05,
+      2.17411e-05,
+      2.17067e-05,
+      2.16242e-05,
+      2.15598e-05,
+      2.15496e-05,
+      2.15804e-05,
+      2.16001e-05,
+      2.15526e-05,
+      2.14144e-05,
+      2.12151e-05,
+      2.10266e-05,
+      2.0928e-05,
+      2.09654e-05,
+      2.1128e-05,
+      2.13543e-05,
+      2.15654e-05,
+      2.17051e-05,
+      2.17666e-05,
+      2.17905e-05,
+      2.1835e-05,
+      2.19372e-05,
+      2.20872e-05,
+      2.22298e-05,
+      2.22942e-05,
+      2.22336e-05,
+      2.20547e-05,
+      2.18173e-05,
+      2.16065e-05,
+      2.14911e-05,
+      2.14912e-05,
+      2.15728e-05,
+      2.16716e-05,
+      2.17327e-05,
+      2.17425e-05,
+      2.17354e-05,
+      2.17719e-05,
+      2.18997e-05,
+      2.21213e-05,
+      2.23859e-05,
+      2.26121e-05,
+      2.27276e-05,
+      2.27057e-05,
+      2.25779e-05,
+      2.24149e-05,
+      2.22888e-05
+     ],
+     "change": 4.42,
+     "changes": [
+      {
+       "title": "5m",
+       "value": "0.3"
+      },
+      {
+       "title": "1h",
+       "value": "-1.2"
+      },
+      {
+       "title": "6h",
+       "value": "2.8"
+      },
+      {
+       "title": "24h",
+       "value": "4.4"
+      }
+     ],
+     "tiles": [
+      {
+       "title": "Market cap",
+       "value": "$1.7B"
+      },
+      {
+       "title": "Liquidity",
+       "value": "$12.4M"
+      },
+      {
+       "title": "Volume 24h",
+       "value": "$88.1M"
+      },
+      {
+       "title": "Buys 24h",
+       "value": "41210"
+      },
+      {
+       "title": "Sells 24h",
+       "value": "38877"
+      },
+      {
+       "title": "Pool since",
+       "value": "14 Dec"
+      }
+     ],
+     "held": {
+      "amount": "120,000",
+      "usd": 2.66,
+      "how": "valued at the pool price",
+      "pnl": "+$0.21 (+8.6%)",
+      "gain": 0.21,
+      "today": 0.11,
+      "since": "с 10 окт.",
+      "paid": "Куплено 100,000 BONK за $2.00 по $0.00002 · ещё 20,000 пришло со стороны, по цене того дня: $0.000022 · сейчас стоит $2.66"
+     },
+     "links": [
+      {
+       "label": "Website",
+       "url": "https://bonkcoin.com"
+      },
+      {
+       "label": "X",
+       "url": "https://x.com/bonk_inu"
+      },
+      {
+       "label": "DexScreener",
+       "url": "https://dexscreener.com/solana/example"
+      }
+     ],
+     "loading": false
+    }
+   }
+  }
+ ],
+ "runningBoard": null,
+ "multisigs": [],
+ "multisigDraft": null,
+ "candidates": [],
+ "ledgerConnect": null,
+ "starred": [],
+ "watching": false,
+ "watched": {},
+ "context": {
+  "used": 21380,
+  "window": 1000000
+ }
+}

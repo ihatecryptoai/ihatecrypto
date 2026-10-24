@@ -165,3 +165,70 @@ function namesMenu(e, names, current) {
   popup(e, names.map((n) => [[h("span", { class: "trade-menu-name" }, plain(n)), n === current ? icon("check", 12) : null],
     () => { if (n !== current) act("planMarket", { name: n }); }]), "trade-menu trade-menu-long");
 }
+
+// MARK: The templates menu's preview
+
+addIcons({ "arrow.down": "M12 5v14M6 13l6 6 6-6" });
+
+/** What each template's scheme looks like (the Mac's TemplatesPanel.steps, S15): label and line, English and Russian. */
+const TEMPLATE_STEPS = {
+  "Trade by the book": [["From", "Откуда", "USDC on Solana", "USDC в Solana"], ["Bridge", "Мост", "Relay or 1Click — the cheaper", "Relay или 1Click — что дешевле"],
+    ["Position", "Позиция", "long or short, up to 5×", "лонг или шорт, до 5×"], ["Stop and take", "Стоп и тейк", "stop 1.5 ATR · take in parts", "стоп 1,5 ATR · тейк частями"],
+    ["Rules", "Правила", "risk 1% of capital", "риск 1% капитала"], ["Second check", "Вторая проверка", "checks the plan", "проверяет план"]],
+  "Short on a pullback": [["Entry", "Вход", "limit 2% above the market", "лимит на 2% выше рынка"], ["Position", "Позиция", "short oil · xyz exchange", "шорт нефти · биржа xyz"],
+    ["Stop and take", "Стоп и тейк", "by the book", "по правилам"], ["Guardian", "Страж", "breakeven after ½", "безубыток после ½"]],
+  "Best rates": [["Free", "Свободные", "USDC on Solana", "USDC в Solana"], ["Split", "Деление", "best rates · ≤ 50% per protocol", "лучшие ставки · ≤ 50% в один протокол"],
+    ["Deposit", "Депозит", "Jupiter Lend, Kamino", "Jupiter Lend, Kamino"], ["Result", "Итог", "a year’s yield in USDC", "доход за год в USDC"]],
+  "Where to keep it": [["Rates", "Ставки", "Jupiter Lend, Kamino, HLP, JitoSOL", "Jupiter Lend, Kamino, HLP, JitoSOL"],
+    ["Conditions", "Условия", "minimums, rent, lockups", "минимумы, рента, блокировки"], ["Advice", "Совет", "at most half in one place", "не больше половины в одном месте"]],
+  "Every week": [["Buy", "Покупка", "SOL for 2 USDC via Jupiter", "SOL на 2 USDC через Jupiter"], ["Every", "Как часто", "week, while ihatecrypto runs", "раз в неделю, пока ihatecrypto работает"],
+    ["Checks", "Проверки", "address, simulation, signature", "адрес, симуляция, подпись"], ["Warning", "Предупреждение", "when Solana runs short", "когда в Solana не хватает денег"]],
+  "Back to Solana": [["From", "Откуда", "Hyperliquid", "Hyperliquid"], ["Bridge", "Мост", "Relay", "Relay"], ["To", "Куда", "your Solana address", "твой адрес в Solana"],
+    ["Signature", "Подпись", "main key — the trading key can’t withdraw", "основной ключ — торговый не может выводить"]],
+  "Protect a position": [["Position", "Позиция", "open on Hyperliquid", "открыта на Hyperliquid"], ["Stop", "Стоп", "to the entry — breakeven", "на точку входа — безубыток"],
+    ["Result", "Итог", "worst case ≈ $0 and fees", "в худшем случае ≈ $0 и комиссии"]],
+  "Stake SOL": [["From", "Откуда", "SOL on Solana", "SOL в Solana"], ["Swap", "Обмен", "SOL → JitoSOL", "SOL → JitoSOL"], ["Earns", "Доход", "the staking yield", "доход от стейкинга"],
+    ["Exit", "Выход", "swap back any time", "обменять обратно в любой момент"]],
+  "Aave on Base": [["From", "Откуда", "USDC on Solana", "USDC в Solana"], ["Bridge", "Мост", "Relay to Base + a little gas", "Relay в Base + немного газа"],
+    ["Approve", "Разрешение", "exactly the amount", "ровно на сумму"], ["Supply", "Вклад", "Aave v3 · ≈ 4% a year", "Aave v3 · ≈ 4% годовых"]],
+  "Price alert": [["Watch", "Слежу", "the mark price every 10–30 s", "цена каждые 10–30 с"], ["Fire", "Сигнал", "one notification at the level", "одно уведомление на уровне"],
+    ["Then", "Потом", "the alert is done", "оповещение снимается"]],
+  "Buy a stock token": [["From", "Откуда", "USDC on Solana", "USDC в Solana"], ["Bridge", "Мост", "Relay → USDG on Robinhood Chain", "Relay → USDG в Robinhood Chain"],
+    ["Swap", "Обмен", "Uniswap · Robinhood's registered token", "Uniswap · токен из реестра Robinhood"], ["Hold", "Хранение", "SPCX, TSLA… in your wallet", "SPCX, TSLA… в твоём кошельке"]],
+  "Profit and loss": [["Trading", "Торговля", "Hyperliquid fills and funding", "сделки и фандинг Hyperliquid"], ["Holdings", "Монеты", "every coin, cost from its buys", "каждая монета, цена по её покупкам"],
+    ["Result", "Итог", "dollars made or lost this week", "сколько заработал или потерял за неделю"]],
+  "What's moving": [["Markets", "Рынки", "Hyperliquid's coins and stocks", "монеты и акции Hyperliquid"], ["Sorted", "Порядок", "by today's change", "по изменению за сегодня"],
+    ["Then", "Потом", "pick one to chart or trade", "выбери, чтобы открыть график или торговать"]],
+  "Chart a coin": [["Price", "Цена", "a week of SOL", "неделя SOL"], ["Facts", "Факты", "high, low, change", "максимум, минимум, изменение"],
+    ["Then", "Потом", "trade it or set an alert", "торговать или поставить оповещение"]],
+  "Buy a memecoin": [["From", "Откуда", "USDC on Solana", "USDC в Solana"], ["Swap", "Обмен", "Jupiter · a verified token", "Jupiter · проверенный токен"],
+    ["Hold", "Хранение", "BONK in your wallet", "BONK в твоём кошельке"]],
+  "Swap on Base": [["From", "Откуда", "USDC on Base", "USDC в Base"], ["Swap", "Обмен", "Uniswap · the best of v2, v3, v4", "Uniswap · лучший из v2, v3, v4"],
+    ["Get", "Получишь", "ETH itself, not WETH", "сам ETH, не WETH"]],
+  "Move to Base": [["From", "Откуда", "USDC on Solana", "USDC в Solana"], ["Bridge", "Мост", "Relay · a few seconds", "Relay · несколько секунд"],
+    ["To", "Куда", "your own address on Base", "твой адрес в Base"]],
+  "Sweep dust": [["Find", "Поиск", "tokens under $5 on Base, Arbitrum, Polygon", "токены дешевле $5 в Base, Arbitrum, Polygon"],
+    ["Sell", "Продажа", "each for USDC on its own network", "каждый за USDC в его сети"], ["Result", "Итог", "USDC instead of crumbs", "USDC вместо крошек"]],
+  "Claim rewards": [["Check", "Проверка", "Merkl on Base, Arbitrum, Ethereum, Polygon", "Merkl в Base, Arbitrum, Ethereum, Polygon"],
+    ["Claim", "Получение", "Morpho's, Aave's and others' rewards", "награды Morpho, Aave и других"], ["Keep", "Куда", "they land in your wallet", "приходят в твой кошелёк"]],
+  "Hyperliquid spot": [["Pay", "Оплата", "10 USDC — the book's minimum", "10 USDC — минимум рынка"], ["Buy", "Покупка", "HYPE on Hyperliquid's spot book", "HYPE на спотовом рынке Hyperliquid"],
+    ["Hold", "Хранение", "the coin itself, no leverage", "сама монета, без плеча"]],
+  "Trade gold": [["Market", "Рынок", "gold · Hyperliquid's xyz exchange", "золото · биржа xyz на Hyperliquid"], ["Position", "Позиция", "long, up to 5×", "лонг, до 5×"],
+    ["Stop and take", "Стоп и тейк", "by the book", "по правилам"]],
+  "Make a multisig": [["Keys", "Ключи", "this PC + a Ledger, a phone or a partner", "этот ПК + Ledger, телефон или партнёр"],
+    ["Rule", "Правило", "a majority must sign each move", "каждое движение подписывает большинство"], ["Network", "Сеть", "Base unless you name others", "Base, если не назовёшь другие"]],
+};
+
+/** The scheme a template draws, beside the templates menu: each step a coloured bar, its label and line. */
+export function templatePreview(en, ru, colors) {
+  const steps = TEMPLATE_STEPS[en] || [];
+  return h("div", { class: "plan-tpl-preview" },
+    h("span", { class: "plan-tpl-head" }, t(`Preview · ${en}`, `Схема · ${ru}`)),
+    h("span", { class: "plan-tpl-sub" }, t("this is how the scheme will look", "так она будет выглядеть")),
+    steps.map(([le, lr, ve, vr], i) => [
+      i ? h("span", { class: "plan-tpl-arrow" }, icon("arrow.down", 10)) : null,
+      h("div", { class: "plan-tpl-step" }, h("span", { class: "plan-tpl-bar", style: `background:${colors[i % colors.length]}` }),
+        h("span", { class: "plan-tpl-text" }, h("span", { class: "plan-tpl-label" }, t(le, lr)), h("b", {}, t(ve, vr))))]),
+    h("span", { class: "plan-tpl-foot" }, t("Say just the asset and direction — ihatecrypto fills the rest from the rules.",
+      "Назови только актив и направление — остальное ihatecrypto заполнит по правилам.")));
+}

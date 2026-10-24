@@ -307,7 +307,8 @@ extension Engine {
         func row(_ label: String, _ value: String) -> String { "\(label)\t\(value)" }
         let sizing = e.sizing
         let name = IntentParser.pretty(r.asset).components(separatedBy: " (").first ?? r.asset
-        var steps: [Board.Step] = []
+        // A price alert tied to the plan comes first: the plan waits for that price (Alerts.swift).
+        var steps: [Board.Step] = planAlertStep.map { [$0] } ?? []
         let free = placeFacts.hyperliquid?.withdrawable ?? 0
         // «Not needed»: the margin is on Hyperliquid already, and the route starts there.
         let bridge = block("bridge").flatMap { $0.status == .info ? nil : $0 }
@@ -753,5 +754,36 @@ extension Engine {
             out[g.rawValue] = markets.values.filter { $0.group == g }.map(\.name).sorted()
         }
         return (try? JSONEncoder().encode(out)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+}
+
+// MARK: The position board
+
+/// The position board's price ruler (the Mac's PriceRuler): take, entry, now and stop on one line, and the guardian's
+/// word under it (PositionBoard). Prices as numbers for the drawing, each label as the card says it.
+nonisolated struct PositionRuler: Encodable, Equatable {
+    struct Point: Encodable, Equatable { var kind: String; var at: Double; var text: String }
+    var points: [Point]
+    var now: Double?
+    var nowText: String?
+    var guardLine: String?
+}
+
+extension Engine {
+    func positionRuler(_ p: HyperliquidAccount.Position, rules: ExitRules?) -> PositionRuler {
+        let triggers = hlOrders.filter { $0.coin == p.coin && $0.isTrigger }
+        let stop = triggers.first { ($0.orderType ?? "").contains("Stop") }?.triggerPx
+        let takes = triggers.filter { ($0.orderType ?? "").contains("Take") }.compactMap(\.triggerPx)
+        let mark = markets[p.coin]?.markPx
+        func d(_ x: Decimal) -> Double { NSDecimalNumber(decimal: x).doubleValue }
+        var points = [PositionRuler.Point(kind: "entry", at: d(p.entry), text: say("entry ", "вход ") + Fmt.price(p.entry))]
+        if let stop { points.append(.init(kind: "stop", at: d(stop), text: say("stop ", "стоп ") + Fmt.price(stop))) }
+        points += takes.map { .init(kind: "take", at: d($0), text: say("take ", "тейк ") + Fmt.price($0)) }
+        let line = rules.map { r in
+            r.movedToBreakeven ? say("Guardian: stop already at breakeven", "Страж: стоп уже в безубытке")
+                : r.breakevenAfterPartial ? say("Guardian: stop to breakeven after the first half", "Страж: стоп в безубыток после первой половины")
+                : say("Guardian is watching", "Страж следит")
+        }
+        return PositionRuler(points: points, now: mark.map(d), nowText: mark.map(Fmt.price), guardLine: line)
     }
 }

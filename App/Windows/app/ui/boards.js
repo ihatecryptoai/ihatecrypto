@@ -310,7 +310,7 @@ function rowTurn(count, size, gap, solid) {
 
 /** What a step does, read from its label («BUY · Solana», «SEND · Solana», «FROM · Hyperliquid»…): it picks the drawing. */
 function stepKind(label, title) {
-  const l = label.toUpperCase();
+  const l = englishVerb(label.toUpperCase());
   const place = (l.split("·").pop() || "").trim();
   const has = (...w) => w.some((x) => l.includes(x));
   const starts = (...w) => w.some((x) => l.startsWith(x));
@@ -346,6 +346,20 @@ function stepKind(label, title) {
   if (starts("TO") && !OWN_PLACES.some((p) => place.startsWith(p))) return "send";
   return "wallet";
 }
+/** A Russian label's verb in English («ОТКУДА · SOLANA» → «FROM · SOLANA»), so it picks the same drawing: the Mac keeps
+ *  its labels English, the engine here says them in the reply's language. */
+const RU_VERBS = [["ОБМЕН МЕЖДУ СЕТЯМИ", "SWAP ACROSS"], ["ОБМЕН RELAY", "RELAY SWAP"], ["СЖЕЧЬ И ВЫПУСТИТЬ", "BURN & MINT"], ["ОТКУДА", "FROM"],
+  ["КУДА", "TO"], ["РАЗРЕШЕНИЕ", "APPROVE"], ["ПРИДЁТ", "ARRIVES"], ["ЗАЁМ", "BORROW"], ["МОСТ", "BRIDGE"], ["ПОКУПКА", "BUY"], ["ПРОДАЖА", "SELL"],
+  ["ПРОВЕРКА", "CHECK"], ["ЗАБРАТЬ", "CLAIM"], ["ЗАКРЫТИЕ", "CLOSE"], ["ЗАЛОГ", "COLLATERAL"], ["КАЖДЫЕ", "EVERY"], ["ГАЗ", "GAS"],
+  ["ЗАБЛОКИРОВАНО", "LOCKED"], ["МУЛЬТИСИГ", "MULTISIG"], ["ОПЛАТА", "PAY"], ["ВОЗВРАТ", "REPAY"], ["ОТЗЫВ", "REVOKE"], ["ПОДПИСЬ", "SIGN"],
+  ["СИМУЛЯЦИЯ", "SIMULATION"], ["ОБМЕН", "SWAP"], ["СДЕЛКА", "TRADE"], ["ОТКРЫТЬ ЛОНГ", "OPEN LONG"], ["ОТКРЫТЬ ШОРТ", "OPEN SHORT"]];
+function englishVerb(l) {
+  const hit = RU_VERBS.find(([ru]) => l.startsWith(ru) && !/\p{L}/u.test(l[ru.length] || ""));
+  if (hit) return hit[1] + l.slice(hit[0].length);
+  // «В · KAMINO LEND» goes into a deposit; «В BASE» (on Base) stays a place.
+  return l.startsWith("В ·") ? "INTO" + l.slice(1) : l;
+}
+
 /** «TO · SOLANA» lands in one of the user's own places; «TO · Mom» is someone else. */
 const OWN_PLACES = ["SOLANA", "BASE", "ARBITRUM", "HYPERLIQUID", "ROBINHOOD", "NEAR", "USDC", "USDG", "POLYGON", "ETHEREUM", "TEMPO", "HYPEREVM", "OPTIMISM", "BNB"];
 
@@ -1084,12 +1098,14 @@ function tokenBlock(b) {
   const pick = h("div", { class: "route-chart-range" }, TRANGES.map(([key, label]) => h("button", { class: key === c.range ? "route-on" : "", onclick: () => key !== c.range && act("tokenRange", { board: b.id, text: key }) }, label)));
   const priceEl = chart ? chart.priceEl : h("span", { class: "route-chart-price" }, c.price !== null && c.price !== undefined ? price(Number(c.price)) : "—");
   const changeEl = change === null ? null : h("span", { class: "route-chart-change " + (change < 0 ? "loss" : "profit") }, (change < 0 ? "−" : "+") + Math.abs(change).toFixed(2) + "% · " + rangeTitle(c.range));
-  const held = c.held ? h("div", { class: "route-held" },
-    h("div", {}, h("span", { class: "eyebrow" }, t("You hold", "У тебя")), h("b", { class: "num" }, masked(`${c.held.amount} ${c.symbol}`)),
+  // As the Mac's held card: since when the P/L counts, and under it what was bought, what came in and what it's worth.
+  const held = c.held ? h("div", { class: "route-held plan-held" },
+    h("div", {}, h("span", { class: "eyebrow" }, t("You hold", "У тебя") + (c.held.since ? " · " + c.held.since : "")), h("b", { class: "num" }, masked(`${c.held.amount} ${c.symbol}`)),
       h("span", { class: "secondary small" }, c.held.how + (c.held.today !== null && c.held.today !== undefined ? " · " + t("today ", "сегодня ") + masked(signedUsd(c.held.today)) : ""))),
     h("span", { class: "spacer" }),
     h("div", { class: "route-held-value" }, h("b", { class: "num" }, masked(c.held.usd !== null && c.held.usd !== undefined ? usd(c.held.usd) : "—")),
-      c.held.pnl ? h("span", { class: "num small " + (Number(c.held.gain) < 0 ? "loss" : "profit") }, masked(c.held.pnl)) : null)) : null;
+      c.held.pnl ? h("span", { class: "num small " + (Number(c.held.gain) < 0 ? "loss" : "profit") }, masked(c.held.pnl)) : null),
+    c.held.paid ? h("div", { class: "plan-held-paid secondary small" }, masked(c.held.paid)) : null) : null;
   const phrases = tradePhrases(c.chain, c.address, c.symbol, { stock: c.stock, verified: c.verified === true, dollar: c.dollar });
   const watch = !c.favorite && !c.dollar ? [[t(`Watch ${c.symbol}`, `Следить за ${c.symbol}`), "star", `watch token ${c.address} on ${c.chain}`]] : [];
   return h("div", { class: "route-block route-chart-block route-token" + (isAttached(b.id) ? " route-attached" : ""), oncontextmenu: (e) => blockMenu(e, b, b.title) },

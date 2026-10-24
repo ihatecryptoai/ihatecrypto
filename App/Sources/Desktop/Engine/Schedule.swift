@@ -53,8 +53,7 @@ extension Engine {
 
     /// The steps must be what this app runs.
     func runnable(_ step: String) -> Bool {
-        WalletCommand.parse(step) != nil || PositionCommand.parse(step) != nil || AlertCommand.parse(step, markets: Set(markets.keys)) != nil
-            || AgentCheck.parse(step) != nil
+        knows(step) || AgentCheck.parse(step) != nil
             || IntentParser.apply(step, to: TradeIntent(), markets: Set(markets.keys)) != nil
     }
 
@@ -257,7 +256,8 @@ extension Engine {
             await runOnAutomation(task, automation)
             await refreshAutomationBudget()
         } else if task.steps.count > 1 {
-            if !(await chain(task.steps, note: "schedule")) { stepFailed = true }
+            // A step that can't go on or a first move that can't be paid stops the run before any card: it failed.
+            if !(await chain(task.steps, note: "schedule")) || chainState.stopped { stepFailed = true }
         } else if let step = task.steps.first, !(await runCanonical(step, userText: step)) {
             reply(say("“\(step)” didn't run.", "«\(step)» не выполнилось."), note: "schedule")
             stepFailed = true

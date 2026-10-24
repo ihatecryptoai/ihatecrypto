@@ -91,6 +91,7 @@ button.pg-set-way:hover { background: var(--fill); }
 .pg-skill-actions .link-btn { font-size: 11.5px; }
 .pg-skill-actions .accent-ink { color: var(--accent-ink); }
 .pg-skill-actions .loss { color: var(--loss); }
+.pg-skill-actions .link-btn:disabled { opacity: 0.4; cursor: default; color: var(--secondary); }
 .pg-skill-body { max-height: 280px; overflow: auto; margin: 0; padding: 10px; border-radius: 10px; background: var(--fill); font: 11px/1.45 var(--mono);
   white-space: pre-wrap; }
 

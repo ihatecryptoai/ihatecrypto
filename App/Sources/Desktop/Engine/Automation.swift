@@ -171,6 +171,8 @@ extension Engine {
                 running = (command.summary, [])
                 changed()
                 let said = messages.count
+                // No one may be at the window: Windows Hello waiting on this move is told as a notification.
+                let hello = watchForHello(command.summary)
                 do {
                     try await move(command)
                     updateBoard(id) { $0.state = "done" }
@@ -178,6 +180,7 @@ extension Engine {
                     updateBoard(id) { $0.state = "failed" }
                     reply(say("Failed: ", "Не вышло: ") + error.localizedDescription, note: "schedule")
                 }
+                hello.cancel()
                 let outcome = messages.dropFirst(said).last { !$0.fromUser }?.text
                 updateBoard(id) { b in if let outcome { b.lines.append(String(outcome.prefix(400))) } }
                 runningBoard = nil

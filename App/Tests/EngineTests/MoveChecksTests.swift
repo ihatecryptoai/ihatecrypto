@@ -65,7 +65,9 @@ import Testing
     /// «send 2 USDC to 0x…» with that address saved as Mom: the guard doesn't stop it, the card goes to Mom by name, and,
     /// the first time, it says to try a small amount first.
     @Test(.enabled(if: winsec_is_stub() == 1)) func aSavedAddressIsItsNameAndAFirstSendWarns() throws {
-        let engine = try walletEngine()
+        // No wallet, so no balances arrive to say the send is short before its card (Chains.transferShortfall).
+        let engine = try EngineTests.Engine()
+        try engine.call("hello")
         let mom = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
         let saved = try engine.call("saveAddress", ["name": "Mom", "network": "base", "address": mom])
         #expect(saved.answer["ok"] as? Bool == true, "\(saved.answer)")

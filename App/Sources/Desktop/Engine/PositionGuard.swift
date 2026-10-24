@@ -122,7 +122,8 @@ extension Engine {
             .init(coin: IntentParser.pretty(p.coin), side: p.size > 0 ? "long" : "short", size: Fmt.num(abs(p.size), maxFraction: 6),
                   entry: Fmt.price(p.entry), pnl: Fmt.usd(p.unrealizedPnl), liquidation: p.liquidation.map(Fmt.price),
                   summary: Self.summary(coin: p.coin, size: p.size, entry: p.entry, orders: hlOrders, say: words),
-                  guardian: rules[p.coin].map { Self.duties($0, say: words).joined(separator: " ") })
+                  guardian: rules[p.coin].map { Self.duties($0, say: words).joined(separator: " ") },
+                  ruler: positionRuler(p, rules: rules[p.coin]))
         }
     }
 

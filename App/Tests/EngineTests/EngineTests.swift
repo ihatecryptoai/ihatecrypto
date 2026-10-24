@@ -282,10 +282,10 @@ import Testing
     }
 
     @Test(.enabled(if: winsec_is_stub() == 1)) func moneyGoesOnlyToASavedNameAndOnlyConfirmRunsIt() throws {
+        // No wallet, so no balances arrive: a read landing mid-test would say the send is short (Chains.transferShortfall,
+        // ChainsTests) instead of carding it, and which comes first was a race.
         let engine = try Engine()
         try engine.call("hello")
-        try engine.call("createWallet", ["test": false])
-        try engine.call("phraseSaved")
         let unknown = try engine.call("send", ["text": "send 5 USDC to mom"])
         #expect(unknown.state?["card"] == nil)
         #expect(Self.chat(unknown.state).last?.contains("no “mom”") == true)

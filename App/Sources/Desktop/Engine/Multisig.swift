@@ -179,7 +179,8 @@ extension Engine {
             pending = .wallet(Self.command(d))
             card?.title = title
             card?.lines = lines
-            updateBoard(id) { $0.title = title; $0.steps = [Board.Step(label: say("MULTISIG · Safe", "МУЛЬТИСИГ · Safe"), title: title, lines: lines)] }
+            let route = steps(for: .wallet(Self.command(d)), title: title, lines: lines)
+            updateBoard(id) { $0.title = title; $0.steps = route }
         } else {
             show(.wallet(Self.command(d)), title: title, lines: lines)
         }
