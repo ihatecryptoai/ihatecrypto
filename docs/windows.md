@@ -37,8 +37,10 @@ every change. Between the engine and the signer go the Mac's own `SignerRequest`
   Keychain group, which no other program reads; on Windows it is sealed as a seed is, under the Windows Hello key, and
   opened once per signer run — by the first Windows Hello the signer asks for anything, or by a prompt at the first
   order — then kept only in the signer's memory. Its address is kept beside it and recorded in the trusted settings, so
-  Settings shows it without opening it and a key file put there by another program is never approved as the trading key.
-  A key kept before (DPAPI only) is sealed the first time it is used.
+  Settings shows it without opening it. A DPAPI-only key file beside a wallet whose keys are sealed is never read: one
+  another program puts there is neither shown, used for an order nor approved — turning the key on makes a new one
+  inside the signer and removes that file. (Keys kept DPAPI-only by builds before 2026-10-24 were on test machines;
+  they are left, and the key is approved again once.)
 - **After a restart, until that first Windows Hello**, the guardian can't move a stop by itself, as it can on a Mac. Its
   first try asks for the trading key, a prompt that closes after a minute; unanswered, that order is refused with why —
   never handed to the main key — and for ten minutes the key doesn't ask again for orders that only reduce (stops,

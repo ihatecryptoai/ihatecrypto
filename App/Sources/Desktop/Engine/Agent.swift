@@ -20,7 +20,9 @@ extension Engine {
 
     /// Goes on once the step is through: nothing goes on while a card waits for Confirm, a move runs, or the user wrote since.
     func continueAgent() async {
-        guard let goal = agentGoal, pending == nil, running == nil, !thinking, awaitingAmount == nil, let client = llmClient() else { return }
+        // Steps held behind a card, or running after it, come first: the model hears how they went once they end.
+        guard let goal = agentGoal, pending == nil, running == nil, !thinking, awaitingAmount == nil, chainState.afterCall == nil,
+              !chainState.runningHeld, let client = llmClient() else { return }
         agentGoal = nil
         guard goal.round + 1 < Self.agentRounds else { return }
         let said = messages.dropFirst(goal.mark).filter { !$0.fromUser }.suffix(8).map { String($0.text.prefix(800)) }

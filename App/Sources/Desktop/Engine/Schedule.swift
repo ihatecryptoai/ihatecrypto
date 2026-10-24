@@ -304,7 +304,7 @@ extension Engine {
             thinking = false
             changed()
             ran = !quietCheck
-        } else if usesAutomation(task), let automation = automationWallet, task.movesMoney {
+        } else if usesAutomation(task), let automation = automationWallet, task.movesMoney || task.managesPosition {
             if !(await runOnAutomation(task, automation)) { stepFailed = true }
             await refreshAutomationBudget()
         } else if task.steps.count > 1 {

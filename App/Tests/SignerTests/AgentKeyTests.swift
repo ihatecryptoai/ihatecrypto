@@ -5,8 +5,8 @@ import Testing
 import WalletCore
 
 /// The Hyperliquid trading key on Windows (AgentStore): sealed under Windows Hello as a seed is, opened once per signer
-/// run, its address readable without opening it; a key kept under DPAPI only is sealed at its first use, and one put
-/// there after a key was sealed is never taken. In VaultTests' suite: they share the signer's folder, one at a time.
+/// run, its address readable without opening it; a key kept under DPAPI only is taken only by a wallet that signs with
+/// no one there (test, automation), never one put beside a wallet whose keys are sealed. In VaultTests' suite: they share the signer's folder, one at a time.
 extension VaultTests {
     /// A new signer process: nothing opened, no session, the files read again.
     func restart() {
@@ -48,24 +48,33 @@ extension VaultTests {
         #expect(AgentStore.load(id: id) == key)
     }
 
-    @Test(.enabled(if: fakeHello)) func anOldTradingKeyIsSealedAtItsFirstUseAndAPlantedOneIsNeverTaken() throws {
+    /// S9: a key file another program of the user puts beside a wallet whose keys are sealed — with no key there yet, or
+    /// after the sealed one — is never taken: not shown, not used for an order, and turning the key on approves a new one.
+    @Test(.enabled(if: fakeHello)) func aPlantedTradingKeyIsNeverTakenNorApproved() throws {
         _ = try importWallet()
         let id = SignerWallet.firstID
-        // Kept as before 2026-10-24: DPAPI only.
-        let old = try AgentStore.make()
-        try Vault.write(AgentStore.plain(id), Vault.protect(old))
-        restart()
-        #expect(Vault.$scope.withValue(Vault.Scope()) { AgentStore.load(id: id) } == old)
-        #expect(Vault.exists(AgentStore.file(id)) && !Vault.exists(AgentStore.plain(id)))
-        #expect(AgentStore.address(id: id) == (try EVMAccount.address(privateKey: old)))
-
-        // Another program deletes the sealed key and puts its own beside the wallet, the old way: never taken.
         let planted = try AgentStore.make()
+        let plantedAddress = try EVMAccount.address(privateKey: planted)
+        try Vault.write(AgentStore.plain(id), Vault.protect(planted))
+        restart()
+        #expect(!AgentStore.has(id: id) && AgentStore.address(id: id) == nil)
+        #expect(Vault.$scope.withValue(Vault.Scope()) { AgentStore.load(id: id) } == nil)
+        // Turning the key on makes one inside the signer; the planted file goes.
+        let agent = try #require(try send(.enableAgent).agentAddress)
+        #expect(agent.lowercased() != plantedAddress.lowercased())
+        #expect(Vault.exists(AgentStore.file(id)) && !Vault.exists(AgentStore.plain(id)))
+
+        // Put back after the sealed key is deleted: still never taken.
         Vault.remove(AgentStore.file(id))
         try Vault.write(AgentStore.plain(id), Vault.protect(planted))
         restart()
         #expect(AgentStore.address(id: id) == nil)
         #expect(Vault.$scope.withValue(Vault.Scope()) { AgentStore.load(id: id) } == nil)
+        // A Ledger's trading key is sealed too: a file planted for it isn't one.
+        let ledger = "ledger-0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+        try Vault.write(AgentStore.plain(ledger), Vault.protect(planted))
+        #expect(!AgentStore.has(id: ledger) && AgentStore.address(id: ledger) == nil)
+        Vault.remove(AgentStore.plain(ledger))
     }
 
     @Test(.enabled(if: fakeHello)) func aSealedKeysAddressIsTakenOnlyAsTheTrustedStateRecordedIt() throws {

@@ -23,6 +23,10 @@ extension ScheduledTask {
         }
     }
 
+    /// It changes an open position (close, stop, take, trail): on the automation wallet it runs by itself, on that
+    /// wallet's own account, as the Mac's confirmed runSteps carries a position out.
+    var managesPosition: Bool { steps.contains { WalletCommand.parse($0) == nil && PositionCommand.parse($0) != nil } }
+
     /// It sells a coin: from the wallet that's on, with Windows Hello, never by itself from the automation wallet.
     var sells: Bool {
         steps.contains { step in
@@ -46,7 +50,7 @@ extension Engine {
 
     /// Its moves would go with no one at the computer: a new one starts paused, and only its switch in the window — a
     /// click, never a chat message — turns it on.
-    func waitsForSwitch(_ t: ScheduledTask) -> Bool { usesAutomation(t) && (t.movesMoney || t.steps.contains { PositionCommand.parse($0) != nil }) }
+    func waitsForSwitch(_ t: ScheduledTask) -> Bool { usesAutomation(t) && (t.movesMoney || t.managesPosition) }
 
     func createAutomationWallet(note: String? = nil) async {
         guard automationWallet == nil else {
@@ -166,7 +170,9 @@ extension Engine {
                                          comment: say("From your main wallet: Confirm and Windows Hello.", "С основного кошелька: «Подтвердить» и Windows Hello."),
                                          command: "send \(need) SOL to \(automation.label)", recommended: true)]
         }
-        await sendBoughtToMain(from: automation)
+        // A run that stopped at a card (a contract call waits for its Confirm) leaves what it bought for the next run, as
+        // the Mac's `if let automation, !waits`.
+        if pending == nil { await sendBoughtToMain(from: automation) }
         return true
     }
 
@@ -302,6 +308,15 @@ extension Engine {
     func rememberName(_ buy: WalletCommand) {
         guard case .buy(let a, _) = buy, !a.mint.isEmpty, !a.symbol.contains("…"), !SpotAsset.all.contains(where: { $0.mint == a.mint }) else { return }
         tokenNames[a.mint] = a.symbol
+        if a.resolved { keptAssets[a.mint] = KeptAsset(symbol: a.symbol, decimals: a.decimals, token2022: a.token2022) }
+    }
+
+    /// The token a recurring buy's first Confirm bought, by its mint: each run buys that token, as the Mac's schedule
+    /// keeps its asset, and never checks it against Jupiter's list again.
+    struct KeptAsset: Codable { var symbol: String; var decimals: Int; var token2022: Bool }
+    var keptAssets: [String: KeptAsset] {
+        get { Store.load([String: KeptAsset].self, "recurring-assets.json") ?? [:] }
+        set { Store.save(newValue, "recurring-assets.json") }
     }
 
     /// Recurring buys told once that they wait for the Ledger.
@@ -331,7 +346,9 @@ extension Engine {
             record("failed", off)
             return
         }
-        guard let token = await spotToken(asset, note: "schedule") else {
+        var token = keptAssets[asset.mint].map { SpotAsset(symbol: $0.symbol, mint: asset.mint, decimals: $0.decimals, token2022: $0.token2022) }
+        if token == nil { token = await spotToken(asset, note: "schedule") }
+        guard let token else {
             record("failed", messages.last { !$0.fromUser }?.text ?? title)
             return
         }
@@ -345,7 +362,7 @@ extension Engine {
         _ = try? await SignerLink.shared.send(.endSession)
         let hello = watchForHello(title)
         do {
-            let line = try await executor().swap(token, buy: true, amount: usdc, equity: portfolio.total)
+            let line = try await executor().swap(token, buy: true, amount: usdc, equity: ruleEquity)
             notify(.moves, title, line)
             record("done", line)
         } catch {

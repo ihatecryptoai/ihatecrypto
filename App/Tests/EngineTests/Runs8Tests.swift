@@ -9,7 +9,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Runs8Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("runs8-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
     private var engine: Engine { Self.engine }
 

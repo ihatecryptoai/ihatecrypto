@@ -9,7 +9,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Sends9Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("sends9-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
     private var engine: Engine { Self.engine }
 
@@ -31,7 +31,8 @@ import Testing
     /// S7: the multisig answers only on a network it's made on — an older build's «Multisig» book entry included.
     @Test func aMultisigNeverAnswersOnANetworkItIsntMadeOn() {
         fresh(book: [SignerAddress(name: "Multisig", network: "base", address: Self.safe)], safeOn: ["base"])
-        #expect(engine.entry("Multisig", network: "base")?.address == Self.safe)
+        // An older build's own «Multisig» entry gives way to the Safe itself (multisigEntry), as on the Mac.
+        #expect(engine.entry("Multisig", network: "base")?.address.lowercased() == Self.safe.lowercased())
         #expect(engine.entry("Multisig", network: nil)?.network == "base")
         #expect(engine.entry("Multisig", network: "arbitrum") == nil)
         #expect(engine.entry("Multisig", network: "hyperliquid") == nil)

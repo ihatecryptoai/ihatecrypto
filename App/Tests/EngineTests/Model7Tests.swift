@@ -10,7 +10,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Model7Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("model7-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
     private var engine: Engine { Self.engine }
     // Public test data only: Hardhat's deployer contract and account #3, Solana's test phrase address.

@@ -15,7 +15,7 @@ import Testing
         if ProcessInfo.processInfo.environment["IHATECRYPTO_ENGINE_DIR"] == nil {
             setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("moves6-\(UUID().uuidString)").path)
         }
-        let e = Engine(out: Outbox())
+        let e = Engine(out: Outbox(silent: true))
         // No model: a review or an explanation never reaches a real one.
         e.settings.provider = "openrouter"
         e.settings.language = "en"

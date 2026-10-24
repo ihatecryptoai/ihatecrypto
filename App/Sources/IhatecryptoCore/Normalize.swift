@@ -108,6 +108,13 @@ public enum ChatRouter {
         public init() {}
     }
 
+    /// The computer the app runs on, in the model's text: on a Mac the Mac's own words, unchanged.
+    #if os(Windows)
+    static let device = "this PC", deviceWord = "PC", appKind = "a Windows app"
+    #else
+    static let device = "this Mac", deviceWord = "Mac", appKind = "a Mac app"
+    #endif
+
     /// Every example must parse locally (RouterTests): the model is told to produce exactly these.
     public static let forms = """
     TRADE PLAN (a perp on Hyperliquid; ASSET is a crypto ticker like BTC, ETH, SOL, HYPE, or oil, brent, gold, silver, or a stock ticker like TSLA, NVDA):
@@ -208,7 +215,7 @@ public enum ChatRouter {
       0xF… deposit(uint256,address) 10e6 me approving 10 USDC; its withdrawal = call arbitrum 0xF… redeem(uint256,address,address)
       <SHARES> me me; «застейкай 0.01 ETH в Lido» with stETH found at 0xS… = call ethereum 0xS… submit(address)
       0x0000000000000000000000000000000000000000 with 0.01 ETH. Say «ihatecrypto can't» only after this form can't do it either)
-    MULTISIG (a Safe vault: its money moves only when M of its N keys sign — this Mac's key is always one, the connected Ledger's another, and any saved address can be one: a phone wallet, a partner):
+    MULTISIG (a Safe vault: its money moves only when M of its N keys sign — \(device)'s key is always one, the connected Ledger's another, and any saved address can be one: a phone wallet, a partner):
       make a multisig [M of N] [with <NAME>[, <NAME>…]] [on <base|arbitrum|optimism|polygon|ethereum|bnb|hyperevm|robinhood|tempo>[, <network>…]]
       (NAME is an address-book entry; no M = a majority; no network = Base — write networks only when they name them; the same address on every
       network it's made on; its card lets them add keys, change M and pick networks before Confirm. «сделай мультисиг 2 из 3 с телефоном на арбитруме
@@ -324,10 +331,10 @@ public enum ChatRouter {
     else: you can read any public chain and data API through them, but you can't change the app, write code, browse \
     websites or move money yourself. When they want something ihatecrypto \
     can't do, say so plainly and offer the closest thing it can.
-    What ihatecrypto is, when they ask about the app itself: a Mac app — this chat beside a canvas, a board where what you \
+    What ihatecrypto is, when they ask about the app itself: \(appKind) — this chat beside a canvas, a board where what you \
     answer becomes blocks: a trade plan, a route of step cards waiting for Confirm, charts, rates, notes, alerts. A topic can \
     get its own canvas («new canvas»); canvases and note folders sit in the rail on the left, with History (the clock) and \
-    Addresses (the book). The keys stay sealed in a separate signer on this Mac — neither the app nor you ever see them; every \
+    Addresses (the book). The keys stay sealed in a separate signer on this \(deviceWord) — neither the app nor you ever see them; every \
     money move waits for their Confirm and \(Presence.name), and rules written in code check each trade before it is signed. The model \
     is the one they connected (their own subscription or key), called only for their messages: one message is one call, plus \
     one per round of lookups (at most 3), a second read of a command before it runs, a short comment on a changed plan and one \

@@ -11,7 +11,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Consent6Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("consent-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
 
     // Hardhat's public accounts #1 and #3, and a public contract (AERO on Base).

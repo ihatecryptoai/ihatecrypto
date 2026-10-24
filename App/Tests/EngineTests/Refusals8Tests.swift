@@ -10,7 +10,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Refusals8Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("refusals8-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
     private var engine: Engine { Self.engine }
     // Public test data only: Hardhat's accounts #3 and #1, the multisig a made-up address of zeros and ones.

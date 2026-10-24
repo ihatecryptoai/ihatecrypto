@@ -449,7 +449,8 @@ enum AgentStore {
     static func name(_ id: String) -> String { "agent-\(Wallets.scoped("hyperliquid", id))" }
     /// Sealed under Windows Hello.
     static func file(_ id: String) -> String { name(id) + ".sealed" }
-    /// DPAPI only: a wallet that signs with no prompt, and every key before 2026-10-24.
+    /// DPAPI only: a wallet that signs with no prompt (test, automation). For a wallet whose keys are sealed it is never
+    /// read: any program of the user can write it, and `enableAgent` would have the main key approve what it holds.
     static func plain(_ id: String) -> String { name(id) + ".key" }
     /// Set in the sealed trusted state once a key of `id` is sealed: a DPAPI-only file for it is never taken again, so a
     /// program can't put its own key there to be approved as the trading key.
@@ -502,13 +503,14 @@ enum AgentStore {
     }
 
     /// Whether there is a trading key for `id`, without opening it.
-    static func has(id: String = Wallets.activeID) -> Bool { Vault.exists(file(id)) || Vault.exists(plain(id)) }
+    static func has(id: String = Wallets.activeID) -> Bool { Vault.exists(file(id)) || (!sealedFor(id) && Vault.exists(plain(id))) }
 
     /// Its address, without opening it (Settings, the status, the approval `enableAgent` signs). The file's address is
     /// taken only as the trusted state recorded it when the key was sealed: a file with another address put there would
     /// get that address approved. (A trusted state changed to match stops the approval's Windows Hello: `Trusted.verify`.)
     static func address(id: String = Wallets.activeID) -> String? {
         if let s = readSealed(id) { return Trusted.state.prefs[record(id)] == .string(s.address) ? s.address : nil }
+        guard !sealedFor(id) else { return nil }
         return load(id: id, prompt: false).flatMap { try? EVMAccount.address(privateKey: $0) }
     }
 
@@ -527,13 +529,10 @@ enum AgentStore {
             lock.withLock { opened[name(id)] = key }
             return key
         }
-        guard let blob = Vault.read(plain(id)), let key = try? Vault.unprotect(blob) else { return nil }
-        // A DPAPI-only key where a sealed one was kept: put there by someone else.
-        guard Trusted.state.prefs[record(id)] == nil else { return nil }
-        // Kept before keys were sealed: sealed now (that asks Windows Hello once, closing after a minute), the old file gone.
-        if sealedFor(id), prompt {
-            guard asksNow(), (try? save(key, id: id, within: 60)) != nil else { return unanswered() }
-        }
+        // A DPAPI-only key beside a wallet whose keys are sealed: never ours to take — written by another program, or
+        // left from a build before keys were sealed (test machines only), and turning the key on makes a new one.
+        guard !sealedFor(id), Trusted.state.prefs[record(id)] == nil,
+              let blob = Vault.read(plain(id)), let key = try? Vault.unprotect(blob) else { return nil }
         return key
     }
 

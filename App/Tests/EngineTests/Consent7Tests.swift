@@ -11,7 +11,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Consent7Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("consent7-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
     // Hardhat's public account #3 and Base's USDC.
     static let mom = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"

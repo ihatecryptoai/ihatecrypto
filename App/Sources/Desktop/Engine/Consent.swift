@@ -206,6 +206,10 @@ extension Engine {
         if o.command == Self.leaveCostly { costly = nil; reply(say("Left as it was: nothing was signed.", "Оставил как есть: ничего не подписано.")); return }
         guard !o.command.isEmpty else { await send(o.title); return }
         if card != nil { cancelPending() }
+        // Like any new message, it drops what waited: steps held behind a card, a «How much?» (the Mac's pick).
+        chainState.afterCall = nil
+        chainState.held = nil
+        awaitingAmount = nil
         messages.append(Message(fromUser: true, text: o.title))
         agentGoal = nil
         nameCanvas(from: o.title)

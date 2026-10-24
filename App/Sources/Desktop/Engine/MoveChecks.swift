@@ -438,11 +438,18 @@ extension Engine {
         var to: [String] = []
         switch done {
         case .transfer(let e, _): to = [e.address]
-        case .wallet(.sendSol(let name, _)): to = entry(name, network: "solana").map { [$0.address] } ?? []
-        case .wallet(.sendNear(let name, _)), .wallet(.closeNear(let name)): to = entry(name, network: "near").map { [$0.address] } ?? []
+        // The address the send went to, found as the send found it (a partial name, another wallet here).
+        case .wallet(let c) where (try? nativeRecipient(c)) != nil: to = ((try? nativeRecipient(c)) ?? nil).map { [$0.address] } ?? []
         case .wallet(.sendToken(let name, let token, _, let net)):
             to = ((try? acrossRecipient(name, token: token, network: net))?.entry.address ?? (try? tokenRecipient(name, network: net))?.entry.address).map { [$0] } ?? []
-        case .chain(let steps): to = steps.compactMap { if case .transfer(let e, _) = $0 { e.address } else { nil } }
+        case .chain(let steps):
+            to = steps.compactMap { step -> String? in
+                switch step {
+                case .transfer(let e, _): e.address
+                case .wallet(let c): ((try? nativeRecipient(c)) ?? nil)?.address
+                default: nil
+                }
+            }
         default: break
         }
         guard !to.isEmpty else { return }

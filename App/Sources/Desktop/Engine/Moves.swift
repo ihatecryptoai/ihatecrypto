@@ -278,7 +278,12 @@ extension Engine {
         // A multisig's address answers only on a network it's made on: elsewhere no Safe holds it, and money sent there is
         // stuck (an older Windows build saved «Multisig» in the book; the Mac never does — multisigEntry decides).
         let safes = Dictionary(multisigs.map { ($0.address.lowercased(), $0.networks) }, uniquingKeysWith: { a, b in a + b })
-        let usable = book.filter { e in safes[e.address.lowercased()].map { $0.contains(network ?? e.network) } ?? true }
+        let usable = book.filter { e in
+            guard let nets = safes[e.address.lowercased()] else { return true }
+            // An older build's own «Multisig» entry: multisigEntry answers that name with the newest Safe, as on the Mac.
+            if Self.namesMultisig(e.name) { return false }
+            return nets.contains(network ?? e.network)
+        }
         let named = usable.filter { $0.name.lowercased() == key }
         let near = key.isEmpty ? [] : usable.filter { $0.name.lowercased().contains(key) }
         return named.first(where: fits) ?? named.first ?? ownWallet(name, network: network) ?? multisigEntry(key, network: network)
@@ -287,8 +292,12 @@ extension Engine {
 
     /// The multisig as an address-book entry («send 10 USDC on base to the multisig»), only on a network it's made on; the
     /// signer asks Windows Hello, with the whole address, the first time money goes there, as for any new address.
+    nonisolated static func namesMultisig(_ name: String) -> Bool {
+        name.lowercased().wholeMatch(of: /(?:the\s+|my\s+)?(?:multisig|мультисиг\w*)/) != nil
+    }
+
     func multisigEntry(_ name: String, network: String?) -> SignerAddress? {
-        guard name.lowercased().wholeMatch(of: /(?:the\s+|my\s+)?(?:multisig|мультисиг\w*)/) != nil, let m = multisigs.last else { return nil }
+        guard Self.namesMultisig(name), let m = multisigs.last else { return nil }
         let net = network ?? m.networks.first ?? "base"
         guard m.networks.contains(net) else { return nil }
         return SignerAddress(name: "Multisig", network: net, address: m.address, memo: "")
@@ -328,17 +337,15 @@ extension Engine {
 
     /// Another wallet of this computer by its name («send 10 USDC to Automation»): the user's own, which the signer
     /// knows as ours, so it needs no saving first.
+    /// Another of the user's own wallets by its name, or the Ledger by what it is: its Solana address, as the Mac's ownWallet
+    /// — «send 10 USDC on base to Test» is told it's a Solana address (`network` is the asked one, never the answer's).
     func ownWallet(_ name: String, network: String?) -> SignerAddress? {
         let key = Self.ownKey(name)
         if let l = ledger, l.active != true, Self.meansLedger(key, label: l.label) {
-            let net = network ?? (l.solana != nil ? "solana" : "base")
-            let address = net == "solana" ? l.solana : net == "near" ? nil : l.evm
-            return address.map { SignerAddress(name: l.label, network: net, address: $0, memo: "") }
+            return l.solana.map { SignerAddress(name: l.label, network: "solana", address: $0, memo: "") }
         }
         guard let w = status?.wallets?.first(where: { $0.label.lowercased() == key && $0.id != activeWallet?.id }) else { return nil }
-        let net = network ?? (w.solana != nil ? "solana" : "base")
-        let address = net == "solana" ? w.solana : net == "near" ? w.near : w.evm
-        return address.map { SignerAddress(name: w.label, network: net, address: $0, memo: "") }
+        return w.solana.map { SignerAddress(name: w.label, network: "solana", address: $0, memo: "") }
     }
 
     /// «my Ledger» → «ledger»: a wallet's name as the person says it.
@@ -500,6 +507,8 @@ extension Engine {
         let open = Set(positions.map(\.coin) + (pendingEntry.map { [$0.coin] } ?? []))
         if let named = IntentParser.namedAsset(text, markets: Set(markets.keys)) { return open.contains(named) ? named : nil }
         if intent != TradeIntent(), open.contains(intent.asset) { return intent.asset }
+        // The coin just traded (the Mac keeps its plan after the trade; here it's `tradedPlan`): «stop 2%» is about it.
+        if intent == TradeIntent(), let traded = tradedPlan?.asset, open.contains(traded) { return traded }
         return intent == TradeIntent() && open.count == 1 ? open.first : nil
     }
 
@@ -680,8 +689,8 @@ extension Engine {
             case .orders(let moves, let coin, let traded): reply(try await moveOrders(moves, coin: coin, intent: traded), note: "Hyperliquid")
             }
             noteSent(waiting)
-            // A contract call a chain held its next steps behind: they run now, on this Confirm (holdAfterCall).
-            if case .wallet(.contractCall) = waiting, let board = runningBoard { Task { await continueAfterCall(board) } }
+            // A card a chain held its next steps behind: they run now, on this Confirm (holdAfterCall).
+            if let board = runningBoard, chainState.afterCall?.board == board { Task { await continueAfterCall(board) } }
         } catch {
             // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown»,
             // never «failed» (the Mac's finish(false, unknown:)).
@@ -867,6 +876,8 @@ extension Engine {
         case .arbitrumToSolana(let amount): reply(try await e.evmToSolana(.arbitrum, usdc: amount), note: "Relay · Arbitrum → Solana")
         case .evmToSolana(let network, let amount): reply(try await e.evmToSolana(try net(network), usdc: amount), note: "Relay → Solana")
         case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
+        // Hyperliquid isn't an EVM network: its own deposit route (the Mac's case), the account-opening card's move too.
+        case .solanaTo("hyperliquid", let amount): reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
         case .solanaTo(let place, let amount): reply(try await e.solanaToEVM(try net(place), usdc: amount ?? 0), note: "Relay · Solana → \(place)")
         case .buyStock(let symbol, let usdc):
             reply(try await e.buyStock(symbol, usdc: usdc ?? 0), note: "Robinhood Chain · Uniswap")
@@ -905,7 +916,7 @@ extension Engine {
         case .bridge(let from, let to, let amount):
             let hyperliquid = to == "hyperliquid"
             reply(try await e.bridge(try net(from), to: hyperliquid ? nil : try net(to), hyperliquid: hyperliquid, usdc: amount), note: "Relay")
-        case .buy(let asset, let usdc): reply(try await e.swap(asset, buy: true, amount: usdc, equity: portfolio.total, shown: shownOut(command)), note: "Solana · Jupiter")
+        case .buy(let asset, let usdc): reply(try await e.swap(asset, buy: true, amount: usdc, equity: ruleEquity, shown: shownOut(command)), note: "Solana · Jupiter")
         case .sell(let asset, let amount): reply(try await e.swap(asset, buy: false, amount: amount, shown: shownOut(command)), note: "Solana · Jupiter")
         case .jupiterDCA(let asset, let usdc, let orders, let every):
             reply(try await e.jupiterDCA(asset, usdc: usdc ?? 0, orders: orders ?? WalletCommand.jupiterDCAOrders(for: usdc ?? 0), every: every), note: "Jupiter DCA")

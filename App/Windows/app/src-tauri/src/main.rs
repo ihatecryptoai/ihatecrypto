@@ -772,9 +772,14 @@ async fn update_check(app: tauri::AppHandle) -> Result<Option<String>, String> {
 async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
     let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(()) };
-    // The task rests while the installer swaps the files, or it could start the old copy mid-swap (the Mac's Updater).
+    // Downloaded and checked first; the task rests only once the installer really runs, or it could start the old copy
+    // mid-swap — and a download or install that fails leaves it going (the Mac's updaterWillRelaunchApplication).
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
     system::pause_keep_running();
-    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    if let Err(e) = update.install(bytes) {
+        system::resume_keep_running();
+        return Err(e.to_string());
+    }
     system::QUITTING.store(true, Ordering::SeqCst);
     app.restart()
 }

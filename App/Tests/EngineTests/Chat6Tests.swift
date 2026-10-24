@@ -11,7 +11,7 @@ import Testing
 @MainActor @Suite(.serialized) struct Chat6Tests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("chat6-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
 
     private var engine: Engine { Self.engine }

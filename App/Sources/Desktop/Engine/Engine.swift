@@ -839,9 +839,13 @@ final class Engine {
 /// The engine's output: one JSON line per answer or event on standard output, which the window reads.
 nonisolated final class Outbox: @unchecked Sendable {
     private let lock = NSLock()
+    /// An engine inside a test process writes nothing: its states would fill the test runner's own output (on Windows
+    /// `swift test` stalled on them, and with it every test).
+    private let silent: Bool
+    init(silent: Bool = false) { self.silent = silent }
 
     private func write(_ object: some Encodable) {
-        guard var data = try? JSONEncoder.lines.encode(object) else { return }
+        guard !silent, var data = try? JSONEncoder.lines.encode(object) else { return }
         data.append(0x0A)
         lock.withLock { FileHandle.standardOutput.write(data) }
     }

@@ -17,11 +17,21 @@ public enum Presence {
         var error: NSError?
         return LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
         #else
-        // ponytail: no Touch ID off a Mac; Windows Hello gets its own wording with the Windows signer.
+        // No Touch ID off a Mac: Windows asks through Windows Hello (the names below).
         return false
         #endif
     }()
 
+    #if os(Windows)
+    /// Windows Hello — the face, the finger or the PIN — in every case and language, as the window's own presence() says
+    /// it (a name, not declined in Russian).
+    public static var name: String { "Windows Hello" }
+    public static var short: String { "Windows Hello" }
+    public static var icon: String { "lock.fill" }
+    public static var ru: String { "Windows Hello" }
+    public static var ruGen: String { "Windows Hello" }
+    public static var ruIns: String { "Windows Hello" }
+    #else
     /// In a sentence: «asks for Touch ID» / «asks for your Mac password».
     public static var name: String { touchID ? "Touch ID" : "your Mac password" }
     /// On a label, or after «one»: «Sign · Touch ID» / «Sign · Mac password».
@@ -33,4 +43,5 @@ public enum Presence {
     public static var ruGen: String { touchID ? "Touch ID" : "пароля от Mac" }
     /// «подтверждено Touch ID / паролем от Mac».
     public static var ruIns: String { touchID ? "Touch ID" : "паролем от Mac" }
+    #endif
 }

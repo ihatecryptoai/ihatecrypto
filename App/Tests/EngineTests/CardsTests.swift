@@ -12,7 +12,7 @@ import Testing
 @MainActor @Suite(.serialized) struct CardsTests {
     static let engine: Engine = {
         setEnv("IHATECRYPTO_ENGINE_DIR", FileManager.default.temporaryDirectory.appendingPathComponent("cards-\(UUID().uuidString)").path)
-        return Engine(out: Outbox())
+        return Engine(out: Outbox(silent: true))
     }()
 
     // Public test data only: Hardhat's addresses, a token's public contract, XRP's account zero.

@@ -68,6 +68,15 @@ extension Engine {
         return (Plan.resolve(intent, market: m, equity: portfolio.total > 0 ? portfolio.total : nil, policy: policy).intent, m)
     }
 
-    /// What the risk rules measure against for a position's stop: the whole portfolio, as the Mac's `equity`.
-    var ruleEquity: Decimal? { portfolio.total > 0 ? portfolio.total : nil }
+    /// Capital the risk rules measure against, as the Mac's `equity`: everything on show but the networks' own coins (SOL,
+    /// ETH and the other gas coins) — the user's money, in the balance, but no trade may spend it. NEAR counts, as on the
+    /// Mac. The plan, a stop change and a Solana buy all measure against this.
+    var ruleEquity: Decimal? {
+        guard portfolio.total > 0 else { return nil }
+        let gas = portfolio.networks.filter { $0.key != "near" }.flatMap(\.rows).filter(Self.isGasCoin).reduce(Decimal(0)) { $0 + ($1.usd ?? 0) }
+        return max(portfolio.total - gas, 0)
+    }
+
+    /// A network's own coin: an EVM network's «native» row, SOL on Solana.
+    nonisolated static func isGasCoin(_ r: PortfolioView.Row) -> Bool { r.contract == "native" || (r.symbol == "SOL" && r.contract == CostBasis.wsol) }
 }

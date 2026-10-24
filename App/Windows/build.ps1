@@ -63,5 +63,6 @@ Push-Location Windows/app
 npx --yes @tauri-apps/cli@2.12.4 build @tauriConfig
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Pop-Location
-$setup = Get-ChildItem Windows/app/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+# The one just built: an older version's installer can still be beside it, and sorts first by name.
+$setup = Get-ChildItem Windows/app/src-tauri/target/release/bundle/nsis/*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host "Installer: $($setup.FullName)"
