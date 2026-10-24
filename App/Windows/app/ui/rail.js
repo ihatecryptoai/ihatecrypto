@@ -217,7 +217,10 @@ function walletChip(compact) {
 function popover(anchor, side, content, cls = "") {
   // Where the anchor is before the open menu goes: a row of the folded Canvases list is inside it (Rename beside it).
   const r = anchor.getBoundingClientRect();
-  document.querySelector(".menu")?.remove();
+  // A list it was opened from (Rename, Change icon… from the folded Canvases list) stays under it, as the Mac's rename in
+  // place and icon picker over the row leave the list open.
+  const host = anchor.closest?.(".menu-host");
+  for (const m of document.querySelectorAll(".menu")) if (m !== host) m.remove();
   const panel = h("div", { class: "menu rail-popover " + cls, onclick: (e) => e.stopPropagation() }, content);
   document.body.append(panel);
   const w = panel.offsetWidth, hgt = panel.offsetHeight;
@@ -234,7 +237,8 @@ function popover(anchor, side, content, cls = "") {
   }), 0);
   return panel;
 }
-const closePopover = () => document.querySelector(".rail-popover")?.remove();
+/** The topmost panel: a rename over the folded Canvases list closes, the list stays. */
+const closePopover = () => { const all = document.querySelectorAll(".rail-popover"); all[all.length - 1]?.remove(); };
 
 /** The wallet menu (W04): the wallets on the left; the one picked on the right, its address on every network with
  * Copy and «Switch to…». The automation wallet lives in the Schedule, not here. */

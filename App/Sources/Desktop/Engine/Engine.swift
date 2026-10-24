@@ -125,6 +125,10 @@ final class Engine {
     var refreshing = false
     /// A refresh asked for while one ran (a wallet switch's, a move's): it runs right after, never skipped.
     var refreshAgain = false
+    /// The reads begun and the callers waiting for one: `await refresh()` asked during a read returns once the read it
+    /// queued has landed (Portfolio.swift).
+    var readsStarted = 0
+    var readWaiters: [(pass: Int, done: CheckedContinuation<Void, Never>)] = []
     /// The Hyperliquid account `positions` and `hlOrders` were read for: the guardian acts only on those, never on a
     /// list that was never read (a first request that failed) or read for another wallet.
     var positionsFor: String?
@@ -245,6 +249,11 @@ final class Engine {
     var routeWay: (key: String, way: String)?
     /// Both ways of the waiting EVM trade as quoted for its step's details (RouteEdit.quoteWays), the better first.
     var wayQuotes: (command: WalletCommand, ways: [RouteEdit.Way])? { didSet { if wayQuotes?.ways.isEmpty == false { quotedAt = Date() } } }
+    /// A Solana swap Jupiter can't price (a token it can't name, an amount under one unit): Confirm as always, not held
+    /// for a quote that never comes (the Mac returns before setting pricedCommand).
+    var unpriced: WalletCommand?
+    /// When the plan's take-profit ways were last offered: the History freezes them only into the request that did.
+    var takesAt: Date?
     /// What Merkl owes for the waiting card's claim or sweep, once read: that move's route and footer, alone or leading a
     /// chain (MoveRoutes.swift quoteRoute).
     var claimOwed: (board: String, command: WalletCommand, owed: [Merkl.Reward])?
@@ -338,10 +347,7 @@ final class Engine {
         if !e.isEmpty, let problem = AddressCheck.problem(e, network: .base) { throw WalletError(problem) }
         settings.watchSolana = s.isEmpty ? nil : s
         settings.watchEVM = e.isEmpty ? nil : e
-        portfolio = PortfolioView()
-        positions = []
-        hlOrders = []
-        positionsFor = nil
+        forgetWalletReads()
         loadEquity()
         Task { await refresh() }
     }

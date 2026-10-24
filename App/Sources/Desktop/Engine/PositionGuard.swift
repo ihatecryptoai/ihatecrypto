@@ -129,8 +129,11 @@ extension Engine {
     func noteClosedPositions(before: [String]) async {
         guard running == nil, let user = evmAddress else { return }
         for coin in Set(before).subtracting(positions.map(\.coin)) {
+            // Another wallet since: its rules aren't this coin's, and the old wallet's close isn't its news.
+            guard evmAddress == user else { return }
             exitRules[coin] = nil
             guard let close = try? await HyperliquidAccount.lastClose(user, coin: coin), Date().timeIntervalSince(close.time) < 600 else { continue }
+            guard evmAddress == user else { return }
             let text = say("\(coin) position closed outside ihatecrypto (stop, take-profit or by hand) at \(Fmt.price(close.price)): \(close.pnl >= 0 ? "profit" : "loss") \(Fmt.usd(abs(close.pnl))).",
                            "Позиция \(coin) закрылась вне ihatecrypto (стоп, тейк или вручную) по \(Fmt.price(close.price)): \(close.pnl >= 0 ? "прибыль" : "убыток") \(Fmt.usd(abs(close.pnl))).")
             reply(text, note: "exchange")

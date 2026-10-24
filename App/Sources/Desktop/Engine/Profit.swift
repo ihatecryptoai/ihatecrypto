@@ -49,6 +49,8 @@ extension Engine {
         async let fillsCall = TradeHistory.fills(user: me)
         async let fundingCall = TradeHistory.funding(user: me)
         let fills = (try? await fillsCall) ?? [], funding = (try? await fundingCall) ?? []
+        // Another wallet since the request: its own fills, not the last one's against its positions.
+        guard evmAddress == me else { return await pnlReport(command) }
         let unrealized = Dictionary(positions.map { ($0.coin, $0.unrealizedPnl) }, uniquingKeysWith: +)
         let points = (Store.load([EquityPoint].self, "equity.json") ?? []).filter { $0.wallet == wallet }.map { (at: $0.at, usd: $0.usd) }
             + (portfolio.updatedAt != nil ? [(at: Date(), usd: ruleEquity ?? 0)] : [])

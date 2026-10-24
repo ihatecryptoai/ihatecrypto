@@ -190,9 +190,10 @@ pinch zoom on a touchpad or a touch screen; «In transit» and a place's details
 browser's Back and Forward enabled only when there is somewhere to go (WebView2's own history), a page that fails to
 load said under the toolbar, phishing hosts never loaded (the check holds while the app is locked), a site's
 new-window link opening nothing (a phishing host gets the banner), no alerts, file pickers (an input outside the page
-too), print preview, `window.close()` or `Notification` for sites, and none of WebView2's own prompts (permissions,
+too), print preview, `window.close()`, `Notification` or element fullscreen for sites, and none of WebView2's own prompts (permissions,
 HTTP sign-in, client certificates, «open this app?» from a frame, autofill), a certificate error refused with the red
-«certificate» line and no way past, right-click
+«certificate» line and no way past, a server's own error page (a 404) shown with no «didn't load» line, a
+page that asks to close closing the browser as its × does, right-click
 in a field or on selected text giving Cut/Copy/Paste, «open jup.ag» from the chat, and links opening beside the
 chat in a page panel (the Mac's WebPanel); Settings › Trading agent (styles, limits, rules, safe search), Modules (every
 network and protocol, «off» refused before a card), the Hyperliquid trading key (offered after the first money there,
@@ -227,7 +228,10 @@ landing side by side with an «ARRIVES · SOLANA» step, the next step spending 
 before its card); every move drawn step by step with its quote on its step (stocks, EVM tokens, swaps off Solana and
 across networks, revoke, NEAR, pay, multisig, CCTP, USDT0, Aave, Merkl, a saved address, closing a position) and the
 15-second countdown on every priced swap, a chain's first move too (it's quoted, counted down, refreshed and held to
-its price as a card of its own; its amount or way can be changed with the rest kept behind it); the cards' warnings (an XRP exchange address without its tag, a token by its
+its price as a card of its own; its amount or way can be changed with the rest kept behind it); a Hyperliquid spot trade shows its quote on
+the card without holding Confirm, as on the Mac; a quote that doesn't come shows Refresh, and a swap Jupiter can't price
+keeps a plain Confirm; the chat's quote line warns when fees take more than a tenth, and a coin sent through NEAR
+Intents is quoted in its own words; the cards' warnings (an XRP exchange address without its tag, a token by its
 contract, Robinhood's stock tokens, Aave's liquidation price, Jupiter Lend instead of Kamino's rent); a price alert
 added to the plan as its first step; the position board's ruler, guardian and «Close X at market?»; Jupiter's staked
 JUP, perps and predictions in the portfolio; the token card's held P/L; the plan templates' preview; Skills' Study notes
@@ -274,6 +278,9 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
    A file input made by script and never put in the page, or a label of one, opens no picker on a real click; a
    frame sent to `ms-settings:` opens nothing; `window.print()` and `window.close()` do nothing; `typeof Notification`
    is "undefined"; expired.badssl.com is blank under the «certificate» line, with no «Continue».
+   With a page that first replaces `preventDefault`, `composedPath`, `Function.prototype.call` and `Reflect.apply`, a
+   real click on a file input still opens no picker; client.badssl.com's 400 page shows with no red line;
+   `document.fullscreenEnabled` is false.
 10. A Ledger over USB: «connect my Ledger» reads both addresses; a 1 USDC send shows on its screen. Then a Nano X, Stax
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
@@ -338,3 +345,8 @@ At 00f72cf (wave 14): every target, engine suite and suite-less test passes agai
 days and the app restarted, a listed host opened as the very first site never loads and gets the banner; a file input
 made in another frame and moved into the page opens no picker on a real click; a site asking for the location is
 refused with no prompt.
+
+At 6ba6913 (wave 15): 59 test runs pass. In a site: `typeof Notification` is "undefined"; a script's file input never
+put in the page, and a label of one, open no picker on a real click; a frame sent to `ms-settings:` starts nothing and
+asks nothing; `print()` and `close()` do nothing; client.badssl.com gets no certificate picker; expired.badssl.com is
+refused with no way past.

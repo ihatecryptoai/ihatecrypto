@@ -175,10 +175,13 @@ extension Engine {
 
     /// A swap whose card shows a price: Jupiter's on Solana, the two ways of a Base or Arbitrum trade, a stock's.
     func priced(_ c: WalletCommand) -> Bool {
-        switch c {
-        case .buy(_, _?), .sell(_, _?), .swapOn("solana", _, _, _?), .hlSpotBuy(_, _?), .hlSpotSell(_, _?), .crossSwap: true
-        // The Mac's quoteSwap prices every place's swap and a coin sent through NEAR Intents (pricedCommand).
-        case .swapOn("hyperliquid", _, _, let x), .swapOn("near", _, _, let x): x != nil
+        if unpriced == c { return false }
+        return switch c {
+        case .buy(_, _?), .sell(_, _?), .swapOn("solana", _, _, _?), .crossSwap: true
+        // The Mac's quoteSwap prices every place's swap and a coin sent through NEAR Intents (pricedCommand) — but not
+        // Hyperliquid's spot book: its quote shows on the card and Confirm isn't held for it.
+        case .hlSpotBuy, .hlSpotSell, .swapOn("hyperliquid", _, _, _): false
+        case .swapOn("near", _, _, let x): x != nil
         case .swapOn(let place, _, _, _): EVMNetwork.named(place) != nil
         case .sendToken(let name, let token, _?, let net): (try? acrossRecipient(name, token: token, network: net)) != nil
         default: RouteEdit.wayKey(c) != nil || c.isStockTrade
@@ -196,31 +199,40 @@ extension Engine {
 
     var quoteView: QuoteView? {
         guard let c = quotedMove, priced(c) else { return nil }
-        if let w = wayQuotes, w.command == c {
-            guard let best = w.ways.first else { return QuoteView(state: "stale") }
-            return state(c, gets: best.gets)
-        }
         if let j = jupiterShown, j.command == c {
             return state(c, gets: String(j.title.dropFirst()).trimmingCharacters(in: .whitespaces))
+        }
+        if let w = wayQuotes, w.command == c {
+            // Asked and not answered yet: Refresh and «over 15 s old» while it keeps asking (the Mac's empty swapQuote).
+            guard let best = w.ways.first else { return QuoteView(state: "stale") }
+            return state(c, gets: best.gets, worth: best.usd)
         }
         return QuoteView(state: "quoting")
     }
 
-    private func state(_ c: WalletCommand, gets: String) -> QuoteView {
+    private func state(_ c: WalletCommand, gets: String, worth: Decimal? = nil) -> QuoteView {
         guard let at = quotedAt else { return QuoteView(state: "quoting") }
-        return QuoteView(state: Date().timeIntervalSince(at) < Self.quoteLife ? "fresh" : "stale", at: at, line: Self.swapLine(c, gets: gets))
+        // A sale by contract names its ticker once known (the Mac's tokenSymbol).
+        var sold: String?
+        if case .sellOn(let place, let t, _, _) = c, t.hasPrefix("0x") { sold = tokenSymbol(t, on: place) }
+        return QuoteView(state: Date().timeIntervalSince(at) < Self.quoteLife ? "fresh" : "stale", at: at,
+                         line: Self.swapLine(c, gets: gets, worth: worth, sold: sold))
     }
 
-    /// «You get ≈ 23.01 SPX · 1 SPX ≈ $0.4346», from what the quote gets (the Mac's swapLine).
-    nonisolated static func swapLine(_ c: WalletCommand, gets: String) -> String {
+    /// «You get ≈ 23.01 SPX · 1 SPX ≈ $0.4346», from what the quote gets (the Mac's swapLine), and «⚠️ fees take ≈ $0.18
+    /// (18%): a bigger amount loses less» when dollars go in and fees keep more than a tenth. `worth`: what arrives in
+    /// dollars after gas (an EVM way's, a stock's); without it, a cross quote's own «≈ $X».
+    nonisolated static func swapLine(_ c: WalletCommand, gets: String, worth: Decimal? = nil, sold: String? = nil) -> String {
+        // A coin bought on the way to a NEAR Intents address: the quote's own words — what it costs in USDC, the fees, the
+        // time — never «You get» (that's what the send costs, not what arrives).
+        if case .sendToken = c { return gets }
         guard let m = gets.firstMatch(of: /([\d,]+(?:\.\d+)?)\s+([^\s·≈(]+)/),
               let out = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: "")), out > 0 else { return "You get ≈ \(gets)" }
         let got = String(m.2)
         let pays: (amount: Decimal, symbol: String)? = switch c {
-        case .buy(_, let u?), .buyOn(_, _, let u?, _), .buyStock(_, let u?), .hlSpotBuy(_, let u?): (u, "USDC")
+        case .buy(_, let u?), .buyOn(_, _, let u?, _), .buyStock(_, let u?): (u, "USDC")
         case .sell(let a, let x?): (x, a.symbol)
-        case .hlSpotSell(let s, let x?): (x, s.uppercased())
-        case .sellOn(_, let t, let x?, _): (x, t.hasPrefix("0x") ? "\(t.prefix(6))…" : t.uppercased())
+        case .sellOn(_, let t, let x?, _): (x, sold ?? (t.hasPrefix("0x") ? "\(t.prefix(6))…" : t.uppercased()))
         case .sellStock(let s, let x?): (x, s)
         case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?): (x, a.uppercased())
         default: nil
@@ -231,6 +243,9 @@ extension Engine {
             if dollars.contains(pays.symbol.uppercased()) { line += " · 1 \(got) ≈ $\(Fmt.price(pays.amount / out))" }
             else if dollars.contains(got.uppercased()) { line += " · 1 \(pays.symbol) ≈ $\(Fmt.price(out / pays.amount))" }
             else { line += " · 1 \(pays.symbol) ≈ \(Fmt.price(out / pays.amount)) \(got)" }
+            let value = worth.flatMap { $0 > 0 ? $0 : nil }
+                ?? gets.firstMatch(of: /≈\s*\$([\d,]+(?:\.\d+)?)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: "")) }
+            if dollars.contains(pays.symbol.uppercased()), let value, let warning = Fmt.feeWarning(paid: pays.amount, worth: value) { line += " · " + warning }
         }
         return line
     }

@@ -112,8 +112,9 @@ function tellEngine() {
   const on = onboardingRunning();
   if (on !== toldRunning) { toldRunning = on; act("onboarding", { test: on }); }
 }
-function go(next) { flow.history.push(step()); store("onboardingStep", next); tellEngine(); render(); }
-function back() { store("onboardingStep", flow.history.pop() || ""); tellEngine(); render(); }
+// Leaving the Top up step, its state goes (the Mac's MoneyStep is made anew each time it's drawn): coming back starts afresh.
+function go(next) { if (step() === "money") flow.money = null; flow.history.push(step()); store("onboardingStep", next); tellEngine(); render(); }
+function back() { if (step() === "money") flow.money = null; store("onboardingStep", flow.history.pop() || ""); tellEngine(); render(); }
 function finish() {
   Object.assign(flow, { history: [], accounts: null, money: null, tried: false });
   store("onboardingStep", "");

@@ -230,6 +230,17 @@ fn site_closed(app: &tauri::AppHandle) {
     site_gone(app, origin);
 }
 
+/// The site's webview taken away by WebView2 (a page asked to close): the browser closes as its × and its window's close
+/// do — the request it had waiting goes (siteGone), its toolbar and window with it — and Profile › Browser opens it again
+/// on its last page (open_browser).
+#[cfg(windows)]
+fn site_lost(app: &tauri::AppHandle) {
+    site_closed(app);
+    web::shown(app, SITE, false);
+    for label in [SITE, BAR] { if let Some(v) = app.get_webview(label) { let _ = v.close(); } }
+    if let Some(w) = app.get_window(BROWSER_WINDOW) { let _ = w.close(); }
+}
+
 /// The engine's word in a siteState answer: Some(true) the host is on MetaMask's phishing list, Some(false) it isn't,
 /// None it wasn't checked (the engine refused or failed) — which the browser takes as a no, never as a yes.
 fn listed(answer: &serde_json::Value) -> Option<bool> {

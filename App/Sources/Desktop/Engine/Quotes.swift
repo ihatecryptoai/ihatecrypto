@@ -17,9 +17,13 @@ extension Engine {
             if let from = await solanaAsset(a), let to = await solanaAsset(b) { pair = (from, to, x) } else { pair = nil }
         default: pair = nil
         }
-        guard let (from, to, amount) = pair else { return }
-        let units = NSDecimalNumber(decimal: (amount * Decimal(sign: .plus, exponent: from.decimals, significand: 1)).rounded(0, .down)).uint64Value
-        guard units > 0 else { return }
+        let jupiter: Bool = switch command { case .buy(_, _?), .sell(_, _?), .swapOn("solana", _, _, _?): true; default: false }
+        let units = pair.map { NSDecimalNumber(decimal: ($0.2 * Decimal(sign: .plus, exponent: $0.0.decimals, significand: 1)).rounded(0, .down)).uint64Value } ?? 0
+        guard let (from, to, _) = pair, units > 0 else {
+            // A token Jupiter can't name, or under one unit: Confirm shows, the run says why if it fails (the Mac).
+            if jupiter, quotedMove == command, card?.id == board { unpriced = command; changed() }
+            return
+        }
         while !Task.isCancelled, card?.id == board {
             if let q = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units) {
                 guard card?.id == board, quotedMove == command else { return }
@@ -29,8 +33,17 @@ extension Engine {
                 redrawRoute(board, command)
                 return
             }
+            quoteFailed(command)
             try? await Task.sleep(for: .seconds(15))
         }
+    }
+
+    /// A priced swap's quote asked and not given: the card shows Refresh and «the price is over 15 s old» while it keeps
+    /// asking, as the Mac's empty swapQuote — never «Quoting…» for as long as the place doesn't answer.
+    func quoteFailed(_ c: WalletCommand) {
+        guard quotedMove == c, priced(c), wayQuotes?.command != c, jupiterShown?.command != c else { return }
+        wayQuotes = (c, [])
+        changed()
     }
 
     /// The move a waiting card prices: a single move, or a chain's first, as the Mac's chain card is its first move's

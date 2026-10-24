@@ -68,7 +68,8 @@ import Testing
     /// and the chat checks the plan item by item.
     @Test(.enabled(if: winsec_is_stub() == 1)) func aPlanTheRulesStopIsDrawnWithItsRoute() throws {
         let engine = try walletEngine()
-        try engine.call("refresh")
+        // A refresh waits for a whole read; one slower than the helper waits leaves the plan to say what it lacks.
+        _ = try? engine.call("refresh")
         let r = try engine.call("send", ["text": "long ETH risk $5 stop 3%"])
         let said = EngineTests.chat(r.state).last ?? ""
         // Hyperliquid unreachable even after its retries (many readers at once): the plan says the price didn't load.

@@ -27,8 +27,13 @@ import Testing
     @Test func aRefreshAskedDuringOneRunsAfterIt() async {
         engine.refreshing = true
         engine.refreshAgain = false
-        await engine.refresh()
+        let asked = Task { await engine.refresh() }
+        while engine.readWaiters.isEmpty { await Task.yield() }
         #expect(engine.refreshAgain, "a refresh asked for during a read must run after it, not be dropped")
+        // The read it queued lands (Balance17Tests has the rest).
+        engine.readsStarted += 1
+        engine.landReads()
+        await asked.value
         engine.refreshing = false
         engine.refreshAgain = false
     }

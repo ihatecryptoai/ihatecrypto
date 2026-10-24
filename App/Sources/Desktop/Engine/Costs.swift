@@ -94,6 +94,8 @@ extension Engine {
                 if !days.isEmpty, let id = Holdings.llamaID(chain: w.chain, contract: w.contract) { prices = await Holdings.pastPrices(id, at: days) }
                 basis = prices.map { p in CostBasis.fold(changes, held: w.held) { p[$0] } }
             }
+            // A switch during this coin's requests: its cost isn't the new wallet's.
+            guard owner == solanaAddress else { return }
             if let basis { chainCost[w.key] = (w.held, basis) }
             // Nothing tells what it cost: from when the app first saw it.
             if (basis?.amount ?? 0) == 0, (appCosts[w.key]?.amount ?? 0) == 0, let price = w.price { seen(w.key, held: w.held, price: price) }

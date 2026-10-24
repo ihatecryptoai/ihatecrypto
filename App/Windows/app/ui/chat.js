@@ -156,7 +156,9 @@ export function chatPanel() {
   if (liveMenu) liveMenu();
   // The networks menu and the context popover follow the state while open too («N of M on» as a switch flips).
   const live = document.querySelector(".menu");
-  if (live?._live) { const top = live.scrollTop; live.replaceChildren(live._live()); live.scrollTop = top; }
+  // The context popover exists only with its chip (the Mac's ContextMeter): a canvas with nothing read yet takes it away.
+  if (live?._live === contextPop && !s.context?.used) live.remove();
+  else if (live?._live) { const top = live.scrollTop; live.replaceChildren(live._live()); live.scrollTop = top; }
   // Cards come under a reply already shown: when they don't all fit, the reply they answer stays in view from its top
   // (the Mac's onChange(of: nextSteps?.message)) — after app.js has put a following chat at its end; not at launch.
   const cardsFor = liveMessage()?.id || null;
@@ -681,6 +683,11 @@ function ideas() {
 /** The field's text when Esc closed the «/ @ $» list: it stays closed until the text changes. */
 let dismissed = null;
 let pick = 0;
+// The «/ @ $» list's place across a state's redraw: where the wheel left it, the caret it was read at (the list stays
+// with the field out of focus, under an open menu, as the Mac's is computed from the draft), and the pointer's last
+// spot — a row takes the pick only once the pointer has moved (the Mac's pointerAtKey), so a list redrawn under a
+// resting pointer doesn't walk.
+let listTop = 0, caretAt = null, pointerAt = null;
 /** The sent message ↑ brought back into the field, by its place in the sent list. */
 let recalled = null;
 /** The blocks the next message goes with besides the newest (ui.attached, which the canvas lights), oldest first. */
@@ -749,7 +756,9 @@ function composer(s) {
   setTimeout(() => {
     autosize(field, 140);
     drawHelpers();
-    if (document.activeElement !== field) return;
+    if (document.activeElement === field) caretAt = field.selectionStart;
+    else if (caretAt === null) return;
+    else field.setSelectionRange(caretAt, caretAt);
     const rows = suggestionRows(field);
     pick = Math.min(pick, Math.max(0, rows.length - 1));
     drawSuggestions(rows);
@@ -955,7 +964,7 @@ function keys(e) {
   const rows = suggestionRows(e.target);
   if (rows.length) {
     // ↑↓ stop at the ends, as the Mac's keyed(max(0, pick - 1)) and keyed(min(count - 1, pick + 1)).
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); pick = Math.max(0, Math.min(rows.length - 1, pick + (e.key === "ArrowDown" ? 1 : -1))); drawSuggestions(rows); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); pick = Math.max(0, Math.min(rows.length - 1, pick + (e.key === "ArrowDown" ? 1 : -1))); drawSuggestions(rows, true); return; }
     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(rows[Math.min(pick, rows.length - 1)], e.target); return; }
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dismissed = e.target.value; drawSuggestions([]); return; }
   }
@@ -1228,23 +1237,29 @@ function suggestionRows(el) {
 function networkOf(key) { return (ui.state.modules?.networks || []).find((n) => n.id === "network." + key) || null; }
 function networkName(key) { return networkOf(key)?.name || (key ? key.charAt(0).toUpperCase() + key.slice(1) : ""); }
 
-function refreshSuggestions(el) { pick = 0; drawSuggestions(suggestionRows(el)); }
+function refreshSuggestions(el) { pick = 0; listTop = 0; caretAt = el.selectionStart; drawSuggestions(suggestionRows(el)); }
 
-function drawSuggestions(rows) {
+/** `keyed`: ↑↓ moved the pick, so the list scrolls to it; otherwise it stays where the wheel left it. */
+function drawSuggestions(rows, keyed = false) {
   const slot = document.getElementById("chat-suggest");
   if (!slot) return;
   if (!rows.length) { slot.replaceChildren(); return; }
   const field = document.getElementById("composer");
-  slot.replaceChildren(h("div", { class: "chat-suggest" },
-    h("div", { class: "chat-suggest-rows" }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); },
-      // The pointer over a row picks it, as ↑↓ do (the Mac's onHover).
-      onmouseenter: () => { if (pick !== i) { pick = i; for (const [n, b] of [...slot.querySelectorAll(".chat-suggest-row")].entries()) b.classList.toggle("chat-lit", n === i); } } },
+  const list = h("div", { class: "chat-suggest-rows", onscroll: (e) => { if (e.target.isConnected) listTop = e.target.scrollTop; } }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); },
+      // The pointer moving over a row picks it, as ↑↓ do (the Mac's onHover, once the pointer has moved).
+      onmousemove: (e) => {
+        if (pointerAt && pointerAt.x === e.clientX && pointerAt.y === e.clientY) return;
+        pointerAt = { x: e.clientX, y: e.clientY };
+        if (pick !== i) { pick = i; for (const [n, b] of [...slot.querySelectorAll(".chat-suggest-row")].entries()) b.classList.toggle("chat-lit", n === i); }
+      } },
       // A market's picture is its own only (`pic`): never the app's logo for the symbol it claims.
-      r.pic ? logo(r.title, 16, r.pic, false) : r.logo ? logo(r.logo, 16, r.src) : icon(r.icon, 13), h("b", { class: "one-line" }, r.title), h("span", { class: "one-line secondary" }, r.detail)))),
+      r.pic ? logo(r.title, 16, r.pic, false) : r.logo ? logo(r.logo, 16, r.src) : icon(r.icon, 13), h("b", { class: "one-line" }, r.title), h("span", { class: "one-line secondary" }, r.detail))));
+  slot.replaceChildren(h("div", { class: "chat-suggest" }, list,
     h("div", { class: "chat-suggest-foot" }, rows.length > 8
       ? t(`${rows.length} · scroll or ↑↓ · Return puts it in · Esc closes`, `${rows.length} · прокрути или ↑↓ · Return — вставить · Esc — закрыть`)
       : t("↑↓ choose · Return puts it in · Esc closes", "↑↓ — выбрать · Return — вставить · Esc — закрыть"))));
-  slot.querySelector(".chat-suggest-row.chat-lit")?.scrollIntoView({ block: "nearest" });
+  list.scrollTop = listTop;
+  if (keyed) { slot.querySelector(".chat-suggest-row.chat-lit")?.scrollIntoView({ block: "nearest" }); listTop = list.scrollTop; }
 }
 
 /** A pick: its text in the word's place, a space after it unless it stands alone (a «$» chip is closed by its space). */
@@ -1348,7 +1363,7 @@ function modelMenu(anchor) {
   // The popover's watch calls `closed` once it's gone.
   const close = () => document.querySelector(".menu")?.remove();
   // Only while it's the live one: a model menu opened in its place keeps its face.
-  const closed = () => { if (liveMenu === draw) { liveMenu = null; if (tuning === "model") tuning = null; } act("refreshModels"); render(); };
+  const closed = () => { if (liveMenu === draw) { liveMenu = null; if (tuning === "model") tuning = null; } if (!ui.state?.lock?.locked) act("refreshModels"); render(); };
   // «<model> · connected», «any model by key · sign-in needed», «<model> · on this PC» (the Mac's detail(info)).
   const wayDetail = (p) => {
     const state = p.kind === "local" ? t("on this PC", "на этом ПК") : p.connected ? t("connected", "подключено") : t("sign-in needed", "нужен вход");

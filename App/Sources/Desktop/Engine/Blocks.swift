@@ -600,6 +600,8 @@ extension Engine {
     func readClosed() async {
         guard let me = evmAddress else { return }
         guard let fills = try? await TradeHistory.fills(user: me) else { return }
+        // Another wallet since it was asked: its trades aren't this one's (the Mac checks the account, Workspace.swift:2148).
+        guard evmAddress?.lowercased() == me.lowercased() else { return }
         let week = Date().addingTimeInterval(-7 * 86_400)
         let closed: [ClosedTrade] = TradeHistory.stories(fills).compactMap { s in
             guard let at = s.closed, at > week else { return nil }

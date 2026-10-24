@@ -131,11 +131,12 @@ extension Engine {
             }
         }
         // ponytail: its own read of the open orders, one more request a minute; the guardian's `hlOrders` can feed it.
-        if let orders = try? await HyperliquidAccount.openOrders(user) {
+        if let orders = try? await HyperliquidAccount.openOrders(user), evmAddress == user {
             NoticeMemory.entries = Set(orders.filter { !$0.isTrigger && !$0.reduceOnly }.map(\.coin))
         }
         // The HLP deposit's 4-day lock ended: said once per lock.
-        if let v = try? await HyperliquidAccount.vaultEquity(user: user, vault: HLGuard.hlpVault), let until = v.lockedUntil, until <= Date(), v.equity > 0 {
+        if let v = try? await HyperliquidAccount.vaultEquity(user: user, vault: HLGuard.hlpVault), evmAddress == user,
+           let until = v.lockedUntil, until <= Date(), v.equity > 0 {
             let key = until.timeIntervalSince1970
             if Store.load(Double.self, "hlp-unlock-noticed.json") != key {
                 Store.save(key, "hlp-unlock-noticed.json")

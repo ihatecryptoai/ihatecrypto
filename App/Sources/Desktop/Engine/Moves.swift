@@ -81,6 +81,8 @@ extension Engine {
         let id = UUID().uuidString
         // An earlier card's price never shows on this one's step, even for the same command (routeSteps reads it).
         jupiterShown = nil
+        wayQuotes = nil
+        unpriced = nil
         card = Card(id: id, title: title, lines: lines, warnings: warnings + cautions,
                     confirm: warnings.isEmpty ? say("Confirm", "Подтвердить") : say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение"))
         pin(Board(id: id, kind: "move", title: title, lines: (warnings + cautions).map { "⚠ " + $0 }, steps: steps(for: pending, title: title, lines: lines), state: "waiting"))

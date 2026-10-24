@@ -72,14 +72,49 @@ nonisolated struct PortfolioView: Encodable, Equatable {
 extension Engine {
     /// Every network read at once, then drawn together. A network that didn't answer keeps its last card. One read at a
     /// time; one asked for meanwhile (a wallet switch's, a move's) runs right after it instead of being dropped.
+    /// Asked during a read, it returns once the next read has landed — one begun after the ask — as the Mac's
+    /// `await ws.refresh()` does: the rail's spinner and a chain's «reads balances after this one» wait for it.
     func refresh() async {
-        if refreshing { refreshAgain = true; return }
+        if refreshing {
+            refreshAgain = true
+            let pass = readsStarted + 1
+            await withCheckedContinuation { readWaiters.append((pass, $0)) }
+            return
+        }
         refreshing = true
         defer { refreshing = false }
         repeat {
             refreshAgain = false
+            readsStarted += 1
             await readOnce()
+            landReads()
         } while refreshAgain
+    }
+
+    /// A read landed: the callers waiting for it, or for an earlier one, go on.
+    func landReads() {
+        let done = readsStarted
+        let landed = readWaiters.filter { $0.pass <= done }
+        readWaiters.removeAll { $0.pass <= done }
+        landed.forEach { $0.done.resume() }
+    }
+
+    /// Nothing the last wallet's reads left is the new one's (the Mac's walletChanged clears solana, hl, dexBalances, hlp,
+    /// its orders and recentlyClosed): the balances, positions and orders, what each network has answered since it came
+    /// on screen, the Solana tokens that price an unpriced read, Hyperliquid's details, the closed trades and the
+    /// notices' memory of its positions.
+    func forgetWalletReads() {
+        portfolio = PortfolioView()
+        positions = []
+        hlOrders = []
+        positionsFor = nil
+        seenSolanaPriced = nil
+        seenHL = false
+        solanaHoldings = []
+        placeFacts.hyperliquid = nil
+        recentlyClosed = []
+        NoticeMemory.positions = nil
+        NoticeMemory.entries = []
     }
 
     private func readOnce() async {

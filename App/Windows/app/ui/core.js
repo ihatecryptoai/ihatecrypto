@@ -304,8 +304,9 @@ export function when(iso) {
 
 /** A menu at a point; Escape or a click outside closes it. `items`: [label, run] or null for a divider. */
 export function popup(e, items, cls = "") {
-  // A list that holds rows with menus of their own (`menu-host`) stays under the row's menu.
-  document.querySelector(".menu:not(.menu-host)")?.remove();
+  // A list that holds rows with menus of their own (`menu-host`) stays under a row's menu opened inside it; a menu opened
+  // anywhere else closes it, as the Mac's transient popover goes on any click outside it, a right-click too.
+  for (const m of document.querySelectorAll(".menu")) if (!(m.classList.contains("menu-host") && m.contains(e?.target))) m.remove();
   const menu = h("div", { class: "menu " + cls },
     items.map((it) => it === null ? h("div", { class: "menu-divider" }) : h("button", { class: "item", onclick: () => { menu.remove(); it[1](); } }, it[0])));
   document.body.append(menu);

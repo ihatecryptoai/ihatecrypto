@@ -29,6 +29,8 @@ nonisolated enum RouteEdit {
         var worth: String
         /// How much less than the best this way leaves, for a Robinhood Chain trade's list; nil for the best.
         var less: String? = nil
+        /// The worth as a number, for the fee warning on the chat's quote line (the Mac's way.worth).
+        var usd: Decimal? = nil
     }
 
     /// The field as one amount: «2», «0,5», «1 000», «1,000.50», «1.000,50». Anything else is nil, never the number it
@@ -87,7 +89,7 @@ extension Engine {
         return RouteEdit.Edit(board: id, amount: command.editableAmount.map { NSDecimalNumber(decimal: $0).stringValue },
                               unit: RouteEdit.unit(command), ways: key != nil, stock: command.isStockTrade,
                               way: key.flatMap { k in routeWay?.key == k ? routeWay?.way : nil },
-                              quotes: wayQuotes?.command == command ? wayQuotes?.ways : nil)
+                              quotes: wayQuotes?.command == command && wayQuotes?.ways.isEmpty == false ? wayQuotes?.ways : nil)
     }
 
     /// Both ways of a Base or Arbitrum trade quoted while its card waits (the Mac's quoteSwap): once, asked again every
@@ -104,11 +106,12 @@ extension Engine {
         while quotedMove == command {
             if let ways = try? await e.swapQuotes(net, token, usdc: usdc, sell: sell, from: from, keep: keep), !ways.isEmpty {
                 guard quotedMove == command else { return }
-                wayQuotes = (command, ways.map { RouteEdit.Way(way: $0.way, gets: $0.gets, worth: Fmt.usd($0.worth)) })
+                wayQuotes = (command, ways.map { RouteEdit.Way(way: $0.way, gets: $0.gets, worth: Fmt.usd($0.worth), usd: $0.worth) })
                 // The best way and what it gets, on the step it names (MoveRoutes.swift).
                 if let id = card?.id { redrawRoute(id, command) } else { changed() }
                 return
             }
+            quoteFailed(command)
             try? await Task.sleep(for: .seconds(15))
         }
     }
@@ -127,12 +130,13 @@ extension Engine {
             if let ways = try? await e.stockQuotes(symbol, usdc: usdc, sell: sell), let best = ways.first {
                 guard quotedMove == command, let id = card?.id else { return }
                 wayQuotes = (command, ways.enumerated().map { i, q in
-                    RouteEdit.Way(way: q.way, gets: q.gets, worth: Fmt.usd(q.worth), less: i == 0 ? nil : Fmt.usd(best.worth - q.worth))
+                    RouteEdit.Way(way: q.way, gets: q.gets, worth: Fmt.usd(q.worth), less: i == 0 ? nil : Fmt.usd(best.worth - q.worth), usd: q.worth)
                 })
                 // The best names the BUY (or SELL) step, the others are its line (MoveRoutes.swift, the Mac's stockBuyStep).
                 redrawRoute(id, command)
                 return
             }
+            quoteFailed(command)
             try? await Task.sleep(for: .seconds(15))
         }
     }
@@ -153,7 +157,9 @@ extension Engine {
         if let key = RouteEdit.wayKey(command) {
             routeWay = (way == "relay" || way == "uniswap") ? (key, way!) : nil
         }
-        guard let edited else { changed(); return }
+        // The way alone: the route shows it at once (its swap step, the approve Uniswap needs), as the Mac's observed
+        // routeWays redraws — Confirm takes the picked way (takeWay), so the card must say it.
+        guard let edited else { redrawRoute(id, command); return }
         guard case .chain(let list)? = pending else { await handleWallet(edited); return }
         // A chain's first move edited: checked as that move would be on its own, then the chain drawn again with the rest
         // still behind it (the Mac's Save keeps the task queue).

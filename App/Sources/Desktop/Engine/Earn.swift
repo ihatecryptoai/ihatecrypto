@@ -170,17 +170,31 @@ extension Engine {
 
     func showJupiterDCA(note: String?) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { reply(say("Jupiter didn't answer.", "Jupiter не ответил."), note: note); return }
-        readDCA(orders)
-        if !orders.isEmpty { pin("result", "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10))))) }
+        // Every board pinned before shows the orders as they are now; a new one only where none is (one live board).
+        let here = readDCA(orders)
+        if !orders.isEmpty, !here { pin("result", "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10))))) }
         reply(orders.isEmpty ? say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")
               : say("Running Jupiter DCA: \(orders.count).", "Запущено Jupiter DCA: \(orders.count)."), note: note ?? "Jupiter DCA")
     }
 
-    /// The orders as read now, for every canvas's Jupiter DCA board (boards.js draws it where none is pinned).
-    func readDCA(_ orders: [JupiterRecurring.Order]) {
-        jupiterDCA = orders.isEmpty ? nil
-            : Board(id: "jupiter-dca", kind: "result", title: "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10)))))
+    /// The orders as read now: the session's board every canvas draws where none is pinned (boards.js), and every board
+    /// pinned on any canvas shown as they are, as the Mac's one live board (Studio.swift:1379) — one pinned elsewhere
+    /// never lists a cancelled order or old fills. True when this canvas has one pinned.
+    @discardableResult
+    func readDCA(_ orders: [JupiterRecurring.Order]) -> Bool {
+        let lines = orders.isEmpty ? [say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")] : dcaLines(orders)
+        let data = orders.isEmpty ? nil : BlockData(dca: dcaRows(Array(orders.prefix(10))))
+        jupiterDCA = orders.isEmpty ? nil : Board(id: "jupiter-dca", kind: "result", title: "Jupiter DCA", lines: lines, data: data)
+        var found = false
+        for c in canvases.indices {
+            for i in canvases[c].boards.indices where canvases[c].boards[i].kind == "result" && canvases[c].boards[i].title == "Jupiter DCA" {
+                canvases[c].boards[i].lines = lines; canvases[c].boards[i].data = data
+                if c == canvasIndex { found = true }
+            }
+        }
+        saveCanvases()
         changed()
+        return found
     }
 
     func dcaLines(_ orders: [JupiterRecurring.Order]) -> [String] {
@@ -196,19 +210,7 @@ extension Engine {
     /// here gets one. Jupiter not answering leaves the block as it was.
     func refreshJupiterDCA(placed: Bool) async {
         guard let orders = try? await executor().jupiterDCAOrders() else { return }
-        readDCA(orders)
-        let lines = orders.isEmpty ? [say("No Jupiter DCA is running.", "Jupiter DCA сейчас не запущен.")] : dcaLines(orders)
-        let data = orders.isEmpty ? nil : BlockData(dca: dcaRows(Array(orders.prefix(10))))
-        // Every canvas's, as the Mac's one live board (Studio.swift:1379): one pinned elsewhere never lists a cancelled order.
-        var found = false
-        for c in canvases.indices {
-            for i in canvases[c].boards.indices where canvases[c].boards[i].kind == "result" && canvases[c].boards[i].title == "Jupiter DCA" {
-                canvases[c].boards[i].lines = lines; canvases[c].boards[i].data = data
-                if c == canvasIndex { found = true }
-            }
-        }
-        saveCanvases()
-        changed()
-        if !found, placed, !orders.isEmpty { pin("result", "Jupiter DCA", lines: lines, data: data) }
+        let found = readDCA(orders)
+        if !found, placed, !orders.isEmpty { pin("result", "Jupiter DCA", lines: dcaLines(orders), data: BlockData(dca: dcaRows(Array(orders.prefix(10))))) }
     }
 }

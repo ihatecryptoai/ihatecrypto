@@ -8,7 +8,7 @@ import { railEdge, companyLogo } from "./rail.js";
 import { chatPanel, modelName } from "./chat.js";
 import { askMenu, askedClass } from "./portfolio.js";
 import { segmented, toggle, showImport, showImportKey, watchFields, noHello } from "./onboarding.js";
-import { codeMaker, lockAfterPicker } from "./lock.js";
+import { codeMaker, lockAfterPicker, resetMaker } from "./lock.js";
 
 const back = () => { ui.view = "canvas"; render(); };
 
@@ -91,9 +91,26 @@ const tabs = [
   ["skills", "wand", () => t("Skills", "Навыки")],
 ];
 
+// Settings' open panels go with their tab and with Settings itself, as the Mac's tab content is made anew each time
+// (SettingsView's `switch tab`; ImportWalletView turns the Test switch off as it goes): the node / 1Click sheet with
+// what was pasted, «Remove?», a rename, «Create a new wallet» and its Test switch, a half-made code, the ⓘ texts.
+let shownTab = null;
+function closePanels() {
+  Object.assign(secretForm, { open: null, text: "", problem: null, checking: false });
+  removing = null;
+  renaming = null;
+  renameDraft = "";
+  if (!creating.busy) creating = { open: false, test: false };
+  passcode.making = false;
+  resetMaker();
+  openInfo.clear();
+}
+
 export function settingsPage() {
   let tab = store("settingsTab");
   if (!tabs.some(([id]) => id === tab)) tab = "general";
+  // Opened anew (the last draw had no Settings) or on another tab: nothing is left open from before.
+  if (shownTab !== tab || !document.querySelector(".pg-settings")) { closePanels(); shownTab = tab; }
   const s = ui.state;
   const [title, line, body] = {
     general: [t("General", "Основные"), t("How the app talks to you and keeps running.", "Как приложение говорит с тобой и работает в фоне."), general],

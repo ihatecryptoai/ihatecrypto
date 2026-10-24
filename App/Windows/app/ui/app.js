@@ -103,6 +103,8 @@ function draw() {
     parts.push(h("div", { class: "ground" }), page || canvasView(), rail(), windowControls());
   }
   app.replaceChildren(...parts);
+  // A chat popover goes with the chat: Settings (Ctrl+, too) replaces it, as the Mac's Settings replaces the Studio.
+  if (!app.querySelector(".chat-panel")) for (const m of document.querySelectorAll(".chat-pop")) m.remove();
   // The page panel's webviews sit over this page: hidden while Settings, a sheet, the lock or the first run fills it, as
   // the Mac's Settings replaces the Studio (panel-grip.js reads it) — History and Top up are drawn inside the Studio
   // there, beside its panel, so it stays beside them here too — and while a site's request waits, whose block (and its

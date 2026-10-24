@@ -708,6 +708,7 @@ extension Engine {
         }
         let risk = Plan.evaluate(Plan.resolve(intent, market: markets[intent.asset], equity: ruleEquity, policy: policy).intent, market: markets[intent.asset]).sizing?.lossAtStopUSD
         updateBoard(planBoard) { $0.plan?.takes = takeChoices(risk: risk) }
+        takesAt = Date()
         reply(say("Three ways to take profit are on the canvas. The stop stays the same; pick one or say your own, e.g. “take 3R”.",
                   "На холсте три способа взять прибыль. Стоп остаётся прежним; выбери один или скажи свой, например «тейк 3R»."), note: note)
         return true

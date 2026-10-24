@@ -103,15 +103,22 @@ pub fn go(webview: &tauri::Webview, back: bool) -> tauri::Result<()> {
 /// handler for any of it and shows nothing: a permission a page asks for (notifications, location, camera, microphone,
 /// clipboard…) is denied; an HTTP sign-in is cancelled; a client certificate isn't offered; a frame sent to an app's
 /// scheme opens nothing; a certificate error is refused with no «continue» (the toolbar says «certificate»), and no load
-/// error gets WebView2's own page; fields get no autofill suggestions.
+/// error gets WebView2's own page; fields get no autofill suggestions. A page that asks to close (a frame's `top.close()`)
+/// closes the panel as its × does, never leaving the header over an empty area.
 #[cfg(windows)]
 pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{BasicAuthenticationRequestedEventHandler, ClientCertificateRequestedEventHandler, HistoryChangedEventHandler,
                        LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-                       PermissionRequestedEventHandler, ProcessFailedEventHandler, ServerCertificateErrorDetectedEventHandler, take_pwstr};
+                       PermissionRequestedEventHandler, ProcessFailedEventHandler, ServerCertificateErrorDetectedEventHandler,
+                       WindowCloseRequestedEventHandler, take_pwstr};
     use windows::core::{Interface, PWSTR};
     let (label, app) = (webview.label().to_string(), app.clone());
+    // The page's own load, and whether a certificate error stopped it: so the toolbar says «certificate» for it (and not
+    // for a picture inside), whatever status WebView2 ends that load with. Seeded with the address the webview was made
+    // with, as its first NavigationStarting can come before these handlers are in.
+    // ponytail: the handlers go in a hop after the webview is made; its first page's TLS answer takes far longer.
+    let first = webview.url().map(|u| u.to_string()).unwrap_or_default();
     let _ = webview.with_webview(move |w| {
         let Ok(core) = (unsafe { w.controller().CoreWebView2() }) else { return };
         let (a, l) = (app.clone(), label.clone());
@@ -120,17 +127,22 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
             Ok(())
         }));
         let (a, l) = (app.clone(), label.clone());
+        let loading = std::sync::Arc::new(std::sync::Mutex::new((first, false)));
+        let seen = loading.clone();
         let completed = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
             if let Some(args) = args {
-                let (mut ok, mut status) = (windows::core::BOOL::default(), COREWEBVIEW2_WEB_ERROR_STATUS::default());
+                let (mut ok, mut status, mut code) = (windows::core::BOOL::default(), COREWEBVIEW2_WEB_ERROR_STATUS::default(), 0i32);
                 unsafe {
                     let _ = args.IsSuccess(&mut ok);
                     let _ = args.WebErrorStatus(&mut status);
+                    // A server's own error page (a 404, a 400) is a page that loaded, as WebKit shows it with no error.
+                    if let Ok(more) = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>() { let _ = more.HttpStatusCode(&mut code); }
                 }
+                let certificate = seen.lock().map(|p| p.1).unwrap_or(false);
                 // A load the next one replaced isn't a failure, nor one the app stopped itself (an http link, a phishing
                 // host, a check it couldn't make): that one keeps the line it set.
                 if status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
-                    let error = (!ok.as_bool()).then(|| reason(status));
+                    let error = (!ok.as_bool() && code == 0).then(|| if certificate { "certificate".into() } else { reason(status) });
                     set(&a, &l, |p| p.error = error);
                 }
             }
@@ -166,15 +178,12 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
             if let Some(args) = args { unsafe { let _ = args.SetCancel(true); } }
             Ok(())
         }));
-        // The page's own load, kept so a certificate error on it (and not on a picture inside) says so in the toolbar; a
-        // cancelled load ends «cancelled», which keeps the line it set.
-        let loading = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let started = {
             let loading = loading.clone();
             NavigationStartingEventHandler::create(Box::new(move |_, args| {
                 let mut uri = PWSTR::null();
                 if let Some(args) = args { unsafe { let _ = args.Uri(&mut uri); } }
-                if let Ok(mut l) = loading.lock() { *l = take_pwstr(uri); }
+                if let Ok(mut l) = loading.lock() { *l = (take_pwstr(uri), false); }
                 Ok(())
             }))
         };
@@ -186,7 +195,18 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
                 let _ = args.SetAction(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL);
                 let _ = args.RequestUri(&mut uri);
             }
-            if loading.lock().map(|p| *p == take_pwstr(uri)).unwrap_or(false) { set(&a, &l, |p| p.error = Some("certificate".into())); }
+            let page = loading.lock().map(|mut p| { let hit = p.0 == take_pwstr(uri); if hit { p.1 = true; } hit }).unwrap_or(false);
+            if page { set(&a, &l, |p| p.error = Some("certificate".into())); }
+            Ok(())
+        }));
+        // wry destroys the webview's window when a page asks to close (the page's own close() is a no-op, keys.rs; a
+        // cross-origin frame's top.close() still reaches it): the panel then goes as its × would, and the next «open»
+        // makes it again — the Mac's web view, with no UI delegate, stays.
+        let (a, l) = (app.clone(), label.clone());
+        let closing = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+            let (a, l) = (a.clone(), l.clone());
+            // Off this callback: the webview is closed from the event loop, not from inside its own event.
+            tauri::async_runtime::spawn(async move { gone(&a, &l) });
             Ok(())
         }));
         if let Ok(settings) = unsafe { core.Settings() } {
@@ -202,6 +222,7 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
             let _ = core.add_ProcessFailed(&failed, &mut token);
             let _ = core.add_PermissionRequested(&permission, &mut token);
             let _ = core.add_NavigationStarting(&started, &mut token);
+            let _ = core.add_WindowCloseRequested(&closing, &mut token);
             if let Ok(core) = core.cast::<ICoreWebView2_5>() { let _ = core.add_ClientCertificateRequested(&client_cert, &mut token); }
             if let Ok(core) = core.cast::<ICoreWebView2_10>() { let _ = core.add_BasicAuthenticationRequested(&sign_in, &mut token); }
             if let Ok(core) = core.cast::<ICoreWebView2_14>() { let _ = core.add_ServerCertificateErrorDetected(&bad_cert, &mut token); }
@@ -212,6 +233,14 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
 
 #[cfg(not(windows))]
 pub fn watch(_webview: &tauri::Webview, _app: &tauri::AppHandle) {}
+
+/// A site or a page beside the chat whose webview WebView2 took away (a page asked to close): closed the way its × and
+/// the browser's window close it, so nothing is left over an empty area.
+#[cfg(windows)]
+fn gone(app: &tauri::AppHandle, label: &str) {
+    if label == PANEL { close_page(app); } else { crate::site_lost(app); }
+    layout_panel(app);
+}
 
 #[cfg(windows)]
 fn read_history(app: &tauri::AppHandle, label: &str, core: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2) {

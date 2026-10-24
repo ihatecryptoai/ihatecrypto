@@ -49,7 +49,8 @@ import Testing
         var transit: [[String: Any]] = []
         let deadline = Date().addingTimeInterval(90)
         while transit.isEmpty, Date() < deadline {
-            transit = try engine.call("refresh").state?["inTransit"] as? [[String: Any]] ?? []
+            // A refresh waits for a whole read (as the Mac's): one slower than the helper waits is tried again.
+            transit = (try? engine.call("refresh"))?.state?["inTransit"] as? [[String: Any]] ?? []
         }
         #expect(transit.count == 1, "\(transit)")
         let order = try #require(transit.first)

@@ -16,6 +16,8 @@ let typed = "";
 let offered = 0;
 export function lockScreen() {
   const l = ui.state?.lock;
+  // What's New (on the body, over the window) is covered while locked and still open after, as the Mac's under its lock.
+  document.body.classList.toggle("locked", !!l?.locked);
   // Windows Hello stood in for a code that's off: Settings › Wallet opens on making a new one, once for each offer (a
   // later «Forgot the code?» opens it again).
   if (l?.offerNewCode && !l.locked && l.newCodeOffers !== offered) { offered = l.newCodeOffers; store("settingsTab", "wallet"); ui.view = "settings"; }
@@ -99,6 +101,8 @@ export function lockAfterPicker(l) {
 
 // The two steps of making a code (the Mac's CodeMaker): type it, then once more; kept here between redraws.
 const maker = { first: null, code: "", problem: null, busy: false };
+/** A half-made code goes with its screen (the Mac's CodeMaker is the view's own state); not while the signer has it. */
+export function resetMaker() { if (!maker.busy) Object.assign(maker, { first: null, code: "", problem: null }); }
 
 /** Six boxes over a hidden field; the sixth digit moves on. `done` runs once the signer has the code. */
 export function codeMaker(l, done) {

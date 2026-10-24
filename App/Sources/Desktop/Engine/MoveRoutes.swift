@@ -135,6 +135,7 @@ extension Engine {
                 try? await Task.sleep(for: .seconds(30))
                 continue
             }
+            quoteFailed(c)
             try? await Task.sleep(for: .seconds(15))
         }
         return true
@@ -220,6 +221,16 @@ extension Engine {
             ?? ContractNames.known[key]
         guard let symbol else { learnName(token); return short }
         return "\(TokenLookup.suspicious(symbol, contract: token, genuine: Self.genuineContracts) ? "⚠ " : "")\(symbol) (\(short))"
+    }
+
+    /// A contract's ticker when known (the Mac's tokenSymbol): a favorite's, the portfolio's, a learned one; nil until then.
+    func tokenSymbol(_ token: String, on place: String) -> String? {
+        let key = token.lowercased()
+        let symbol = favorites.first { $0.address.lowercased() == key }?.symbol
+            ?? portfolio.networks.first { $0.key == place }?.rows.first { $0.contract?.lowercased() == key }?.symbol
+            ?? ContractNames.known[key]
+        if symbol == nil { learnName(token) }
+        return symbol
     }
 
     /// The real dollars and wrapped ether where the app moves money: their tickers on any other contract are a fake.

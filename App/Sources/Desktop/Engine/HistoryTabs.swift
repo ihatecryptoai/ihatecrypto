@@ -16,6 +16,12 @@ nonisolated struct HistoryTabs: Encodable {
         var lines: [String] = []
         var status = "info"
     }
+    /// What the canvas showed once a message was handled (the Mac's snapshotCanvas): that request's title and cards,
+    /// frozen. No title and no cards: nothing the Mac would freeze; the cards the message drew are its History card.
+    struct Snapshot: Codable, Equatable {
+        var title: String?
+        var bubbles: [Bubble] = []
+    }
     struct Activity: Codable, Equatable {
         /// «request», «execution» or «automatic».
         var kind: String
@@ -76,6 +82,8 @@ nonisolated struct HistoryTabs: Encodable {
     struct Saved: Codable {
         var chats: [CanvasDoc] = []
         var automatic: [HistoryTabs.Activity] = []
+        /// Each request's frozen canvas, by its message's id (nil in a record from before they were kept).
+        var shown: [String: HistoryTabs.Snapshot]?
     }
     static let limit = 1000
     static var saved: Saved = Store.load(Saved.self, "history.json") ?? Saved()
@@ -141,6 +149,16 @@ nonisolated struct HistoryTabs: Encodable {
             saved.chats[i].boards.removeAll { $0.at < cutoff }
         }
         saved.chats.removeAll { $0.messages.isEmpty && $0.boards.isEmpty }
+        if let shown = saved.shown {
+            let ids = Set(saved.chats.flatMap { $0.messages.map(\.id) })
+            saved.shown = shown.filter { ids.contains($0.key) }
+        }
+    }
+
+    /// A request's canvas frozen as it was handled.
+    static func freeze(_ snapshot: HistoryTabs.Snapshot, message: String) {
+        saved.shown = (saved.shown ?? [:]).merging([message: snapshot]) { $1 }
+        Store.save(saved, "history.json")
     }
 }
 
@@ -163,8 +181,35 @@ extension Engine {
         return [HistoryTabs.Bubble(kind: b.kind, label: b.kind == "chart" ? "Chart" : "Result", title: b.title, lines: Array(b.lines.prefix(2)), status: status)]
     }
 
+    /// The canvas as it is once a message is handled, frozen into that request's History card (the Mac's snapshotCanvas
+    /// → canvasBubbles), in the Mac's order: the card waiting for Confirm; else the chart while no plan is under way and
+    /// this message showed no rates; else the rates it showed; else the take-profit ways it offered; else the plan under
+    /// way. Rates and take-profit ways count only for the message that showed them, as the Mac clears both at the next.
+    func snapshotCanvas(for message: Message) {
+        let since = message.at
+        let planUnderWay = intent != TradeIntent() && !positions.contains { $0.coin == intent.asset }
+        let plan = planBoard.flatMap { id in boards.first { $0.id == id } }
+        let rates = boards.last { $0.kind == "result" && $0.data?.rates != nil && $0.at >= since }
+        var snap = HistoryTabs.Snapshot()
+        if let c = card, let b = boards.first(where: { $0.id == c.id }) {
+            snap = .init(title: c.title, bubbles: Self.bubbles(b))
+        } else if !planUnderWay, rates == nil, let chart = boards.last(where: { $0.kind == "chart" }) {
+            snap = .init(title: Self.boardTitle([chart]), bubbles: Self.bubbles(chart))
+        } else if let rates {
+            snap = .init(title: "Rates", bubbles: Self.bubbles(rates))
+        } else if planUnderWay, let plan, let takes = plan.plan?.takes, !takes.isEmpty, (takesAt ?? .distantPast) >= since {
+            snap = .init(title: "Take-profit choices", bubbles: takes.map {
+                HistoryTabs.Bubble(kind: "choice", label: $0.title, title: $0.payoff.isEmpty ? $0.title : $0.payoff, lines: [$0.detail])
+            })
+        } else if planUnderWay, let plan {
+            snap = .init(title: plan.title, bubbles: Self.bubbles(plan))
+        }
+        HistoryStore.freeze(snap, message: message.id)
+    }
+
     /// What a canvas shows between requests, as the Mac's canvasBubbles picks it once the moves are done: its chart while
-    /// no plan or rates are there, else its rates, else its plan. The newest of each.
+    /// no plan or rates are there, else its rates, else its plan. The newest of each. Only for a request recorded before
+    /// snapshots were kept.
     nonisolated static func standing(_ boards: [Board]) -> Board? {
         let plan = boards.last { $0.kind == "move" && $0.plan != nil }
         let rates = boards.last { $0.kind == "result" && $0.data?.rates != nil }
@@ -191,15 +236,17 @@ extension Engine {
                 let said = c.messages.filter { !$0.fromUser && $0.at >= q.at && $0.at < until }.map(\.text)
                 let kept = c.boards.filter { !Self.liveBoards.contains($0.kind) && !["recurring", "scheduleItem"].contains($0.kind) }
                 let made = kept.filter { $0.at >= q.at && $0.at < until }.sorted { $0.at < $1.at }
-                // A request that drew nothing keeps what the canvas showed as it was handled (the Mac's snapshotCanvas):
-                // its chart, its rates or its plan.
-                let shown = made.isEmpty ? Self.standing(kept.filter { $0.at < q.at }.sorted { $0.at < $1.at }) : nil
-                let bubbles = shown.map(Self.bubbles) ?? made.flatMap(Self.bubbles)
+                // What the canvas showed as it was handled (the Mac's snapshotCanvas), frozen then; a record from before
+                // snapshots: what a request that drew nothing had standing.
+                let snap = HistoryStore.saved.shown?[q.id]
+                let shown = snap == nil && made.isEmpty ? Self.standing(kept.filter { $0.at < q.at }.sorted { $0.at < $1.at }) : nil
+                let frozen = snap.flatMap { $0.bubbles.isEmpty ? nil : $0.bubbles }
+                let bubbles = frozen ?? shown.map(Self.bubbles) ?? made.flatMap(Self.bubbles)
                 // A scheduled run is a request of its own, «Scheduled: …», with no coin, so it isn't a «Guardian» step of a
                 // trade (the Mac's beginActivity(.request, request:, schedule:), Tasks.swift:130).
                 let run = q.note == "schedule"
                 out.append(HistoryTabs.Activity(kind: "request", at: q.at, request: q.text, understood: q.understood,
-                                                title: Self.boardTitle(shown.map { [$0] } ?? made), coin: run ? nil : IntentParser.namedAsset(q.text, markets: names),
+                                                title: snap?.title ?? Self.boardTitle(shown.map { [$0] } ?? made), coin: run ? nil : IntentParser.namedAsset(q.text, markets: names),
                                                 bubbles: bubbles, lines: said, failed: run && made.contains { $0.state == "failed" }))
             }
         }

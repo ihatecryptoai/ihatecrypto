@@ -3,7 +3,7 @@
 // one card at a time — ← → switch, Space pauses, the bars fill in 6 s and move on, Esc goes back to the list. Nothing
 // opens by itself: the newest version not seen yet is `whatsNewUnseen()`, for the logo's ring and the menu's dot.
 
-import { t, h, icon, addIcons, suggest, store } from "./core.js";
+import { ui, t, h, icon, addIcons, suggest, store } from "./core.js";
 import { releases } from "./whatsnew-data.js";
 
 addIcons({
@@ -117,6 +117,8 @@ export function openWhatsNew() {
   }
 
   function keys(e) {
+    // Under the lock its keys are the lock screen's (the Mac's What's New is disabled under it).
+    if (ui.state?.lock?.locked) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); playing ? back() : close(); }
     else if (playing && e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
     else if (playing && e.key === "ArrowRight") { e.preventDefault(); go(1); }
