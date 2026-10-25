@@ -11,6 +11,12 @@ extension Workspace {
         UserDefaults.standard.set("plan", forKey: "canvasMode")
     }
 
+    /// What `opener` opens is open on the canvas now: the token's board, or the chart of that network's own coin.
+    func isOpen(chain: String, contract: String, symbol: String) -> Bool {
+        if contract != "native", chain != "hyperliquid" { return detail == TokenBoard.place(chain: chain, address: contract) }
+        return detail == "chart" && chart?.coin == symbol.uppercased() && chart?.network == chain
+    }
+
     /// What a click on a held token opens: the board of a token with a contract; the market's chart for a network's own
     /// coin (SOL, ETH, NEAR) or a Hyperliquid spot token that trades as a perp; nil when there's nothing to open. Both
     /// open in the same place on the canvas, each replacing the last.

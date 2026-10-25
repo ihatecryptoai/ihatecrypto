@@ -1874,7 +1874,8 @@ struct HoldingRow: View {
         // A click opens the token (its board, or the chart of a network's own coin); right-click asks the chat about it or
         // trades it.
         .modifier(RowLink(action: ws.opener(chain: token.chain, contract: token.contract, symbol: token.symbol),
-                          help: "\(token.symbol): details and chart · right-click to ask the chat, buy or sell"))
+                          help: "\(token.symbol): details and chart · right-click to ask the chat, buy or sell",
+                          selected: ws.isOpen(chain: token.chain, contract: token.contract, symbol: token.symbol)))
         .modifier(TokenMenu(chain: token.chain, address: token.native || token.chain == "hyperliquid" ? nil : token.contract,
                             symbol: token.symbol, verified: token.verified))
     }

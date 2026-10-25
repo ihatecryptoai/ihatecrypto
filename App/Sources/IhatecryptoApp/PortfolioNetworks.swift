@@ -322,7 +322,8 @@ struct NetworkCard: View {
                           change: stock ? ws.markets["xyz:\(s.symbol)"]?.change24h : ws.tokenInfo["robinhood:" + s.address.lowercased()]?.change24h)
             }
             .modifier(RowLink(action: { ws.openToken(s.address) },
-                              help: "\(s.symbol) at \(s.price.map { Fmt.usd($0) } ?? "—"): details and chart · right-click to ask the chat, buy or sell"))
+                              help: "\(s.symbol) at \(s.price.map { Fmt.usd($0) } ?? "—"): details and chart · right-click to ask the chat, buy or sell",
+                              selected: ws.detail == TokenBoard.place(chain: "robinhood", address: s.address)))
             .modifier(TokenMenu(chain: "robinhood", address: s.address, symbol: s.symbol, stock: stock, verified: true))
     }
 }
@@ -332,12 +333,14 @@ struct NetworkCard: View {
 struct RowLink: ViewModifier {
     let action: (() -> Void)?
     var help = ""
+    /// What the row opens is open now: the accent edge shows then, not on hover.
+    var selected = false
 
     func body(content: Content) -> some View {
         if let action {
             content.padding(.horizontal, 5).padding(.vertical, 3)
                 .contentShape(Rectangle())
-                .modifier(HoverLift(radius: 8))
+                .modifier(HoverLift(radius: 8, selected: selected))
                 .onTapGesture(perform: action)
                 .help(help)
                 .padding(.horizontal, -5).padding(.vertical, -3)
@@ -374,7 +377,8 @@ struct NetworkLineRow: View {
         }
         .contentShape(Rectangle())
         row.modifier(RowLink(action: ws.opener(line, chain: chain),
-                             help: (line.help ?? "\(line.title): \(line.contract == nil ? "chart" : "details and chart")") + " · right-click to ask the chat"))
+                             help: (line.help ?? "\(line.title): \(line.contract == nil ? "chart" : "details and chart")") + " · right-click to ask the chat",
+                             selected: ws.isOpen(chain: chain, contract: line.contract ?? "native", symbol: line.title)))
             .modifier(TokenMenu(chain: chain, address: line.contract, symbol: line.title))
     }
 

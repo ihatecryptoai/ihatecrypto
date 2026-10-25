@@ -575,9 +575,10 @@ struct Openable: ViewModifier {
         let width: CGFloat = open ? 2 : 1.5
         // A fixed-color edge that shows at once: a fade redraws the whole window every frame.
         content
+            // The edge only while its details are open; hovering shows the hand alone (the owner, 2026-10-25).
             .overlay {
                 RoundedRectangle(cornerRadius: 16).strokeBorder(Brand.accent, lineWidth: width)
-                    .opacity(open ? 1 : hover ? 0.6 : 0)
+                    .opacity(open ? 1 : 0)
             }
             .contentShape(Rectangle())
             .onHover { hover = $0 }
@@ -660,13 +661,17 @@ extension ButtonStyle where Self == HoverIconStyle {
 struct HoverLift: ViewModifier {
     var radius: CGFloat = 12
     var enabled = true
+    /// Where a row knows whether what it opens is open: the accent edge only then, and hovering only lightens the row
+    /// (the owner, 2026-10-25: «убери когда провожу мимо бордер, только когда селектед бордер»). nil: the edge on hover.
+    var selected: Bool?
     @State private var hover = false
 
     func body(content: Content) -> some View {
         let on = hover && enabled
+        let edge = selected ?? on
         content
             .background(RoundedRectangle(cornerRadius: radius).fill(Color.primary).opacity(on ? 0.07 : 0))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: 1.5).opacity(on ? 0.7 : 0))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: 1.5).opacity(edge ? (selected == nil ? 0.7 : 1) : 0))
             .onHover { hover = $0 }
             .pointerStyle(enabled ? .link : .default)
     }
