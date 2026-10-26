@@ -522,17 +522,22 @@ struct WindowDragArea: View {
 struct UpdateTag: View {
     let version: String
     var compact = false
+    /// The folded rail's full width, at its foot by the profile (the owner, 2026-10-26: «лучше расположить вот… и на всю
+    /// ширину»).
+    var wide = false
 
     var body: some View {
         Button { Updater.shared.check() } label: {
-            HStack(spacing: 3) {
+            HStack(spacing: 4) {
                 Image(systemName: "arrow.down.circle.fill")
                 if !compact { Text(version).lineLimit(1) }
             }
             .fixedSize()
-            .font(.ui(10, .bold)).foregroundStyle(Brand.accentInk)
-                .padding(.horizontal, compact ? 4 : 6).frame(height: 18)
-                .background(Capsule().fill(Brand.accent.opacity(0.16)))
+            .font(.ui(wide ? 11.5 : 10, .bold)).foregroundStyle(Brand.accentInk)
+            .padding(.horizontal, compact ? 4 : 6)
+            .frame(maxWidth: wide ? .infinity : nil).frame(height: wide ? 30 : 18)
+            .background(Capsule().fill(Brand.accent.opacity(0.16)))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain).pointerStyle(.link)
         .help("ihatecrypto \(version) is out: see what's new and install it")
@@ -708,7 +713,6 @@ struct StudioRail: View {
                 VStack(spacing: 8) {
                     BrandLogo(size: 34, mood: refreshing ? .thinking : .idle, animated: true)
                     if Flavor.dev { DevTag() }
-                    if let version = ws.updateReady { UpdateTag(version: version, compact: true) }
                     VStack(spacing: 1) {
                         BalanceAmount(font: .ui(11, .semibold), mask: "$•••", skeleton: CGSize(width: 44, height: 11)).lineLimit(1).minimumScaleFactor(0.7)
                         if !ws.positions.isEmpty, !balanceHidden {
@@ -736,6 +740,7 @@ struct StudioRail: View {
             Button("New canvas") { withAnimation(StudioView.spring) { ws.newCanvas() } }
                 .buttonStyle(RailRound(icon: "plus", title: "New", dashed: true)).help("New canvas").disabled(ws.busy)
             Spacer(minLength: 0)
+            if let version = ws.updateReady { UpdateTag(version: version, wide: true).frame(width: 76) }
             Button("Expand the sidebar") { withAnimation(StudioView.spring) { collapsed = false } }
                 .buttonStyle(RailRound(icon: "sidebar.left", plain: true)).help("Expand the sidebar")
             ProfileMenu(compact: true)
