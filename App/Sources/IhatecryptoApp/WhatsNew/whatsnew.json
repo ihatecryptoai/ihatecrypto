@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.7.9",
+    "date": "2026-10-26",
+    "stories": [
+      {
+        "title": "A new version you can see",
+        "text": "When a new ihatecrypto is out, «↓ its version» sits by the logo until you install it, and the app menu and the menu bar's coin offer it too. A click shows what's new with Install; nothing downloads by itself.",
+        "symbol": "arrow.down.circle.fill",
+        "color": "0A84FF"
+      }
+    ]
+  },
+  {
     "version": "0.7.8",
     "date": "2026-10-26",
     "stories": [
