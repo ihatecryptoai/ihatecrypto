@@ -79,7 +79,7 @@ do {
     case "jev-screen":
         let text = args.dropFirst().filter { $0 != "--yes" }.joined(separator: " ")
         let key = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
-        printVerdict(await InjectionGuard.screen(text, source: "terminal check", classifier: key.map { JevClassifier(apiKey: $0) }))
+        printVerdict(await InjectionGuard.screen(text, source: "terminal check", classifier: key.map { JevClassifier(apiKey: $0) }).verdict)
     case "jev-eval": try await jevEval(args.dropFirst().first ?? "")
     case "lookup":
         let tool = args.dropFirst().first ?? "", arg = args.dropFirst(2).joined(separator: " ")

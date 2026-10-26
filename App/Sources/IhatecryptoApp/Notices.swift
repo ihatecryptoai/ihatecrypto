@@ -1,6 +1,8 @@
 import os
 import AppKit
+import GuardJev
 import IhatecryptoCore
+import TxGuard
 import WalletCore
 import SwiftUI
 @preconcurrency import UserNotifications
@@ -18,6 +20,47 @@ extension Workspace {
     }
     /// «Russian» or «English», for the model's instructions.
     var replyLanguage: String { chatLanguage.name(recentUserMessages: ownWords) }
+
+    /// `say` off the main thread, in a `replyLanguage` taken beforehand.
+    nonisolated static func say(_ english: String, _ russian: String, _ spanish: String, in language: String) -> String {
+        language == "Russian" ? russian : language == "Spanish" ? spanish : english
+    }
+
+    /// Why the guard stopped a message (InjectionGuard.Stop), in the chat's language.
+    nonisolated static func stopWords(_ stop: InjectionGuard.Stop, in language: String) -> String {
+        switch stop {
+        case .commands(let found):
+            let quoted = found.joined(separator: "», «")
+            return say("The text has commands for the assistant: “\(found.joined(separator: "”, “"))”.", "В тексте есть команды ассистенту: «\(quoted)».",
+                       "El texto trae órdenes para el asistente: «\(quoted)».", in: language)
+        case .sendsTo(let address):
+            return say("The text asks to send funds to \(address). Addresses from text never become recipients.",
+                       "В тексте просят отправить деньги на \(address), а адрес из текста получателем не становится.",
+                       "El texto pide enviar fondos a \(address); una dirección sacada de un texto nunca recibe dinero.", in: language)
+        case .steers(let p):
+            return say("The second check: the text tries to steer the assistant (\(p)%).", "Вторая проверка видит в тексте чужие указания ассистенту (\(p)%).",
+                       "La segunda verificación ve en el texto órdenes ajenas para el asistente (\(p)%).", in: language)
+        case .redirects(let p):
+            return say("The second check: the text tries to redirect funds to its own address (\(p)%).",
+                       "Вторая проверка видит в тексте попытку увести деньги на чужой адрес (\(p)%).",
+                       "La segunda verificación ve en el texto un intento de llevar el dinero a otra dirección (\(p)%).", in: language)
+        }
+    }
+
+    /// The second check's doubt about the model's command, in the chat's language; in English as Jev wrote it.
+    nonisolated static func doubtWords(_ review: JevReview, in language: String) -> String {
+        guard language == "Russian" || language == "Spanish" else { return review.text }
+        let differs = say("", "команда делает не то, о чём ты просишь", "el comando no hace lo que pides", in: language)
+        switch review.about ?? (review.label == "unclear" ? "unclear" : "") {
+        case "action": return say("", differs + ", — другое действие.", differs + ": la acción es otra.", in: language)
+        case "asset": return say("", differs + ", — другая монета.", differs + ": el activo es otro.", in: language)
+        case "place": return say("", differs + ", — другая сеть, площадка или получатель.", differs + ": la red, el sitio o el destinatario es otro.", in: language)
+        case "amount": return say("", differs + ", — другая сумма или она не на своём месте: вложение вместо риска или наоборот.",
+                                  differs + ": la cantidad es otra o cumple otro papel (lo que pones frente a lo que arriesgas).", in: language)
+        case "unclear": return say("", "из сообщения не понять, что именно сделать.", "el mensaje no deja claro qué hacer.", in: language)
+        default: return differs + "."
+        }
+    }
 }
 
 /// What a notification is about; each kind can be turned off in Settings.

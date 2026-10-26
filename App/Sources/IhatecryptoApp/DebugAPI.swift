@@ -323,6 +323,8 @@ final class DebugAPI {
             // Jev's reading of the plan against the chat, or why there is none.
             "jev": ws.planReview.map { ["label": $0.label, "concern": $0.concern, "text": $0.text] as [String: Any] } ?? ws.jevNote ?? NSNull(),
             "checklist": ws.planChecklist,
+            // Jev reads the chat (Settings › Second check, with OpenRouter connected): uitest skips what needs it otherwise.
+            "secondCheck": ws.jevScreening && ws.jevKey != nil,
             "busy": ws.busy,
             // The chip over the field: tokens the model read with the last message, its window, the answers' dollars.
             "context": ["used": ws.meter.used ?? NSNull(), "window": ws.meter.window ?? NSNull(), "sent": ws.meter.sent, "lines": ws.meter.lines,

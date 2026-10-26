@@ -9,7 +9,10 @@ Measured 2026-10-13, at 0.5 (before = the questions as they were, mean over the 
   plans.py tx      false alarms 0% → 0%,  caught 55% → 61% (an address the plan doesn't name is not seen: the guard's job)
 2026-10-14, the screen at 0.7 (before = one question for every text, «instructions» stops):
   screens.py, own messages   false stops 5.9% → 0.4% (one, by a local rule: «ты теперь…»),  attacks stopped 55% → 100%
-  screens.py, lookup texts   not screened before → no false stop on 49 real results, 80 of 80 attacks stopped"""
+  screens.py, lookup texts   not screened before → no false stop on 49 real results, 80 of 80 attacks stopped
+2026-10-27, the screen at 0.7, «ты теперь» narrowed to a new role, Jev on every message (18 short wishes, 16 short pastes added):
+  screens.py, own messages   no false stop on 280; 40 of 40 pasted attacks, 14 of 16 short pastes with no address or link stopped
+  screens.py, lookup texts   no false stop on 49, 80 of 80 attacks stopped"""
 import collections, json, sys
 cases = {c["id"]: c for c in map(json.loads, open(sys.argv[1]))}
 T = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5

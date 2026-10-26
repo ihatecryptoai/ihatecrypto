@@ -11,10 +11,19 @@ public enum InjectionHeuristics {
         // A prompt is named as a header or a tag that opens new orders («SYSTEM PROMPT: …», «[system]», «new system prompt»);
         // a question about it («what's the system prompt size?») is not a command.
         #"(system|developer)\s+(prompt|message)\s*[:>\]]|[\[<]\s*/?\s*(system|developer)\s*[\]>]|(new|override|updated)\s+(system|developer)\s+(prompt|message)|developer\s+mode"#,
-        #"(you\s+are\s+now|new\s+instructions|do\s+not\s+tell\s+the\s+user|don't\s+tell\s+the\s+user)"#,
+        #"(new\s+instructions|do\s+not\s+tell\s+the\s+user|don't\s+tell\s+the\s+user)"#,
+        // «you are now» and «ты теперь» only with a new role or mode: the user's own «ты теперь всегда отвечай по-русски»,
+        // «you are now my trading buddy» are wishes, and «киты теперь продают ETH?» held «ты теперь» before the word
+        // boundary. Trading words stay out: support (a price level), AI tokens, «торговых ботов». Measured 2026-10-27:
+        // none of the 280 own messages of Tools/jevcheck/screens.py stopped, all 7 role switches still stopped. A switch in
+        // other words is Jev's to catch (it reads every message); a lookup's result still stops on any of the two (newRole).
+        #"\byou\s+are\s+now\b[^.!?\n]{0,40}?(agent|assistant|\bbot\b|\bai\b(?![\s-]*tokens?)|model|admin|developer|mode\b|\bdan\b|unrestricted|unfiltered|uncensored|jailbr|without\s+(limits|rules|checks|restrictions|filters|confirm))\w*"#,
         #"(игнорируй|забудь|отмени)\s+(все\s+|всё\s+|предыдущие\s+|прежние\s+)*(инструкции|правила|указания)"#,
-        #"(системн\w+\s+(промпт\w*|сообщени\w+)\s*:|нов\w+\s+системн\w+\s+промпт|новые\s+инструкции|ты\s+теперь|не\s+(говори|сообщай)\s+пользователю)"#,
+        #"(системн\w+\s+(промпт\w*|сообщени\w+)\s*:|нов\w+\s+системн\w+\s+промпт|новые\s+инструкции|не\s+(говори|сообщай)\s+пользователю)"#,
+        #"\bты\s+теперь\b[^.!?\n]{0,40}?(агент|ассистент|\bбот(ом)?\b|\bии\b(?![\s-]*токен)|модел|админ|разработчик|режим|свобод|\bdan\b|jailbr|джейлбр|без\s+(огранич|правил|провер|подтвержд|вопрос|фильтр|цензур)|не\s+обязан)\w*"#,
     ]
+    /// What a lookup brings back speaks to no one: «you are now…», «ты теперь…» there is said to the model reading it.
+    static let newRole = #"\b(you\s+are\s+now|ты\s+теперь)\b"#
     static let transferVerbs = #"(send|transfer|withdraw|bridge|deposit|approve|pay|отправ\w*|перевед\w*|перевест\w*|переведи|выведи|вывест\w*|скинь|пополн\w*|оплат\w*)"#
     static let evmAddress = #"0x[0-9a-fA-F]{40}"#
     static let solanaAddress = #"[1-9A-HJ-NP-Za-km-z]{32,44}"#
@@ -71,42 +80,68 @@ public protocol TextClassifier: Sendable {
 public enum InjectionGuard {
     public static let threshold = 0.7
 
-    public static func screen(_ text: String, source: String, classifier: (any TextClassifier)?) async -> Verdict {
-        var v = Verdict()
+    /// Why a text was stopped, as data: the problems' English stays for logs and the terminal, the chat says these in
+    /// its own language.
+    public enum Stop: Sendable, Equatable {
+        /// Commands to the assistant the local rules found, as written.
+        case commands([String])
+        /// The address from the text the money would go to.
+        case sendsTo(String)
+        /// The classifier, in percent: someone else's orders to the assistant.
+        case steers(Int)
+        /// The classifier, in percent: funds pushed to the text's own address.
+        case redirects(Int)
+    }
+
+    public struct Screen: Sendable {
+        public var verdict = Verdict()
+        /// One for each problem.
+        public var stops: [Stop] = []
+        public var ok: Bool { verdict.ok }
+        public var checks: [String] { verdict.checks }
+        public var problems: [String] { verdict.problems }
+    }
+
+    public static func screen(_ text: String, source: String, classifier: (any TextClassifier)?) async -> Screen {
+        var s = Screen()
         let f = InjectionHeuristics.findings(text)
         if !f.commands.isEmpty {
-            v.problems.append("The text has commands for the assistant: “\(f.commands.joined(separator: "”, “"))”.")
+            s.verdict.problems.append("The text has commands for the assistant: “\(f.commands.joined(separator: "”, “"))”.")
+            s.stops.append(.commands(f.commands))
         }
         if !f.addresses.isEmpty {
             if f.transferVerb, let to = f.recipients.first {
-                v.problems.append("The text asks to send funds to \(to). Addresses from text never become recipients.")
+                s.verdict.problems.append("The text asks to send funds to \(to). Addresses from text never become recipients.")
+                s.stops.append(.sendsTo(to))
             } else if f.transferVerb {
-                v.checks.append("The address names the token to send; only a saved name receives it.")
+                s.verdict.checks.append("The address names the token to send; only a saved name receives it.")
             } else {
-                v.checks.append("The text has an address; it will not become a payment recipient.")
+                s.verdict.checks.append("The text has an address; it will not become a payment recipient.")
             }
         }
         guard let classifier else {
-            v.checks.append("Checked by local rules.")
-            return v
+            s.verdict.checks.append("Checked by local rules.")
+            return s
         }
         do {
             let (label, confidence) = try await classifier.classify(text, source: source)
             let percent = Int(confidence * 100)
             switch label {
             case "data":
-                v.checks.append("\(classifier.name): looks like ordinary data (\(percent)%).")
+                s.verdict.checks.append("\(classifier.name): looks like ordinary data (\(percent)%).")
             case "instructions" where confidence >= threshold:
-                v.problems.append("\(classifier.name): the text tries to steer the assistant (\(percent)%).")
+                s.verdict.problems.append("\(classifier.name): the text tries to steer the assistant (\(percent)%).")
+                s.stops.append(.steers(percent))
             case "payment_redirect" where confidence >= threshold:
-                v.problems.append("\(classifier.name): the text tries to redirect funds to its own address (\(percent)%).")
+                s.verdict.problems.append("\(classifier.name): the text tries to redirect funds to its own address (\(percent)%).")
+                s.stops.append(.redirects(percent))
             default:
-                v.checks.append("\(classifier.name) is unsure: \(label) (\(percent)%). Local rules decide.")
+                s.verdict.checks.append("\(classifier.name) is unsure: \(label) (\(percent)%). Local rules decide.")
             }
         } catch {
-            v.checks.append("\(classifier.name) is unavailable (\(error.localizedDescription)); local rules apply.")
+            s.verdict.checks.append("\(classifier.name) is unavailable (\(error.localizedDescription)); local rules apply.")
         }
-        return v
+        return s
     }
 
     /// What a lookup brought back for the chat's model — a token's listing, a page, a service's docs, a contract's
@@ -115,7 +150,7 @@ public enum InjectionGuard {
     /// with the chat); the classifier adds what is said in other words. Whatever is decided here, an address a lookup
     /// finds never becomes a recipient.
     public static func lookupProblem(_ text: String, source: String, classifier: (any TextClassifier)?) async -> String? {
-        let commands = InjectionHeuristics.findings(text).commands
+        let commands = InjectionHeuristics.findings(text).commands + InjectionHeuristics.all(InjectionHeuristics.newRole, in: text.lowercased()).prefix(1)
         if !commands.isEmpty { return "it has commands for the assistant: “\(commands.joined(separator: "”, “"))”" }
         guard let classifier, let (label, confidence) = try? await classifier.classify(text, source: source), label != "data", confidence >= threshold else { return nil }
         let percent = Int(confidence * 100)

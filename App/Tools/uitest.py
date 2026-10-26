@@ -128,13 +128,17 @@ def main():
     failed = skipped = 0
     try:
         for n, s in enumerate(scenarios, 1):
-            cond = s.get("only_if")  # a scenario that depends on what the wallet holds, or on which wallet signs
+            cond = s.get("only_if")  # a scenario that depends on what the wallet holds, on which wallet signs, or on Jev
+            if cond and "second_check" in cond and cond["second_check"] != bool(start.get("secondCheck")):
+                skipped += 1
+                print(f"SKIP  {s['name']}  (the second check is {'off' if cond['second_check'] else 'on'})")
+                continue
             if cond and "wallet" in cond:
                 if (cond["wallet"] == "test") != bool(start["wallet"].get("test")):
                     skipped += 1
                     print(f"SKIP  {s['name']}  (needs the {cond['wallet']} wallet)")
                     continue
-            elif cond:
+            elif cond and "balance" in cond:
                 have = float(start["balances"].get(cond["balance"]) or 0)
                 if ("at_least" in cond and have < cond["at_least"]) or ("below" in cond and have >= cond["below"]):
                     skipped += 1

@@ -9,6 +9,9 @@ import TxGuard
 /// 2026-10-14 (Tools/jevcheck/screens.py), a stop at 0.7: 262 of the user's own messages — 5.9% stopped before, none
 /// now; 40 of them with an injected paste — 55% stopped before, all now; 49 real lookup results — none stopped;
 /// 80 of those with an attack put in at the start, the middle or the end, in ru/en/es — all stopped.
+/// The chat asks it about every message, short ones too (2026-10-27): 14 of 16 short pastes with no address or link
+/// stopped (the two missed read as the user's own order), none of 20 short wishes («ты теперь пиши без эмодзи»), one
+/// call 0.53–0.77 s.
 public struct JevClassifier: TextClassifier {
     static let endpoint = URL(string: "https://openrouter.ai/api/alpha/decisions")!
     static let model = "typesafe/jev-1.13"
@@ -36,10 +39,11 @@ public struct JevClassifier: TextClassifier {
     public init(apiKey: String, own: Bool = false) { (self.apiKey, self.own) = (apiKey, own) }
 
     public func classify(_ text: String, source: String) async throws -> (label: String, confidence: Double) {
-        // As much as the chat's model is given of one lookup (AgentReads.cap).
+        // As much as the chat's model is given of one lookup (AgentReads.cap). A chat message waits for it, so an
+        // OpenRouter that doesn't answer leaves a short one to the local rules after 5 s; a paste gets the full 15.
         let p = try await Self.decide(apiKey: apiKey, state: ["source": source, "text": String(text.prefix(6000))],
                                       instructions: own ? Self.ownInstructions : Self.outsideInstructions,
-                                      criteria: own ? Self.ownLabels : Self.outsideLabels).options
+                                      criteria: own ? Self.ownLabels : Self.outsideLabels, timeout: own && text.count < 100 ? 5 : 15).options
         return Self.verdict(p)
     }
 
@@ -59,8 +63,8 @@ public struct JevClassifier: TextClassifier {
     /// commands, 2026-10-13). The choice goes twice, its options in opposite orders, and the two answers are averaged:
     /// the model leans toward the option it reads first (the verdict changed with that order alone for 6.5%).
     static func decide(apiKey: String, state: KeyValuePairs<String, Any>, instructions: String, criteria: KeyValuePairs<String, String>,
-                       asks: KeyValuePairs<String, String> = [:]) async throws -> (options: [String: Double], yes: [String: Double]) {
-        var request = URLRequest(url: endpoint, timeoutInterval: 15)
+                       asks: KeyValuePairs<String, String> = [:], timeout: TimeInterval = 15) async throws -> (options: [String: Double], yes: [String: Double]) {
+        var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -114,9 +118,12 @@ public struct JevReview: Sendable, Equatable {
     /// Jev disagrees with enough confidence to stop and ask the user.
     public let concern: Bool
     public let text: String
+    /// What a mismatch is about, when one ask names it («action», «asset», «place», «amount»): the chat says it in its
+    /// own language.
+    public let about: String?
 
-    public init(label: String, confidence: Double, concern: Bool, text: String) {
-        (self.label, self.confidence, self.concern, self.text) = (label, confidence, concern, text)
+    public init(label: String, confidence: Double, concern: Bool, text: String, about: String? = nil) {
+        (self.label, self.confidence, self.concern, self.text, self.about) = (label, confidence, concern, text, about)
     }
 }
 
@@ -194,12 +201,16 @@ public enum JevReviewer {
                     "message": String(message.prefix(600)), "command": command],
             instructions: "A crypto wallet's assistant read state.message (in any language, typos and slang included; state.recent_chat came before it and state.canvas is what the user sees) and wrote state.command, one line in the app's fixed English command forms, to carry out. state.forms lists those forms and what each means; a command is judged by what its form does, not by its wording. Judge whether the command does what the user asked. Numbers and places the user didn't give may be missing or filled in: the app fills them by its rules or asks. A command «confirm: …» is right only when the message approves the card waiting for Confirm in state.canvas as it is. A command ending in «(step 1 of the request: …)» only has to be the right first step.",
             criteria: readingLabels, asks: readingAsks)
+        return readingReview(p, yes: yes)
+    }
+
+    static func readingReview(_ p: [String: Double], yes: [String: Double]) -> JevReview {
         let r = review(p, good: "matches", texts: [
             "matches": "the command matches the message", "mismatch": "the command does something other than the message asks",
             "unclear": "the message is too vague to tell",
         ])
         guard r.label == "mismatch", let least = yes.min(by: { $0.value < $1.value }), least.value < 0.5, let what = readingDiffers[least.key] else { return r }
-        return JevReview(label: r.label, confidence: r.confidence, concern: true, text: "the command does something other than the message asks: \(what).")
+        return JevReview(label: r.label, confidence: r.confidence, concern: true, text: "the command does something other than the message asks: \(what).", about: least.key)
     }
 
     public static func transactions(plan: [String], signatures: [String], changes: [String], apiKey: String) async throws -> JevReview {
