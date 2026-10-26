@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.7.8",
+    "date": "2026-10-26",
+    "stories": [
+      {
+        "title": "Send all of anything",
+        "text": "«Send all» works for every coin now: all your SOL, the rent of the empty token accounts with it; ETH, POL or BNB less only the fee; all of Tempo's USDC with a speck left, not a cent. Sending all of a token closes its account and its rent comes back. A token named by its contract is no longer taken for the address it goes to.",
+        "symbol": "paperplane.fill",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "Price alerts on the Schedule",
+        "text": "Your price alerts sit on the Schedule beside the tasks: the level, how far the price is, a switch to pause one and a page of its own. A row gets its orange edge only while it's open, not under the pointer.",
+        "symbol": "bell.badge.fill",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "Every fee counted",
+        "text": "A Hyperliquid spot quote takes off the exchange's 0.07% and, on a sale, ihatecrypto's 0.05%. On your first trade the signing card counts the fee approval as the signature it is.",
+        "symbol": "percent",
+        "color": "64D2FF"
+      }
+    ]
+  },
+  {
     "version": "0.7.7",
     "date": "2026-10-24",
     "stories": [
