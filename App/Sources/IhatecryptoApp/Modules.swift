@@ -568,6 +568,7 @@ struct Openable: ViewModifier {
 
     @Environment(Workspace.self) private var ws
     let place: String
+    var radius: CGFloat = 16
     @State private var hover = false
 
     func body(content: Content) -> some View {
@@ -577,7 +578,7 @@ struct Openable: ViewModifier {
         content
             // The edge only while its details are open; hovering shows the hand alone (the owner, 2026-10-25).
             .overlay {
-                RoundedRectangle(cornerRadius: 16).strokeBorder(Brand.accent, lineWidth: width)
+                RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: width)
                     .opacity(open ? 1 : 0)
             }
             .contentShape(Rectangle())

@@ -537,8 +537,14 @@ final class Workspace {
     /// A limit entry waiting on the book (its stop and take are the trigger orders next to it).
     var pendingEntry: HyperliquidAccount.Order? { orders.first { !$0.isTrigger } }
     var lend: [(vault: String, usdc: Decimal)] = []
-    /// Kamino Lend deposits, in dollars.
+    /// The same deposits with their own coin and rate, for the portfolio's tiles (DepositTile).
+    var lendDeposits: [LendDeposit] = []
+    /// What each earned so far, in its coin's raw units, by the vault's token; read at most every five minutes.
+    var lendEarned: [String: Decimal] = [:]
+    @ObservationIgnored var lendEarnedAt: Date?
+    /// Kamino Lend deposits, in dollars, and by coin.
     var kamino: Decimal = 0
+    var kaminoDeposits: [KaminoDeposit] = []
     /// The NEAR implicit account the signer derived from the same phrase; nil until it has been asked once.
     var nearAddress: String?
     /// NEAR on that account: native and wNEAR, in NEAR.
@@ -2075,8 +2081,12 @@ final class Workspace {
         func current() -> Bool { owner == solanaAddress && nearAccount == nearAddress }
         do {
             let s = try await balance
-            let l: [(vault: String, usdc: Decimal)] = ((await lendPositions) ?? []).filter { $0.assets > 0 }
-                .map { ($0.vault, Decimal($0.assets) / 1_000_000) }
+            let held = ((await lendPositions) ?? []).filter { $0.assets > 0 }
+            let l: [(vault: String, usdc: Decimal)] = held.map { ($0.vault, Decimal($0.assets) / 1_000_000) }
+            let deposits = held.map { p in
+                LendDeposit(address: p.address, coin: p.coin == "WSOL" ? "SOL" : p.coin, amount: Decimal(p.assets) / pow(10, p.decimals),
+                            decimals: p.decimals, apy: p.apy)
+            }
             let k = await kaminoPositions, n = await nearBalance
             land { [self] in
                 guard current() else { return }
@@ -2084,8 +2094,26 @@ final class Workspace {
                 solanaError = nil
                 // Tuples aren't Equatable: without this check @Observable redraws on every refresh.
                 if !l.elementsEqual(lend, by: ==) { lend = l }
-                if let k { kamino = k.reduce(0) { $0 + $1.valueUSD } }
+                if deposits != lendDeposits { lendDeposits = deposits }
+                if let k {
+                    kamino = k.reduce(0) { $0 + $1.valueUSD }
+                    let byCoin = k.map { KaminoDeposit(coin: $0.symbol, usd: $0.valueUSD, apy: $0.apy) }
+                    if byCoin != kaminoDeposits { kaminoDeposits = byCoin }
+                }
                 if let n { near = n.near + n.wrapped }
+            }
+            // What the deposits earned: not with every balance read (Jupiter's free API answers 429 to many).
+            if !deposits.isEmpty, Date().timeIntervalSince(lendEarnedAt ?? .distantPast) > 300 {
+                lendEarnedAt = Date()
+                Task { [self] in
+                    // A refused read (429) asks again in a minute rather than five.
+                    guard let e = try? await JupiterLend.earnings(user: owner, positions: deposits.map(\.address)) else {
+                        lendEarnedAt = Date().addingTimeInterval(-240)
+                        return
+                    }
+                    // Only the Solana address: the NEAR one is still being derived right after launch.
+                    if owner == solanaAddress, e != lendEarned { lendEarned = e }
+                }
             }
         } catch {
             // A failed read keeps the last balances: set to nil, the rail and the canvas's cards went blank until the next one.

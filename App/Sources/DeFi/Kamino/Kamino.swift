@@ -68,6 +68,8 @@ public enum Kamino {
         /// Kamino's collateral shares (raw), not the underlying tokens.
         public let amount: Decimal
         public let valueUSD: Decimal
+        /// The reserve's supply % a year, where the market lists it.
+        public var apy: Decimal? = nil
     }
 
     public static func positions(wallet: String) async throws -> [Position] {
@@ -88,7 +90,7 @@ public enum Kamino {
                 // ponytail: all stored values 0 with several deposits splits evenly; exact would read each reserve's exchange rate.
                 let value = storedSum > 0 ? total * stored[i] / storedSum : total / Decimal(deposits.count)
                 let shares = (d["depositedAmount"] as? String).flatMap { Decimal(string: $0) } ?? 0
-                out.append(Position(reserve: reserve, symbol: names[reserve]?.symbol ?? "?", amount: shares, valueUSD: value))
+                out.append(Position(reserve: reserve, symbol: names[reserve]?.symbol ?? "?", amount: shares, valueUSD: value, apy: names[reserve]?.supplyAPY))
             }
         }
         return out

@@ -38,7 +38,11 @@ extension Workspace {
         hlp = (0, nil)
         solana = nil
         lend = []
+        lendDeposits = []
+        lendEarned = [:]
+        lendEarnedAt = nil
         kamino = 0
+        kaminoDeposits = []
         near = 0
         base = nil
         arbitrumUSDC = nil

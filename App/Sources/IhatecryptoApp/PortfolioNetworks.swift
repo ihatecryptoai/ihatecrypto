@@ -12,7 +12,7 @@ import TradeExecution
 /// the others follow by money, and those with $100 or less fold under «Other networks» (PortfolioSplit.networkCards).
 struct NetworkLine: Identifiable {
     enum Kind { case earning, idle, gas, held }
-    var id: String { title + detail }
+    var id: String { title + detail + (coin ?? "") }
     let kind: Kind
     let logo: String
     let title: String
@@ -29,6 +29,26 @@ struct NetworkLine: Identifiable {
     /// The coin's contract, for its board and chart (idle USDC, USDG); nil for a network's own coin.
     var contract: String? = nil
     var help: String? = nil
+    /// A deposit's coin, the one put in («USDC», «SOL»); % a year; dollars earned so far, where the protocol says.
+    var coin: String? = nil
+    var apy: Decimal? = nil
+    var earned: Decimal? = nil
+}
+
+/// A Jupiter Lend deposit: the coin put in, how much of it, its decimals and % a year; `address` is the vault's token.
+struct LendDeposit: Equatable {
+    let address: String
+    let coin: String
+    let amount: Decimal
+    let decimals: Int
+    let apy: Decimal?
+}
+
+/// A Kamino Lend deposit: its coin, what it's worth and % a year.
+struct KaminoDeposit: Equatable {
+    let coin: String
+    let usd: Decimal
+    let apy: Decimal?
 }
 
 extension Workspace {
@@ -56,14 +76,17 @@ extension Workspace {
             return [NetworkLine(kind: .gas, logo: symbol.lowercased(), title: symbol, detail: Fmt.num(coin, maxFraction: 6), usd: coin * (price ?? 0),
                                 amount: price == nil ? "\(Fmt.num(coin, maxFraction: 6)) \(symbol)" : nil, help: "\(symbol) here pays the network fees on \(n.name)")]
         }
-        func earning(_ logo: String, _ title: String, apy: Decimal?, usdc: Decimal, place: String? = nil, help: String? = nil) -> NetworkLine {
+        // Every deposit the same way, with the coin that went in (the owner: «если ты usdc закинул, то чтобы он его и показывал»).
+        func earning(_ logo: String, _ title: String, apy: Decimal?, usd: Decimal, coin: String = "USDC", amount: Decimal? = nil,
+                     earned: Decimal? = nil, place: String? = nil, help: String? = nil) -> NetworkLine {
             NetworkLine(kind: .earning, logo: logo, title: title, detail: "earning" + (apy.map { " \(Fmt.num($0.rounded(2, .plain)))%" } ?? ""),
-                        usd: usdc, usdc: true, place: place, help: help)
+                        usd: usd, usdc: coin == "USDC", amount: Self.isDollar(coin) ? nil : amount.map { "\(Fmt.num($0, maxFraction: 6)) \(coin)" },
+                        place: place, help: help, coin: coin, apy: apy, earned: earned)
         }
         // Aave and Morpho off Base.
         let elsewhere = lendingElsewhere.filter { ModuleNetwork(place: $0.network) == n }.map { p in
             let protocolName = p.place.hasPrefix("Morpho") ? "Morpho" : "Aave"
-            var line = earning(protocolName.lowercased(), protocolName, apy: p.apy, usdc: p.usdc,
+            var line = earning(protocolName.lowercased(), protocolName, apy: p.apy, usd: p.usdc,
                                help: "Say “withdraw USDC from \(protocolName) on \(p.network)” to bring it back to Solana")
             line.site = protocolName == "Aave" ? "app.aave.com" : "app.morpho.org"
             return line
@@ -72,17 +95,25 @@ extension Workspace {
         switch n {
         case .solana:
             lines = idle(solana?.usdc, contract: SpotAsset.usdc.mint) + gas(solana?.sol, "SOL")
-            if lendTotal > 0 { lines.append(earning("jup", "Jupiter Lend", apy: nil, usdc: lendTotal, place: "jupiter")) }
-            if kamino > 0 { lines.append(NetworkLine(kind: .earning, logo: "kamino", title: "Kamino Lend", detail: "earning", usd: kamino, place: "kamino")) }
+            lines += lendDeposits.map { d in
+                let price = coinPrice(d.coin) ?? 0
+                return earning("jup", "Jupiter Lend", apy: d.apy, usd: d.amount * price, coin: d.coin, amount: d.amount,
+                               earned: lendEarned[d.address].map { $0 / pow(10, d.decimals) * price }, place: "jupiter")
+            }
+            lines += kaminoDeposits.map { earning("kamino", "Kamino Lend", apy: $0.apy, usd: $0.usd, coin: $0.coin, place: "kamino") }
             // Deposits made on a site: Kamino's vaults, Jupiter's other platforms.
             lines += protocolPositions.map { p in
-                NetworkLine(kind: .earning, logo: p.logo, title: p.platform, detail: p.name + (p.apy.map { " · \(Fmt.num($0.rounded(2, .plain)))%" } ?? ""),
-                            usd: p.usd, amount: p.amount, site: p.site, help: "Managed on \(p.site): a click opens it beside the chat")
+                let coin = p.symbol ?? p.amount?.split(separator: " ").last.map(String.init) ?? p.name
+                var line = earning(p.logo, p.platform, apy: p.apy, usd: p.usd, coin: coin, amount: p.tokens,
+                                   help: "\(p.name) · managed on \(p.site): a click opens it beside the chat")
+                if line.amount == nil, !Self.isDollar(coin) { line.amount = p.amount }
+                line.site = p.site
+                return line
             }
         case .base:
             lines = idle(base?.usdc, contract: EVMRPC.baseUSDC) + gas(base?.eth, "ETH")
-            if let b = base, b.morpho > 0 { lines.append(earning("morpho", "Morpho", apy: morphoAPY, usdc: b.morpho, place: "morpho")) }
-            if let b = base, b.aave > 0 { lines.append(earning("aave", "Aave", apy: aaveAPY, usdc: b.aave, place: "aave")) }
+            if let b = base, b.morpho > 0 { lines.append(earning("morpho", "Morpho", apy: morphoAPY, usd: b.morpho, place: "morpho")) }
+            if let b = base, b.aave > 0 { lines.append(earning("aave", "Aave", apy: aaveAPY, usd: b.aave, place: "aave")) }
         case .arbitrum:
             lines = idle(arbitrumUSDC, contract: EVMRPC.arbitrumUSDC) + elsewhere
         case .robinhood:
@@ -96,6 +127,17 @@ extension Workspace {
             lines = []
         }
         return lines.sorted { $0.usd > $1.usd }
+    }
+
+    /// A dollar stablecoin: its deposit needs no amount beside the dollars.
+    static func isDollar(_ coin: String) -> Bool {
+        (Stablecoins.top.map { $0.uppercased() } + ["USDG", "JUPUSD", "USDT0", "PYUSD"]).contains(coin.uppercased())
+    }
+
+    /// A coin's price in dollars: 1 for a dollar stablecoin, else Hyperliquid's market or the token's own price here.
+    func coinPrice(_ coin: String) -> Decimal? {
+        if Self.isDollar(coin) { return 1 }
+        return markets[coin.uppercased()]?.markPx ?? holdings.first { $0.symbol.uppercased() == coin.uppercased() }?.price
     }
 }
 
@@ -383,33 +425,78 @@ struct NetworkLineRow: View {
     }
 
     @ViewBuilder private var deposit: some View {
-        let row = HStack(spacing: 8) {
-            TokenLogo(name: line.logo, size: 20)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(line.title).font(.ui(12, .semibold)).lineLimit(1)
-                Text(line.detail).font(.ui(9.5)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            VStack(alignment: .trailing, spacing: 0) {
-                if line.usdc {
-                    HStack(spacing: 3) {
-                        TokenLogo(name: "usdc", size: 12)
-                        Text(masked(Fmt.num(line.usd))).font(.ui(12, .bold)).monospacedDigit()
-                    }
-                } else {
-                    Text(masked(line.amount ?? Fmt.usd(line.usd))).font(.ui(12, .bold)).monospacedDigit().lineLimit(1)
-                }
-                if line.amount != nil, line.usd > 0 { Text(masked("≈ \(Fmt.usd(line.usd))")).font(.ui(9)).foregroundStyle(.secondary).monospacedDigit() }
-            }
-        }
-        .contentShape(Rectangle())
-        .help(line.help ?? "")
-        // The accent edge a little off the row, so it doesn't touch the logo and the amount.
+        let tile = DepositTile(line: line).help(line.help ?? "")
         if let place = line.place {
-            row.padding(.horizontal, 5).padding(.vertical, 3).modifier(Openable(place: place)).padding(.horizontal, -5).padding(.vertical, -3)
+            tile.modifier(Openable(place: place, radius: DepositTile.radius))
         } else {
-            row.modifier(RowLink(action: ws.opener(line, chain: chain), help: line.help ?? ""))
+            tile.modifier(RowLink(action: ws.opener(line, chain: chain), help: line.help ?? ""))
         }
+    }
+}
+
+/// A deposit that earns, the same for every protocol (the owner picked J04a on the design canvas): the protocol's logo
+/// with its name and, under it, the coin that went in; % a year on the right; the dollars; then a day's and a month's
+/// interest and what it has earned so far (or a year's, where the protocol doesn't say). Dark in both modes, in the
+/// protocol's colors where it has its own.
+struct DepositTile: View {
+    let line: NetworkLine
+    static let radius: CGFloat = 12
+
+    static func style(_ logo: String) -> (fill: Color, accent: Color) {
+        switch logo {
+        case "jup": (Color(hex: 0x131D27), Color(hex: 0xC7F284))
+        case "kamino": (Color(hex: 0x082A56), Color(hex: 0x8FD3FF))
+        default: (Color(hex: 0x1A1D24), Color(hex: 0x7FE3B0))
+        }
+    }
+
+    /// A day's and a month's interest at the rate now, then what it earned (or a year's).
+    private var stats: [(value: String, label: String)] {
+        func plus(_ usd: Decimal) -> String { "+" + Fmt.usd(usd) }
+        let earned = line.earned.map { (plus($0), "earned so far") }
+        guard let apy = line.apy, apy > 0 else { return earned.map { [$0] } ?? [] }
+        let year = line.usd * apy / 100
+        return [(plus(year / 365), "a day"), (plus(year / 12), "a month"), earned ?? (plus(year), "a year")]
+    }
+
+    var body: some View {
+        let style = Self.style(line.logo), coin = line.coin ?? line.title
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                TokenLogo(name: line.logo, size: 29, round: true)
+                VStack(alignment: .leading, spacing: 2.5) {
+                    Text(line.title).font(.ui(11, .semibold)).lineLimit(1)
+                    HStack(spacing: 3.5) {
+                        TokenLogo(name: TokenLogo.name(forAsset: coin) ?? coin.lowercased(), size: 10, round: true)
+                        // A coin that isn't a dollar says how much of it went in.
+                        Text(masked(line.amount ?? coin)).font(.ui(9, .semibold)).foregroundStyle(Color(hex: 0xC9D3DC)).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let apy = line.apy, apy > 0 {
+                    Text("\(Fmt.num(apy.rounded(2, .plain)))% APY").font(.ui(8, .bold)).foregroundStyle(style.fill).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 6).padding(.vertical, 2.5).background(Capsule().fill(style.accent))
+                }
+            }
+            Text(masked(Fmt.usd(line.usd))).font(.ui(18, .heavy)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            let stats = stats
+            if !stats.isEmpty {
+                HStack(alignment: .top, spacing: 5) {
+                    ForEach(stats, id: \.label) { s in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(masked(s.value)).font(.ui(10, .bold)).foregroundStyle(style.accent).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                            Text(s.label).font(.ui(7.5)).foregroundStyle(Color(hex: 0x8C98A4)).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Self.radius).fill(style.fill))
+        .environment(\.colorScheme, .dark)
+        .foregroundStyle(.white)
     }
 }
 

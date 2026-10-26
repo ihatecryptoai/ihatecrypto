@@ -21,6 +21,12 @@ public enum JupiterLend {
         /// Underlying tokens the shares are worth now, raw units.
         public let assets: UInt64
         public let shares: UInt64
+        /// The vault token's address (what `earnings` is asked by), the coin it holds («USDC», «WSOL»), its decimals and
+        /// % a year (supply interest plus rewards).
+        public var address = ""
+        public var coin = ""
+        public var decimals = 6
+        public var apy: Decimal? = nil
     }
 
     public static func vaults() async throws -> [Vault] {
@@ -58,8 +64,23 @@ public enum JupiterLend {
             let token = p["token"] as? [String: Any]
             func raw(_ key: String) -> UInt64? { (p[key] as? String).flatMap(UInt64.init) ?? (p[key] as? NSNumber)?.uint64Value }
             guard let assets = raw("underlyingAssets"), let shares = raw("shares") else { return nil }
-            return Position(vault: token?["symbol"] as? String ?? "?", assets: assets, shares: shares)
+            let asset = token?["asset"] as? [String: Any]
+            let rate = (token?["totalRate"] as? String).flatMap { Decimal(string: $0) } ?? (token?["totalRate"] as? NSNumber)?.decimalValue
+            return Position(vault: token?["symbol"] as? String ?? "?", assets: assets, shares: shares, address: token?["address"] as? String ?? "",
+                            coin: asset?["symbol"] as? String ?? "", decimals: (asset?["decimals"] as? NSNumber ?? token?["decimals"] as? NSNumber)?.intValue ?? 6,
+                            apy: rate.map { $0 / 100 })
         }
+    }
+
+    /// What each position has earned so far, in the coin's raw units, by the vault token's address.
+    public static func earnings(user: String, positions: [String]) async throws -> [String: Decimal] {
+        let data = try await get(URL(string: "\(base)/earnings?user=\(user)&positions=\(positions.joined(separator: ","))")!)
+        guard let list = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { throw LendError(data) }
+        return Dictionary(list.compactMap { e -> (String, Decimal)? in
+            guard let address = e["address"] as? String,
+                  let raw = (e["earnings"] as? NSNumber)?.decimalValue ?? (e["earnings"] as? String).flatMap({ Decimal(string: $0) }) else { return nil }
+            return (address, raw)
+        }, uniquingKeysWith: { a, _ in a })
     }
 
     static func transaction(_ path: String, _ body: [String: String]) async throws -> Data {
