@@ -67,7 +67,7 @@ else
   (( pipestatus[1] == 0 )) || fail "uitest: $PWD/$OUT/uitest.log"
   ui=$(tail -1 $OUT/uitest.log)
 fi
-echo "$ui"
+[[ $ui == skipped* ]] && echo "$ui"   # uitest already printed its own last line
 
 shots=($OUT/shots/*.png(N))
 if [[ $ui != skipped* ]]; then
