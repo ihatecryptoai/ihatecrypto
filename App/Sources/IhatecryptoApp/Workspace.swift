@@ -429,6 +429,9 @@ final class Workspace {
     var tuning: String?
     /// Settings fill the main window in place of the canvas and the chat.
     var settingsOpen = false
+    /// A new version Sparkle found and the user hasn't installed (Updater.swift): the tag by the logo, the app menu and
+    /// the menu bar's popover offer it until it's installed or skipped; Install is pressed in Sparkle's window.
+    var updateReady: String?
 
     /// Shows Settings, on `tab` (a `SettingsView.Tab`) when given.
     func openSettings(_ tab: SettingsView.Tab? = nil) {

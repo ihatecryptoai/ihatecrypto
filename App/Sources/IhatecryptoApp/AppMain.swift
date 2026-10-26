@@ -121,6 +121,7 @@ struct AppMain: App {
             }
             // Only in the copy from the site: a local build has no feed.
             CommandGroup(after: .appInfo) {
+                if let version = workspace.updateReady { Button("Install ihatecrypto \(version)…") { Updater.shared.check() } }
                 if Updater.shared.available { Button("Check for Updates…") { Updater.shared.check() } }
             }
         }
@@ -302,6 +303,14 @@ struct MenuBarContent: View {
                 Label("\(IntentParser.pretty(a.coin)) \(a.above ? "above" : "below") \(Fmt.price(a.price))", systemImage: "bell").font(.ui(10))
             }
             Divider()
+            // A new version is out: its notes and Install in Sparkle's window.
+            if let version = ws.updateReady {
+                Button { Updater.shared.check() } label: {
+                    Label("ihatecrypto \(version) is out · Install", systemImage: "arrow.down.circle.fill")
+                        .font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk)
+                }
+                .buttonStyle(.plain).pointerStyle(.link)
+            }
             HStack {
                 Button { StatusItem.shared.openMain() } label: {
                     Text("Open ihatecrypto").font(.ui(13, .semibold)).foregroundStyle(Brand.onAccent).lineLimit(1).fixedSize()
@@ -405,6 +414,8 @@ struct ContentView: View {
             }
             // `-openPlace kamino`: opens that place's card from the rail, to check the canvas layout in a screenshot;
             // `history` and `favorites` open the boards of the rail's buttons, `settings` Settings (the tab: `-settingsTab modules`). Only shows cards, so it stays in Release builds.
+            // `-fakeUpdate 0.7.9` in the Dev copy: the update tag and menu items, to see them; the Dev copy has no feed.
+            if Flavor.dev, let version = UserDefaults.standard.string(forKey: "fakeUpdate") { ws.updateReady = version }
             switch UserDefaults.standard.string(forKey: "openPlace") {
             case "history": ws.showHistory = true
             case "favorites": ws.showFavorites = true

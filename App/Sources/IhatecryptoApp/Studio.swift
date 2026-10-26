@@ -517,6 +517,29 @@ struct WindowDragArea: View {
 }
 
 // MARK: Rail
+/// A new version is out (Workspace.updateReady): by the logo until it's installed; a click opens Sparkle's window with
+/// its notes and Install.
+struct UpdateTag: View {
+    let version: String
+    var compact = false
+
+    var body: some View {
+        Button { Updater.shared.check() } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.down.circle.fill")
+                if !compact { Text(version).lineLimit(1) }
+            }
+            .fixedSize()
+            .font(.ui(10, .bold)).foregroundStyle(Brand.accentInk)
+                .padding(.horizontal, compact ? 4 : 6).frame(height: 18)
+                .background(Capsule().fill(Brand.accent.opacity(0.16)))
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .help("ihatecrypto \(version) is out: see what's new and install it")
+        .accessibilityLabel("Update to ihatecrypto \(version)")
+    }
+}
+
 /// «DEV» by the logo of the development copy (`Flavor`), beside the working one: nobody types into the wrong window.
 struct DevTag: View {
     var body: some View {
@@ -630,6 +653,8 @@ struct StudioRail: View {
                 WhatsNewLogo()
                 Text("ihatecrypto").font(.brand(19)).lineLimit(1).fixedSize()
                 if Flavor.dev { DevTag() }
+                // Beside «DEV» only the arrow fits.
+                if let version = ws.updateReady { UpdateTag(version: version, compact: Flavor.dev) }
                 Spacer(minLength: 0)
                 if fullScreen { collapseButton }
             }
@@ -683,6 +708,7 @@ struct StudioRail: View {
                 VStack(spacing: 8) {
                     BrandLogo(size: 34, mood: refreshing ? .thinking : .idle, animated: true)
                     if Flavor.dev { DevTag() }
+                    if let version = ws.updateReady { UpdateTag(version: version, compact: true) }
                     VStack(spacing: 1) {
                         BalanceAmount(font: .ui(11, .semibold), mask: "$•••", skeleton: CGSize(width: 44, height: 11)).lineLimit(1).minimumScaleFactor(0.7)
                         if !ws.positions.isEmpty, !balanceHidden {
