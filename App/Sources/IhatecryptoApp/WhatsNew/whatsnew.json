@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.8.0",
+    "date": "2026-10-27",
+    "stories": [
+      {
+        "title": "Your P/L, not your top-ups",
+        "text": "The portfolio's line shows what prices did to what you hold. Money you add or send, swaps and bridges don't move it, so a top-up no longer looks like a gain. And the line is a smooth curve now.",
+        "symbol": "chart.line.uptrend.xyaxis",
+        "color": "34C759"
+      },
+      {
+        "title": "Deposits you can read",
+        "text": "Every deposit is one tile: the protocol, the coin you put in, its rate a year, the dollars, what it brings a day and a month, and what Jupiter Lend has earned you so far.",
+        "symbol": "banknote.fill",
+        "color": "30B0C7"
+      },
+      {
+        "title": "Protocols in their own colors",
+        "text": "The top 50 DeFi protocols on DefiLlama each have their logo and colors on their deposit tile.",
+        "symbol": "paintpalette.fill",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
     "version": "0.7.9",
     "date": "2026-10-26",
     "stories": [
