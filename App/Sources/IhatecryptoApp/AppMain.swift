@@ -243,6 +243,31 @@ struct AppMain: App {
 }
 
 /// With the window closed, ihatecrypto keeps watching from the menu bar (S13): positions, exit rules, regular purchases.
+/// The menu bar popover's «new version» card: tinted, with the accent edge, a click opens Sparkle's window.
+struct UpdateCard: View {
+    let version: String
+
+    var body: some View {
+        Button { Updater.shared.check() } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill").font(.system(size: 22)).foregroundStyle(Brand.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("ihatecrypto \(version) is out").font(.ui(12.5, .bold))
+                    Text("See what's new and install it").font(.ui(10.5)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 6)
+                Text("Install").font(.ui(12, .bold)).foregroundStyle(Brand.accentInk)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Brand.accent.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Brand.accent.opacity(0.6), lineWidth: 1.2))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .accessibilityLabel("ihatecrypto \(version) is out: install it")
+    }
+}
+
 struct MenuBarContent: View {
     @Environment(Workspace.self) private var ws
 
@@ -268,6 +293,9 @@ struct MenuBarContent: View {
                     }
                 }
             }
+            // A new version is out, first under the header and set apart as its own card (the owner, 2026-10-26: «вот
+            // это как-то надо выделить»): its notes and Install in Sparkle's window.
+            if let version = ws.updateReady { UpdateCard(version: version) }
             ForEach(ws.positions, id: \.coin) { PositionChip(position: $0) }
             ForEach(ws.exitRules.keys.sorted(), id: \.self) { coin in
                 Label("ihatecrypto manages the stop: \(IntentParser.pretty(coin))", systemImage: "shield.lefthalf.filled").font(.ui(10))
@@ -303,14 +331,6 @@ struct MenuBarContent: View {
                 Label("\(IntentParser.pretty(a.coin)) \(a.above ? "above" : "below") \(Fmt.price(a.price))", systemImage: "bell").font(.ui(10))
             }
             Divider()
-            // A new version is out: its notes and Install in Sparkle's window.
-            if let version = ws.updateReady {
-                Button { Updater.shared.check() } label: {
-                    Label("ihatecrypto \(version) is out · Install", systemImage: "arrow.down.circle.fill")
-                        .font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk)
-                }
-                .buttonStyle(.plain).pointerStyle(.link)
-            }
             HStack {
                 Button { StatusItem.shared.openMain() } label: {
                     Text("Open ihatecrypto").font(.ui(13, .semibold)).foregroundStyle(Brand.onAccent).lineLimit(1).fixedSize()
