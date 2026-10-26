@@ -465,16 +465,16 @@ struct DepositTile: View {
             HStack(spacing: 7) {
                 TokenLogo(name: line.logo, size: 29, round: true)
                 VStack(alignment: .leading, spacing: 2.5) {
-                    Text(line.title).font(.ui(11, .semibold)).lineLimit(1)
+                    Text(line.title).font(.ui(12, .semibold)).lineLimit(1)
                     HStack(spacing: 3.5) {
-                        TokenLogo(name: TokenLogo.name(forAsset: coin) ?? coin.lowercased(), size: 10, round: true)
+                        TokenLogo(name: TokenLogo.name(forAsset: coin) ?? coin.lowercased(), size: 11, round: true)
                         // A coin that isn't a dollar says how much of it went in.
-                        Text(masked(line.amount ?? coin)).font(.ui(9, .semibold)).foregroundStyle(Color(hex: 0xC9D3DC)).lineLimit(1)
+                        Text(masked(line.amount ?? coin)).font(.ui(10, .semibold)).foregroundStyle(Color(hex: 0xC9D3DC)).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
                 if let apy = line.apy, apy > 0 {
-                    Text("\(Fmt.num(apy.rounded(2, .plain)))% APY").font(.ui(8, .bold)).foregroundStyle(style.fill).lineLimit(1).fixedSize()
+                    Text("\(Fmt.num(apy.rounded(2, .plain)))% APY").font(.ui(9, .bold)).foregroundStyle(style.fill).lineLimit(1).fixedSize()
                         .padding(.horizontal, 6).padding(.vertical, 2.5).background(Capsule().fill(style.accent))
                 }
             }
@@ -484,8 +484,9 @@ struct DepositTile: View {
                 HStack(alignment: .top, spacing: 5) {
                     ForEach(stats, id: \.label) { s in
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(masked(s.value)).font(.ui(10, .bold)).foregroundStyle(style.accent).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-                            Text(s.label).font(.ui(7.5)).foregroundStyle(Color(hex: 0x8C98A4)).lineLimit(1)
+                            Text(masked(s.value)).font(.ui(11, .bold)).foregroundStyle(style.accent).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                            // The app's small text size, not smaller: 7.5 pt read as fine print (the design review).
+                            Text(s.label).font(.ui(9)).foregroundStyle(Color(hex: 0x9AA5B1)).lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
