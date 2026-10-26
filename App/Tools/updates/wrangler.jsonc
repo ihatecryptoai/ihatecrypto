@@ -3,8 +3,9 @@
 // After ./release.sh <ver> https://updates.ihatecrypto.ai, publish with
 //   npx wrangler deploy -c Tools/updates/wrangler.jsonc
 // Static files are served free and without a request limit; one file may be at most 25 MiB (a zip is ~19 MB).
-// worker.js runs first only for the landing's pages, its download and its counts (run_worker_first): http → https,
-// www → the bare domain, HSTS, and the counts into D1. Those requests use the Workers free plan's 100k a day.
+// worker.js runs first only for the landing's pages, its download, its counts and the update feed (run_worker_first):
+// http → https, www → the bare domain, HSTS, and the counts into D1. Those requests use the Workers free plan's 100k a
+// day; past it they fail, the feed with them (a Sparkle check is one request per copy a day or so).
 {
   "name": "ihatecrypto-updates",
   "main": "worker.js",
@@ -12,9 +13,9 @@
   "assets": {
     "directory": "../../dist/site",
     "binding": "ASSETS",
-    "run_worker_first": ["/", "/index.html", "/manifesto", "/manifesto/*", "/es", "/es/*", "/ru", "/ru/*", "/e", "/ihatecrypto.dmg"]
+    "run_worker_first": ["/", "/index.html", "/manifesto", "/manifesto/*", "/es", "/es/*", "/ru", "/ru/*", "/e", "/ihatecrypto.dmg", "/appcast.xml"]
   },
-  // The landing's counts by day (schema.sql): no IPs, no ids.
+  // The landing's counts and the update checks by day (schema.sql): no IPs, no ids.
   "d1_databases": [{ "binding": "DB", "database_name": "ihatecrypto-landing", "database_id": "b0f74dc6-d205-42e7-9634-7ed7a96bebda" }],
   "workers_dev": false,
   "routes": [
