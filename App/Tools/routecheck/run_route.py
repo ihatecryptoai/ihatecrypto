@@ -88,7 +88,8 @@ def judge_route(case, out):
 def run_batch(batch, provider, env_extra):
     # The folders the phrases name, as the app knows the user's: a typo of one lands there (FolderCommand.existing).
     env = dict(os.environ, IHATECRYPTO_ROUTE_JSON="1", IHATECRYPTO_MARKETS=MARKETS, IHATECRYPTO_ROUTE_FOLDERS="Research,Ресерч,Ideas,Идеи", **env_extra)
-    cmd = [os.path.join(HERE, "LLMCheck"), provider, "--route"] + [c["message"] for c in batch]
+    # LLMCHECK: another copy of the binary (night.sh runs its own, so a rebuild here doesn't touch it).
+    cmd = [os.environ.get("LLMCHECK") or os.path.join(HERE, "LLMCheck"), provider, "--route"] + [c["message"] for c in batch]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=120 * len(batch))
         lines = p.stdout.splitlines()
