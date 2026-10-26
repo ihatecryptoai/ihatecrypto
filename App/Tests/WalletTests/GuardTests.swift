@@ -222,6 +222,20 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!SolanaGuard.check(approve, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
 }
 
+/// «Send all» of a token closes our account after the transfer; the guard lets the rent come back only to us.
+@Test func sendingAllOfATokenClosesOurAccountIntoThisWallet() throws {
+    let mint = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"
+    let wire = try SPL.transferMessage(payer: me, to: deposit, mint: mint, amount: 1_000_000, decimals: 6, blockhash: me, close: true)
+    let m = try SolanaMessage.parse(message: wire)
+    let mine = try SPL.associatedAccount(owner: me, mint: mint), theirs = try SPL.associatedAccount(owner: deposit, mint: mint)
+    let v = SolanaGuard.check(m, accounts: m.staticKeys, policy: policy, tokenOwners: [mine: me, theirs: deposit])
+    #expect(v.ok, "\(v.problems)")
+    #expect(v.checks.contains { $0.hasPrefix("Temporary account closes") })
+    // The same close with the rent going to someone else is refused.
+    let (steal, accounts) = try message([me, mine, scam, SPL.tokenProgram], [(3, [1, 2, 0], [9])])
+    #expect(!SolanaGuard.check(steal, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
+}
+
 @Test func jupiterSwapsPayOnlyThisWalletsOwnAccount() throws {
     let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     let source = try SPL.associatedAccount(owner: me, mint: usdcMint), out = try SPL.associatedAccount(owner: me, mint: wsol)

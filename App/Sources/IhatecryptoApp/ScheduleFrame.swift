@@ -143,7 +143,8 @@ enum NextRun {
 extension Workspace {
     var automationWallet: SignerWallet? { wallets.first(where: \.isAutomation) }
 
-    /// Tasks and recurring buys by their next run, then the perps (their stops sit on the exchange).
+    /// Tasks and recurring buys by their next run, then the price alerts (no date: they wait for a price), then the perps
+    /// (their stops sit on the exchange).
     var scheduleEntries: [ScheduleEntry] {
         let dated = tasks.map { t in
             ScheduleEntry(id: "task:\(t.id)", title: t.steps.map(ScheduleCanvas.readable).joined(separator: " → "), when: t.when, next: t.next,
@@ -153,7 +154,15 @@ extension Workspace {
             ScheduleEntry(id: "buy:\(b.symbol)", title: "Buy \(b.symbol) for \(Fmt.usd(b.usdc))", when: "every \(ScheduleCanvas.period(b.days)) · next \(Fmt.date(b.next))",
                           next: b.next, paused: b.paused == true, logo: b.symbol.lowercased(), icon: "cart", every: "every \(ScheduleCanvas.period(b.days))")
         }
-        return dated.sorted { ($0.next ?? .distantFuture) < ($1.next ?? .distantFuture) } + positions.map { p in
+        let watching = alerts.map { a in
+            let name = IntentParser.pretty(a.coin).components(separatedBy: " (").first ?? a.coin
+            let level = "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))"
+            let now = (markets[a.coin]?.markPx).map { "now \(Fmt.price($0)) · \(Fmt.num(abs(((a.price - $0) / $0 * 100).rounded(1, .plain))))% away" }
+            return ScheduleEntry(id: "alert:\(a.id)", title: ([level] + (a.steps ?? []).map(ScheduleCanvas.readable)).joined(separator: " → "),
+                                 when: now ?? "waits for the price", next: nil, paused: a.paused == true,
+                                 logo: TokenLogo.name(forAsset: a.coin), icon: "bell")
+        }
+        return dated.sorted { ($0.next ?? .distantFuture) < ($1.next ?? .distantFuture) } + watching + positions.map { p in
             ScheduleEntry(id: "perp:\(p.coin)", title: "\(p.size > 0 ? "Long" : "Short") \(IntentParser.pretty(p.coin))", when: "stop and take on the exchange",
                           next: nil, paused: false, logo: nil, icon: "chart.line.uptrend.xyaxis")
         }
@@ -175,6 +184,11 @@ extension Workspace {
     /// recurring buy is signed by the wallet that's on: Touch ID, its Ledger, or nothing on a test wallet.
     func signer(_ key: String) -> ScheduleSigner {
         if key.hasPrefix("perp:") { return .exchange }
+        // A price alert's steps come to the wallet that's on to confirm when it fires; with none it only tells you.
+        if let a = alerts.first(where: { "alert:\($0.id)" == key }) {
+            if !a.task.movesMoney { return .itself }
+            return ledgerActive ? .ledger : activeWallet?.isTest == true ? .confirm : .touchID
+        }
         if let t = tasks.first(where: { "task:\($0.id)" == key }) {
             if !t.movesMoney || usesAutomation(t) { return .itself }
             return ledgerActive ? .ledger : activeWallet?.isTest == true ? .confirm : .touchID
@@ -281,7 +295,7 @@ extension Workspace {
         var facts = [e.title, e.every ?? e.when]
         if let next = e.next { facts.append("next run \(NextRun.when(next))") }
         facts.append(e.paused ? "paused" : schedulePaused ? "the whole schedule is paused" : "on")
-        if let t = tasks.first(where: { "task:\($0.id)" == key }) {
+        if let t = tasks.first(where: { "task:\($0.id)" == key }) ?? alerts.first(where: { "alert:\($0.id)" == key })?.task {
             facts.append("steps: " + t.steps.joined(separator: " then "))
             if !t.movesMoney {
                 facts.append("moves no money")
@@ -303,12 +317,14 @@ extension Workspace {
     func setPaused(_ id: String, _ paused: Bool) {
         if let i = tasks.firstIndex(where: { "task:\($0.id)" == id }) { tasks[i].paused = paused ? true : nil }
         if let i = schedules.firstIndex(where: { "buy:\($0.symbol)" == id }) { schedules[i].paused = paused ? true : nil }
+        if let i = alerts.firstIndex(where: { "alert:\($0.id)" == id }) { alerts[i].paused = paused ? true : nil }
     }
 
     /// Off the schedule for good; what it ran stays in the history.
     func removeScheduled(_ id: String) {
         tasks.removeAll { "task:\($0.id)" == id }
         schedules.removeAll { "buy:\($0.symbol)" == id }
+        alerts.removeAll { "alert:\($0.id)" == id }
     }
 
     func loadAutomationBudget() async {
@@ -680,7 +696,8 @@ struct ScheduleFrame: View {
         .contentShape(Rectangle())
         .onHover { inside in if inside { hovered = e.id } else if hovered == e.id { hovered = nil } }
         // Its own canvas: steps, runs, Pause and Delete, and the chat to change it.
-        .modifier(HoverLift(radius: 14)).onTapGesture { ws.openScheduleCanvas(e.id) }
+        .modifier(HoverLift(radius: 14, selected: ws.currentScheduleKey == e.id)).onTapGesture { ws.openScheduleCanvas(e.id) }
+        .accessibilityAddTraits(.isButton).accessibilityAction { ws.openScheduleCanvas(e.id) }
         .contextMenu {
             if !e.id.hasPrefix("perp:") { Button("Delete", role: .destructive) { ws.removeScheduled(e.id) } }
         }
@@ -929,7 +946,8 @@ struct ScheduleTop3: View {
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: 10))
-                .modifier(HoverLift(radius: 10)).onTapGesture { ws.openScheduleCanvas(e.id) }
+                .modifier(HoverLift(radius: 10, selected: ws.currentScheduleKey == e.id)).onTapGesture { ws.openScheduleCanvas(e.id) }
+                .accessibilityAddTraits(.isButton).accessibilityAction { ws.openScheduleCanvas(e.id) }
                 .contextMenu {
                     if !e.id.hasPrefix("perp:") {
                         Button("Pause") { ws.setPaused(e.id, true) }
@@ -1004,7 +1022,9 @@ struct ScheduleItemBoard: View {
     /// Runs opened to their whole card.
     @State private var opened: Set<UUID> = []
 
-    private var task: ScheduledTask? { ws.tasks.first { "task:\($0.id)" == key } }
+    private var task: ScheduledTask? { ws.tasks.first { "task:\($0.id)" == key } ?? ws.alerts.first { "alert:\($0.id)" == key }?.task }
+    /// A price alert: no date and no «Run now»; its steps pay from the wallet that's on, never from the automation wallet.
+    private var isAlert: Bool { key.hasPrefix("alert:") }
 
     var body: some View {
         let entry = ws.scheduleEntries.first { $0.id == key }
@@ -1023,10 +1043,14 @@ struct ScheduleItemBoard: View {
             } else if let entry {
                 header(entry)
                 if let next = entry.next { TimelineView(.everyMinute) { clock in nextRun(entry, next, now: clock.date) } }
+                if isAlert {
+                    Text("Fires once the price gets there — \(entry.when). Checked every 10 s while ihatecrypto is open or in the menu bar.")
+                        .font(.ui(13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 facts(entry)
-                if let t = task, !entry.paused, t.spreadsUSDC, ws.freeUSDC(t) == 0 { nothingFree(t) }
+                if let t = task, !isAlert, !entry.paused, t.spreadsUSDC, ws.freeUSDC(t) == 0 { nothingFree(t) }
                 if let t = task, t.steps.count > 1 { steps(t) }
-                if let t = task, t.untrusted != true, ws.automationWallet == nil, t.movesMoney, !t.sells { automationOffer }
+                if let t = task, !isAlert, t.untrusted != true, ws.automationWallet == nil, t.movesMoney, !t.sells { automationOffer }
             } else {
                 // Done or cancelled: what it did is all that's left.
                 Text("No longer scheduled — what it did is below.").font(.ui(13, .semibold)).foregroundStyle(.secondary)
@@ -1077,9 +1101,11 @@ struct ScheduleItemBoard: View {
                 Text(e.paused ? "Paused" : "On").font(.ui(12.5, .semibold))
             }
             .toggleStyle(.switch).controlSize(.small)
-            Button { ws.runScheduledNow(key) } label: { Label("Run now", systemImage: "play.fill").font(.ui(12, .semibold)) }
-                .buttonStyle(.bordered).controlSize(.small).pointerStyle(.link).disabled(ws.schedulePaused)
-                .help("Runs within half a minute, on a canvas of its own")
+            if !isAlert {
+                Button { ws.runScheduledNow(key) } label: { Label("Run now", systemImage: "play.fill").font(.ui(12, .semibold)) }
+                    .buttonStyle(.bordered).controlSize(.small).pointerStyle(.link).disabled(ws.schedulePaused)
+                    .help("Runs within half a minute, on a canvas of its own")
+            }
         }
     }
 
@@ -1146,7 +1172,7 @@ struct ScheduleItemBoard: View {
                      Fact(label: "ENDS UP IN", value: wallet, detail: "the wallet it pays from")]
         }
         // With an automation wallet a task picks where it pays from, on the tile itself.
-        let pick = task.map { t in t.movesMoney && t.untrusted != true && !t.sells && ws.automationWallet != nil } ?? false
+        let pick = task.map { t in !isAlert && t.movesMoney && t.untrusted != true && !t.sells && ws.automationWallet != nil } ?? false
         return HStack(alignment: .top, spacing: 10) {
             ForEach(facts + [signs]) { f in
                 VStack(alignment: .leading, spacing: 3) {
@@ -1283,8 +1309,11 @@ struct ScheduleItemBoard: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 8)
             .contentShape(Rectangle())
-            .modifier(HoverLift(radius: 10))
+            .modifier(HoverLift(radius: 10, selected: open))
             .onTapGesture { if open { opened.remove(a.id) } else { opened.insert(a.id) } }
+            // A click and AXPress both unfold it (onTapGesture alone isn't pressable through Accessibility).
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton)
+            .accessibilityAction { if open { opened.remove(a.id) } else { opened.insert(a.id) } }
             .help(open ? "Hide what it did" : "Show what it did")
             if open { ActivityCard(activity: Self.done(a)).padding(.bottom, 8).transition(.opacity) }
         }

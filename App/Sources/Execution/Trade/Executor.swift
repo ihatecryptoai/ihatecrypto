@@ -251,6 +251,8 @@ public actor Executor {
         /// One line per signature, in order.
         public let steps: [String]
         public let preparedAt: Date
+        /// The first trade asks to approve ihatecrypto's fee: one signature more than the plan's steps.
+        public var asksFee = false
 
         /// The bridge transaction's blockhash lives about a minute; after that the preview is redone.
         public var isFresh: Bool { Date().timeIntervalSince(preparedAt) < 45 }
@@ -362,7 +364,9 @@ public actor Executor {
             changes.append("Hyperliquid \(t.dex), free: \(Fmt.usd(dexFree)) → \(Fmt.usd(dexFree + t.usdc)) before entry.")
         }
         // ihatecrypto's fee is asked for once, here, by the signer; it stays off a card where Hyperliquid has it approved.
-        if askFee, let fee = await allowedFee(), fee < HLBuilder.fee {
+        let fee = askFee ? await allowedFee() : nil
+        let asksFee = fee.map { $0 < HLBuilder.fee } == true
+        if asksFee {
             steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Wallet › Hyperliquid can take it back.")
         }
         steps.append("Leverage \(leverage)×, isolated margin.")
@@ -381,6 +385,7 @@ public actor Executor {
         p.dexTransfer = dexTransfer
         p.fundFrom = fund.map { ($0.net, $0.usdc) }
         p.openVia1Click = opening
+        p.asksFee = asksFee
         return p
     }
 

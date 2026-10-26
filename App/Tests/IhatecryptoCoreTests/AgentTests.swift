@@ -693,6 +693,9 @@ private final class Script: LLMClient, @unchecked Sendable {
 }
 
 @Test func sendsToNetworksOnlyNearIntentsReachesAreParsed() {
+    // «All» of a network's own coin: everything but the fee (Send.swift), no number needed.
+    #expect(WalletCommand.parse("send all SOL to Bybit") == .sendToken(name: "Bybit", token: "SOL", amount: nil, network: nil))
+    #expect(WalletCommand.parse("переведи весь ETH на base на Bybit") == .sendToken(name: "Bybit", token: "ETH", amount: nil, network: "base"))
     #expect(WalletCommand.parse("send 0.0005 BTC to Binance") == .sendToken(name: "Binance", token: "BTC", amount: Decimal(string: "0.0005")!, network: nil))
     #expect(WalletCommand.parse("send 20 USDT on tron to Binance") == .sendToken(name: "Binance", token: "USDT", amount: 20, network: "tron"))
     #expect(WalletCommand.parse("send 20 USDC on sui to Sui wallet") == .sendToken(name: "Sui wallet", token: "USDC", amount: 20, network: "sui"))

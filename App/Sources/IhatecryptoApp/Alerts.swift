@@ -77,7 +77,7 @@ extension Workspace {
     /// Runs with every refresh: an alert that fires sends one notification and is done.
     func checkAlerts() {
         for a in alerts {
-            guard let mark = markets[a.coin]?.markPx, a.fires(at: mark) else { continue }
+            guard a.paused != true, let mark = markets[a.coin]?.markPx, a.fires(at: mark) else { continue }
             alerts.removeAll { $0.id == a.id }
             // Its steps run as a task due now: on their own canvas once nothing else is going on, and a move or a plan
             // waits there for Confirm with a notification (runDueTask).
@@ -100,6 +100,16 @@ extension Workspace {
             notify(.alerts, "🔔 \(IntentParser.pretty(a.coin))", text)
             reply(text + say(" The alert is done; set another any time.", " Алерт сработал; поставь новый, когда захочешь."), note: "price alert")
         }
+    }
+}
+
+extension PriceAlert {
+    /// Its steps read as the task it becomes when it fires (checkAlerts): from the wallet that's on, each move confirmed.
+    var task: ScheduledTask {
+        var t = ScheduledTask(steps: steps ?? [], next: .distantFuture, every: nil)
+        t.fromActive = true
+        t.untrusted = untrusted
+        return t
     }
 }
 

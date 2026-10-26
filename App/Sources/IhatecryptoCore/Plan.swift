@@ -78,6 +78,8 @@ public enum RiskCalc {
     public static let builderFee = HLBuilder.share
     /// What each side of a trade pays in all.
     public static let tradeFee = takerFee + builderFee
+    /// Hyperliquid's tier-0 spot taker fee; ihatecrypto's fee is taken on spot sells only.
+    public static let spotTakerFee = Decimal(string: "0.0007")!
 
     /// `entry`: a limit price; the mark when nil.
     public static func size(

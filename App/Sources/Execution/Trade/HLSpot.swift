@@ -56,18 +56,21 @@ extension Executor {
         return mid
     }
 
-    /// What a spot buy (`usdc`) or sale (`sell`) gets at the book's mid now, for the route's card: «0.243 HYPE».
+    /// What a spot buy (`usdc`) or sale (`sell`) gets at the book's mid now, fees taken off, for the route's card: «0.243 HYPE».
     // ponytail: the mid, not a walk of the book; the order itself takes at most 1% off it (IOC), a big one may get less.
     public static func spotQuote(_ symbol: String, usdc: Decimal?, sell: Decimal?) async throws -> String? {
         let pair = try await spotPair(symbol), mid = try await spotMid(pair)
-        if let usdc { return "\(Fmt.num(usdc / mid, maxFraction: 6)) \(pair.symbol)" }
-        return sell.map { "\(Fmt.num($0 * mid, maxFraction: 2)) USDC" }
+        if let usdc { return "\(Fmt.num(usdc / mid * (1 - RiskCalc.spotTakerFee), maxFraction: 6)) \(pair.symbol)" }
+        return sell.map { "\(Fmt.num($0 * mid * (1 - spotSellFee), maxFraction: 2)) USDC" }
     }
 
-    /// One spot token for another at the books' mids, for the card: «≈ 12.4 PURR». nil amount = what's free of `from`.
+    /// A spot sell pays the exchange's taker fee and ihatecrypto's; a buy only the exchange's.
+    static let spotSellFee = RiskCalc.spotTakerFee + RiskCalc.builderFee
+
+    /// One spot token for another at the books' mids less both orders' fees, for the card: «≈ 12.4 PURR». nil amount = what's free of `from`.
     public static func spotSwapQuote(from: String, to: String, amount: Decimal) async throws -> String {
         let a = try await spotPair(from), b = try await spotPair(to)
-        let out = amount * (try await spotMid(a)) / (try await spotMid(b))
+        let out = amount * (try await spotMid(a)) * (1 - spotSellFee) / (try await spotMid(b)) * (1 - RiskCalc.spotTakerFee)
         return "\(Fmt.num(out, maxFraction: 6)) \(b.symbol)"
     }
 

@@ -1059,7 +1059,7 @@ final class Workspace {
             // The user's own «переведи 2 USDC на 0x…»: no attack, just the rule that money goes to saved addresses only.
             // The chat offers the save instead, ready in the field; the address becomes a recipient only on its card.
             let found = InjectionHeuristics.findings(text)
-            if screen.problems.count == 1, found.commands.isEmpty, found.transferVerb, let address = found.addresses.first {
+            if screen.problems.count == 1, found.commands.isEmpty, found.transferVerb, let address = found.recipients.first {
                 let lower = text.lowercased()
                 let net = AddressBookCommand.network(lower) ?? (address.hasPrefix("0x") ? "base" : "solana")
                 suggest(say("save \(address) as NAME on \(net)", "сохрани \(address) как ИМЯ на \(net)"))

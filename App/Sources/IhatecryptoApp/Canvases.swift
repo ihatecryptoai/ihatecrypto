@@ -1608,8 +1608,11 @@ extension Workspace {
         let held = holdings.first { $0.chain == net && ($0.symbol.lowercased() == token.lowercased() || $0.contract.lowercased() == token.lowercased()) }
         // All of it reads as the number held, «all available» under it.
         let what = amount.map { "\(Fmt.num($0, maxFraction: 9)) \(held?.symbol ?? token)" } ?? held.map { "\(Fmt.num($0.amount, maxFraction: 9)) \($0.symbol)" } ?? "all \(token)"
+        // All of a network's own coin: everything but the fee; on Solana the empty token accounts close and their rent goes too.
+        let coin = token.uppercased() == (net == "solana" ? "SOL" : EVMNetwork.named(net)?.gasCoin)
+        let all = amount == nil && coin ? " All of it but the fee" + (net == "solana" ? "; the wallet's empty token accounts close and their rent goes too." : ".") : ""
         return MoveRoute(title: "Send \(what) to \(entry.name)",
-                         footer: "One transfer on \(place?.title ?? net), the token as it is: only this saved address may receive it. Press Confirm.",
+                         footer: "One transfer on \(place?.title ?? net), the token as it is: only this saved address may receive it.\(all) Press Confirm.",
                          steps: [
             step(logo, "FROM · \((place?.title ?? net).uppercased())", what, amount == nil ? (held == nil ? "" : "all available") : held.map { "held: \(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" } ?? "", fill,
                  money: held.map { h in [MoneyMove(place: WalletCommand.placeName(net), symbol: h.symbol, was: h.amount, after: max(0, h.amount - (amount ?? h.amount)))] }
@@ -2065,7 +2068,7 @@ extension Workspace {
         let logo = TokenLogo.name(forAsset: symbol) ?? "hyperliquid"
         if let usdc {
             return MoveRoute(title: "Buy \(symbol) · \(Fmt.num(usdc)) USDC on Hyperliquid spot",
-                             footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC. Press Confirm.",
+                             footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid, less Hyperliquid's \(Fmt.pct(RiskCalc.spotTakerFee * 100)) fee; the spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC. Press Confirm.",
                              steps: [step("hyperliquid", "FROM · HYPERLIQUID", "\(Fmt.num(usdc)) USDC", "spot balance · perp tops it up when short", .hyperliquid),
                                      step(logo, "BUY · SPOT ORDER", symbol,
                                           quotedGets(.hlSpotBuy(symbol: symbol, usdc: usdc)).map { "≈ \($0) · at most 1% over the mid" } ?? "IOC · at most 1% over the mid", .hyperliquid),
@@ -2073,7 +2076,7 @@ extension Workspace {
                                           money: Self.quotedAmount(quotedGets(.hlSpotBuy(symbol: symbol, usdc: usdc))).map { tokenMove(symbol, on: "hyperliquid", by: $0) } ?? [])])
         }
         return MoveRoute(title: "Sell \(amountOrAll(sell, symbol, on: "hyperliquid")) on Hyperliquid spot",
-                         footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the USDC lands on your spot balance. The exchange takes orders from 10 USDC. Press Confirm.",
+                         footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the USDC lands on your spot balance, less Hyperliquid's \(Fmt.pct(RiskCalc.spotTakerFee * 100)) and ihatecrypto's \(Fmt.pct(RiskCalc.builderFee * 100)). The exchange takes orders from 10 USDC. Press Confirm.",
                          steps: [step(logo, "FROM · SPOT BALANCE", "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(symbol)", "on Hyperliquid", .hyperliquid,
                                       money: moneyMove(symbol, on: "hyperliquid", by: sell.map { -$0 })),
                                  step(logo, "SELL · SPOT ORDER", "→ USDC",

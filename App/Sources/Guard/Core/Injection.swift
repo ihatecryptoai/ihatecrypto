@@ -18,6 +18,10 @@ public enum InjectionHeuristics {
     static let transferVerbs = #"(send|transfer|withdraw|bridge|deposit|approve|pay|отправ\w*|перевед\w*|перевест\w*|переведи|выведи|вывест\w*|скинь|пополн\w*|оплат\w*)"#
     static let evmAddress = #"0x[0-9a-fA-F]{40}"#
     static let solanaAddress = #"[1-9A-HJ-NP-Za-km-z]{32,44}"#
+    /// «send all 0x… on base to Bybit»: an address right after the verb (and the amount) is the token sent, when a name
+    /// after «to» receives it. Group 1 the token, group 2 the receiver.
+    static let tokenSlot = #"(?i)(?:send|transfer|отправ\w*|перевед\w*|перевести|скинь|кинь)\s+(?:(?:all|весь|всё|все|\d+(?:[.,]\d+)?)\s+)?(?:(?:the|my|мои|мой)\s+)?(?:tokens?\s+|токен\w*\s+)?("#
+        + evmAddress + "|" + solanaAddress + #")(?:\s+tokens?)?(?:\s+(?:on|in|в|на)\s+\S+)?\s+(?:to|на|для)\s+[«"“]?(\S+)"#
 
     static func all(_ pattern: String, in text: String) -> [String] {
         guard let regex = try? Regex(pattern) else { return [] }
@@ -28,6 +32,10 @@ public enum InjectionHeuristics {
         public var commands: [String] = []
         public var addresses: [String] = []
         public var transferVerb = false
+        /// Addresses that name the token sent, not who gets it.
+        public var tokens: [String] = []
+        /// The addresses that would receive the money.
+        public var recipients: [String] { addresses.filter { !tokens.contains($0) } }
     }
 
     public static func findings(_ text: String) -> Findings {
@@ -42,6 +50,13 @@ public enum InjectionHeuristics {
                 && !evm.contains(where: { $0.contains(s) })
         }
         f.transferVerb = !all(transferVerbs, in: lower).isEmpty
+        if let regex = try? Regex(tokenSlot) {
+            for m in text.matches(of: regex) {
+                guard let token = m.output[1].substring.map(String.init), let to = m.output[2].substring.map(String.init),
+                      !f.addresses.contains(where: { to.contains($0) }) else { continue }
+                f.tokens.append(token)
+            }
+        }
         return f
     }
 }
@@ -63,8 +78,10 @@ public enum InjectionGuard {
             v.problems.append("The text has commands for the assistant: “\(f.commands.joined(separator: "”, “"))”.")
         }
         if !f.addresses.isEmpty {
-            if f.transferVerb {
-                v.problems.append("The text asks to send funds to \(f.addresses[0]). Addresses from text never become recipients.")
+            if f.transferVerb, let to = f.recipients.first {
+                v.problems.append("The text asks to send funds to \(to). Addresses from text never become recipients.")
+            } else if f.transferVerb {
+                v.checks.append("The address names the token to send; only a saved name receives it.")
             } else {
                 v.checks.append("The text has an address; it will not become a payment recipient.")
             }

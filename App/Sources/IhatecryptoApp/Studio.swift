@@ -2068,6 +2068,8 @@ struct PlanButtons: View {
             }
         }
         .disabled(ws.busy)
+        // The SIGN card counts the fee approval the first trade asks for.
+        .task(id: ws.hlAddress) { if ws.feeApproved != true { await ws.loadFeeApproval() } }
     }
 }
 
@@ -2180,8 +2182,9 @@ extension Workspace {
             }
             steps.append(card("PROTECT", sizing?.takePrice != nil ? "Stop + take" : "Stop", lines, state(s.status), logo: "hype", .hyperliquid))
         }
-        // What Confirm does: the simulation first, then Touch ID for every signature.
-        let signing = nodes.filter { $0.signature != nil }.count
+        // What Confirm does: the simulation first, then Touch ID for every signature — ihatecrypto's fee approval on the
+        // first trade is one of them.
+        let signing = nodes.filter { $0.signature != nil }.count + ((prepared?.asksFee ?? (feeApproved == false)) ? 1 : 0)
         if sizing != nil, signing > 0 {
             steps.append(card(prepared == nil ? "SIMULATION · ON CONFIRM" : "SIMULATION · PASSED", prepared == nil ? "Shows first" : "As planned",
                               prepared.map { Array($0.changes.prefix(3)) } ?? ["every balance, before and after", "nothing is signed before it"],
@@ -2196,8 +2199,7 @@ extension Workspace {
             lines.append(row("fees", "≈ \(Fmt.usd(s.feesUSD)) · ihatecrypto \(Fmt.usd(s.builderFeesUSD))"))
             steps.append(card("RESULT · ESTIMATE", "−\(Fmt.usd(s.lossAtStopUSD))" + (s.profitAtTakeUSD.map { " / +\(Fmt.usd($0))" } ?? ""), lines, "info", .check))
         }
-        let signatures = nodes.filter { $0.signature != nil }.count
-        let footer = "Execute shows the simulation first, then \(signatures) signature\(signatures == 1 ? "" : "s") — nothing is signed before "
+        let footer = "Execute shows the simulation first, then \(signing) signature\(signing == 1 ? "" : "s") — nothing is signed before "
             + (ledgerActive ? "you approve it on your Ledger." : "\(Presence.signName).")
         return (steps, footer)
     }

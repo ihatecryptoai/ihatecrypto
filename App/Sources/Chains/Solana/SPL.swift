@@ -64,8 +64,10 @@ public enum SPL {
 
     /// The same transfer as an unsigned message, for a signer that holds the key elsewhere. `program`: the mint's own,
     /// SPL Token or Token-2022 — both accounts and the TransferChecked derive from it.
+    /// `close`: our token account closes after the transfer (all of it went), its rent back to the wallet.
     public static func transferMessage(payer payerAddress: String, to owner: String, mint: String, amount: UInt64, decimals: UInt8,
-                                       blockhash: String, microLamportsPerCU: UInt64 = 20_000, program: String = tokenProgram) throws -> Data {
+                                       blockhash: String, microLamportsPerCU: UInt64 = 20_000, program: String = tokenProgram,
+                                       close: Bool = false) throws -> Data {
         let payer = try Base58.decode(payerAddress)
         guard owner != payerAddress else { throw WalletError("Transfer to yourself") }
         let keys = [
@@ -83,10 +85,11 @@ public enum SPL {
         var message = Data([1, 0, 6]) + T.compact(keys.count)
         for key in keys { message += key }
         message += try Base58.decode(blockhash)
-        message += T.compact(3)
+        message += T.compact(close ? 4 : 3)
         message += Data([8]) + T.compact(0) + T.compact(9) + Data([3]) + T.le(microLamportsPerCU)
         message += Data([7]) + T.compact(6) + Data([0, 2, 3, 4, 5, 6]) + T.compact(1) + Data([1])        // CreateIdempotent
         message += Data([6]) + T.compact(4) + Data([1, 4, 2, 0]) + T.compact(10) + Data([12]) + T.le(amount) + Data([decimals])
+        if close { message += Data([6]) + T.compact(3) + Data([1, 0, 0]) + T.compact(1) + Data([9]) }   // CloseAccount(ours, → wallet, owner)
         return message
     }
 }

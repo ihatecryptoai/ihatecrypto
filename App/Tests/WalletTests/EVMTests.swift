@@ -631,3 +631,9 @@ import WalletCore
     refund.replaceSubrange((4 + 6 * 32)..<(4 + 7 * 32), with: ABI.uint(1))   // gasPrice 1
     #expect(Safe.execRefusal(refund, safe: safe) != nil)
 }
+
+/// «Send all ETH» on Base and Optimism asks the fee oracle's getL1FeeUpperBound(uint256) (Send.swift l1FeeBound); its
+/// selector, checked against the OP-stack predeploy on Base mainnet 2026-10-26.
+@Test func l1FeeUpperBoundSelector() {
+    #expect(Keccak.hash256(Data("getL1FeeUpperBound(uint256)".utf8)).prefix(4).hex == "f1c7a58b")
+}
