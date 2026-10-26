@@ -437,17 +437,17 @@ struct NetworkLineRow: View {
 /// A deposit that earns, the same for every protocol (the owner picked J04a on the design canvas): the protocol's logo
 /// with its name and, under it, the coin that went in; % a year on the right; the dollars; then a day's and a month's
 /// interest and what it has earned so far (or a year's, where the protocol doesn't say). Dark in both modes, in the
-/// protocol's colors where it has its own.
+/// protocol's colors (ProtocolStyle: DefiLlama's top 50), a common dark tile for any other.
 struct DepositTile: View {
     let line: NetworkLine
     static let radius: CGFloat = 12
 
-    static func style(_ logo: String) -> (fill: Color, accent: Color) {
-        switch logo {
-        case "jup": (Color(hex: 0x131D27), Color(hex: 0xC7F284))
-        case "kamino": (Color(hex: 0x082A56), Color(hex: 0x8FD3FF))
-        default: (Color(hex: 0x1A1D24), Color(hex: 0x7FE3B0))
-        }
+    /// By the line's logo name, its title («Rocket Pool» → «rocketpool») or the title's first word («Kamino Lend»).
+    static func style(_ line: NetworkLine) -> (fill: Color, accent: Color) {
+        let keys = [line.logo, line.title, String(line.title.split(separator: " ").first ?? "")]
+            .map { $0.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) } }
+        let c = keys.lazy.compactMap { ProtocolStyle.colors[$0] }.first ?? ProtocolStyle.common
+        return (Color(hex: c.fill), Color(hex: c.accent))
     }
 
     /// A day's and a month's interest at the rate now, then what it earned (or a year's).
@@ -460,7 +460,7 @@ struct DepositTile: View {
     }
 
     var body: some View {
-        let style = Self.style(line.logo), coin = line.coin ?? line.title
+        let style = Self.style(line), coin = line.coin ?? line.title
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
                 TokenLogo(name: line.logo, size: 29, round: true)
