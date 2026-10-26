@@ -1941,15 +1941,17 @@ struct StudioPortfolio: View {
     }
 
     @ViewBuilder private var loaded: some View {
-        // Once per pass: it filters the whole equity history.
-        let series = ws.equitySeries()
+        // Once per pass: it filters the whole equity history. P/L, not value: a top-up isn't a gain.
+        let series = ws.pnlSeries()
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("PORTFOLIO").font(.ui(10, .semibold)).tracking(1.2).foregroundStyle(.secondary)
                     BalanceAmount(font: .ui(20, .heavy))
                     if series.count > 2, let first = series.first, let last = series.last {
-                        Text("\(masked(signed(last.usd - first.usd))) · \(Int((last.at.timeIntervalSince(first.at) / 86_400).rounded(.up))) d")
+                        // Hours until a day is counted: the line starts fresh, and «1 d» over twenty minutes said too much.
+                        let hours = last.at.timeIntervalSince(first.at) / 3_600
+                        Text("\(masked(signed(last.usd - first.usd))) · \(hours < 24 ? "\(max(1, Int(hours.rounded(.up)))) h" : "\(Int((hours / 24).rounded(.up))) d")")
                             .font(.ui(10, .semibold)).monospacedDigit()
                             .foregroundStyle(last.usd >= first.usd ? Brand.profit : Brand.loss)
                     }

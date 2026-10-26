@@ -160,3 +160,11 @@ private let funding = [PnL.Funding(time: ago(10.2), coin: "xyz:CL", usdc: Decima
     // SOL itself: the wallet's lamports (the fee given back), here 0.1 out to buy BONK.
     #expect(CostBasis.replaySolana(mint: CostBasis.wsol, moves: moves) { _ in 150 }.filter { $0.tokens < 0 }.map(\.tokens) == [Decimal(string: "-0.1")!])
 }
+
+@Test func priceEffectIgnoresMoneyMovedInOrOut() {
+    let before = ["sol": PnL.Mark(amount: 2, price: 100), "perp:ETH": PnL.Mark(amount: -1, price: 3000), "gone": PnL.Mark(amount: 5, price: 1)]
+    // SOL up $10 a coin, a top-up tripled it, the short gained $50, a sold coin dropped out, a new coin came in.
+    let after = ["sol": PnL.Mark(amount: 6, price: 110), "perp:ETH": PnL.Mark(amount: -1, price: 2950), "new": PnL.Mark(amount: 1000, price: 1)]
+    #expect(PnL.priceEffect(from: before, to: after) == 70)     // 2 × 10 + (−1) × (−50); the top-up and the new coin count nothing
+    #expect(PnL.priceEffect(from: [:], to: after) == 0)
+}

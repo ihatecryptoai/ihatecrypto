@@ -338,6 +338,8 @@ final class Workspace {
     var equityHistory: [EquityPoint] = LocalStore.load(Workspace.scoped("equity") + ".json") ?? [] {
         didSet { LocalStore.save(equityHistory, Workspace.scoped("equity", activeWalletID) + ".json") }
     }
+    /// The P/L line's running count (Alerts.swift); saved with each point of `equityHistory`.
+    @ObservationIgnored var pnlMarks: PnLMarks? = LocalStore.load(Workspace.scoped("pnlmarks") + ".json")
     /// What each held token cost as the chain shows it (`loadChainCosts`), by the same keys, with the amount held when it
     /// was read: tokens bought outside the app have a P/L too. Read again when that amount changes; not kept.
     var chainCost: [String: (held: Decimal, cost: CostBasis)] = [:]

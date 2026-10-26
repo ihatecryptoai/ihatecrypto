@@ -273,7 +273,11 @@ extension Workspace {
         }
         let week = equitySeries()
         if week.count > 2, let first = week.first, let last = week.last {
-            facts.append("Portfolio since \(Fmt.date(first.at)): \(Fmt.usd(first.usd)) → \(Fmt.usd(last.usd)) (\(signed(last.usd - first.usd))).")
+            facts.append("Portfolio since \(Fmt.date(first.at)): \(Fmt.usd(first.usd)) → \(Fmt.usd(last.usd)) (\(signed(last.usd - first.usd)), top-ups and transfers included).")
+        }
+        let pnl = pnlSeries()
+        if pnl.count > 2, let first = pnl.first, let last = pnl.last {
+            facts.append("Portfolio P/L since \(Fmt.date(first.at)) (the card's line; price moves of what was held, top-ups and transfers not counted): \(signed(last.usd - first.usd)).")
         }
         if let h = hlTotal { facts.append("Hyperliquid account: \(Fmt.usd(h)).") }
         if lendTotal > 0 { facts.append("Jupiter Lend vault: \(Fmt.num(lendTotal)) USDC.") }

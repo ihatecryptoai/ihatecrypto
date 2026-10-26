@@ -249,15 +249,46 @@ nonisolated struct EquityPoint: Codable, Equatable {
     let usd: Decimal
     /// The wallet it was measured for (P/L); nil in points kept before wallets were told apart.
     var wallet: String? = nil
+    /// The P/L line's count at that moment (`PnLMarks`); nil in points kept before it was counted.
+    var pnl: Decimal? = nil
+}
+
+/// The P/L line's running count: what prices did to the holdings since counting began, and the holdings it was last
+/// counted from. Saved with each point (pnlmarks.json, per wallet), so a closed app picks up where it stopped.
+nonisolated struct PnLMarks: Codable {
+    var marks: [String: PnL.Mark]
+    var pnl: Decimal
 }
 
 extension Workspace {
-    /// Only when both main balances are in: a half-loaded portfolio would draw a false dip.
+    /// Only when both main balances are in: a half-loaded portfolio would draw a false dip. The P/L count moves on every
+    /// pass, once everything is read: a half-read wallet would leave coins out of it.
     func recordEquity() {
         guard solana != nil, hl != nil, let e = equity, e > 0 else { return }
+        if balanceReady {
+            let now = priceMarks
+            pnlMarks = PnLMarks(marks: now, pnl: pnlMarks.map { $0.pnl + PnL.priceEffect(from: $0.marks, to: now) } ?? 0)
+        }
         if let last = equityHistory.last, Date().timeIntervalSince(last.at) < 600 { return }
         let cutoff = Date().addingTimeInterval(-30 * 86_400)
-        equityHistory = equityHistory.filter { $0.at > cutoff } + [EquityPoint(at: Date(), usd: e, wallet: pnlWallet)]
+        equityHistory = equityHistory.filter { $0.at > cutoff } + [EquityPoint(at: Date(), usd: e, wallet: pnlWallet, pnl: pnlMarks?.pnl)]
+        if let m = pnlMarks { LocalStore.save(m, Self.scoped("pnlmarks", activeWalletID) + ".json") }
+    }
+
+    /// Every coin on screen with its amount and price now: tokens, stocks, the gas coins, NEAR, and Hyperliquid's positions
+    /// at the price their P/L is counted at. Dollars in lending and vaults have no price to move and are left out.
+    var priceMarks: [String: PnL.Mark] {
+        var out: [String: PnL.Mark] = [:]
+        func add(_ key: String, _ amount: Decimal, _ price: Decimal?) {
+            if amount != 0, let price, price > 0 { out[key] = PnL.Mark(amount: amount, price: price) }
+        }
+        for t in shownTokens { add(t.id, t.amount, t.price) }
+        for s in robinhood?.stocks ?? [] { add("robinhood:\(s.address.lowercased())", s.amount, s.price) }
+        add("sol", solana?.sol ?? 0, markets["SOL"]?.markPx)
+        add("eth", gasETH, markets["ETH"]?.markPx)
+        add("near", near, markets["NEAR"]?.markPx)
+        for p in positions where p.size != 0 { add("perp:\(p.coin)", p.size, p.entry + p.unrealizedPnl / p.size) }
+        return out
     }
 
     /// The last `days` of history plus the value now. «Now» is when the balances were read: stamped with the clock, the
@@ -266,25 +297,35 @@ extension Workspace {
         let since = Date().addingTimeInterval(-days * 86_400)
         return equityHistory.filter { $0.at >= since } + (equity.map { [EquityPoint(at: updatedAt ?? Date(), usd: $0)] } ?? [])
     }
+
+    /// The P/L line over the last `days` (`usd` is the P/L) plus the count now: top-ups and transfers don't move it.
+    func pnlSeries(days: Double = 7) -> [EquityPoint] {
+        let since = Date().addingTimeInterval(-days * 86_400)
+        return equityHistory.filter { $0.at >= since }.compactMap { p in p.pnl.map { EquityPoint(at: p.at, usd: $0) } }
+            + (pnlMarks.map { [EquityPoint(at: updatedAt ?? Date(), usd: $0.pnl)] } ?? [])
+    }
 }
 
-/// A small line of the portfolio's value; green when it grew over the period, red when it fell.
+/// A small line of the portfolio's P/L; green when it grew over the period, red when it fell. Averaged into slices of
+/// time and drawn as a curve: a point every ten minutes for a week made a jagged line.
 struct EquitySparkline: View {
     let points: [EquityPoint]
     var height: CGFloat = 26
 
     var body: some View {
-        let values = points.map { NSDecimalNumber(decimal: $0.usd).doubleValue }
-        let up = (values.last ?? 0) >= (values.first ?? 0)
+        let curve = Self.smoothed(points)
+        let up = (points.last?.usd ?? 0) >= (points.first?.usd ?? 0)
         Canvas { context, size in
-            guard values.count > 1, let lo = values.min(), let hi = values.max() else { return }
-            let span = max(hi - lo, max(hi * 0.002, 0.01))
-            let start = points.first!.at.timeIntervalSince1970, total = max(points.last!.at.timeIntervalSince1970 - start, 1)
+            guard curve.count > 1, let lo = curve.map(\.y).min(), let hi = curve.map(\.y).max() else { return }
+            let span = max(hi - lo, max(abs(hi) * 0.002, 0.01))
+            let pts = curve.map { CGPoint(x: size.width * $0.x, y: size.height * (1 - ($0.y - lo) / span)) }
+            // Through the midpoints, each point a control: smooth, and never past the highest or lowest value.
             var line = Path()
-            for (i, p) in points.enumerated() {
-                let pt = CGPoint(x: size.width * (p.at.timeIntervalSince1970 - start) / total, y: size.height * (1 - (values[i] - lo) / span))
-                i == 0 ? line.move(to: pt) : line.addLine(to: pt)
+            line.move(to: pts[0])
+            for i in 1..<pts.count - 1 {
+                line.addQuadCurve(to: CGPoint(x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2), control: pts[i])
             }
+            line.addLine(to: pts[pts.count - 1])
             var area = line
             area.addLine(to: CGPoint(x: size.width, y: size.height))
             area.addLine(to: CGPoint(x: 0, y: size.height))
@@ -295,6 +336,20 @@ struct EquitySparkline: View {
             context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
         }
         .frame(height: height)
-        .accessibilityLabel("Portfolio value over the week")
+        .accessibilityLabel("Portfolio P/L over the week")
+    }
+
+    /// The points averaged into `slices` stretches of time (x from 0 to 1), starting and ending on the exact values.
+    static func smoothed(_ points: [EquityPoint], slices: Int = 48) -> [(x: Double, y: Double)] {
+        guard let first = points.first, let last = points.last, points.count > 1 else { return [] }
+        let start = first.at.timeIntervalSince1970, total = max(last.at.timeIntervalSince1970 - start, 1)
+        var sums = [(x: Double, y: Double, n: Double)](repeating: (0, 0, 0), count: slices)
+        for p in points {
+            let x = (p.at.timeIntervalSince1970 - start) / total, i = min(Int(x * Double(slices)), slices - 1)
+            sums[i] = (sums[i].x + x, sums[i].y + NSDecimalNumber(decimal: p.usd).doubleValue, sums[i].n + 1)
+        }
+        let means = sums.filter { $0.n > 0 }.map { (x: $0.x / $0.n, y: $0.y / $0.n) }
+        return [(0, NSDecimalNumber(decimal: first.usd).doubleValue)] + means.dropFirst().dropLast()
+            + [(1, NSDecimalNumber(decimal: last.usd).doubleValue)]
     }
 }

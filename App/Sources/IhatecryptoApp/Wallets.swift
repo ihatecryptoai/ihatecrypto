@@ -57,6 +57,7 @@ extension Workspace {
         taskQueue = nil
         exitRules = UserDefaults.standard.data(forKey: Self.scoped("exitRules", id)).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) } ?? [:]
         equityHistory = LocalStore.load(Self.scoped("equity", id) + ".json") ?? []
+        pnlMarks = LocalStore.load(Self.scoped("pnlmarks", id) + ".json")
         costBasis = LocalStore.load(Self.scoped("costbasis", id) + ".json") ?? [:]
         chainCost = [:]
     }
@@ -71,11 +72,12 @@ extension Workspace {
             taskQueue = nil
             exitRules = [:]
             equityHistory = []
+            pnlMarks = nil
             costBasis = [:]
         }
         lastBalance[id] = nil
         for key in ["schedules", "tasks", "exitRules"] { UserDefaults.standard.removeObject(forKey: Self.scoped(key, id)) }
-        for file in ["equity", "costbasis"] { LocalStore.remove(Self.scoped(file, id) + ".json") }
+        for file in ["equity", "pnlmarks", "costbasis"] { LocalStore.remove(Self.scoped(file, id) + ".json") }
     }
 
     /// Asks the signer to sign with `wallet` (Touch ID there), then reads everything for it.
