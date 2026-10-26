@@ -4,6 +4,7 @@
     python3 App/Tools/uitest.py                 # every scenario in uitest-scenarios.json
     python3 App/Tools/uitest.py deposit chart   # only those whose name contains a word
     IHATECRYPTO_APP=work python3 App/Tools/uitest.py   # against the working app, not «ihatecrypto Dev»
+    UITEST_SHOTS=<folder> python3 App/Tools/uitest.py  # also a picture of the window after each scenario (done.sh)
 
 A scenario is one or more phrases and what the canvas and the reply must show after the last ("send" + "expect"), or a
 conversation checked after every message ("turns": [{"send": "…", "expect": {…}}, …]): a card that waits while it's
@@ -17,6 +18,7 @@ while a move waits for Confirm or runs on the user's own canvas. Exit code 1 whe
 import re
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -27,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.environ.get("IHATECRYPTO_APP") == "work"
 TOKEN = open(os.path.expanduser("~/Library/Application Support/ihatecrypto" + ("" if WORK else "-dev") + "/debug-token")).read().strip()
 BASE = "http://127.0.0.1:" + ("51789" if WORK else "51790")
+SHOTS = os.environ.get("UITEST_SHOTS")
 
 
 def call(method, path, body=None, timeout=240):
@@ -124,7 +127,7 @@ def main():
     print(f"ihatecrypto · {start['provider']} · {start['model']} · {len(scenarios)} scenarios\n")
     failed = skipped = 0
     try:
-        for s in scenarios:
+        for n, s in enumerate(scenarios, 1):
             cond = s.get("only_if")  # a scenario that depends on what the wallet holds, or on which wallet signs
             if cond and "wallet" in cond:
                 if (cond["wallet"] == "test") != bool(start["wallet"].get("test")):
@@ -146,6 +149,11 @@ def main():
                     state = call("POST", "/send", {"text": phrase})
                     replies += [m["text"] for m in state["messages"] if not m["user"]]
                 why += [(f"after «{turn['send']}»: " if "turns" in s else "") + w for w in check(turn["expect"], state, replies)]
+            if SHOTS and state.get("windowID"):
+                time.sleep(2)  # route cards fade in one at a time
+                # /screenshot comes out blank (glass chrome): screencapture needs the terminal's Screen Recording right.
+                shot = os.path.join(SHOTS, f"{n:02d} {re.sub(r'[/:]', '-', s['name'])[:80]}.png")
+                subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])
             if state["boards"].get("pending"):
                 call("POST", "/cancel")
             ok = not why

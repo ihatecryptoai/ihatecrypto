@@ -31,6 +31,7 @@ Run from `App/`:
 ```sh
 swift build && swift build --build-tests && swift test --skip-build
 ./lint.sh
+./done.sh [scenario words…]          # the definition of done (below): build, tests, lint, UI scenarios, design review
 ./run.sh                             # no signing process: balances only
 TEAM=<team id> ./build-app.sh        # «ihatecrypto Dev.app»; add Debug for a build in .build/xcode
 ./verify-release.sh <version>        # rebuild a release from its tag and compare it with the DMG (~5 min)
@@ -58,6 +59,20 @@ The user turns it on in Settings › Debugging › Local debug API. It listens o
 `python3 App/Tools/uitest.py [word…]` runs the scenarios in `App/Tools/uitest-scenarios.json` against the Dev copy.
 Each one gets a fresh test canvas and is cleaned up afterwards. Add a scenario for a change in what the chat or the
 canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that only when the user asks.
+
+## Definition of done
+
+1. Before the code, write the acceptance: a scenario in `App/Tools/uitest-scenarios.json` for what the chat or the
+   canvas shows, parser tests in English and Russian for a new command, and for a money feature the live run on the
+   Dev copy's test wallet.
+2. Run `App/done.sh <scenario words>` until it says green. It builds, runs the tests and `lint.sh`, runs the scenarios
+   whose names contain the words on the Dev copy (start it and turn on its debug API first), and has a separate model
+   review the window after each one. Green writes `App/.build/done/summary.json`. A change that none of this covers
+   (docs, the site): `App/done.sh --skip "why"`. The Stop hook in `.claude/settings.json` reminds you while App/Sources
+   or App/Tests changed after the last green.
+3. Have the diff reviewed by a fresh eye: a new subagent given only your diff and the plan, and Codex too when it's
+   installed (`codex review --uncommitted`; in a shared checkout tell it which files are yours). Fix what you confirm.
+4. Commit only your own files.
 
 ## Conventions
 
