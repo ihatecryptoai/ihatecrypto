@@ -22,6 +22,15 @@ struct AppMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     /// The main window's title; DebugAPI and the window test find the window by it.
     static let mainTitle = "ihatecrypto"
+    /// Help › Report a Problem: the public repo's new-issue page, its body an empty template and this copy's version.
+    static var problemReport: URL {
+        let info = Bundle.main.infoDictionary, os = ProcessInfo.processInfo.operatingSystemVersion
+        let version = "ihatecrypto \(info?["CFBundleShortVersionString"] as? String ?? "?") (build \(info?["CFBundleVersion"] as? String ?? "?")), "
+            + "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        var url = URLComponents(string: "https://github.com/ihatecryptoai/ihatecrypto/issues/new")!
+        url.queryItems = [URLQueryItem(name: "body", value: "### What happened\n\n\n### What you expected\n\n\n---\n\(version)\n")]
+        return url.url!
+    }
     /// Created once with the app, so the watch loop below outlives the window.
     private let workspace = Workspace()
 
@@ -123,6 +132,13 @@ struct AppMain: App {
             CommandGroup(after: .appInfo) {
                 if let version = workspace.updateReady { Button("Install ihatecrypto \(version)…") { Updater.shared.check() } }
                 if Updater.shared.available { Button("Check for Updates…") { Updater.shared.check() } }
+            }
+            // A new issue on GitHub with only the version and macOS filled in: no logs, addresses or amounts, and
+            // nothing is sent until the user submits it there.
+            CommandGroup(after: .help) {
+                Button(WelcomeLanguage.system.pick("Report a Problem…", "Informar de un problema…", "Сообщить о проблеме…")) {
+                    NSWorkspace.shared.open(Self.problemReport)
+                }
             }
         }
 
