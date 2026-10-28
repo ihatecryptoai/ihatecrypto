@@ -169,6 +169,7 @@ final class CanvasPanView: NSView {
     private var shownScale: CGFloat = 0
     private var placed = false
     private var dragFrom: NSPoint?
+    private lazy var pacer = ScrollPacer { [weak self] in self?.move(by: $0) }
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
     nonisolated(unsafe) private var clickMonitor: Any?
 
@@ -214,10 +215,14 @@ final class CanvasPanView: NSView {
         ]
         // A click, or the start of a trackpad scroll, lands where the canvas is seen: a slide not given to AppKit yet goes
         // first. A swipe begun within 0.15 s of a pan went by where the boards had been: over the Top up's row of networks
-        // it moved the whole canvas, up and down too, instead of the row.
+        // it moved the whole canvas, up and down too, instead of the row. A scroll still playing stops where it's drawn,
+        // as fingers put down stop momentum: its last 30 ms would slide the canvas under the click.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] event in
             if event.type != .scrollWheel || !event.phase.isDisjoint(with: [.mayBegin, .began]) {
-                MainActor.assumeIsolated { self?.commit() }
+                MainActor.assumeIsolated {
+                    self?.pacer.cancel()
+                    self?.commit()
+                }
             }
             return event
         }
@@ -266,7 +271,10 @@ final class CanvasPanView: NSView {
         setOrigin(at)
     }
 
-    func home() { setOrigin(CGPoint(x: leading, y: 0)) }
+    func home() {
+        pacer.cancel()
+        setOrigin(CGPoint(x: leading, y: 0))
+    }
 
     func fit() {
         place.zoom = 1
@@ -304,6 +312,12 @@ final class CanvasPanView: NSView {
     }
 
     // MARK: Size
+
+    // Off the window a display link stops calling, so the scroll's own stop never comes.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { pacer.cancel() }
+    }
 
     override func layout() {
         super.layout()
@@ -343,6 +357,8 @@ final class CanvasPanView: NSView {
     /// Changes the zoom by `factor`, keeping `point` (in this view) where it is. The layers show it at once; SwiftUI
     /// gets it when the steps stop (`commit`), so a pinch costs the main thread nothing while it lasts.
     func zoom(by factor: CGFloat, about point: CGPoint) {
+        // A scroll still playing would land after the zoom, unscaled.
+        pacer.cancel()
         if Render.classic { return zoomNow(by: factor, about: point) }
         let shown = place.zoom * pendingZoom
         let f = CanvasPlace.zoomRange.clamped(shown * factor) / shown
@@ -379,7 +395,9 @@ final class CanvasPanView: NSView {
         if event.modifierFlags.contains(.command) {
             zoom(by: 1 + event.scrollingDeltaY * step * 0.01, about: convert(event.locationInWindow, from: nil))
         } else {
-            move(by: CGSize(width: event.scrollingDeltaX * step, height: event.scrollingDeltaY * step))
+            // The event's own time (the clock CADisplayLink keeps), or now if it's on another one or ahead.
+            let now = CACurrentMediaTime(), at = (0..<1).contains(now - event.timestamp) ? event.timestamp : now
+            pacer.add(CGSize(width: event.scrollingDeltaX * step, height: event.scrollingDeltaY * step), at: at, in: self)
         }
     }
 
@@ -413,3 +431,42 @@ final class CanvasPanView: NSView {
     }
 }
 
+/// Two-finger pans moved once a frame (`ScrollTrail`), on a display link that asks for 120 Hz: moving on each event gave
+/// frames uneven steps, and with the pointer standing still nothing else asked a ProMotion display for 120 Hz. Drags
+/// never needed this: they come once a frame, each with where the pointer is, and the moving pointer keeps 120 Hz.
+@MainActor
+private final class ScrollPacer: NSObject {
+    private let apply: (CGSize) -> Void
+    private var link: CADisplayLink?
+    private var trail = ScrollTrail()
+    private var shown = (x: 0.0, y: 0.0)
+
+    init(apply: @escaping (CGSize) -> Void) { self.apply = apply }
+
+    func add(_ d: CGSize, at t: CFTimeInterval, in view: NSView) {
+        trail.add((d.width, d.height), at: t)
+        guard link == nil else { return }
+        let link = view.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    /// Done with what's left: a jump (Fit, home) wins over the rest of a scroll.
+    func cancel() {
+        link?.invalidate()
+        link = nil
+        trail.clear()
+        shown = trail.sum
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let now = trail.frame(at: link.targetTimestamp)
+        if now != shown {
+            apply(CGSize(width: now.x - shown.x, height: now.y - shown.y))
+            shown = now
+        }
+        // No event for a while (all of it shown long since): the display may slow down again.
+        if let last = trail.last, link.timestamp - last > 0.25 { cancel() }
+    }
+}
