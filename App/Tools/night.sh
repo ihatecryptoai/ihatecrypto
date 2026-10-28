@@ -6,7 +6,7 @@
 # Klodik runs it from its own folder and reads stdout:
 #   «TODO: …»          one line in Russian: something broken or regressed, a task for the project's agents
 #   «METRIC name N»    a number for the trend and the dashboard (names [a-z0-9_])
-#   «# skipped: why»   a check whose tool or data isn't here
+#   «# skipped: why»   a check whose tool or data isn't here, or whose failures came on a night the Mac slept
 # Exit 0: the checks ran, with or without TODOs. Non-zero: one couldn't run at all (no key, the build failed); the last
 # lines say why. Logs and results go to App/.build/night/<date>/, what the next night compares with to App/.build/night/.
 #
@@ -17,6 +17,8 @@
 
 export LC_ALL=en_US.UTF-8 PATH="/opt/homebrew/bin:/usr/local/bin:$PATH:$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | tail -1)"
 cd "$(dirname "$0")/.." || exit 1
+# On power the Mac stays awake until the checks end; on battery it may sleep, and slept() says so.
+caffeinate -s -w $$ > /dev/null 2>&1 &
 REPO=ihatecryptoai/ihatecrypto
 NIGHT=.build/night
 OUT=$NIGHT/$(date +%F)
@@ -32,6 +34,8 @@ skip() { echo "# skipped: $*"; }
 clean() { local s; s=$(printf '%s' "$1" | tr '\000-\037\177' ' '); printf '%s' "${s:0:${2:-160}}"; }
 # A command that hangs is stopped after $1 seconds.
 limit() { perl -e 'alarm shift; exec @ARGV or die' "$@"; }
+# The Mac slept after $1 (seconds since 1970): a request then broke off, which says nothing about the API it went to.
+slept() { (( $(sysctl -n kern.sleeptime kern.waketime | sed -E 's/^\{ sec = ([0-9]+).*/\1/' | sort -n | tail -1) >= $1 )); }
 
 echo "# build"
 if ! swift build --product WalletCheck > "$OUT/build.log" 2>&1 || ! swift build --product LLMCheck >> "$OUT/build.log" 2>&1; then
@@ -43,6 +47,7 @@ fi
 rm -f "$BIN/WalletCheck" "$BIN/LLMCheck" && cp -c .build/debug/WalletCheck .build/debug/LLMCheck "$BIN/"
 
 echo "# external APIs (WalletCheck, read-only)"
+NET=$(date +%s)
 BROKEN=()
 # name, whose API, WalletCheck's arguments: a second try 30 s after a failure, since a blip at night isn't drift.
 check() {
@@ -64,36 +69,48 @@ else
     skip "the Solana simulation and the Relay and 1Click bridge quotes need WalletCheck's test wallet (~/.ihatecrypto/test-wallet.txt)"
 fi
 printf '%s\n' "${BROKEN[@]%%|*}" | sed '/^$/d' | sort > "$OUT/broken.txt"
-for b in "${BROKEN[@]}"; do
-    IFS='|' read -r name who err <<< "$b"
-    grep -qxF "$name" "$NIGHT/broken.txt" 2>/dev/null && continue   # told on an earlier night
-    todo "Проверка API: WalletCheck $name ($who) не прошла и со второй попытки: «$(clean "$err")» — похоже, $who поменял API или формат ответа; лог App/$OUT/$name.log"
-done
-cp "$OUT/broken.txt" "$NIGHT/broken.txt"
-metric api_broken ${#BROKEN[@]}
+# A failure on a night the Mac slept is no news: the next awake night compares with the last awake one.
+if (( ${#BROKEN[@]} )) && slept "$NET"; then
+    skip "the API checks' failures ($(paste -sd ' ' "$OUT/broken.txt")): the Mac slept during them (on battery caffeinate can't hold it), so a broken-off request isn't an API change"
+else
+    for b in "${BROKEN[@]}"; do
+        IFS='|' read -r name who err <<< "$b"
+        grep -qxF "$name" "$NIGHT/broken.txt" 2>/dev/null && continue   # told on an earlier night
+        todo "Проверка API: WalletCheck $name ($who) не прошла и со второй попытки: «$(clean "$err")» — похоже, $who поменял API или формат ответа; лог App/$OUT/$name.log"
+    done
+    cp "$OUT/broken.txt" "$NIGHT/broken.txt"
+    metric api_broken ${#BROKEN[@]}
+fi
 
 # Every stablecoin pair the app knows, quoted both ways (Jupiter, Hyperliquid, NEAR Intents, Relay, Uniswap). Some
 # pairs have no route by design: only a pair that quoted last night and doesn't now is news.
 limit 1200 "$BIN/WalletCheck" stables > "$OUT/stables.log" 2>&1
-quoted=$(grep -c '^✓' "$OUT/stables.log")
 grep '^✗' "$OUT/stables.log" | sed 's/:.*//' | sort -u > "$OUT/stables-failed.txt"
 new=$([[ -f $NIGHT/stables-failed.txt ]] && comm -13 "$NIGHT/stables-failed.txt" "$OUT/stables-failed.txt")
 if [[ -n $new ]]; then
     sleep 30   # Jupiter answers a burst with 429: the new ones' networks are asked again
     for net in $(awk '{ print $2 }' <<< "$new" | sort -u); do limit 600 "$BIN/WalletCheck" stables "$net" > "$OUT/stables-$net.log" 2>&1; done
-    new=$(while IFS= read -r k; do grep -qF "$k:" "$OUT/stables-$(awk '{ print $2 }' <<< "$k").log" && echo "$k"; done <<< "$new")
+    # Still failing: ✗ again, or the second run didn't get to its last line (a hang, a crash), which recovers nothing.
+    new=$(while IFS= read -r k; do f=$OUT/stables-$(awk '{ print $2 }' <<< "$k").log
+        { grep -qF "$k:" "$f" || ! tail -1 "$f" | grep -qE '^(All quoted|[0-9]+ without a quote)\.$'; } && echo "$k"; done <<< "$new")
     { comm -12 "$NIGHT/stables-failed.txt" "$OUT/stables-failed.txt"; [[ -n $new ]] && echo "$new"; } | sort -u > "$OUT/stables-failed.tmp"
     mv "$OUT/stables-failed.tmp" "$OUT/stables-failed.txt"
 fi
 failed=$(grep -c . "$OUT/stables-failed.txt")
-metric stables_quoted "$quoted"
-metric stables_failed "$failed"
-if [[ $((quoted + failed)) == 0 ]]; then
-    todo "Проверка API: WalletCheck stables не выдал ни одной котировки: «$(clean "$(tail -1 "$OUT/stables.log")")»; лог App/$OUT/stables.log"
-elif [[ -n $new ]]; then
-    todo "Котировки стейблкоинов: $(grep -c . <<< "$new") новых пар без котировки (теперь $failed из $((quoted + failed))): $(clean "$(head -3 <<< "$new" | sed 's/^✗ //' | paste -sd ';' -)" 300) — проверить, не поменялся ли API у Jupiter/Relay/Uniswap/1Click/Hyperliquid; лог App/$OUT/stables.log"
+quoted=$(( $(grep -cE '^(✓|✗)' "$OUT/stables.log") - failed ))   # a pair that quoted on the second try counts as quoted
+# Whatever the count: a run the Mac slept through may have stopped before some pairs, and they'd drop out of the list.
+if slept "$NET"; then
+    skip "the stablecoin quotes ($quoted quoted, $failed without a quote, $(grep -c . <<< "$new") new): the Mac slept during them, so a broken-off request isn't an API change"
+else
+    metric stables_quoted "$quoted"
+    metric stables_failed "$failed"
+    if [[ $((quoted + failed)) == 0 ]]; then
+        todo "Проверка API: WalletCheck stables не выдал ни одной котировки: «$(clean "$(tail -1 "$OUT/stables.log")")»; лог App/$OUT/stables.log"
+    elif [[ -n $new ]]; then
+        todo "Котировки стейблкоинов: $(grep -c . <<< "$new") новых пар без котировки (теперь $failed из $((quoted + failed))): $(clean "$(head -3 <<< "$new" | sed 's/^✗ //' | paste -sd ';' -)" 300) — проверить, не поменялся ли API у Jupiter/Relay/Uniswap/1Click/Hyperliquid; лог App/$OUT/stables.log"
+    fi
+    (( quoted + failed )) && cp "$OUT/stables-failed.txt" "$NIGHT/stables-failed.txt"   # no answer at all says nothing about a pair
 fi
-cp "$OUT/stables-failed.txt" "$NIGHT/stables-failed.txt"
 
 KEY=${OPENROUTER_API_KEY:-$(security find-generic-password -s ihatecrypto-night -a openrouter -w 2>/dev/null)}
 if [[ -z $KEY ]]; then
