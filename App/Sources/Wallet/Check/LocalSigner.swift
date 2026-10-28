@@ -52,7 +52,8 @@ struct LocalSigner: TradeSigner {
                  recipients: [String]) async throws -> Data {
         guard EVMRPC.signable.contains(chainId) else { throw ExecutionError("Not signing for network \(chainId).") }
         let call = EVMCall.decode(data)
-        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm) { throw ExecutionError(refusal) }
+        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm)
+            ?? EVMCall.targetRefusal(to: to, data: data, sender: wallet.evm) { throw ExecutionError(refusal) }
         if let payee = call.payees(to: to, value: 0, chainId: chainId).first(where: { p in !(recipients + [wallet.evm]).contains { $0.lowercased() == p.lowercased() } }) {
             throw ExecutionError("Tokens or the right to spend them would go to \(payee).")
         }
@@ -65,7 +66,8 @@ struct LocalSigner: TradeSigner {
                         data: Data, recipients: [String]) async throws -> Data {
         guard EVMRPC.signable.contains(chainId) else { throw ExecutionError("Not signing for network \(chainId).") }
         let call = EVMCall.decode(data)
-        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm) { throw ExecutionError(refusal) }
+        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm)
+            ?? EVMCall.targetRefusal(to: to, data: data, sender: wallet.evm) { throw ExecutionError(refusal) }
         if let payee = call.payees(to: to, value: value, chainId: chainId).first(where: { p in !(recipients + [wallet.evm]).contains { $0.lowercased() == p.lowercased() } }) {
             throw ExecutionError("Coins or tokens would go to \(payee).")
         }

@@ -81,6 +81,7 @@ private struct ForkKey: TradeSigner {
                  recipients: [String]) async throws -> Data {
         let call = EVMCall.decode(data)
         if let why = call.refusal(sender: address, chainId: chainId) { throw ExecutionError(why) }
+        if let why = EVMCall.targetRefusal(to: to, data: data, sender: address) { throw ExecutionError(why) }
         let ok = Set((recipients + [address]).map { $0.lowercased() })
         if let payee = call.payees(to: to, value: 0, chainId: chainId).first(where: { !ok.contains($0.lowercased()) }) { throw ExecutionError("pays \(payee)") }
         return try EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee, gasLimit: gasLimit,

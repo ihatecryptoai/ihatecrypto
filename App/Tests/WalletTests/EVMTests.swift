@@ -666,6 +666,47 @@ import WalletCore
     var refund = try pay.exec([(me, sig)])
     refund.replaceSubrange((4 + 6 * 32)..<(4 + 7 * 32), with: ABI.uint(1))   // gasPrice 1
     #expect(Safe.execRefusal(refund, safe: safe) != nil)
+    #expect(Safe.execRefusal(try ERC20.transfer(to: me, amount: 5), safe: safe) == nil)
+    // An execTransaction the signer can't read is refused, not let through: Safe 1.4.1 (ABI coder v1) runs a data offset
+    // one byte off (0x141), which readExec doesn't read — on a Base fork it added a key to the multisig (2026-10-29).
+    let exec = try selfCall.exec([(me, sig)])
+    var skewed = exec
+    func bump(_ word: Int) { skewed.replaceSubrange((4 + word * 32)..<(4 + (word + 1) * 32), with: ABI.uint(ABI.uint(in: Data(exec.dropFirst(4)), word: word)! + 1)) }
+    bump(2)   // data
+    bump(9)   // signatures
+    skewed.insert(0, at: 4 + 10 * 32)
+    #expect(Safe.readExec(skewed) == nil)
+    #expect(Safe.execRefusal(skewed, safe: safe) != nil)
+    #expect(EVMCall.targetRefusal(to: safe, data: skewed, sender: me) != nil)
+    #expect(!Batch7702.problems([.init(to: safe, data: skewed)], owner: me, chainId: 8453).isEmpty)
+    // Nine head words, a data offset past the end, an operation word with stray bits (0x0101): unread, so refused.
+    #expect(Safe.execRefusal(Data(exec.prefix(4 + 9 * 32)), safe: safe) != nil)
+    var pastEnd = exec
+    pastEnd.replaceSubrange((4 + 2 * 32)..<(4 + 3 * 32), with: ABI.uint(UInt64(exec.count - 4)))
+    #expect(Safe.execRefusal(pastEnd, safe: safe) != nil)
+    var dirtyOp = try pay.exec([(me, sig)])
+    dirtyOp.replaceSubrange((4 + 3 * 32)..<(4 + 4 * 32), with: ABI.uint(0x0101))
+    #expect(Safe.readExec(dirtyOp) == nil && Safe.execRefusal(dirtyOp, safe: safe) != nil)
+    // A data offset or length near 2⁶⁴ reads as nothing, not an overflow that would stop the app and the signing process.
+    for (word, n) in [(2, UInt64.max - 31), (10, UInt64.max)] {
+        var huge = exec
+        huge.replaceSubrange((4 + word * 32)..<(4 + (word + 1) * 32), with: ABI.uint(n))
+        #expect(Safe.readExec(huge) == nil)
+    }
+    // A move the signer reads is still only a payout: a coin, or a token's plain transfer without coins. Not a vault's
+    // withdrawal to someone else, NFT rights, credit delegation: rules no one checks on the multisig's behalf.
+    func move(_ to: String, _ value: UInt64, _ data: Data) throws -> Data {
+        try Safe.Move(chainId: 8453, safe: safe, to: to, value: value, data: data, nonce: 0).exec([(me, sig)])
+    }
+    #expect(Safe.execRefusal(try move(thief, 1, Data()), safe: safe) == nil)
+    #expect(Safe.execRefusal(try move(usdc, 1, pay.data), safe: safe) != nil)
+    #expect(Safe.execRefusal(try move(thief, 0, Data(hex: "a22cb465")! + (try word(thief)) + ABI.uint(1)), safe: safe) != nil)
+    let withdraw = Data(hex: "b460af94")! + ABI.uint(5) + (try word(thief)) + (try word(safe))   // withdraw(assets, receiver, owner)
+    if case .vault = EVMCall.decode(withdraw) { #expect(Safe.execRefusal(try move(thief, 0, withdraw), safe: safe) != nil) } else { Issue.record("withdraw not read as a vault call") }
+    // approveHash(bytes32) to any address: the owner's own transaction approving a move ahead of time, which anyone may then run.
+    let approveHash = Data(hex: "d4d9bdcd")! + Data(repeating: 7, count: 32)
+    #expect(EVMCall.targetRefusal(to: safe, data: approveHash, sender: me) != nil)
+    #expect(EVMCall.targetRefusal(to: thief, data: approveHash, sender: me) != nil)
 }
 
 /// «Send all ETH» on Base and Optimism asks the fee oracle's getL1FeeUpperBound(uint256) (Send.swift l1FeeBound); its
