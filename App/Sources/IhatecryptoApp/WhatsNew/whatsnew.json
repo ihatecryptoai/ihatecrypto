@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.8.1",
+    "date": "2026-10-29",
+    "stories": [
+      {
+        "title": "No silent loss to price impact",
+        "text": "A swap that would move the price more than 2% stops before anything is signed and offers a smaller part now, the whole anyway with the loss in dollars, or nothing. Selling a thin memecoin in one go no longer eats a chunk of it unseen.",
+        "symbol": "exclamationmark.shield.fill",
+        "color": "FF453A"
+      },
+      {
+        "title": "The best way to swap",
+        "text": "On Solana JupiterZ's market makers fill a swap when they pay more than the pools. On EVM networks Uniswap, KyberSwap and Relay are compared by what's left after gas. From Solana to another network, Relay's swap is weighed against Relay's bridge plus the best exchange there, and the card names the one you sign.",
+        "symbol": "arrow.triangle.branch",
+        "color": "0A84FF"
+      },
+      {
+        "title": "Stocks from Ondo",
+        "text": "Buy US stocks and ETFs from Ondo on Solana («buy $5 of Nvidia from Ondo») at the market makers' price, and keep dollars in Ondo's USDY. Ondo's residency limits show before you confirm.",
+        "symbol": "building.columns.fill",
+        "color": "30B0C7"
+      },
+      {
+        "title": "Borrow against your stocks",
+        "text": "Kamino's Backpack market lends USDC against tokenized stocks such as SPCX or MU, so you get dollars without selling them. Every card says «all» with its number.",
+        "symbol": "banknote.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Hedge what you hold",
+        "text": "Say «hedge my SOL» and ihatecrypto opens a short on Hyperliquid the size of the coins you hold, with no take-profit, so a fall is covered; the risk rules count it net of your coins.",
+        "symbol": "shield.lefthalf.filled",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "Smoother canvas, safer chat",
+        "text": "Two-finger pans move the canvas once a frame, smoothly. The second check reads every chat message and says why it stopped one in your language. Help › Report a Problem opens a GitHub issue with your version filled in.",
+        "symbol": "hand.draw.fill",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
     "version": "0.8.0",
     "date": "2026-10-27",
     "stories": [
