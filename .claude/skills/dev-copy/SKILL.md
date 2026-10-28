@@ -18,15 +18,20 @@ Tools/dev.sh api POST /cancel      # drop the card · /reset a fresh test canvas
 Tools/dev.sh busy                  # exit 0 while a card waits, a move runs, the model answers, or uitest/done.sh runs
 Tools/dev.sh relaunch --build      # refuses while busy; quit, build-app.sh, open, wait until the new token answers
 Tools/dev.sh relaunch -- -jevOpenRouter YES   # launch flags after --; plain `relaunch` reopens without building
+Tools/dev.sh hold 20 "ihatecrypto-41: Kamino live cycle"   # keep it for a run of several steps; release when done
+export DEV_HOLDER=ihatecrypto-41                # your own commands pass your hold; others' busy/relaunch don't
+Tools/dev.sh release                            # only the holder's (DEV_HOLDER) or an expired hold goes
 ```
 
 ## Rules that save the most time
 
 - **The token changes on every launch.** `dev.sh` reads `debug-token` for each call; never keep it in a variable
   across a relaunch. Right after launch `/state` can be half-written JSON: parse with `json.loads(…, strict=False)`.
-- **Other sessions share this copy.** Before a relaunch or a long run, `Tools/dev.sh busy` must say nothing. If another
-  session uses it, message that session once (ListAgents / SendMessage) and wait with `Tools/dev.sh idle`. Don't
-  quit Dev while it's busy: a quit in the middle of a move leaves it unsettled.
+- **Other sessions share this copy.** Before a relaunch or a long run, `Tools/dev.sh busy` must say nothing (it sees a
+  hold, a card or a move, a model answering, uitest/done.sh, a build-app.sh). For a run of several steps take a
+  hold: the pauses between steps look idle, and another session's `relaunch --build` landed in one in the middle of a
+  live loan. If someone holds it, message that session once (ListAgents / SendMessage) and wait. Never quit Dev
+  while it's busy: a quit in the middle of a move leaves it unsettled.
 - **done.sh refuses a stale build** («the Dev copy runs a build older than Sources»): another agent's edit is enough.
   `Tools/dev.sh relaunch --build` right before `done.sh`, not an hour before.
 - `build-app.sh` needs no `TEAM`: project.yml has it. It builds Release into `~/Applications`. A Debug build

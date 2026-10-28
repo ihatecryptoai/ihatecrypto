@@ -91,11 +91,11 @@ extension Executor {
                                  liquidationPrice: after.liquidation, borrowAPY: usdcReserve.borrowAPY)
     }
 
-    /// The position once Kamino's API shows the move just made (`done`): it lags seconds behind the chain — a first
-    /// deposit read as no position at all, and the portfolio dropped the stock. Ten seconds at most.
+    /// The position once Kamino's API shows the move just made (`done`): it lags behind the chain — a first deposit
+    /// read as no position at all, and a repaid debt as still owed for over 10 s (live, 2026-10-29). 30 seconds at most.
     func kaminoLoan(_ market: String, until done: (Kamino.Loan?) -> Bool) async throws -> Kamino.Loan? {
         var now = try await Kamino.loan(wallet: wallet.solana, market: market)
-        for _ in 0..<10 where !done(now) {
+        for _ in 0..<30 where !done(now) {
             try await Task.sleep(for: .seconds(1))
             now = try await Kamino.loan(wallet: wallet.solana, market: market)
         }
@@ -191,13 +191,16 @@ extension Executor {
         let lastValid = try await rpc.latestBlockhash().lastValidBlockHeight
         _ = try await signAndSend(wire, lastValid: lastValid, owners: [myUSDC: wallet.solana], rules: [(myUSDC, "USDC", true, -Int64(units))],
                                   note: "Kamino repay \(Fmt.num(asked, maxFraction: 6)) USDC")
-        let now = try await kaminoLoan(found.market) { Self.usdcOwed($0) < found.loan.debts.first { $0.symbol == "USDC" }!.tokens }
-        let left = Self.usdcOwed(now)
-        // What left the wallet, not what was asked: Kamino takes only what's owed.
+        let stored = found.loan.debts.first { $0.symbol == "USDC" }?.tokens ?? found.owed
+        let now = try await kaminoLoan(found.market) { Self.usdcOwed($0) < stored }
+        // What left the wallet, not what was asked: Kamino takes only what's owed. The chain says it before the API.
         let paid = held - Decimal(try await rpc.tokenBalance(owner: wallet.solana, mint: usdcReserve.mint)) / 1_000_000
+        let caughtUp = Self.usdcOwed(now) < stored
+        // «All» asked a tenth of a percent over what's owed, and Kamino takes no more: nothing is left then.
+        let left = caughtUp ? Self.usdcOwed(now) : usdc == nil && paid > 0 ? 0 : max(0, stored - paid)
         let stocks = (now?.collateral ?? []).filter { $0.tokens > 0 }.map(\.symbol)
         let line = "Paid back \(Fmt.num(paid > 0 ? paid : max(found.owed - left, 0), maxFraction: 6)) USDC on \(place): "
-            + (left > Decimal(string: "0.000001")! ? "\(Fmt.num(left, maxFraction: 6)) USDC still owed, health factor \(now?.health.map { Fmt.num($0, maxFraction: 2) } ?? "∞")."
+            + (left > Decimal(string: "0.00001")! ? "\(Fmt.num(left, maxFraction: 6)) USDC still owed" + (caughtUp ? ", health factor \(now?.health.map { Fmt.num($0, maxFraction: 2) } ?? "∞")." : ".")
                : "no debt left." + (stocks.isEmpty ? "" : " The \(stocks.joined(separator: ", ")) stays as collateral: «withdraw \(stocks[0]) from kamino» takes it back."))
         report(line)
         return line

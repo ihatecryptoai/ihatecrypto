@@ -17,6 +17,13 @@ buttons=("${@:-Confirm}")
 state=$(TIMEOUT=10 dev api GET /state) || { echo "Dev doesn't answer: Tools/dev.sh relaunch" >&2; exit 1 }
 echo $state | py "sys.exit(0 if d['wallet'].get('test') else 1)" || { echo "The Dev copy's active wallet isn't the test wallet: switch to it first." >&2; exit 1 }
 if why=$(dev busy); then echo "Dev is in use ($why)." >&2; exit 1; fi
+# The run's own hold, so no other session relaunches Dev between its steps, given back at the end whatever happens.
+# Under a longer hold of yours (Tools/dev.sh hold with DEV_HOLDER=<who>) the run takes none and leaves yours alone:
+# it overwrote one and released it at its end.
+if [[ -z $DEV_HOLDER ]]; then
+  export DEV_HOLDER="live.sh-$$"
+  dev hold 15 "$DEV_HOLDER: $1" >/dev/null && trap 'dev release >/dev/null' EXIT
+fi
 if [[ -z $DRY && ( ! -x $AX || $HERE/axpress.swift -nt $AX ) ]]; then
   mkdir -p ${AX:h} && swiftc -O $HERE/axpress.swift -o $AX || exit 1
 fi

@@ -2110,7 +2110,20 @@ final class Workspace {
                 LendDeposit(address: p.address, coin: p.coin == "WSOL" ? "SOL" : p.coin, amount: Decimal(p.assets) / pow(10, p.decimals),
                             decimals: p.decimals, apy: p.apy)
             }
-            let k = await kaminoPositions, n = await nearBalance, b = await backpack
+            let k = await kaminoPositions, n = await nearBalance
+            var b = await backpack
+            // Kamino's API can say «no position» seconds after one was made or while it stands (its servers lag behind
+            // each other; the executor had already seen it): with a stock just gone from the wallet, or a position here
+            // a moment ago, it's read again before the stock is shown nowhere. A real closure still lands, seconds later.
+            let left = WalletCommand.kaminoStocks.contains { st in
+                (heldOnSolana(st) ?? 0) > (s.tokens.first { $0.contract == WalletCommand.kaminoStockMints[st] }?.amount ?? 0)
+            }
+            if b.ok, b.loan == nil, kaminoLoan != nil || left {
+                for _ in 0..<3 {
+                    try? await Task.sleep(for: .seconds(2))
+                    if let again = try? await Kamino.loan(wallet: owner, market: Kamino.backpackMarket) { b = (true, again); break }
+                }
+            }
             land { [self] in
                 guard current() else { return }
                 solana = s.pricing(from: solana?.tokens ?? [])

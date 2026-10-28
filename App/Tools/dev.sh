@@ -6,8 +6,12 @@
 #   Tools/dev.sh busy                      exit 0 when someone uses the copy now (a move, a model answer, uitest, done.sh)
 #   Tools/dev.sh relaunch [--build] [args] quit it, rebuild it with build-app.sh (--build), open it with the args, wait for its API
 #   Tools/dev.sh idle                      wait until it's neither busy nor executing (10 min at most)
+#   Tools/dev.sh hold <minutes> "<who: why>"   keep it for a run of several steps: busy says so and relaunch refuses
+#                                          (to others: with DEV_HOLDER=<who> your own commands pass it)
+#   Tools/dev.sh release                   give it back (a hold also ends by itself when its minutes pass)
 # The token in debug-token changes on every launch: it's read for each call, never kept.
 emulate -L zsh
+zmodload zsh/datetime   # EPOCHSECONDS
 BUNDLE=app.ihatecrypto.mac.dev PORT=51790 DATA=~/Library/Application\ Support/ihatecrypto-dev APP=~/Applications/"ihatecrypto Dev.app"
 HERE=${0:A:h}
 
@@ -18,9 +22,23 @@ api() {  # METHOD PATH [JSON]
 }
 py() { python3 -I -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); $1" }
 
-busy() {
+HOLD=$DATA/dev-hold   # «<until, epoch seconds> <who: why>», written by hold
+held() {
+  [[ -f $HOLD ]] || return 1
+  local until note; read -r until note < $HOLD
+  (( until > EPOCHSECONDS )) || { rm -f $HOLD; return 1 }
+  [[ -n $DEV_HOLDER && $note == $DEV_HOLDER* ]] && return 1   # your own hold (DEV_HOLDER=<the name you held with>)
+  echo "held by $note for $(( (until - EPOCHSECONDS + 59) / 60 )) more min"
+}
+
+# A session in the middle of several steps (a live run: deposit, borrow, repay…) said so: the pauses between its
+# steps look idle, and a relaunch there broke one. `idle` waits for activity only: the holder waits on it too.
+busy() { held || active }
+
+active() {
   # The scripts themselves, not a command line that only names them (another session's wait loop did).
   pgrep -f '(^|[ /])(uitest\.py|done\.sh)( |$)' >/dev/null && { echo "uitest.py or done.sh runs"; return 0 }
+  pgrep -f '(^|[ /])build-app\.sh( |$)' >/dev/null && { echo "a Dev build runs (build-app.sh)"; return 0 }
   local s; s=$(TIMEOUT=5 api GET /state) || return 1
   echo $s | py "b=d['boards']; why=[k for k in ('busy','executing') if d.get(k)] + (['a card waits for Confirm'] if b.get('pending') else []) + (['a move runs'] if b.get('running') else []); print(', '.join(why)); sys.exit(0 if why else 1)"
 }
@@ -35,9 +53,17 @@ for s in p.get('steps') or []: print('   ', s['label'], '·', s['title'], '·', 
 print('outcome:', d.get('outcome'), '· balances:', {k: v for k, v in d['balances'].items() if v not in (None, '0')})
 for m in d['messages'][-3:]: print('  ', 'you:' if m['user'] else 'app:', m['text'][:300].replace(chr(10), ' '))";;
 busy) busy;;
+hold) [[ $2 == <-> && -n $3 ]] || { echo 'Tools/dev.sh hold <minutes> "<who: why>"' >&2; exit 2 }
+  # Someone else's hold stands; your own (DEV_HOLDER) is renewed.
+  if why=$(held); then echo "already $why" >&2; exit 1; fi
+  echo "$(( EPOCHSECONDS + $2 * 60 )) $3" > $HOLD; echo "Dev held for $2 min";;
+release)
+  # Only your own: another session's hold is theirs to give back.
+  if why=$(DEV_HOLDER= held) && ! { [[ -n $DEV_HOLDER ]] && ! held >/dev/null }; then echo "not yours: $why" >&2; exit 1; fi
+  rm -f $HOLD; echo "Dev released";;
 idle)
-  for i in {1..300}; do busy >/dev/null || exit 0; sleep 2; done
-  echo "still busy after 10 min: $(busy)" >&2; exit 1;;
+  for i in {1..300}; do active >/dev/null || exit 0; sleep 2; done
+  echo "still busy after 10 min: $(active)" >&2; exit 1;;
 relaunch)
   shift
   if why=$(busy); then echo "Dev is in use ($why): not relaunching. Ask the session using it, or wait: Tools/dev.sh idle" >&2; exit 1; fi

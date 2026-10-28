@@ -1369,7 +1369,8 @@ extension Workspace {
                 "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it."
             }
             // «Sell all USDT» reads as the amount its first step found held: «Sell 0.999604 USDT».
-            let held = from.title.hasPrefix("all") ? nil : from.title.split(separator: " ").last.map { "all \($0)" }
+            // «all 0.034429 SPCX» (all, with its number) replaces it too: «all» alone never stands on a card.
+            let held = from.title.hasPrefix("all") && !from.title.contains(where: \.isNumber) ? nil : from.title.split(separator: " ").last.map { "all \($0)" }
             let title = readable(command.summary.prefix(1).uppercased() + command.summary.dropFirst())
             return MoveRoute(title: held.map { title.replacingOccurrences(of: $0, with: from.title) } ?? title, footer: footer, steps: around(command, [from, to]))
         }
@@ -1391,10 +1392,10 @@ extension Workspace {
         if case .kaminoRepay = command {
             // «All» is what's owed, not all the wallet's USDC: the debt as quoted, a tenth of a percent over.
             let out = amount ?? q?.first { $0.way == "debt" }.map { ($0.worth * Decimal(string: "1.001")!).rounded(6, .up) }
-            return MoveRoute(title: "Repay \(what) USDC on Kamino",
+            return MoveRoute(title: "Repay \(amount == nil ? out.map { "all ≈ \(Fmt.num($0, maxFraction: 6))" } ?? "all" : what) USDC on Kamino",
                              footer: "One transaction: the USDC goes back to Kamino against this wallet's own loan, never anyone else's, and Kamino takes no more than is owed. "
                                 + "The collateral stays until you withdraw it. Press Confirm.",
-                             steps: [step("usdc", "FROM · SOLANA", out.map { "\(amount == nil ? "≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", free, .solana,
+                             steps: [step("usdc", "FROM · SOLANA", out.map { "\(amount == nil ? "all ≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "all owed · reading…", free, .solana,
                                           money: out.map { moneyMove("USDC", on: "solana", by: -$0) } ?? []),
                                      step("kamino", "REPAY · KAMINO", line("debt").map { "debt \($0)" } ?? "\(what) USDC", "the debt goes down, the collateral stays", .kamino)])
         }
@@ -1735,11 +1736,15 @@ extension Workspace {
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))
         // Backpack's stocks: collateral on Kamino's Backpack market, out of the wallet and back.
         case .kamino(let into, let s, let x) where WalletCommand.kaminoStockMints[s] != nil:
-            let wallet = step(stockLogo(s), into ? "FROM · SOLANA" : "TO · SOLANA", "\(n(x)) \(s)",
-                              into ? heldOnSolana(s).map { "in the wallet: \(Fmt.num($0, maxFraction: 6)) \(s)" } ?? "" : "your wallet", .solana,
-                              money: x.map { moneyMove(s, on: "solana", by: into ? -$0 : $0) } ?? (into ? moneyMove(s, on: "solana", by: nil) : []))
-            let kamino = step("kamino", into ? "COLLATERAL · KAMINO" : "FROM · KAMINO", "\(n(x)) \(s)",
-                              into ? "Backpack market · earns nothing · borrow USDC against it" : "the collateral back; a loan on it is paid first", .kamino)
+            // «All» with its number (the owner: «надо писать алл и кол-во»): what the wallet holds, or what Kamino does.
+            let all = x == nil ? into ? heldOnSolana(s) : kaminoLoan?.collateral.first { $0.symbol == s }?.tokens : nil
+            let what = x.map { "\(n($0)) \(s)" } ?? all.map { "all \(Fmt.num($0, maxFraction: 6)) \(s)" } ?? "all \(s) · reading…"
+            let moved = x ?? all
+            let wallet = step(stockLogo(s), into ? "FROM · SOLANA" : "TO · SOLANA", what, into ? "" : "your wallet", .solana,
+                              money: moved.map { moneyMove(s, on: "solana", by: into ? -$0 : $0) } ?? [])
+            let kamino = step("kamino", into ? "COLLATERAL · KAMINO" : "FROM · KAMINO", what,
+                              into ? "Backpack market · earns nothing · borrow USDC against it" : "the collateral back; a loan on it is paid first", .kamino,
+                              money: moved.map { vaultMove("Kamino", s, was: kaminoLoan?.collateral.first { c in c.symbol == s }?.tokens ?? 0, by: into ? $0 : -$0) } ?? [])
             return into ? (wallet, kamino) : (kamino, wallet)
         case .kamino(true, let s, let x):
             let a = x ?? heldForAll(s, fill: .solana)?.0
@@ -2324,12 +2329,15 @@ extension Workspace {
         let what = amount.map { Fmt.num($0, maxFraction: 6) } ?? "all"
         switch command {
         case .aaveRepay:
-            return MoveRoute(title: "Repay \(what) USDC on Aave · \(name)",
+            // «All» is the debt as Aave counts it now, with its number; never the wallet's whole USDC.
+            let owed = q?.first { $0.way == "debt" }?.worth
+            let out = amount ?? owed.map { ($0 * Decimal(string: "1.001")!).rounded(6, .up) }
+            let shown = out.map { "\(amount == nil ? "all ≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "all owed · reading…"
+            return MoveRoute(title: "Repay \(amount == nil ? out.map { "all ≈ \(Fmt.num($0, maxFraction: 6))" } ?? "all" : what) USDC on Aave · \(name)",
                              footer: "An approve of what's owed (a tenth of a percent over, for the interest of the next blocks), then the repay — of this wallet's own debt only. Press Confirm.",
-                             // «All» is the debt, not the wallet's USDC: the step's «all» would read as everything held.
-                             steps: [step(logo, "FROM · \(name.uppercased())", amount.map { "\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", "USDC on \(name)", fill,
-                                          money: amount.map { moneyMove("USDC", on: net, by: -$0) } ?? []),
-                                     approve(amount.map { "\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", for: "Aave", logo: "aave", .aave),
+                             steps: [step(logo, "FROM · \(name.uppercased())", shown, "USDC on \(name)", fill,
+                                          money: out.map { moneyMove("USDC", on: net, by: -$0) } ?? []),
+                                     approve(shown, for: "Aave", logo: "aave", .aave),
                                      step("aave", "REPAY · AAVE", "\(what) USDC", "the debt goes down, the collateral stays", .aave)])
         case .aaveCollateral:
             return MoveRoute(title: "\(what) ETH as collateral on Aave · \(name)",
@@ -2455,6 +2463,12 @@ extension Workspace {
                 }
                 try? await Task.sleep(for: .seconds(30))
             }
+            return
+        case .aaveRepay(nil, let net):
+            // «Repay all»: the debt now, for the card's number.
+            guard let wallet = previewWallet, let m = AaveV3.markets.first(where: { $0.chain == net }),
+                  let a = try? await executor(wallet).aaveAccount(m), !Task.isCancelled else { return }
+            swapQuote = (command, [("debt", Fmt.usd(a.debt), a.debt)])
             return
         case .kaminoRepay:
             // What is owed now, on the market that holds the loan.
