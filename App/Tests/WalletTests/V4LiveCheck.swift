@@ -2,6 +2,7 @@
 import ExecutionCore
 import Foundation
 import HyperliquidSigning
+import JupiterSwap
 import OneClickKit
 import SolanaChain
 import Testing
@@ -238,4 +239,39 @@ func evmCallsSurviveABadOwnNodeAndTheCheckKeepsOnlyAGoodOne() async throws {
             == "Not enough ETH for gas: the wallet can't pay this network's fee. Send it a little ETH, then try again.")
     #expect(EVMRPC.shortOfGas("execution reverted: insufficient funds", chainId: 8453) == nil)
     #expect(EVMRPC.shortOfGas("nonce too low", chainId: 8453) == nil)
+}
+
+/// A live JupiterZ fill (reads only, nothing signed): IHATECRYPTO_JUPITERZ_TAKER = a Solana wallet holding some USDC and SOL.
+/// Jupiter's /order, USDC → SOL or SOL → USDC at the first size a market maker fills, passes the guard with the maker as
+/// the fee payer, and the simulation without signatures takes exactly what goes in and brings at least the minimum out,
+/// the maker paying the fee.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_JUPITERZ_TAKER"] != nil))
+func liveJupiterZFillPassesTheGuard() async throws {
+    let taker = ProcessInfo.processInfo.environment["IHATECRYPTO_JUPITERZ_TAKER"]!, rpc = SolanaRPC()
+    let usdc = Jupiter.usdcMint, sol = Jupiter.solMint, myUSDC = try SPL.associatedAccount(owner: taker, mint: usdc)
+    let asks: [(String, String, UInt64)] = [(usdc, sol, 15_000_000), (usdc, sol, 10_000_000), (usdc, sol, 5_000_000),
+                                            (sol, usdc, 150_000_000), (sol, usdc, 100_000_000), (sol, usdc, 50_000_000)]
+    var tried: [String] = []
+    for (input, output, units) in asks {
+        // A size the wallet can't pay comes back as Jupiter's «insufficient funds»: the next one is tried.
+        guard let order = try? await Jupiter.order(input: input, output: output, amount: units, taker: taker) else { tried.append("\(units): no order"); continue }
+        tried.append("\(units) \(input == sol ? "SOL" : "USDC"): \(order.router)")
+        let message = try SolanaMessage.parse(transaction: order.wire)
+        guard order.router == "jupiterz", let maker = message.staticKeys.first, maker != taker else { continue }
+        let verdict = SolanaGuard.check(message, accounts: try await rpc.resolveAccounts(message), policy: SolanaPolicy(owner: taker, sponsor: maker),
+                                        tokenOwners: [myUSDC: taker])
+        #expect(verdict.ok, "\(verdict.problems)")
+        #expect(verdict.checks.contains { $0.hasPrefix("JupiterZ fill: ") })
+        // The one fill swaps exactly what was asked, which the app checks before taking it (Executor.fillSwaps).
+        #expect(Executor.fillSwaps(order.wire, from: input, to: output) && !Executor.fillSwaps(order.wire, from: output, to: input))
+        let usdcBefore = Int64(try await rpc.tokenBalance(owner: taker, mint: usdc)), lamports = Int64(try await rpc.balance(taker))
+        let simulation = try await rpc.simulate(order.wire, watch: [myUSDC, taker], sigVerify: false)
+        #expect(simulation.error == nil, "\(simulation.error ?? "")")
+        let usdcDelta = Int64(simulation.after[myUSDC]?.token ?? 0) - usdcBefore, solDelta = Int64(simulation.after[taker]?.lamports ?? 0) - lamports
+        if input == usdc { #expect(usdcDelta == -Int64(units) && solDelta >= Int64(order.minOut)) }
+        else { #expect(solDelta == -Int64(units) && usdcDelta >= Int64(order.minOut)) }
+        print("JupiterZ fill of \(tried.last!) by \(maker.prefix(6))…: guard ok · simulated USDC \(usdcDelta), lamports \(solDelta) · \(verdict.checks.filter { $0.contains("JupiterZ") })")
+        return
+    }
+    print("No JupiterZ fill at these sizes now:", tried.joined(separator: ", "))
 }

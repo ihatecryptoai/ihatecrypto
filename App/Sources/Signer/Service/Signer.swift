@@ -535,8 +535,10 @@ enum Signer {
                 .map { "runs \($0), not on ihatecrypto's list" }
             let payer = sponsor.map { ["the network fee is paid by \($0.prefix(4))…\($0.suffix(4)), not by you"] } ?? []
             let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n")
-            // The fee payer may get rent back from this wallet: it's a payee like any other, allowed in person once.
-            try approve(recipients + (sponsor.map { [$0] } ?? []) + relayPayees, doing: doing)
+            // The fee payer may get rent back from this wallet: then it's a payee like any other, allowed in person once. One that
+            // gets nothing of the wallet's (a JupiterZ maker, which only swaps) isn't kept as an address money may go to.
+            let payee = sponsor.flatMap { SolanaGuard.refundsSponsor(message, accounts: accounts, owner: owner, sponsor: $0) ? [$0] : nil } ?? []
+            try approve(recipients + payee + relayPayees, doing: doing)
             // A program not on the list runs with this wallet's authority and the signer can't read what it does: every
             // such transaction asks in person afresh, whatever session is open (the 2026-10-24 review).
             if !extra.isEmpty { try confirmAfresh(doing + "\nit can move anything in this wallet: sign only if you trust this site") }

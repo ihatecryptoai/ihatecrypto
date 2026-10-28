@@ -1984,10 +1984,14 @@ extension Workspace {
         }
         let src = (from ?? auto).flatMap { $0 == "solana" || $0 == place ? nil : $0 }
         // A source the user named is the card's, never Solana's ways: if it can't pay, the move is refused, not swapped.
-        let here = keep || ((from ?? auto) != nil && (from ?? auto) != "solana") || (usdc.map { u in quoted?.first.map { $0.way == "here" }
+        let here = keep || ((from ?? auto) != nil && (from ?? auto) != "solana") || (usdc.map { u in quoted?.first.map { $0.way.hasPrefix("here") }
             ?? (from != "solana" && (self.usdc(on: place) ?? 0) >= u) } ?? false)
         if here {
-            let gets = quoted?.first { $0.way == "here" }?.gets
+            let gets = quoted?.first { $0.way.hasPrefix("here") }?.gets
+            // The way on the network that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
+            let venue = quoted?.first { $0.way.hasPrefix("here:") }.map { String($0.way.dropFirst(5)) } ?? "Uniswap"
+            let venueLogo = venue.hasPrefix("Uniswap") ? "uni" : venue == "KyberSwap" ? "kyber" : "relay"
+            let venueName = venue.hasPrefix("Uniswap") ? "Uniswap" : venue == "Relay's swap" ? "Relay" : venue
             let moving = usdc.map { "\(Fmt.num($0)) USDC" } ?? "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)"
             let start: [ActivityBubble] = if let src {
                 [step(ModuleNetwork(place: src)?.logo ?? src, "FROM · \(WalletCommand.placeName(src).uppercased())", moving,
@@ -2002,17 +2006,17 @@ extension Workspace {
                       money: moneyMove(label, on: place, by: sell.map { -$0 }))]
             }
             let footer = (src.map { "First Relay moves the USDC from \(WalletCommand.placeName($0)) to \(name): an exact approve and its deposit. Then two" } ?? "Two")
-                + " \(name) transactions: an exact approve and the Uniswap swap, which may only pay this wallet"
+                + " \(name) transactions: an exact approve and the swap on \(venueName), which may only pay this wallet"
                 + (usdc == nil ? "; the USDC stays on \(name)." : ".") + " Press Confirm."
             if let usdc {
                 return MoveRoute(title: "Buy \(label) · \(Fmt.num(usdc)) USDC on \(name)", footer: footer, steps: start + [
-                    approve("\(Fmt.num(usdc)) USDC", for: "Uniswap", logo: "uni", fill, line: src == nil ? nil : "what arrives · only Uniswap may take it"),
-                    step(logo, "BUY · UNISWAP ON \(name.uppercased())", label, gets.map { "≈ \($0)" } ?? "at the pool price", fill,
+                    approve("\(Fmt.num(usdc)) USDC", for: venueName, logo: venueLogo, fill, line: src == nil ? nil : "what arrives · only \(venueName) may take it"),
+                    step(logo, "BUY · \(venueName.uppercased()) ON \(name.uppercased())", label, gets.map { "≈ \($0)" } ?? "at the best price there", fill,
                          money: Self.quotedAmount(gets).map { tokenMove(label, on: place, by: $0) } ?? []),
                 ], warning: token.hasPrefix("0x") ? "A token by its contract is anyone’s coin: its price can halve in a day and nobody vouches for it. Put in only what you can lose." : nil)
             }
             return MoveRoute(title: "Sell \(amountOrAll(sell, label, on: place)) on \(name) → USDC on \(name)", footer: footer, steps: start + [
-                approve(moving, for: "Uniswap", logo: "uni", fill),
+                approve(moving, for: venueName, logo: venueLogo, fill),
                 step("usdc", "TO · USDC ON \(name.uppercased())", gets.map { "≈ \($0)" } ?? "USDC", "stays on \(name) · your own address ✓", fill,
                      money: Self.quotedAmount(gets).map { moneyMove("USDC", on: place, by: $0, approx: true) } ?? []),
             ])
@@ -2175,12 +2179,14 @@ extension Workspace {
         let moving = "\(amount.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label(from))"
         var steps = [step(logo, "FROM · \(name.uppercased())", moving, coinIn ? "your \(coin) · its fees stay" : "on \(name)", fill,
                           money: moneyMove(label(from), on: place, by: amount.map { -$0 }))]
-        if !coinIn { steps.append(approve(moving, for: "Uniswap", logo: "uni", fill)) }
-        // The network's logo with Uniswap's badge, as a buy on Uniswap there.
-        steps.append(step(logo, "SWAP · \((quoted?.way ?? "Uniswap").uppercased()) ON \(name.uppercased())", label(to),
-                          quoted.map { "≈ \($0.gets)" } ?? "the best of v2, v3 and v4", fill,
+        // The way that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
+        let way = quoted?.way ?? "Uniswap", wayName = way.hasPrefix("Uniswap") ? "Uniswap" : way == "Relay's swap" ? "Relay" : way
+        if !coinIn { steps.append(approve(moving, for: wayName, logo: way.hasPrefix("Uniswap") ? "uni" : way == "KyberSwap" ? "kyber" : "relay", fill)) }
+        // The network's logo with the way's badge, as a buy there.
+        steps.append(step(logo, "SWAP · \(way.uppercased()) ON \(name.uppercased())", label(to),
+                          quoted.map { "≈ \($0.gets)" } ?? "the best of Uniswap, Relay and KyberSwap", fill,
                           money: Self.quotedAmount(quoted?.gets).map { tokenMove(label(to), on: place, by: $0) } ?? []))
-        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap v2, v3 and v4, at most 0.5–3% under its quote by the price impact, paying only this wallet."
+        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap (v2, v3, v4), Relay's swap and KyberSwap after gas, at most 0.5–3% under its quote by the price impact, paying only this wallet."
             + (coinIn ? " \(coin) goes in as itself into a v4 pool of it, else wrapped into W\(coin) first (one more transaction)." : " An exact approve first.")
             + (coinOut ? " \(coin) comes out as itself, or is unwrapped after." : "") + " Press Confirm."
         return MoveRoute(title: "Swap \(moving) → \(label(to)) on \(name)", footer: footer, steps: steps,
@@ -2407,14 +2413,19 @@ extension Workspace {
         guard units > 0 else { return }
         pricedCommand = command
         while !Task.isCancelled {
-            let q = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units)
+            // The pools' route and JupiterZ's market makers, the better of the two: what the swap takes (Executor.convert).
+            async let pools = try? Jupiter.quote(input: from.mint, output: to.mint, amount: units)
+            async let makers = try? Jupiter.orderQuote(input: from.mint, output: to.mint, amount: units)
+            let (p, z) = await (pools, makers)
             guard !Task.isCancelled else { return }
+            let q: (out: UInt64, impact: Decimal, way: String)? = if let z, z.router == "jupiterz", z.out > p?.outAmount ?? 0 { (z.out, z.impact, "JupiterZ") }
+                else { p.map { ($0.outAmount, $0.impact, "Jupiter") } }
             if let q {
-                let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
-                jupiterShown = (command, q.outAmount)
+                let out = Decimal(q.out) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
+                jupiterShown = (command, q.out)
                 // As Uniswap's cards say it (UniRoute.impactText): from a tenth of a percent up.
                 let impact = q.impact >= Decimal(string: "0.001")! ? " · price impact \(Fmt.num((q.impact * 100).rounded(q.impact < Decimal(string: "0.1")! ? 2 : 1, .plain)))%" : ""
-                swapQuote = (command, [("Jupiter", "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)\(impact)", 0)])
+                swapQuote = (command, [(q.way, "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)\(impact)", 0)])
                 return
             }
             if swapQuote?.command != command { swapQuote = (command, []) }

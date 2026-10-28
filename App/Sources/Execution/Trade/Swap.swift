@@ -218,11 +218,17 @@ extension Executor {
         return Decimal(gas) * Decimal(price) / 1_000_000_000_000_000_000 * ethUSD
     }
 
-    /// Which ways Settings › Modules allows: Relay's swap needs Relay; the other needs Relay and Uniswap.
-    private func allowedWays(_ net: EVMNetwork) -> (relay: Bool, uniswap: Bool) {
+    /// Which ways Settings › Modules allows on the network: Relay (its swap, and its bridge to and from Solana), Uniswap,
+    /// and KyberSwap where it serves. A way across from Solana through Uniswap needs both Relay and Uniswap.
+    private func allowedWays(_ net: EVMNetwork) -> (relay: Bool, uniswap: Bool, kyber: Bool) {
         let place = ModuleNetwork(place: net.key).map { [$0] } ?? []
-        let relay = Modules.current.refusal(.relay, via: place) == nil
-        return (relay, relay && Modules.current.refusal(.uniswap, via: place) == nil)
+        return (Modules.current.refusal(.relay, via: place) == nil, Modules.current.refusal(.uniswap, via: place) == nil,
+                KyberSwap.chains[net.rpc.chainId] != nil && Modules.current.refusal(.kyberswap, via: place) == nil)
+    }
+
+    /// The network's own USDC as a token, for a swap into it or out of it there.
+    static func usdcToken(_ net: EVMNetwork) -> EVMTokens.Token {
+        EVMTokens.Token(symbol: "USDC", name: "USD Coin", address: net.usdc.lowercased(), decimals: net.usdcDecimals)
     }
 
     /// The way a trade takes: the one that leaves more, or only the one the person picked on the route's step
@@ -238,7 +244,8 @@ extension Executor {
 
     /// Both ways of a buy (`usdc`) or a sale (`sell`, nil = all) quoted now for the route's card, the one that leaves
     /// more first; nothing is signed. `gets` is what arrives («2.41 AERO», «1.97 USDC»), `worth` its USD after gas.
-    /// "here" is the one way when the trade runs on the network's own USDC (`buyHere`, or a sale that keeps the USDC).
+    /// "here:<the way's name>" («here:KyberSwap») is the one way when the trade runs on the network's own USDC (`buyHere`, or
+    /// a sale that keeps the USDC): the best of Uniswap, Relay's swap and KyberSwap there (bestPair).
     public func swapQuotes(_ net: EVMNetwork, _ ref: String, usdc: Decimal?, sell: Decimal?, from: String? = nil, keep: Bool = false) async throws
         -> [(way: String, gets: String, worth: Decimal)] {
         guard let uni = UniswapV3.on(net.rpc.chainId) else { return [] }
@@ -246,8 +253,8 @@ extension Executor {
         let scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1)
         if let usdc {
             let units = NSDecimalNumber(decimal: (usdc * 1_000_000).rounded(0, .down)).uint64Value
-            if let here = try await buyHere(net, token, units: units, from: from, uni) {
-                return [("here", "\(Fmt.num(here.route.out / scale, maxFraction: 6)) \(token.symbol)\(here.route.impactText)", usdc)]
+            if let here = try await buyHere(net, token, units: units, from: from, uni, quoteOnly: true) {
+                return [("here:" + here.pair.title, "\(Fmt.num(here.pair.out / scale, maxFraction: 6)) \(token.symbol)\(here.pair.impactText)", usdc)]
             }
             return try await buyWays(net, token, units: units, uni).ways.sorted { $0.worth > $1.worth }
                 .map { ($0.name, "\(Fmt.num($0.out / scale, maxFraction: 6)) \(token.symbol)", $0.worth) }
@@ -256,9 +263,9 @@ extension Executor {
         let units = (sell.map { min($0 * scale, held) } ?? held).whole
         guard units > 0 else { return [] }
         if keep {
-            guard let best = await bestUniswap(on: net, uni, from: token.address, to: net.usdc, amountIn: units) else { return [] }
+            guard let best = try await bestPair(net, uni, token, Self.usdcToken(net), units: units, uniswap: allowedWays(net).uniswap, quoteOnly: true) else { return [] }
             let got = Decimal(net.micro(best.out)) / 1_000_000
-            return [("here", "\(Fmt.num(got)) USDC\(best.impactText)", got)]
+            return [("here:" + best.title, "\(Fmt.num(got)) USDC\(best.impactText)", got)]
         }
         return try await sellWays(net, token, units: units, uni).ways.sorted { $0.worth > $1.worth }
             .map { ($0.name, "\(Fmt.num($0.out / 1_000_000)) USDC", $0.worth) }
@@ -284,7 +291,7 @@ extension Executor {
         }
         // A way picked on the route's step is one of Solana's: only then is the money on the network passed over.
         if prefer == nil || from != nil, let here = try await buyHere(net, token, units: units, from: from, uni) {
-            try holdsImpact(here.route, paid: usdc, amount: usdc, symbol: "USDC")
+            try await holdsPairImpact(net, here.pair)
             var spend = units
             if let src = here.src {
                 let before = try await net.usdcBalance(me)
@@ -334,40 +341,40 @@ extension Executor {
             + "You hold \(amount(after)) there.\(hash.isEmpty ? "" : " \(net.explorer)/tx/\(hash)")"
     }
 
-    /// Whether a buy is paid on the network itself, and Uniswap's path there: `from` nil = when the network holds the
-    /// USDC and Uniswap has a pool (else nil: Solana's ways); «solana» = never; the network's key = it must; another EVM
-    /// network's key = its USDC comes over first (`src`). A named place that can't pay is refused, never swapped for another.
-    func buyHere(_ net: EVMNetwork, _ token: EVMTokens.Token, units: UInt64, from: String?, _ uni: UniswapV3.Deployment) async throws
-        -> (route: UniRoute, src: EVMNetwork?)? {
+    /// Whether a buy is paid on the network itself, and the best way there (bestPair): `from` nil = when the network holds
+    /// the USDC and an exchange there quotes it (else nil: Solana's ways); «solana» = never; the network's key = it must;
+    /// another EVM network's key = its USDC comes over first (`src`). A named place that can't pay is refused, never swapped
+    /// for another. `quoteOnly`: for the card.
+    func buyHere(_ net: EVMNetwork, _ token: EVMTokens.Token, units: UInt64, from: String?, _ uni: UniswapV3.Deployment, quoteOnly: Bool = false) async throws
+        -> (pair: PairSwap, src: EVMNetwork?)? {
         guard from != "solana" else { return nil }
         let me = wallet.evm, want = Fmt.num(Decimal(units) / 1_000_000)
         let src = from.flatMap(EVMNetwork.named).flatMap { $0.key == net.key ? nil : $0 }
         if from != nil, from != net.key, src == nil { throw ExecutionError("ihatecrypto doesn't pay for a buy on \(net.name) from \(from ?? "there"). Nothing was signed.") }
         let there = try await (src ?? net).usdcBalance(me)
-        let best = allowedWays(net).uniswap ? await bestUniswap(on: net, uni, from: net.usdc, to: token.address, amountIn: net.raw(units)) : nil
-        if let best, there >= units { return (best, src) }
+        let best = there >= units ? try await bestPair(net, uni, Self.usdcToken(net), token, units: net.raw(units), uniswap: allowedWays(net).uniswap, quoteOnly: quoteOnly) : nil
+        if let best { return (best, src) }
         guard from != nil else { return nil }
         throw ExecutionError(there < units
             ? "\(Fmt.num(Decimal(there) / 1_000_000)) USDC on \((src ?? net).name); the buy needs \(want). Nothing was signed."
-            : "Uniswap has no pool for \(token.symbol) on \(net.name)\(allowedWays(net).uniswap ? "" : " (Uniswap is off in Settings › Modules)"); "
+            : "No exchange on \(net.name) quotes \(token.symbol) for USDC now; "
                 + "“buy \(token.symbol) on \(net.key) for \(want) USDC from solana” takes Relay's swap. Nothing was signed.")
     }
 
-    /// A buy with USDC already on the network: an exact approve and Uniswap's best path, which pays only this wallet.
+    /// A buy with USDC already on the network: the best way there (bestPair) — Uniswap's route, Relay's swap or
+    /// KyberSwap's — each with an exact approve, paying only this wallet. Quoted again now: a bridge may have brought the USDC.
     private func buyThere(_ net: EVMNetwork, _ token: EVMTokens.Token, units: UInt64, _ uni: UniswapV3.Deployment) async throws -> String {
-        let me = wallet.evm, scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1), usdc = Fmt.num(Decimal(units) / 1_000_000, maxFraction: 6)
+        let scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1), usdc = Fmt.num(Decimal(units) / 1_000_000, maxFraction: 6)
         func amount(_ raw: Decimal) -> String { "\(Fmt.num(raw / scale, maxFraction: 6)) \(token.symbol)" }
+        guard units > 0, let best = try await bestPair(net, uni, Self.usdcToken(net), token, units: net.raw(units), uniswap: allowedWays(net).uniswap) else {
+            throw ExecutionError("No exchange on \(net.name) quotes \(token.symbol) now; the USDC stays there. Nothing was swapped.")
+        }
+        try await holdsPairImpact(net, best, signed: "The USDC stays on \(net.name); nothing was swapped.")
+        report("\(usdc) USDC on \(net.name) → \(token.symbol) on \(best.title): ≈ \(amount(best.out))\(best.impactText), no bridge.")
         // Gas only: the USDC is there.
         try await ensureEVM(net, usdc: units)
-        guard units > 0, let best = await bestUniswap(on: net, uni, from: net.usdc, to: token.address, amountIn: net.raw(units)) else {
-            throw ExecutionError("Uniswap doesn't quote \(token.symbol) on \(net.name) now; the USDC stays there. Nothing was swapped.")
-        }
-        try holdsImpact(best, paid: Decimal(units) / 1_000_000, amount: Decimal(units) / 1_000_000, symbol: "USDC",
-                        signed: "The USDC stays on \(net.name); nothing was swapped.")
-        report("\(usdc) USDC on \(net.name) → \(token.symbol) on \(best.title): ≈ \(amount(best.out))\(best.impactText), no bridge.")
         let before = try await balance(token.address, on: net.rpc)
-        let hash = try await swapUniswap(best, on: net, uni, tokenIn: net.usdc, units: net.raw(units), what: "\(usdc) USDC",
-                                         note: "Buy \(token.symbol) for \(usdc) USDC")
+        let hash = try await runPair(net, uni, best, what: "\(usdc) USDC", note: "Buy \(token.symbol) for \(usdc) USDC").last
         var after = try await balance(token.address, on: net.rpc)
         for _ in 0..<10 where after <= before {
             try await Task.sleep(for: .seconds(1))
@@ -421,21 +428,21 @@ extension Executor {
     /// and Uniswap on the chain followed by the Relay bridge. `keep`: Uniswap there, and the USDC stays on the network.
     public func sellOn(_ net: EVMNetwork, _ ref: String, amount: Decimal?, prefer: String? = nil, keep: Bool = false) async throws -> String {
         guard let uni = UniswapV3.on(net.rpc.chainId) else { throw ExecutionError("ihatecrypto swaps on Solana, Base, Arbitrum, Polygon, Ethereum, Optimism, BNB Chain and HyperEVM.") }
-        let token = try await evmToken(ref, on: net), me = wallet.evm
+        let token = try await evmToken(ref, on: net)
         let scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1)
         let held = try await balance(token.address, on: net.rpc)
         let units = (amount.map { min($0 * scale, held) } ?? held).whole
         guard units > 0 else { throw ExecutionError("No \(token.symbol) on \(net.name).") }
         func tokens(_ raw: Decimal) -> String { "\(Fmt.num(raw / scale, maxFraction: 6)) \(token.symbol)" }
         if keep {
-            guard allowedWays(net).uniswap, let best = await bestUniswap(on: net, uni, from: token.address, to: net.usdc, amountIn: units) else {
-                throw ExecutionError("Uniswap has no pool to sell \(token.symbol) for USDC on \(net.name)\(allowedWays(net).uniswap ? "" : " (Uniswap is off in Settings › Modules)"); "
+            guard let best = try await bestPair(net, uni, token, Self.usdcToken(net), units: units, uniswap: allowedWays(net).uniswap) else {
+                throw ExecutionError("No exchange on \(net.name) quotes \(token.symbol) for USDC now; "
                                      + "without «keep», Relay's swap sells it for USDC on Solana. Nothing was signed.")
             }
-            try holdsImpact(best, paid: Self.beforeImpact(Decimal(net.micro(best.out)) / 1_000_000, best), amount: units / scale, symbol: token.symbol)
+            try await holdsPairImpact(net, best)
             report("\(tokens(units)) on \(net.name) → ≈ \(Fmt.num(Decimal(net.micro(best.out)) / 1_000_000)) USDC there\(best.impactText), on \(best.title).")
             try await ensureEVM(net, usdc: 0)
-            let sold = try await sellThere(net, token, units: units, route: best, uni)
+            let sold = try await sellThere(net, best, uni)
             traded?("\(net.key):\(token.address.lowercased())", -units / scale, sold.got)
             return sold.text
         }
@@ -458,7 +465,7 @@ extension Executor {
                 try holdsImpact(fresh, paid: Self.beforeImpact(Decimal(net.micro(fresh.out)) / 1_000_000, fresh), amount: units / scale, symbol: token.symbol,
                                 signed: "\(token.symbol) stays on \(net.name); nothing was swapped.")
             }
-            let sold = try await sellThere(net, token, units: units, route: fresh ?? plan, uni)
+            let sold = try await sellThere(net, PairSwap(tokenIn: token, tokenOut: Self.usdcToken(net), coinIn: false, coinOut: false, units: units, route: fresh ?? plan), uni)
             report(sold.text)
             traded?("\(net.key):\(token.address.lowercased())", -units / scale, sold.got)
             return try await evmToSolana(net, usdc: sold.got)
@@ -468,20 +475,19 @@ extension Executor {
         return text
     }
 
-    /// The Uniswap sale on the network: an exact approve of the tokens, then the swap to USDC at this wallet.
-    private func sellThere(_ net: EVMNetwork, _ token: EVMTokens.Token, units: Decimal, route: UniRoute, _ uni: UniswapV3.Deployment) async throws
-        -> (got: Decimal, text: String) {
-        let me = wallet.evm, scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1)
-        let tokens = "\(Fmt.num(units / scale, maxFraction: 6)) \(token.symbol)"
+    /// The sale on the network, the way `p` took: an exact approve of the tokens, then the swap to USDC at this wallet.
+    private func sellThere(_ net: EVMNetwork, _ p: PairSwap, _ uni: UniswapV3.Deployment) async throws -> (got: Decimal, text: String) {
+        let me = wallet.evm, scale = Decimal(sign: .plus, exponent: p.tokenIn.decimals, significand: 1)
+        let tokens = "\(Fmt.num(p.units / scale, maxFraction: 6)) \(p.tokenIn.symbol)"
         let before = try await net.usdcBalance(me)
-        let hash = try await swapUniswap(route, on: net, uni, tokenIn: token.address, units: units, what: tokens, note: "Sell \(tokens)")
+        let hash = try await runPair(net, uni, p, what: tokens, note: "Sell \(tokens)").last
         var after = try await net.usdcBalance(me)
         for _ in 0..<10 where after <= before {
             try await Task.sleep(for: .seconds(1))
             after = try await net.usdcBalance(me)
         }
         let got = Decimal(after > before ? after - before : 0) / 1_000_000
-        return (got, "Sold \(tokens) for \(Fmt.num(got)) USDC on \(net.name), on \(route.title). \(net.explorer)/tx/\(hash)")
+        return (got, "Sold \(tokens) for \(Fmt.num(got)) USDC on \(net.name), on \(p.title). \(net.explorer)/tx/\(hash)")
     }
 
     /// Both ways to sell `units` back to USDC on Solana, quoted and valued (nothing is signed): Relay's swap-and-bridge,
@@ -513,7 +519,8 @@ extension Executor {
     }
 
     /// One token for another on a network, quoted: both sides (the network's own coin as its wrapped token), the amount in,
-    /// and the route that gives most — Uniswap's best for the pair (v2, v3, v4), or a v4 pool of the coin itself.
+    /// and the way that leaves most (bestPair) — Uniswap's best for the pair (v2, v3, v4, or a v4 pool of the coin itself),
+    /// Relay's swap or KyberSwap's route.
     struct PairSwap {
         let tokenIn: EVMTokens.Token
         let tokenOut: EVMTokens.Token
@@ -523,11 +530,22 @@ extension Executor {
         let units: Decimal
         /// nil for the coin into its own wrapped token or back: a wrap or an unwrap, no swap — or for Relay's swap.
         let route: UniRoute?
-        /// What Relay's swap on the network gives, in the output's smallest units, when Uniswap has no pool for the pair
-        /// (HyperEVM's money sits on other exchanges, which Relay reaches).
+        /// What Relay's swap on the network gives, in the output's smallest units, when it leaves the most (HyperEVM's money
+        /// sits on other exchanges, which Relay reaches).
         var relayOut: Decimal? = nil
+        /// KyberSwap's route, when it leaves the most.
+        var kyber: KyberSwap.Route? = nil
+        /// Relay's or KyberSwap's price impact by its own valuation, else Uniswap's measured one for the same pair: a token
+        /// they don't price must not pass the impact stop as 0% (the 2026-10-28 review).
+        var wayImpact: Decimal? = nil
         /// The route is a v4 pool of the coin itself: it goes in as the call's value or comes out as coins, unwrapped.
         var direct: Bool { route?.v4?.key.currency0 == UniswapV4.native }
+        /// What it gives, in the output's smallest units (a wrap or an unwrap: the amount itself).
+        var out: Decimal { route?.out ?? kyber?.out ?? relayOut ?? units }
+        var title: String { route?.title ?? (kyber != nil ? "KyberSwap" : relayOut != nil ? "Relay's swap" : coinIn ? "wrap" : "unwrap") }
+        /// How far it moves the price: Uniswap's measured route, else the other way's (wayImpact).
+        var impact: Decimal? { route?.impact ?? wayImpact }
+        var impactText: String { UniRoute.impactText(impact) }
     }
 
     /// Whether `ref` names the network's own coin: ETH, or POL (MATIC) on Polygon — never its wrapped token, which is a token.
@@ -562,11 +580,31 @@ extension Executor {
         } else { units = held }
         guard units > 0 else { throw ExecutionError("No \(tokenIn.symbol) to swap on \(net.name).") }
         guard !coinIn || units <= Decimal(UInt64.max) else { throw ExecutionError("At most 18 \(net.gasCoin) at once. Nothing was signed.") }
-        // The coin and its wrapped token are the same money: a wrap or an unwrap.
-        if tokenIn.address == tokenOut.address { return PairSwap(tokenIn: tokenIn, tokenOut: tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, route: nil) }
-        async let wrapped = bestUniswap(on: net, uni, from: tokenIn.address, to: tokenOut.address, amountIn: units)
-        async let coinPool = coinIn || coinOut
+        guard let p = try await bestPair(net, uni, tokenIn, tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, uniswap: allowedWays(net).uniswap,
+                                         quoteOnly: quoteOnly) else {
+            throw ExecutionError("Neither Uniswap, Relay nor KyberSwap swaps \(tokenIn.symbol) for \(tokenOut.symbol) on \(net.name) right now. Nothing was signed.")
+        }
+        return p
+    }
+
+    /// The way that leaves the most for `units` of `tokenIn` → `tokenOut` on the network itself, nothing signed: Uniswap's
+    /// best route (or a v4 pool of the coin itself), Relay's swap, or KyberSwap's route over every exchange there — each
+    /// valued at one price for what comes out (KyberSwap's, else Relay's) less the gas it takes. 1 BTCB → USDC on BNB Chain,
+    /// 2026-10-28: Uniswap $74,004, Relay $81,168, KyberSwap $81,267. nil when none quotes it. `uniswap` false: Uniswap is
+    /// off in Settings › Modules. `quoteOnly`: for the card, Relay's loss shown rather than stopped at (relayPairQuote).
+    func bestPair(_ net: EVMNetwork, _ uni: UniswapV3.Deployment, _ tokenIn: EVMTokens.Token, _ tokenOut: EVMTokens.Token,
+                  coinIn: Bool = false, coinOut: Bool = false, units: Decimal, uniswap: Bool = true, quoteOnly: Bool = false) async throws -> PairSwap? {
+        let rpc = net.rpc, allowed = allowedWays(net)
+        let pair = PairSwap(tokenIn: tokenIn, tokenOut: tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, route: nil)
+        // The coin and its wrapped token are the same money: a wrap or an unwrap. The same token on both sides is no swap
+        // («buy USDC for USDC» once reached here and would have unwrapped WETH: the Codex review, 2026-10-28).
+        if tokenIn.address == tokenOut.address { return coinIn != coinOut ? pair : nil }
+        async let wrapped = uniswap ? bestUniswap(on: net, uni, from: tokenIn.address, to: tokenOut.address, amountIn: units) : nil
+        async let coinPool = uniswap && (coinIn || coinOut)
             ? v4Route(coinIn ? UniswapV4.native : tokenIn.address, coinOut ? UniswapV4.native : tokenOut.address, amountIn: units, rpc: rpc) : nil
+        // Relay takes the coin wrapped; KyberSwap only tokens on both sides (the coin would go as the call's value, unread).
+        async let relayQuote = allowed.relay ? try? relayPairQuote(net, from: tokenIn.address, to: coinOut ? UniswapV4.native : tokenOut.address, units: units, capped: !quoteOnly) : nil
+        async let kyberRoute = allowed.kyber && !coinIn && !coinOut ? try? KyberSwap.route(chainId: rpc.chainId, from: tokenIn.address, to: tokenOut.address, amount: units) : nil
         var route = await wrapped
         if let pool = await coinPool, pool.out > (route?.out ?? 0) {
             var direct = UniRoute(v3: nil, v4: pool, out: pool.out)
@@ -576,17 +614,58 @@ extension Executor {
             }
             route = direct
         }
-        // No Uniswap pool, or only a thin one (price impact past impactCap: USDS on Arbitrum, USDT0 on Optimism sit in dead
-        // v2 pools): Relay's swap on the network itself, if it quotes the pair and gives more (the coin goes in wrapped).
-        if route == nil || (route?.impact ?? 0) > Self.impactCap, allowedWays(net).relay,
-           let out = try? await relayPairQuote(net, from: tokenIn.address, to: coinOut ? UniswapV4.native : tokenOut.address, units: units, capped: !quoteOnly).out,
-           out > route?.out ?? 0 {
-            return PairSwap(tokenIn: tokenIn, tokenOut: tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, route: nil, relayOut: out)
+        let (relay, kyber) = await (relayQuote, kyberRoute)
+        let scale = Decimal(sign: .plus, exponent: tokenOut.decimals, significand: 1)
+        // One price for what comes out, and one for a unit of gas — KyberSwap's own estimates where it quoted.
+        let relayUSD = relay.flatMap { Decimal(string: $0.quote.amountOutUSD) } ?? 0
+        let price: Decimal? = kyber.flatMap { $0.outUSD > 0 ? $0.outUSD / ($0.out / scale) : nil } ?? relay.flatMap { relayUSD > 0 ? relayUSD / ($0.out / scale) : nil }
+        let ways = [route != nil, relay != nil, kyber != nil].filter { $0 }.count
+        let perGas: Decimal = if let k = kyber, k.gas > 0 { k.gasUSD / Decimal(k.gas) }
+            else if ways > 1, price != nil { ((try? await gasUSD(1_000_000, on: net, uni)) ?? 0) / 1_000_000 } else { 0 }
+        func worth(_ out: Decimal, gas: UInt64) -> Decimal { price.map { out / scale * $0 - Decimal(gas) * perGas } ?? out / scale }
+        var best: (worth: Decimal, pair: PairSwap)?
+        func offer(_ worth: Decimal, _ p: PairSwap) { if worth > best?.worth ?? -.greatestFiniteMagnitude { best = (worth, p) } }
+        if let route { offer(worth(route.out, gas: route.gas), PairSwap(tokenIn: tokenIn, tokenOut: tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, route: route)) }
+        if let relay {
+            let inUSD = Decimal(string: relay.quote.amountInUSD) ?? 0
+            var p = pair
+            p.relayOut = relay.out
+            p.wayImpact = inUSD > 0 && relayUSD > 0 ? max(0, 1 - relayUSD / inUSD) : route?.impact
+            offer(worth(relay.out, gas: 50_000 + 300_000), p)
         }
-        guard let route else {
-            throw ExecutionError("Neither Uniswap nor Relay swaps \(tokenIn.symbol) for \(tokenOut.symbol) on \(net.name) right now. Nothing was signed.")
+        if let kyber { var p = pair; p.kyber = kyber; p.wayImpact = kyber.impact ?? route?.impact; offer(worth(kyber.out, gas: 50_000 + kyber.gas), p) }
+        return best?.pair
+    }
+
+    /// A swap on the network checked against impactCap before anything is signed (a bridge or gas top-up included, `signed`
+    /// says where the money waits): Uniswap's measured impact, KyberSwap's own; Relay's swap has its cap in relayPairQuote.
+    /// What goes in, in USD: the USDC itself, else what the USDC out was worth before the impact, else KyberSwap's
+    /// valuation, else DefiLlama's price (none: the impact alone decides).
+    func holdsPairImpact(_ net: EVMNetwork, _ p: PairSwap, signed: String? = nil) async throws {
+        guard let impact = p.impact, impact > Self.impactCap else { return }
+        let scale = Decimal(sign: .plus, exponent: p.tokenIn.decimals, significand: 1), amount = p.units / scale
+        let usdc = net.usdc.lowercased()
+        var paid: Decimal = if p.tokenIn.address == usdc { Decimal(net.micro(p.units)) / 1_000_000 }
+            else if p.tokenOut.address == usdc, impact < 1 { Decimal(net.micro(p.out)) / 1_000_000 / (1 - impact) }
+            else { p.kyber?.inUSD ?? 0 }
+        if paid == 0 { paid = amount * (await Holdings.llamaPrices(net.key, [p.tokenIn.address])[p.tokenIn.address.lowercased()]?.price ?? 0) }
+        try Self.checkImpact(impact, paid: paid, amount: amount, symbol: p.coinIn ? net.gasCoin : p.tokenIn.symbol, venue: p.title, signed: signed)
+    }
+
+    /// KyberSwap's route, built for this wallet and read back before anything is signed: the router call must be its swap
+    /// of exactly `units` of the token in for the token out, paying only this wallet, no fee to anyone, at most the route's
+    /// tolerance under its quote (UniRoute.tolerance, by its impact); then an exact approve to its router, and the call.
+    func kyberSwap(_ net: EVMNetwork, _ route: KyberSwap.Route, tokenIn: EVMTokens.Token, tokenOut: EVMTokens.Token, units: Decimal,
+                   what: String, rpc: EVMRPC? = nil) async throws -> String {
+        let rpc = rpc ?? net.rpc, me = wallet.evm
+        let tolerance = UniRoute.tolerance(impact: route.impact)
+        let call = try await KyberSwap.build(route, chainId: net.rpc.chainId, sender: me, slippageBps: NSDecimalNumber(decimal: tolerance * 10_000).intValue)
+        guard let s = KyberSwap.decode(call), KyberSwap.refusal(s, sender: me) == nil, s.srcToken.lowercased() == tokenIn.address.lowercased(),
+              s.dstToken.lowercased() == tokenOut.address.lowercased(), s.amount == units, s.minReturn >= (route.out * (1 - tolerance)).whole - 1 else {
+            throw ExecutionError("KyberSwap's call isn't the swap it quoted (this wallet, these tokens, this amount, its floor). Nothing was signed.")
         }
-        return PairSwap(tokenIn: tokenIn, tokenOut: tokenOut, coinIn: coinIn, coinOut: coinOut, units: units, route: route)
+        return try await approveAndSend(rpc, token: tokenIn.address, spender: KyberSwap.router, units: units, approveNote: "Approve exactly \(what) to KyberSwap",
+                                        to: KyberSwap.router, data: call, note: "KyberSwap: swap \(what) for \(tokenOut.symbol) on \(net.name)")
     }
 
     /// Relay's swap on one network, from and to this wallet: its quote, checked — the sender and the recipient are this
@@ -626,9 +705,7 @@ extension Executor {
         }
         let p = try await pairSwap(net, from: a, to: b, amount: amount, quoteOnly: true)
         let scale = Decimal(sign: .plus, exponent: p.tokenOut.decimals, significand: 1)
-        let out = p.route?.out ?? p.relayOut ?? p.units
-        return ("\(Fmt.num(out / scale, maxFraction: 6)) \(p.tokenOut.symbol)\(p.route?.impactText ?? "")",
-                p.route.map { $0.title } ?? (p.relayOut != nil ? "Relay's swap" : p.coinIn ? "wrap" : "unwrap"))
+        return ("\(Fmt.num(p.out / scale, maxFraction: 6)) \(p.tokenOut.symbol)\(p.impactText)", p.title)
     }
 
     /// «swap 0.01 ETH for AERO on Base», «swap all DEGEN for AERO on base»: one token for another on the network, straight —
@@ -638,67 +715,16 @@ extension Executor {
     public func swapOn(_ net: EVMNetwork, from a: String, to b: String, amount: Decimal?) async throws -> String {
         if net.key == "tempo" { return try await tempoSwap(from: a, to: b, amount: amount) }
         let p = try await pairSwap(net, from: a, to: b, amount: amount)
-        guard let uni = UniswapV3.on(net.rpc.chainId), let weth = UniswapV2.on(net.rpc.chainId)?.weth else { throw ExecutionError("No Uniswap on \(net.name).") }
+        guard let uni = UniswapV3.on(net.rpc.chainId) else { throw ExecutionError("No Uniswap on \(net.name).") }
         let rpc = net.rpc, me = wallet.evm
-        if let route = p.route, (route.impact ?? 0) > Self.impactCap {
-            let amount = p.units / Decimal(sign: .plus, exponent: p.tokenIn.decimals, significand: 1)
-            let price = await Holdings.llamaPrices(net.key, [p.tokenIn.address])[p.tokenIn.address.lowercased()]?.price ?? 0
-            try holdsImpact(route, paid: amount * price, amount: amount, symbol: p.coinIn ? net.gasCoin : p.tokenIn.symbol)
-        }
+        try await holdsPairImpact(net, p)
         func show(_ raw: Decimal, _ t: EVMTokens.Token) -> String { "\(Fmt.num(raw / Decimal(sign: .plus, exponent: t.decimals, significand: 1), maxFraction: 8)) \(t.symbol)" }
         func held() async throws -> Decimal { p.coinOut ? Decimal(try await rpc.balance(me)) : try await balance(p.tokenOut.address, on: rpc) }
-        let what = show(p.units, p.tokenIn), wrappedName = "W" + net.gasCoin
+        let what = show(p.units, p.tokenIn)
         guard p.units <= Decimal(UInt64.max) || !p.coinIn else { throw ExecutionError("At most 18 \(net.gasCoin) at once. Nothing was signed.") }
-        let wei = p.coinIn ? NSDecimalNumber(decimal: p.units).uint64Value : 0
         try await ensureEVM(net, usdc: 0)
         let before = try await held()
-        var last: String
-        // What came out, when the coin's balance can't say it (its fees come out of the same coin): the WETH the swap paid
-        // before it was unwrapped; a v4 pool of the coin, its quote.
-        var received: Decimal?
-        if p.relayOut != nil {
-            // Relay's swap: the coin is wrapped first (Relay takes its wrapped token through the proxy), then asked again with
-            // the money in place — the price may have moved — and every check run on that quote.
-            if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
-            let q = try await relayPairQuote(net, from: p.tokenIn.address, to: p.coinOut ? UniswapV4.native : p.tokenOut.address, units: p.units)
-            report("\(what) → \(p.tokenOut.symbol) on \(net.name) through Relay's swap (no Uniswap pool there): ≈ \(show(q.out, p.tokenOut)).")
-            last = try await approveAndSend(rpc, token: p.tokenIn.address, spender: q.proxy, units: p.units,
-                                            approveNote: "Approve exactly \(p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what) to Relay",
-                                            to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)")
-            try journal.append(.init(chain: "relay", id: q.quote.requestId, kind: .signed, note: "\(net.name) \(p.tokenIn.symbol)→\(p.tokenOut.symbol), tx \(last)"))
-        } else if let route = p.route {
-            report("\(what) → \(p.tokenOut.symbol) on \(net.name), on \(route.title)\(p.direct ? " (\(net.gasCoin) itself, no wrap)" : ""): ≈ \(show(route.out, p.tokenOut))\(route.impactText).")
-            if p.direct {
-                last = try await swapUniswap(route, on: net, uni, tokenIn: p.coinIn ? UniswapV4.native : p.tokenIn.address, units: p.units, what: what,
-                                             note: "Swap \(what) for \(p.tokenOut.symbol)")
-                if p.coinOut { received = route.out }
-            } else {
-                if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
-                let wethBefore = p.coinOut ? try await balance(weth, on: rpc) : 0
-                // The coin is its wrapped token by now: that's what the approve lets Uniswap take.
-                last = try await swapUniswap(route, on: net, uni, tokenIn: p.tokenIn.address, units: p.units,
-                                             what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what,
-                                             note: "Swap \(what) for \(p.tokenOut.symbol)")
-                if p.coinOut {
-                    // A node can answer from before the swap's block: it said 0, the unwrap was skipped and the WETH stayed
-                    // in the wallet (2026-10-22, after an EIP-7702 batch on Base). So it's asked again while nothing shows.
-                    var got = try await balance(weth, on: rpc) - wethBefore
-                    for _ in 0..<10 where got <= 0 {
-                        try await Task.sleep(for: .seconds(1))
-                        got = try await balance(weth, on: rpc) - wethBefore
-                    }
-                    received = got
-                    if got > 0 {
-                        last = try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(got)), note: "Unwrap \(Fmt.num(got / 1e18, maxFraction: 8)) \(wrappedName) into \(net.gasCoin)")
-                    }
-                }
-            }
-        } else if p.coinIn {
-            last = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei)
-        } else {
-            last = try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(p.units)), note: "Unwrap \(what) into \(net.gasCoin)")
-            received = p.units
-        }
+        let (last, received) = try await runPair(net, uni, p, what: what, note: "Swap \(what) for \(p.tokenOut.symbol)")
         var after = try await held()
         for _ in 0..<10 where after <= before {
             try await Task.sleep(for: .seconds(1))
@@ -707,7 +733,63 @@ extension Executor {
         // ponytail: a token-for-token swap has no dollar cost to record; the P/L by token counts only buys and sales for USDC.
         let got = received ?? (after > before ? after - before : 0)
         let approx = p.direct && p.coinOut ? "≈ " : ""
-        return "Swapped \(what) for \(approx)\(show(got, p.tokenOut)) on \(net.name)\(p.route.map { ", on \($0.title)" } ?? ""). You hold \(show(after, p.tokenOut)) there. \(net.explorer)/tx/\(last)"
+        let via = p.route != nil || p.kyber != nil || p.relayOut != nil ? ", on \(p.title)" : ""
+        return "Swapped \(what) for \(approx)\(show(got, p.tokenOut)) on \(net.name)\(via). You hold \(show(after, p.tokenOut)) there. \(net.explorer)/tx/\(last)"
+    }
+
+    /// Carries out the swap `p` chose on the network, nothing checked here that the caller hasn't (holdsPairImpact): Relay's
+    /// swap, asked again with the money in place and every check run on that quote; KyberSwap's route, built and read back
+    /// (kyberSwap); Uniswap's route, the network's own coin into a v4 pool of it as the call's value or wrapped first (its
+    /// WETH, one transaction), out of such a pool as coins or unwrapped after; or a plain wrap or unwrap. Returns the last
+    /// transaction and, where the coin's balance can't say it (its fees come out of the same coin), what came out.
+    func runPair(_ net: EVMNetwork, _ uni: UniswapV3.Deployment, _ p: PairSwap, what: String, note: String) async throws -> (last: String, received: Decimal?) {
+        guard let weth = UniswapV2.on(net.rpc.chainId)?.weth else { throw ExecutionError("No wrapped \(net.gasCoin) known on \(net.name).") }
+        let rpc = net.rpc, wrappedName = "W" + net.gasCoin
+        let wei = p.coinIn ? NSDecimalNumber(decimal: p.units).uint64Value : 0
+        func show(_ raw: Decimal, _ t: EVMTokens.Token) -> String { "\(Fmt.num(raw / Decimal(sign: .plus, exponent: t.decimals, significand: 1), maxFraction: 8)) \(t.symbol)" }
+        if p.relayOut != nil {
+            // The coin is wrapped first (Relay takes its wrapped token through the proxy), then Relay is asked again with the
+            // money in place — the price may have moved — and every check run on that quote.
+            if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
+            let q = try await relayPairQuote(net, from: p.tokenIn.address, to: p.coinOut ? UniswapV4.native : p.tokenOut.address, units: p.units)
+            report("\(what) → \(p.tokenOut.symbol) on \(net.name) through Relay's swap: ≈ \(show(q.out, p.tokenOut)).")
+            let last = try await approveAndSend(rpc, token: p.tokenIn.address, spender: q.proxy, units: p.units,
+                                                approveNote: "Approve exactly \(p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what) to Relay",
+                                                to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)")
+            try journal.append(.init(chain: "relay", id: q.quote.requestId, kind: .signed, note: "\(net.name) \(p.tokenIn.symbol)→\(p.tokenOut.symbol), tx \(last)"))
+            return (last, nil)
+        }
+        if let k = p.kyber {
+            report("\(what) → \(p.tokenOut.symbol) on \(net.name) through KyberSwap: ≈ \(show(k.out, p.tokenOut))\(p.impactText).")
+            return (try await kyberSwap(net, k, tokenIn: p.tokenIn, tokenOut: p.tokenOut, units: p.units, what: what), nil)
+        }
+        if let route = p.route {
+            report("\(what) → \(p.tokenOut.symbol) on \(net.name), on \(route.title)\(p.direct ? " (\(net.gasCoin) itself, no wrap)" : ""): ≈ \(show(route.out, p.tokenOut))\(route.impactText).")
+            if p.direct {
+                let last = try await swapUniswap(route, on: net, uni, tokenIn: p.coinIn ? UniswapV4.native : p.tokenIn.address, units: p.units, what: what, note: note)
+                return (last, p.coinOut ? route.out : nil)
+            }
+            if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
+            let wethBefore = p.coinOut ? try await balance(weth, on: rpc) : 0
+            // The coin is its wrapped token by now: that's what the approve lets Uniswap take.
+            var last = try await swapUniswap(route, on: net, uni, tokenIn: p.tokenIn.address, units: p.units,
+                                             what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what, note: note)
+            guard p.coinOut else { return (last, nil) }
+            // A node can answer from before the swap's block: it said 0, the unwrap was skipped and the WETH stayed in the
+            // wallet (2026-10-22, after an EIP-7702 batch on Base). So it's asked again while nothing shows.
+            var got = try await balance(weth, on: rpc) - wethBefore
+            for _ in 0..<10 where got <= 0 {
+                try await Task.sleep(for: .seconds(1))
+                got = try await balance(weth, on: rpc) - wethBefore
+            }
+            if got > 0 {
+                last = try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(got)), note: "Unwrap \(Fmt.num(got / 1e18, maxFraction: 8)) \(wrappedName) into \(net.gasCoin)")
+            }
+            return (last, got)
+        }
+        if p.coinIn, !p.coinOut { return (try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei), nil) }
+        guard p.coinOut, !p.coinIn, p.tokenIn.address == weth else { throw ExecutionError("No way to swap \(p.tokenIn.symbol) for \(p.tokenOut.symbol) on \(net.name). Nothing was signed.") }
+        return (try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(p.units)), note: "Unwrap \(what) into \(net.gasCoin)"), p.units)
     }
 
     /// Relay's own swap-and-bridge from a token on the chain: an exact approve to the approval proxy Relay publishes for
@@ -775,7 +857,8 @@ struct UniRoute {
         return min(impact / 2 + Decimal(string: "0.01")!, Decimal(string: "0.03")!)
     }
     /// « · price impact 1.2%» from a tenth of a percent up, for the card and the report.
-    var impactText: String {
+    var impactText: String { Self.impactText(impact) }
+    static func impactText(_ impact: Decimal?) -> String {
         guard let impact, impact >= Decimal(string: "0.001")! else { return "" }
         return " · price impact \(Fmt.num((impact * 100).rounded(impact < Decimal(string: "0.1")! ? 2 : 1, .plain)))%"
     }

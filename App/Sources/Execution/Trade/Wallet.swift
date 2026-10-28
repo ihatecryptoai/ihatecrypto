@@ -363,28 +363,48 @@ extension Executor {
             let paid = from == .usdc ? Decimal(units) / 1_000_000 : impact < 1 ? worth / (1 - impact) : 0
             try Self.checkImpact(impact, paid: paid, amount: Decimal(units) / scale, symbol: from.symbol, venue: "Jupiter")
         }
-        // Under the fee floor (USDC came without SOL) Jupiter's own wallet may pay the fee: its gasless swap, checked the same.
-        // Jupiter decides: a wallet that can still pay (a few thousandths of SOL) gets the ordinary swap below. JupiterZ's
-        // market makers are left out: their program isn't on the guard's list.
-        let gasless: (order: Jupiter.Order, sponsor: String)? = if !nativeIn, lamports < TopUpOrder.solanaFeeFloor,
-            let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana, excludeRouters: ["jupiterz"]),
-            order.gasless, let payer = try? SolanaMessage.parse(transaction: order.wire).staticKeys.first, payer != wallet.solana { (order, payer) } else { nil }
+        // Jupiter's /order, where someone else pays the fee and signs first, our wallet second: JupiterZ's market makers when
+        // their price beats the pools' (/quote) — big swaps mostly (2M WIF: $362k against $321k, 2026-10-28; on small ones
+        // its fee makes it the worse) — and, under the fee floor (USDC came without SOL), Jupiter's own gasless swap, which
+        // Jupiter grants a wallet that can't pay (a few thousandths of SOL still gets the ordinary swap below).
+        let lowSOL = !nativeIn && lamports < TopUpOrder.solanaFeeFloor
+        let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana)
+        let payer = order.flatMap { $0.gasless ? try? SolanaMessage.parse(transaction: $0.wire).staticKeys.first : nil }.flatMap { $0 == wallet.solana ? nil : $0 }
+        var sponsored: (order: Jupiter.Order, sponsor: String)? = nil
+        if let order, let payer {
+            if lowSOL { sponsored = (order, payer) }
+            else if order.router == "jupiterz", Self.fillSwaps(order.wire, from: from.mint, to: to.mint),
+                    let pools = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units), order.outAmount > pools.outAmount {
+                sponsored = (order, payer)
+            }
+        }
         // Not even the rent of an account the swap opens (the temporary wSOL one, or the coin's own: ≈ 0.00204 SOL) and Jupiter
         // won't pay: said before a simulation fails on it.
-        if gasless == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000 {
+        if sponsored == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000 {
             throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and Jupiter pays the fee only for a bigger one ($5 and up). Swap more, or add ≈ 0.01 SOL first.")
         }
-        if let (order, sponsor) = gasless {
+        if let (order, sponsor) = sponsored {
+            let maker = order.router == "jupiterz"
             try holdsShown(order.outAmount, feeBps: Decimal(order.feeBps))
             try holdsImpact(order.impact, usd: order.usd, out: order.outAmount)
-            report("\(from.symbol) → \(to.symbol) via Jupiter, its wallet paying the fee: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route).")
-            var rules: [(String, String, Bool, Int64)] = [(inAccount, from.symbol, true, -Int64(units))]
+            report("\(from.symbol) → \(to.symbol) via \(maker ? "JupiterZ, a market maker filling it and paying the fee" : "Jupiter, its wallet paying the fee"): \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route.isEmpty ? order.router : order.route).")
+            var rules: [(String, String, Bool, Int64)] = nativeIn ? [] : [(inAccount, from.symbol, true, -Int64(units))]
             if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(order.minOut))) }
-            // Not a lamport of ours pays: SOL bought arrives whole, at least the minimum.
-            changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
-                                            note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by Jupiter", lamportsAtLeast: nativeOut ? Int64(order.minOut) : 0,
-                                            dryRun: dryRun, sponsor: (sponsor, order.requestId))
-        } else {
+            // Not a lamport of ours pays: SOL in leaves exactly, SOL bought arrives whole, at least the minimum.
+            do {
+                changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
+                                                note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by \(maker ? "JupiterZ's market maker" : "Jupiter")",
+                                                lamportsAtLeast: nativeIn ? -Int64(units) : nativeOut ? Int64(order.minOut) : 0,
+                                                dryRun: dryRun, sponsor: (sponsor, order.requestId))
+            } catch where maker && !lowSOL && ((error as? GuardStop)?.message.hasPrefix("The guard stopped") == true
+                                                 || (error as? ExecutionError)?.message.hasPrefix("The simulation failed") == true) {
+                // Refused by the app's own checks before the signer was asked (the guard, or a simulation off the quote): the
+                // pools' route below instead. A «no» at the signer's prompt stops here, never asks again for another route.
+                report("JupiterZ's fill didn't pass the checks, nothing was sent: \(error.localizedDescription) Taking the pools' route.")
+                sponsored = nil
+            }
+        }
+        if sponsored == nil {
             // Jupiter's route can fail before anything is signed: its transaction is over Solana's 1232 bytes (HumidiFi → Hadron
             // into a Token-2022 coin), or the simulation ends under its own minimum — 6001, SlippageToleranceExceeded, when a
             // pool quoted more than it gives (Flux → Hadron, TesseraV → Hadron). Up to three routes, each without the failed ones' pools.
@@ -443,6 +463,15 @@ extension Executor {
         }
         report(line)
         return line
+    }
+
+    /// A JupiterZ order's one fill swaps exactly these mints: its input mint (account 6) and output mint (account 8), read
+    /// from the transaction's own keys. What the guard can't know — what the user asked to swap — the app checks.
+    static func fillSwaps(_ wire: Data, from: String, to: String) -> Bool {
+        guard let m = try? SolanaMessage.parse(transaction: wire) else { return false }
+        let fills = m.instructions.filter { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == SolanaGuard.jupiterZ }
+        guard fills.count == 1, let ix = fills.first, ix.accounts.count > 8, ix.accounts[6] < m.staticKeys.count, ix.accounts[8] < m.staticKeys.count else { return false }
+        return m.staticKeys[ix.accounts[6]] == from && m.staticKeys[ix.accounts[8]] == to
     }
 
     /// Guard and simulation here, the signer's own guard, then send and wait. `rules`: (account, label, token?, least change).

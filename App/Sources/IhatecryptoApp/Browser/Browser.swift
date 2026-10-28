@@ -343,6 +343,9 @@ final class Browser {
             lines.append("Call to permit (permission to spend).")
         case .swap(let r):
             lines.append("Uniswap swap paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
+        case .kyberSwap(let k):
+            let t = await token(k.srcToken)
+            lines.append("KyberSwap swap of \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), t.decimals)) \(t.symbol) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")
         case .borrow(let asset, let a, let owner):
             let t = await token(asset)
             lines.append("Borrow \(amount(a, t.decimals)) \(t.symbol) from \(to), the debt on \(owner.lowercased() == from.lowercased() ? "this wallet" : owner).")

@@ -97,6 +97,21 @@ extension Jupiter {
         /// As on a Quote: how far it moves the price, and what comes out in USD.
         public var impact: Decimal = 0
         public var usd: Decimal = 0
+        /// Who fills it: «metis» (Jupiter's own routing) or «jupiterz» (a market maker, which pays the fee and signs first).
+        public var router = ""
+    }
+
+    /// What /order gives for `amount` without a taker: its output, price impact and router — for the card, which compares
+    /// it with /quote's (JupiterZ's market makers beat the pools on big swaps: 2M WIF $362k against $321k, 2026-10-28).
+    public static func orderQuote(input: String, output: String, amount: UInt64) async throws -> (out: UInt64, impact: Decimal, router: String) {
+        let url = URL(string: "\(v2)/order?inputMint=\(input)&outputMint=\(output)&amount=\(amount)")!
+        return try await RPCRetry.run({ try await URLSession.shared.data(from: url) }) { data, status in
+            guard status == 200, let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let out = (j["outAmount"] as? String).flatMap(UInt64.init) else {
+                throw RPCRetry.Again(status == 429 || status >= 500, JupiterError(data, status))
+            }
+            return (out, impactAndWorth(j).impact, j["router"] as? String ?? "")
+        }
     }
 
     /// The swap for `taker` as Jupiter builds it; nil transaction when it can't (too little, no route): its words.
@@ -119,7 +134,7 @@ extension Jupiter {
                          gasless: j["gasless"] as? Bool ?? false, feeBps: (j["feeBps"] as? NSNumber)?.intValue ?? 0,
                          route: dexes.joined(separator: " → "),
                          lastValidBlockHeight: (j["lastValidBlockHeight"] as? NSNumber)?.uint64Value ?? UInt64(j["lastValidBlockHeight"] as? String ?? "") ?? 0,
-                         impact: impact, usd: usd)
+                         impact: impact, usd: usd, router: j["router"] as? String ?? "")
         }
     }
 

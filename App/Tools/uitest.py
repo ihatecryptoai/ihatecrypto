@@ -62,6 +62,8 @@ def check(expect, state, replies):
             labels = [s["label"].upper() for s in (pending or {}).get("steps", [])]
             if not all(any(w in l for l in labels) for w in want):
                 why.append(f"steps {labels}, expected {want}")
+        elif key == "steps_lack" and any(want.upper() in s["label"].upper() for s in (pending or {}).get("steps", [])):
+            why.append(f"steps {[s['label'] for s in (pending or {}).get('steps', [])]} name «{want}»")
         elif key == "pending_name" and (pending or {}).get("name") != want:
             why.append(f"the card saves «{(pending or {}).get('name')}», expected «{want}»")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):
@@ -152,6 +154,12 @@ def main():
                 for phrase in [turn["send"]] if isinstance(turn["send"], str) else turn["send"]:
                     state = call("POST", "/send", {"text": phrase})
                     replies += [m["text"] for m in state["messages"] if not m["user"]]
+                # A swap's card names its way once quoted (Uniswap's until then): asked again for a while.
+                for _ in range(30 if turn["expect"].get("wait_quote") else 0):
+                    if (state["boards"].get("pending") or {}).get("quote"):
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
                 why += [(f"after «{turn['send']}»: " if "turns" in s else "") + w for w in check(turn["expect"], state, replies)]
             if SHOTS and state.get("windowID"):
                 time.sleep(2)  # route cards fade in one at a time

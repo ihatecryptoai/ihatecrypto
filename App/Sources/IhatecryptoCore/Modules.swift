@@ -94,11 +94,11 @@ public enum ModuleKind: String, CaseIterable, Sendable {
 }
 
 public enum ModuleProtocol: String, CaseIterable, Sendable {
-    case jupiter, jupiterDCA, uniswap, jupiterLend, kamino, jitoSOL, aave, morpho, hlp, hlPerps, xyz, robinhoodStocks, relay, oneClick, mpp
+    case jupiter, jupiterDCA, uniswap, kyberswap, jupiterLend, kamino, jitoSOL, aave, morpho, hlp, hlPerps, xyz, robinhoodStocks, relay, oneClick, mpp
 
     public var kind: ModuleKind {
         switch self {
-        case .jupiter, .jupiterDCA, .uniswap: .swaps
+        case .jupiter, .jupiterDCA, .uniswap, .kyberswap: .swaps
         case .jupiterLend, .kamino, .jitoSOL, .aave, .morpho, .hlp: .earn
         case .hlPerps: .perps
         case .xyz, .robinhoodStocks: .stocks
@@ -112,7 +112,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         switch self {
         case .jupiter, .jupiterDCA, .jupiterLend, .kamino, .jitoSOL, .relay: [.solana]
         // Uniswap works on Robinhood Chain, Base and Arbitrum: the network is checked per move.
-        case .uniswap: []
+        case .uniswap, .kyberswap: []
         case .robinhoodStocks: [.robinhood]
         // Aave and Morpho work on several networks: the one a move uses is checked per move.
         case .aave, .morpho: []
@@ -127,6 +127,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         case .jupiter: "Jupiter"
         case .jupiterDCA: "Jupiter DCA"
         case .uniswap: "Uniswap"
+        case .kyberswap: "KyberSwap"
         case .jupiterLend: "Jupiter Lend"
         case .kamino: "Kamino"
         case .jitoSOL: "JitoSOL staking"
@@ -150,6 +151,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         case .xyz: "Oil, metals, stocks"
         case .relay: "Solana ⇄ Base · Arbitrum · Polygon · Ethereum · Robinhood · Tempo · HyperEVM · Optimism · BNB Chain"
         case .uniswap: "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · Robinhood"
+        case .kyberswap: "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · HyperEVM"
         case .aave: "Base · Arbitrum · Polygon · Ethereum"
         case .morpho: "Base · Arbitrum · Ethereum"
         case .oneClick: "NEAR ⇄ Solana"
@@ -163,6 +165,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         switch self {
         case .jupiter, .jupiterDCA, .jupiterLend: "jup"
         case .uniswap: "uni"
+        case .kyberswap: "kyber"
         case .kamino: "kamino"
         case .jitoSOL: "jitosol"
         case .aave: "aave"
@@ -299,8 +302,11 @@ public struct Modules: Equatable, Sendable {
         case .swapOn("tempo", _, _, _):
             return isOn(.swaps) ? refusal(network: .tempo, ru: ru)
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        // One token for another on the network itself: whichever of Uniswap, KyberSwap and Relay's swap is on there (the
+        // executor's bestPair takes only those); refused, in Uniswap's words, when none is.
         case .swapOn(let place, _, _, _):
-            return isOn(.swaps) ? r(.uniswap, via: ModuleNetwork(place: place).map { [$0] } ?? [])
+            let via = ModuleNetwork(place: place).map { [$0] } ?? [], ways = [r(.uniswap, via: via), r(.kyberswap, via: via), r(.relay, via: via)]
+            return isOn(.swaps) ? (ways.contains { $0 == nil } ? nil : ways[0])
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
         case .crossSwap(_, let from, _, let to, _):
             return isOn(.swaps) ? r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))

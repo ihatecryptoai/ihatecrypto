@@ -636,6 +636,8 @@ public enum EVMCall: Equatable, Sendable {
     case permit2Approve(token: String, spender: String, amount: Data, expiration: UInt64)
     /// The Universal Router's v4 swap in exactly this app's shape (UniswapV4.decodeExecute): it pays the caller.
     case v4Swap(UniswapV4.Swap)
+    /// KyberSwap's router swap (KyberSwap.decode): who gets what comes out, and who else takes a fee.
+    case kyberSwap(KyberSwap.Swap)
     /// ERC-721 or ERC-1155 safeTransferFrom / safeBatchTransferFrom: NFTs (or game items) from `from` to `to`.
     case nftTransfer(from: String, to: String)
     /// Aave's approveDelegation or Morpho Blue's setAuthorization: `to` may borrow against, or manage, this wallet's positions.
@@ -707,6 +709,7 @@ public enum EVMCall: Equatable, Sendable {
         case "87517c45": if let t = address(0), let s = address(1), let a = word(2), let e = ABI.uint(in: Data(args), word: 3) { return .permit2Approve(token: t, spender: s, amount: a, expiration: e) }
         // Any other Universal Router call stays a plain contract call (a site's own swap), read as before.
         case "3593564c": if let swap = UniswapV4.decodeExecute(data) { return .v4Swap(swap) }
+        case "e21fd0e9": if let swap = KyberSwap.decode(data) { return .kyberSwap(swap) }
         case "42842e0e", "b88d4fde", "f242432a", "2eb2c2d6": if let f = address(0), let t = address(1) { return .nftTransfer(from: f, to: t) }
         case "c04a8a10": if let d = address(0), let a = word(1) { return .delegation(to: d, granted: a.contains { $0 != 0 }) }
         case "eecea000": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
@@ -787,6 +790,8 @@ public enum EVMCall: Equatable, Sendable {
         case .increaseAllowance(let spender, let a): "let \(short(spender)) spend \(amount(a, of: to)) more \(net)"
         case .swap: "swap on Uniswap \(net), paying this wallet"
         case .v4Swap: "swap on Uniswap v4 \(net), paying this wallet"
+        case .kyberSwap(let k): "swap \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), of: k.srcToken)) on KyberSwap \(net) for at least "
+            + "\(amount((try? ABI.word(k.minReturn)) ?? Data(count: 32), of: k.dstToken)), paying this wallet"
         case .permit2Approve(let token, let spender, let a, _): "let \(short(spender)) spend exactly \(amount(a, of: token)) through Permit2 \(net)"
         case .unwrap(let a): "unwrap \(units(a, 18)) W\(EVMRPC.coin(chainId)) of \(short(to)) into \(EVMRPC.coin(chainId)) \(net)"
         case .vault(_, let owner): "\(owner == nil ? "deposit into" : "withdraw from") the vault \(short(to)) \(net)"
@@ -828,6 +833,7 @@ public enum EVMCall: Equatable, Sendable {
         if let v2 = UniswapV2.on(chainId) { s.append(v2.router) }
         if chainId == EVMRPC.robinhood.chainId { s.append(UniswapV3.robinhoodRouter) }
         if let v4 = UniswapV4.on(chainId) { s += [v4.router, UniswapV4.permit2] }
+        if KyberSwap.chains[chainId] != nil { s.append(KyberSwap.router) }
         return Set(s.map { $0.lowercased() })
     }
 
@@ -845,7 +851,7 @@ public enum EVMCall: Equatable, Sendable {
         // A protocol's call read by its selector alone (a swap, a vault, a claim…) is that protocol's only at its own
         // contract: at another, the selector is the contract's word for whatever it does — asked about like an unread call.
         let byProtocol = switch self {
-        case .swap, .v4Swap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
+        case .swap, .v4Swap, .kyberSwap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
         default: false
         }
         if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
@@ -863,6 +869,10 @@ public enum EVMCall: Equatable, Sendable {
     /// naming this wallet as the depositor (depositNative, depositErc20 with or without an amount), and a Safe's
     /// execTransaction must be a plain payout (Safe.execRefusal) — the 2026-10-24 review.
     public static func targetRefusal(to: String, data: Data, sender: String) -> String? {
+        // KyberSwap's router gets only the swap the signer reads (an exact approve to it goes to the token, not here).
+        if to.lowercased() == KyberSwap.router, KyberSwap.decode(data) == nil {
+            return "A call to KyberSwap's router that isn't the swap ihatecrypto reads. ihatecrypto only swaps there."
+        }
         if to.lowercased() == RelayMulticallPermit.depository {
             let selector = data.prefix(4).hex
             guard relayDeposits.contains(selector) else { return "A call to Relay's depository that isn't a deposit. ihatecrypto only deposits there." }
@@ -939,6 +949,7 @@ public enum EVMCall: Equatable, Sendable {
             return "The lending pool would credit \(beneficiary), not this wallet."
         }
         if case .v4Swap(let swap) = self, let why = UniswapV4.refusal(swap, chainId: chainId) { return why }
+        if case .kyberSwap(let swap) = self, let why = KyberSwap.refusal(swap, sender: sender) { return why }
         if case .multisigExec(_, _, _, let operation) = self, operation != 0 {
             return "A multisig move by DELEGATECALL runs another contract's code as the multisig. Refused."
         }

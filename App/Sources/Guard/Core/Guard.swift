@@ -58,6 +58,13 @@ public enum SolanaGuard {
     public static let jupiterLend = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
     /// Jupiter's on-chain DCA (Recurring v1): open_dca_v2 and close_dca on the user's own order account.
     public static let jupiterDCA = "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M"
+    /// JupiterZ, Jupiter's market makers (its order engine, jup-ag/rfq-webhook-toolkit): one instruction, `fill`, where the
+    /// maker pays the fee, signs first and swaps with the taker at its quoted price.
+    public static let jupiterZ = "61DFfeTKM7trxYcPQCM78bJ794ddZprZpAwAnLiwTpYH"
+    /// fill(input_amount, output_amount, expire_at): sha256("global:fill")[0..<8]; its accounts taker 0, maker 1, the taker's
+    /// input 2 and output 4 accounts (the program's own id for none: SOL then comes as lamports), input mint 6, output mint 8.
+    static let jupiterZFill = "a860b7a35c0a28a0"
+    static let wrappedSOL = "So11111111111111111111111111111111111111112"
     /// Relay Depository (github.com/relayprotocol/relay-depository), Anchor program.
     public static let relayDepository = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2"
     public static let kaminoLend = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
@@ -89,6 +96,16 @@ public enum SolanaGuard {
     /// Farms: unstake, withdraw_unstaked_deposits, harvest_reward (to the owner), refresh_farm, refresh_user_state, initialize_user.
     static let kaminoFarmsAllowed: Set<String> = ["5a5f6b2acd7c32e1", "2466bb31dc248443", "44c8e4e9b820e2bc", "d6838ab790c2ac2a", "01870c3ef38c4d6c",
                                                   "6f11b9fa3c7a26fe"]
+
+    /// Whether the transaction sends this wallet's SOL to the fee payer (rent it fronted, coming back): only then is the
+    /// payer someone the wallet pays, to be allowed as such. A JupiterZ maker isn't: the swap's prompt names it.
+    public static func refundsSponsor(_ m: SolanaMessage, accounts: [String], owner: String, sponsor: String) -> Bool {
+        m.instructions.contains { ix in
+            ix.programIndex < accounts.count && accounts[ix.programIndex] == system && ix.data.count >= 12 && le32(ix.data, 0) == 2
+                && ix.accounts.count > 1 && ix.accounts[0] < accounts.count && ix.accounts[1] < accounts.count
+                && accounts[ix.accounts[0]] == owner && accounts[ix.accounts[1]] == sponsor
+        }
+    }
 
     /// The Relay order ids the transaction's depository deposits name (bytes 16..<48 of each one's data).
     public static func relayDepositIDs(_ m: SolanaMessage) -> [Data] {
@@ -138,7 +155,7 @@ public enum SolanaGuard {
     public static let lookupTableProgram = "AddressLookupTab1e1111111111111111111111111"
     public static let knownPrograms: [String: String] = [
         system: "System", computeBudget: "Compute Budget", SPL.tokenProgram: "SPL Token", SPL.token2022Program: "SPL Token-2022",
-        SPL.associatedTokenProgram: "Associated Token", jupiterSwap: "Jupiter Swap", jupiterLend: "Jupiter Lend Earn", jupiterDCA: "Jupiter DCA",
+        SPL.associatedTokenProgram: "Associated Token", jupiterSwap: "Jupiter Swap", jupiterLend: "Jupiter Lend Earn", jupiterDCA: "Jupiter DCA", jupiterZ: "JupiterZ",
         relayDepository: "Relay Depository", kaminoLend: "Kamino Lend", kaminoVault: "Kamino Vault", kaminoFarms: "Kamino Farms",
         lookupTableProgram: "Address Lookup Table",
     ]
@@ -197,6 +214,7 @@ public enum SolanaGuard {
         var unitLimit: UInt64 = 200_000
         var unitPrice: UInt64 = 0
         var refunded: UInt64 = 0
+        var fills = 0
         for (n, ix) in m.instructions.enumerated() {
             guard ix.programIndex < m.staticKeys.count else {
                 v.problems.append("Instruction \(n + 1): the program is loaded from a lookup table.")
@@ -325,6 +343,24 @@ public enum SolanaGuard {
                     continue
                 }
                 v.checks.append("Calls \(programName): an instruction that pays only you. The balance simulation checks the amount.")
+            case jupiterZ:
+                // One fill, this wallet the taker: what it gives comes from its own account for the input mint (or, with none
+                // named — the program's id — as SOL), and what it gets lands in its own account for the output mint (or as
+                // SOL). Another fill, or one drawing on a different account of the wallet, could hand the maker a token the
+                // app's simulation doesn't watch (the 2026-10-28 review). The amounts go on the prompt; the simulation checks them.
+                fills += 1
+                guard fills == 1, ix.data.prefix(8).hex == jupiterZFill, ix.data.count >= 24, account(0) == policy.owner,
+                      let source = account(2), let inMint = account(6), let out = account(4), let mint = account(8) else {
+                    v.problems.append("Instruction \(n + 1): a JupiterZ instruction that isn't the one fill with your wallet as the taker.")
+                    continue
+                }
+                func own(_ a: String, _ m: String) -> Bool {
+                    (a == jupiterZ && m == wrappedSOL) || (mine(a) || ownTokenAccount(a, owner: policy.owner, mint: m)) && (policy.trustLookupTables || staticKeys.contains(a))
+                }
+                guard own(source, inMint) else { v.problems.append("The JupiterZ fill takes from \(source), not your account for what you swap."); continue }
+                guard own(out, mint) else { v.problems.append("The JupiterZ fill pays \(out), not your wallet."); continue }
+                func units(_ n: UInt64, _ m: String) -> String { mintNames[m].map { "\(Decimal(n) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(n) units of \(m.prefix(6))…" }
+                v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), inMint)) for \(units(le64(ix.data, 16), mint)) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
             case jupiterSwap:
                 // Every swap form's output account (its «instead» one when set: the program's own id when not) must be this
                 // wallet's own; any other Jupiter instruction is refused (the 2026-10-24 review: the gasless path's route_v2

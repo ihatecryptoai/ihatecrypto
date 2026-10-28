@@ -840,5 +840,20 @@
         "plan"
       ]
     }
+  },
+  {
+    "name": "1 BTCB for USDT on BNB Chain, where Uniswap's pool is thin → the card takes KyberSwap or Relay, never Uniswap",
+    "send": [
+      "поменяй 1 BTCB на USDT на bnb"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "wait_quote": true,
+      "steps": [
+        "SWAP ·",
+        "BNB CHAIN"
+      ],
+      "steps_lack": "UNISWAP"
+    }
   }
 ]

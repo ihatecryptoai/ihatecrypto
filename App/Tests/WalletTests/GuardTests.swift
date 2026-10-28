@@ -330,6 +330,50 @@ private let jupiterLendDeposit = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 private let jupiterLendWithdraw = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkT8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPccj71J70/rvu0J/yTO1674UGxqeljWsbxMzyBLGGTIhUDS8nxGHynp/roauKzTlJapxlsK5ipxPwH5QamTv1XtZfXf/XyEr3Wopfe9zqFiLis6v4f8U6hxuQhWGjqLG95uxTRcaS26p8mN5qM4XiYgYQGzhBlklxtkIakhwHV1nAIRE+8/cf8FyV6ejOFzFvFRe8v54cSEIbvrhfgwTQQYeXyzPK1sDIBzsh2kxDdkBYXtOfawRnLIelHWBYy3JvqgC5ZIwUW4+UWatmCd5Vc8UzUhP8EscD1FvC2CJQgA1veA4oganO3BaPj9y3TzLqfiwk9dDCxaIuRcmdJ+MiQSBDEN4MUqaL/buRQj3/nOWgSj23k04ooSfCTii9x91BEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEcn8RD5rZyCj3b2Rq49ZiVsmScRvvn3bU9qhBHACBPVR6mnvvwFsKRZEO8A58f97e1/yRiQ5ahJERwinC6lqslJomRsm5Gr9y9W+wdHAcnDKneVfnQTMTEQq+wdbs8IgIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEK/huRLkhelf0V6yk33/xLN6MW0KY4Ev8Cukm0xsGNHgr+HpfkVsu5LmQqJbULpjlv8kgWS8p0aWOoRZKs1szDBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKmXNQm9Ur4PKo8EBMUD3U1E8ZHbXvOOAjdI/QFJYEEJLgEQEgAEAgsBDwYFCAwHCQMRDRIOChC3EkaclG2hIkBCDwAAAAAA"
 private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAgN8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPdA0vJ8Rh8p6f66Gris05SWqcZbCuYqcT8B+UGpk79V7Yq3C3dSmy6SMXmaC86a+QNB8cM57M8nvXfavvug7xwr4nQ/DK+NdbsMGe0wCTT41rh+ExTnoFi4Cj6ruTycByXsYF21KZtx/G85tfoFGdt2xIhsqTLuddL1Tk70GQ1aUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FmwdagGY3nKb+NwN/8MKNVUpuTWNtnoUYz+brrpP1I2/rUn1F1kDj7BX2FdWw4jpUqWuD8Lggv3BjXyQ0rGQMwExvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFZnavCXYB4DeVN4DdHU86ACyRfTVP8tOOh1oPI9Z1GlQQGAAUCAAAAAAYACQNADQMAAAAAAAkGAAEADAUIAQELDQQAAAwHAQMCBQgJCgsrjncrbaI0C7EyNdtqAAAAAADh9QUAAAAAgPD6AgAAAACAUQEAAAAAAAAAAA=="
 
+/// JupiterZ's fill (a market maker pays the fee, signs first and swaps at its quote; 2026-10-28): passes only with this
+/// wallet as the taker and what it gets landing in its own account, or as SOL straight to it (the output account left
+/// as the program's id, Anchor's «none»). Accounts as its IDL has them: taker, maker, taker's and maker's input, taker's
+/// and maker's output, input mint and program, output mint and program, System.
+@Test func jupiterZFillsPayOnlyThisWallet() throws {
+    let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let maker = deposit, z = SolanaGuard.jupiterZ
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myWSOL = try SPL.associatedAccount(owner: me, mint: wsol)
+    let makerUSDC = try SPL.associatedAccount(owner: maker, mint: usdcMint), makerWSOL = try SPL.associatedAccount(owner: maker, mint: wsol)
+    // fill(input_amount 15 USDC, output_amount 0.148288542 SOL, expire_at) and the five bytes the program ignores.
+    func le(_ n: UInt64) -> [UInt8] { withUnsafeBytes(of: n.littleEndian, Array.init) }
+    let fill: [UInt8] = [0xa8, 0x60, 0xb7, 0xa3, 0x5c, 0x0a, 0x28, 0xa0] + le(15_000_000) + le(148_288_542) + le(1_793_192_203) + [0, 0, 0, 0, 0]
+    let keys = [maker, me, myUSDC, makerUSDC, z, makerWSOL, SolanaGuard.system, usdcMint, SPL.tokenProgram, wsol, myWSOL]
+    let sponsored = SolanaPolicy(owner: me, sponsor: maker)
+    func check(_ accounts: [Int], data: [UInt8] = fill, policy: SolanaPolicy = sponsored, twice: Bool = false) throws -> Verdict {
+        let (m, list) = try message(keys, [(4, accounts, data)] + (twice ? [(4, accounts, data)] : []), signers: 2)
+        return SolanaGuard.check(m, accounts: list, policy: policy, tokenOwners: [:])
+    }
+    // USDC in, SOL out as lamports: the output account is the program's id.
+    let sol = try check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6])
+    #expect(sol.ok, "\(sol.problems)")
+    #expect(sol.checks.contains("JupiterZ fill: 15 USDC for 0.148288542 SOL → your wallet, as SOL. The balance simulation checks it."))
+    // The maker only swaps: no SOL of the wallet's goes to it, so the signer doesn't keep it as an address money may go to.
+    let (m, list) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], fill)], signers: 2)
+    #expect(!SolanaGuard.refundsSponsor(m, accounts: list, owner: me, sponsor: maker))
+    let (refund, refundList) = try message([maker, me, SolanaGuard.system], [(2, [1, 0], solTransfer(2_039_280))], signers: 2)
+    #expect(SolanaGuard.refundsSponsor(refund, accounts: refundList, owner: me, sponsor: maker))
+    // Into this wallet's own wSOL account: fine too.
+    #expect(try check([1, 0, 2, 3, 10, 5, 7, 8, 9, 8, 6]).ok)
+    // The output to the maker's account, «none» for a mint that isn't SOL, someone else as the taker, or another
+    // instruction of the program: refused.
+    #expect(try !check([1, 0, 2, 3, 5, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 9, 8, 7, 8, 6]).ok)
+    #expect(try !check([0, 1, 3, 2, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], data: [0, 1, 2, 3, 4, 5, 6, 7] + [UInt8](repeating: 1, count: 29)).ok)
+    // What it gives drawn on another account of the wallet (its wSOL for a USDC fill), «none» for an input that isn't SOL,
+    // or a second fill riding along: refused — the app's simulation watches only the swap's own accounts.
+    #expect(try !check([1, 0, 10, 3, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 4, 3, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], twice: true).ok)
+    // Without the maker as the named fee payer the two signatures are refused, as for any transaction.
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], policy: SolanaPolicy(owner: me)).ok)
+}
+
 @Test func jupiterLendAndDCAPayOnlyTheSignersOwnAccounts() throws {
     let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
     func verdict(_ wire: Data) throws -> Verdict {

@@ -673,3 +673,47 @@ import WalletCore
 @Test func l1FeeUpperBoundSelector() {
     #expect(Keccak.hash256(Data("getL1FeeUpperBound(uint256)".utf8)).prefix(4).hex == "f1c7a58b")
 }
+
+/// KyberSwap's router call in its API's shape (1 USDC → AERO on Base, built 2026-10-28), read by the signer itself: a swap
+/// paying only this wallet, no fee to anyone and no permit with it; anything else to the router is refused, and a call
+/// whose offsets aren't aligned isn't read as a swap at all.
+@Test func aKyberSwapPaysOnlyThisWallet() throws {
+    let me = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", evil = "0x3333333333333333333333333333333333333333"
+    let usdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", aero = "0x940181a94a35a4569e4529a3cdfb74e38fd98631"
+    let executor = "0x8f10b468b06c6fd214b65f87778827f7d113f996"
+    func call(receiver: String = me, fees: [String] = [], permit: Bool = false, misaligned: Bool = false, minReturn: Decimal = 1_425_956_540_186_467_126) throws -> Data {
+        func w(_ n: Int) -> Data { ABI.uint(UInt64(n)) }
+        // The descriptor's eleven words, then its arrays: srcReceivers, srcAmounts, feeReceivers, feeAmounts, permit.
+        let arrays = 352, feesAt = arrays + 128, feeAmountsAt = feesAt + 32 + 32 * fees.count, permitAt = feeAmountsAt + 32 + 32 * fees.count
+        var desc = try ABI.address(usdc) + ABI.address(aero) + w(arrays) + w(arrays + 64) + w(feesAt) + w(feeAmountsAt)
+        desc += try ABI.address(receiver) + w(1_000_000) + ABI.word(minReturn) + w(512) + w(permitAt)
+        desc += try w(1) + ABI.address(executor) + w(1) + w(1_000_000)
+        desc += try w(fees.count) + fees.map(ABI.address).reduce(Data(), +) + w(fees.count) + fees.map { _ in w(1) }.reduce(Data(), +)
+        desc += permit ? w(32) + Data(count: 32) : w(0)
+        // SwapExecutionParams: callTarget, approveTarget, targetData (empty, at 160), desc (at 192), clientData (empty).
+        let params = try ABI.address(executor) + w(0) + w(160) + w(misaligned ? 200 : 192) + w(192 + desc.count) + w(0) + desc + w(0)
+        return Data([0xe2, 0x1f, 0xd0, 0xe9]) + w(32) + params
+    }
+    let swap = try #require(KyberSwap.decode(call()))
+    #expect(swap.srcToken == usdc && swap.dstToken == aero && swap.dstReceiver == me && swap.amount == 1_000_000)
+    #expect(swap.minReturn == 1_425_956_540_186_467_126 && swap.feeReceivers.isEmpty && !swap.permit)
+    let read = EVMCall.decode(try call())
+    #expect(read.refusal(sender: me, chainId: 8453) == nil && read.payees(to: KyberSwap.router, value: 0, chainId: 8453).isEmpty)
+    #expect(read.unreadTarget(to: KyberSwap.router, value: 0, chainId: 8453) == nil)
+    #expect(read.summary(chainId: 8453, to: KyberSwap.router, value: 0)
+            == "swap 1 USDC on KyberSwap on Base for at least 1425956540186467126 units of the token 0x9401…8631, paying this wallet")
+    // Paying someone else, a fee to someone, a permit riding along: refused.
+    #expect(EVMCall.decode(try call(receiver: evil)).refusal(sender: me, chainId: 8453)?.contains(evil) == true)
+    #expect(EVMCall.decode(try call(fees: [evil])).refusal(sender: me, chainId: 8453)?.contains(evil) == true)
+    #expect(EVMCall.decode(try call(permit: true)).refusal(sender: me, chainId: 8453) != nil)
+    // No least amount to come out: any price would do, so it isn't signed.
+    #expect(EVMCall.decode(try call(minReturn: 0)).refusal(sender: me, chainId: 8453)?.contains("least") == true)
+    // The exact approve to the router names nobody to allow: it's a known spender where KyberSwap serves.
+    let approve = Data([0x09, 0x5e, 0xa7, 0xb3]) + (try ABI.address(KyberSwap.router)) + ABI.uint(1_000_000)
+    #expect(EVMCall.decode(approve).payees(to: usdc, value: 0, chainId: 8453).isEmpty)
+    // Anything but that swap to the router, or a swap with crafted offsets: refused, never read as a swap.
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: try call(), sender: me) == nil)
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: Data([0x8a, 0xf0, 0x33, 0xfb]) + Data(count: 64), sender: me) != nil)
+    #expect(KyberSwap.decode(try call(misaligned: true)) == nil)
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: try call(misaligned: true), sender: me) != nil)
+}

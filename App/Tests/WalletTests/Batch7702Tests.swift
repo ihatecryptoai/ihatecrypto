@@ -242,6 +242,29 @@ func forkApproveAndSwapGoAsOneTransaction() async throws {
     }
 }
 
+/// KyberSwap's route on an anvil fork of Base (Tools/fork7702.sh): its API builds the call for the fork's fresh key, the
+/// executor reads it back (this wallet, these tokens, this amount, its floor), approves exactly that to the router and
+/// swaps — every call held to the signer's rules (ForkSigner) — and the allowance is spent to zero.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_ANVIL"] != nil && (ProcessInfo.processInfo.environment["IHATECRYPTO_ANVIL_CHAIN"] ?? "8453") == "8453"))
+func forkKyberSwapPaysThisWallet() async throws {
+    let env = ProcessInfo.processInfo.environment
+    let rpc = EVMRPC(url: URL(string: env["IHATECRYPTO_ANVIL"]!)!, chainId: 8453)
+    let key = Data(hex: env["IHATECRYPTO_ANVIL_KEY"]!)!
+    let me = try EVMAccount.address(privateKey: key)
+    let b = EVMNetwork.base
+    let net = EVMNetwork(name: b.name, key: b.key, rpc: rpc, usdc: b.usdc, relayChain: b.relayChain, explorer: b.explorer, gasFloor: b.gasFloor, topupUSD: b.topupUSD)
+    let aero = EVMTokens.Token(symbol: "AERO", name: "Aerodrome", address: "0x940181a94a35a4569e4529a3cdfb74e38fd98631", decimals: 18)
+    let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("forkkyber-\(UUID().uuidString).jsonl"))
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: key, address: me), journal: journal) { print("·", $0) }
+    let usdc0 = try await rpc.tokenBalance(b.usdc, owner: me), aero0 = try await e.balance(aero.address, on: rpc)
+    let route = try await KyberSwap.route(chainId: 8453, from: b.usdc, to: aero.address, amount: 2_000_000)
+    print(try await e.kyberSwap(net, route, tokenIn: Executor.usdcToken(net), tokenOut: aero, units: 2_000_000, what: "2 USDC"))
+    #expect(try await rpc.tokenBalance(b.usdc, owner: me) == usdc0 - 2_000_000)
+    #expect(try await e.balance(aero.address, on: rpc) - aero0 >= (route.out * (1 - UniRoute.tolerance(impact: route.impact))).whole)
+    let allowance = ABI.decimal(in: try await rpc.read(b.usdc, try ERC20.allowance(owner: me, spender: KyberSwap.router)), word: 0)
+    #expect(allowance == 0)
+}
+
 /// Robinhood Chain's Uniswap v4 buy on an anvil fork (NET=robinhood Tools/fork7702.sh): the approve to Permit2,
 /// Permit2's approve to the router and the swap go as one type-4 transaction; a second buy within Permit2's half hour is
 /// the swap alone when nothing needs approving.
