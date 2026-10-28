@@ -21,9 +21,9 @@ if [[ -z $DRY && ( ! -x $AX || $HERE/axpress.swift -nt $AX ) ]]; then
   mkdir -p ${AX:h} && swiftc -O $HERE/axpress.swift -o $AX || exit 1
 fi
 canvas=$(echo $state | py "print(d.get('canvasID') or '')")
-seen=$(echo $state | py "print(len(d['messages']))")
 
-dev api POST /reset >/dev/null
+# A fresh test canvas, or nothing: the phrase must never land in the canvas the owner left open.
+dev api POST /reset >/dev/null || { echo "/reset failed: not sending anything" >&2; exit 1 }
 echo "you: $phrase"
 dev api POST /send "$(python3 -I -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' $phrase)" >/dev/null
 # The card's quote comes a moment after the card.
@@ -47,6 +47,6 @@ for b in $buttons; do
   dev idle || exit 1
 done
 TIMEOUT=10 dev api GET /state | py "
-for m in d['messages'][$seen:]: print('you:' if m['user'] else 'app:', m['text'])
+for m in d['messages']: print('you:' if m['user'] else 'app:', m['text'])
 print('outcome:', d.get('outcome'))"
 dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null

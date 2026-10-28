@@ -46,9 +46,10 @@ printf '%s\n' "Subject: what changed, for whom" "" "Body: why." "" "Co-Authored-
 App/Tools/commit-own.sh $TMPDIR/msg App/Sources/… App/Tests/…      # a private index; HEAD moves only if nobody moved it
 ```
 
-- A file another agent also edits: commit only your hunks — `git show HEAD:<f>` + your hunks → `git hash-object -w` →
-  `git update-index --cacheinfo <mode>,<blob>,<f>` into a private `GIT_INDEX_FILE`, then `commit-tree` / `update-ref`
-  as the script does.
+- A file another agent also edits: commit only your hunks. `python3 -I App/Tools/hunks.py list <f>` numbers the
+  file's hunks against HEAD; `App/Tools/commit-own.sh $TMPDIR/msg <f>@1,3 <other files>` commits HEAD plus hunks 1
+  and 3 of it. Place your edits away from theirs (a few lines apart) so the hunks stay separate, and for the review
+  build your diff the same way (`hunks.py keep <f> 1,3` against `git show HEAD:<f>`).
 - Before committing a big change, build the commit's tree alone: `git archive <tree> | tar -x -C <dir>`, copy
   `App/.build` there (`cp -cR`), `swift build --build-tests && swift test --skip-build`. Others' uncommitted files can
   make your tree build in the checkout and fail alone.
