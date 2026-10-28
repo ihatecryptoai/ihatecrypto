@@ -394,3 +394,31 @@ private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         #expect(try !verdict(wire).ok)
     }
 }
+
+/// A borrow and a repay on Kamino's Backpack market pass only on the owner's own position there, the one the guard
+/// derives itself; the same instruction on anyone else's position, or with an instruction ihatecrypto doesn't use, is refused.
+@Test func kaminoBackpackLoansRunOnlyOnTheOwnersPosition() throws {
+    let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+    let mine = try #require(SolanaGuard.kaminoObligation(owner: owner, market: SolanaGuard.kaminoBackpackMarket))
+    #expect(mine != SolanaGuard.kaminoObligation(owner: owner))
+    func verdict(_ discriminator: [UInt8], obligation: String) throws -> Verdict {
+        let ix = SolanaInstruction(program: SolanaGuard.kaminoLend, accounts: [
+            .init(pubkey: owner, isSigner: true, isWritable: false), .init(pubkey: obligation, isSigner: false, isWritable: true),
+            .init(pubkey: SolanaGuard.kaminoBackpackMarket, isSigner: false, isWritable: false),
+        ], data: Data(discriminator) + Data(repeating: 0, count: 8))
+        let wire = SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([ix], payer: owner, blockhash: deposit))
+        let m = try SolanaMessage.parse(transaction: wire)
+        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: owner, trustLookupTables: false), tokenOwners: [:])
+    }
+    let borrowV2: [UInt8] = [0xa1, 0x80, 0x8f, 0xf5, 0xab, 0xc7, 0xc2, 0x06], repayV2: [UInt8] = [0x74, 0xae, 0xd5, 0x4c, 0xb4, 0x35, 0xd2, 0x90]
+    let repay: [UInt8] = [0x91, 0xb2, 0x0d, 0xe1, 0x4c, 0xf0, 0x93, 0x48]
+    for d in [borrowV2, repayV2, repay] {
+        let ok = try verdict(d, obligation: mine)
+        #expect(ok.ok, "\(ok.problems)")
+        // Someone else's debt, or another wallet's position: refused.
+        let other = try #require(SolanaGuard.kaminoObligation(owner: me, market: SolanaGuard.kaminoBackpackMarket))
+        #expect(try !verdict(d, obligation: other).ok)
+    }
+    // A flash loan on the same position: not an instruction ihatecrypto uses.
+    #expect(try !verdict([0x87, 0xe7, 0x34, 0xa7, 0x07, 0x34, 0xd4, 0xc1], obligation: mine).ok)
+}

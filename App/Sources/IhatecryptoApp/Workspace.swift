@@ -546,6 +546,12 @@ final class Workspace {
     /// Kamino Lend deposits, in dollars, and by coin.
     var kamino: Decimal = 0
     var kaminoDeposits: [KaminoDeposit] = []
+    /// The position on Kamino's Backpack market: Backpack's stocks put up as collateral, the USDC borrowed against them.
+    var kaminoLoan: Kamino.Loan?
+    /// Kamino answered for the Backpack market at least once: before that, a nil loan says nothing.
+    var kaminoLoanRead = false
+    /// What it's worth: the collateral less the debt.
+    var kaminoLoanUSD: Decimal { kaminoLoan.map { $0.depositUSD - $0.debtUSD } ?? 0 }
     /// The NEAR implicit account the signer derived from the same phrase; nil until it has been asked once.
     var nearAddress: String?
     /// NEAR on that account: native and wNEAR, in NEAR.
@@ -924,7 +930,7 @@ final class Workspace {
     var equity: Decimal? {
         guard solana != nil || hl != nil else { return nil }
         return (solana?.usdc ?? 0) + shownTokensUSD + (hl?.accountValue ?? 0) + lend.reduce(0) { $0 + $1.usdc } + dexBalances.values.reduce(0) { $0 + $1.accountValue }
-            + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino + hlp.equity + nearUSD + protocolUSD
+            + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino + kaminoLoanUSD + hlp.equity + nearUSD + protocolUSD
     }
     /// The plan with what the user left to the rules filled in.
     var resolved: (intent: TradeIntent, notes: [String]) { planned().resolved }
@@ -1716,6 +1722,14 @@ final class Workspace {
         if hlp.equity > 0 { c.balances.append("HLP vault \(Fmt.usd(hlp.equity))" + (hlp.lockedUntil.map { ", locked until \(Fmt.date($0))" } ?? "")) }
         for l in lend where l.usdc > 0 { c.balances.append("Jupiter Lend \(l.vault.replacingOccurrences(of: "jl", with: "")) \(Fmt.num(l.usdc))") }
         if kamino > 0 { c.balances.append("Kamino \(Fmt.usd(kamino))") }
+        if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
+            // What stands on Kamino's Backpack market: the model offers a repay and the stock's way back from this.
+            let put = loan.collateral.filter { $0.tokens > 0 }.map { "\(Fmt.num($0.tokens, maxFraction: 6)) \($0.symbol)" }.joined(separator: ", ")
+            let owed = loan.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
+            c.balances.append("Kamino Backpack market: \(put.isEmpty ? "no" : put) collateral (\(Fmt.usd(loan.depositUSD))), \(Fmt.num(owed, maxFraction: 6)) USDC borrowed"
+                              + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2))" } ?? "")
+                              + (loan.borrowLimitUSD > loan.adjustedDebtUSD ? ", up to \(Fmt.usd(loan.borrowLimitUSD - loan.adjustedDebtUSD)) more can be borrowed" : ""))
+        }
         if let b = base {
             if b.aave > 0 { c.balances.append("Aave on Base \(Fmt.num(b.aave)) USDC") }
             if b.morpho > 0 { c.balances.append("Morpho on Base \(Fmt.num(b.morpho)) USDC") }
@@ -2078,6 +2092,10 @@ final class Workspace {
         async let balance = Solana.balance(owner: owner)
         async let lendPositions = try? JupiterLend.positions(user: owner)
         async let kaminoPositions = try? Kamino.positions(wallet: owner)
+        // ok false: Kamino didn't answer, and the last read stays (a nil loan is no position there).
+        async let backpack = { () async -> (ok: Bool, loan: Kamino.Loan?) in
+            do { return (true, try await Kamino.loan(wallet: owner, market: Kamino.backpackMarket)) } catch { return (false, nil) }
+        }()
         async let nearBalance = { () async -> (near: Decimal, wrapped: Decimal)? in
             guard let nearAccount else { return nil }
             return try? await Near.balance(account: nearAccount)
@@ -2092,7 +2110,7 @@ final class Workspace {
                 LendDeposit(address: p.address, coin: p.coin == "WSOL" ? "SOL" : p.coin, amount: Decimal(p.assets) / pow(10, p.decimals),
                             decimals: p.decimals, apy: p.apy)
             }
-            let k = await kaminoPositions, n = await nearBalance
+            let k = await kaminoPositions, n = await nearBalance, b = await backpack
             land { [self] in
                 guard current() else { return }
                 solana = s.pricing(from: solana?.tokens ?? [])
@@ -2105,6 +2123,9 @@ final class Workspace {
                     let byCoin = k.map { KaminoDeposit(coin: $0.symbol, usd: $0.valueUSD, apy: $0.apy) }
                     if byCoin != kaminoDeposits { kaminoDeposits = byCoin }
                 }
+                // None is no position: Kamino closes it when everything comes out (its rent comes back with it).
+                if b.ok, b.loan != kaminoLoan { kaminoLoan = b.loan }
+                if b.ok, !kaminoLoanRead { kaminoLoanRead = true }
                 if let n { near = n.near + n.wrapped }
             }
             // What the deposits earned: not with every balance read (Jupiter's free API answers 429 to many).

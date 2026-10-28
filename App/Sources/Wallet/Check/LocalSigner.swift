@@ -193,6 +193,8 @@ func moveMoney(_ text: String) async throws {
         guard let a = EVMNetwork.named(from), let b = EVMNetwork.named(to) else { throw ExecutionError("ihatecrypto doesn't move USDT between \(from) and \(to).") }
         print(try await executor.usdtMove(from: a, to: b, usdt: amount, layerZero: layerZero))
     case .aaveBorrow(let x, let net): print(try await executor.aaveBorrow(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, usdc: x ?? 0))
+    case .kaminoBorrow(let x, let stock, let adding): print(try await executor.kaminoBorrow(usdc: x ?? 0, against: stock, adding: adding))
+    case .kaminoRepay(let x): print(try await executor.kaminoRepay(usdc: x))
     case .aaveRepay(let x, let net): print(try await executor.aaveRepay(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, usdc: x))
     case .aaveCollateral(let x, let net): print(try await executor.aaveSupplyETH(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, eth: x ?? 0))
     case .receiveAcross: print("Receiving through NEAR Intents opens a deposit address in the app.")

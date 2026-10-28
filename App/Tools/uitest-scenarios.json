@@ -471,6 +471,37 @@
     }
   },
   {
+    "name": "a loan against tokenized stocks with none put up («не продавая») → how to put SPCX up on Kamino's Backpack market, never a sale",
+    "only_if": {
+      "balance": "solanaSPCX",
+      "below": 1e-06
+    },
+    "send": "займи 1 USDC под мои акции SpaceX на камино, не продавая",
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "SPCX",
+      "reply_cyrillic": true
+    }
+  },
+  {
+    "name": "a loan against SPCX in the wallet → a Kamino card: the stock put up, the loan with its health factor, the USDC to the wallet",
+    "only_if": {
+      "balance": "solanaSPCX",
+      "at_least": 0.001
+    },
+    "send": "займи 0.02 USDC под 0.001 SPCX на камино",
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "Borrow 0.02 USDC on Kamino against SPCX",
+      "steps": [
+        "FROM · SOLANA",
+        "COLLATERAL · KAMINO",
+        "BORROW · KAMINO",
+        "TO · SOLANA"
+      ]
+    }
+  },
+  {
     "name": "conversation: a spread waits while asked about, grows, loses Kamino, is cancelled",
     "only_if": {
       "balance": "total",

@@ -478,7 +478,7 @@ extension Executor {
     /// Returns the simulated change per watched balance; `dryRun` stops before signing. `sponsor`: Jupiter's wallet pays the
     /// fee and signs first, and the transaction goes back through Jupiter's /execute with its order id.
     @discardableResult
-    private func signAndSend(_ unsigned: Data, lastValid: UInt64, owners: [String: String], rules: [(String, String, Bool, Int64)], note: String,
+    func signAndSend(_ unsigned: Data, lastValid: UInt64, owners: [String: String], rules: [(String, String, Bool, Int64)], note: String,
                              lamportsAtLeast: Int64 = -5_000_000, dryRun: Bool = false, sponsor: (key: String, requestId: String)? = nil) async throws -> [String] {
         let message = try SolanaMessage.parse(transaction: unsigned)
         let accounts = try await rpc.resolveAccounts(message)
@@ -928,49 +928,70 @@ extension Executor {
         return CostlyMove(lost: rent, paid: depositUSD, what: "Kamino", words: "The first Kamino deposit creates your accounts: rent ≈ \(Fmt.num(sol, maxFraction: 4)) SOL (≈ \(Fmt.usd(rent))) on a \(Fmt.usd(depositUSD)) deposit — over 10% of the amount. Jupiter Lend has no rent; Kamino makes sense from ≈ \(Fmt.usd((rent * 10).rounded(0, .up))). Nothing was signed.")
     }
 
-    /// Kamino Lend, main market. `symbol`: USDC, SOL, USDT… `amount` in tokens; withdraw with nil takes the whole
-    /// position (its dollars at the token's price). `dryRun` only simulates: the first deposit's rent shows up here.
-    /// `acceptRent`: the plan showed the first deposit's rent (a rebalance, the CLI's flag), so the 10% rule does not ask.
+    /// Kamino Lend: the main market, and the Backpack market for Backpack's stocks (Kamino.market(for:)) — there a
+    /// deposit is collateral to borrow USDC against. `symbol`: USDC, SOL, USDT, SPCX… `amount` in tokens; withdraw with
+    /// nil takes the whole position (its dollars at the token's price). `dryRun` only simulates: the first deposit's rent
+    /// shows up here. `acceptRent`: the plan showed the first deposit's rent (a rebalance, the CLI's flag), so the 10%
+    /// rule does not ask.
     public func kamino(_ symbol: String, amount requested: Decimal?, deposit: Bool, dryRun: Bool = false, acceptRent: Bool = false) async throws -> String {
-        guard let reserve = try await Kamino.reserves().first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else {
+        let market = Kamino.market(for: symbol), stock = market == Kamino.backpackMarket
+        guard let reserve = try await Kamino.reserves(market: market).first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else {
             throw ExecutionError("Kamino has no \(symbol) market.")
         }
         let native = reserve.mint == "So11111111111111111111111111111111111111112"
         let supply = try await rpc.call("getTokenSupply", [reserve.mint]) as? [String: Any]
         let decimals = ((supply?["value"] as? [String: Any])?["decimals"] as? NSNumber)?.intValue ?? 6
         let scale = Decimal(sign: .plus, exponent: decimals, significand: 1)
-        let position = try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }
+        // On the Backpack market a position is collateral, and a loan may stand on it.
+        let loan = stock ? try await Kamino.loan(wallet: wallet.solana, market: market) : nil
+        let positionUSD = stock
+            ? loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD
+            : try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }?.valueUSD
+        if stock, !deposit, let loan, loan.debtUSD > 0 {
+            // Kamino lets collateral out only while what's left still carries the debt at its borrow limit.
+            let risk = try await Kamino.risk(reserve: reserve.address)
+            let free = Self.kaminoFreeCollateral(loan, maxLTV: risk.maxLTV, priceUSD: reserve.priceUSD)
+            if requested.map({ $0 > free }) ?? true {
+                throw ExecutionError("A loan of \(Fmt.usd(loan.debtUSD)) stands on this \(symbol) on Kamino: "
+                                     + (free > 0 ? "up to \(Fmt.num(free, maxFraction: 6)) \(symbol) can come out now. " : "")
+                                     + "Pay it back first — «repay all USDC on kamino» — and the rest comes out. Nothing was signed.")
+            }
+        }
         // A deposit made on kamino.com sits in a Kamino Vault (Earn), not in Lend.
         // ponytail: Lend first when both hold the token; «all» then leaves the vault, say it again for that.
-        if !deposit, position == nil,
+        if !deposit, !stock, positionUSD == nil,
            let v = try await Kamino.vaultPositions(wallet: wallet.solana).first(where: { $0.mint == reserve.mint && $0.shares > 0 }) {
             return try await kaminoVault(v, amount: requested, decimals: decimals, dryRun: dryRun)
         }
         // Everything: ask for 1% over the value — Kamino caps a withdrawal at what is there (checked live), so no dust stays.
         let all = !deposit && requested == nil
-        if all, position != nil, reserve.priceUSD <= 0 { throw ExecutionError("Kamino gave no \(symbol) price just now; say how much to withdraw.") }
-        guard let amount = requested ?? (deposit ? nil : position.map { Self.kaminoAll(valueUSD: $0.valueUSD, priceUSD: reserve.priceUSD) }), amount > 0 else {
+        if all, positionUSD != nil, reserve.priceUSD <= 0 { throw ExecutionError("Kamino gave no \(symbol) price just now; say how much to withdraw.") }
+        guard let amount = requested ?? (deposit ? nil : positionUSD.map { Self.kaminoAll(valueUSD: $0, priceUSD: reserve.priceUSD) }), amount > 0 else {
             throw ExecutionError(deposit ? "How much should go into Kamino?" : "No \(symbol) position in Kamino.")
         }
         let units = NSDecimalNumber(decimal: (amount * scale).rounded(0, .down)).uint64Value
         /// What should come out: the position's value when taking everything, else what was asked.
         let expected = Int64(all ? units * 100 / 101 : units)
-        let myToken = try SPL.associatedAccount(owner: wallet.solana, mint: reserve.mint)
+        // Backpack's stocks are Token-2022 tokens: their account derives from that program.
+        let myToken = try SPL.associatedAccount(owner: wallet.solana, mint: reserve.mint, program: try await tokenProgram(reserve.mint))
         if deposit {
             let have = native ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)
             guard have >= units else { throw ExecutionError("You have \(Fmt.num(Decimal(have) / scale, maxFraction: 6)) \(symbol); need \(Fmt.num(amount, maxFraction: 6)).") }
         }
         let wire = deposit
-            ? try await Kamino.depositTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount)
-            : try await Kamino.withdrawTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount)
+            ? try await Kamino.depositTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount, market: market)
+            : try await Kamino.withdrawTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount, market: market)
         let lastValid = try await rpc.latestBlockhash().lastValidBlockHeight
-        // The first deposit pays rent for the user's Kamino accounts and lookup table; later ones only the fee.
-        let firstTime = position == nil && deposit
+        // The first deposit pays rent for the user's Kamino accounts and lookup table; later ones only the fee. On the
+        // Backpack market the position is one for all its stocks.
+        let firstTime = (stock ? loan == nil : positionUSD == nil) && deposit
         var rules: [(String, String, Bool, Int64)] = []
         if !native { rules.append((myToken, symbol, true, deposit ? -Int64(units) : expected * 99 / 100)) }
         let lamports: Int64 = native ? (deposit ? -Int64(units) - (firstTime ? 60_000_000 : 5_000_000) : expected * 99 / 100 - 5_000_000)
                                      : (firstTime ? -60_000_000 : -5_000_000)
-        if firstTime, !dryRun, !acceptRent {
+        // A stock put up on the Backpack market isn't asked about: its position's rent (≈ 0.0176 SOL) comes back when
+        // everything is taken out — Kamino closes the position then (measured live 2026-10-28).
+        if firstTime, !dryRun, !acceptRent, !stock {
             // The first deposit pays ~0.03 SOL of rent for Kamino's user accounts and lookup table. Not worth it for
             // a small amount: simulate first, and when the rent is over a tenth of what goes in, stop and ask (CostlyMove:
             // «Send anyway», or Jupiter Lend, which has no rent). It was refused outright, which stopped a chain of moves
@@ -984,7 +1005,18 @@ extension Executor {
         }
         let changes = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
                                             note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, dryRun: dryRun)
-        let line = (dryRun ? "Kamino simulation (nothing signed): " : "Kamino \(symbol) \(Fmt.num(reserve.supplyAPY.rounded(2, .plain)))% APY: \(deposit ? "deposited \(Fmt.num(amount, maxFraction: 6)) \(symbol)" : all ? "withdrew everything" : "withdrew \(Fmt.num(amount, maxFraction: 6)) \(symbol)"). ")
+        if stock, !dryRun {
+            // Read on: the portfolio right after must find the stock under Kamino, not lose it.
+            let was = loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD ?? 0
+            _ = try? await kaminoLoan(market) { l in
+                let v = l?.collateral.first { $0.reserve == reserve.address }?.valueUSD ?? 0
+                return deposit ? v > was : v < was
+            }
+        }
+        let did = deposit ? "deposited \(Fmt.num(amount, maxFraction: 6)) \(symbol)" : all ? "withdrew everything" : "withdrew \(Fmt.num(amount, maxFraction: 6)) \(symbol)"
+        let line = (dryRun ? "Kamino simulation (nothing signed): "
+                    : stock ? "Kamino's Backpack market: \(deposit ? "put up \(Fmt.num(amount, maxFraction: 6)) \(symbol) as collateral" : did). "
+                    : "Kamino \(symbol) \(Fmt.num(reserve.supplyAPY.rounded(2, .plain)))% APY: \(did). ")
             + changes.joined(separator: "; ") + "."
         report(line)
         return line

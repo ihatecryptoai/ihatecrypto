@@ -26,6 +26,15 @@ for a Solana lending protocol; JupiterZ/KyberSwap for a new swap way.
   (no KYC allow-list: `defaultAccountState` initialized), and is there a route to buy it (`lite-api.jup.ag/swap/v1/quote`).
 - Risk numbers for the card: max LTV, liquidation LTV, borrow factor, caps (Kamino `GET /reserves/<reserve>/stats`),
   rates, rent of the first use, minimums. Write the date of the check next to each constant.
+- Dry-run the whole executor path before any money moves: `DRY_SOLANA=<any address with a position> swift run
+  WalletCheck move "<form>" --yes` builds the protocol's transaction, runs the guard and the network's simulation, and
+  stops at signing («A dry run signs nothing»). A third party's public position works for a borrow or a withdrawal.
+- Read the API's caching: Kamino sends a wallet's obligations with `max-age=60` and Cloudflare serves them stale for a
+  minute after a move — a wallet's own state needs a query of its own (`Kamino.fresh`) and the cache bypassed, and
+  the executor waits until the API shows the move (`kaminoLoan(_:until:)`), else the portfolio drops what just moved.
+- Measure the rent in the live run, per step: on Kamino's Backpack market the first deposit opens a position
+  (≈ 0.0176 SOL, back when everything comes out — Kamino closes it), the first borrow opens a farm account for the
+  debt (≈ 0.0053 SOL, stays). A simulation rule's SOL floor must leave room for what a first use opens.
 
 ## 2. The guard and the signer (safety lives in code)
 
@@ -60,10 +69,17 @@ for a Solana lending protocol; JupiterZ/KyberSwap for a new swap way.
   («займи 2 USDC под SPCX на камино» = …). `IhatecryptoCore/PositionCommand.swift`: the `WalletCommand` case, its
   parser (English and Russian regexes — order matters: a specific protocol before a generic «borrow»), the question
   when the amount is missing, `with(amount:)`, the form text it prints back. Tests in both languages.
+- Read the branches of `WalletCommand.read` that run before yours with your phrases in mind: «займи под акции
+  SpaceX, не продавая» was taken for a sale of Robinhood's SpaceX token («прода» in «не продавая») until the stock
+  branch learned to skip loan words. Test the negations and the words of neighbouring protocols («borrow … on aave»).
 - Build: the «switch must be exhaustive» errors list the rest of the places (Modules, LocalSigner, Canvases,
-  Execution, Blocks, Browser, Wallets).
+  Execution, Blocks, Browser, Wallets). Switches with a `default:` don't complain: grep for the neighbouring
+  protocol's case (`grep -n 'aaveBorrow' -r App/Sources`) to find them.
 - `IhatecryptoApp/Execution.swift`: the dispatch to the executor; `refusalBeforeCard` for what the balances already
-  show can't work. `IhatecryptoApp/Canvases.swift`: the route card — steps FROM → protocol → TO, numbers quoted while
+  show can't work (nothing to borrow against, no debt to repay) — only once they've loaded (`solana != nil`), with
+  the way that works in the reply, in English and Russian (`say(en, ru)`).
+- What the scenarios and the live run need to see goes into `/state` (`DebugAPI.swift` balances): uitest's
+  `only_if: {"balance": "<key>", "at_least" | "below": N}` picks the scenario that fits what the test wallet holds. `IhatecryptoApp/Canvases.swift`: the route card — steps FROM → protocol → TO, numbers quoted while
   the card waits (the `swapQuote` loop, every 30 s), a warning line for the risk. Design rules: everything as cards
   in the chat, nothing disappears from the canvas.
 - The portfolio: money put into the protocol stays visible — `Workspace` refresh and `PortfolioNetworks` lines (a

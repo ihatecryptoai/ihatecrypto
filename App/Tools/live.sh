@@ -38,11 +38,14 @@ if [[ -n $DRY ]]; then dev api POST /cancel >/dev/null; dev api POST /restore "{
 
 for b in $buttons; do
   # An exact title, or the first button whose title contains it («Send anyway» for «Send anyway · ≈ $3.10 lost»).
-  if ! $AX press $b 2>/dev/null; then
-    title=$($AX list $b | head -1 | awk -F ' · ' '{print $1}')
-    [[ -n $title ]] || { echo "no button «$b» on screen; buttons: $($AX list | tr '\n' '|')" >&2; exit 1 }
-    $AX press $title || exit 1
-  fi
+  # The chat's cards fade in one at a time after the reply: up to 10 s for it to show.
+  pressed=
+  for i in {1..10}; do
+    pressed=$($AX press $b 2>/dev/null) && break
+    pressed=; sleep 1
+  done
+  [[ -n $pressed ]] || { echo "no button «$b» on screen; buttons: $($AX list | tr '\n' '|')" >&2; exit 1 }
+  echo $pressed
   sleep 2
   dev idle || exit 1
 done

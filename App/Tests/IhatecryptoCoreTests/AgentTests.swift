@@ -758,3 +758,33 @@ private final class Script: LLMClient, @unchecked Sendable {
         #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
     }
 }
+
+/// Kamino's Backpack market: USDC borrowed against Backpack's tokenized stocks without selling them, paid back, the
+/// stock put up and taken back — in English and Russian, by ticker or company. Aave keeps its own words.
+@Test func kaminoBorrowingAgainstStocksIsParsed() {
+    let five = Decimal(string: "0.05")!
+    #expect(WalletCommand.parse("borrow 2 USDC on kamino against 0.05 SPCX") == .kaminoBorrow(2, against: "SPCX", adding: five))
+    #expect(WalletCommand.parse("borrow 2 USDC on kamino against SPCX") == .kaminoBorrow(2, against: "SPCX"))
+    #expect(WalletCommand.parse("borrow 1 USDC on kamino") == .kaminoBorrow(1))
+    #expect(WalletCommand.parse("займи 2 USDC под 0.05 SPCX на камино") == .kaminoBorrow(2, against: "SPCX", adding: five))
+    #expect(WalletCommand.parse("займи 3 доллара под мои акции SpaceX, не продавая") == .kaminoBorrow(3, against: "SPCX"))
+    #expect(WalletCommand.parse("borrow 4 USDC against my Micron shares") == .kaminoBorrow(4, against: "MU"))
+    #expect(WalletCommand.parse("займи 2 под 0.01 MU") == .kaminoBorrow(2, against: "MU", adding: Decimal(string: "0.01")!))
+    #expect(WalletCommand.parse("repay all USDC on kamino") == .kaminoRepay(nil))
+    #expect(WalletCommand.parse("погаси долг на камино") == .kaminoRepay(nil))
+    #expect(WalletCommand.parse("repay 1.5 USDC on kamino") == .kaminoRepay(Decimal(string: "1.5")!))
+    #expect(WalletCommand.parse("deposit 0.05 SPCX to kamino") == .kamino(deposit: true, symbol: "SPCX", amount: five))
+    #expect(WalletCommand.parse("withdraw SPCX from kamino") == .kamino(deposit: false, symbol: "SPCX", amount: nil))
+    #expect(WalletCommand.parse("выведи 0.02 SNDK из камино") == .kamino(deposit: false, symbol: "SNDK", amount: Decimal(string: "0.02")!))
+    #expect(WalletCommand.parse("займи 1 USDC под 0.05 спейса на камино") == .kaminoBorrow(1, against: "SPCX", adding: five))
+    // «займёт» is time, not a loan.
+    #expect(WalletCommand.parse("сколько займёт покупка акций SpaceX?") != .kaminoBorrow(nil, against: "SPCX"))
+    // Aave's loans and Kamino's USDC stay what they were.
+    #expect(WalletCommand.parse("borrow 10 USDC on aave") == .aaveBorrow(10, network: "base"))
+    #expect(WalletCommand.parse("deposit 5 USDC to kamino") == .kamino(deposit: true, symbol: "USDC", amount: 5))
+    #expect(WalletCommand.kaminoBorrow(nil, against: "SPCX").amountQuestion == "How many USDC to borrow on Kamino against SPCX?")
+    for c in [WalletCommand.kaminoBorrow(2, against: "SPCX", adding: five), .kaminoBorrow(1), .kaminoBorrow(3, against: "MU"),
+              .kaminoRepay(nil), .kaminoRepay(2)] {
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+}

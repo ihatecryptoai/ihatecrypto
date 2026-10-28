@@ -333,7 +333,7 @@ final class DebugAPI {
                                                              "cards": ($0.options ?? []).map(\.title)] as [String: Any] },
             "balances": [
                 "total": num(ws.equity), "solanaUSDC": num(ws.solana?.usdc), "sol": num(ws.solana?.sol),
-                "hyperliquid": num(ws.hlTotal), "near": num(ws.near), "kamino": num(ws.kamino), "jupiterLend": num(ws.lendTotal),
+                "hyperliquid": num(ws.hlTotal), "near": num(ws.near), "kamino": num(ws.kamino), "kaminoBackpack": num(ws.kaminoLoan.map { $0.depositUSD - $0.debtUSD }), "solanaSPCX": num(ws.heldOnSolana("SPCX")), "jupiterLend": num(ws.lendTotal),
                 "baseAave": num(ws.base?.aave), "baseMorpho": num(ws.base?.morpho), "baseUSDC": num(ws.base?.usdc),
                 "robinhoodUSDG": num(ws.robinhood?.usdg), "arbitrumUSDC": num(ws.arbitrumUSDC),
                 "arbitrumUSDT": num(USDT0.on(42161).flatMap { ws.heldUSDC("arbitrum", $0.token) }),

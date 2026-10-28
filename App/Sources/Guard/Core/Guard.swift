@@ -71,14 +71,19 @@ public enum SolanaGuard {
     /// Kamino's vaults (Earn) and the farm their shares are staked in: a vault withdrawal unstakes, then redeems.
     public static let kaminoVault = "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
     public static let kaminoFarms = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
-    /// Kamino's main lending market, the only one ihatecrypto lends on (Kamino.mainMarket).
+    /// Kamino's main lending market (Kamino.mainMarket).
     public static let kaminoMainMarket = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
+    /// Kamino's Backpack market (Kamino.backpackMarket): Backpack's tokenized stocks as collateral, USDC lent against them.
+    public static let kaminoBackpackMarket = "4iRHKGsTq3e4uut6e4PfyV9AEbNuXaMu9JaSP378p9qy"
+    /// The markets ihatecrypto lends and borrows on; a position on any other is refused.
+    public static let kaminoMarkets = [kaminoMainMarket, kaminoBackpackMarket]
 
     /// The Kamino instructions ihatecrypto's deposits and withdrawals use whose programs pay out only to the signer
     /// (token::authority = owner, has_one = owner; read in the verified source, klend e921c64, kvault 2dadf94, kfarms
-    /// bfa1860, 2026-10-23), by 8-byte discriminator. Any other — a deposit minting to someone else's account, repaying
-    /// someone else's debt, a flash loan, handing a farm stake over (transfer_ownership), topping up a vault's rewards —
-    /// is refused, whatever the app says. KLend's value is the index of the obligation the instruction acts on (nil: none).
+    /// bfa1860, 2026-10-23; the repays klend 77e8185, 2026-10-28), by 8-byte discriminator. Any other — a deposit
+    /// minting to someone else's account, a flash loan, handing a farm stake over (transfer_ownership), topping up a
+    /// vault's rewards — is refused, whatever the app says. KLend's value is the index of the obligation the instruction
+    /// acts on (nil: none), which must be the owner's own on one of `kaminoMarkets`: a repay of someone else's debt fails it.
     static let kaminoLendAllowed: [String: Int?] = [
         "75a9b045c5170fa2": nil,                                                  // init_user_metadata (no referrer, below)
         "fb0ae74c1b0b9f60": 2, "883f0fbad398a8a4": 2,                             // init_obligation, init_obligation_farms_for_reserve
@@ -89,6 +94,10 @@ public enum SolanaGuard {
         "2574cd67f3c05cc6": 1, "caf97572e7c02f8a": 1,                             // withdraw_obligation_collateral(_v2)
         "6cd1044815167685": 1, "8991975ea7710491": 1,                             // deposit_obligation_collateral(_v2)
         "797f12cc49f5e141": 1, "a1808ff5abc7c206": 1,                             // borrow_obligation_liquidity(_v2)
+        // repay_obligation_liquidity(_v2): the program lets anyone repay any obligation; pinned to the owner's own, it
+        // pays back only this wallet's debt. The money comes from an account the signer is the authority of (the
+        // transfer runs under `owner`'s signature), and the balance simulation checks how much leaves.
+        "91b20de14cf09348": 1, "74aed54cb435d290": 1,
         "ea75b57db98edc1d": nil,                                                  // redeem_reserve_collateral
     ]
     /// Vault withdrawals (withdraw, sell, withdraw_from_available, redeem_in_kind): to the signer's own accounts. No deposits.
@@ -137,7 +146,7 @@ public enum SolanaGuard {
     /// public). Measured on mainnet 2026-10-23: the program refuses another payee, and the signer checks it as well.
     static let jupiterDCAOpen = "8e772b6da2340bb1", jupiterDCAClose = "16072162a8b722f3"
 
-    /// The owner's plain obligation on Kamino's main market: seeds [tag 0, id 0, owner, market, default, default] (klend
+    /// The owner's plain obligation on a Kamino market: seeds [tag 0, id 0, owner, market, default, default] (klend
     /// handler_init_obligation.rs). An instruction on it acts on that market (has_one = lending_market), whatever market
     /// a lookup table names: the signer can't read those, so this pins the market from a static account instead.
     /// `account` is `owner`'s associated token account for `mint`, under SPL Token or Token-2022.
@@ -146,8 +155,8 @@ public enum SolanaGuard {
         return [SPL.tokenProgram, SPL.token2022Program].contains { (try? SPL.associatedAccount(owner: owner, mint: mint, program: $0)) == account }
     }
 
-    public static func kaminoObligation(owner: String) -> String? {
-        guard let o = try? Base58.decode(owner), let m = try? Base58.decode(kaminoMainMarket), let p = try? Base58.decode(kaminoLend),
+    public static func kaminoObligation(owner: String, market: String = kaminoMainMarket) -> String? {
+        guard let o = try? Base58.decode(owner), let m = try? Base58.decode(market), let p = try? Base58.decode(kaminoLend),
               let pda = try? SPL.programAddress(seeds: [Data([0]), Data([0]), o, m, Data(count: 32), Data(count: 32)], program: p) else { return nil }
         return Base58.encode(pda)
     }
@@ -332,8 +341,9 @@ public enum SolanaGuard {
                     continue
                 }
                 if program == kaminoLend, case .some(.some(let at)) = kaminoLendAllowed[kind] {
-                    guard let obligation = account(at), staticKeys.contains(obligation), obligation == kaminoObligation(owner: policy.owner) else {
-                        v.problems.append("Instruction \(n + 1): the Kamino position isn't your own on Kamino's main market.")
+                    guard let obligation = account(at), staticKeys.contains(obligation),
+                          kaminoMarkets.contains(where: { kaminoObligation(owner: policy.owner, market: $0) == obligation }) else {
+                        v.problems.append("Instruction \(n + 1): the Kamino position isn't your own on Kamino's main or Backpack market.")
                         continue
                     }
                 }
@@ -342,7 +352,7 @@ public enum SolanaGuard {
                     v.problems.append("Instruction \(n + 1): Kamino's account setup names a referrer.")
                     continue
                 }
-                v.checks.append("Calls \(programName): an instruction that pays only you. The balance simulation checks the amount.")
+                v.checks.append("Calls \(programName) on your own position: it pays only you, and a repay pays only your debt. The balance simulation checks the amount.")
             case jupiterZ:
                 // One fill, this wallet the taker: what it gives comes from its own account for the input mint (or, with none
                 // named — the program's id — as SOL), and what it gets lands in its own account for the output mint (or as

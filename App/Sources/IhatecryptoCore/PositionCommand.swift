@@ -122,8 +122,14 @@ public enum WalletCommand: Equatable, Sendable {
     case lendDeposit(String, Decimal?)
     /// nil = the whole vault position.
     case lendWithdraw(String, Decimal?)
-    /// Kamino Lend, main market.
+    /// Kamino Lend: the main market, and the Backpack market for Backpack's stocks (`kaminoStocks`), where a deposit is
+    /// collateral to borrow against.
     case kamino(deposit: Bool, symbol: String, amount: Decimal?)
+    /// USDC borrowed on Kamino — on the Backpack market against Backpack's tokenized stocks, or on the main market against
+    /// deposits there — and paid back (nil = all of it). `against`: the stock the loan stands on («SPCX»); `adding`: that
+    /// many of its tokens put up as collateral first (nil = what's there already).
+    case kaminoBorrow(Decimal?, against: String? = nil, adding: Decimal? = nil)
+    case kaminoRepay(Decimal?)
     /// SOL into JitoSOL (liquid staking) and back; nil = all.
     case stake(Decimal?)
     case unstake(Decimal?)
@@ -448,8 +454,9 @@ public enum WalletCommand: Equatable, Sendable {
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buy(.byMint(mint), usdc: amount) }
         }
-        // Robinhood Stock Tokens: a stock word or a company ihatecrypto knows, with buy or sell.
-        if let symbol = StockNames.symbol(in: text), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
+        // Robinhood Stock Tokens: a stock word or a company ihatecrypto knows, with buy or sell. A loan against stocks
+        // isn't one: «займи под акции SpaceX, не продавая» was read as their sale.
+        if let symbol = StockNames.symbol(in: text), !q.contains(Self.borrowWords), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
                 // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it».
                 let shares = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
@@ -513,12 +520,25 @@ public enum WalletCommand: Equatable, Sendable {
         }
         // The network the lending command names; Base when it names none.
         let lendingNetwork = Self.network(in: q) ?? "base"
+        // Borrowing on Kamino and paying it back: «borrow 2 USDC on kamino against 0.05 SPCX», «займи 2 USDC под SPCX на
+        // камино», «repay all USDC on kamino», «погаси долг на камино». A Backpack stock named is Kamino, not Aave.
+        let stock = Self.kaminoStock(in: q)
+        if q.contains(/kamino|камино/) || (stock != nil && !q.contains(/\baave\b|ааве|\bаав/)) {
+            if q.contains(Self.borrowWords), !q.contains(Self.repayWords) {
+                let adding = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?\s+of\s+|акци\w*\s+)?(?:spcx|sndk|skhy|\bmu\b|space\s*x|спейс\w*|micron|микрон\w*|hynix|хайникс\w*|sandisk|сандиск\w*)/)
+                    .flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+                return .kaminoBorrow(amount ?? (bare == adding ? nil : bare), against: stock, adding: adding)
+            }
+            if q.contains(Self.repayWords) {
+                return .kaminoRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare)
+            }
+        }
         // Borrowing on Aave and paying it back, and ETH as its collateral: «borrow 10 USDC on aave», «займи 10 USDC в aave»,
         // «repay all USDC on aave», «погаси долг на aave», «supply 0.01 ETH as collateral on aave», «положи 0.01 ETH в залог».
-        if q.contains(/\bborrow\w*|\bзайм\w*|\bзайми\b|занять|\bв\s+долг\b|\bloan\b/), !q.contains(/\brepay\w*|погас\w*|верн\w*/) {
+        if q.contains(Self.borrowWords), !q.contains(/\brepay\w*|погас\w*|верн\w*/) {
             return .aaveBorrow(amount ?? bare, network: lendingNetwork)
         }
-        if q.contains(/\brepay\w*|погас\w*|(?:верни|вернуть|закрой|закрыть)\s+(?:весь\s+|мой\s+)?долг/) {
+        if q.contains(Self.repayWords) {
             return .aaveRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare, network: lendingNetwork)
         }
         if q.contains(/collateral|залог/), let m = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:eth|эфир)/) {
@@ -534,8 +554,10 @@ public enum WalletCommand: Equatable, Sendable {
             if into || q.contains(/\blend\b|\bsupply\b|\bdeposit\b|депозит|полож|одолж/) { return .morpho(deposit: true, amount: coins ?? amount ?? bare, network: lendingNetwork) }
         }
         if q.contains(/kamino|камино/) {
-            if outOf { return .kamino(deposit: false, symbol: symbol, amount: coins ?? amount ?? bare) }
-            if into { return .kamino(deposit: true, symbol: symbol, amount: coins ?? amount ?? bare) }
+            // A Backpack stock goes in and out by its count of tokens: «deposit 0.05 SPCX to kamino».
+            let tokens = stock == nil ? coins : bare
+            if outOf { return .kamino(deposit: false, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
+            if into { return .kamino(deposit: true, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
         }
         if q.contains(/(?:останов|отмен|прекрат|стоп)\w*\s+(?:регулярн\w*\s+)?(?:покупк|dca|расписан)|(?:stop|cancel|end)\s+(?:the\s+|all\s+)?(?:recurring|regular|scheduled)?\s*(?:buys|purchases|dca|schedules?)/) { return .stopSchedules }
         if q.contains(/покупай|каждый|каждую|каждые|раз\s+в\s+|регулярн|\bdca\b|\bevery\b|\beach\b|weekly|daily|monthly|recurring/), q.contains(/куп|dca|\bbuy/), let asset = SpotAsset.find(q), let amount {
@@ -663,6 +685,25 @@ public enum WalletCommand: Equatable, Sendable {
     nonisolated(unsafe) static let depositWords = try! Regex("полож\\w*|внес\\w*|закин\\w*|вкин\\w*|кинь|засун\\w*|влож\\w*|задепозит\\w*|депозитн\\w*|депни|пополн\\w*|инвест\\w*|\\bdeposit\\w*|\\bdepo\\b|\\bput\\b|\\badd\\b|\\bplace\\b|\\bsupply\\b|\\bstash\\b|\\bpark\\b|\\binvest\\w*|\\btop\\s+up\\b")
     nonisolated(unsafe) static let withdrawWords = try! Regex("сним\\w*|выв[её]д\\w*|забер\\w*|верн\\w*|\\bwithdraw\\w*|take\\s+out|\\bremove\\b|\\bpull\\b|\\bredeem\\w*")
     /// «в камино», «into the vault», «из хранилища»: compiled once, not on every message.
+    /// «займёт» is time («сколько займёт покупка»), not a loan.
+    nonisolated(unsafe) static let borrowWords = /\bborrow\w*|\bзайм(?![её]т)\w*|\bзайми\b|занять|\bв\s+долг\b|\bloan\b/
+    nonisolated(unsafe) static let repayWords = /\brepay\w*|погас\w*|(?:верни|вернуть|закрой|закрыть)\s+(?:весь\s+|мой\s+)?долг/
+
+    /// Backpack's tokenized stocks Kamino's Backpack market takes as collateral, by ticker: their Token-2022 mints
+    /// (Kamino.backpackStocks has the same four).
+    public static let kaminoStockMints = ["SPCX": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb", "MU": "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
+                                          "SKHY": "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3", "SNDK": "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH"]
+    public static let kaminoStocks = ["SPCX", "MU", "SKHY", "SNDK"]
+
+    /// The Backpack stock a request names, by ticker or company, in English or Russian.
+    static func kaminoStock(in q: String) -> String? {
+        if q.contains(/\bspcx\b|space\s*x|спейс\w*/) { return "SPCX" }
+        if q.contains(/\bsndk\b|sandisk|сандиск/) { return "SNDK" }
+        if q.contains(/\bskhy\b|hynix|хайникс|хиникс/) { return "SKHY" }
+        if q.contains(/\bmu\b|micron|микрон/) { return "MU" }
+        return nil
+    }
+
     static let places = #"(?:the\s+|my\s+|мо[йеюи]\s+)?(?:vault|хранилищ|jupiter|jupyter|джупитер|юпитер|kamino|камино|aave|ааве|hlp|хлп|лендинг|lend)"#
     nonisolated(unsafe) static let intoPlace = try! Regex(#"(?:\bв\b|\bво\b|into|\bto\b|\bin\b)\s+"# + places)
     nonisolated(unsafe) static let outOfPlace = try! Regex(#"(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b|out\s+of)\s+"# + places)
@@ -773,6 +814,7 @@ extension WalletCommand {
         case .solanaTo(let place, nil): "How many USDC should I move from Solana to \(Self.placeName(place))?"
         case .receiveAcross(let net, let t, nil): "How much \(t) will you send from \(AddressCheck.Network(rawValue: net)?.title ?? net)?"
         case .aaveBorrow(nil, let net): "How many USDC to borrow on Aave on \(Self.placeName(net))?"
+        case .kaminoBorrow(nil, let s, _): "How many USDC to borrow on Kamino" + (s.map { " against \($0)" } ?? "") + "?"
         case .aaveCollateral(nil, let net): "How much ETH as collateral on Aave on \(Self.placeName(net))?"
         default: nil
         }
@@ -803,6 +845,7 @@ extension WalletCommand {
         case .solanaTo(let place, _): .solanaTo(place, amount)
         case .receiveAcross(let net, let t, _): .receiveAcross(network: net, token: t, amount: amount)
         case .aaveBorrow(_, let net): .aaveBorrow(amount, network: net)
+        case .kaminoBorrow(_, let s, let add): .kaminoBorrow(amount, against: s, adding: add)
         case .aaveCollateral(_, let net): .aaveCollateral(amount, network: net)
         case .sell(let a, _): .sell(a, amount: amount)
         case .sellOn(let place, let t, _, let keep): .sellOn(place, token: t, amount: amount, keep: keep)
@@ -972,6 +1015,8 @@ extension WalletCommand {
         case .usdt(let from, let to, let x, let layerZero):
             return "move \(n(x)) USDT from \(Self.placeName(from)) to \(Self.placeName(to))" + (layerZero ? " via LayerZero" : "")
         case .aaveBorrow(let x, let net): return "borrow \(n(x)) USDC on Aave on \(Self.placeName(net))"
+        case .kaminoBorrow(let x, let s, let add): return "borrow \(n(x)) USDC on kamino" + (s.map { " against " + (add.map { "\(n($0)) " } ?? "") + $0 } ?? "")
+        case .kaminoRepay(let x): return x == nil ? "repay all USDC on kamino" : "repay \(n(x)) USDC on kamino"
         case .aaveRepay(let x, let net): return x == nil ? "repay all USDC on Aave on \(Self.placeName(net))" : "repay \(n(x)) USDC on Aave on \(Self.placeName(net))"
         case .aaveCollateral(let x, let net): return "supply \(n(x)) ETH as collateral on Aave on \(Self.placeName(net))"
         case .claimRewards: return "claim rewards on Merkl"

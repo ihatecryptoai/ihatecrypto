@@ -1,3 +1,4 @@
+import DeFiKamino
 import EVMChain
 import Foundation
 import IhatecryptoCore
@@ -1357,6 +1358,8 @@ extension Workspace {
         case .usdt(let from, let to, let amount, let layerZero): usdtRoute(command, from, to, amount, layerZero: layerZero)
         case .aaveBorrow(let x?, let net), .aaveCollateral(let x?, let net): aaveDebtRoute(command, x, net)
         case .aaveRepay(let x, let net): aaveDebtRoute(command, x, net)
+        case .kaminoBorrow(let x?, let stock, let adding): kaminoDebtRoute(command, x, stock, adding)
+        case .kaminoRepay(let x): kaminoDebtRoute(command, x, nil, nil)
         case .gas(let place, let usd): gasRoute(place, usd ?? 1)
         case .claimRewards, .sweepRewards: claimRoute()
         default: ends(command).map { from, to in
@@ -1371,6 +1374,56 @@ extension Workspace {
             return MoveRoute(title: held.map { title.replacingOccurrences(of: $0, with: from.title) } ?? title, footer: footer, steps: around(command, [from, to]))
         }
         }
+    }
+
+    /// A Backpack stock's bundled logo, else Kamino's.
+    private func stockLogo(_ stock: String?) -> String {
+        stock.map { TokenLogo.image($0.lowercased()) != nil ? $0.lowercased() : "kamino" } ?? "kamino"
+    }
+
+    /// Borrowing USDC on Kamino against a stock — put up first when the command brings it — or paying it back: the
+    /// collateral, the loan with the health factor before and after (quoted while the card waits), where the USDC ends.
+    private func kaminoDebtRoute(_ command: WalletCommand, _ amount: Decimal?, _ stock: String?, _ adding: Decimal?) -> MoveRoute {
+        let q = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
+        func line(_ way: String) -> String? { q?.first(where: { $0.way == way }).map(\.gets) }
+        let what = amount.map { Fmt.num($0, maxFraction: 6) } ?? "all"
+        let free = solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? ""
+        if case .kaminoRepay = command {
+            // «All» is what's owed, not all the wallet's USDC: the debt as quoted, a tenth of a percent over.
+            let out = amount ?? q?.first { $0.way == "debt" }.map { ($0.worth * Decimal(string: "1.001")!).rounded(6, .up) }
+            return MoveRoute(title: "Repay \(what) USDC on Kamino",
+                             footer: "One transaction: the USDC goes back to Kamino against this wallet's own loan, never anyone else's, and Kamino takes no more than is owed. "
+                                + "The collateral stays until you withdraw it. Press Confirm.",
+                             steps: [step("usdc", "FROM · SOLANA", out.map { "\(amount == nil ? "≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", free, .solana,
+                                          money: out.map { moneyMove("USDC", on: "solana", by: -$0) } ?? []),
+                                     step("kamino", "REPAY · KAMINO", line("debt").map { "debt \($0)" } ?? "\(what) USDC", "the debt goes down, the collateral stays", .kamino)])
+        }
+        let logo = stockLogo(stock)
+        // What Kamino holds of the stock and what the wallet owes there now, and after: the cards' was → after boxes.
+        let up = kaminoLoan?.collateral.first { $0.symbol == stock }?.tokens ?? 0, owed = kaminoLoan?.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
+        var steps: [ActivityBubble] = []
+        if let stock, let adding {
+            steps.append(step(logo, "FROM · SOLANA", "\(Fmt.num(adding, maxFraction: 6)) \(stock)", "", .solana, money: moneyMove(stock, on: "solana", by: -adding)))
+        }
+        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", stock == nil ? "what you put up on Kamino" : "Backpack market · not sold", .kamino,
+                       money: stock.map { vaultMove("Kamino", $0, was: up, by: adding ?? 0) } ?? []),
+                  step("kamino", "BORROW · KAMINO", "\(what) USDC", line("health").map { "health factor \($0)" } ?? "health factor: reading…", .kamino,
+                       money: vaultMove("Kamino debt", "USDC", was: owed, by: amount)),
+                  step("usdc", "TO · SOLANA", "\(what) USDC", line("rate").map { "your wallet · \($0)" } ?? "your wallet", .solana,
+                       money: amount.map { moneyMove("USDC", on: "solana", by: $0) } ?? [])]
+        // A loan the executor would refuse says so on the card, with how much it would take.
+        let health = q?.first { $0.way == "health" }?.worth, available = q?.first { $0.way == "available" }?.worth
+        let refused: String? = if let amount, let available, amount > available {
+            "Kamino lends at most \(Fmt.usd(available)) against this collateral: ihatecrypto won't sign \(what) USDC. Borrow less, or put more up."
+        } else if let health, health > 0, health < Executor.minimumHealth {
+            "That leaves a health factor of \(Fmt.num(health, maxFraction: 2)), under ihatecrypto's 1.5: it won't sign this. Borrow less, or put more up."
+        } else { nil }
+        let first = stock.flatMap { s in adding.map { _ in "Two transactions: the \(s) goes in as collateral, then Kamino lends \(what) USDC against it, nothing sold (the first time ≈ 0.023 SOL of rent, most of it back when all comes out). " } }
+        return MoveRoute(title: "Borrow \(what) USDC on Kamino" + (stock.map { " against \($0)" } ?? ""),
+                         footer: (first ?? "Kamino lends \(what) USDC against what's up there, nothing sold. ")
+                            + "ihatecrypto stops at a health factor of 1.5" + (stock != nil ? "; stock prices stand still while US markets are closed. " : ". ") + "Press Confirm.",
+                         steps: steps,
+                         warning: refused ?? line("liquidation").flatMap { $0.isEmpty ? nil : "Liquidation if \($0): Kamino sells your \(stock ?? "collateral") at a penalty. Keep an eye on it, or borrow less." })
     }
 
     private func step(_ logo: String, _ label: String, _ title: String, _ line: String, _ fill: RouteFill, money: [MoneyMove] = []) -> ActivityBubble {
@@ -1680,6 +1733,14 @@ extension Workspace {
             return (step("jup", "FROM · JUPITER LEND", "\(n(x)) \(s)", lendTotal > 0 ? "in the vault: \(Fmt.num(lendTotal)) USDC" : "", .jupiter,
                          money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lendTotal, by: x.map { -$0 }) : []),
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))
+        // Backpack's stocks: collateral on Kamino's Backpack market, out of the wallet and back.
+        case .kamino(let into, let s, let x) where WalletCommand.kaminoStockMints[s] != nil:
+            let wallet = step(stockLogo(s), into ? "FROM · SOLANA" : "TO · SOLANA", "\(n(x)) \(s)",
+                              into ? heldOnSolana(s).map { "in the wallet: \(Fmt.num($0, maxFraction: 6)) \(s)" } ?? "" : "your wallet", .solana,
+                              money: x.map { moneyMove(s, on: "solana", by: into ? -$0 : $0) } ?? (into ? moneyMove(s, on: "solana", by: nil) : []))
+            let kamino = step("kamino", into ? "COLLATERAL · KAMINO" : "FROM · KAMINO", "\(n(x)) \(s)",
+                              into ? "Backpack market · earns nothing · borrow USDC against it" : "the collateral back; a loan on it is paid first", .kamino)
+            return into ? (wallet, kamino) : (kamino, wallet)
         case .kamino(true, let s, let x):
             let a = x ?? heldForAll(s, fill: .solana)?.0
             return (step(s == "SOL" ? "sol" : "usdc", "FROM · SOLANA", "\(n(x)) \(s)", s == "SOL" ? solSOL : solUSDC, .solana, money: moneyMove(s, on: "solana", by: a.map { -$0 })),
@@ -2265,8 +2326,10 @@ extension Workspace {
         case .aaveRepay:
             return MoveRoute(title: "Repay \(what) USDC on Aave · \(name)",
                              footer: "An approve of what's owed (a tenth of a percent over, for the interest of the next blocks), then the repay — of this wallet's own debt only. Press Confirm.",
-                             steps: [step(logo, "FROM · \(name.uppercased())", "\(what) USDC", "USDC on \(name)", fill, money: moneyMove("USDC", on: net, by: amount.map { -$0 })),
-                                     approve("\(what) USDC", for: "Aave", logo: "aave", .aave),
+                             // «All» is the debt, not the wallet's USDC: the step's «all» would read as everything held.
+                             steps: [step(logo, "FROM · \(name.uppercased())", amount.map { "\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", "USDC on \(name)", fill,
+                                          money: amount.map { moneyMove("USDC", on: net, by: -$0) } ?? []),
+                                     approve(amount.map { "\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "what's owed, in USDC", for: "Aave", logo: "aave", .aave),
                                      step("aave", "REPAY · AAVE", "\(what) USDC", "the debt goes down, the collateral stays", .aave)])
         case .aaveCollateral:
             return MoveRoute(title: "\(what) ETH as collateral on Aave · \(name)",
@@ -2374,6 +2437,34 @@ extension Workspace {
                                            ("collateral", Fmt.usd(p.now.collateral), p.now.collateral)])
                 }
                 try? await Task.sleep(for: .seconds(30))
+            }
+            return
+        case .kaminoBorrow(let x?, let stock, let adding):
+            // The health factor after the borrow, the stock's price that would liquidate it and the rate, every 30 s.
+            guard let wallet = previewWallet else { return }
+            while !Task.isCancelled {
+                let p = try? await executor(wallet).kaminoBorrowPreview(usdc: x, against: stock, adding: adding)
+                guard !Task.isCancelled else { return }
+                if let p {
+                    let now = p.healthNow.map { Fmt.num($0, maxFraction: 2) } ?? "∞", after = p.healthAfter.map { Fmt.num($0, maxFraction: 2) } ?? "∞"
+                    swapQuote = (command, [("health", "\(now) → \(after)", p.healthAfter ?? 0),
+                                           ("liquidation", p.liquidationPrice.map { "\(p.stock ?? "the collateral") ≤ \(Fmt.usd($0))" } ?? "", 0),
+                                           ("collateral", p.stock.map { "\(Fmt.num(p.stockTokens, maxFraction: 6)) \($0) · \(Fmt.usd(p.collateralUSD))" } ?? Fmt.usd(p.collateralUSD), p.collateralUSD),
+                                           ("rate", "\(Fmt.num(p.borrowAPY.rounded(2, .plain)))% a year", p.borrowAPY),
+                                           ("available", Fmt.usd(p.availableUSD), p.availableUSD)])
+                }
+                try? await Task.sleep(for: .seconds(30))
+            }
+            return
+        case .kaminoRepay:
+            // What is owed now, on the market that holds the loan.
+            let owner = solanaAddress
+            for m in [Kamino.backpackMarket, Kamino.mainMarket] {
+                if let loan = try? await Kamino.loan(wallet: owner, market: m), loan.debtUSD > 0 {
+                    guard !Task.isCancelled else { return }
+                    swapQuote = (command, [("debt", Fmt.usd(loan.debtUSD), loan.debtUSD)])
+                    return
+                }
             }
             return
         case .sendToken(let name, let token, let x?, let network):

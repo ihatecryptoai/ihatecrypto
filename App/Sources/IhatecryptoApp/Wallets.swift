@@ -43,6 +43,8 @@ extension Workspace {
         lendEarnedAt = nil
         kamino = 0
         kaminoDeposits = []
+        kaminoLoan = nil
+        kaminoLoanRead = false
         near = 0
         base = nil
         arbitrumUSDC = nil

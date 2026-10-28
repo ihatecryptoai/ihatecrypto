@@ -270,7 +270,7 @@ public struct Modules: Equatable, Sendable {
         case .jupiterDCA, .jupiterDCACancel, .jupiterDCAOrders: return r(.jupiterDCA)
         case .stake, .unstake: return r(.jitoSOL)
         case .lendDeposit, .lendWithdraw: return r(.jupiterLend)
-        case .kamino: return r(.kamino)
+        case .kamino, .kaminoBorrow, .kaminoRepay: return r(.kamino)
         case .hlp: return r(.hlp)
         case .aave(_, _, let net): return r(.aave) ?? r(.relay, via: ModuleNetwork(place: net).map { [$0] } ?? [])
         case .aaveBorrow(_, let net), .aaveRepay(_, let net), .aaveCollateral(_, let net): return r(.aave, via: ModuleNetwork(place: net).map { [$0] } ?? [])

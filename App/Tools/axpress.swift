@@ -3,7 +3,8 @@
 // it never reaches the installed app. The terminal needs the Accessibility right (System Settings › Privacy & Security).
 //   swiftc -O App/Tools/axpress.swift -o App/.build/axpress   (Tools/live.sh does it)
 //   axpress list [part of a title]   the buttons on screen, their titles and descriptions
-//   axpress press <exact title>      presses the first button with that title («Confirm», «Send anyway · ≈ $3.10 lost»)
+//   axpress press <title>            presses the first button with that exact title («Confirm»), else the first whose
+//                                    title holds it («Send anyway» for «Send anyway · ≈ $3.10 lost»)
 import AppKit
 import ApplicationServices
 
@@ -28,20 +29,21 @@ func names(_ e: AXUIElement) -> [String] {
 }
 var roots = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
 if let main = attr(app, kAXMainWindowAttribute) { roots.append(main as! AXUIElement) }
-var found: [AXUIElement] = []
+var found: [AXUIElement] = [], partly: [AXUIElement] = []
 func walk(_ e: AXUIElement, _ depth: Int) {
     guard depth < 60 else { return }
     let n = names(e)
     if attr(e, kAXRoleAttribute) as? String == "AXButton" {
         if args[1] == "list", args.count < 3 || n.contains(where: { $0.localizedCaseInsensitiveContains(args[2]) }) { print(n.joined(separator: " · ")) }
         if args[1] == "press", n.contains(args[2]) { found.append(e) }
+        if args[1] == "press", n.contains(where: { $0.contains(args[2]) }) { partly.append(e) }
     }
     for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { walk(c, depth + 1) }
 }
 for r in roots { walk(r, 0) }
 if args[1] == "press" {
     // The card waits twice, under the chat's reply and on the canvas: both are the same Confirm.
-    guard let e = found.first else { print("no button titled «\(args[2])»; axpress list shows what there is"); exit(1) }
+    guard let e = found.first ?? partly.first else { print("no button titled «\(args[2])»; axpress list shows what there is"); exit(1) }
     let r = AXUIElementPerformAction(e, kAXPressAction as CFString)
     print(r == .success ? "pressed «\(args[2])»" : "press failed: \(r.rawValue)")
     exit(r == .success ? 0 : 1)

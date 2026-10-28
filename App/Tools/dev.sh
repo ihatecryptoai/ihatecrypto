@@ -19,7 +19,8 @@ api() {  # METHOD PATH [JSON]
 py() { python3 -I -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); $1" }
 
 busy() {
-  pgrep -f 'uitest.py|done.sh' >/dev/null && { echo "uitest.py or done.sh runs"; return 0 }
+  # The scripts themselves, not a command line that only names them (another session's wait loop did).
+  pgrep -f '(^|[ /])(uitest\.py|done\.sh)( |$)' >/dev/null && { echo "uitest.py or done.sh runs"; return 0 }
   local s; s=$(TIMEOUT=5 api GET /state) || return 1
   echo $s | py "b=d['boards']; why=[k for k in ('busy','executing') if d.get(k)] + (['a card waits for Confirm'] if b.get('pending') else []) + (['a move runs'] if b.get('running') else []); print(', '.join(why)); sys.exit(0 if why else 1)"
 }
@@ -46,7 +47,7 @@ relaunch)
   if [[ $1 == --build ]]; then
     shift
     df -h /System/Volumes/Data | awk 'NR==2 && $5+0 > 85 { print "disk " $5 " full: builds fail without a clear error below 15% free" > "/dev/stderr" }'
-    (cd $HERE/.. && unset GIT_DIR GIT_WORK_TREE && ./build-app.sh 2>&1 | grep -E '^\*\* BUILD|error:|installed') || exit 1
+    (setopt pipefail; cd $HERE/.. && unset GIT_DIR GIT_WORK_TREE && ./build-app.sh 2>&1 | grep -E '^\*\* BUILD|error:|installed') || { echo "the build failed: Dev not reopened" >&2; exit 1 }
   fi
   old=$(stat -f %m $DATA/debug-token 2>/dev/null || echo 0)
   open $APP ${1:+--args} "$@"

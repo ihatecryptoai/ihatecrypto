@@ -162,7 +162,8 @@ def main():
                     state = call("GET", "/state")
                 why += [(f"after «{turn['send']}»: " if "turns" in s else "") + w for w in check(turn["expect"], state, replies)]
             if SHOTS and state.get("windowID"):
-                time.sleep(2)  # route cards fade in one at a time
+                # Route cards fade in one at a time, about a second each: a picture before the last caught «2 of 4».
+                time.sleep(2 + len((state["boards"].get("pending") or {}).get("steps") or []))
                 # /screenshot comes out blank (glass chrome): screencapture needs the terminal's Screen Recording right.
                 shot = os.path.join(SHOTS, f"{n:02d} {re.sub(r'[/:]', '-', s['name'])[:80]}.png")
                 subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])

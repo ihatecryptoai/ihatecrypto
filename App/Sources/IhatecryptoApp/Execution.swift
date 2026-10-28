@@ -604,6 +604,8 @@ extension Workspace {
                 case .aaveRepay: reply(try await e.aaveRepay(m, usdc: x), note: "\(m.place) · repay")
                 default: reply(try await e.aaveSupplyETH(m, eth: x ?? 0), note: "\(m.place) · collateral")
                 }
+            case .kaminoBorrow(let x, let stock, let adding): reply(try await e.kaminoBorrow(usdc: x ?? 0, against: stock, adding: adding), note: "Kamino · borrow")
+            case .kaminoRepay(let x): reply(try await e.kaminoRepay(usdc: x), note: "Kamino · repay")
             case .receiveAcross: break   // no card: the deposit address goes on the canvas (prepareReceiveAcross)
             case .crossSwap(let a, let from, let b, let to, let amount):
                 // NEAR's side: the wallet's NEAR account, which only the signer derives.
@@ -802,6 +804,12 @@ extension Workspace {
         otherTokens = otherTokens.filter { !($0.chain == place && $0.contract == net.usdc) } + (units > 0 ? [fresh] : [])
     }
 
+    /// The wallet's tokens of a Backpack stock on Solana, by its mint; nil before the balance loads.
+    func heldOnSolana(_ stock: String) -> Decimal? {
+        guard let s = solana, let mint = WalletCommand.kaminoStockMints[stock] else { return nil }
+        return s.tokens.first { $0.contract == mint }?.amount ?? 0
+    }
+
     /// A move that can't go through with what the wallet holds is said so at once, instead of a card whose Confirm
     /// could only fail («Sell 0 NEAR»).
     func refusalBeforeCard(_ command: WalletCommand, inChain: Bool = false) -> String? {
@@ -841,6 +849,26 @@ extension Workspace {
             }
             return lacks(hlp.equity, asked, "HLP")
         case .lendDeposit("USDC", let asked?), .kamino(deposit: true, symbol: "USDC", amount: let asked?): return lacks(solana?.usdc, asked, "Solana")
+        // Backpack's stocks put up on Kamino come from the wallet; a repay pays from its USDC on Solana.
+        case .kamino(deposit: true, symbol: let s, amount: let asked?) where WalletCommand.kaminoStockMints[s] != nil:
+            return lacks(heldOnSolana(s), asked, "Solana", s)
+        case .kaminoBorrow(_, against: let s?, adding: let asked?) where !inChain: return lacks(heldOnSolana(s), asked, "Solana", s)
+        // A loan with nothing put up yet, on a stock named or none: the way to put one up, or to get it, before any card.
+        case .kaminoBorrow(let usdc, against: let named, adding: nil) where !inChain && named.map { WalletCommand.kaminoStockMints[$0] != nil } ?? true:
+            guard solana != nil, kaminoLoanRead, (kaminoLoan?.depositUSD ?? 0) <= 0 else { return nil }
+            // Unnamed: the Backpack stock the wallet holds, else SpaceX's for the example.
+            let s = named ?? WalletCommand.kaminoStocks.first { (heldOnSolana($0) ?? 0) > 0 } ?? "SPCX"
+            let held = heldOnSolana(s) ?? 0, n = Fmt.num(held, maxFraction: 6), x = usdc.map { Fmt.num($0) } ?? "1"
+            return held > 0
+                ? say("Nothing is up on Kamino's Backpack market yet. The wallet has \(n) \(s): «borrow \(x) USDC on kamino against \(n) \(s)» puts it up and borrows in one go.",
+                      "На рынке Backpack в Kamino пока ничего не заложено. В кошельке \(n) \(s): «borrow \(x) USDC on kamino against \(n) \(s)» заложит их и займёт за один раз.")
+                : say("There's no \(s) on Kamino or in the wallet. Buy it first — «buy \(s) on solana for 5 USDC» — then borrow against it.",
+                      "\(s) нет ни в Kamino, ни в кошельке. Сначала купи — «купи \(s) на солане на 5 USDC», — потом займи под него.")
+        case .kaminoRepay(let asked) where !inChain:
+            if solana != nil, kaminoLoanRead, (kaminoLoan?.debtUSD ?? 0) <= 0, kamino <= 0 {
+                return say("No USDC debt on Kamino — nothing to pay back.", "Долга в USDC на Kamino нет — возвращать нечего.")
+            }
+            return lacks(solana?.usdc, asked, "Solana")
         // All of it goes in at once, and Jupiter starts at 100: «say less» would only meet its minimum.
         case .jupiterDCA(_, let asked?, _, _):
             if let have = solana?.usdc, asked > have {

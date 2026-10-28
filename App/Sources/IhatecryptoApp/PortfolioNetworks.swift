@@ -33,6 +33,8 @@ struct NetworkLine: Identifiable {
     var coin: String? = nil
     var apy: Decimal? = nil
     var earned: Decimal? = nil
+    /// A deposit's own numbers under its dollars, in place of the interest (a loan: collateral, borrowed, health).
+    var facts: [(value: String, label: String)]? = nil
 }
 
 /// A Jupiter Lend deposit: the coin put in, how much of it, its decimals and % a year; `address` is the vault's token.
@@ -101,6 +103,20 @@ extension Workspace {
                                earned: lendEarned[d.address].map { $0 / pow(10, d.decimals) * price }, place: "jupiter")
             }
             lines += kaminoDeposits.map { earning("kamino", "Kamino Lend", apy: $0.apy, usd: $0.usd, coin: $0.coin, place: "kamino") }
+            // Backpack's stocks put up on Kamino stay on the card, worth the collateral less the debt.
+            if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
+                let main = loan.collateral.max { $0.valueUSD < $1.valueUSD }
+                let amounts = loan.collateral.filter { $0.tokens > 0 }.map { "\(Fmt.num($0.tokens, maxFraction: 6)) \($0.symbol)" }.joined(separator: " · ")
+                let debt = loan.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
+                lines.append(NetworkLine(kind: .earning, logo: "kamino", title: "Kamino Backpack", detail: "collateral", usd: loan.depositUSD - loan.debtUSD,
+                                         amount: amounts.isEmpty ? nil : amounts, place: "kamino",
+                                         help: "\(amounts) put up on Kamino's Backpack market, \(Fmt.num(debt, maxFraction: 6)) USDC borrowed against it"
+                                            + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2)) (liquidation at 1)" } ?? "")
+                                            + ". «repay all USDC on kamino» pays it back; «withdraw \(main?.symbol ?? "SPCX") from kamino» takes the stock back.",
+                                         coin: main?.symbol ?? "USDC",
+                                         facts: [(Fmt.usd(loan.depositUSD), "collateral"), ("−" + Fmt.usd(loan.debtUSD), "borrowed")]
+                                            + (loan.health.map { [(Fmt.num($0, maxFraction: 2), "health")] } ?? [])))
+            }
             // Deposits made on a site: Kamino's vaults, Jupiter's other platforms.
             lines += protocolPositions.map { p in
                 let coin = p.symbol ?? p.amount?.split(separator: " ").last.map(String.init) ?? p.name
@@ -453,6 +469,7 @@ struct DepositTile: View {
     /// A day's and a month's interest at the rate now, then what it earned (or a year's).
     private var stats: [(value: String, label: String)] {
         func plus(_ usd: Decimal) -> String { "+" + Fmt.usd(usd) }
+        if let facts = line.facts { return facts }
         let earned = line.earned.map { (plus($0), "earned so far") }
         guard let apy = line.apy, apy > 0 else { return earned.map { [$0] } ?? [] }
         let year = line.usd * apy / 100

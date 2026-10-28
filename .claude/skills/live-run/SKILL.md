@@ -26,6 +26,12 @@ the window by the Dev copy's bundle id alone. Never sign from a main wallet; nev
 
 ## Pitfalls
 
+- A button's title is in the chat's language and may hold a price: «Отправить всё равно · потеря ≈ $1.79». A part
+  of it is enough (`"Отправить всё равно"`); in the shell, single quotes keep `$1` from being eaten.
+- The chat's cards fade in after the reply; live.sh retries a press for 10 s. It deletes its test canvas at the end:
+  a question the run left unanswered goes with it, so pass every button of the flow in one run.
+- Balances in /state can lag a hung refresh by minutes (all networks land together): check the chain or the protocol's
+  API before deciding that a move didn't happen, and before the next step builds on it.
 - `axpress` needs the terminal's Accessibility right (System Settings › Privacy & Security › Accessibility). Several
   buttons can be titled «Confirm» (under the chat's reply and on the canvas): they are the same card.
 - `swift run WalletCheck …` uses `~/.ihatecrypto/test-wallet.txt`, an older wallet that may not exist on this Mac.
