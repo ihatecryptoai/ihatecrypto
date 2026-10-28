@@ -6,7 +6,7 @@
 #   Tools/commit-own.sh <message file> <file>@1,3 …   only hunks 1 and 3 of a file another agent also edits
 #                                                     (python3 -I Tools/hunks.py list <file> numbers them)
 emulate -L zsh
-setopt err_exit
+setopt err_exit pipe_fail
 [[ $# -ge 2 && -f $1 ]] || { sed -n '2,8p' $0 | sed 's/^# //'; exit 2 }
 msg=${1:A}; shift
 hunks=${0:A:h}/hunks.py
