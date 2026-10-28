@@ -28,6 +28,12 @@ public struct TradeIntent: Codable, Equatable, Sendable {
     public var partialTake: Bool?
     /// «трейлинг 2%»: the stop follows the best price at this distance while the app is open.
     public var trailingPct: Decimal?
+    /// «hedge 0.1 SOL»: a short of this many of the coins the wallet holds (Hedge); sized by them, not by a risk.
+    public var hedge: Decimal?
+    /// «hedge SOL» = 1, «hedge SOL half» = 0.5: the share of what the wallet holds, turned into `hedge` by Plan.resolve.
+    public var hedgeShare: Decimal?
+
+    public var isHedge: Bool { hedge != nil || hedgeShare != nil }
 
     public init() {}
 
@@ -46,6 +52,10 @@ public struct TradeIntent: Codable, Equatable, Sendable {
         if autoRules != old.autoRules, autoRules == true { out.append("the rest by the risk rules") }
         if partialTake != old.partialTake, partialTake == true { out.append("take in parts: half at 1R, then stop to breakeven") }
         if trailingPct != old.trailingPct { out.append("trailing \(opt(trailingPct, Fmt.pct))") }
+        if isHedge, hedge != old.hedge || hedgeShare != old.hedgeShare {
+            out.append(hedge.map { "hedge \(Fmt.num($0, maxFraction: 6)) \(asset)" }
+                       ?? hedgeShare.map { $0 < 1 ? "hedge \(Fmt.pct($0 * 100)) of the \(asset) held" : "hedge all the \(asset) held" } ?? "")
+        }
         if entryPx != old.entryPx || pullbackPct != old.pullbackPct {
             out.append(entryPx.map { "limit entry at \(Fmt.price($0))" } ?? pullbackPct.map { "entry on a \(Fmt.pct($0)) pullback" } ?? "market entry")
         }
@@ -59,13 +69,21 @@ public struct TradeIntent: Codable, Equatable, Sendable {
     /// the empty plan (TradeIntent's defaults are ETH, long), which isn't drawn.
     public var started: TradeIntent {
         var next = self
-        if next.autoRules == nil, next.riskUSD == nil || next.stopPct == nil { next.autoRules = true }
+        // A hedge is sized by the coins held: the rules have no risk to fill.
+        if next.autoRules == nil, !isHedge, next.riskUSD == nil || next.stopPct == nil { next.autoRules = true }
         return next
     }
 
     public var command: String {
         func n(_ d: Decimal) -> String { NSDecimalNumber(decimal: d).stringValue }
-        var parts = ["\(side == .long ? "long" : "short") \(asset.hasPrefix("xyz:") ? String(asset.dropFirst(4)) : asset)"]
+        let name = asset.hasPrefix("xyz:") ? String(asset.dropFirst(4)) : asset
+        if isHedge {
+            var parts = [hedge.map { "hedge \(n($0)) \(name)" } ?? "hedge \(name)\((hedgeShare ?? 1) < 1 ? " \(n((hedgeShare ?? 1) * 100))%" : "")"]
+            if let v = leverage { parts.append("leverage \(n(v))x") }
+            if let v = stopPct { parts.append("stop \(n(v))%") }
+            return parts.joined(separator: " ")
+        }
+        var parts = ["\(side == .long ? "long" : "short") \(name)"]
         if let v = riskUSD { parts.append("risk $\(n(v))") }
         if let v = stopPct { parts.append("stop \(n(v))%") }
         if let v = takePct { parts.append("take \(n(v))%") } else if let v = takeR { parts.append("take \(n(v))R") }
@@ -126,9 +144,20 @@ public enum IntentParser {
             || q.contains(/^\s*(?:buy|sell|купи\w*|прода\w*)\b.*\b(?:on|на|в|во)\s+(?:the\s+)?(?:solana|base|arbitrum|polygon|ethereum|mainnet|optimism|hyperevm|robinhood|tempo|bnb|bsc|binance|avalanche|avax|sui|tron|солан\w*|бейс\w*|арбитрум\w*|полигон\w*|эфириум\w*|оптимизм\w*|хайперевм\w*|робинхуд\w*|темпо\w*|бнб|бсц|бинанс\w*|аваланч\w*)\b/) { return nil }
         var next = intent
         var hit = false
+        // «hedge SOL», «захеджируй половину эфира»: a plan of its own, sized by what the wallet holds, never a change to the
+        // plan on the canvas; a long or a short after it is a trade again.
+        // «не хеджируй», «сними хедж»: never a new hedge, and nothing else either; «long SOL, no hedge» is the long.
+        let unhedge = q.contains(/\bне\s+(?:за)?хедж|сним\w*\s+хедж|убери\s+хедж|без\s+хедж|\bno\s+hedg|\bdon'?t\s+hedg|\bunhedg|\bwithout\s+(?:a\s+)?hedg/)
+        if unhedge, !q.contains(/\b(?:лонг|шорт|long|short)/) { return nil }
+        let hedging = !unhedge && q.contains(/\bhedg|хедж/)
+        // A dollar amount isn't a hedge's size: it counts coins, so the model asks.
+        if hedging, q.contains(/\$\s*\d|\d\s*(?:\$|usdc|usd\b|долл|бакс)/) { return nil }
+        if hedging { next = TradeIntent() }
+        var named = false
 
         if q.contains(/\b(?:лонг|long)/) { next.side = .long; hit = true }
         if q.contains(/\b(?:шорт|short)/) { next.side = .short; hit = true }
+        if !hedging, q.contains(/\b(?:лонг|шорт|long|short)/) { next.hedge = nil; next.hedgeShare = nil }
 
         let known = markets.isEmpty ? fallbackMarkets : markets
         // A ticker on the main exchange, else the same ticker on a HIP-3 one («xyz:TSLA»).
@@ -140,9 +169,9 @@ public enum IntentParser {
             return known.sorted().first { $0.hasSuffix(":" + ticker) }
         }
         if let m = q.firstMatch(of: /\$([a-z][a-z0-9]{1,9})\b/) {
-            next.asset = market(m.1.uppercased()) ?? m.1.uppercased(); hit = true
+            next.asset = market(m.1.uppercased()) ?? m.1.uppercased(); hit = true; named = true
         } else if let alias = Self.aliases.first(where: { q.contains($0.0) }) {
-            next.asset = market(alias.1) ?? "xyz:" + alias.1; hit = true
+            next.asset = market(alias.1) ?? "xyz:" + alias.1; hit = true; named = true
         } else {
             // Typed as a ticker («ETH», «NOW») a word counts on any exchange; in lowercase only a main-exchange ticker
             // that isn't an everyday word, so «what is open now» or «move stop» never name a market.
@@ -153,7 +182,7 @@ public enum IntentParser {
                 let thousand = ticker.hasPrefix("K") && known.contains("k" + ticker.dropFirst()) ? "k" + ticker.dropFirst() : nil
                 let name = word == ticker ? market(ticker) : known.contains(ticker) && !everydayWords.contains(ticker) ? ticker : thousand
                 if let name {
-                    next.asset = name; hit = true
+                    next.asset = name; hit = true; named = true
                     break
                 }
             }
@@ -187,6 +216,22 @@ public enum IntentParser {
         if q.contains(/по\s+рынку|market/) { next.entryPx = nil; next.pullbackPct = nil; hit = true }
         if q.contains(/частям|частичн|scale\s*out|in\s+parts|partial/) { next.partialTake = true; hit = true }
         if let v = number(q, /(?:трейл\w*|скользящ\w*|trail\w*)(?:[- ]?(?:стоп\w*|stop))?[^\d]{0,6}?(\d+(?:[.,]\d+)?)\s*%/) { next.trailingPct = v; hit = true }
+        if hedging {
+            // Only a coin named: «хедж мне что-нибудь» is the model's to pick from what the wallet holds.
+            guard named else { return nil }
+            next.side = .short
+            // «hedge SOL 30%», «хеджируй 30% эфира»: a share; «hedge 0.1 SOL»: coins; «half», else all of it.
+            if let v = number(q, /(?:hedg|хедж)\w*\s+(?:\S+\s+)?(\d+(?:[.,]\d+)?)\s*%/), v > 0, v <= 100 { next.hedgeShare = v / 100 }
+            else if let v = number(q, /(?:hedg|хедж)\w*\s+(\d+(?:[.,]\d+)?)(?![\d.,]|\s*%)/) { next.hedge = v }
+            else { next.hedgeShare = q.contains(/\bhalf\b|половин/) ? Decimal(string: "0.5")! : 1 }
+            hit = true
+        }
+        // A hedge is sized by the coins and has no take: a risk, a take, money in the trade or a limit said for one would
+        // be listed as a change and then do nothing.
+        if next.isHedge {
+            next.riskUSD = nil; next.takePct = nil; next.takeR = nil; next.amountUSDC = nil; next.autoRules = nil
+            next.entryPx = nil; next.pullbackPct = nil; next.partialTake = nil; next.trailingPct = nil
+        }
 
         return hit ? next : nil
     }
@@ -215,7 +260,7 @@ public enum IntentParser {
     /// Whether the text has a trading word in Russian or English. Without one, a ticker and an amount alone
     /// («compra SOL por 1 USDC») are too weak to trust: the message may be another language asking for something else.
     public static func hasTradeWords(_ text: String) -> Bool {
-        text.lowercased().contains(/лонг|шорт|\blong\b|\bshort\b|риск|\brisk\b|стоп|\bstop|тейк|\btake\b|\btp\b|\bsl\b|плеч|leverage|\d\s*[xх×]\b|откат|pullback|лимит|limit|по\s+рынку|market|как\s+учат|by\s+the\s+(?:book|rules)|трейл|trail|частям|in\s+parts|scale\s*out|\d\s*r\b|\b1\s*[:к]\s*\d/)
+        text.lowercased().contains(/лонг|шорт|\blong\b|\bshort\b|\bhedg|хедж|риск|\brisk\b|стоп|\bstop|тейк|\btake\b|\btp\b|\bsl\b|плеч|leverage|\d\s*[xх×]\b|откат|pullback|лимит|limit|по\s+рынку|market|как\s+учат|by\s+the\s+(?:book|rules)|трейл|trail|частям|in\s+parts|scale\s*out|\d\s*r\b|\b1\s*[:к]\s*\d/)
     }
 
     /// Numbers as the parsers read them: «2,500» and «1,234.56» lose their thousands commas and «.5» becomes «0.5»; a

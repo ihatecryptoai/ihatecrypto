@@ -2211,7 +2211,7 @@ extension Workspace {
                 if let tp = z.takePrice {
                     lines.append(row("take", "\(Fmt.price(tp)) · +\(Fmt.pct((abs(tp - z.entry) / z.entry * 100).rounded(1, .plain)))"))
                 }
-                lines.append("both wait on the exchange")
+                lines.append(z.takePrice != nil ? "both wait on the exchange" : intent.isHedge ? "guards the margin" : "waits on the exchange")
             }
             steps.append(card("PROTECT", sizing?.takePrice != nil ? "Stop + take" : "Stop", lines, state(s.status), logo: "hype", .hyperliquid))
         }

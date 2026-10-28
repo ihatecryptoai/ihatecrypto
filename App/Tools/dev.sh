@@ -81,7 +81,8 @@ relaunch)
     (setopt pipefail; cd $HERE/.. && unset GIT_DIR GIT_WORK_TREE && ./build-app.sh 2>&1 | grep -E '^\*\* BUILD|error:|installed') || { echo "the build failed: Dev not reopened" >&2; exit 1 }
   fi
   old=$(stat -f %m $DATA/debug-token 2>/dev/null || echo 0)
-  open $APP ${1:+--args} "$@"
+  # -g: in the background, behind the owner's windows; screencapture -l still sees it on this desktop.
+  open -g $APP ${1:+--args} "$@"
   # The new token is written when the API starts; /state may answer half-written JSON for a moment (strict=False above).
   for i in {1..60}; do
     sleep 1

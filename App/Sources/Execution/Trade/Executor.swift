@@ -296,7 +296,9 @@ public actor Executor {
     /// Fresh prices and balances, the bridge quote and transaction, and a simulation of it. Nothing is signed.
     /// The risk rules are applied here too, on fresh balances: the UI showing a green plan is not enough.
     /// `openVia1Click`: a new Hyperliquid account opens through NEAR Intents (2–4 min, no opening fee) instead of Relay.
-    public func prepare(_ requested: TradeIntent, policy: RiskPolicy = RiskPolicy(), openVia1Click: Bool = false) async throws -> Prepared {
+    /// `spot`: what the wallet holds of each market's coin (Hedge.spot), which sizes a hedge and covers shorts in the risk rules.
+    public func prepare(_ requested: TradeIntent, policy: RiskPolicy = RiskPolicy(), openVia1Click: Bool = false,
+                        spot: [String: Decimal] = [:]) async throws -> Prepared {
         let markets = try await Hyperliquid.markets()
         guard var market = markets[requested.asset], market.index >= 0 else { throw ExecutionError("No \(requested.asset) market on Hyperliquid.") }
         market.atrPct = try? await Hyperliquid.atrPct(coin: market.name)
@@ -310,7 +312,14 @@ public actor Executor {
             held[net.key] = (try? await net.usdcBalance(wallet.evm)).map { Decimal($0) / 1_000_000 }
         }
         equity += held.values.reduce(0, +)
-        let intent = Plan.resolve(requested, market: market, equity: equity, policy: policy).intent
+        var spot = spot
+        // The coins a hedge covers, read again where it's cheap: sold a moment ago, they'd leave the short uncovered.
+        // ponytail: only SOL is re-read; other coins come from the app's last refresh.
+        if requested.isHedge, market.name == "SOL" {
+            spot["SOL"] = min(spot["SOL"] ?? 0, Decimal(try await rpc.balance(wallet.solana)) / 1_000_000_000)
+        }
+        let intent = Plan.resolve(requested, market: market, equity: equity, policy: policy,
+                                  spot: requested.isHedge ? spot[market.name] ?? 0 : nil).intent
         let evaluation = Plan.evaluate(intent, market: market)
         guard evaluation.missing.isEmpty, evaluation.problem == nil, let sizing = evaluation.sizing, intent.stopPct != nil else {
             throw ExecutionError(evaluation.problem ?? "The plan isn't ready: missing \(evaluation.missing.joined(separator: ", ")).")
@@ -321,7 +330,7 @@ public actor Executor {
         if positions.contains(where: { $0.coin == market.name }) || orders.contains(where: { $0.coin == market.name }) {
             throw ExecutionError("There's already a position or order on \(market.name). Manage it in chat («stop to breakeven», «close half», «cancel the limit») or pick another asset.")
         }
-        let openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders)
+        let openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: spot)
         let blocked = RiskRules.check(intent, sizing, market: market, equity: equity, policy: policy, openRisk: openRisk).filter { $0.level == .block }
         guard blocked.isEmpty else { throw ExecutionError(blocked.map(\.text).joined(separator: " ")) }
         let leverage = NSDecimalNumber(decimal: intent.leverage ?? 1).intValue
@@ -407,12 +416,16 @@ public actor Executor {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) as a limit at \(Fmt.price(HLAction.price(limit, szDecimals: market.szDecimals))) (now \(Fmt.price(market.markPx))), waiting on the exchange, with stop −\(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit +\(Fmt.pct($0))" } ?? ""), active once it fills.")
         } else {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) at market, no worse than \(Fmt.price(HLAction.price(market.markPx * (intent.side == .long ? 1 + Self.slippage : 1 - Self.slippage), szDecimals: market.szDecimals))).")
-            steps.append("Stop \(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit \(Fmt.pct($0))" } ?? "") from the entry price (\(intent.side == .long ? "stop below, take above" : "stop above, take below")), on the exchange.")
+            steps.append(intent.isHedge
+                ? "Stop \(Fmt.pct(intent.stopPct ?? 0)) above the entry price, on the exchange: it only closes the hedge before liquidation. No take-profit."
+                : "Stop \(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit \(Fmt.pct($0))" } ?? "") from the entry price (\(intent.side == .long ? "stop below, take above" : "stop above, take below")), on the exchange.")
         }
         if intent.partialTake == true, intent.entryPx == nil { steps.append("Partial take-profit: half the position at 1R, as a separate order on the exchange; then the stop moves to breakeven.") }
         if let trail = intent.trailingPct { steps.append("Trailing \(Fmt.pct(trail)): ihatecrypto moves the stop while the app is open (each move is a signature).") }
         changes.append("Hyperliquid, free: \(Fmt.usd(hl.withdrawable)) → ≈ \(Fmt.usd(hl.withdrawable + arriving - sizing.margin - sizing.feesUSD / 2)) (margin \(Fmt.usd(sizing.margin)) goes into the position).")
-        changes.append("Position: \(side.lowercased()) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name), at the stop ≈ −\(Fmt.usd(sizing.lossAtStopUSD))\(sizing.profitAtTakeUSD.map { ", at the take ≈ +\(Fmt.usd($0))" } ?? "").")
+        changes.append(intent.isHedge
+            ? "Position: short \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name), a hedge of the \(market.name) the wallet holds; net of them it costs ≈ \(Fmt.usd(sizing.feesUSD)) in fees."
+            : "Position: \(side.lowercased()) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name), at the stop ≈ −\(Fmt.usd(sizing.lossAtStopUSD))\(sizing.profitAtTakeUSD.map { ", at the take ≈ +\(Fmt.usd($0))" } ?? "").")
         var p = Prepared(intent: intent, market: market, sizing: sizing, leverage: leverage, bridge: bridge,
                          changes: changes, steps: steps, preparedAt: Date())
         p.dexTransfer = dexTransfer
@@ -1102,7 +1115,9 @@ public enum HyperliquidAccount {
     }
 
     /// What the open positions and the resting limit entries lose if every stop fills; nil when one of them has no stop.
-    public static func riskAtStops(positions: [Position], orders: [Order]) -> Decimal? {
+    /// `spot`: coins the wallet holds by market (Hedge.spot): a short of them loses at its stop what they gain, so only the
+    /// part of a short beyond them counts.
+    public static func riskAtStops(positions: [Position], orders: [Order], spot: [String: Decimal] = [:]) -> Decimal? {
         func stops(_ coin: String, _ own: [Order] = []) -> [Decimal] {
             (own + orders.filter { $0.coin == coin }).filter { $0.isTrigger && ($0.orderType ?? "").contains("Stop") }.compactMap(\.triggerPx)
         }
@@ -1110,7 +1125,8 @@ public enum HyperliquidAccount {
         for p in positions where p.size != 0 {
             // The stop that fills first is the one nearest the entry on the losing side.
             guard let stop = p.size > 0 ? stops(p.coin).max() : stops(p.coin).min() else { return nil }
-            total += max(0, (p.size > 0 ? p.entry - stop : stop - p.entry) * abs(p.size))
+            let covered = p.size < 0 ? min(abs(p.size), spot[p.coin] ?? 0) : 0
+            total += max(0, (p.size > 0 ? p.entry - stop : stop - p.entry) * (abs(p.size) - covered))
         }
         // A limit entry still waiting loses as much once it fills: at its own stop (armed with it) or the coin's.
         for o in orders where !o.isTrigger && !o.reduceOnly {

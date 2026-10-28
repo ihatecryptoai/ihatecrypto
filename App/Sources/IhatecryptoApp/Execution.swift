@@ -323,7 +323,7 @@ extension Workspace {
         txReview = nil
         defer { preparing = false }
         do {
-            let p = try await executor(wallet).prepare(intent, policy: policy, openVia1Click: openVia1Click == true)
+            let p = try await executor(wallet).prepare(intent, policy: policy, openVia1Click: openVia1Click == true, spot: spotHoldings ?? [:])
             prepared = p
             if jevScreening, let key = jevKey {
                 txReview = try? await JevReviewer.transactions(plan: planLines, signatures: p.steps, changes: p.changes, apiKey: key)
@@ -392,9 +392,9 @@ extension Workspace {
         var moves: [PositionCommand] = []
         if let stopPct = resolvedNext.stopPct, stopPct != before.stopPct {
             let stop = p.entry * (1 - dir * stopPct / 100)
-            // A wider stop may not break the per-trade limit.
+            // A wider stop may not break the per-trade limit. A hedge's stop loses what the coins it covers gain.
             let loss = abs(p.entry - stop) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
-            if let equity, equity > 0, loss / equity * 100 > policy.maxRiskPct {
+            if !before.isHedge, let equity, equity > 0, loss / equity * 100 > policy.maxRiskPct {
                 reply("A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
                 return true
             }

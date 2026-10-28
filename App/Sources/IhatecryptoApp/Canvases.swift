@@ -1196,7 +1196,7 @@ extension Workspace {
         let richest = ([solana?.usdc] + EVMNetwork.searched.map { usdc(on: $0.key) }).compactMap { $0 }.max() ?? 0
         let available = max(0, richest - Decimal(string: "0.1")!) + (hl.map { $0.withdrawable + (m.dex.flatMap { dexBalances[$0]?.withdrawable } ?? 0) } ?? 0)
         let key = FixKey(intent: intent, market: m, equity: equity, policy: policy,
-                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders), available: available)
+                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: shortsCovered), available: available)
         if fixMemo?.key != key { fixMemo = (key, Plan.fix(key.intent, market: m, equity: key.equity, policy: key.policy, openRisk: key.openRisk, available: available)) }
         guard let f = fixMemo?.fix else { return nil }
         // Said as what changes in the trade, not as a sum: «Risk $0.33» read like something to pay.

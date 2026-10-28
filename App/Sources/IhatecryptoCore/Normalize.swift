@@ -112,6 +112,15 @@ public enum ChatRouter {
     public static let forms = """
     TRADE PLAN (a perp on Hyperliquid; ASSET is a crypto ticker like BTC, ETH, SOL, HYPE, or oil, brent, gold, silver, or a stock ticker like TSLA, NVDA):
       long|short <ASSET> [N USDC] [risk $N] [stop N%] [take N% | take NR] [leverage Nx] [by the book] [on a N% pullback] [limit <PRICE>] [take in parts] [trailing N%]
+      hedge <ASSET> [half | N%] | hedge N <ASSET> [leverage Nx]   (a hedge of coins the wallet HOLDS — SOL, ETH on any network,
+      wrapped BTC, HYPE, a stock token as its xyz market: a short on Hyperliquid the size of them, so a fall is covered. No
+      take-profit, a far stop only guards the margin, the rules count it net of the coins; the size, leverage and stop are code's.
+      Any hedge, insurance or protection of what they hold against a fall is this form, never a «short» with a stop and a take.
+      «захеджируй SOL» = hedge SOL, «прикрой половину эфира» = hedge ETH half, «захеджируй треть эфира» = hedge ETH 33%, «застрахуй
+      0.1 SOL от падения» = hedge 0.1 SOL. Dollars aren't a hedge's size: the coins or a share of them («на $500 эфира» with ETH at
+      2500 = hedge 0.2 ETH). «хедж мне что-нибудь» = hedge the coin the balances show they hold most of (with several worth
+      hedging, "clarify" with a card per coin). A coin they don't hold can't be hedged: say so, and a short of it is a trade with
+      its own risk)
       with a plan already on the canvas, a change alone: N USDC | risk $N | stop N% | take N% | take NR | leverage Nx | limit <PRICE> | at market | by the book
         | take in parts («фиксируй частями») | trailing N% | on a N% pullback
       N USDC is the money put into the trade (its margin; the size follows from it and the stop): «на 5 баксов», «увеличь до 5 USDC»,

@@ -67,8 +67,10 @@ public enum RiskRules {
             out.append(Advice(.warn, "Capital unknown: no balance, so risk in % isn't checked."))
         }
 
-        // Reward to risk.
-        if let profit = s.profitAtTakeUSD, s.lossAtStopUSD > 0 {
+        // Reward to risk. A hedge has no take and no bet on direction: the stop, the trend and the entry are beside the point.
+        if i.isHedge {
+            out.append(Advice(.ok, "Hedge: no take-profit, the stop only guards the margin; net of the coins it covers, the trade costs its fees."))
+        } else if let profit = s.profitAtTakeUSD, s.lossAtStopUSD > 0 {
             let r = (profit / s.lossAtStopUSD).rounded(1, .plain)
             out.append(r < p.minRewardRisk
                 ? Advice(.warn, "Reward/risk 1:\(Fmt.num(r)): the take-profit is close. The usual minimum is 1:\(Fmt.num(p.defaultRewardRisk)), “take \(Fmt.num(p.defaultRewardRisk))R”.")
@@ -78,7 +80,7 @@ public enum RiskRules {
         }
 
         // The stop against ordinary noise.
-        if let atr = m.atrPct, let stop = i.stopPct, stop < atr {
+        if !i.isHedge, let atr = m.atrPct, let stop = i.stopPct, stop < atr {
             out.append(Advice(.warn, "Stop \(Fmt.pct(stop)) is below the average 4-hour move of \(m.name) (ATR \(Fmt.pct(atr.rounded(2, .plain)))): normal noise can hit it. “Stop by the book” sets \(Fmt.num(p.atrStopMultiple)) ATR."))
         }
 
@@ -89,12 +91,12 @@ public enum RiskRules {
         }
         let stopDistance = abs(s.entry - s.stopPrice)
         let liqDistance = abs(s.entry - s.liquidationPrice)
-        if stopDistance > 0, liqDistance < stopDistance * 2 {
+        if !i.isHedge, stopDistance > 0, liqDistance < stopDistance * 2 {
             out.append(Advice(.warn, "Liquidation (\(Fmt.price(s.liquidationPrice))) is less than two stops from entry: a slipping stop could reach it. Lower the leverage."))
         }
 
         // Entry point: the last day's move and the cost of holding.
-        if let prev = m.prevDayPx, prev > 0 {
+        if !i.isHedge, let prev = m.prevDayPx, prev > 0 {
             let change = ((m.markPx - prev) / prev * 100).rounded(1, .plain)
             if long, change >= 5 {
                 out.append(Advice(i.entryPx == nil ? .warn : .ok, i.entryPx == nil
@@ -125,7 +127,10 @@ public enum RiskRules {
 extension Plan {
     /// Fills what the user left to the rules ("by the book", "take 2R"): stop from volatility, take from the stop,
     /// risk from capital. Returns the concrete intent and one line per filled value.
-    public static func resolve(_ i: TradeIntent, market: Market?, equity: Decimal?, policy p: RiskPolicy) -> (intent: TradeIntent, notes: [String]) {
+    /// `spot`: what the wallet holds of the plan's coin, which sizes a hedge; nil when not read.
+    public static func resolve(_ i: TradeIntent, market: Market?, equity: Decimal?, policy p: RiskPolicy,
+                               spot: Decimal? = nil) -> (intent: TradeIntent, notes: [String]) {
+        if i.isHedge { return hedge(i, market: market, spot: spot) }
         var r = i
         var notes: [String] = []
         let auto = i.autoRules == true
@@ -191,6 +196,34 @@ extension Plan {
         return (r, notes)
     }
 
+    /// A hedge: a short of the coins held (all, a share, or the number named, never more than there is), at 2× unless
+    /// named, with a stop that only guards the margin and nothing else a trade has.
+    static func hedge(_ i: TradeIntent, market: Market?, spot: Decimal?) -> (intent: TradeIntent, notes: [String]) {
+        var r = TradeIntent()
+        r.asset = i.asset
+        r.side = .short
+        r.leverage = i.leverage
+        r.stopPct = i.stopPct
+        // Still a hedge while the balance isn't read: `hedge` stays nil and the plan waits for it.
+        r.hedgeShare = i.hedgeShare ?? 1
+        var notes: [String] = []
+        if let spot {
+            let asked = i.hedge ?? spot * (i.hedgeShare ?? 1)
+            r.hedge = min(asked, spot)
+            if asked > spot { notes.append("The wallet holds \(Fmt.num(spot, maxFraction: 6)) \(IntentParser.pretty(i.asset)): the hedge covers that, not \(Fmt.num(asked, maxFraction: 6)).") }
+        }
+        guard let m = market else { return (r, notes) }
+        if r.leverage == nil {
+            r.leverage = min(Hedge.leverage, Decimal(m.maxLeverage))
+            notes.append("Leverage \(Fmt.num(r.leverage!))× for a hedge: margin is \(Fmt.pct((100 / r.leverage!).rounded(0, .plain))) of the position, liquidation far above.")
+        }
+        if r.stopPct == nil {
+            r.stopPct = Hedge.guardStop(leverage: r.leverage!, market: m)
+            notes.append("Stop \(Fmt.pct(r.stopPct!)) above the entry, four fifths of the way to liquidation: it only keeps the margin.")
+        }
+        return (r, notes)
+    }
+
     static func risk(_ i: TradeIntent, _ e: Evaluation, _ live: Live) -> Block {
         let label = "Risk management"
         guard let s = e.sizing, let m = live.market else {
@@ -199,7 +232,9 @@ extension Plan {
         let advice = RiskRules.check(i, s, market: m, equity: live.equity, policy: live.policy, openRisk: live.openRisk)
         let mark: [Advice.Level: String] = [.ok: "✓", .warn: "⚠", .block: "✗"]
         var lines = live.notes
-        if let equity = live.equity, equity > 0 {
+        if i.isHedge {
+            lines.append("Net of the coins it covers: what the short loses, they gain, and back. The trade costs ≈ \(Fmt.usd(s.feesUSD)) in fees, plus funding while it's open.")
+        } else if let equity = live.equity, equity > 0 {
             var result = "If the stop hits: −\(Fmt.usd(s.lossAtStopUSD)) (−\(Fmt.pct((s.lossAtStopUSD / equity * 100).rounded(1, .plain))) of capital)."
             if let profit = s.profitAtTakeUSD {
                 result += " If the take-profit hits: +\(Fmt.usd(profit)) (+\(Fmt.pct((profit / equity * 100).rounded(1, .plain))))."

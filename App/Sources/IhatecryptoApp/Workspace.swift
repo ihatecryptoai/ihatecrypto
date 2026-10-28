@@ -932,6 +932,21 @@ final class Workspace {
         return (solana?.usdc ?? 0) + shownTokensUSD + (hl?.accountValue ?? 0) + lend.reduce(0) { $0 + $1.usdc } + dexBalances.values.reduce(0) { $0 + $1.accountValue }
             + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino + kaminoLoanUSD + hlp.equity + nearUSD + protocolUSD
     }
+    /// What the wallet holds of each Hyperliquid market's coin (Hedge.spot): SOL and ETH as the networks report them,
+    /// tokens priced like their market. nil until a balance is read; a network not read yet counts as nothing, which can
+    /// only make a hedge smaller.
+    var spotHoldings: [String: Decimal]? {
+        guard solana != nil || base != nil || robinhood != nil || !holdings.isEmpty else { return nil }
+        var held: [(symbol: String, amount: Decimal, price: Decimal?)] = [("SOL", solana?.sol ?? 0, nil), ("ETH", base?.eth ?? 0, nil),
+                                                                          ("ETH", robinhood?.eth ?? 0, nil)]
+        held += holdings.map { ($0.symbol, $0.amount, $0.price ?? 0) } + (robinhood?.stocks ?? []).map { ($0.symbol, $0.amount, $0.price ?? 0) }
+        return Hedge.spot(held, marks: markets.mapValues(\.markPx))
+    }
+    /// The coins held, for the risk rules: a short of them adds no risk at its stop. Read only with a hedge planned or a
+    /// short open, since the plan's numbers are asked for many times an update.
+    var shortsCovered: [String: Decimal] {
+        intent.isHedge || positions.contains { $0.size < 0 } ? spotHoldings ?? [:] : [:]
+    }
     /// The plan with what the user left to the rules filled in.
     var resolved: (intent: TradeIntent, notes: [String]) { planned().resolved }
     var evaluation: Evaluation { planned().evaluation }
@@ -939,7 +954,8 @@ final class Workspace {
         var live = Live()
         live.equity = equity
         live.policy = policy
-        live.openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders)
+        live.openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: shortsCovered)
+        live.spot = intent.isHedge ? spotHoldings.map { $0[intent.asset] ?? 0 } : nil
         live.solanaAddressSet = isSolanaAddress(solanaAddress)
         live.solanaUSDC = solana?.usdc
         live.hlAddressSet = isEVMAddress(hlAddress)
@@ -961,12 +977,13 @@ final class Workspace {
     // The plan's numbers are asked for some ten times an update (the status, the buttons, the chat's actions), each a
     // whole resolve and evaluate, and Plan.fix runs both 60 times. Each keeps its last answer by its inputs: reading the
     // inputs to make the key still ties a view to them, so it redraws when they change.
-    private struct PlanInputs: Equatable { let intent: TradeIntent, market: Market?, equity: Decimal?, policy: RiskPolicy }
+    private struct PlanInputs: Equatable { let intent: TradeIntent, market: Market?, equity: Decimal?, policy: RiskPolicy, spot: Decimal? }
     @ObservationIgnored private var planMemo: (inputs: PlanInputs, resolved: (intent: TradeIntent, notes: [String]), evaluation: Evaluation)?
     private func planned() -> (resolved: (intent: TradeIntent, notes: [String]), evaluation: Evaluation) {
-        let inputs = PlanInputs(intent: intent, market: market, equity: equity, policy: policy)
+        let spot = intent.isHedge ? spotHoldings.map { $0[intent.asset] ?? 0 } : nil
+        let inputs = PlanInputs(intent: intent, market: market, equity: equity, policy: policy, spot: spot)
         if let memo = planMemo, memo.inputs == inputs { return (memo.resolved, memo.evaluation) }
-        let r = Plan.resolve(inputs.intent, market: inputs.market, equity: inputs.equity, policy: inputs.policy)
+        let r = Plan.resolve(inputs.intent, market: inputs.market, equity: inputs.equity, policy: inputs.policy, spot: spot)
         let e = Plan.evaluate(r.intent, market: inputs.market)
         planMemo = (inputs, r, e)
         return (r, e)
@@ -976,9 +993,10 @@ final class Workspace {
     private struct BlocksKey: Equatable {
         let intent: TradeIntent, equity: Decimal?, policy: RiskPolicy, openRisk: Decimal?, solanaSet: Bool, solanaUSDC: Decimal?
         let hlSet: Bool, hlWithdrawable: Decimal?, marketsLoaded: Bool, market: Market?, quote: BridgeQuote?, from: String?, fromUSDC: Decimal?
+        let spot: Decimal?
         init(intent: TradeIntent, live: Live) {
             self.intent = intent
-            equity = live.equity; policy = live.policy; openRisk = live.openRisk
+            equity = live.equity; policy = live.policy; openRisk = live.openRisk; spot = live.spot
             solanaSet = live.solanaAddressSet; solanaUSDC = live.solanaUSDC
             hlSet = live.hlAddressSet; hlWithdrawable = live.hlWithdrawable; marketsLoaded = live.marketsLoaded
             market = live.market; quote = live.quote; from = live.from?.name; fromUSDC = live.from?.usdc

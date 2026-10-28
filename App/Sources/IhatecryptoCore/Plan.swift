@@ -81,9 +81,10 @@ public enum RiskCalc {
     /// Hyperliquid's tier-0 spot taker fee; ihatecrypto's fee is taken on spot sells only.
     public static let spotTakerFee = Decimal(string: "0.0007")!
 
-    /// `entry`: a limit price; the mark when nil.
+    /// `entry`: a limit price; the mark when nil. `hedge`: the coins a hedge covers, which set the size instead of the risk.
     public static func size(
-        riskUSD: Decimal, stopPct: Decimal, takePct: Decimal?, leverage: Decimal, side: Side, market: Market, entry limit: Decimal? = nil
+        riskUSD: Decimal, stopPct: Decimal, takePct: Decimal?, leverage: Decimal, side: Side, market: Market, entry limit: Decimal? = nil,
+        hedge: Decimal? = nil
     ) -> Sizing {
         let entry = limit ?? market.markPx
         let dir: Decimal = side == .long ? 1 : -1
@@ -91,7 +92,7 @@ public enum RiskCalc {
         let stop = entry * (1 - dir * s)
         // Loss per coin if the stop fills at its price: the move plus the fees on both legs.
         let perCoinLoss = entry * s + (entry + stop) * tradeFee
-        let size = (riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
+        let size = (hedge ?? riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
         let notional = size * entry
         let fees = size * (entry + stop) * tradeFee
         let take = takePct.map { entry * (1 + dir * $0 / 100) }
@@ -103,7 +104,9 @@ public enum RiskCalc {
         return Sizing(
             size: size, entry: entry, notional: notional, margin: notional / leverage,
             stopPrice: stop, takePrice: take, liquidationPrice: liq,
-            feesUSD: fees, builderFeesUSD: size * (entry + stop) * builderFee, lossAtStopUSD: size * entry * s + fees, profitAtTakeUSD: profit
+            feesUSD: fees, builderFeesUSD: size * (entry + stop) * builderFee,
+            // A hedge loses at its stop what the coins it covers gain: the fees are what's left.
+            lossAtStopUSD: (hedge == nil ? size * entry * s : 0) + fees, profitAtTakeUSD: profit
         )
     }
 }
@@ -156,6 +159,8 @@ public struct Live: Sendable {
     public var policy = RiskPolicy()
     /// Loss at the stops of positions already open; nil when one has no stop.
     public var openRisk: Decimal? = 0
+    /// What the wallet holds of the plan's coin, for a hedge; nil when not read.
+    public var spot: Decimal?
     /// What `Plan.resolve` filled in, shown in the risk block.
     public var notes: [String] = []
 
@@ -178,12 +183,15 @@ public enum Plan {
 
     public static func evaluate(_ i: TradeIntent, market: Market?) -> Evaluation {
         var e = Evaluation()
-        if i.riskUSD == nil { e.missing.append("risk in $") }
+        if i.riskUSD == nil, !i.isHedge { e.missing.append("risk in $") }
+        if i.isHedge, i.hedge == nil { e.missing.append("what the wallet holds of \(i.asset)") }
         if i.stopPct == nil { e.missing.append("stop in %") }
-        guard e.missing.isEmpty, let m = market, let risk = i.riskUSD, let stop = i.stopPct else { return e }
+        guard e.missing.isEmpty, let m = market, let stop = i.stopPct else { return e }
+        let risk = i.riskUSD ?? 0
         let lev = i.leverage ?? 1
 
-        if risk <= 0 { e.problem = "Risk must be above zero."; return e }
+        if let h = i.hedge, h <= 0 { e.problem = "Nothing to hedge: the wallet holds no \(IntentParser.pretty(i.asset))."; return e }
+        if i.hedge == nil, risk <= 0 { e.problem = "Risk must be above zero."; return e }
         if stop <= 0 || stop >= 100 { e.problem = "Stop must be above 0% and below 100%."; return e }
         if let t = i.takePct, t <= 0 || (i.side == .short && t >= 100) { e.problem = "Take-profit is out of range."; return e }
         // The signer refuses more than 20× whatever the market allows (HLGuard.maxLeverage): said here, before money moves.
@@ -195,13 +203,16 @@ public enum Plan {
             e.problem = "Limit \(Fmt.price(px)) is \(i.side == .long ? "above" : "below") the market \(Fmt.price(m.markPx)) and would fill at once. For a market entry, type “at market”."
             return e
         }
-        let s = RiskCalc.size(riskUSD: risk, stopPct: stop, takePct: i.takePct, leverage: lev, side: i.side, market: m, entry: i.entryPx)
+        let s = RiskCalc.size(riskUSD: risk, stopPct: stop, takePct: i.takePct, leverage: lev, side: i.side, market: m, entry: i.entryPx,
+                              hedge: i.hedge)
         e.sizing = s
         let liqBeforeStop = i.side == .long ? s.liquidationPrice >= s.stopPrice : s.liquidationPrice <= s.stopPrice
         if s.size <= 0 {
-            e.problem = "Risk is too small for the minimum \(m.name) size step."
+            e.problem = i.isHedge ? "Too little \(m.name) to hedge: below the market's size step." : "Risk is too small for the minimum \(m.name) size step."
         } else if s.notional < minNotional {
-            e.problem = "Notional \(Fmt.usd(s.notional)) is below the Hyperliquid $10 minimum order. Raise the risk or tighten the stop."
+            e.problem = i.isHedge
+                ? "A hedge of \(Fmt.usd(s.notional)) is below Hyperliquid's $10 minimum order: hedge at least $10 of \(m.name)."
+                : "Notional \(Fmt.usd(s.notional)) is below the Hyperliquid $10 minimum order. Raise the risk or tighten the stop."
         } else if liqBeforeStop {
             e.problem = "Liquidation (\(Fmt.price(s.liquidationPrice))) comes before the stop. Lower the leverage."
         }
@@ -321,7 +332,7 @@ public enum Plan {
 
     static func position(_ i: TradeIntent, _ e: Evaluation, _ live: Live) -> Block {
         let label = "Position · Hyperliquid"
-        let title = "\(i.side == .long ? "Long" : "Short") \(IntentParser.pretty(i.asset))"
+        let title = i.isHedge ? "Hedge \(IntentParser.pretty(i.asset)) · short" : "\(i.side == .long ? "Long" : "Short") \(IntentParser.pretty(i.asset))"
         guard let m = live.market else {
             let line = live.marketsLoaded ? "No \(i.asset) market on Hyperliquid." : "Price: no data."
             return Block(id: "position", label: label, title: title, lines: [line], status: live.marketsLoaded ? .blocked : .noData)
@@ -343,6 +354,9 @@ public enum Plan {
             "Liquidation ≈ \(Fmt.price(s.liquidationPrice)), isolated margin.",
             "Fees per side: Hyperliquid \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))%, ihatecrypto \(Fmt.num(RiskCalc.builderFee * 100, maxFraction: 3))%.",
         ]
+        if i.isHedge {
+            lines.insert("Covers \(Fmt.num(s.size, maxFraction: m.szDecimals))\(live.spot.map { " of the \(Fmt.num($0, maxFraction: 6))" } ?? "") \(m.name) the wallet holds: what they lose in a fall, the short makes back.", at: 1)
+        }
         if let p = e.problem { lines.append(p) }
         return Block(id: "position", label: label, title: title, lines: lines, status: e.problem == nil ? .ready : .blocked)
     }
@@ -351,6 +365,17 @@ public enum Plan {
         let label = "Protection"
         guard let s = e.sizing, let stopPct = i.stopPct else {
             return Block(id: "protection", label: label, title: "Stop & take-profit", lines: ["Set a stop in %, e.g. “stop 3%”."], status: .needsInput)
+        }
+        if i.isHedge {
+            // Far out, the stop only keeps the margin; near, a rise past it ends the hedge.
+            let guarding = abs(s.stopPrice - s.entry) * 2 >= abs(s.liquidationPrice - s.entry)
+            return Block(id: "protection", label: label, title: "Stop · no take-profit", lines: [
+                guarding
+                    ? "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)): only keeps the margin from liquidation (≈ \(Fmt.price(s.liquidationPrice))). Below it the short covers the coins."
+                    : "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)): a rise past it closes the hedge, and the coins are uncovered from there.",
+                "No take-profit: the hedge stays until you close it («close \(i.asset.hasPrefix("xyz:") ? String(i.asset.dropFirst(4)) : i.asset)»).",
+                "If you sell the coins, the short is left on its own: close it too.",
+            ], status: e.problem == nil ? .ready : .blocked)
         }
         var lines = [
             "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)). Loss ≈ \(Fmt.usd(s.lossAtStopUSD)) incl. \(Fmt.usd(s.feesUSD)) fees (ihatecrypto \(Fmt.usd(s.builderFeesUSD))).",

@@ -943,5 +943,36 @@
       ],
       "steps_lack": "COMPARING"
     }
+  },
+  {
+    "name": "hedge the SOL held → a short of that SOL, no take-profit, the stop only guards the margin",
+    "send": [
+      "захеджируй мой SOL"
+    ],
+    "expect": {
+      "plan": "SOL",
+      "reply_contains": "✓ Hedge: short",
+      "reply_contains_2": "Take: none",
+      "no_pending": true
+    },
+    "only_if": {
+      "balance": "sol",
+      "at_least": 0.12
+    }
+  },
+  {
+    "name": "hedge something → the coin the wallet holds, as a hedge, never a short with a take",
+    "send": [
+      "хедж мне что-нибудь"
+    ],
+    "expect": {
+      "plan": "SOL",
+      "reply_contains": "✓ Hedge: short",
+      "no_pending": true
+    },
+    "only_if": {
+      "balance": "sol",
+      "at_least": 0.12
+    }
   }
 ]

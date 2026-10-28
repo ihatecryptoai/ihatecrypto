@@ -9,7 +9,9 @@ extension Workspace {
     var missingDetails: String? {
         guard intent != TradeIntent(), !managesPosition else { return nil }
         let r = resolved.intent
-        let parts = [r.riskUSD == nil ? "the risk in $" : nil, r.stopPct == nil ? "a stop" : nil].compactMap { $0 }
+        // A hedge is sized by the coins held: what it waits for is their balance, not a risk.
+        let parts = [r.isHedge ? r.hedge == nil ? "the balance of \(r.asset)" : nil : r.riskUSD == nil ? "the risk in $" : nil,
+                     r.stopPct == nil ? "a stop" : nil].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " and ")
     }
 
@@ -29,7 +31,7 @@ extension Workspace {
             line += ", take \(Fmt.pct(take)) at \(Fmt.price(tp)) → +\(Fmt.usd(p))"
         }
         let advice = RiskRules.check(r, s, market: m, equity: equity, policy: policy,
-                                     openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders))
+                                     openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: shortsCovered))
         return (line, advice)
     }
 
@@ -52,8 +54,15 @@ extension Workspace {
         var marketLine = "✓ Market: \(IntentParser.pretty(r.asset)) \(Fmt.price(m.markPx))"
         if let prev = m.prevDayPx, prev > 0 { marketLine += ", 24h \(signedPct((m.markPx - prev) / prev * 100))" }
         out.append(marketLine)
-        out.append("✓ Direction: \(r.side == .long ? "long" : "short")")
-        if let risk = r.riskUSD {
+        if r.isHedge {
+            let held = spotHoldings?[r.asset]
+            out.append(r.hedge.map { "✓ Hedge: short \(Fmt.num(sizing?.size ?? $0, maxFraction: m.szDecimals)) \(m.name)" + (held.map { " of the \(Fmt.num($0, maxFraction: 6)) held" } ?? "") }
+                       ?? "✗ Hedge: what the wallet holds of \(m.name) isn't read yet")
+        } else {
+            out.append("✓ Direction: \(r.side == .long ? "long" : "short")")
+        }
+        if r.isHedge {
+        } else if let risk = r.riskUSD {
             let from = intent.riskUSD != nil ? "" : intent.amountUSDC.map { " from \(Fmt.num($0)) USDC in the trade" } ?? " by the book"
             out.append("✓ Risk: \(Fmt.usd(risk))\(share(risk))\(from)")
         } else {
@@ -62,11 +71,13 @@ extension Workspace {
         if let stop = r.stopPct {
             let direction: Decimal = r.side == .short ? 1 : -1
             let price = sizing?.stopPrice ?? entry * (1 + direction * stop / 100)
-            out.append("✓ Stop: \(Fmt.pct(stop)) at \(Fmt.price(price))\(intent.stopPct == nil ? " by the book" : "")")
+            out.append("✓ Stop: \(Fmt.pct(stop)) at \(Fmt.price(price))\(r.isHedge ? intent.stopPct == nil ? ", only guards the margin from liquidation" : ", a rise past it ends the hedge" : intent.stopPct == nil ? " by the book" : "")")
         } else {
             out.append("✗ Stop: not set" + (book.stopPct.map { " — by the book \(Fmt.pct($0)), \(Fmt.num(policy.atrStopMultiple)) × 4h volatility" } ?? ""))
         }
-        if let take = r.takePct {
+        if r.isHedge {
+            out.append("✓ Take: none, the hedge stays until you close it")
+        } else if let take = r.takePct {
             out.append("✓ Take: \(Fmt.pct(take))" + (sizing?.takePrice.map { " at \(Fmt.price($0))" } ?? "") + (r.partialTake == true ? ", half at 1R" : ""))
         } else {
             out.append("· Take: none — by the book \(Fmt.num(policy.defaultRewardRisk))R")
@@ -94,12 +105,14 @@ extension Workspace {
                 out.append("✓ Money: \(free) free on Hyperliquid covers the margin")
             }
             let advice = RiskRules.check(r, s, market: m, equity: equity, policy: policy,
-                                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders))
+                                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: shortsCovered))
             let problems = advice.filter { $0.level != .ok }
             out += problems.map { "\($0.level == .block ? "✗" : "⚠") Rules: \($0.text)" }
             if problems.isEmpty { out.append("✓ Rules: all met") }
-            var result = "✓ Result: at the stop −\(Fmt.usd(s.lossAtStopUSD))\(share(s.lossAtStopUSD))"
-            if let p = s.profitAtTakeUSD, s.lossAtStopUSD > 0 {
+            var result = r.isHedge
+                ? "✓ Result: a fall in \(m.name) is covered, a rise given up; ≈ \(Fmt.usd(s.feesUSD)) fees + funding"
+                : "✓ Result: at the stop −\(Fmt.usd(s.lossAtStopUSD))\(share(s.lossAtStopUSD))"
+            if !r.isHedge, let p = s.profitAtTakeUSD, s.lossAtStopUSD > 0 {
                 result += ", at the take +\(Fmt.usd(p)), 1:\(Fmt.num((p / s.lossAtStopUSD).rounded(1, .plain)))"
             }
             out.append(result)
@@ -108,7 +121,9 @@ extension Workspace {
         }
 
         let next: String
-        if missingDetails != nil {
+        if r.isHedge, r.hedge == nil {
+            next = "The hedge's size comes once the wallet's balances are read."
+        } else if missingDetails != nil {
             next = "Tap “By the book” or say your own, e.g. “risk $1 stop 3%”."
         } else if out.contains(where: { $0.hasPrefix("✗") }) {
             next = "Fix the ✗ above — for example a smaller risk or a wider stop — and I'll check again."

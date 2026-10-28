@@ -92,7 +92,7 @@ def check(expect, state, replies):
             why.append(f"note card {text(b.get('note')) or 'none'}, expected «{want}»")
         elif key == "reply" and not replies:
             why.append("no reply")
-        elif key == "reply_contains" and not any(want.lower() in r.lower() for r in replies):
+        elif key.startswith("reply_contains") and not any(want.lower() in r.lower() for r in replies):
             why.append(f"no reply with «{want}»: {replies[-3:]}")
         elif key == "reply_cyrillic" and bool(re.search("[а-яё]", (replies or [""])[-1].lower())) != want:
             why.append(f"the reply is {'not ' if want else ''}in Russian: {replies[-1:]}")
