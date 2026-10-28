@@ -14,7 +14,7 @@ HERE=${0:A:h}
 api() {  # METHOD PATH [JSON]
   local token body=(); token=$(cat $DATA/debug-token 2>/dev/null) || { echo "no debug token: is Dev running with Settings › Debugging › Local debug API on?" >&2; return 1 }
   [[ $1 == GET ]] || body=(-d "${3-}")   # a POST without a body still sends an empty one
-  curl -sf -m ${TIMEOUT:-240} -X $1 -H "Authorization: Bearer $token" -H 'Content-Type: application/json' $body http://127.0.0.1:$PORT$2
+  curl -sf -m ${TIMEOUT:-240} -X $1 -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "${body[@]}" http://127.0.0.1:$PORT$2
 }
 py() { python3 -I -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); $1" }
 
