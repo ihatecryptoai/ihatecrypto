@@ -232,6 +232,10 @@ public enum SolanaGuard {
         var unitPrice: UInt64 = 0
         var refunded: UInt64 = 0
         var fills = 0, makerSteps = 0
+        // The fill's taker side — the taker (0), what it gives from (2) and what it gets into (4) — found before the loop:
+        // a maker's step never touches them, whatever the app claimed about whose they are.
+        let takerSide = Set(m.instructions.first { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == jupiterZ }
+            .map { ix in [0, 2, 4].compactMap { $0 < ix.accounts.count ? ix.accounts[$0] : nil } } ?? [])
         for (n, ix) in m.instructions.enumerated() {
             guard ix.programIndex < m.staticKeys.count else {
                 v.problems.append("Instruction \(n + 1): the program is loaded from a lookup table.")
@@ -240,12 +244,12 @@ public enum SolanaGuard {
             let program = accounts[ix.programIndex]
             // The wallet signs as account 1 and is a static key, so a step not given it can't act with its signature.
             if policy.sponsor != nil, let maker = jupiterZMakerPrograms[program] {
-                guard !ix.accounts.contains(where: { $0 < accounts.count && (accounts[$0] == policy.owner || mine(accounts[$0])) }) else {
+                guard !ix.accounts.contains(where: { takerSide.contains($0) || $0 < accounts.count && (accounts[$0] == policy.owner || mine(accounts[$0])) }) else {
                     v.problems.append("Instruction \(n + 1): \(maker) is given your wallet or one of its accounts.")
                     continue
                 }
                 makerSteps += 1
-                if makerSteps == 1 { v.checks.append("The market maker sources the coin itself (\(maker) and the like), on its own accounts only.") }
+                if makerSteps == 1 { v.checks.append("The market maker sources the coin itself (\(maker) and the like), given none of your swap's accounts.") }
                 continue
             }
             guard let programName = policy.programs[program] else {
@@ -387,8 +391,11 @@ public enum SolanaGuard {
                 }
                 guard own(source, inMint) else { v.problems.append("The JupiterZ fill takes from \(source), not your account for what you swap."); continue }
                 guard own(out, mint) else { v.problems.append("The JupiterZ fill pays \(out), not your wallet."); continue }
+                // A mint a lookup table names is unread here: the wallet's own account for it says which it is (its address
+                // derives from the mint), so the prompt reads «3 USDC», not «3000000 units of lookup-table entry 21».
+                func named(_ a: String, _ m: String) -> String { mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m }
                 func units(_ n: UInt64, _ m: String) -> String { mintNames[m].map { "\(Decimal(n) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(n) units of \(m.prefix(6))…" }
-                v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), inMint)) for \(units(le64(ix.data, 16), mint)) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
+                v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), named(source, inMint))) for \(units(le64(ix.data, 16), named(out, mint))) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
             case jupiterSwap:
                 // Every swap form's output account (its «instead» one when set: the program's own id when not) must be this
                 // wallet's own; any other Jupiter instruction is refused (the 2026-10-24 review: the gasless path's route_v2
@@ -411,6 +418,9 @@ public enum SolanaGuard {
             }
         }
         if makerSteps > 0, fills != 1 { v.problems.append("A market maker's steps come without its one JupiterZ fill.") }
+        // A JupiterZ maker fronts no rent: the wallet's own new account is paid by its own create step. SOL «back» to the
+        // fee payer beside a fill would be the maker skimming the wallet (the 2026-10-29 review).
+        if fills > 0, refunded > 0 { v.problems.append("\(Double(refunded) / 1e9) SOL to the market maker: a JupiterZ fill takes no SOL from your wallet.") }
         // Both numbers are the transaction's: a product past 64 bits is refused, not trapped on.
         let (product, overflow) = unitLimit.multipliedReportingOverflow(by: unitPrice)
         let fee = product / 1_000_000

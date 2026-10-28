@@ -373,9 +373,9 @@ extension Executor {
                                              excludeRouters: Self.jupiterZFirst ? ["metis", "iris", "dflow", "okx"] : [])
         let payer = order.flatMap { $0.gasless ? try? SolanaMessage.parse(transaction: $0.wire).staticKeys.first : nil }.flatMap { $0 == wallet.solana ? nil : $0 }
         var sponsored: (order: Jupiter.Order, sponsor: String)? = nil
-        if let order, let payer {
+        if let order, let payer, Self.sponsorable(router: order.router, wire: order.wire, from: from.mint, to: to.mint) {
             if lowSOL { sponsored = (order, payer) }
-            else if order.router == "jupiterz", Self.fillSwaps(order.wire, from: from.mint, to: to.mint),
+            else if order.router == "jupiterz",
                     let pools = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units), order.outAmount > pools.outAmount || Self.jupiterZFirst {
                 sponsored = (order, payer)
             }
@@ -393,11 +393,14 @@ extension Executor {
             var rules: [(String, String, Bool, Int64)] = nativeIn ? [] : [(inAccount, from.symbol, true, -Int64(units))]
             if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(order.minOut))) }
             // Not a lamport of ours pays: SOL in leaves exactly, SOL bought arrives whole, at least the minimum. A maker leaves
-            // the rent of the coin's new account to the wallet (≈ 0.00156 SOL for an Ondo stock's Token-2022 one, 2026-10-29).
+            // the rent of the coin's new account to the wallet (≈ 0.00156 SOL for an Ondo stock's Token-2022 one, 2026-10-29):
+            // only when that account doesn't exist yet, and the guard lets no SOL of the wallet's go to the maker.
+            let outNew = maker && !nativeOut ? try await rpc.balance(outAccount) == 0 : false
+            let rent: Int64 = outNew ? 2_100_000 : 0
             do {
                 changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
                                                 note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by \(maker ? "JupiterZ's market maker" : "Jupiter")",
-                                                lamportsAtLeast: nativeIn ? -Int64(units) : nativeOut ? Int64(order.minOut) : maker && outBefore == 0 ? -2_100_000 : 0,
+                                                lamportsAtLeast: nativeIn ? -Int64(units) - rent : nativeOut ? Int64(order.minOut) : -rent,
                                                 dryRun: dryRun, sponsor: (sponsor, order.requestId))
             } catch where maker && !lowSOL && ((error as? GuardStop)?.message.hasPrefix("The guard stopped") == true
                                                  || (error as? ExecutionError)?.message.hasPrefix("The simulation failed") == true) {
@@ -450,19 +453,23 @@ extension Executor {
         let outAfter = nativeOut ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: to.mint)
         var line = "Swapped \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) \(from.symbol) → \(to.symbol) +\(Fmt.num(Decimal(Int64(outAfter) - Int64(outBefore)) / outScale, maxFraction: 8))\(nativeOut ? " (net of fees)" : "")."
         swapped?(from, to, Decimal(units) / scale, Decimal(Int64(outAfter) - Int64(outBefore)) / outScale)
-        // Out of a token entirely: its empty account still holds ~0.002 SOL of rent; closing returns it. A Token-2022
-        // account would need that program, which the guard doesn't allow: its rent stays.
-        if !nativeIn, !from.token2022, try await rpc.tokenBalance(owner: wallet.solana, mint: from.mint) == 0 {
-            let close = SolanaInstruction(program: SPL.tokenProgram, accounts: [
+        // Out of a token entirely: its empty account still holds ~0.002 SOL of rent (≈ 0.00156 an Ondo stock's Token-2022
+        // one); closing returns it, under the token's own program. The swap went through either way: a failed close says so.
+        if !nativeIn, try await rpc.tokenBalance(owner: wallet.solana, mint: from.mint) == 0 {
+            let close = SolanaInstruction(program: from.token2022 ? SPL.token2022Program : SPL.tokenProgram, accounts: [
                 .init(pubkey: inAccount, isSigner: false, isWritable: true), .init(pubkey: wallet.solana, isSigner: false, isWritable: true),
                 .init(pubkey: wallet.solana, isSigner: true, isWritable: false),
             ], data: Data([9])) // CloseAccount
-            let (hash, lastValid) = try await rpc.latestBlockhash()
-            let before = try await rpc.balance(wallet.solana)
-            try await signAndSend(SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([close], payer: wallet.solana, blockhash: hash)),
-                                  lastValid: lastValid, owners: [inAccount: wallet.solana], rules: [], note: "close empty \(from.symbol) account",
-                                  lamportsAtLeast: 1_000_000)
-            line += " Empty \(from.symbol) account closed: +\(Fmt.num(Decimal(Int64(try await rpc.balance(wallet.solana)) - Int64(before)) / 1_000_000_000, maxFraction: 6)) SOL of rent returned."
+            do {
+                let (hash, lastValid) = try await rpc.latestBlockhash()
+                let before = try await rpc.balance(wallet.solana)
+                try await signAndSend(SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([close], payer: wallet.solana, blockhash: hash)),
+                                      lastValid: lastValid, owners: [inAccount: wallet.solana], rules: [], note: "close empty \(from.symbol) account",
+                                      lamportsAtLeast: 1_000_000)
+                line += " Empty \(from.symbol) account closed: +\(Fmt.num(Decimal(Int64(try await rpc.balance(wallet.solana)) - Int64(before)) / 1_000_000_000, maxFraction: 6)) SOL of rent returned."
+            } catch {
+                line += " Its empty \(from.symbol) account stays open, with its rent (closing it failed: \(error.localizedDescription))."
+            }
         }
         report(line)
         return line
@@ -472,6 +479,13 @@ extension Executor {
     /// from the transaction's own keys. What the guard can't know — what the user asked to swap — the app checks.
     /// A mint a lookup table names (USDC in the fills for Ondo's stocks, 2026-10-29) is proven by the taker's own account
     /// for it instead (input 2, output 4): a token account's address derives from its mint.
+    /// Whether a gasless order may be taken: a JupiterZ fill only when it swaps exactly what was asked — on the low-SOL path
+    /// too, since the guard takes the wallet's account for any mint and the simulation watches only the asked two (the
+    /// 2026-10-29 review). Jupiter's own routes are read by the guard.
+    static func sponsorable(router: String, wire: Data, from: String, to: String) -> Bool {
+        router != "jupiterz" || fillSwaps(wire, from: from, to: to)
+    }
+
     static func fillSwaps(_ wire: Data, from: String, to: String) -> Bool {
         guard let m = try? SolanaMessage.parse(transaction: wire) else { return false }
         let fills = m.instructions.filter { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == SolanaGuard.jupiterZ }

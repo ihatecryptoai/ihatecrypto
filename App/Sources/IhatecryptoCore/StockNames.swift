@@ -27,7 +27,9 @@ public enum StockNames {
 
 /// Ondo Global Markets' tokenized US stocks and ETFs on Solana (NVDAon, SPYon…: Token-2022 mints ending in «ondo», each
 /// Jupiter-verified and filled by JupiterZ's market makers, whom Ondo mints and redeems for) and USDY, its dollar earning
-/// the US Treasury rate. Checked 2026-10-29 against Jupiter's list and docs.ondo.finance.
+/// the US Treasury rate. Checked 2026-10-29 against Jupiter's list and docs.ondo.finance; on chain the stocks' mint
+/// authority is 9foMHsSDq7nMg4WPusSz9eY7tyxyukqborA8GyU5cUxD, USDY's 8n2uiRUd…, all frozen by 51QVCuHf…. The suffix is a
+/// vanity anyone can grind: a token counts as Ondo's only Jupiter-verified too (SpotAsset.ondo).
 public enum Ondo {
     public static let usdy = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
     public static func issued(_ mint: String) -> Bool { mint == usdy || mint.hasSuffix("ondo") }

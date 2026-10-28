@@ -392,17 +392,53 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     let v = check(SolanaPolicy(owner: me, trustLookupTables: false, sponsor: maker))
     #expect(v.ok, "\(v.problems)")
     #expect(v.checks.contains { $0.hasPrefix("The market maker sources the coin itself") })
-    // Without a maker paying, the same steps are programs off the list.
-    #expect(!check(SolanaPolicy(owner: me, trustLookupTables: false)).ok)
+    // The prompt names the input by the wallet's own account for it, not by the lookup table's unread entry.
+    #expect(v.checks.contains { $0.hasPrefix("JupiterZ fill: 3 USDC for 13918596 units of gEGtLT") }, "\(v.checks)")
     // The app's own check of what the fill swaps: USDC, named by a lookup table, proven by the taker's own account for it.
     #expect(Executor.fillSwaps(wire, from: usdcMint, to: nvda) && !Executor.fillSwaps(wire, from: nvda, to: usdcMint))
     #expect(!Executor.fillSwaps(wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    // The low-SOL path takes a gasless order without comparing prices: a JupiterZ fill still has to swap what was asked.
+    #expect(Executor.sponsorable(router: "jupiterz", wire: wire, from: usdcMint, to: nvda))
+    #expect(!Executor.sponsorable(router: "jupiterz", wire: wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    #expect(Executor.sponsorable(router: "metis", wire: wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
     // A maker's step given the wallet, or one with no fill beside it: refused.
     let ondo = "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm", sponsored = SolanaPolicy(owner: me, sponsor: deposit)
     let (given, givenList) = try message([deposit, me, ondo], [(2, [0, 1], [1])], signers: 2)
     #expect(SolanaGuard.check(given, accounts: givenList, policy: sponsored, tokenOwners: [:]).problems.first?.contains("given your wallet") == true)
     let (alone, aloneList) = try message([deposit, me, ondo], [(2, [0], [1])], signers: 2)
     #expect(SolanaGuard.check(alone, accounts: aloneList, policy: sponsored, tokenOwners: [:]).problems == ["A market maker's steps come without its one JupiterZ fill."])
+    // With the wallet paying its own fee there's no maker: the same step is a program off the list.
+    let (own, ownList) = try message([me, ondo], [(1, [], [1])])
+    #expect(SolanaGuard.check(own, accounts: ownList, policy: SolanaPolicy(owner: me), tokenOwners: [:]).problems
+        == ["Instruction 1: program \(ondo) is not on the allowed list."])
+}
+
+/// The maker's own steps beside a hand-made fill (accounts as jupiterZFillsPayOnlyThisWallet has them, USDC in, SOL out):
+/// they pass on the maker's accounts only — never the fill's taker side, a token account the wallet holds, a second fill,
+/// or SOL «back» to the maker from the wallet.
+@Test func jupiterZMakerStepsKeepOffTheWallet() throws {
+    let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let maker = deposit, z = SolanaGuard.jupiterZ, ondo = "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm"
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myWSOL = try SPL.associatedAccount(owner: me, mint: wsol)
+    let makerUSDC = try SPL.associatedAccount(owner: maker, mint: usdcMint), makerWSOL = try SPL.associatedAccount(owner: maker, mint: wsol)
+    func le(_ n: UInt64) -> [UInt8] { withUnsafeBytes(of: n.littleEndian, Array.init) }
+    let fill: [UInt8] = [0xa8, 0x60, 0xb7, 0xa3, 0x5c, 0x0a, 0x28, 0xa0] + le(15_000_000) + le(148_288_542) + le(1_793_192_203)
+    let keys = [maker, me, myUSDC, makerUSDC, z, makerWSOL, SolanaGuard.system, usdcMint, SPL.tokenProgram, wsol, myWSOL, ondo]
+    let fillIx = (program: 4, accounts: [1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], data: fill)
+    func check(_ ixs: [(program: Int, accounts: [Int], data: [UInt8])], owners: [String: String] = [:]) throws -> Verdict {
+        let (m, list) = try message(keys, ixs, signers: 2)
+        return SolanaGuard.check(m, accounts: list, policy: SolanaPolicy(owner: me, sponsor: maker), tokenOwners: owners)
+    }
+    // On the maker's own USDC account: passes.
+    let ok = try check([(11, [0, 3], [1]), fillIx])
+    #expect(ok.ok, "\(ok.problems)")
+    // The fill's source account, though the app claimed nothing about it; a wSOL account the app says is the wallet's.
+    #expect(try check([(11, [0, 2], [1]), fillIx]).problems.first?.contains("given your wallet") == true)
+    #expect(try check([(11, [0, 10], [1]), fillIx], owners: [myWSOL: me]).problems.first?.contains("given your wallet") == true)
+    // Two fills: the second is refused, and the maker's steps have no one fill to stand beside.
+    #expect(try check([(11, [0, 3], [1]), fillIx, fillIx]).problems.contains("A market maker's steps come without its one JupiterZ fill."))
+    // SOL from the wallet to the maker beside a fill: the maker fronted no rent, so it's a skim.
+    #expect(try check([(6, [1, 0], solTransfer(2_039_280)), fillIx]).problems.contains { $0.contains("a JupiterZ fill takes no SOL from your wallet") })
 }
 
 @Test func jupiterLendAndDCAPayOnlyTheSignersOwnAccounts() throws {

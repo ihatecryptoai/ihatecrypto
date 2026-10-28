@@ -114,9 +114,10 @@ extension Workspace {
         }
         // Ondo's own tokens: not the freeze, mint and thin-pool warnings, which an issuer's token always has (its market
         // makers, not the pools, set the price); its terms go on the buy's card (Canvases, the route's footer).
-        let warnings = t.verified && Ondo.issued(mint) ? [] : t.warnings(russian: modulesRussian)
+        let ondo = t.verified && Ondo.issued(mint)
+        let warnings = ondo ? [] : t.warnings(russian: modulesRussian)
         if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: "; ") + ".", note: note) }
-        return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
+        return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022, ondo: ondo)
     }
 
     /// Prices and icons for the favorites, at most once a minute.

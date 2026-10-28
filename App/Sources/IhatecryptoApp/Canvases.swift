@@ -1365,7 +1365,7 @@ extension Workspace {
         default: ends(command).map { from, to in
             let footer = if case .sellStock = command {
                 "Two Robinhood Chain transactions: an exact approve and the Uniswap swap, which may only pay this wallet. Press Confirm; Cancel or “cancel” drops it."
-            } else if case .buy(let a, _) = command, Ondo.issued(a.mint) {
+            } else if case .buy(let a, _) = command, a.ondo {
                 "One Solana signature, checked and simulated before it’s signed. " + Ondo.terms(russian: false) + " Press Confirm; Cancel or “cancel” drops it."
             } else {
                 "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it."

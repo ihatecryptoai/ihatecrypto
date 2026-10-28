@@ -55,9 +55,11 @@ public struct SpotAsset: Equatable, Sendable {
     public let decimals: Int
     /// A Token-2022 mint: its accounts derive from that program, not the classic one.
     public var token2022 = false
+    /// Ondo's own token, as Jupiter's verified list vouches for it (Ondo.issued alone is a mint suffix anyone can grind).
+    public var ondo = false
 
-    public init(symbol: String, mint: String, decimals: Int, token2022: Bool = false) {
-        self.symbol = symbol; self.mint = mint; self.decimals = decimals; self.token2022 = token2022
+    public init(symbol: String, mint: String, decimals: Int, token2022: Bool = false, ondo: Bool = false) {
+        self.symbol = symbol; self.mint = mint; self.decimals = decimals; self.token2022 = token2022; self.ondo = ondo
     }
 
     /// A token named by its mint only, until the app looks it up.
