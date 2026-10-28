@@ -2852,7 +2852,11 @@ private struct ChatComposer: View {
     /// The move waiting for Confirm, said in the field's own head; nil when nothing waits.
     private var waiting: String? {
         guard let text = ws.pendingText ?? ws.pendingAllocation.map({ ws.readable($0.summary) }) else { return nil }
-        let shown = ws.withAmounts(text)
+        // «All» with its number, as the card on the canvas says it («Withdraw all 0.034429 SPCX from Kamino»): the wallet
+        // alone can't tell what a protocol holds or what's owed.
+        let drawn: String? = if case .wallet(let c)? = ws.pendingAction, text.contains("all "), let t = ws.route(c)?.title,
+                                t.contains("all "), t.contains(where: \.isNumber) { t } else { nil }
+        let shown = drawn ?? ws.withAmounts(text)
         return shown.prefix(1).uppercased() + shown.dropFirst()
     }
 

@@ -69,6 +69,11 @@ relaunch)
   if why=$(busy); then echo "Dev is in use ($why): not relaunching. Ask the session using it, or wait: Tools/dev.sh idle" >&2; exit 1; fi
   osascript -e "tell application id \"$BUNDLE\" to quit" 2>/dev/null
   for i in {1..40}; do pgrep -x 'ihatecrypto Dev' >/dev/null || break; sleep 0.5; done
+  # It can refuse a quit while idle («User canceled», -128): busy said nothing runs, so it's stopped instead.
+  if pgrep -x 'ihatecrypto Dev' >/dev/null; then
+    pkill -TERM -x 'ihatecrypto Dev'
+    for i in {1..20}; do pgrep -x 'ihatecrypto Dev' >/dev/null || break; sleep 0.5; done
+  fi
   pgrep -x 'ihatecrypto Dev' >/dev/null && { echo "Dev didn't quit (a sheet open?)" >&2; exit 1 }
   if [[ $1 == --build ]]; then
     shift
