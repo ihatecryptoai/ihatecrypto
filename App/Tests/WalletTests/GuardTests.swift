@@ -3,6 +3,7 @@ import HyperliquidSigning
 @testable import SolanaChain
 import Testing
 import TxGuard
+@testable import TradeExecution
 import WalletCore
 
 private let me = "2EUrWmf5xMmWER9BtDbXbGbZjoL7R3eTDMXYR6H6cKPj"
@@ -372,6 +373,36 @@ private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], twice: true).ok)
     // Without the maker as the named fee payer the two signatures are refused, as for any transaction.
     #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], policy: SolanaPolicy(owner: me)).ok)
+}
+
+/// A JupiterZ order for Ondo's NVDAon, as lite-api.jup.ag/swap/v2/order built it on 2026-10-29 (3 USDC in), its taker and
+/// the taker's two accounts put on `me`: beside the fill the maker has Ondo mint the stock against a signed price, inside a
+/// Jupiter program's pair of calls, and USDC's mint comes from a lookup table.
+private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAIABhCWmpufqjVYZfnyuFyDIYJfGWS2mAfjxKCUSfgP6ocw/xJPu1CG1eT0myNTijJn+XIY+eWIRKQHl7jC8aQ1uVa2CeMxq5qhwAgmIW0MF4dLMwkxIHrBvr5c08/crA4Q6T4KDKkOmBBVt2cJe1e58QIGFNB0ELCh8y9LyeeJjoR4CihDMtHUfShf/Oa+osQ679KsykqKYBb4lOUWiWQGOHeiS8S88QqamOrvVmZOo1uOpWQDtUp3ZTx3MrWCN4rX5LRfSm4AXB93lixCTAA65IyZL1CfDcROhO+FoE99e2FdSYSAR+QmNK7fLerYNxa0XtOC1dfBbrPRu3kH56B66UwkzRhwOQPjN/vIpl7Xium7Iy3jagX5rfmT/XPNgYLV8+5Y/FEh+eXX45qjIynXZgTkY7cIE4pMYcB9TX1GrxEDaAMGRm/lIRcy/+ytunLDm+e8jOW7xfcSayxDmzpAAAAABMb8IPBQzPBVhNchHJ+M9Z7BR4W7FmoeKDDoEiAAAAAH8GPXUx0J5M4QhSMGkyrDXnCjhql+ffCiasaQs5lcKgr+HsLLby6mG8NIKPJ3FF1seUNQjRv5tY9hZNnovtSxSlhJ+3Kju+kf3FsOalf2PFoctFsgZ6btDKzTY5XIoQKMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WWEZw4aLgkz9+/ZC/96Me/cEcyrZNeKZHt0ZqF4FpEKRCAoACQMtDgAAAAAAAAoABQLAJwkADQ4AFRglEBkfFiEeHA8aGxBnE04Y8AmHP8DGLQAAAAAACwCBAQEgAAMMAANhACAAA/8tBPYALBDrpwKtr+L0PKxZlsR3sxtpnTz2K4pXv/Z97/PhqjZLzNF7QixOsnC+EoqocPwaNqtDy+2GtaTvWO+DHOYtxTEvldatk/POSSeVTe99NgEs4WarmsuZQRz+8QNnk3bNdj6uHSFTC6z1d1yZ2brP4QwZAAMiBwQCBggmHRoPHCQSFyUYERMjFBsgDDCAHIWtR465zhub09K8oEa6oMM1Kc3sCEPb9kYiMgAAAIRh1AAAAAAAtk7iagAAAAAPBgEJAQMaHQEBDgsBAAUYCQYlHAMdGiWoYLejXAoooMDGLQAAAAAAhGHUAAAAAAC0TuJqAAAAAAoAAAAADQ4AFRglEBkfFiEeHA8aGxDVL5mJVPNe6MDGLQAAAAAAATvS46ffe5EJgS8syMCyEUfC+/dSXfa1UwnJq4WTjUwjCg4KFh0UDBEXHBANBQQGBwEPFQ0SEwsJGw=="
+
+@Test func jupiterZMakersSourceOndoStocksOnlyOnTheirOwnAccounts() throws {
+    let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", nvda = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo"
+    let maker = "B8ttfFCJRyJivDLn19Q6uvndVCssTwkokLAgz22vyo1Q"
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myNVDA = try SPL.associatedAccount(owner: me, mint: nvda, program: SPL.token2022Program)
+    let wire = try #require(Data(base64Encoded: ondoFill))
+    let m = try SolanaMessage.parse(transaction: wire)
+    // As the signer sees it: the lookup tables' entries unread.
+    let accounts = m.staticKeys + m.lookups.flatMap { $0.writable + $0.readonly }.map { "entry \($0)" }
+    func check(_ policy: SolanaPolicy) -> Verdict { SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [myUSDC: me, myNVDA: me]) }
+    let v = check(SolanaPolicy(owner: me, trustLookupTables: false, sponsor: maker))
+    #expect(v.ok, "\(v.problems)")
+    #expect(v.checks.contains { $0.hasPrefix("The market maker sources the coin itself") })
+    // Without a maker paying, the same steps are programs off the list.
+    #expect(!check(SolanaPolicy(owner: me, trustLookupTables: false)).ok)
+    // The app's own check of what the fill swaps: USDC, named by a lookup table, proven by the taker's own account for it.
+    #expect(Executor.fillSwaps(wire, from: usdcMint, to: nvda) && !Executor.fillSwaps(wire, from: nvda, to: usdcMint))
+    #expect(!Executor.fillSwaps(wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    // A maker's step given the wallet, or one with no fill beside it: refused.
+    let ondo = "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm", sponsored = SolanaPolicy(owner: me, sponsor: deposit)
+    let (given, givenList) = try message([deposit, me, ondo], [(2, [0, 1], [1])], signers: 2)
+    #expect(SolanaGuard.check(given, accounts: givenList, policy: sponsored, tokenOwners: [:]).problems.first?.contains("given your wallet") == true)
+    let (alone, aloneList) = try message([deposit, me, ondo], [(2, [0], [1])], signers: 2)
+    #expect(SolanaGuard.check(alone, accounts: aloneList, policy: sponsored, tokenOwners: [:]).problems == ["A market maker's steps come without its one JupiterZ fill."])
 }
 
 @Test func jupiterLendAndDCAPayOnlyTheSignersOwnAccounts() throws {

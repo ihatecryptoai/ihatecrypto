@@ -128,6 +128,10 @@ public enum ChatRouter {
       take stay as they are. Nothing else removes a stop.)
     SPOT ON SOLANA (Jupiter): buy <SOL|BTC|ETH|JUP|JitoSOL> for N USDC | sell [N] <SOL|BTC|ETH|JUP>
       any other Jupiter-verified token by its ticker: buy <TICKER> on solana for N USDC | sell [N] <TICKER> on solana   (BONK, WIF, USDT, JTO, PYTH, POPCAT, RENDER…)
+      Ondo's tokenized US stocks and ETFs are such tokens, the US ticker + «on» (NVDAon, TSLAon, AAPLon, MSFTon, GOOGLon, SPYon, QQQon…), filled at the market makers' price:
+      «купи акции Nvidia от Ondo на 5$» = buy NVDAon on solana for 5 USDC, «buy $5 of SPY on Ondo» = buy SPYon on solana for 5 USDC, «продай всю Теслу от Ondo» = sell all TSLAon on solana;
+      a stock bought with no «Ondo» said stays the Robinhood form below. USDY is Ondo's dollar that earns the US Treasury rate (its price grows, it isn't a stablecoin):
+      «положи 10 долларов в USDY» = buy USDY on solana for 10 USDC, «выведи всё из USDY» = sell all USDY on solana
       buy <SOL|BTC|ETH|JUP> for N USDC every <day|week|N days> | stop recurring buys
       Jupiter DCA N USDC into <SOL|BTC|ETH|JUP|TICKER> [in K orders] [every <hour|day|week|month|N days> | over N <days|weeks|months>] | cancel Jupiter DCA [<TICKER>] | show Jupiter DCA
       (Jupiter's on-chain DCA: all N goes into an order account of the wallet's own at once and Jupiter's keepers buy each round, even with the app closed; at least 100 USDC and 50 per order; no K = one per 50 USDC. Write it when the user names Jupiter's DCA or wants buys that run on-chain without the app; a plain «buy SOL every week» is the app's own recurring buy above)

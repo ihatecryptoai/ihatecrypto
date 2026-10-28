@@ -64,6 +64,14 @@ public enum SolanaGuard {
     /// fill(input_amount, output_amount, expire_at): sha256("global:fill")[0..<8]; its accounts taker 0, maker 1, the taker's
     /// input 2 and output 4 accounts (the program's own id for none: SOL then comes as lamports), input mint 6, output mint 8.
     static let jupiterZFill = "a860b7a35c0a28a0"
+    /// What a JupiterZ market maker runs beside its fill to source the coin, seen in its orders for Ondo's tokenized stocks
+    /// (2026-10-29): Ondo Global Markets mints or redeems the stock for the maker against a price it signed (the secp256k1
+    /// precompile checks that signature), between two calls of a Jupiter program (jupgf…) on the maker's accounts. Allowed
+    /// only beside the one fill, with a maker paying, and never given this wallet or one of its accounts.
+    static let jupiterZMakerPrograms = [
+        "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm": "Ondo Global Markets", "KeccakSecp256k11111111111111111111111111111": "the secp256k1 check",
+        "jupgfSgfuAXv4B6R2Uxu85Z1qdzgju79s6MfZekN6XS": "Jupiter's maker program",
+    ]
     static let wrappedSOL = "So11111111111111111111111111111111111111112"
     /// Relay Depository (github.com/relayprotocol/relay-depository), Anchor program.
     public static let relayDepository = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2"
@@ -223,13 +231,23 @@ public enum SolanaGuard {
         var unitLimit: UInt64 = 200_000
         var unitPrice: UInt64 = 0
         var refunded: UInt64 = 0
-        var fills = 0
+        var fills = 0, makerSteps = 0
         for (n, ix) in m.instructions.enumerated() {
             guard ix.programIndex < m.staticKeys.count else {
                 v.problems.append("Instruction \(n + 1): the program is loaded from a lookup table.")
                 continue
             }
             let program = accounts[ix.programIndex]
+            // The wallet signs as account 1 and is a static key, so a step not given it can't act with its signature.
+            if policy.sponsor != nil, let maker = jupiterZMakerPrograms[program] {
+                guard !ix.accounts.contains(where: { $0 < accounts.count && (accounts[$0] == policy.owner || mine(accounts[$0])) }) else {
+                    v.problems.append("Instruction \(n + 1): \(maker) is given your wallet or one of its accounts.")
+                    continue
+                }
+                makerSteps += 1
+                if makerSteps == 1 { v.checks.append("The market maker sources the coin itself (\(maker) and the like), on its own accounts only.") }
+                continue
+            }
             guard let programName = policy.programs[program] else {
                 v.problems.append("Instruction \(n + 1): program \(program) is not on the allowed list.")
                 continue
@@ -392,6 +410,7 @@ public enum SolanaGuard {
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
             }
         }
+        if makerSteps > 0, fills != 1 { v.problems.append("A market maker's steps come without its one JupiterZ fill.") }
         // Both numbers are the transaction's: a product past 64 bits is refused, not trapped on.
         let (product, overflow) = unitLimit.multipliedReportingOverflow(by: unitPrice)
         let fee = product / 1_000_000

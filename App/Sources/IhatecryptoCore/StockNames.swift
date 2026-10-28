@@ -24,3 +24,16 @@ public enum StockNames {
         return nil
     }
 }
+
+/// Ondo Global Markets' tokenized US stocks and ETFs on Solana (NVDAon, SPYon…: Token-2022 mints ending in «ondo», each
+/// Jupiter-verified and filled by JupiterZ's market makers, whom Ondo mints and redeems for) and USDY, its dollar earning
+/// the US Treasury rate. Checked 2026-10-29 against Jupiter's list and docs.ondo.finance.
+public enum Ondo {
+    public static let usdy = "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6"
+    public static func issued(_ mint: String) -> Bool { mint == usdy || mint.hasSuffix("ondo") }
+    /// Ondo's terms, said before Confirm. Its freeze and mint authorities are an issuer's, not a scam's sign.
+    public static func terms(russian: Bool) -> String {
+        russian ? "Ondo не продаёт свои токены жителям США, Канады, России и Беларуси, а в ЕЭЗ, Британии, Сингапуре, Гонконге, Швейцарии, Бразилии и Малайзии — только квалифицированным инвесторам; погашение у самого Ondo — после KYC."
+                : "Ondo doesn't offer its tokens to residents of the US, Canada, Russia or Belarus, and in the EEA, the UK, Singapore, Hong Kong, Switzerland, Brazil and Malaysia only to qualified investors; redeeming at Ondo itself needs KYC."
+    }
+}

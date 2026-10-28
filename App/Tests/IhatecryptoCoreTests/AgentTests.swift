@@ -256,6 +256,21 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(ChatRouter.forms.contains("buy <TICKER> on <base|arbitrum|polygon|ethereum|optimism|bnb|hyperevm> for N USDC") && ChatRouter.forms.contains("buy <TICKER> on solana for N USDC"))
 }
 
+/// Ondo's tokenized stocks and USDY are Solana tokens by ticker (2026-10-29): the model writes them in this form, English
+/// or Russian, and a stock with no «Ondo» stays Robinhood's.
+@Test func ondoStocksAndUSDYAreSolanaTokens() {
+    #expect(WalletCommand.parse("buy NVDAon on solana for 5 USDC") == .buy(.bySymbol("NVDAon"), usdc: 5))
+    #expect(WalletCommand.parse("купи SPYon на солане на 5$") == .buy(.bySymbol("SPYon"), usdc: 5))
+    #expect(WalletCommand.parse("sell all TSLAon on solana") == .sell(.bySymbol("TSLAon"), amount: nil))
+    #expect(WalletCommand.parse("продай 0.01 NVDAon на солане") == .sell(.bySymbol("NVDAon"), amount: Decimal(string: "0.01")!))
+    #expect(WalletCommand.parse("buy USDY on solana for 10 USDC") == .buy(.bySymbol("USDY"), usdc: 10))
+    #expect(WalletCommand.parse("купи USDY на солане на 10 usdc") == .buy(.bySymbol("USDY"), usdc: 10))
+    #expect(WalletCommand.parse("buy Nvidia stock for 5 USDC") == .buyStock(symbol: "NVDA", usdc: 5))
+    #expect(ChatRouter.forms.contains("«купи акции Nvidia от Ondo на 5$» = buy NVDAon on solana for 5 USDC"))
+    // Ondo's own mints (its stocks end in «ondo») get its terms on the card; USDC doesn't.
+    #expect(Ondo.issued("gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo") && Ondo.issued(Ondo.usdy) && !Ondo.issued(SpotAsset.usdc.mint))
+}
+
 @Test func aTickerFindsJupitersVerifiedTokenNotItsNamesakes() throws {
     let json = """
     [{"id": "Fake1", "symbol": "WIF", "liquidity": 900000000, "tags": ["unknown"]},

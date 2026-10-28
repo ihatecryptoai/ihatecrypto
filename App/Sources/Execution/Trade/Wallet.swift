@@ -392,11 +392,12 @@ extension Executor {
             report("\(from.symbol) → \(to.symbol) via \(maker ? "JupiterZ, a market maker filling it and paying the fee" : "Jupiter, its wallet paying the fee"): \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route.isEmpty ? order.router : order.route).")
             var rules: [(String, String, Bool, Int64)] = nativeIn ? [] : [(inAccount, from.symbol, true, -Int64(units))]
             if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(order.minOut))) }
-            // Not a lamport of ours pays: SOL in leaves exactly, SOL bought arrives whole, at least the minimum.
+            // Not a lamport of ours pays: SOL in leaves exactly, SOL bought arrives whole, at least the minimum. A maker leaves
+            // the rent of the coin's new account to the wallet (≈ 0.00156 SOL for an Ondo stock's Token-2022 one, 2026-10-29).
             do {
                 changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
                                                 note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by \(maker ? "JupiterZ's market maker" : "Jupiter")",
-                                                lamportsAtLeast: nativeIn ? -Int64(units) : nativeOut ? Int64(order.minOut) : 0,
+                                                lamportsAtLeast: nativeIn ? -Int64(units) : nativeOut ? Int64(order.minOut) : maker && outBefore == 0 ? -2_100_000 : 0,
                                                 dryRun: dryRun, sponsor: (sponsor, order.requestId))
             } catch where maker && !lowSOL && ((error as? GuardStop)?.message.hasPrefix("The guard stopped") == true
                                                  || (error as? ExecutionError)?.message.hasPrefix("The simulation failed") == true) {
@@ -469,11 +470,19 @@ extension Executor {
 
     /// A JupiterZ order's one fill swaps exactly these mints: its input mint (account 6) and output mint (account 8), read
     /// from the transaction's own keys. What the guard can't know — what the user asked to swap — the app checks.
+    /// A mint a lookup table names (USDC in the fills for Ondo's stocks, 2026-10-29) is proven by the taker's own account
+    /// for it instead (input 2, output 4): a token account's address derives from its mint.
     static func fillSwaps(_ wire: Data, from: String, to: String) -> Bool {
         guard let m = try? SolanaMessage.parse(transaction: wire) else { return false }
         let fills = m.instructions.filter { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == SolanaGuard.jupiterZ }
-        guard fills.count == 1, let ix = fills.first, ix.accounts.count > 8, ix.accounts[6] < m.staticKeys.count, ix.accounts[8] < m.staticKeys.count else { return false }
-        return m.staticKeys[ix.accounts[6]] == from && m.staticKeys[ix.accounts[8]] == to
+        guard fills.count == 1, let ix = fills.first, ix.accounts.count > 8 else { return false }
+        func key(_ i: Int) -> String? { ix.accounts[i] < m.staticKeys.count ? m.staticKeys[ix.accounts[i]] : nil }
+        func swaps(mint at: Int, account: Int, _ mint: String) -> Bool {
+            if let named = key(at) { return named == mint }
+            guard let taker = key(0), let own = key(account) else { return false }
+            return [SPL.tokenProgram, SPL.token2022Program].contains { (try? SPL.associatedAccount(owner: taker, mint: mint, program: $0)) == own }
+        }
+        return swaps(mint: 6, account: 2, from) && swaps(mint: 8, account: 4, to)
     }
 
     /// Guard and simulation here, the signer's own guard, then send and wait. `rules`: (account, label, token?, least change).

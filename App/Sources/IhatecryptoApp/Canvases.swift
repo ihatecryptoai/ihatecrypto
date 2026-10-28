@@ -1365,6 +1365,8 @@ extension Workspace {
         default: ends(command).map { from, to in
             let footer = if case .sellStock = command {
                 "Two Robinhood Chain transactions: an exact approve and the Uniswap swap, which may only pay this wallet. Press Confirm; Cancel or “cancel” drops it."
+            } else if case .buy(let a, _) = command, Ondo.issued(a.mint) {
+                "One Solana signature, checked and simulated before it’s signed. " + Ondo.terms(russian: false) + " Press Confirm; Cancel or “cancel” drops it."
             } else {
                 "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it."
             }
@@ -1435,6 +1437,13 @@ extension Workspace {
             return ActivityBubble(kind: "step", label: label, title: "\(Fmt.num(x, maxFraction: 8)) \(symbol)", lines: [all], logo: logo, fill: fill, money: money)
         }
         return ActivityBubble(kind: "step", label: label, title: title, lines: [line], logo: logo, fill: fill, money: money)
+    }
+
+    /// A Solana buy's coin now → after, by the quote the card shows; none until it's quoted.
+    private func boughtMove(_ c: WalletCommand, _ a: SpotAsset) -> [MoneyMove] {
+        guard let shown = jupiterShown, shown.command == c, a.resolved else { return [] }
+        let was = holdings.first { $0.chain == "solana" && $0.contract == a.mint }?.amount ?? 0
+        return [MoneyMove(place: "Solana", symbol: a.symbol, was: was, after: was + Decimal(shown.out) / pow(10, a.decimals), approx: true)]
     }
 
     /// A balance a step changes, read now: `symbol` on `place` and what `delta` makes of it (nil delta: all of it
@@ -1775,7 +1784,8 @@ extension Workspace {
         case .buy(let a, let u):
             return (step("usdc", "FROM · SOLANA", "\(n(u)) USDC", solUSDC, .solana, money: moneyMove("USDC", on: "solana", by: u.map { -$0 })),
                     step(TokenLogo.name(forAsset: a.symbol) ?? "usdc", "BUY · JUPITER", a.symbol,
-                         quotedGets(c).map { "≈ \($0) · simulated first" } ?? "best route, simulated first", .jupiter))
+                         quotedGets(c).map { ($0.components(separatedBy: " · ").dropFirst() + ["simulated first"]).joined(separator: " · ") } ?? "best route, simulated first",
+                         .jupiter, money: boughtMove(c, a)))
         case .jupiterDCA(let a, let u, let o, let e):
             let orders = o ?? u.map(WalletCommand.jupiterDCAOrders) ?? 2
             return (step("usdc", "FROM · SOLANA", "\(n(u)) USDC", solUSDC + (solUSDC.isEmpty ? "" : " · ") + "all goes in now", .solana,

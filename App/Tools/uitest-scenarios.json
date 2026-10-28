@@ -19,6 +19,47 @@
     }
   },
   {
+    "name": "buy an Ondo stock → NVDAon on Solana through Jupiter, Ondo's terms on the card, priced by its market makers",
+    "send": [
+      "купи акции Nvidia от Ondo на 3$"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "SOLANA",
+        "JUPITER"
+      ],
+      "command_contains": "NVDAon",
+      "footer_contains": "KYC"
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 3
+    }
+  },
+  {
+    "name": "dollars into Ondo's USDY → a Solana buy of USDY through Jupiter, Ondo's terms on the card",
+    "send": [
+      "положи 3 доллара в USDY"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "steps": [
+        "SOLANA",
+        "JUPITER"
+      ],
+      "command_contains": "USDY",
+      "footer_contains": "KYC"
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 3
+    }
+  },
+  {
     "name": "buy a favorite token by symbol → its contract, never an invented address",
     "send": [
       "купи AI на 2 бакса"

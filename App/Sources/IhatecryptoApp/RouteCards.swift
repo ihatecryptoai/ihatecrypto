@@ -930,7 +930,8 @@ struct StepScene: View {
             context.fill(tag, with: fill); stroke(tag)
             stroke(circle(236, 80, 5), StrokeStyle(lineWidth: 2.5 * k))
             if let ticker {
-                context.draw(Text(ticker).font(.ui(24 * k, .heavy)).foregroundStyle(look.tag), at: p(254, 80), anchor: .leading)
+                // Four letters fill the tag at 24 pt; a longer ticker (NVDAon) gets smaller instead of running off it.
+                context.draw(Text(ticker).font(.ui(24 * k * min(1, 4 / CGFloat(max(ticker.count, 1))), .heavy)).foregroundStyle(look.tag), at: p(254, 80), anchor: .leading)
             }
         case (.swap, false):
             var arrows = Path()

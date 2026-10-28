@@ -112,7 +112,9 @@ extension Workspace {
                       "Включён Safe search, а Jupiter не проверял \(t.name) (\(t.symbol)), поэтому ihatecrypto его не купит. Чтобы торговать непроверенным токеном по mint-адресу, выключи Safe search в Settings › General."), note: note)
             return nil
         }
-        let warnings = t.warnings(russian: modulesRussian)
+        // Ondo's own tokens: not the freeze, mint and thin-pool warnings, which an issuer's token always has (its market
+        // makers, not the pools, set the price); its terms go on the buy's card (Canvases, the route's footer).
+        let warnings = t.verified && Ondo.issued(mint) ? [] : t.warnings(russian: modulesRussian)
         if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: "; ") + ".", note: note) }
         return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
     }

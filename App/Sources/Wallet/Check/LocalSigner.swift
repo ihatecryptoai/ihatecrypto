@@ -240,12 +240,21 @@ func moveMoney(_ text: String) async throws {
     case .yields(let asset):
         for o in await Yields.options(for: asset) { print("\(o.asset) · \(o.place): \(Fmt.num(o.apy.rounded(2, .plain)))%  \(o.note)") }
         return
-    case .buy(let asset, let usdc): _ = try await executor.swap(asset, buy: true, amount: usdc)
-    case .sell(let asset, let amount): _ = try await executor.swap(asset, buy: false, amount: amount)
+    case .buy(let asset, let usdc): _ = try await executor.swap(try await lookedUp(asset), buy: true, amount: usdc)
+    case .sell(let asset, let amount): _ = try await executor.swap(try await lookedUp(asset), buy: false, amount: amount)
     case .schedule, .stopSchedules: print("Scheduled buys are run by the ihatecrypto app while it is open.")
     }
     try await printLendPositions()
     try await printBalances()
+}
+
+/// A token named by its ticker or mint alone, looked up on Jupiter as the app does (TokensUI.spotToken): its decimals and
+/// token program, so a Token-2022 coin (Ondo's stocks) reads from its own account.
+func lookedUp(_ asset: SpotAsset) async throws -> SpotAsset {
+    guard !asset.resolved else { return asset }
+    let mint = asset.mint.isEmpty ? await TokenResearch.solanaMint(symbol: asset.symbol) : asset.mint
+    guard let mint, let t = await TokenResearch.solanaToken(mint) else { throw WalletError("Jupiter has no verified token \(asset.symbol) on Solana.") }
+    return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
 }
 
 /// `manage "стоп в безубыток"` and the like, on the position of the named or ETH asset.
