@@ -356,6 +356,13 @@ extension Executor {
             throw ExecutionError("Jupiter now gives \(Fmt.num(Decimal(out) / outScale, maxFraction: 8)) \(to.symbol), more than 1% under the "
                                  + "\(Fmt.num(Decimal(shown) / outScale, maxFraction: 8)) the card showed. Nothing was signed; Refresh shows the new price.")
         }
+        // The swap moves the price past impactCap: asked, not signed. What goes in, in USD: the USDC itself, else what comes
+        // out (Jupiter's own price for it) before the impact.
+        func holdsImpact(_ impact: Decimal, usd: Decimal, out: UInt64) throws {
+            let worth = to == .usdc ? Decimal(out) / 1_000_000 : usd
+            let paid = from == .usdc ? Decimal(units) / 1_000_000 : impact < 1 ? worth / (1 - impact) : 0
+            try Self.checkImpact(impact, paid: paid, amount: Decimal(units) / scale, symbol: from.symbol, venue: "Jupiter")
+        }
         // Under the fee floor (USDC came without SOL) Jupiter's own wallet may pay the fee: its gasless swap, checked the same.
         // Jupiter decides: a wallet that can still pay (a few thousandths of SOL) gets the ordinary swap below. JupiterZ's
         // market makers are left out: their program isn't on the guard's list.
@@ -369,6 +376,7 @@ extension Executor {
         }
         if let (order, sponsor) = gasless {
             try holdsShown(order.outAmount, feeBps: Decimal(order.feeBps))
+            try holdsImpact(order.impact, usd: order.usd, out: order.outAmount)
             report("\(from.symbol) → \(to.symbol) via Jupiter, its wallet paying the fee: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route).")
             var rules: [(String, String, Bool, Int64)] = [(inAccount, from.symbol, true, -Int64(units))]
             if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(order.minOut))) }
@@ -386,6 +394,7 @@ extension Executor {
                 do { quote = try await Jupiter.quote(input: from.mint, output: to.mint, amount: units, excludeDexes: excluded) }
                 catch { throw firstFailure ?? error }
                 try holdsShown(quote.outAmount)
+                try holdsImpact(quote.impact, usd: quote.usd, out: quote.outAmount)
                 report("\(from.symbol) → \(to.symbol) via Jupiter: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(quote.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(quote.minOut) / outScale, maxFraction: 8)). Route: \(quote.route).")
                 let tx = try await Jupiter.swapTransaction(quote, user: wallet.solana)
                 var rules: [(String, String, Bool, Int64)] = []

@@ -86,11 +86,9 @@ private let calls = [Batch7702.Call(to: baseUSDC, data: approve), Batch7702.Call
     #expect(UniRoute.tolerance(impact: d("0.03")) == d("0.025"))
     #expect(UniRoute.tolerance(impact: d("0.2")) == d("0.03"))
     var deep = UniRoute(v3: (Data(), 1), v4: nil, out: 1, impact: d("0.0004"))
-    #expect(deep.impactText.isEmpty && deep.warning == nil)
+    #expect(deep.impactText.isEmpty)
     deep.impact = d("0.012")
-    #expect(deep.impactText == " · price impact 1.2%" && deep.warning == nil)
-    deep.impact = d("0.07")
-    #expect(deep.warning?.contains("7%") == true)
+    #expect(deep.impactText == " · price impact 1.2%")
 }
 
 /// Batching waits for the user's switch (Settings › Wallet, off by default): off, approve and call go as before.

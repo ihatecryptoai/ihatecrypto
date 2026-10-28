@@ -480,6 +480,42 @@ import WalletCore
     #expect(Executor.kaminoRent(sol: rent, solPrice: sol, depositUSD: 3, accepted: stop.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) == nil)
 }
 
+/// A swap that moves the price past 2% stops before anything is signed and asks (2026-10-24: someone lost $340k selling
+/// a memecoin in one go; Jupiter quoted 2M WIF at once 12.4% under the market on 2026-10-28): the loss in dollars, and
+/// the part that moves it about 1%. A small or deep swap goes; so does the same one once «Send anyway» took that impact —
+/// which leaves the dollar caps on bridges and gas as they were.
+@Test func aSwapPastThePriceImpactCapIsAsked() throws {
+    let d = { Decimal(string: $0)! }
+    let stop = try #require(throws: CostlyMove.self) {
+        try Executor.checkImpact(d("0.124"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    }
+    #expect(stop.lost == d("45260") && stop.paid == 365_000 && stop.impact == d("0.124"))
+    #expect(stop.part?.amount == 161_290 && stop.part?.symbol == "WIF")
+    #expect(stop.localizedDescription == "At once, this moves Jupiter's price by 12.4%: ≈ $45,260.00 of $365,000.00 lost to the thin market. "
+            + "161,290 WIF at a time moves it about 1%. Nothing was signed.")
+    // Under the cap, or under a dollar however far it moves: no question.
+    try Executor.checkImpact(d("0.015"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    try Executor.checkImpact(d("0.3"), paid: 3, amount: 3, symbol: "USDC", venue: "Uniswap v3")
+    // A coin's part keeps its fractions: 1 BTCB on BNB Chain's Uniswap moved it 8.6% (2026-10-28).
+    let btc = try #require(throws: CostlyMove.self) { try Executor.checkImpact(d("0.086"), paid: 81_000, amount: 1, symbol: "BTCB", venue: "Uniswap v3") }
+    #expect(btc.part?.amount == d("0.116279"))
+    // Nobody prices the token: the impact alone stops it.
+    let unpriced = try #require(throws: CostlyMove.self) { try Executor.checkImpact(d("0.05"), paid: 0, amount: 100, symbol: "XYZ", venue: "Uniswap v4") }
+    #expect(unpriced.lost == 0 && unpriced.localizedDescription.contains("nobody prices XYZ"))
+    // After a bridge or gas went: a plain refusal that says where the money waits, never «Nothing was signed».
+    let late = try #require(throws: ExecutionError.self) {
+        try Executor.checkImpact(d("0.05"), paid: 1_000, amount: 1_000, symbol: "USDC", venue: "Uniswap v3", signed: "The USDC waits on Base.")
+    }
+    #expect(late.message.hasSuffix("The USDC waits on Base.") && !late.message.contains("Nothing was signed"))
+    // «Send anyway» takes the impact, not dollars: a dollar loss accepted elsewhere doesn't let it through.
+    #expect(throws: CostlyMove.self) {
+        try Executor.$lossAccepted.withValue(1_000_000) { try Executor.checkImpact(d("0.124"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter") }
+    }
+    try Executor.$impactAccepted.withValue(d("0.124") * d("1.25") + d("0.005")) {
+        try Executor.checkImpact(d("0.13"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    }
+}
+
 /// A gateway's error page never reaches the chat as markup (2026-10-11: Jupiter's nginx 503 was printed as raw HTML);
 /// a service's own words stay as they are.
 @Test func aGatewaysErrorPageIsSaidAsItsStatus() {

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+@testable import JupiterSwap
 @testable import SolanaChain
 import Testing
 import WalletCore
@@ -121,4 +122,14 @@ private let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     #expect(SolanaRPC.shortOfSOL(#"{"InstructionError":[2,{"Custom":1}]}"#, logs: ["Transfer: insufficient lamports 1977880, need 2039280"]))
     #expect(!SolanaRPC.shortOfSOL(#"{"InsufficientFundsForRent":{"account_index":3}}"#, logs: []))
     #expect(!SolanaRPC.shortOfSOL(#"{"InstructionError":[3,{"Custom":6001}]}"#, logs: ["Program log: Error: slippage tolerance exceeded"]))
+}
+
+/// Jupiter's price impact and the swap's USD worth, as each API says them: v1's quote in strings, v2's order in numbers
+/// with the impact negative (2026-10-28, 2M WIF for USDC).
+@Test func jupiterSaysImpactAndWorthEitherWay() {
+    let v1 = Jupiter.impactAndWorth(["priceImpactPct": "0.1235947568", "swapUsdValue": "320500.59"])
+    #expect(v1.impact == Decimal(string: "0.1235947568") && v1.usd == Decimal(string: "320500.59"))
+    let v2 = Jupiter.impactAndWorth(["priceImpactPct": "-0.0103491778", "swapUsdValue": NSNumber(value: 361914.39)])
+    #expect(v2.impact == Decimal(string: "0.0103491778") && v2.usd > 361_914 && v2.usd < 361_915)
+    #expect(Jupiter.impactAndWorth([:]) == (0, 0))
 }

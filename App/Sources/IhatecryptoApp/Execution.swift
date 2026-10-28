@@ -729,12 +729,24 @@ extension Workspace {
             if sent.isEmpty, let costly = error as? CostlyMove {
                 // More lost than a move may lose on its own: asked, not refused (the user: «показывать диалог и спрашивать
                 // Send anyway?»). The cards run it again with that loss accepted, or leave it.
-                costlyMove = (command, costly.lost)
+                costlyMove = (command, costly)
                 reply(costly.localizedDescription + say(" Send it anyway?", " Отправить всё равно?"))
                 // Kamino's first-deposit rent: Jupiter Lend takes the same deposit without it, one card away.
                 let lend: WalletCommand? = if case .kamino(deposit: true, symbol: let s, amount: let a?) = command, ["USDC", "SOL"].contains(s) { .lendDeposit(s, a) } else { nil }
-                offerCards([
-                        ChatRouter.Option(title: say("Send anyway · ≈ \(Fmt.usd(costly.lost)) lost", "Отправить всё равно · потеря ≈ \(Fmt.usd(costly.lost))"),
+                // A swap past the price-impact cap: the part that moves the price about 1% now, the rest later — the same command
+                // run for less (Self.sendPart), never its words parsed again (a token by its mint would come back as its namesake).
+                let part: [ChatRouter.Option] = costly.part.flatMap { p in
+                    command.with(amount: p.amount) == command ? nil
+                        : [ChatRouter.Option(title: say("\(Fmt.num(p.amount, maxFraction: 6)) \(p.symbol) now · price moves ≈ 1%",
+                                                        "\(Fmt.num(p.amount, maxFraction: 6)) \(p.symbol) сейчас · цена сдвинется ≈ на 1%"),
+                                             comment: say("The rest later, in parts: each one loses less", "Остальное позже, частями: каждая теряет меньше"),
+                                             command: Self.sendPart, recommended: true)]
+                } ?? []
+                // Unpriced, the loss is said by the impact itself.
+                let loss = costly.lost > 0 ? (say("≈ \(Fmt.usd(costly.lost)) lost", "потеря ≈ \(Fmt.usd(costly.lost))"))
+                    : say("price moves \(Fmt.num((costly.impact ?? 0) * 100, maxFraction: 1))%", "цена сдвинется на \(Fmt.num((costly.impact ?? 0) * 100, maxFraction: 1))%")
+                offerCards(part + [
+                        ChatRouter.Option(title: say("Send anyway · \(loss)", "Отправить всё равно · \(loss)"),
                                           comment: costly.localizedDescription, command: Self.sendAnyway),
                     ] + (lend.map { [ChatRouter.Option(title: say("Jupiter Lend instead · no rent", "Лучше в Jupiter Lend · без аренды"),
                                                        comment: say("The same deposit, no accounts to pay for", "Тот же депозит, без платы за аккаунты"), command: $0.summary)] } ?? []) + [
@@ -753,7 +765,7 @@ extension Workspace {
     }
 
     /// The two cards after a move the loss cap stopped: what they carry instead of a chat command.
-    static let sendAnyway = "send anyway", leaveCostly = "leave it as is"
+    static let sendAnyway = "send anyway", leaveCostly = "leave it as is", sendPart = "send the part that moves the price about 1%"
 
     private func movesMoney(_ command: WalletCommand, confirmed: Bool) -> Bool {
         switch command {

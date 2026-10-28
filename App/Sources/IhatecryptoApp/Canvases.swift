@@ -2412,7 +2412,9 @@ extension Workspace {
             if let q {
                 let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
                 jupiterShown = (command, q.outAmount)
-                swapQuote = (command, [("Jupiter", "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)", 0)])
+                // As Uniswap's cards say it (UniRoute.impactText): from a tenth of a percent up.
+                let impact = q.impact >= Decimal(string: "0.001")! ? " · price impact \(Fmt.num((q.impact * 100).rounded(q.impact < Decimal(string: "0.1")! ? 2 : 1, .plain)))%" : ""
+                swapQuote = (command, [("Jupiter", "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)\(impact)", 0)])
                 return
             }
             if swapQuote?.command != command { swapQuote = (command, []) }

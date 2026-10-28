@@ -460,8 +460,9 @@ final class Workspace {
     var cardFold: [UUID: Bool] = [:]
     /// The live card ↑↓ moved to from the empty field (ChatComposer): Return picks it; typing or Esc lets it go.
     var cardKey: Int?
-    /// A move the loss cap stopped (CostlyMove) and what it would lose: «Send anyway» runs it again with that accepted.
-    @ObservationIgnored var costlyMove: (command: WalletCommand, lost: Decimal)?
+    /// A move the loss cap stopped (CostlyMove), and why: «Send anyway» runs it again with that loss or impact accepted;
+    /// a swap's part runs it for less.
+    @ObservationIgnored var costlyMove: (command: WalletCommand, stop: CostlyMove)?
     /// The last answer's boards while the next message or picked card is handled: drawn as they were, not clickable,
     /// until the answer is on the canvas. Cleared at once for the logic, they'd leave the canvas blank while the model thinks.
     var heldAnswer: (yields: [Yields.Option]?, takes: [TakeStyle]?)?

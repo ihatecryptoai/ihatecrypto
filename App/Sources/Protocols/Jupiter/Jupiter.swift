@@ -18,6 +18,16 @@ public enum Jupiter {
         public let route: String
         /// The route's pools by Jupiter's label, e.g. ["HumidiFi", "Hadron"]: what `excludeDexes` takes.
         public let dexes: [String]
+        /// How far the swap moves the price, 0…1 (Jupiter's priceImpactPct): 0.12 for 2M WIF sold at once (2026-10-28).
+        public var impact: Decimal = 0
+        /// What comes out, in USD by Jupiter's prices (swapUsdValue); 0 when it doesn't say.
+        public var usd: Decimal = 0
+    }
+
+    /// Jupiter's price impact (its sign dropped: v2 says it negative) and the swap's USD worth, from a quote or an order.
+    static func impactAndWorth(_ j: [String: Any]) -> (impact: Decimal, usd: Decimal) {
+        func dec(_ v: Any?) -> Decimal { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber)?.decimalValue ?? 0 }
+        return (abs(dec(j["priceImpactPct"])), dec(j["swapUsdValue"]))
     }
 
     /// `excludeDexes`: labels Jupiter must route around (a route that failed before signing).
@@ -35,7 +45,9 @@ public enum Jupiter {
                 throw RPCRetry.Again(status == 429 || status >= 500, JupiterError(data, status))
             }
             let dexes = (j["routePlan"] as? [[String: Any]] ?? []).compactMap { ($0["swapInfo"] as? [String: Any])?["label"] as? String }
-            return Quote(raw: data, inAmount: inAmount, outAmount: outAmount, minOut: minOut, route: dexes.joined(separator: " → "), dexes: dexes)
+            let (impact, usd) = impactAndWorth(j)
+            return Quote(raw: data, inAmount: inAmount, outAmount: outAmount, minOut: minOut, route: dexes.joined(separator: " → "), dexes: dexes,
+                         impact: impact, usd: usd)
         }
     }
 
@@ -82,6 +94,9 @@ extension Jupiter {
         public let route: String
         /// The block its blockhash is good until (0 when Jupiter doesn't say).
         public let lastValidBlockHeight: UInt64
+        /// As on a Quote: how far it moves the price, and what comes out in USD.
+        public var impact: Decimal = 0
+        public var usd: Decimal = 0
     }
 
     /// The swap for `taker` as Jupiter builds it; nil transaction when it can't (too little, no route): its words.
@@ -99,10 +114,12 @@ extension Jupiter {
                 throw JupiterError(message: j["errorMessage"] as? String ?? j["error"] as? String ?? "no transaction for this swap")
             }
             let dexes = (j["routePlan"] as? [[String: Any]] ?? []).compactMap { ($0["swapInfo"] as? [String: Any])?["label"] as? String }
+            let (impact, usd) = impactAndWorth(j)
             return Order(requestId: requestId, wire: wire, inAmount: inAmount, outAmount: outAmount, minOut: minOut,
                          gasless: j["gasless"] as? Bool ?? false, feeBps: (j["feeBps"] as? NSNumber)?.intValue ?? 0,
                          route: dexes.joined(separator: " → "),
-                         lastValidBlockHeight: (j["lastValidBlockHeight"] as? NSNumber)?.uint64Value ?? UInt64(j["lastValidBlockHeight"] as? String ?? "") ?? 0)
+                         lastValidBlockHeight: (j["lastValidBlockHeight"] as? NSNumber)?.uint64Value ?? UInt64(j["lastValidBlockHeight"] as? String ?? "") ?? 0,
+                         impact: impact, usd: usd)
         }
     }
 

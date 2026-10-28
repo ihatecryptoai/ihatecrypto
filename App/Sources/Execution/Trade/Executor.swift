@@ -129,6 +129,10 @@ public struct CostlyMove: LocalizedError, Sendable {
     public let what: String
     /// Its own words, where the loss isn't a share the move keeps: Kamino's first-deposit rent comes on top, in SOL.
     var words: String?
+    /// A swap's price impact (0…1) when that's what stopped it: «Send anyway» takes that impact, not a dollar loss.
+    public var impact: Decimal?
+    /// The part of what goes in that moves the price only about 1% («160,000 WIF»), for a card.
+    public var part: (amount: Decimal, symbol: String)?
     public var errorDescription: String? {
         words ?? "\(what) keeps ≈ \(Fmt.usd(lost)) of \(Fmt.usd(paid)) (\(Fmt.num(lost / max(paid, Decimal(string: "0.01")!) * 100, maxFraction: 0))%): "
             + "more than a move may lose on its own. Nothing was signed."
@@ -185,6 +189,28 @@ public actor Executor {
     static func checkLoss(_ lost: Decimal, paid: Decimal, cap: Decimal, what: String) throws {
         guard lost > cap, lost > lossAccepted else { return }
         throw CostlyMove(lost: lost, paid: paid, what: what)
+    }
+
+    /// How far a swap may move the price on its own. Past it (and past $1), it stops before anything is signed and asks:
+    /// a part now, the whole anyway, or nothing (2026-10-24: someone lost $340k selling a memecoin in one go).
+    static let impactCap = Decimal(string: "0.02")!
+    /// The price impact the user took with «Send anyway» on a swap that impactCap stopped; the dollar caps stay as they are.
+    @TaskLocal public static var impactAccepted: Decimal = 0
+
+    /// Stops a swap whose price impact (0…1) is past `impactCap` and what was accepted: `paid` is what goes in, in USD at
+    /// the market price (0 = nobody prices it: the impact alone decides), `amount` the same in the input's own units
+    /// («all» as the number it is), for the part that moves the price ≈ 1%. `signed`: what already went (a bridge, gas)
+    /// and where the money waits — then it's a plain refusal, since «Nothing was signed» would be untrue.
+    static func checkImpact(_ impact: Decimal, paid: Decimal, amount: Decimal, symbol: String, venue: String, signed: String? = nil) throws {
+        let lost = paid * impact
+        guard impact > impactCap, impact > impactAccepted, paid == 0 || lost > 1 else { return }
+        // ponytail: impact grows about in step with size; the part is quoted and checked again when it runs.
+        let share = amount * Decimal(string: "0.01")! / impact, part = share.rounded(share < 10 ? 6 : 0, .down)
+        let words = "At once, this moves \(venue)'s price by \(Fmt.num((impact * 100).rounded(1, .plain)))%"
+            + (paid > 0 ? ": ≈ \(Fmt.usd(lost)) of \(Fmt.usd(paid)) lost to the thin market. " : ", and nobody prices \(symbol) to say it in dollars. ")
+            + (part > 0 ? "\(Fmt.num(part, maxFraction: 6)) \(symbol) at a time moves it about 1%. " : "")
+        if let signed { throw ExecutionError(words + signed) }
+        throw CostlyMove(lost: lost, paid: paid, what: venue, words: words + "Nothing was signed.", impact: impact, part: part > 0 ? (part, symbol) : nil)
     }
     /// Market stop and take fill up to this far past the trigger, as Hyperliquid's own interface does.
     static let triggerSlippage = Decimal(string: "0.1")!

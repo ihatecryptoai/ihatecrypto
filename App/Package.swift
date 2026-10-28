@@ -92,7 +92,7 @@ let package = Package(
         .testTarget(name: "IhatecryptoAppTests", dependencies: ["IhatecryptoApp", "IhatecryptoCore", "LLMCore", "LLMCatalog"],
                     swiftSettings: [.defaultIsolation(MainActor.self)]),
         .testTarget(name: "DeFiTests", dependencies: ["DeFiYields"]),
-        .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev"]),
+        .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev", "JupiterSwap"]),
         .testTarget(
             name: "LLMTests",
             dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMCatalog"]

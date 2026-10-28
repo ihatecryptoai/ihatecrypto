@@ -494,14 +494,22 @@ extension Workspace {
                       "Оставил выключенным. Включить можно в Settings › Wallet › Hyperliquid или словами «включи торговый ключ»."))
             return
         }
-        if option.command == Self.sendAnyway || option.command == Self.leaveCostly {
+        if option.command == Self.sendAnyway || option.command == Self.leaveCostly || option.command == Self.sendPart {
             let costly = costlyMove
             costlyMove = nil
-            guard option.command == Self.sendAnyway, let costly else {
+            guard option.command != Self.leaveCostly, let costly else {
                 reply(say("Left as is: nothing was signed.", "Оставил как есть: ничего не подписано."))
                 return
             }
-            await Executor.$lossAccepted.withValue(costly.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) { await move(costly.command) }
+            // The part: the same swap for less, checked again as any swap.
+            if option.command == Self.sendPart, let part = costly.stop.part { await move(costly.command.with(amount: part.amount)); return }
+            // A swap's price impact is taken as that impact (a little room for the price to move): the dollar caps on the
+            // bridges and gas around it stay.
+            if let impact = costly.stop.impact {
+                await Executor.$impactAccepted.withValue(min(1, impact * Decimal(string: "1.25")! + Decimal(string: "0.005")!)) { await move(costly.command) }
+                return
+            }
+            await Executor.$lossAccepted.withValue(costly.stop.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) { await move(costly.command) }
             return
         }
         if await !runCanonical(option.command, userText: steps.userText, before: intent) {
