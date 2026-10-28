@@ -14,7 +14,8 @@ async function counts(env) {
   const q = (sql) => env.DB.prepare(sql);
   const [byName, downloads, byDevice, checks, story] = await env.DB.batch([
     q('SELECT name, SUM(n) n, MIN(day) first FROM events GROUP BY name'),
-    q("SELECT day, SUM(n) n FROM events WHERE name = 'download' AND day >= date('now', '-29 days') GROUP BY day"),
+    q("SELECT day, SUM(CASE WHEN device = 'mac' THEN n ELSE 0 END) mac, SUM(n) n FROM events WHERE name = 'download' "
+      + "AND day >= date('now', '-29 days') GROUP BY day"),
     q("SELECT device, SUM(n) n FROM events WHERE name = 'download' GROUP BY device ORDER BY n DESC"),
     q("SELECT day, version, n FROM update_checks WHERE day >= date('now', '-29 days') ORDER BY day DESC, n DESC"),
     q("SELECT lang, device, SUM(n) n FROM events WHERE name = 'story_1' GROUP BY lang, device"),
@@ -56,11 +57,25 @@ const LABELS = [
   ['share_copy', 'Copied the link'], ['menu', 'Opened the phone menu'], ['lang', 'Picked a language'],
 ];
 
+// One bar a day; with `mac` set, the Mac part in the accent and the rest muted on top of it.
 function bars(rows, total) {
   const max = Math.max(1, ...rows.map((r) => r.n));
-  return `<div class="bars" role="img" aria-label="${esc(total)}">${rows.map((r) => `<div class="bar" title="${esc(r.day)}: ${int(r.n)}">`
-    + `<i style="height:${Math.max(r.n ? 6 : 0, Math.round(r.n / max * 100))}%"></i></div>`).join('')}</div>`
+  const h = (n) => `${Math.max(n ? 4 : 0, Math.round(n / max * 100))}%`;
+  return `<div class="bars" role="img" aria-label="${esc(total)}">${rows.map((r) => {
+    const mac = r.mac ?? r.n;
+    return `<div class="bar" title="${esc(r.day)}: ${int(mac)}${r.mac === undefined ? '' : ` on a Mac, ${int(r.n - mac)} elsewhere`}">`
+      + (r.n > mac ? `<i class="rest" style="height:${h(r.n - mac)}"></i>` : '') + (mac ? `<i style="height:${h(mac)}"></i>` : '') + '</div>';
+  }).join('')}</div>`
     + `<div class="axis"><span>${esc(rows[0].day)}</span><span>${esc(rows.at(-1).day)}</span></div>`;
+}
+
+// The DMG asked for from anything but a Mac: a Windows or phone browser, a link scanner, a script. Not installs.
+const ELSEWHERE = { windows: 'Windows browsers', iphone: 'iPhone', ipad: 'iPad', android: 'Android', other: 'other (scripts, link scanners)' };
+function elsewhere(byDevice) {
+  const rest = byDevice.filter((r) => r.device !== 'mac' && r.n);
+  if (!rest.length) return '';
+  return `<p class="note"><span class="swatch"></span>Also fetched from ${rest.map((r) => `${esc(ELSEWHERE[r.device] ?? r.device)} ${int(r.n)}`).join(', ')}. `
+    + 'ihatecrypto runs only on a Mac, so these aren’t installs.</p>';
 }
 
 const failed = (what, reason) => `<p class="miss">${esc(what)} didn’t answer just now: ${esc(reason?.message ?? reason)}. Reload in a minute.</p>`;
@@ -72,7 +87,8 @@ export async function stats(env) {
   const total = (k) => name[k]?.n ?? 0;
   const month = days(30);
 
-  const byDay = (rows) => { const m = Object.fromEntries(rows.map((r) => [r.day, r.n])); return month.map((day) => ({ day, n: m[day] ?? 0 })); };
+  const byDay = (rows) => { const m = Object.fromEntries(rows.map((r) => [r.day, r])); return month.map((day) => ({ ...m[day], day, n: m[day]?.n ?? 0 })); };
+  const onMac = c.value?.byDevice.find((r) => r.device === 'mac')?.n ?? 0;
   let checkDays = [], yesterday = 0;
   if (c.value) {
     const sum = {};
@@ -82,7 +98,7 @@ export async function stats(env) {
   }
 
   const tiles = [
-    [c.value ? int(total('download')) : '—', 'Downloads of the app', name.download ? `since ${name.download.first}` : ''],
+    [c.value ? int(onMac) : '—', 'Downloads on a Mac', name.download ? `since ${name.download.first}` : ''],
     [c.value ? int(yesterday) : '—', 'Update checks yesterday', 'about one a day per copy in use'],
     [hl.value ? usd(hl.value.earned) : '—', 'Earned on Hyperliquid', hl.value ? `${usd(hl.value.volume)} traded through the app` : ''],
     [gh.value ? int(gh.value.stars) : '—', 'GitHub stars', gh.value ? `${int(gh.value.forks)} forks` : ''],
@@ -129,8 +145,12 @@ export async function stats(env) {
   section { display: grid; gap: 12px; }
   .src { text-transform: none; letter-spacing: 0; font-size: 12px; }
   .bars { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 120px; align-items: end; border-bottom: 1px solid var(--line); }
-  .bar { height: 100%; display: flex; align-items: flex-end; }
-  .bar i { display: block; width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; }
+  .bar { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+  .bar i { display: block; width: 100%; background: var(--accent); }
+  .bar i:first-child { border-radius: 3px 3px 0 0; }
+  .bar i.rest, .swatch { background: var(--line); }
+  .note { color: var(--muted); font-size: 14px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
   .axis { display: flex; justify-content: space-between; text-transform: none; }
   .table { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -156,10 +176,9 @@ export async function stats(env) {
 <div class="tiles">${tiles.map(([v, t, s]) => `<div class="tile"><b>${esc(v)}</b><span>${esc(t)}</span><small>${esc(s)}</small></div>`).join('')}</div>
 
 <section>
-  <h2>Downloads, last 30 days</h2>
-  ${c.value ? bars(byDay(c.value.downloads), 'Downloads per day')
-    + `<div class="chips">${c.value.byDevice.map((r) => `<span class="chip">${esc(r.device)} <b>${int(r.n)}</b></span>`).join('')}</div>` : failed('The count', c.reason)}
-  <p class="src">Each GET of ihatecrypto.ai/ihatecrypto.dmg from its first byte (a resumed download counts once). A script or curl counts too, as «other».</p>
+  <h2>Downloads on a Mac, last 30 days</h2>
+  ${c.value ? bars(byDay(c.value.downloads).map((r) => ({ ...r, mac: r.mac ?? 0 })), 'Downloads per day on a Mac') + elsewhere(c.value.byDevice) : failed('The count', c.reason)}
+  <p class="src">Each GET of ihatecrypto.ai/ihatecrypto.dmg from its first byte (a resumed download counts once), by the browser’s User-Agent.</p>
 </section>
 
 <section>
@@ -186,7 +205,7 @@ export async function stats(env) {
       <tr><td>Stars</td><td class="n">${int(gh.value.stars)}</td></tr>
       <tr><td>Forks</td><td class="n">${int(gh.value.forks)}</td></tr>
       <tr><td>Releases</td><td class="n">${int(gh.value.releases)}</td></tr>
-      <tr><td>DMG downloads from GitHub</td><td class="n">${int(gh.value.dmg)}</td></tr>
+      <tr><td>DMG downloads from GitHub, any device</td><td class="n">${int(gh.value.dmg)}</td></tr>
     </tbody></table></div>` : failed('GitHub', gh.reason)}
     <p class="src">GitHub’s API for ${esc(REPO)}, kept 15 minutes.</p>
   </div>

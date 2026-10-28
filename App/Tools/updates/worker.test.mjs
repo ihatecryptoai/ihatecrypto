@@ -25,7 +25,7 @@ assert.equal((await get('ihatecrypto/0.8.0 Sparkle/2.10.0', { prepare: () => { t
 // /stats: D1, GitHub and Hyperliquid mocked; a referred account's address never reaches the page.
 const db = { prepare: (sql) => sql, batch: async () => [
   { results: [{ name: 'download', n: 57, first: '2026-10-10' }, { name: 'story_1', n: 36, first: '2026-10-10' }] },
-  { results: [{ day: new Date().toISOString().slice(0, 10), n: 3 }] },
+  { results: [{ day: new Date().toISOString().slice(0, 10), mac: 1, n: 3 }] },
   { results: [{ device: 'mac', n: 50 }, { device: 'other', n: 7 }] },
   { results: [{ day: new Date().toISOString().slice(0, 10), version: '0.8.0', n: 2 }] },
   { results: [{ lang: 'en', device: 'mac', n: 30 }, { lang: 'ru', device: 'iphone', n: 6 }] },
@@ -45,12 +45,13 @@ const ok = await page('ihatecrypto.ai', sources);
 assert.equal(ok.status, 200);
 assert.equal(ok.robots, 'noindex, nofollow');
 assert.match(ok.body, /<meta name="robots" content="noindex, nofollow">/);
-assert.match(ok.body, /<b>57<\/b><span>Downloads of the app/);
+assert.match(ok.body, /<b>50<\/b><span>Downloads on a Mac/);   // only the Mac's: the DMG runs nowhere else
+assert.match(ok.body, /Also fetched from other \(scripts, link scanners\) 7\. ihatecrypto runs only on a Mac/);
 assert.match(ok.body, /\$50\.00 traded through the app/);
 assert.ok(!ok.body.toLowerCase().includes(referred));
 const down = await page('ihatecrypto.ai', async () => { throw new Error('offline'); });
 assert.equal(down.status, 200);
 assert.match(down.body, /GitHub didn’t answer just now: offline/);
-assert.match(down.body, /<b>57<\/b>/);
+assert.match(down.body, /<b>50<\/b>/);
 assert.equal((await page('updates.ihatecrypto.ai', sources)).body, 'asset');
 console.log('worker: ok');
