@@ -368,13 +368,15 @@ extension Executor {
         // its fee makes it the worse) — and, under the fee floor (USDC came without SOL), Jupiter's own gasless swap, which
         // Jupiter grants a wallet that can't pay (a few thousandths of SOL still gets the ordinary swap below).
         let lowSOL = !nativeIn && lamports < TopUpOrder.solanaFeeFloor
-        let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana)
+        // The Dev copy's JupiterZ run: Jupiter's other routers left out, so its market makers answer even a test size.
+        let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana,
+                                             excludeRouters: Self.jupiterZFirst ? ["metis", "iris", "dflow", "okx"] : [])
         let payer = order.flatMap { $0.gasless ? try? SolanaMessage.parse(transaction: $0.wire).staticKeys.first : nil }.flatMap { $0 == wallet.solana ? nil : $0 }
         var sponsored: (order: Jupiter.Order, sponsor: String)? = nil
         if let order, let payer {
             if lowSOL { sponsored = (order, payer) }
             else if order.router == "jupiterz", Self.fillSwaps(order.wire, from: from.mint, to: to.mint),
-                    let pools = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units), order.outAmount > pools.outAmount {
+                    let pools = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units), order.outAmount > pools.outAmount || Self.jupiterZFirst {
                 sponsored = (order, payer)
             }
         }

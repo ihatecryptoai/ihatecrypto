@@ -99,11 +99,40 @@ import WalletCore
 
 @Test func aPickedSwapWayOnlyNarrowsTheQuotedOnes() {
     let relay = Executor.SwapWay(name: "relay", out: 100, worth: 1.90, line: "")
-    let uniswap = Executor.SwapWay(name: "uniswap", out: 101, worth: 1.95, line: "")
-    #expect(Executor.pick([relay, uniswap], prefer: nil)?.name == "uniswap")      // whichever leaves more
-    #expect(Executor.pick([relay, uniswap], prefer: "relay")?.name == "relay")    // the one picked, even if it leaves less
-    #expect(Executor.pick([uniswap], prefer: "relay") == nil)                     // picked but unquoted: nothing is signed
+    let bridge = Executor.SwapWay(name: "bridge", out: 101, worth: 1.95, line: "", venue: "KyberSwap")
+    #expect(Executor.pick([relay, bridge], prefer: nil)?.name == "bridge")        // whichever leaves more
+    #expect(Executor.pick([relay, bridge], prefer: "relay")?.name == "relay")     // the one picked, even if it leaves less
+    #expect(Executor.pick([bridge], prefer: "relay") == nil)                      // picked but unquoted: nothing is signed
+    // The card names the exchange after the bridge, and a pick of the bridge's way finds it whichever exchange it is.
+    #expect(Executor.wayKey(bridge) == "bridge:KyberSwap" && Executor.wayKey(relay) == "relay")
+    #expect(Executor.pick([relay, bridge], prefer: "bridge")?.venue == "KyberSwap")
     #expect(Executor.pick([], prefer: nil) == nil)
+}
+
+// Relay's swap losing past its cap asks once: «Send anyway» takes its loss as an impact, which passes the impact stop on
+// the same loss too — two separate answers had asked in turn forever.
+@Test func relaysLossAsksOnceForBothStops() throws {
+    try Executor.holdsRelayLoss(in: 100, out: 98)                     // 2%: under its 3% cap
+    do {
+        try Executor.holdsRelayLoss(in: 100, out: 90)
+        Issue.record("a 10% loss went without asking")
+    } catch let stop as CostlyMove {
+        let impact = try #require(stop.impact)
+        #expect(impact == Decimal(string: "0.1"))
+        try Executor.$impactAccepted.withValue(min(1, impact * Decimal(string: "1.25")! + Decimal(string: "0.005")!)) {
+            try Executor.holdsRelayLoss(in: 100, out: 90)
+            try Executor.checkImpact(impact, paid: 100, amount: 100, symbol: "USDC", venue: "Relay's swap")
+        }
+    }
+}
+
+// Confirm takes the way the card showed: Uniswap's versions are one; another exchange or way stops before anything is signed.
+@Test func aWayOtherThanTheCardsStopsBeforeSigning() throws {
+    try Executor.holdsShownWay("bridge:Uniswap v4", shown: "bridge:Uniswap v3")
+    try Executor.holdsShownWay("here:KyberSwap", shown: nil)            // no card: a scheduled buy
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("bridge:Uniswap v3", shown: "bridge:KyberSwap") }
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("relay", shown: "bridge:KyberSwap") }
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("bridge:KyberSwap", shown: "here:KyberSwap") }
 }
 
 // Solana short: the first network holding the amount and a dime for Relay; Ethereum last (its gas costs dollars), never out.

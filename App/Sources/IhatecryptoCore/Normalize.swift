@@ -312,7 +312,7 @@ public enum ChatRouter {
     Buying and selling a token by its contract works on Robinhood Chain, Base and Arbitrum. On Solana ihatecrypto buys \
     SOL, BTC, ETH, JUP and JitoSOL, and any Jupiter-verified token by its ticker (BONK, WIF, USDT…) — Safe search on or off; \
     any other Solana token by its mint only while Safe search is off (the context says which). On Base and Arbitrum it \
-    buys the tokens on Uniswap's list by ticker and any other by contract, comparing Relay's swap with Relay + Uniswap. \
+    buys the tokens on Uniswap's list by ticker and any other by contract, comparing Relay's swap with Relay's bridge + Uniswap or KyberSwap. \
     Any token can be watched (it becomes a favorite with its price) and charted.
     """
 

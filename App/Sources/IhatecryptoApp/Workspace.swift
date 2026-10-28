@@ -405,7 +405,7 @@ final class Workspace {
     /// the field, an attached block's edge lit. Several at once; the message takes them all.
     var attached: [StepContext] = []
     /// The way a Base or Arbitrum trade takes, picked in its route step's details (Workspace.wayKey → "relay" or
-    /// "uniswap"); none = whichever leaves more. Used once, by the move it was picked for.
+    /// "bridge"); none = whichever leaves more. Used once, by the move it was picked for.
     var routeWays: [String: String] = [:]
     /// Both ways of the Base or Arbitrum trade waiting for Confirm, quoted now, the better first (Workspace.quoteSwap):
     /// its card shows the one that leaves more. Empty = neither quotes.

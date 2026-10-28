@@ -196,14 +196,21 @@ public actor Executor {
     static let impactCap = Decimal(string: "0.02")!
     /// The price impact the user took with «Send anyway» on a swap that impactCap stopped; the dollar caps stay as they are.
     @TaskLocal public static var impactAccepted: Decimal = 0
+    /// A JupiterZ fill is taken even when the pools give more: only the Dev copy's `-jupiterZFirst YES` sets it, for a
+    /// live run of that signed path on test sizes (where its fee makes it the worse). Every check still runs.
+    nonisolated(unsafe) public static var jupiterZFirst = false
+    /// A swap's impact that reaches checkImpact counts as at least 3% and its dollars don't matter (Solana's swaps; an EVM
+    /// route under impactCap stops before it): only the Dev copy's `-impactStopTest YES` sets it, for a live run of the
+    /// stop's cards (a part now, the whole anyway, nothing) on test sizes.
+    nonisolated(unsafe) public static var impactStopTest = false
 
     /// Stops a swap whose price impact (0…1) is past `impactCap` and what was accepted: `paid` is what goes in, in USD at
     /// the market price (0 = nobody prices it: the impact alone decides), `amount` the same in the input's own units
     /// («all» as the number it is), for the part that moves the price ≈ 1%. `signed`: what already went (a bridge, gas)
     /// and where the money waits — then it's a plain refusal, since «Nothing was signed» would be untrue.
     static func checkImpact(_ impact: Decimal, paid: Decimal, amount: Decimal, symbol: String, venue: String, signed: String? = nil) throws {
-        let lost = paid * impact
-        guard impact > impactCap, impact > impactAccepted, paid == 0 || lost > 1 else { return }
+        let impact = impactStopTest ? max(impact, Decimal(string: "0.03")!) : impact, lost = paid * impact
+        guard impact > impactCap, impact > impactAccepted, impactStopTest || paid == 0 || lost > 1 else { return }
         // ponytail: impact grows about in step with size; the part is quoted and checked again when it runs.
         let share = amount * Decimal(string: "0.01")! / impact, part = share.rounded(share < 10 ? 6 : 0, .down)
         let words = "At once, this moves \(venue)'s price by \(Fmt.num((impact * 100).rounded(1, .plain)))%"

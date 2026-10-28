@@ -528,7 +528,7 @@ struct RouteCard: View {
     /// tickers keep their capitals.
     static func pretty(_ place: String) -> String {
         let small: Set = ["ON", "OF", "TO", "OR", "AND", "IN", "AT", "FOR", "WITH", "FROM"]
-        let kept = ["USDC": "USDC", "USDG": "USDG", "USDT": "USDT", "NEAR": "NEAR", "JITOSOL": "JitoSOL", "1CLICK": "1Click", "HYPEREVM": "HyperEVM", "LAYERZERO": "LayerZero", "CCTP": "CCTP"]
+        let kept = ["USDC": "USDC", "USDG": "USDG", "USDT": "USDT", "NEAR": "NEAR", "JITOSOL": "JitoSOL", "1CLICK": "1Click", "HYPEREVM": "HyperEVM", "LAYERZERO": "LayerZero", "CCTP": "CCTP", "KYBERSWAP": "KyberSwap"]
         return place.split(separator: " ").enumerated().map { i, w in
             let word = String(w)
             if let k = kept[word] { return k }
@@ -616,7 +616,7 @@ struct LogoBadge: View {
     /// the step's own logo.
     static func second(_ step: ActivityBubble) -> String? {
         let label = step.label.uppercased()
-        let protocols = [("UNISWAP", "uni"), ("RELAY", "relay"), ("JUPITER", "jup"), ("NEAR INTENTS", "near"), ("1CLICK", "near"),
+        let protocols = [("UNISWAP", "uni"), ("KYBERSWAP", "kyber"), ("RELAY", "relay"), ("JUPITER", "jup"), ("NEAR INTENTS", "near"), ("1CLICK", "near"),
                          ("KAMINO", "kamino"), ("AAVE", "aave"), ("MORPHO", "morpho"), ("JITO", "jitosol")]
         return protocols.first { label.contains($0.0) && $0.1 != step.logo }?.1
     }
@@ -1188,6 +1188,7 @@ struct StepDetails: View {
         label.lowercased().capitalized.replacingOccurrences(of: " Or ", with: " or ").replacingOccurrences(of: "Usdc", with: "USDC")
             .replacingOccurrences(of: "Jitosol", with: "JitoSOL").replacingOccurrences(of: "Hlp", with: "HLP").replacingOccurrences(of: "V3", with: "v3")
             .replacingOccurrences(of: "Layerzero", with: "LayerZero").replacingOccurrences(of: "Cctp", with: "CCTP")
+            .replacingOccurrences(of: "Kyberswap", with: "KyberSwap")
     }
 
     var body: some View {
@@ -1289,9 +1290,10 @@ struct StepDetails: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("ROUTE").font(.ui(10, .heavy)).tracking(0.8).foregroundStyle(.secondary)
             wayRow(nil, "The best one", quotes?.first.map { "now \(Workspace.wayName($0.way)), ≈ \($0.gets) · checked again before signing" }
-                   ?? "both quoted, gas counted · checked again before signing", logos: ["relay", "uni"], recommended: true)
+                   ?? "both quoted, gas counted · checked again before signing", logos: ["relay", "uni", "kyber"], recommended: true)
             wayRow("relay", "Relay swap", quoted("relay") ?? "one Solana signature, Relay swaps on the way", logos: ["relay"])
-            wayRow("uniswap", "Relay bridge + Uniswap", quoted("uniswap") ?? "USDC over the bridge, then Uniswap with an exact approve", logos: ["relay", "uni"])
+            wayRow("bridge", "Relay bridge + the best exchange", quoted("bridge") ?? "USDC over the bridge, then Uniswap or KyberSwap with an exact approve",
+                   logos: ["relay", "uni", "kyber"])
         }
     }
 
@@ -1329,7 +1331,9 @@ struct StepDetails: View {
     }
 
     private func quoted(_ way: String) -> String? {
-        quotes?.first { $0.way == way }.map { "≈ \($0.gets) · \(Fmt.usd($0.worth)) after gas" }
+        quotes?.first { $0.way == way || $0.way.hasPrefix(way + ":") }.map {
+            "≈ \($0.gets)\($0.way.hasPrefix("bridge:") ? " on \(Workspace.venueName(String($0.way.dropFirst(7))))" : "") · \(Fmt.usd($0.worth)) after gas"
+        }
     }
 
     private func wayRow(_ value: String?, _ title: String, _ detail: String, logos: [String], recommended: Bool = false) -> some View {
@@ -1518,7 +1522,7 @@ extension Workspace {
         return WalletCommand.placeName(place)
     }
 
-    /// Which way a trade of `token` on `place` takes, as its route's step picked it: "relay", "uniswap", or none.
+    /// Which way a trade of `token` on `place` takes, as its route's step picked it: "relay", "bridge", or none.
     static func wayKey(_ place: String, _ token: String) -> String { "\(place):\(token.lowercased())" }
 }
 

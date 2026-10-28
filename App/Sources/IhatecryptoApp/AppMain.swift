@@ -1,6 +1,7 @@
 import AppKit
 import GuardJev
 import TxGuard
+import TradeExecution
 import IhatecryptoCore
 import LLMCatalog
 import LLMCore
@@ -400,6 +401,10 @@ struct ContentView: View {
             StatusItem.shared.install(ws)
             #if DEBUG_API
             if UserDefaults.standard.bool(forKey: "debugAPI") { DebugAPI.shared.start(ws) }
+            // Live runs on the Dev test wallet of what its few dollars never reach: JupiterZ's signed path
+            // (`-jupiterZFirst YES`), the price-impact stop's cards (`-impactStopTest YES`).
+            Executor.jupiterZFirst = UserDefaults.standard.bool(forKey: "jupiterZFirst")
+            Executor.impactStopTest = UserDefaults.standard.bool(forKey: "impactStopTest")
             #endif
             // The development copy says so in the Dock, beside the working one's same icon.
             if Flavor.dev { NSApp.dockTile.badgeLabel = Flavor.tag }

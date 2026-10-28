@@ -886,5 +886,21 @@
       ],
       "steps_lack": "UNISWAP"
     }
+  },
+  {
+    "name": "buy a token on an EVM network from Solana → Relay's swap against the bridge and the best exchange there, quoted",
+    "send": [
+      "купи AERO на base на 3 USDC из соланы"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "SOLANA",
+        "RELAY"
+      ],
+      "steps_lack": "COMPARING"
+    }
   }
 ]

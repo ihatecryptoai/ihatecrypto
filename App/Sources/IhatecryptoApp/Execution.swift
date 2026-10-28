@@ -561,11 +561,11 @@ extension Workspace {
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't swap on \(place).") }
                 // The way picked on the route's step, for this move only.
                 let prefer = routeWays.removeValue(forKey: Self.wayKey(place, token))
-                reply(try await e.buyOn(net, token, usdc: usdc ?? 0, prefer: prefer, from: from), note: "\(net.name) · \(prefer == "relay" ? "Relay" : prefer == "uniswap" ? "Relay + Uniswap" : "Relay / Uniswap")")
+                reply(try await e.buyOn(net, token, usdc: usdc ?? 0, prefer: prefer, from: from, shown: shownWay(command, prefer: prefer)), note: "\(net.name) · \(prefer == "relay" ? "Relay" : prefer == "bridge" ? "Relay + exchange" : "the best way")")
             case .sellOn(let place, let token, let amount, let keep):
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't swap on \(place).") }
                 let prefer = routeWays.removeValue(forKey: Self.wayKey(place, token))
-                reply(try await e.sellOn(net, token, amount: amount, prefer: prefer, keep: keep), note: "\(net.name) · \(prefer == "relay" ? "Relay" : prefer == "uniswap" ? "Uniswap + Relay" : "Relay / Uniswap")")
+                reply(try await e.sellOn(net, token, amount: amount, prefer: prefer, keep: keep, shown: shownWay(command, prefer: prefer)), note: "\(net.name) · \(prefer == "relay" ? "Relay" : prefer == "bridge" ? "exchange + Relay" : "the best way")")
             case .hlSpotBuy(let symbol, let usdc): reply(try await e.hlSpot(buy: true, symbol: symbol, usdc: usdc, amount: nil), note: "Hyperliquid · spot")
             case .hlSpotSell(let symbol, let amount): reply(try await e.hlSpot(buy: false, symbol: symbol, usdc: nil, amount: amount), note: "Hyperliquid · spot")
             case .showApprovals: detail = "approvals"   // shown without a card (Canvases: before the card)

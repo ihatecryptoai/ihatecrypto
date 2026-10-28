@@ -2032,7 +2032,7 @@ extension Workspace {
 
     /// A token on an EVM network: bought with the USDC already there (or brought from the network `from` names), else
     /// with USDC from Solana; sold back to Solana, or for USDC that stays there (`keep`). Solana's way (Relay's swap, or
-    /// Relay's bridge and Uniswap) is chosen when it runs, by what leaves more after gas.
+    /// Relay's bridge and the best exchange there) is chosen when it runs, by what leaves more after gas.
     private func swapRoute(_ place: String, _ token: String, usdc: Decimal?, sell: Decimal?, from: String? = nil, keep: Bool = false,
                            ahead: [String: Decimal] = [:]) -> MoveRoute {
         let name = WalletCommand.placeName(place)
@@ -2056,8 +2056,7 @@ extension Workspace {
             let gets = quoted?.first { $0.way.hasPrefix("here") }?.gets
             // The way on the network that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
             let venue = quoted?.first { $0.way.hasPrefix("here:") }.map { String($0.way.dropFirst(5)) } ?? "Uniswap"
-            let venueLogo = venue.hasPrefix("Uniswap") ? "uni" : venue == "KyberSwap" ? "kyber" : "relay"
-            let venueName = venue.hasPrefix("Uniswap") ? "Uniswap" : venue == "Relay's swap" ? "Relay" : venue
+            let venueLogo = Self.venueLogo(venue), venueName = Self.venueName(venue)
             let moving = usdc.map { "\(Fmt.num($0)) USDC" } ?? "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)"
             let start: [ActivityBubble] = if let src {
                 [step(ModuleNetwork(place: src)?.logo ?? src, "FROM · \(WalletCommand.placeName(src).uppercased())", moving,
@@ -2088,16 +2087,19 @@ extension Workspace {
             ])
         }
         // The way picked in the step's details, else the one that leaves more now (quoted while the card waits).
+        // The exchange the bridge's way ends on, as quoted (Executor.swapQuotes «bridge:KyberSwap»): Uniswap or KyberSwap.
+        let bridgeVenue = quoted?.first { $0.way.hasPrefix("bridge:") }.map { Self.venueName(String($0.way.dropFirst(7))) }
+        let exchange = bridgeVenue ?? "the best exchange"
         let way = switch routeWays[Self.wayKey(place, token)] {
         case "relay": step("relay", "RELAY SWAP", "one step", usdc != nil ? "Relay swaps on the way · one Solana signature" : "Relay swaps it back to USDC on Solana", .relay)
-        case "uniswap": step("relay", "RELAY + UNISWAP", usdc != nil ? "bridge, then Uniswap" : "Uniswap, then bridge",
-                             usdc != nil ? "USDC to \(name), then Uniswap with an exact approve" : "Uniswap on \(name), then Relay's bridge to Solana", .relay)
-        default: bestWay(swapQuote.flatMap { q in q.command == command ? q.ways : nil })
+        case "bridge": step("relay", "RELAY + \((bridgeVenue ?? "exchange").uppercased())", usdc != nil ? "bridge, then \(exchange)" : "\(exchange), then bridge",
+                            usdc != nil ? "USDC to \(name), then \(exchange) with an exact approve" : "\(exchange) on \(name), then Relay's bridge to Solana", .relay)
+        default: bestWay(quoted)
         }
-        // Relay + Uniswap approves exactly what it swaps: shown once that's the way (picked, or leaving more now).
-        let viaUniswap = (routeWays[Self.wayKey(place, token)] ?? swapQuote.flatMap { q in q.command == command ? q.ways.first?.way : nil }) == "uniswap"
-        let footer = (usdc != nil ? "Relay’s swap is one Solana signature; the other way bridges USDC over Relay and swaps on Uniswap with an exact approve, the swap paying only this wallet. "
-                                  : "Relay’s swap is an exact approve and its deposit on \(name); the other way swaps on Uniswap with an exact approve, then bridges the USDC over Relay, paying only this wallet. ")
+        // The bridge's way approves exactly what it swaps: shown once that's the way (picked, or leaving more now).
+        let viaBridge = (routeWays[Self.wayKey(place, token)] ?? quoted?.first?.way)?.hasPrefix("bridge") == true
+        let footer = (usdc != nil ? "Relay’s swap, or Relay’s bridge and then Uniswap or KyberSwap: whichever leaves more, paying only this wallet. "
+                                  : "Relay’s swap, or Uniswap or KyberSwap and then Relay’s bridge: whichever leaves more, paying only this wallet. ")
             + (token.hasPrefix("0x") ? "A token by its contract must trade on \(name) with $50k+ of liquidity. " : "The ticker is taken from Uniswap’s token list, its contract checked on-chain. ")
             + "Press Confirm."
         if let usdc {
@@ -2105,7 +2107,8 @@ extension Workspace {
                 step("sol", "FROM · SOLANA", "\(Fmt.num(usdc)) USDC", solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? "", .solana,
                      money: moneyMove("USDC", on: "solana", by: -usdc)),
                 way,
-            ] + (viaUniswap ? [approve("≈ \(Fmt.num(usdc)) USDC", for: "Uniswap", logo: "uni", fill, line: "exactly what arrives · only Uniswap may take it")] : []) + [
+            ] + (viaBridge ? [approve("≈ \(Fmt.num(usdc)) USDC", for: exchange, logo: bridgeVenue.map(Self.venueLogo) ?? "uni", fill,
+                                      line: "exactly what arrives · only \(exchange) may take it")] : []) + [
                 step(logo, "BUY · ON \(name.uppercased())", label, quotedGets(command).map { "≈ \($0) arrives" } ?? "at the best price found", fill,
                      money: Self.quotedAmount(quotedGets(command)).map { tokenMove(label, on: place, by: $0) } ?? []),
             ], warning: token.hasPrefix("0x") ? "A token by its contract is anyone’s coin: its price can halve in a day and nobody vouches for it. Put in only what you can lose." : nil)
@@ -2113,7 +2116,7 @@ extension Workspace {
         return MoveRoute(title: "Sell \(amountOrAll(sell, label, on: place)) on \(name) → Solana", footer: footer, steps: [
             step(logo, "FROM · \(name.uppercased())", "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", "\(EVMNetwork.named(place)?.gasCoin ?? "ETH") for gas comes along when there’s none", fill,
                  money: moneyMove(label, on: place, by: sell.map { -$0 })),
-        ] + (viaUniswap ? [approve("\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", for: "Uniswap", logo: "uni", fill)] : []) + [
+        ] + (viaBridge ? [approve("\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", for: exchange, logo: bridgeVenue.map(Self.venueLogo) ?? "uni", fill)] : []) + [
             way,
             step("sol", "TO · SOLANA", "USDC", quotedGets(command).map { "≈ \($0) · your wallet" } ?? "your wallet", .solana,
                  money: Self.quotedAmount(quotedGets(command)).map { moneyMove("USDC", on: "solana", by: $0, approx: true) } ?? []),
@@ -2246,13 +2249,13 @@ extension Workspace {
         var steps = [step(logo, "FROM · \(name.uppercased())", moving, coinIn ? "your \(coin) · its fees stay" : "on \(name)", fill,
                           money: moneyMove(label(from), on: place, by: amount.map { -$0 }))]
         // The way that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
-        let way = quoted?.way ?? "Uniswap", wayName = way.hasPrefix("Uniswap") ? "Uniswap" : way == "Relay's swap" ? "Relay" : way
-        if !coinIn { steps.append(approve(moving, for: wayName, logo: way.hasPrefix("Uniswap") ? "uni" : way == "KyberSwap" ? "kyber" : "relay", fill)) }
+        let way = quoted?.way ?? "Uniswap"
+        if !coinIn { steps.append(approve(moving, for: Self.venueName(way), logo: Self.venueLogo(way), fill)) }
         // The network's logo with the way's badge, as a buy there.
-        steps.append(step(logo, "SWAP · \(way.uppercased()) ON \(name.uppercased())", label(to),
+        steps.append(step(logo, "SWAP · \(Self.venueName(way).uppercased())", label(to),
                           quoted.map { "≈ \($0.gets)" } ?? "the best of Uniswap, Relay and KyberSwap", fill,
                           money: Self.quotedAmount(quoted?.gets).map { tokenMove(label(to), on: place, by: $0) } ?? []))
-        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap (v2, v3, v4), Relay's swap and KyberSwap after gas, at most 0.5–3% under its quote by the price impact, paying only this wallet."
+        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap, Relay and KyberSwap after gas, paying only this wallet."
             + (coinIn ? " \(coin) goes in as itself into a v4 pool of it, else wrapped into W\(coin) first (one more transaction)." : " An exact approve first.")
             + (coinOut ? " \(coin) comes out as itself, or is unwrapped after." : "") + " Press Confirm."
         return MoveRoute(title: "Swap \(moving) → \(label(to)) on \(name)", footer: footer, steps: steps,
@@ -2356,7 +2359,13 @@ extension Workspace {
         }
     }
 
-    static func wayName(_ way: String) -> String { way == "relay" ? "Relay swap" : "Relay + Uniswap" }
+    /// «Relay swap», or the bridge and the exchange it ends on («bridge:KyberSwap» → «Relay + KyberSwap»).
+    static func wayName(_ way: String) -> String {
+        way == "relay" ? "Relay swap" : way.hasPrefix("bridge:") ? "Relay + " + venueName(String(way.dropFirst(7))) : "Relay + an exchange"
+    }
+    /// An exchange as a card names it: «Uniswap v3» → «Uniswap», «Relay's swap» → «Relay».
+    static func venueName(_ venue: String) -> String { venue.hasPrefix("Uniswap") ? "Uniswap" : venue == "Relay's swap" ? "Relay" : venue }
+    static func venueLogo(_ venue: String) -> String { venue.hasPrefix("Uniswap") ? "uni" : venue == "KyberSwap" ? "kyber" : "relay" }
     static func stockWayName(_ way: String) -> String { way == "v4" ? "Uniswap v4" : way == "v3" ? "Uniswap v3" : "Relay swap" }
 
     /// The BUY step of a Robinhood Chain buy: the way that gives the most now, marked best, and what the others give.
@@ -2375,16 +2384,27 @@ extension Workspace {
     func quotedGets(_ c: WalletCommand) -> String? { swapQuote.flatMap { $0.command == c ? $0.ways.first?.gets : nil } }
 
     private func bestWay(_ ways: [(way: String, gets: String, worth: Decimal)]?) -> ActivityBubble {
-        guard let ways else { return step("relay", "RELAY OR UNISWAP · COMPARING", "comparing…", "Relay swap vs Relay + Uniswap", .relay) }
-        guard let best = ways.first else { return step("relay", "RELAY OR UNISWAP · COMPARING", "no quote now", "asking again every 30 s", .relay) }
-        let other = Self.wayName(best.way == "relay" ? "uniswap" : "relay")
+    /// The way the card showed for the move (Executor.holdsShownWay): the one picked on the route's step as quoted, else
+    /// the best one; nil while unquoted.
+    func shownWay(_ c: WalletCommand, prefer: String?) -> String? {
+        guard let ways = swapQuote.flatMap({ $0.command == c ? $0.ways : nil }) else { return nil }
+        guard let prefer else { return ways.first?.way }
+        return ways.first { $0.way == prefer || $0.way.hasPrefix(prefer + ":") }?.way
+    }
+
+        guard let ways else { return step("relay", "RELAY OR BRIDGE · COMPARING", "comparing…", "Relay swap vs Relay + Uniswap or KyberSwap", .relay) }
+        guard let best = ways.first else { return step("relay", "RELAY OR BRIDGE · COMPARING", "no quote now", "asking again every 30 s", .relay) }
+        let other = ways.dropFirst().first.map { Self.wayName($0.way) } ?? (best.way == "relay" ? "Relay + an exchange" : "Relay swap")
         let margin = ways.dropFirst().first.map { best.worth - $0.worth }
         let line = switch margin {
         case nil: "\(other) doesn't quote it now"
         case let m? where m < Decimal(string: "0.01")!: "about the same as \(other)"
         case let m?: "\(Fmt.usd(m)) more than \(other)"
         }
-        return step("relay", "\(Self.wayName(best.way).uppercased()) · BEST NOW", "≈ \(best.gets)", line, .relay)
+        // The bridge's way says «RELAY + KYBERSWAP» alone: with «· BEST NOW» after it the name was cut («RELAY + UNISW…»),
+        // and its line says it leaves more. It starts with RELAY: that's what makes it the step whose way can be picked.
+        let bridged = best.way.hasPrefix("bridge:")
+        return step("relay", "\(Self.wayName(best.way).uppercased())\(bridged ? "" : " · BEST NOW")", "≈ \(best.gets)", line, .relay)
     }
 
     /// A swap's price while its card waits for Confirm: quoted once (both ways of a Base or Arbitrum trade, the better
