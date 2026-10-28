@@ -2096,10 +2096,10 @@ extension Workspace {
                      money: Self.quotedAmount(gets).map { moneyMove("USDC", on: place, by: $0, approx: true) } ?? []),
             ])
         }
-        // The way picked in the step's details, else the one that leaves more now (quoted while the card waits).
         // The exchange the bridge's way ends on, as quoted (Executor.swapQuotes «bridge:KyberSwap»): Uniswap or KyberSwap.
         let bridgeVenue = quoted?.first { $0.way.hasPrefix("bridge:") }.map { Self.venueName(String($0.way.dropFirst(7))) }
         let exchange = bridgeVenue ?? "the best exchange"
+        // The way picked in the step's details, else the one that leaves more now (quoted while the card waits).
         let way = switch routeWays[Self.wayKey(place, token)] {
         case "relay": step("relay", "RELAY SWAP", "one step", usdc != nil ? "Relay swaps on the way · one Solana signature" : "Relay swaps it back to USDC on Solana", .relay)
         case "bridge": step("relay", "RELAY + \((bridgeVenue ?? "exchange").uppercased())", usdc != nil ? "bridge, then \(exchange)" : "\(exchange), then bridge",
@@ -2393,7 +2393,6 @@ extension Workspace {
     /// it, not only the chat. nil until quoted, and on a board shown as it was.
     func quotedGets(_ c: WalletCommand) -> String? { swapQuote.flatMap { $0.command == c ? $0.ways.first?.gets : nil } }
 
-    private func bestWay(_ ways: [(way: String, gets: String, worth: Decimal)]?) -> ActivityBubble {
     /// The way the card showed for the move (Executor.holdsShownWay): the one picked on the route's step as quoted, else
     /// the best one; nil while unquoted.
     func shownWay(_ c: WalletCommand, prefer: String?) -> String? {
@@ -2402,6 +2401,7 @@ extension Workspace {
         return ways.first { $0.way == prefer || $0.way.hasPrefix(prefer + ":") }?.way
     }
 
+    private func bestWay(_ ways: [(way: String, gets: String, worth: Decimal)]?) -> ActivityBubble {
         guard let ways else { return step("relay", "RELAY OR BRIDGE · COMPARING", "comparing…", "Relay swap vs Relay + Uniswap or KyberSwap", .relay) }
         guard let best = ways.first else { return step("relay", "RELAY OR BRIDGE · COMPARING", "no quote now", "asking again every 30 s", .relay) }
         let other = ways.dropFirst().first.map { Self.wayName($0.way) } ?? (best.way == "relay" ? "Relay + an exchange" : "Relay swap")
