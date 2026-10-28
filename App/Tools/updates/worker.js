@@ -3,8 +3,11 @@
 //   http → https and www → the bare domain, 301; the pages carry HSTS, so a browser asks over https from then on.
 //   POST /e {n, l}: the page says what was pressed or reached; GET /ihatecrypto.dmg counts as a download.
 //   GET /appcast.xml from Sparkle counts as one update check of the version its User-Agent names.
+//   GET /stats is the numbers on one page (stats.js), linked from nowhere and kept out of search.
 // Counts are added up by day, language and kind of device (update checks: by day and version) in D1 (schema.sql).
 // No IP, no cookie, no id is kept.
+import { stats } from './stats.js';
+
 const EVENTS = new Set(['send', 'share_tg', 'share_wa', 'share_mail', 'share_x', 'share_copy', 'story_1', 'story_2', 'story_end',
   'seen_canvas', 'seen_how', 'seen_safe', 'seen_open', 'seen_ask', 'seen_faq', 'faq_open', 'menu', 'lang', 'claude', 'github']);
 const LANGS = new Set(['en', 'es', 'ru']);
@@ -62,7 +65,7 @@ export default {
     if (url.pathname === '/ihatecrypto.dmg' && request.method === 'GET' && (!range || /^bytes=0-/.test(range))) {
       ctx.waitUntil(count(env, 'download', langOf((request.headers.get('accept-language') ?? '').slice(0, 2).toLowerCase()), request));
     }
-    const res = await env.ASSETS.fetch(request);
+    const res = site && /^\/stats\/?$/.test(url.pathname) ? await stats(env) : await env.ASSETS.fetch(request);
     if (!site) return res;
     const out = new Response(res.body, res);
     out.headers.set('Strict-Transport-Security', 'max-age=31536000');
