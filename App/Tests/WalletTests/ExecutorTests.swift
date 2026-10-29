@@ -142,6 +142,25 @@ import WalletCore
     }
 }
 
+// Relay's sale with no dollar price for what goes in stops before the swap: read as $0, any loss had passed.
+@Test func relaysSaleWithoutAPriceStops() throws {
+    #expect(throws: ExecutionError.self) { try Executor.holdsRelaySale(worthIn: 0, arriving: 5, symbol: "XYZ", network: "Base") }
+    try Executor.holdsRelaySale(worthIn: 10, arriving: Decimal(string: "9.8")!, symbol: "AERO", network: "Base")   // 2%: passes
+    #expect(throws: CostlyMove.self) { try Executor.holdsRelaySale(worthIn: 10, arriving: 9, symbol: "AERO", network: "Base") }
+}
+
+// What goes in: Relay's valuation first (DefiLlama not asked), else DefiLlama's sure price × the amount, else 0 (stopped).
+@Test func relaysSaleIsWorthRelaysPriceElseDefiLlamasSureOne() async {
+    var asked = false
+    #expect(await Executor.relayWorthIn(relayUSD: "0.697351", amount: 1) { asked = true; return (5, true) } == Decimal(string: "0.697351"))
+    #expect(!asked)
+    for empty in ["", "0", "-1", "NaN"] {
+        #expect(await Executor.relayWorthIn(relayUSD: empty, amount: Decimal(string: "1.5")!) { (Decimal(string: "0.68")!, true) } == Decimal(string: "1.02"))
+    }
+    #expect(await Executor.relayWorthIn(relayUSD: "", amount: 2) { (Decimal(string: "0.68")!, false) } == 0)   // unsure
+    #expect(await Executor.relayWorthIn(relayUSD: "", amount: 2) { nil } == 0)                                   // no price
+}
+
 // Confirm takes the way the card showed: Uniswap's versions are one; another exchange or way stops before anything is signed.
 @Test func aWayOtherThanTheCardsStopsBeforeSigning() throws {
     try Executor.holdsShownWay("bridge:Uniswap v4", shown: "bridge:Uniswap v3")

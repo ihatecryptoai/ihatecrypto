@@ -63,6 +63,8 @@ extension Executor {
         let worth: Decimal
         let line: String
         var venue = ""
+        /// Relay's swap of a token: Relay's dollar valuation of what goes in, as quoted ("" when it gave none).
+        var inUSD = ""
     }
 
     /// A ticker from Uniswap's list, or a contract that trades on the chain with $50k+ of liquidity; decimals are read
@@ -475,6 +477,10 @@ extension Executor {
         try Self.holdsShownWay(Self.wayKey(way), shown: shown)
         let plan = way.name == "bridge" ? bridged : nil
         if let plan { try await holdsPairImpact(net, plan) }
+        // Relay's swap that nobody prices stops here, before a gas top-up is signed for it; relaySell checks its fresh quote.
+        if plan == nil, await relayWorthIn(net, token, units: units, relayUSD: way.inUSD) <= 0 {
+            try Self.holdsRelaySale(worthIn: 0, arriving: way.out / 1_000_000, symbol: token.symbol, network: net.name)
+        }
         report("\(tokens(units)) on \(net.name) → USDC on Solana. " + ways.map(\.line).joined(separator: "; ") + ". Taking \(plan.map { "\($0.title) and the bridge" } ?? "Relay's swap")\(prefer == nil ? "" : ", as picked").")
         // Both ways sign on the chain: ETH for gas first (a top-up from Solana when there's none).
         try await ensureEVM(net, usdc: 0)
@@ -522,7 +528,7 @@ extension Executor {
         if let relay, let out = Decimal(string: relay.amountOut), out > 0 {
             let gas = try await gasUSD(50_000 + 300_000, on: net, uni)
             ways.append(SwapWay(name: "relay", out: out, worth: out / 1_000_000 - gas,
-                                line: "Relay swap: \(Fmt.num(out / 1_000_000)) USDC on Solana after \(Fmt.usd(gas)) of gas"))
+                                line: "Relay swap: \(Fmt.num(out / 1_000_000)) USDC on Solana after \(Fmt.usd(gas)) of gas", inUSD: relay.amountInUSD))
         }
         var bridged: PairSwap?
         if allowed.uniswap || allowed.kyber,
@@ -687,6 +693,32 @@ extension Executor {
         let lost = worthIn - worthOut, share = worthIn > 0 ? lost / worthIn : 0
         guard lost > max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), lost > lossAccepted, share > impactAccepted else { return }
         throw CostlyMove(lost: lost, paid: worthIn, what: "Relay's swap", impact: share)
+    }
+
+    /// What `units` of the token going into Relay's swap are worth in dollars: Relay's own valuation, else DefiLlama's sure
+    /// price — 0 when neither prices it, which holdsRelaySale stops (read as $0 before, it let any loss through).
+    func relayWorthIn(_ net: EVMNetwork, _ token: EVMTokens.Token, units: Decimal, relayUSD: String) async -> Decimal {
+        await Self.relayWorthIn(relayUSD: relayUSD, amount: units / Decimal(sign: .plus, exponent: token.decimals, significand: 1)) {
+            await Holdings.llamaPrices(net.key, [token.address])[token.address.lowercased()]
+        }
+    }
+
+    /// The same with DefiLlama's price as `llama`, asked only when Relay gave none (empty, 0 or less); only a sure one
+    /// counts: a low price would hide a real loss, a high one only asks «Send anyway».
+    static func relayWorthIn(relayUSD: String, amount: Decimal, llama: () async -> (price: Decimal, sure: Bool)?) async -> Decimal {
+        if let usd = Decimal(string: relayUSD), usd > 0 { return usd }
+        guard let p = await llama(), p.sure else { return 0 }
+        return amount * p.price
+    }
+
+    /// Relay's swap-and-bridge of a token, judged by what goes in: nobody's dollar price stops it (read as $0 it let any loss
+    /// through), else at most 3% (or $0.15) lost, past that a CostlyMove to ask about.
+    static func holdsRelaySale(worthIn: Decimal, arriving: Decimal, symbol: String, network: String) throws {
+        guard worthIn > 0 else {
+            throw ExecutionError("Neither Relay nor DefiLlama prices \(symbol) on \(network) now, so what Relay's swap keeps can't be checked. "
+                                 + "\(symbol) stays on \(network); nothing was swapped. Pick «Relay bridge + the best exchange» on the route's step.")
+        }
+        try checkLoss(worthIn - arriving, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap")
     }
 
     /// A swap on the network checked against impactCap before anything is signed (a bridge or gas top-up included, `signed`
@@ -859,9 +891,9 @@ extension Executor {
             throw ExecutionError("Relay's transactions don't go to the approval proxy it publishes for \(net.name), for exactly this amount. Nothing was signed.")
         }
         let arriving = (Decimal(string: quote.amountOut) ?? 0) / 1_000_000
-        let worthIn = Decimal(string: quote.amountInUSD) ?? 0
         guard arriving > 0 else { throw ExecutionError("Relay doesn't quote \(token.symbol) for USDC now. Nothing was signed.") }
-        try Self.checkLoss(worthIn - arriving, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap")
+        let worthIn = await relayWorthIn(net, token, units: units, relayUSD: quote.amountInUSD)
+        try Self.holdsRelaySale(worthIn: worthIn, arriving: arriving, symbol: token.symbol, network: net.name)
         let mint = Relay.Currency.solanaUSDC
         let solBefore = try await rpc.tokenBalance(owner: wallet.solana, mint: mint)
         let hash = try await approveAndSend(net.rpc, token: token.address, spender: proxy, units: units,
