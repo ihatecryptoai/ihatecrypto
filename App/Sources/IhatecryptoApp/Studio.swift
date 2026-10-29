@@ -3775,7 +3775,10 @@ extension Workspace {
     var hlMargin: Decimal? { hl.map { $0.accountValue + dexBalances.values.reduce(0) { $0 + $1.accountValue } } }
     /// Everything on Hyperliquid: margin and the HLP vault.
     var hlTotal: Decimal? { hlMargin.map { $0 + hlp.equity } }
-    var lendTotal: Decimal { lend.reduce(0) { $0 + $1.usdc } }
+    /// What Jupiter Lend holds of one coin («USDC», «SOL»), in that coin.
+    func lent(_ coin: String) -> Decimal { lendDeposits.amount(of: coin) }
+    /// Jupiter Lend in dollars, each coin at its price, as on the Solana card.
+    var lendUSD: Decimal { lendDeposits.usd(coinPrice) }
 }
 
 /// A card whose right side is an arrow: this step moves money on to the next one.

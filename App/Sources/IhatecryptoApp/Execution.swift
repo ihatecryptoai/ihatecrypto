@@ -831,7 +831,7 @@ extension Workspace {
         switch command {
         case .withdrawToSolana(let asked): return lacks(hl?.withdrawable, asked, "Hyperliquid")
         case .kamino(deposit: false, symbol: "USDC", amount: let asked): return lacks(kaminoVault("USDC")?.tokens ?? kamino, asked, "Kamino")
-        case .lendWithdraw("USDC", let asked): return lacks(lend.reduce(0) { $0 + $1.usdc }, asked, "Jupiter Lend")
+        case .lendWithdraw("USDC", let asked): return lacks(lent("USDC"), asked, "Jupiter Lend")
         case .baseToSolana(let asked): return lacks(base?.usdc, asked, "Base")
         // «с базы на арбитрум» 50 with 1 there drew «Move 1 USDC» under «Понял: move 50»: the amount is said before the card.
         // Not inside a chain: a step before it may have just brought the money, and those balances load after the refresh.

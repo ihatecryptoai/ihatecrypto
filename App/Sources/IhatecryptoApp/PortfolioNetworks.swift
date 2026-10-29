@@ -1,3 +1,4 @@
+import DeFiJupiterLend
 import EVMChain
 import ExecutionCore
 import IhatecryptoCore
@@ -44,6 +45,21 @@ struct LendDeposit: Equatable {
     let amount: Decimal
     let decimals: Int
     let apy: Decimal?
+}
+
+extension LendDeposit {
+    /// A Jupiter Lend position in its own coin (SOL for the WSOL vault), at its own decimals.
+    init(_ p: JupiterLend.Position) {
+        self.init(address: p.address, coin: p.coin == "WSOL" ? "SOL" : p.coin, amount: Decimal(p.assets) / pow(10, p.decimals),
+                  decimals: p.decimals, apy: p.apy)
+    }
+}
+
+extension [LendDeposit] {
+    /// What is in of one coin («USDC», «SOL»), in that coin.
+    func amount(of coin: String) -> Decimal { filter { $0.coin == coin }.reduce(0) { $0 + $1.amount } }
+    /// In dollars, each coin at `price`; a coin without one counts as nothing, as on its tile.
+    func usd(_ price: (String) -> Decimal?) -> Decimal { reduce(0) { $0 + $1.amount * (price($1.coin) ?? 0) } }
 }
 
 /// A Kamino Lend deposit: its coin, what it's worth and % a year.

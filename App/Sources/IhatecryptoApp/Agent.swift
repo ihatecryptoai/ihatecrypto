@@ -261,7 +261,7 @@ extension Workspace {
             agentStep = say("Comparing rates", "Сравниваю ставки")
             let asset = l.arg.uppercased().contains("SOL") ? "SOL" : "USDC"
             let options = await loadYields(asset)
-            let held = lend.filter { $0.usdc > 0 }.map { "Jupiter Lend \($0.vault) \(Fmt.num($0.usdc))" } + (kamino > 0 ? ["Kamino \(Fmt.usd(kamino))"] : [])
+            let held = lendDeposits.map { "Jupiter Lend \(Fmt.num($0.amount, maxFraction: 6)) \($0.coin)" } + (kamino > 0 ? ["Kamino \(Fmt.usd(kamino))"] : [])
                 + (base.map { [$0.aave > 0 ? "Aave · Base \(Fmt.num($0.aave)) USDC" : nil, $0.morpho > 0 ? "Morpho · Base \(Fmt.num($0.morpho)) USDC" : nil].compactMap { $0 } } ?? [])
                 + lendingElsewhere.map { "\($0.place) \(Fmt.num($0.usdc)) USDC" }
             return (options.isEmpty ? ["The rate sources didn't answer."] : options.prefix(16).map { o in

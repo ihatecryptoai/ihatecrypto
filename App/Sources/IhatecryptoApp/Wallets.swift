@@ -37,7 +37,6 @@ extension Workspace {
         dexBalances = [:]
         hlp = (0, nil)
         solana = nil
-        lend = []
         lendDeposits = []
         lendEarned = [:]
         lendEarnedAt = nil

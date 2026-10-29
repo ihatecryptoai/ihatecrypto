@@ -427,8 +427,8 @@ struct PlaceDetailBoard: View {
                 Text("USDC rate now ≈ \(Fmt.num(rate.rounded(2, .plain)))% a year.").font(.ui(10)).foregroundStyle(.secondary)
             }
         case "jupiter":
-            ForEach(ws.lend, id: \.vault) { v in row("jup", v.vault, "\(Fmt.num(v.usdc)) USDC", "earning · withdraw any time") }
-            if ws.lend.isEmpty { Text("Nothing in Jupiter Lend yet.").font(.ui(10)).foregroundStyle(.secondary) }
+            ForEach(ws.lendDeposits, id: \.address) { d in row("jup", d.coin, "\(Fmt.num(d.amount, maxFraction: 6)) \(d.coin)", "earning · withdraw any time") }
+            if ws.lendDeposits.isEmpty { Text("Nothing in Jupiter Lend yet.").font(.ui(10)).foregroundStyle(.secondary) }
             if let rate = ws.yieldOptions?.first(where: { $0.place.contains("Jupiter") && $0.asset == "USDC" })?.apy {
                 Text("USDC rate now ≈ \(Fmt.num(rate.rounded(2, .plain)))% a year.").font(.ui(10)).foregroundStyle(.secondary)
             }

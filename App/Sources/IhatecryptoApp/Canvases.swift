@@ -1481,7 +1481,7 @@ extension Workspace {
     func deposited(in place: String) -> Decimal? {
         let n = place.lowercased()
         if n.contains("kamino") { return kamino }
-        if n.contains("jupiter") { return lendTotal }
+        if n.contains("jupiter") { return lent("USDC") }
         if n.contains("hlp") { return hlp.equity }
         for name in ["Aave", "Morpho"] where n.contains(name.lowercased()) {
             if n.contains("base") || !n.contains("·") && !n.contains(" on ") { return name == "Aave" ? base?.aave : base?.morpho }
@@ -1737,11 +1737,11 @@ extension Workspace {
             let a = x ?? heldForAll(s, fill: .solana)?.0
             return (step(s == "SOL" ? "sol" : "usdc", "FROM · SOLANA", "\(n(x)) \(s)", s == "SOL" ? solSOL : solUSDC, .solana, money: moneyMove(s, on: "solana", by: a.map { -$0 })),
                     step("jup", "INTO · JUPITER LEND", "\(n(x)) \(s)", "earns the vault rate · withdraw any time", .jupiter,
-                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lendTotal, by: a) : []))
+                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lent("USDC"), by: a) : []))
         case .lendWithdraw(let s, let x):
-            let x = x ?? (s == "USDC" && lendTotal > 0 ? lendTotal : nil)
-            return (step("jup", "FROM · JUPITER LEND", "\(n(x)) \(s)", lendTotal > 0 ? "in the vault: \(Fmt.num(lendTotal)) USDC" : "", .jupiter,
-                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lendTotal, by: x.map { -$0 }) : []),
+            let held = lent(s), x = x ?? (held > 0 ? held : nil)
+            return (step("jup", "FROM · JUPITER LEND", "\(n(x)) \(s)", held > 0 ? "in the vault: \(Fmt.num(held, maxFraction: 6)) \(s)" : "", .jupiter,
+                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: held, by: x.map { -$0 }) : []),
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))
         // Backpack's stocks: collateral on Kamino's Backpack market, out of the wallet and back.
         case .kamino(let into, let s, let x) where WalletCommand.kaminoStockMints[s] != nil:

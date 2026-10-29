@@ -1037,5 +1037,52 @@
       "balance": "baseUSDC",
       "at_least": 0.01
     }
+  },
+  {
+    "name": "withdraw more than Jupiter Lend holds → said before any card, counted in USDC only",
+    "send": [
+      "withdraw 1000 USDC from Jupiter Lend"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "only",
+      "reply_cyrillic": false
+    },
+    "only_if": {
+      "balance": "jupiterLend",
+      "at_least": 1
+    }
+  },
+  {
+    "name": "withdraw more than Jupiter Lend holds, in Russian → said before any card",
+    "send": [
+      "выведи 1000 USDC из Jupiter Lend"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "только",
+      "reply_cyrillic": true
+    },
+    "only_if": {
+      "balance": "jupiterLend",
+      "at_least": 1
+    }
+  },
+  {
+    "name": "withdraw all USDC from Jupiter Lend → the card says what the vault holds, in USDC",
+    "send": [
+      "выведи весь USDC из Jupiter Lend"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "steps": [
+        "JUPITER",
+        "SOLANA"
+      ]
+    },
+    "only_if": {
+      "balance": "jupiterLend",
+      "at_least": 1
+    }
   }
 ]

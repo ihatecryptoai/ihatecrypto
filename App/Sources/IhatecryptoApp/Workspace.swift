@@ -537,8 +537,7 @@ final class Workspace {
     var orders: [HyperliquidAccount.Order] = []
     /// A limit entry waiting on the book (its stop and take are the trigger orders next to it).
     var pendingEntry: HyperliquidAccount.Order? { orders.first { !$0.isTrigger } }
-    var lend: [(vault: String, usdc: Decimal)] = []
-    /// The same deposits with their own coin and rate, for the portfolio's tiles (DepositTile).
+    /// Jupiter Lend deposits, each in its own coin and rate: the total, the portfolio's tiles, the vault's card.
     var lendDeposits: [LendDeposit] = []
     /// What each earned so far, in its coin's raw units, by the vault's token; read at most every five minutes.
     var lendEarned: [String: Decimal] = [:]
@@ -630,7 +629,11 @@ final class Workspace {
     private var quotedKey: String?
 
     var solanaAddress = UserDefaults.standard.string(forKey: "solanaAddress") ?? "" {
-        didSet { UserDefaults.standard.set(solanaAddress, forKey: "solanaAddress"); Task { await loadSolana() } }
+        didSet {
+            // loadSolana keeps the last Jupiter Lend read when Jupiter refuses one: another address's isn't that.
+            if solanaAddress != oldValue { lendDeposits = [] }
+            UserDefaults.standard.set(solanaAddress, forKey: "solanaAddress"); Task { await loadSolana() }
+        }
     }
     var hlAddress = UserDefaults.standard.string(forKey: "hlAddress") ?? "" {
         didSet { UserDefaults.standard.set(hlAddress, forKey: "hlAddress"); Task { await loadHL(); await refreshQuote() } }
@@ -929,7 +932,7 @@ final class Workspace {
     /// Capital the risk rules measure against: USDC on Solana and the tokens on show there, the Hyperliquid account and vaults.
     var equity: Decimal? {
         guard solana != nil || hl != nil else { return nil }
-        return (solana?.usdc ?? 0) + shownTokensUSD + (hl?.accountValue ?? 0) + lend.reduce(0) { $0 + $1.usdc } + dexBalances.values.reduce(0) { $0 + $1.accountValue }
+        return (solana?.usdc ?? 0) + shownTokensUSD + (hl?.accountValue ?? 0) + lendUSD + dexBalances.values.reduce(0) { $0 + $1.accountValue }
             + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino + kaminoLoanUSD + hlp.equity + nearUSD + protocolUSD
     }
     /// What the wallet holds of each Hyperliquid market's coin (Hedge.spot): SOL and ETH as the networks report them,
@@ -1738,7 +1741,7 @@ final class Workspace {
         if let h = hl { c.balances.append("Hyperliquid trading balance \(Fmt.usd(h.accountValue)), withdrawable \(Fmt.usd(h.withdrawable))") }
         for (dex, b) in dexBalances where b.accountValue > 0 { c.balances.append("Hyperliquid \(dex) exchange \(Fmt.usd(b.accountValue))") }
         if hlp.equity > 0 { c.balances.append("HLP vault \(Fmt.usd(hlp.equity))" + (hlp.lockedUntil.map { ", locked until \(Fmt.date($0))" } ?? "")) }
-        for l in lend where l.usdc > 0 { c.balances.append("Jupiter Lend \(l.vault.replacingOccurrences(of: "jl", with: "")) \(Fmt.num(l.usdc))") }
+        for d in lendDeposits { c.balances.append("Jupiter Lend \(Fmt.num(d.amount, maxFraction: 6)) \(d.coin)") }
         if kamino > 0 { c.balances.append("Kamino \(Fmt.usd(kamino))") }
         if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
             // What stands on Kamino's Backpack market: the model offers a repay and the stock's way back from this.
@@ -2122,12 +2125,8 @@ final class Workspace {
         func current() -> Bool { owner == solanaAddress && nearAccount == nearAddress }
         do {
             let s = try await balance
-            let held = ((await lendPositions) ?? []).filter { $0.assets > 0 }
-            let l: [(vault: String, usdc: Decimal)] = held.map { ($0.vault, Decimal($0.assets) / 1_000_000) }
-            let deposits = held.map { p in
-                LendDeposit(address: p.address, coin: p.coin == "WSOL" ? "SOL" : p.coin, amount: Decimal(p.assets) / pow(10, p.decimals),
-                            decimals: p.decimals, apy: p.apy)
-            }
+            // nil: Jupiter didn't answer (429), and the last read stays.
+            let deposits = (await lendPositions).map { $0.filter { $0.assets > 0 }.map(LendDeposit.init) }
             let k = await kaminoPositions, n = await nearBalance
             var b = await backpack
             // Kamino's API can say «no position» seconds after one was made or while it stands (its servers lag behind
@@ -2146,9 +2145,7 @@ final class Workspace {
                 guard current() else { return }
                 solana = s.pricing(from: solana?.tokens ?? [])
                 solanaError = nil
-                // Tuples aren't Equatable: without this check @Observable redraws on every refresh.
-                if !l.elementsEqual(lend, by: ==) { lend = l }
-                if deposits != lendDeposits { lendDeposits = deposits }
+                if let deposits, deposits != lendDeposits { lendDeposits = deposits }
                 if let k {
                     kamino = k.reduce(0) { $0 + $1.valueUSD }
                     let byCoin = k.map { KaminoDeposit(coin: $0.symbol, usd: $0.valueUSD, apy: $0.apy) }
@@ -2160,7 +2157,7 @@ final class Workspace {
                 if let n { near = n.near + n.wrapped }
             }
             // What the deposits earned: not with every balance read (Jupiter's free API answers 429 to many).
-            if !deposits.isEmpty, Date().timeIntervalSince(lendEarnedAt ?? .distantPast) > 300 {
+            if let deposits, !deposits.isEmpty, Date().timeIntervalSince(lendEarnedAt ?? .distantPast) > 300 {
                 lendEarnedAt = Date()
                 Task { [self] in
                     // A refused read (429) asks again in a minute rather than five.
