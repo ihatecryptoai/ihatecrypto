@@ -29,6 +29,8 @@ struct CallReview {
     let simulation: EVMSimulation
     /// «First time with this contract», «proxy: its owner can change the code»: on the card, above everything.
     let badges: [String]
+    /// Each simulated token's symbol and decimals as the card read them: `recordCall` books the call with these.
+    let tokens: [String: (symbol: String, decimals: Int?)]
     /// «FluidLending» or «0x1a99…6096».
     var contractName: String { trust.implementation ?? trust.name ?? "\(call.contract.prefix(6))…\(call.contract.suffix(4))" }
 }
@@ -115,7 +117,12 @@ extension Workspace {
                 return
             }
             let meta = await tokenMeta(token, net)
-            approve = .init(token: token, symbol: meta.symbol, amount: a.amount, units: (a.amount * pow(10, meta.decimals)).rounded(0, .down))
+            guard let decimals = meta.decimals else {
+                refuse("\(meta.symbol) (\(token)) on \(net.name) doesn't answer decimals(), so ihatecrypto can't count an exact approve.",
+                       "\(meta.symbol) (\(token)) в \(net.name) не отвечает на decimals(), а без этого ihatecrypto не посчитает точный approve.")
+                return
+            }
+            approve = .init(token: token, symbol: meta.symbol, amount: a.amount, units: (a.amount * pow(10, decimals)).rounded(0, .down))
         }
         // What the calldata does, and what the signer would refuse anyway.
         let decoded = EVMCall.decode(data)
@@ -155,7 +162,12 @@ extension Workspace {
                            "ihatecrypto не может оценить уходящий \(t.symbol), а значит не может удержать вызов в лимите.")
                     return
                 }
-                atRisk += -delta / pow(10, t.decimals) * p
+                guard let decimals = t.decimals else {
+                    refuse("ihatecrypto can't read the decimals() of the \(t.symbol) that would leave, so it can't keep the call under its cap.",
+                           "у уходящего \(t.symbol) не читается decimals(), а значит ihatecrypto не может удержать вызов в лимите.")
+                    return
+                }
+                atRisk += -delta / pow(10, decimals) * p
             }
             if let a = approve {
                 let p = priced[a.token.lowercased()] ?? (Stablecoins.dollars.contains(a.symbol.uppercased()) ? 1 : 0)
@@ -173,11 +185,18 @@ extension Workspace {
                 return
             }
         }
-        var changes: [String] = []
+        var changes: [String] = [], tokens: [String: (symbol: String, decimals: Int?)] = [:]
         for (asset, delta) in sim.changes.sorted(by: { $0.key < $1.key }) {
             if asset == EVMSimulation.native { changes.insert("\(net.gasCoin): \(Self.delta(delta / 1_000_000_000_000_000_000))", at: 0); continue }
             let t = await tokenMeta(asset, net)
-            changes.append("\(t.symbol): \(Self.delta(sim.nfts.contains(asset) ? delta : delta / pow(10, t.decimals)))")
+            tokens[asset] = t
+            if sim.nfts.contains(asset) { changes.append("\(t.symbol): \(Self.delta(delta))"); continue }
+            guard let decimals = t.decimals else {
+                refuse("\(t.symbol) (\(asset)) doesn't answer decimals(), so the card couldn't show how much of it moves.",
+                       "\(t.symbol) (\(asset)) не отвечает на decimals(), поэтому карточка не может показать, сколько его уходит или приходит.")
+                return
+            }
+            changes.append("\(t.symbol): \(Self.delta(delta / pow(10, decimals)))")
         }
         var warnings: [String] = []
         if !sim.changes.isEmpty, sim.changes.values.allSatisfy({ $0 < 0 }) {
@@ -191,7 +210,7 @@ extension Workspace {
                                                                    "Вне списка ihatecrypto · в нём \(Fmt.usd(tvl)) · лимит \(Fmt.usd(ContractCallGuard.capUSD))")) }
         let review = CallReview(command: command, call: c, net: net, data: data, value: value, approve: approve,
                                 lines: [decoded.summary(chainId: net.rpc.chainId, to: c.contract, value: value)], changes: changes.isEmpty ? [say("None of your balances change.", "Балансы не меняются.")] : changes,
-                                trust: trust, warnings: warnings, calls: calls, simulation: sim, badges: badges)
+                                trust: trust, warnings: warnings, calls: calls, simulation: sim, badges: badges, tokens: tokens)
         callReview = review
         pendingAction = .wallet(command)
         pendingText = c.text
@@ -202,10 +221,13 @@ extension Workspace {
 
     /// What the call did to the wallet's tokens, in its cost basis: the shares it got for the dollars it spent, so the
     /// portfolio shows them (and their P/L) before the explorer lists them; shares it gave back, sold.
-    func recordCall(_ r: CallReview) async {
+    func recordCall(_ r: CallReview) {
         var spent: Decimal = 0, got: [(key: String, amount: Decimal)] = []
         for (asset, delta) in r.simulation.changes where asset != EVMSimulation.native {
-            let t = await tokenMeta(asset, r.net), amount = abs(delta) / pow(10, t.decimals), key = "\(r.net.key):\(asset.lowercased())"
+            // The decimals the card read, not a read after the send that a node's hiccup could miss. None (an NFT): no
+            // amount, the explorer shows the holding itself.
+            guard let t = r.tokens[asset], let decimals = t.decimals else { continue }
+            let amount = abs(delta) / pow(10, decimals), key = "\(r.net.key):\(asset.lowercased())"
             if delta < 0 {
                 if Stablecoins.dollars.contains(t.symbol.uppercased()) { spent += amount } else { costBasis[key]?.sold(amount) }
             } else if !Stablecoins.dollars.contains(t.symbol.uppercased()) {
@@ -226,7 +248,8 @@ extension Workspace {
                   !have.contains(where: { $0.chain == net.key && $0.contract.lowercased() == parts[1] }),
                   let raw = try? await net.rpc.read(parts[1], ERC20.balanceOf(owner)), let units = ABI.decimal(in: raw, word: 0), units > 0 else { continue }
             let t = await tokenMeta(parts[1], net)
-            out.append(Holding(chain: net.key, contract: parts[1], amount: units / pow(10, t.decimals), symbol: t.symbol))
+            guard let decimals = t.decimals else { continue }
+            out.append(Holding(chain: net.key, contract: parts[1], amount: units / pow(10, decimals), symbol: t.symbol))
         }
         var priced: [Holding] = []
         for chain in Set(out.map(\.chain)) { priced += await Holdings.llamaPriced(chain, out.filter { $0.chain == chain }) }
@@ -246,7 +269,7 @@ extension Workspace {
         let done = try await e.contractCall(r.net, to: r.call.contract, data: r.data, value: r.value, approve: r.approve.map { ($0.token, $0.units) },
                                             approveNote: "Approve exactly \(Fmt.num(r.approve?.amount ?? 0, maxFraction: 6)) \(r.approve?.symbol ?? "") to \(r.contractName)",
                                             note: "\(r.call.name) on \(r.contractName) on \(r.net.name)")
-        await recordCall(r)
+        recordCall(r)
         return done
     }
 
@@ -274,11 +297,11 @@ extension Workspace {
 
     nonisolated static func delta(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }
 
-    /// A token's symbol and decimals, read from it.
-    func tokenMeta(_ token: String, _ net: EVMNetwork) async -> (symbol: String, decimals: Int) {
+    /// A token's symbol and decimals, read from it. No decimals when decimals() didn't answer, never 18: an approve counted
+    /// in 18 decimals for a 6-decimal token is a trillion times the amount, and the cap would see a trillionth of what leaves.
+    func tokenMeta(_ token: String, _ net: EVMNetwork) async -> (symbol: String, decimals: Int?) {
         let symbol = (try? await net.rpc.read(token, Data([0x95, 0xd8, 0x9b, 0x41]))).flatMap(ABI.string) ?? "\(token.prefix(6))…"
-        let decimals = (try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))).flatMap { ABI.uint(in: $0, word: 0) } ?? 18
-        return (symbol, Int(decimals))
+        return (symbol, ABI.decimals(try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))))
     }
 }
 

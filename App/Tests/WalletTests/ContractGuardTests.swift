@@ -43,3 +43,15 @@ private func simulated(_ logs: [[String: Any]]) throws -> EVMSimulation {
     now.grants = [.init(kind: "approve", asset: usdc, to: evil, unlimited: false)]
     #expect(ContractCallGuard.drift(card: card, now: now) != nil)
 }
+
+/// tokenMeta's decimals: a token that doesn't answer gets none, never 18 — an approve counted in 18 decimals for a
+/// 6-decimal token is a trillion times what the user asked, and the cap would see a trillionth of what leaves.
+@Test func decimalsAreReadNeverGuessed() {
+    #expect(ABI.decimals(Data(hex: word(6))) == 6)                   // USDC's answer on Base
+    #expect(ABI.decimals(Data(hex: word(18))) == 18)
+    #expect(ABI.decimals(nil) == nil)                                // a revert (Permit2 on Base) or the node down
+    #expect(ABI.decimals(Data()) == nil)                             // an EOA answers «0x»
+    #expect(ABI.decimals(Data(hex: word(37))) == nil)                // past 36: refused, as Send and Swap do
+    #expect(ABI.decimals(Data(hex: word(1 << 63))) == nil)           // passes ABI.uint, traps Int(…)
+    #expect(ABI.decimals(Data(hex: "0x" + String(repeating: "f", count: 64))) == nil)   // past 64 bits
+}

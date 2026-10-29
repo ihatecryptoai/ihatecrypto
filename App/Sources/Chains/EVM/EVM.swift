@@ -274,6 +274,12 @@ public enum ABI {
         return data.subdata(in: (i * 32 + 24)..<((i + 1) * 32)).reduce(0) { $0 << 8 | UInt64($1) }
     }
 
+    /// decimals()'s answer as a token can have it; nil when it didn't answer (a revert, a node down, an EOA's «0x») or
+    /// answered past 36 (no real token; 10^37 units overflow the amounts' Decimal). Never guessed.
+    public static func decimals(_ answer: Data?) -> Int? {
+        answer.flatMap { uint(in: $0, word: 0) }.flatMap { $0 <= 36 ? Int($0) : nil }
+    }
+
     /// Word `i` as a Decimal (for 256-bit values such as Aave's ray rates).
     public static func decimal(in data: Data, word i: Int) -> Decimal? {
         let data = Data(data)   // a slice keeps its parent's indices

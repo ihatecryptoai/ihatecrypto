@@ -227,13 +227,18 @@ extension Workspace {
         agentStep = say("Reading the multisig on \(net.name)", "Читаю мультисиг в \(net.name)")
         defer { agentStep = nil }
         let meta = coin ? (symbol: net.gasCoin, decimals: 18) : await tokenMeta(contract, net)
+        guard let decimals = meta.decimals else {
+            reply(say("\(meta.symbol) on \(net.name) doesn't answer decimals(), so ihatecrypto can't count the amount. Nothing was signed.",
+                      "\(meta.symbol) в \(net.name) не отвечает на decimals(), поэтому ihatecrypto не может посчитать сумму. Ничего не подписано."), note: note)
+            return
+        }
         guard let owners = (try? await net.rpc.read(m.address, Safe.ownersCall)).flatMap(Safe.owners(in:)),
               let threshold = (try? await net.rpc.read(m.address, Safe.thresholdCall)).flatMap({ ABI.uint(in: $0, word: 0) }),
               let raw = coin ? (try? await net.rpc.balance(m.address)).map(Decimal.init) : (try? await net.rpc.read(contract, ERC20.balanceOf(m.address))).flatMap({ ABI.decimal(in: $0, word: 0) }) else {
             reply(say("\(net.name)'s node didn't answer for the multisig; try again in a moment.", "Нода \(net.name) не ответила по мультисигу; попробуй через минуту."), note: note)
             return
         }
-        let scale = pow(Decimal(10), meta.decimals), held = raw / scale
+        let scale = pow(Decimal(10), decimals), held = raw / scale
         let units = amount.map { ($0 * scale).rounded(0, .down) } ?? raw
         guard units > 0, units <= raw else {
             reply(say("The multisig holds \(Fmt.num(held, maxFraction: 6)) \(meta.symbol) on \(net.name)\(amount == nil ? "" : ", less than that").",
