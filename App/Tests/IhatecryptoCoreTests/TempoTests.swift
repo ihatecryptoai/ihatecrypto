@@ -181,3 +181,26 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect(MPP.unpayable(["serviceUrl": "https://stableenrich.dev"]))
     #expect(!MPP.unpayable(["serviceUrl": "https://brave.mpp.paywithlocus.com"]))
 }
+
+/// The chat calls an unlisted service only when the user's message names its host whole: «notevil.com» doesn't name
+/// «evil.com», «x.com» doesn't name «x.co», and «let.me know» doesn't name «t.me».
+@Test func aHostIsNamedOnlyWhole() {
+    #expect(MPP.named("api.exa.ai", in: "найди через api.exa.ai."))
+    #expect(MPP.named("api.exa.ai", in: "pay GET https://api.exa.ai/search?q=1"))
+    #expect(MPP.named("brave.mpp.paywithlocus.com", in: "use https://brave.mpp.paywithlocus.com/web/search"))
+    #expect(MPP.named("httpbin.org", in: "pay GET https://httpbin.org/anything?note=x"))
+    #expect(MPP.named("stableenrich.dev", in: "оплати stableenrich.dev, пожалуйста"))
+    #expect(MPP.named("my-api.io", in: "«my-api.io» — вызови"))
+    #expect(MPP.named("foo.com", in: "[docs](https://foo.com/a)"))
+    #expect(MPP.named("FOO.com", in: "через Foo.COM:443"))
+    #expect(MPP.named("evil.com", in: "coingecko.com@evil.com"))
+    #expect(!MPP.named("evil.com", in: "оплати notevil.com"))
+    #expect(!MPP.named("example.com", in: "оплати api.example.com"))
+    #expect(!MPP.named("example.com", in: "оплати example.com.au"))
+    #expect(!MPP.named("x.co", in: "найди твиты на x.com"))
+    #expect(!MPP.named("i.co", in: "через api.coingecko.com"))
+    #expect(!MPP.named("t.me", in: "let.me know"))
+    #expect(!MPP.named("pal.com", in: "pay through paypal.com"))
+    #expect(!MPP.named("api.io", in: "call https://my_api.io/x") && MPP.named("my_api.io", in: "call https://my_api.io/x"))
+    #expect(!MPP.named("", in: "биткоин - сколько стоит?"))
+}

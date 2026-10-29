@@ -48,7 +48,7 @@ extension Workspace {
         // Asking a price is a request: only to a service Tempo's directory lists, or a site the user named themselves — so
         // text a lookup slipped into the chat can't have the model send the user's numbers to an address of its choosing.
         let listed = await MPP.serviceName(url)
-        guard listed != nil || ask.lowercased().contains(host.lowercased()) else {
+        guard listed != nil || MPP.named(host, in: ask) else {
             reply(say("\(host) isn't in Tempo's directory of paid services and isn't in your message, so ihatecrypto doesn't call it. Write its address yourself to use it.",
                       "\(host) нет в каталоге платных сервисов Tempo и нет в твоём сообщении, поэтому ihatecrypto его не вызывает. Напиши его адрес сам, чтобы воспользоваться."), note: note)
             return

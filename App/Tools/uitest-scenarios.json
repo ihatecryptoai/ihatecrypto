@@ -403,6 +403,28 @@
     }
   },
   {
+    "name": "a paid-service address the user wrote → called, not refused as unlisted (ru)",
+    "send": [
+      "вызови https://httpbin.org/anything?q=moo через pay GET"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_lacks": "каталог",
+      "reply_contains": "moo"
+    }
+  },
+  {
+    "name": "a paid-service address the user wrote → called, not refused as unlisted (en)",
+    "send": [
+      "call https://httpbin.org/anything?q=moo with pay GET"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_lacks": "directory",
+      "reply_contains": "moo"
+    }
+  },
+  {
     "name": "the 1st of every month → a scheduled monthly task, no card",
     "send": [
       "каждое 1 число месяца в 10:00 показывай мой P/L за месяц"

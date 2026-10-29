@@ -309,6 +309,15 @@ public enum MPP {
         return services.first { (($0["serviceUrl"] as? String).flatMap { URL(string: $0)?.host()?.lowercased() }) == host }?["name"] as? String
     }
 
+    /// Whether the user's text names this host whole («api.example.com», «https://api.example.com/v1», «api.example.com.»),
+    /// not inside a longer one: a substring let «notevil.com» name «evil.com» and «x.com» name «x.co».
+    /// An empty host («https://:8443/x») is never named: a lone «-» in the text trims to nothing.
+    public static func named(_ host: String, in text: String) -> Bool {
+        let host = host.lowercased()
+        return !host.isEmpty && text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && !".-_".contains($0) })
+            .contains { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".-_")) == host }
+    }
+
     // MARK: Directory
 
     /// The services that take MPP payments (mpp.dev's directory) matching the words, with their endpoints and prices,
