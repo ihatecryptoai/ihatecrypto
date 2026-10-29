@@ -154,24 +154,22 @@ extension Workspace {
         if !listed {
             let outflows = sim.changes.filter { $0.value < 0 && $0.key != EVMSimulation.native }
             let priced = await ContractReputation.prices(Array(outflows.keys) + (approve.map { [$0.token] } ?? []), on: net)
-            var atRisk: Decimal = 0
+            var leaving: [(token: String, symbol: String, amount: Decimal?)] = []
             for (asset, delta) in outflows {
                 let t = await tokenMeta(asset, net)
-                guard let p = priced[asset.lowercased()] ?? (Stablecoins.dollars.contains(t.symbol.uppercased()) ? 1 : nil) else {
-                    refuse("ihatecrypto can't price the \(t.symbol) that would leave, so it can't keep the call under its cap.",
-                           "ihatecrypto не может оценить уходящий \(t.symbol), а значит не может удержать вызов в лимите.")
-                    return
-                }
-                guard let decimals = t.decimals else {
-                    refuse("ihatecrypto can't read the decimals() of the \(t.symbol) that would leave, so it can't keep the call under its cap.",
-                           "у уходящего \(t.symbol) не читается decimals(), а значит ihatecrypto не может удержать вызов в лимите.")
-                    return
-                }
-                atRisk += -delta / pow(10, decimals) * p
+                leaving.append((asset, t.symbol, t.decimals.map { -delta / pow(10, $0) }))
             }
-            if let a = approve {
-                let p = priced[a.token.lowercased()] ?? (Stablecoins.dollars.contains(a.symbol.uppercased()) ? 1 : 0)
-                atRisk = max(atRisk, a.amount * p)
+            var atRisk: Decimal
+            switch ContractCallGuard.atRisk(leaving: leaving, approve: approve.map { ($0.token, $0.symbol, $0.amount) }, priced: priced) {
+            case .usd(let usd): atRisk = usd
+            case .unpriced(let s):
+                refuse("ihatecrypto can't price the \(s) this call would spend or let the contract take, so it can't keep the call under its cap.",
+                       "ihatecrypto не может оценить \(s), который вызов потратит или разрешит контракту взять, а значит не может удержать вызов в лимите.")
+                return
+            case .uncounted(let s):
+                refuse("ihatecrypto can't read the decimals() of the \(s) that would leave, so it can't keep the call under its cap.",
+                       "у уходящего \(s) не читается decimals(), а значит ihatecrypto не может удержать вызов в лимите.")
+                return
             }
             let coins = Decimal(value) / 1_000_000_000_000_000_000 + max(0, -(sim.changes[EVMSimulation.native] ?? 0) / 1_000_000_000_000_000_000 - Decimal(value) / 1_000_000_000_000_000_000)
             if coins > 0 {

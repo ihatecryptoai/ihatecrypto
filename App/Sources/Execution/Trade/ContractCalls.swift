@@ -168,6 +168,30 @@ public enum ContractCallGuard {
         return nil
     }
 
+    public enum Risk: Equatable { case usd(Decimal), unpriced(String), uncounted(String) }
+
+    /// What a call to a protocol outside the list puts at risk, in dollars: what leaves the wallet, or its approve when
+    /// that's more (the contract may take the rest of an approve later). A token neither DefiLlama nor the dollar list
+    /// prices fails closed, an approve too — it's a spend that hasn't happened yet, never $0. An outflow without decimals
+    /// (no amount) can't be counted; its price is asked first, so an NFT leaving says it can't be priced.
+    public static func atRisk(leaving: [(token: String, symbol: String, amount: Decimal?)],
+                              approve: (token: String, symbol: String, amount: Decimal)?,
+                              priced: [String: Decimal]) -> Risk {
+        func price(_ token: String, _ symbol: String) -> Decimal? {
+            priced[token.lowercased()] ?? (Stablecoins.dollars.contains(symbol.uppercased()) ? 1 : nil)
+        }
+        var sum: Decimal = 0
+        for t in leaving {
+            guard let p = price(t.token, t.symbol) else { return .unpriced(t.symbol) }
+            guard let amount = t.amount else { return .uncounted(t.symbol) }
+            sum += amount * p
+        }
+        // An approve of 0 is a revoke: it lets the contract take nothing.
+        guard let a = approve, a.amount > 0 else { return .usd(sum) }
+        guard let p = price(a.token, a.symbol) else { return .unpriced(a.symbol) }
+        return .usd(max(sum, a.amount * p))
+    }
+
     /// What the re-simulation changed against the card: nil when every balance moves within 1% of what it showed and
     /// the rights are the same.
     public static func drift(card: EVMSimulation, now: EVMSimulation) -> String? {

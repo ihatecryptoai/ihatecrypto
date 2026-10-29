@@ -55,3 +55,19 @@ private func simulated(_ logs: [[String: Any]]) throws -> EVMSimulation {
     #expect(ABI.decimals(Data(hex: word(1 << 63))) == nil)           // passes ABI.uint, traps Int(…)
     #expect(ABI.decimals(Data(hex: "0x" + String(repeating: "f", count: 64))) == nil)   // past 64 bits
 }
+
+/// The cap for a protocol outside the list: an approve it can't price is refused like an outflow, never counted as $0 —
+/// the contract may take the part of it this call leaves unspent later.
+@Test func anApproveItCantPriceIsRefusedLikeAnOutflow() {
+    let priced: [String: Decimal] = [usdc: 1, vault: 1]
+    #expect(ContractCallGuard.atRisk(leaving: [], approve: (evil, "EVIL", 1_000_000), priced: priced) == .unpriced("EVIL"))
+    #expect(ContractCallGuard.atRisk(leaving: [], approve: (evil, "EVIL", 0), priced: priced) == .usd(0))         // a revoke
+    #expect(ContractCallGuard.atRisk(leaving: [(usdc, "USDC", 10)], approve: (vault, "VLT", 40), priced: priced) == .usd(40))
+    #expect(ContractCallGuard.atRisk(leaving: [(usdc, "USDC", 100)], approve: (vault, "VLT", 1), priced: priced) == .usd(100))
+    #expect(ContractCallGuard.atRisk(leaving: [(usdc, "USDC", 10), (vault, "VLT", 5)], approve: nil, priced: priced) == .usd(15))
+    #expect(ContractCallGuard.atRisk(leaving: [], approve: (evil, "usdc", 30), priced: priced) == .usd(30))       // the dollar list
+    #expect(ContractCallGuard.atRisk(leaving: [(evil, "EVIL", 1)], approve: nil, priced: priced) == .unpriced("EVIL"))
+    // An outflow without decimals: priced, it can't be counted; unpriced (an NFT), the price is asked first.
+    #expect(ContractCallGuard.atRisk(leaving: [(usdc, "USDC", nil)], approve: nil, priced: priced) == .uncounted("USDC"))
+    #expect(ContractCallGuard.atRisk(leaving: [(evil, "EVIL", nil)], approve: nil, priced: priced) == .unpriced("EVIL"))
+}
