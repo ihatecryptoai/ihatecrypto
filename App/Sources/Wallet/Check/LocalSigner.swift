@@ -220,8 +220,10 @@ func moveMoney(_ text: String) async throws {
         print("Price: \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(c.payee) (\(c.realm))\(c.purpose.map { " for «\($0)»" } ?? ""), memo \(c.memo.map { "0x" + $0.hex } ?? "none")")
         guard send else { print("Add --yes to pay it."); return }
         let hash = try await executor.payTempo(c.amount, to: c.payee, memo: c.memo, label: c.realm)
-        let (paid, _, answer) = try await MPP.call(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: wallet.evm)))
-        print("Paid: \(EVMNetwork.tempo.explorer)/tx/\(hash)\n\(paid):\n\(MPP.shown(answer))")
+        let proof = "\(EVMNetwork.tempo.explorer)/tx/\(hash)"
+        let answer = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: wallet.evm)),
+                                        usdc: c.usdc, service: c.realm, proof: proof)
+        print("Paid: \(proof)\n\(MPP.shown(answer))")
     case .claimRewards:
         // Without --yes: what Merkl owes. With it: claimed on each chain.
         let owed = try await Merkl.rewards(user: wallet.evm)

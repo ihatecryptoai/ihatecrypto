@@ -204,3 +204,37 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect(!MPP.named("api.io", in: "call https://my_api.io/x") && MPP.named("my_api.io", in: "call https://my_api.io/x"))
     #expect(!MPP.named("", in: "биткоин - сколько стоит?"))
 }
+
+/// A service on `paid.stub`: /down never answers, /refused answers 500, anything else 200 `{}` — only with the proof.
+private final class PaidStub: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "paid.stub" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        if path == "/down" { return client!.urlProtocol(self, didFailWithError: URLError(.timedOut)) }
+        let status = request.value(forHTTPHeaderField: "Authorization") != "Payment x" ? 401 : path == "/refused" ? 500 : 200
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data((status == 200 ? "{}" : #"{"error":"no"}"#).utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Paid on Tempo, then no answer or a refusal: the error names the payment, the user's only proof for the service.
+@Test func aFailureAfterPayingNamesThePayment() async throws {
+    URLProtocol.registerClass(PaidStub.self)
+    defer { URLProtocol.unregisterClass(PaidStub.self) }
+    let proof = "https://explore.tempo.xyz/tx/0xabc"
+    func paid(_ path: String) async throws -> Data {
+        try await MPP.paid("GET", "https://paid.stub/\(path)", nil, credential: ("Authorization", "Payment x"),
+                           usdc: Decimal(string: "0.06")!, service: "Stub", proof: proof)
+    }
+    for path in ["down", "refused"] {
+        let error = await #expect(throws: (any Error).self) { try await paid(path) }
+        #expect(error?.localizedDescription.hasPrefix("Paid 0.06 USDC, but Stub") == true)
+        #expect(error?.localizedDescription.hasSuffix("The payment is on Tempo: \(proof)") == true)
+        #expect(error?.localizedDescription.contains("..") == false)
+    }
+    #expect(try await paid("ok") == Data("{}".utf8))
+}

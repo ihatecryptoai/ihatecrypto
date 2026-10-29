@@ -115,10 +115,8 @@ extension Workspace {
         let proof = "\(EVMNetwork.tempo.explorer)/tx/\(hash)"
         answerStep(say("loading the answer…", "загружаю ответ…"), say("\(quote.service) is working · up to a minute", "\(quote.service) работает · до минуты"))
         runningAction?.lines.append(say("Waiting for \(quote.service)'s answer", "Жду ответ \(quote.service)"))
-        let (status, _, data) = try await MPP.call(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: signerWallet?.evm ?? "")))
-        guard (200..<300).contains(status) else {
-            throw ExecutionError("Paid \(Fmt.num(c.usdc, maxFraction: 6)) USDC, but \(quote.service) answered \(status): \(MPP.shown(data, limit: 300)). The payment is on Tempo: \(proof)")
-        }
+        let data = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: signerWallet?.evm ?? "")),
+                                      usdc: c.usdc, service: quote.service, proof: proof)
         return await answered(quote.ask, service: quote.service, data: data, usdc: c.usdc, proof: proof)
     }
 

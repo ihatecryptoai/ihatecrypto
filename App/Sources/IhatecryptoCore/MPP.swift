@@ -93,6 +93,7 @@ public enum MPP {
         return .success(Challenge(params: p, amount: amount, payee: payee, memo: memo, expires: expires))
     }
 
+    /// Why MPP stopped: before paying (nothing paid) or, from `paid`, after it (the reason names the payment).
     public struct Refusal: LocalizedError, Equatable, Sendable {
         public let reason: String
         init(_ reason: String) { self.reason = reason }
@@ -137,6 +138,23 @@ public enum MPP {
         let http = response as? HTTPURLResponse
         let headers = (http?.allHeaderFields ?? [:]).reduce(into: [String: String]()) { $0["\($1.key)".lowercased()] = "\($1.value)" }
         return (http?.statusCode ?? 0, headers, data)
+    }
+
+    /// The request again with the payment's proof. The money is gone by now: whatever goes wrong — no answer, a refusal —
+    /// names the payment, so the user can show it to the service.
+    public static func paid(_ method: String, _ url: String, _ body: String?, credential: (field: String, value: String),
+                            usdc: Decimal, service: String, proof: String) async throws -> Data {
+        let paid = "Paid \(Fmt.num(usdc, maxFraction: 6)) USDC, but \(service)"
+        let status: Int, data: Data
+        do {
+            (status, _, data) = try await call(method, url, body, credential: credential)
+        } catch {
+            throw Refusal("\(paid) didn't answer: \(error.localizedDescription.trimmingCharacters(in: [".", " "])). The payment is on Tempo: \(proof)")
+        }
+        guard (200..<300).contains(status) else {
+            throw Refusal("\(paid) answered \(status): \(shown(data, limit: 300)). The payment is on Tempo: \(proof)")
+        }
+        return data
     }
 
     /// A service's answer for the chat: JSON indented, cut at `limit` characters.
