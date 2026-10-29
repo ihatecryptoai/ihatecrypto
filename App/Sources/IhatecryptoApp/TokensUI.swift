@@ -141,8 +141,8 @@ extension Workspace {
         var held: [String: Decimal] = [:]
         for t in favoriteTokens {
             guard let rpc = t.rpc, let raw = try? await rpc.read(t.address, try ERC20.balanceOf(hlAddress)), let units = ABI.decimal(in: raw, word: 0),
-                  let d = ABI.uint(in: (try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) ?? Data(), word: 0) else { continue }
-            held[t.id] = units / Decimal(sign: .plus, exponent: Int(d), significand: 1)
+                  let d = ABI.decimals(try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) else { continue }
+            held[t.id] = units / Decimal(sign: .plus, exponent: d, significand: 1)
         }
         tokenBalances.merge(held) { $1 }
     }
