@@ -714,8 +714,8 @@ public actor Executor {
         guard let position = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }) else {
             return "No open \(asset) position."
         }
-        let size = HLAction.size(abs(position.size) * fraction, szDecimals: market.szDecimals)
-        guard size > 0, size < abs(position.size) else { return try await close(asset: asset) }
+        let size = try Self.partialCloseSize(position: position.size, fraction: fraction, szDecimals: market.szDecimals, asset: asset)
+        guard size < abs(position.size) else { return try await close(asset: asset) }   // a share of 1 or more is the whole
         let buy = position.size < 0
         let px = HLAction.price(market.markPx * (buy ? 1 + 2 * Self.slippage : 1 - 2 * Self.slippage), szDecimals: market.szDecimals)
         let result = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: buy, price: px, size: size, reduceOnly: true,
@@ -767,6 +767,22 @@ public actor Executor {
         guard current != nil, let equity, equity > 0 else { return nil }
         let loss = max(0, long ? entry - stop : stop - entry) * size + size * (entry + stop) * RiskCalc.tradeFee
         return loss / equity * 100 > policy.maxRiskPct ? loss : nil
+    }
+
+    /// The size a partial close sends: the share in whole steps of the market's szDecimals, rounded down. A share smaller
+    /// than one step is refused: it used to fall through to close(asset:), which closed the whole position and its stop.
+    static func partialCloseSize(position: Decimal, fraction: Decimal, szDecimals: Int, asset: String) throws -> Decimal {
+        // A third is 0.333…3: a third of 3 steps came to 0.99…9 steps and rounded down to none.
+        var exact = abs(position) * fraction, wanted = Decimal()
+        NSDecimalRound(&wanted, &exact, 20, .plain)
+        let size = HLAction.size(wanted, szDecimals: szDecimals)
+        guard size > 0 else {
+            let step = 1 / pow(Decimal(10), szDecimals)
+            throw ExecutionError("Closing \(Fmt.pct(fraction * 100)) of \(Fmt.num(abs(position), maxFraction: szDecimals)) \(asset) is "
+                + "\(Fmt.num(wanted, maxFraction: max(6, szDecimals + 3))) \(asset), less than the smallest step, \(Fmt.num(step, maxFraction: szDecimals)) \(asset). "
+                + "Nothing was closed; the stop and take-profit stay. Close a bigger share, or type «close» for the whole position.")
+        }
+        return size
     }
 
     private func market(_ asset: String) async throws -> Market {

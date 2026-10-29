@@ -75,6 +75,22 @@ import WalletCore
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 2000, policy: policy) == nil)
 }
 
+@Test func aShareBelowOneStepIsRefusedNotAFullClose() throws {
+    let btc = Decimal(string: "0.00015")!   // ≈ $12 at $84k, BTC steps of 0.00001
+    for text in ["close 5% BTC", "закрой 5% BTC"] {
+        guard case .close(let share)? = PositionCommand.parse(text) else { Issue.record("\(text) didn't parse"); continue }
+        #expect(throws: ExecutionError.self) { try Executor.partialCloseSize(position: btc, fraction: share, szDecimals: 5, asset: "BTC") }
+    }
+    for text in ["close half", "закрой половину"] {
+        guard case .close(let share)? = PositionCommand.parse(text) else { Issue.record("\(text) didn't parse"); continue }
+        #expect(try Executor.partialCloseSize(position: btc, fraction: share, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00007")!)
+    }
+    #expect(try Executor.partialCloseSize(position: -1000, fraction: Decimal(1) / 3, szDecimals: 0, asset: "kPEPE") == 333)   // a short too
+    // A third is 0.333…3: rounded down as it was, a third of 3 steps was none and a third of 0.00015 one step short.
+    #expect(try Executor.partialCloseSize(position: 3, fraction: Decimal(1) / 3, szDecimals: 0, asset: "kPEPE") == 1)
+    #expect(try Executor.partialCloseSize(position: btc, fraction: Decimal(1) / 3, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00005")!)
+}
+
 @Test func gasTopUpTargetIsAWholeNumberOfWei() {
     // $1 at $3000 an ETH, 80% of it: 266,666,666,666,666 wei, not the 0 an unrounded quotient read as.
     #expect(Executor.gasExpected(usd: 1, price: 3000) == 266_666_666_666_666)
