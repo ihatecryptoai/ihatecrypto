@@ -404,6 +404,7 @@ final class DebugAPI {
                             "place": ws.chartPlace(tradePlan: ws.intent != TradeIntent() && !ws.managesPosition)?.rawValue ?? NSNull()] as [String: Any]
         }
         if let d = ws.detail { out["detail"] = d }
+        if let c = ws.tokenCard, c.place == ws.detail { out["tokenCard"] = c.text }
         if let n = ws.nextSteps { out["nextSteps"] = n.options.map { ["title": $0.title, "command": $0.command, "recommended": $0.recommended] as [String: Any] } }
         if let a = ws.allocationPreview {
             func n(_ d: Decimal) -> Double { NSDecimalNumber(decimal: d).doubleValue }

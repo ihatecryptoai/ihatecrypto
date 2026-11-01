@@ -1110,5 +1110,39 @@
         "SELL"
       ]
     }
+  },
+  {
+    "name": "a copy of a stock token on Robinhood Chain → not verified by Robinhood's registry",
+    "send": [
+      "расскажи про токен 0xA3284897ad7c8FED700b04f573Cf64E4f6c10f2c на robinhood"
+    ],
+    "expect": {
+      "no_pending": true,
+      "detail_contains": "token:robinhood:0xA3284897ad7c8FED700b04f573Cf64E4f6c10f2c",
+      "token_card_contains": "not verified by robinhood's registry"
+    }
+  },
+  {
+    "name": "the real NVDA on Robinhood Chain → verified by Robinhood's registry",
+    "send": [
+      "tell me about token 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC on robinhood"
+    ],
+    "expect": {
+      "no_pending": true,
+      "detail_contains": "token:robinhood:0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "token_card_contains": "verified by robinhood's registry",
+      "token_card_lacks": "not verified"
+    }
+  },
+  {
+    "name": "SPCX on Ethereum under a ticker bought on Robinhood → no registry mark",
+    "send": [
+      "расскажи про токен 0xf734d4797933e25bB421113792622d50423c3C87 на ethereum"
+    ],
+    "expect": {
+      "no_pending": true,
+      "detail_contains": "token:ethereum:",
+      "token_card_lacks": "robinhood's registry"
+    }
   }
 ]

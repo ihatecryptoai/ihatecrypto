@@ -102,6 +102,10 @@ def check(expect, state, replies):
                 why.append(f"unexpected boards: {present}")
         elif key == "detail_contains" and want.lower() not in (b.get("detail") or "").lower():
             why.append(f"canvas block {b.get('detail')}, expected «{want}»")
+        elif key == "token_card_contains" and want.lower() not in (b.get("tokenCard") or "").lower():
+            why.append(f"the token card says {text(b.get('tokenCard'))[:240]}, expected «{want}»")
+        elif key == "token_card_lacks" and (not b.get("tokenCard") or want.lower() in b["tokenCard"].lower()):
+            why.append(f"the token card says «{want}»: {text(b.get('tokenCard'))[:240]}" if b.get("tokenCard") else "no token card")
         elif key == "cards_in_chat" and len(next((m.get("cards") or [] for m in reversed(state.get("messages") or []) if not m["user"]), [])) < want:
             why.append(f"the last reply has fewer than {want} cards under it in the chat")
         elif key == "next_steps_at_least" and len(b.get("nextSteps") or []) < want:
@@ -159,6 +163,16 @@ def main():
                 # A swap's card names its way once quoted (Uniswap's until then): asked again for a while.
                 for _ in range(30 if turn["expect"].get("wait_quote") else 0):
                     if (state["boards"].get("pending") or {}).get("quote"):
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
+                # The token card tells what it shows after its market and the registry's read: asked again for a while.
+                # Alone, token_card_lacks stops at the first text, which on Robinhood Chain may come before the registry's
+                # answer: pair it there with token_card_contains.
+                want = turn["expect"].get("token_card_contains", "").lower()
+                for _ in range(15 if want or "token_card_lacks" in turn["expect"] else 0):
+                    card = (state["boards"].get("tokenCard") or "").lower()
+                    if card and want in card:
                         break
                     time.sleep(1)
                     state = call("GET", "/state")

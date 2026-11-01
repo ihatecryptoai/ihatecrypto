@@ -34,6 +34,14 @@ public enum RobinhoodStocks {
         }
     }
 
+    /// What Robinhood's registry says of a token: true for its own contract on Robinhood Chain, false for another
+    /// contract there under one of its tickers (a copy), nil for anything else. By the contract, never by the ticker alone.
+    public static func listed(_ address: String, symbol: String, chain: String, in registry: [Token]) -> Bool? {
+        guard chain == "robinhood" else { return nil }
+        if registry.contains(where: { $0.address.lowercased() == address.lowercased() }) { return true }
+        return registry.contains { $0.symbol.uppercased() == symbol.uppercased() } ? false : nil
+    }
+
     /// Robinhood's own bid and ask for the token (api.robinhood.com/rhj/prices/{symbol}).
     public static func quote(_ symbol: String) async throws -> (bid: Decimal, ask: Decimal)? {
         let (data, _) = try await URLSession.shared.data(from: URL(string: "https://api.robinhood.com/rhj/prices/\(symbol)")!)

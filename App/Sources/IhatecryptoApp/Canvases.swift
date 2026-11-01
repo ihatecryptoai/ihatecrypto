@@ -433,6 +433,7 @@ extension Workspace {
         // What the rail opened belongs to the canvas it was opened on; the next one starts clean, scrolled to its start at
         // the zoom the user set (zooming is theirs: the buttons and the pinch, never a canvas switch).
         detail = nil
+        tokenCard = nil
         showReceive = false
         showMovers = false
         serviceAnswer = nil
