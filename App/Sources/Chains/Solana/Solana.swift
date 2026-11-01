@@ -101,19 +101,29 @@ public struct SolanaRPC: Sendable {
 
     public enum Outcome: Equatable, Sendable { case confirmed, failed(String), expired }
 
-    /// Waits for "confirmed". A transaction whose blockhash is past `lastValidBlockHeight` can never land:
-    /// that is a definite «didn't land», not a guess, so it is safe to build a new one.
+    /// Waits for "confirmed". Past `lastValidBlockHeight` a transaction can't land any more, so «expired» is a definite
+    /// «didn't land», not a guess, and it is safe to build a new one — once the status, read again from a node that has
+    /// reached a finalized block past that height, still finds nothing. Read before that block, or from a node behind it
+    /// (another node of the public pool, the public node after the user's own), a missing status may only not have reached
+    /// that node yet; a confirmed block wouldn't do, as a node can be ahead of it on another fork. That costs the expiry at
+    /// most the gap between confirmed and finalized.
     public func waitForConfirmation(_ signature: String, lastValidBlockHeight: UInt64, timeout: TimeInterval = 120) async throws -> Outcome {
         let deadline = Date().addingTimeInterval(timeout)
+        var pastSlot: UInt64?   // a finalized slot whose block height is past lastValidBlockHeight
         while Date() < deadline {
             let r = try await call("getSignatureStatuses", [[signature], ["searchTransactionHistory": true]]) as? [String: Any]
             if let status = (r?["value"] as? [Any])?.first as? [String: Any] {
                 if let err = status["err"], !(err is NSNull) { return .failed("\(err)") }
                 let level = status["confirmationStatus"] as? String
                 if level == "confirmed" || level == "finalized" { return .confirmed }
-            } else if let height = (try await call("getBlockHeight", [["commitment": "confirmed"]]) as? NSNumber)?.uint64Value,
-                      height > lastValidBlockHeight {
-                return .expired
+            } else if let pastSlot {
+                let seen = ((r?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value ?? 0
+                if seen >= pastSlot { return .expired }
+            } else if let epoch = try await call("getEpochInfo", [["commitment": "finalized"]]) as? [String: Any],
+                      let height = (epoch["blockHeight"] as? NSNumber)?.uint64Value, height > lastValidBlockHeight,
+                      let slot = (epoch["absoluteSlot"] as? NSNumber)?.uint64Value {
+                pastSlot = slot
+                continue   // the status once more, now: it may have landed between the two reads
             }
             try await Task.sleep(for: .seconds(2))
         }

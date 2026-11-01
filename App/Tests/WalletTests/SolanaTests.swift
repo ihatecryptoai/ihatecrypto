@@ -193,3 +193,95 @@ private func tokenAccount(_ program: String, amount: String, lamports: UInt64) -
     #expect(wallet?.lamports == 5000 && wallet?.token == nil)
     #expect(SolanaRPC.state(NSNull()) == nil)
 }
+
+/// A Solana node at https://<name>.solana.stub for the waits below: block height 1001 at slot 110, one past lastValid 1000, and
+/// the signature's statuses in turn, the last one repeated. Each test has its own name, so they run side by side.
+private final class ScriptedRPC: URLProtocol {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var statuses: [String: [String]] = [:]
+    static let installed = URLProtocol.registerClass(ScriptedRPC.self)
+
+    static func node(_ name: String, statuses: [String]) -> SolanaRPC {
+        _ = installed
+        lock.withLock { self.statuses[name] = statuses }
+        return SolanaRPC(url: URL(string: "https://\(name).solana.stub")!)
+    }
+
+    static func nextStatus(_ name: String) -> String {
+        lock.withLock {
+            guard let queue = statuses[name], let first = queue.first else { return "null" }
+            if queue.count > 1 { statuses[name]!.removeFirst() }
+            return first
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host?.hasSuffix(".solana.stub") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var body = Data()
+        if let stream = request.httpBodyStream {   // URLProtocol gets the body as a stream, not httpBody
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while case let n = stream.read(&buffer, maxLength: buffer.count), n > 0 { body.append(buffer, count: n) }
+            stream.close()
+        }
+        let name = String(request.url!.host!.dropLast(".solana.stub".count))
+        let result = switch ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["method"] as? String {
+        case "getSignatureStatuses": Self.nextStatus(name)
+        case "getEpochInfo": #"{"absoluteSlot":110,"blockHeight":1001,"epoch":1,"slotIndex":110,"slotsInEpoch":432000}"#
+        case "getBlockHeight": "1001"
+        default: "null"
+        }
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data(#"{"jsonrpc":"2.0","id":1,"result":\#(result)}"#.utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// getSignatureStatuses as a node at `slot` answers it: nothing, or the transaction at `level`.
+private func status(at slot: Int, _ level: String? = nil) -> String {
+    let value = level.map { #"{"slot":105,"confirmations":null,"err":null,"confirmationStatus":"\#($0)"}"# } ?? "null"
+    return #"{"context":{"slot":\#(slot)},"value":[\#(value)]}"#
+}
+
+/// The status is read before the block height: a transaction that lands between the two reads is found by reading the
+/// status again, never called «expired» (which the chat says is safe to retry: a second swap, send or bridge).
+@Test func expiryRereadsTheStatusBeforeSayingExpired() async throws {
+    let rpc = ScriptedRPC.node("reread", statuses: [status(at: 100), status(at: 111, "confirmed")])
+    #expect(try await rpc.waitForConfirmation("sig", lastValidBlockHeight: 1000) == .confirmed)
+}
+
+/// A node behind the block that proved the expiry (another in the public pool, the public node after the user's own) may
+/// not have the transaction yet: its «nothing» isn't believed, the wait goes on.
+@Test func aStatusNodeBehindTheExpiryIsNotBelieved() async throws {
+    let rpc = ScriptedRPC.node("behind", statuses: [status(at: 100), status(at: 105), status(at: 112, "confirmed")])
+    #expect(try await rpc.waitForConfirmation("sig", lastValidBlockHeight: 1000) == .confirmed)
+}
+
+/// A node that never catches up ends «status unknown», which the chat doesn't offer to retry — never «expired».
+@Test func aNodeStuckBehindEndsUnknownNotExpired() async {
+    let rpc = ScriptedRPC.node("stuck", statuses: [status(at: 100), status(at: 105)])
+    let error = await #expect(throws: WalletError.self) { try await rpc.waitForConfirmation("sig", lastValidBlockHeight: 1000, timeout: 1) }
+    #expect(error?.message.contains("still unknown") == true)
+}
+
+/// A node past the proving block that still has nothing: then it's sure, «expired» as before.
+@Test func expiredWhenANodePastTheExpiryStillHasNothing() async throws {
+    let rpc = ScriptedRPC.node("gone", statuses: [status(at: 100), status(at: 111)])
+    #expect(try await rpc.waitForConfirmation("sig", lastValidBlockHeight: 1000) == .expired)
+}
+
+/// Live (IHATECRYPTO_NET=1, reads only): a signature that never was, past its last valid block on mainnet, ends «expired»
+/// — the real getEpochInfo and getSignatureStatuses' context.slot read as the stub above answers them.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+func waitSaysExpiredOnMainnetForASignatureThatNeverWas() async throws {
+    let rpc = SolanaRPC(url: SolanaNodes.publicNode)
+    let epoch = try await rpc.call("getEpochInfo", [["commitment": "finalized"]]) as? [String: Any]
+    let height = try #require((epoch?["blockHeight"] as? NSNumber)?.uint64Value)
+    let signature = Base58.encode(Data((0..<64).map { _ in UInt8.random(in: 0...255) }))
+    let started = Date()
+    #expect(try await rpc.waitForConfirmation(signature, lastValidBlockHeight: height - 1, timeout: 30) == .expired)
+    #expect(Date().timeIntervalSince(started) < 10)
+}
