@@ -279,12 +279,25 @@ final class DebugAPI {
             var result: [String: Any] = metered ? meter.stop() : [:]
             result["visible"] = visible
             return (200, "application/json", (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])) ?? Data())
-        case ("GET", let path) where path.hasPrefix("/render/approval"):
-            // The browser's signing sheet for a sample Kamino deposit, drawn off screen («?dark» for the dark look):
-            // to see a design change without a site asking for a real signature. Nothing can be approved from it.
+        case (let method, let path) where path.hasPrefix("/render/approval") && ["GET", "POST"].contains(method):
+            // The browser's signing sheet for a sample Kamino deposit, drawn off screen («?dark» for the dark look,
+            // «?closed» for a site taking all of a token and closing its account): to see a design change without a site
+            // asking for a real signature. POST {"wire": base64} reviews that transaction the way a site's is, simulation
+            // included, for this copy's wallet. Nothing can be approved or signed from it.
+            var origin = "https://kamino.com", site = SiteCheck.Verdict.known, review = Self.sampleReview
+            if method == "POST" {
+                guard let b64 = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["wire"] as? String,
+                      let wire = Data(base64Encoded: b64), let owner = ws.signerWallet?.solana else {
+                    return (400, "text/plain", Data("POST {\"wire\": base64 transaction}, with a wallet in this copy\n".utf8))
+                }
+                do { review = try await ws.browser.review(wire, owner: owner) } catch { return (502, "text/plain", Data("\(error.localizedDescription)\n".utf8)) }
+                (origin, site) = ("file://", .local)
+            } else if path.contains("closed") {
+                (origin, site, review) = ("https://bonk-claim.app", .unknown, Self.closedSampleReview)
+            }
             var png: Data?
             _ = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
-                png = Self.renderApproval(SiteRequest(origin: "https://kamino.com", site: .known, kind: .transaction(Self.sampleReview, send: false), answer: done),
+                png = Self.renderApproval(SiteRequest(origin: origin, site: site, kind: .transaction(review, send: false), answer: done),
                                           ws: ws, dark: path.contains("dark"))
                 done.resume(returning: false)
             }
@@ -421,11 +434,23 @@ final class DebugAPI {
     /// A Kamino Vault deposit as the browser saw one (2026-10-01): 5 USDC in, two of Kamino's programs not on the list.
     static var sampleReview: TxReview {
         var r = TxReview(wire: Data(), accounts: [], tokenOwners: [:], unknownPrograms: ["FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr", "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"],
-                         programNames: [], changes: [],
+                         programNames: [],
                          checks: ["Only your wallet signs and pays the fee.", "Creates a token account owned by your wallet."], problems: [],
                          jev: JevReview(label: "ok", confidence: 0.9, concern: false, text: "An ordinary action for this kind of site."))
-        r.deltas = [("SOL", SpotAsset.all[0].mint, Decimal(string: "-0.006865555")!), ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", -5)]
+        r.deltas = [("SOL", TxReview.nativeSOL, Decimal(string: "-0.006865555")!), ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", -5)]
         r.programs = [("Associated Token", true), ("Compute Budget", true), ("Kamino Farms", false), ("Kamino Vault", false)]
+        return r
+    }
+
+    /// An unfamiliar site's program takes all 1,250,000 BONK and closes the account; its rent comes back. Before the fix
+    /// (2026-11-01) the sheet showed only «You get 0.002034 SOL».
+    static var closedSampleReview: TxReview {
+        var r = TxReview(wire: Data(), accounts: [], tokenOwners: [:], unknownPrograms: ["7xQp…9fLm"], programNames: [],
+                         checks: ["Only your wallet signs and pays the fee."], problems: [])
+        r.deltas = [("SOL", TxReview.nativeSOL, Decimal(string: "0.002034")!), ("BONK", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", -1_250_000)]
+        r.closed = [1]
+        r.rentBack = Decimal(string: "0.00203928")!
+        r.programs = [("Compute Budget", true), ("SPL Token", true), ("7xQp…9fLm", false)]
         return r
     }
 

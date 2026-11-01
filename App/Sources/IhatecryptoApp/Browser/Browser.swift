@@ -26,9 +26,12 @@ struct TxReview {
     /// Programs outside the built-in list: signed only if the user allows them here.
     let unknownPrograms: [String]
     let programNames: [String]
-    let changes: [String]
-    /// The same changes for the card: the token, its mint, the signed amount.
+    /// The simulated change of each balance for the card: the token, its mint, the signed amount.
     var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+    /// Rows of `deltas` whose token account the transaction closes: all of it leaves, with the account.
+    var closed: Set<Int> = []
+    /// SOL those accounts held as rent, which may come back to the wallet: shown as rent, not as a gain.
+    var rentBack: Decimal = 0
     /// Every program it calls, by name, and whether it is on the list ihatecrypto signs for without asking.
     var programs: [(name: String, known: Bool)] = []
     let checks: [String]
@@ -37,7 +40,46 @@ struct TxReview {
     /// Jev's second opinion on the site and the transaction; it can only ask for an extra confirmation.
     var jev: JevReview?
     var jevNote: String?
+
+    /// The wallet's own SOL row's key: not wrapped SOL's mint, so a wSOL account's row is never taken for it.
+    static let nativeSOL = "native SOL"
+
+    /// The same changes in words, for Jev: «JUP: −1,250 (account closes)».
+    var changes: [String] {
+        deltas.indices.map { i in
+            let d = deltas[i]
+            return "\(d.symbol): \((d.amount > 0 ? "+" : d.amount < 0 ? "−" : "") + Fmt.num(abs(d.amount), maxFraction: 9))"
+                + (closed.contains(i) ? " (account closes)" : "")
+        }
+    }
+
+    /// The wallet's SOL beside a real move that only pays the fee and new accounts' rent, or is the rent of an account it
+    /// closes coming back: shown with that note, never as a send or a gain.
+    func feeLike(_ d: (symbol: String, mint: String, amount: Decimal)) -> Bool {
+        d.mint == Self.nativeSOL && deltas.count > 1 && (d.amount < 0 ? -d.amount < Decimal(string: "0.05")! : d.amount > 0 && d.amount <= rentBack)
+    }
+
+    /// «You send 5 USDC to Kamino Vault»: what leaves, what arrives, and the program it's for — fee-sized SOL left out.
+    var summary: String? {
+        let moved = deltas.filter { !feeLike($0) }
+        let out = moved.filter { $0.amount < 0 }.map { "\(Fmt.num(-$0.amount, maxFraction: 6)) \($0.symbol)" }
+        let into = moved.filter { $0.amount > 0 }.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }
+        let infra: Set<String> = ["System", "Compute Budget", "SPL Token", "Associated Token", "Address Lookup Table"]
+        // Programs of one protocol («Kamino Vault», «Kamino Farms») are that protocol: the money goes to Kamino.
+        let work = programs.map(\.name).filter { !infra.contains($0) && !$0.contains("…") }
+        let brands = Set(work.map { String($0.split(separator: " ").first ?? Substring($0)) })
+        let target = work.count > 1 && brands.count == 1 ? brands.first : work.first
+        let to = target.map { " to \($0)" } ?? ""
+        switch (out.isEmpty, into.isEmpty) {
+        case (false, true): return "You send \(list(out))\(to)"
+        case (false, false): return "You send \(list(out)) and get \(list(into))"
+        case (true, false): return "You get \(list(into))"
+        case (true, true): return deltas.isEmpty ? nil : "Only the network fee"
+        }
+    }
 }
+
+private func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
 
 /// An EVM transaction from a site, decoded and simulated before anything is signed.
 struct EVMReview {
@@ -458,18 +500,12 @@ final class Browser {
         let solBefore = try await rpc.balance(owner)
         let simulation = try await rpc.simulate(wire, watch: [owner] + touched.keys, sigVerify: false)
         var problems = verdict.problems
-        var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+        var balances = Balances()
         if let error = simulation.error {
             problems.append("Simulation failed: \(error).")
         } else {
-            let solAfter = simulation.after[owner]?.lamports ?? solBefore
-            deltas.append(("SOL", SpotAsset.all[0].mint, Decimal(Int64(solAfter) - Int64(solBefore)) / 1_000_000_000))
-            for (address, t) in touched.sorted(by: { $0.key < $1.key }) {
-                let after = simulation.after[address]?.token ?? t.amount
-                let scale = Decimal(sign: .plus, exponent: t.decimals, significand: 1)
-                let delta = Decimal(Int64(after) - Int64(t.amount)) / scale
-                if delta != 0 { deltas.append((symbol(t.mint), t.mint, delta)) }
-            }
+            balances = Self.balances(owner: owner, solBefore: solBefore, touched: touched, after: simulation.after)
+            problems += balances.problems
         }
         // Programs ihatecrypto knows by name but doesn't sign for without asking are named, still marked as not on its list.
         let named = programs.sorted().map { p in
@@ -479,35 +515,69 @@ final class Browser {
         var seen = Set<String>()
         var review = TxReview(wire: wire, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown,
                               programNames: named.map { $0.known ? $0.name : "\($0.name) (not on ihatecrypto's list)" },
-                              changes: deltas.map { "\($0.symbol): \(signed($0.amount))" }, checks: verdict.checks.filter { seen.insert($0).inserted },
-                              problems: problems)
-        review.deltas = deltas
+                              checks: verdict.checks.filter { seen.insert($0).inserted }, problems: problems)
+        review.deltas = balances.deltas
+        review.closed = balances.closed
+        review.rentBack = balances.rentBack
         review.programs = named
         return review
     }
 
-    private func signed(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 9) }
+    struct Balances {
+        var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+        var closed: Set<Int> = []
+        var rentBack: Decimal = 0
+        var problems: [String] = []
+    }
 
-    private func symbol(_ mint: String) -> String {
+    /// Each balance of ours after the simulation against before. The node answers null for an account the transaction
+    /// closes: it holds nothing, so all its tokens leave, and the rent it held may come back as SOL. An account missing
+    /// from the answer is a refusal: what happens to it isn't known, and guessing «unchanged» hid a drain.
+    static func balances(owner: String, solBefore: UInt64, touched: [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)],
+                         after: [String: (lamports: UInt64, token: UInt64?)]) -> Balances {
+        var b = Balances()
+        func unknown(_ coin: String) -> String { "The simulation didn't return the balance of \(coin): ihatecrypto can't show what this transaction does to it." }
+        if let sol = after[owner] {
+            b.deltas.append(("SOL", TxReview.nativeSOL, (Decimal(sol.lamports) - Decimal(solBefore)) / 1_000_000_000))
+        } else {
+            b.problems.append(unknown("SOL"))
+        }
+        for (address, t) in touched.sorted(by: { $0.key < $1.key }) {
+            guard let now = after[address] else { b.problems.append(unknown(symbol(t.mint))); continue }
+            // No lamports left: closed. Lamports but no token amount (not readable as a token account): emptied, never «closes».
+            let closes = now.token == nil && now.lamports == 0
+            // A wSOL account's lamports are its wrapped SOL plus the rent: only the rent is rent.
+            if closes { b.rentBack += Decimal(t.lamports - (t.mint == SpotAsset.all[0].mint ? min(t.amount, t.lamports) : 0)) / 1_000_000_000 }
+            let delta = (Decimal(now.token ?? 0) - Decimal(t.amount)) / Decimal(sign: .plus, exponent: t.decimals, significand: 1)
+            guard delta != 0 else { continue }
+            if closes { b.closed.insert(b.deltas.count) }
+            b.deltas.append((symbol(t.mint), t.mint, delta))
+        }
+        return b
+    }
+
+    private static func symbol(_ mint: String) -> String {
         if mint == "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" { return "USDC" }
+        if mint == SpotAsset.all[0].mint { return "wSOL" }
         if let a = SpotAsset.all.first(where: { $0.mint == mint }) { return a.symbol }
         return "token \(mint.prefix(6))…"
     }
 
     /// Our token accounts, classic SPL and Token-2022 alike (the guard lets both run, so a drain through either shows):
-    /// address → mint, raw amount, decimals.
-    private func tokenAccounts(_ owner: String) async throws -> [String: (mint: String, amount: UInt64, decimals: Int)] {
+    /// address → mint, raw amount, decimals, the lamports it holds as rent.
+    private func tokenAccounts(_ owner: String) async throws -> [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)] {
         var items: [[String: Any]] = []
         for program in [SPL.tokenProgram, SPL.token2022Program] {
             let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
             items += r?["value"] as? [[String: Any]] ?? []
         }
-        var out: [String: (String, UInt64, Int)] = [:]
+        var out: [String: (String, UInt64, Int, UInt64)] = [:]
         for item in items {
-            guard let address = item["pubkey"] as? String,
-                  let info = ((((item["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
+            guard let address = item["pubkey"] as? String, let account = item["account"] as? [String: Any],
+                  let info = (((account["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
                   let mint = info["mint"] as? String, let amount = info["tokenAmount"] as? [String: Any] else { continue }
-            out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0)
+            out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0,
+                            (account["lamports"] as? NSNumber)?.uint64Value ?? 0)
         }
         return out
     }
@@ -693,8 +763,8 @@ struct ApprovalSheet: View {
                 ScrollView { Text(text).font(.system(.callout, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 140)
                 note("Signing text doesn't move money. The signer rejects the “text” if it's a hidden transaction.")
             case .transaction(let r, let send):
-                if let lead = summary(r) { Text(lead).font(.ui(16, .semibold)).fixedSize(horizontal: false, vertical: true) }
-                if !r.deltas.isEmpty { card(title: "Your balances (simulated)") { ForEach(r.deltas.indices, id: \.self) { delta(r.deltas[$0], in: r) } } }
+                if let lead = r.summary { Text(lead).font(.ui(16, .semibold)).fixedSize(horizontal: false, vertical: true) }
+                if !r.deltas.isEmpty { card(title: "Your balances (simulated)") { ForEach(r.deltas.indices, id: \.self) { delta($0, in: r) } } }
                 calls(r.programs)
                 checks(r.checks.filter { !$0.hasPrefix("Calls unknown program") })
                 secondCheck(r.jev, r.jevNote)
@@ -762,43 +832,31 @@ struct ApprovalSheet: View {
         }
     }
 
-    /// «You send 5 USDC to Kamino Vault»: what leaves, what arrives, and the program it's for — fee-sized SOL left out.
-    private func summary(_ r: TxReview) -> String? {
-        let moved = r.deltas.filter { !feeLike($0, in: r) }
-        let out = moved.filter { $0.amount < 0 }.map { "\(Fmt.num(-$0.amount, maxFraction: 6)) \($0.symbol)" }
-        let into = moved.filter { $0.amount > 0 }.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }
-        let infra: Set<String> = ["System", "Compute Budget", "SPL Token", "Associated Token", "Address Lookup Table"]
-        // Programs of one protocol («Kamino Vault», «Kamino Farms») are that protocol: the money goes to Kamino.
-        let work = r.programs.map(\.name).filter { !infra.contains($0) && !$0.contains("…") }
-        let brands = Set(work.map { String($0.split(separator: " ").first ?? Substring($0)) })
-        let target = work.count > 1 && brands.count == 1 ? brands.first : work.first
-        let to = target.map { " to \($0)" } ?? ""
-        switch (out.isEmpty, into.isEmpty) {
-        case (false, true): return "You send \(list(out))\(to)"
-        case (false, false): return "You send \(list(out)) and get \(list(into))"
-        case (true, false): return "You get \(list(into))"
-        case (true, true): return r.deltas.isEmpty ? nil : "Only the network fee"
-        }
+    /// The grey line under a row: that a token's account closes with all of it, or what fee-sized SOL pays or brings back.
+    private func rowNote(_ i: Int, in r: TxReview) -> String? {
+        let d = r.deltas[i]
+        if r.closed.contains(i) { return "all of it — the account closes" }
+        guard r.feeLike(d) else { return nil }
+        if d.amount < 0 { return "network fee and rent for new accounts" }
+        let names = r.closed.sorted().map { r.deltas[$0].symbol }
+        return names.isEmpty ? "rent back from a closed token account, less the fee"
+            : "rent back from the closed \(list(names)) account\(names.count > 1 ? "s" : ""), less the fee"
     }
 
-    /// SOL that only pays the fee and rent beside a real move: shown with that note, not as a send.
-    private func feeLike(_ d: (symbol: String, mint: String, amount: Decimal), in r: TxReview) -> Bool {
-        d.symbol == "SOL" && d.amount < 0 && -d.amount < Decimal(string: "0.05")! && r.deltas.count > 1
-    }
-
-    private func delta(_ d: (symbol: String, mint: String, amount: Decimal), in r: TxReview) -> some View {
+    private func delta(_ i: Int, in r: TxReview) -> some View {
+        let d = r.deltas[i], sol = d.symbol == "SOL" || d.symbol == "wSOL"
         let price: Decimal? = Stablecoins.isDollar(d.symbol) ? 1
-            : d.symbol == "SOL" ? ws.markets["SOL"]?.markPx : ws.holdings.first { $0.contract == d.mint }?.price
+            : sol ? ws.markets["SOL"]?.markPx : ws.holdings.first { $0.contract == d.mint }?.price
         return HStack(spacing: 10) {
-            TokenLogo(name: d.symbol.lowercased(), size: 26)
+            TokenLogo(name: sol ? "sol" : d.symbol.lowercased(), size: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(d.symbol).font(.ui(13, .semibold))
-                if feeLike(d, in: r) { Text("network fee and rent for new accounts").font(.ui(10)).foregroundStyle(.secondary) }
+                if let note = rowNote(i, in: r) { Text(note).font(.ui(10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
                 Text((d.amount > 0 ? "+" : "−") + Fmt.num(abs(d.amount), maxFraction: 6)).font(.ui(14, .bold)).monospacedDigit()
-                    .foregroundStyle(d.amount > 0 ? Brand.profit : feeLike(d, in: r) ? Color.primary : Brand.loss)
+                    .foregroundStyle(r.feeLike(d) ? Color.primary : d.amount > 0 ? Brand.profit : Brand.loss)
                 if let price { Text("≈ \(Fmt.usd(abs(d.amount) * price))").font(.ui(10)).foregroundStyle(.secondary).monospacedDigit() }
             }
         }
@@ -895,7 +953,6 @@ struct ApprovalSheet: View {
 
     private func line(_ text: String) -> some View { Text(text).fixedSize(horizontal: false, vertical: true) }
     private func note(_ text: String) -> some View { Text(text).font(.ui(10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-    private func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
 
     /// The domain without «www.», the part a phishing copy changes.
     private var host: String {
