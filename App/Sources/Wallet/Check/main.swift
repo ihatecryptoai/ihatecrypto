@@ -175,15 +175,8 @@ func guardSolana(_ signed: (signature: String, wire: Data), lastValid: UInt64, r
     let accounts = try await rpc.resolveAccounts(message)
     var verdict = SolanaGuard.check(message, accounts: accounts, policy: SolanaPolicy(owner: a.solana, recipients: recipients), tokenOwners: tokenOwners)
 
-    var before: [String: Int64] = [:]
-    for w in watch {
-        if w.token {
-            let r = try? await rpc.call("getTokenAccountBalance", [w.address, ["commitment": "confirmed"]]) as? [String: Any]
-            before[w.address] = ((r?["value"] as? [String: Any])?["amount"] as? String).flatMap(Int64.init) ?? 0
-        } else {
-            before[w.address] = Int64(try await rpc.balance(w.address))
-        }
-    }
+    // One read; a node that fails throws rather than a 0 that would switch the balance rules off (as in signAndSend).
+    let before = try SolanaRPC.before(watch.map { ($0.address, $0.label, $0.token) }, try await rpc.accounts(watch.map(\.address)))
     let simulation = try await rpc.simulate(signed.wire, watch: watch.map(\.address))
     if let error = simulation.error { verdict.problems.append("Simulation failed: \(error)") }
     else {

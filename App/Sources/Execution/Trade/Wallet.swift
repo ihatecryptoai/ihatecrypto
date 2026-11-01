@@ -511,14 +511,16 @@ extension Executor {
         // A program or an account the guard refuses stops it before the simulation: that answer needs no balances.
         guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         let watch = rules.map(\.0) + [wallet.solana]
-        var before: [String: Int64] = [:]
-        for (account, _, token, _) in rules {
-            if token {
-                let r = try? await rpc.call("getTokenAccountBalance", [account, ["commitment": "confirmed"]]) as? [String: Any]
-                before[account] = ((r?["value"] as? [String: Any])?["amount"] as? String).flatMap(Int64.init) ?? 0
-            }
+        // Every balance before in one read. A node that fails stops the move: a made-up 0 would pass a route that takes
+        // more than approved or pays its output to someone else. An account that isn't there yet holds 0 (the node's null).
+        let now: [String: (lamports: UInt64, token: UInt64?)]
+        do { now = try await rpc.accounts(watch) } catch {
+            throw ExecutionError("Couldn't read the balances before \(note), so nothing was signed: \(error.localizedDescription)")
         }
-        before[wallet.solana] = Int64(try await rpc.balance(wallet.solana))
+        let before: [String: Int64]
+        do { before = try SolanaRPC.before(rules.map { ($0.0, $0.1, $0.2) } + [(wallet.solana, "lamports", false)], now) } catch {
+            throw GuardStop("The guard stopped \(note): \(error.localizedDescription)")
+        }
         let simulation = try await rpc.simulate(unsigned, watch: watch, sigVerify: false)
         // A failed simulation says nothing about balances: stop here rather than quote made-up changes.
         if let error = simulation.error { throw ExecutionError("The simulation failed, so nothing was signed: \(error)") }

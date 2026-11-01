@@ -133,3 +133,63 @@ private let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     #expect(v2.impact == Decimal(string: "0.0103491778") && v2.usd > 361_914 && v2.usd < 361_915)
     #expect(Jupiter.impactAndWorth([:]) == (0, 0))
 }
+
+/// Balances before a move are read in one getMultipleAccounts (2026-11-01). The node answers null for an account that
+/// isn't there yet (a coin's first buy opens it): that holds nothing. Real shapes from mainnet, USDC and an Ondo stock.
+private func tokenAccount(_ program: String, amount: String, lamports: UInt64) -> [String: Any] {
+    ["lamports": NSNumber(value: lamports), "owner": SPL.tokenProgram,
+     "data": ["program": program, "space": 165, "parsed": ["type": "account", "info": ["tokenAmount": ["amount": amount, "decimals": 6]]]]]
+}
+
+@Test func aMissingAccountHoldsNothingBeforeAMoveOpensIt() throws {
+    let now = try SolanaRPC.accounts(["A"], [NSNull()])
+    #expect(now["A"]?.lamports == 0 && now["A"]?.token == 0)
+}
+
+@Test func aTokenAccountsAmountIsReadFromTheParsedData() throws {
+    for program in ["spl-token", "spl-token-2022"] {
+        let now = try SolanaRPC.accounts(["A"], [tokenAccount(program, amount: "2335542", lamports: 2_039_280)])
+        #expect(now["A"]?.lamports == 2_039_280 && now["A"]?.token == 2_335_542)
+    }
+}
+
+/// A plain system account comes back as base64 even when jsonParsed is asked, and holds no tokens: a wallet, or a coin
+/// account's address someone sent SOL to before the buy opens it (that buy isn't stopped). A mint has no token amount,
+/// so a token rule on it stops the move.
+@Test func aSystemAccountHoldsNoTokensAndAMintIsNotATokenAccount() throws {
+    let funded: [String: Any] = ["lamports": NSNumber(value: 890_880), "owner": "11111111111111111111111111111111", "data": ["", "base64"]]
+    let mint: [String: Any] = ["lamports": NSNumber(value: 1_461_600), "owner": SPL.tokenProgram,
+                               "data": ["program": "spl-token", "parsed": ["type": "mint", "info": ["decimals": 6, "supply": "1000"]]]]
+    let now = try SolanaRPC.accounts(["F", "M"], [funded, mint])
+    #expect(now["F"]?.lamports == 890_880 && now["F"]?.token == 0)
+    #expect(now["M"]?.lamports == 1_461_600 && now["M"]?.token == nil)
+}
+
+/// Each rule takes its own kind of balance before; one the read didn't give is a stop, never a 0 (2026-11-01).
+@Test func eachRuleReadsItsOwnBalanceBefore() throws {
+    let now: [String: (lamports: UInt64, token: UInt64?)] = ["new": (0, 0), "usdc": (2_039_280, 5_000_000), "wallet": (41_000_000, 0), "mint": (1_461_600, nil)]
+    let before = try SolanaRPC.before([("new", "JUP", true), ("usdc", "USDC", true), ("wallet", "lamports", false)], now)
+    #expect(before == ["new": 0, "usdc": 5_000_000, "wallet": 41_000_000])
+    #expect(throws: WalletError.self) { try SolanaRPC.before([("mint", "USDC", true)], now) }
+    #expect(throws: WalletError.self) { try SolanaRPC.before([("absent", "USDC", true)], now) }
+    #expect(throws: WalletError.self) { try SolanaRPC.before([("absent", "lamports", false)], now) }
+    #expect(throws: WalletError.self) { try SolanaRPC.before([("big", "X", true)], ["big": (0, UInt64.max)]) }
+}
+
+/// An answer that isn't the list asked for is an error, never «0 everywhere», which would switch the balance rules off.
+@Test func anAnswerWithoutTheAccountListThrows() {
+    #expect(throws: WalletError.self) { try SolanaRPC.accounts(["A"], nil) }
+    #expect(throws: WalletError.self) { try SolanaRPC.accounts(["A"], ["value": [NSNull()]]) }
+    #expect(throws: WalletError.self) { try SolanaRPC.accounts(["A", "B"], [NSNull()]) }
+    #expect(throws: WalletError.self) { try SolanaRPC.accounts(["A"], ["not an account"]) }
+    #expect(throws: WalletError.self) { try SolanaRPC.accounts(["A"], [["data": ["", "base64"]]]) }
+}
+
+/// Before and after are read by the same code: the simulation's accounts give what its old loop gave.
+@Test func beforeAndAfterUseOneReader() {
+    let usdc = SolanaRPC.state(tokenAccount("spl-token", amount: "1000000", lamports: 2_039_280))
+    #expect(usdc?.lamports == 2_039_280 && usdc?.token == 1_000_000)
+    let wallet = SolanaRPC.state(["lamports": NSNumber(value: 5000), "data": ["", "base64"]] as [String: Any])
+    #expect(wallet?.lamports == 5000 && wallet?.token == nil)
+    #expect(SolanaRPC.state(NSNull()) == nil)
+}

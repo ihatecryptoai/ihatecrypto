@@ -112,14 +112,8 @@ extension SolanaRPC {
             "accounts": ["encoding": "jsonParsed", "addresses": watch],
         ]]) as? [String: Any]
         let value = r?["value"] as? [String: Any]
-        var after: [String: (UInt64, UInt64?)] = [:]
-        for (address, account) in zip(watch, value?["accounts"] as? [Any] ?? []) {
-            guard let a = account as? [String: Any] else { after[address] = (0, nil); continue }
-            let lamports = (a["lamports"] as? NSNumber)?.uint64Value ?? 0
-            let amount = (((a["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any])
-                .flatMap { ($0["tokenAmount"] as? [String: Any])?["amount"] as? String }.flatMap(UInt64.init)
-            after[address] = (lamports, amount)
-        }
+        var after: [String: (lamports: UInt64, token: UInt64?)] = [:]
+        for (address, account) in zip(watch, value?["accounts"] as? [Any] ?? []) { after[address] = Self.state(account) ?? (0, nil) }
         guard let err = value?["err"], !(err is NSNull) else { return (nil, after) }
         let text = JSONSerialization.isValidJSONObject(err)
             ? (try? JSONSerialization.data(withJSONObject: err)).map { String(decoding: $0, as: UTF8.self) } ?? "\(err)" : "\(err)"
@@ -133,6 +127,46 @@ extension SolanaRPC {
         // The program's own words when it logged any, e.g. «Error: insufficient funds».
         let reason = logs.first { $0.contains("Error") }?.replacingOccurrences(of: "Program log: ", with: "")
         return (reason.map { "\($0) \(text)" } ?? text, after)
+    }
+
+    /// The watched accounts' state now, in one read and one slot: what a move's balance rules compare the simulation with.
+    public func accounts(_ addresses: [String]) async throws -> [String: (lamports: UInt64, token: UInt64?)] {
+        let r = try await call("getMultipleAccounts", [addresses, ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+        return try Self.accounts(addresses, r?["value"])
+    }
+
+    /// The node answers null for an account that isn't there yet (a coin's first buy opens it): that holds nothing. Anything
+    /// else that isn't the list asked for throws: a made-up 0 before would let a route take everything or pay someone else.
+    static func accounts(_ addresses: [String], _ value: Any?) throws -> [String: (lamports: UInt64, token: UInt64?)] {
+        guard let list = value as? [Any], list.count == addresses.count else { throw WalletError("Solana RPC getMultipleAccounts: no account list") }
+        return try Dictionary(zip(addresses, list).map { address, account in
+            if account is NSNull { return (address, (0, 0)) }
+            guard let state = state(account) else { throw WalletError("Solana RPC getMultipleAccounts: \(address) isn't an account") }
+            // A plain system account holds no tokens: a wallet, or a coin account's address someone sent SOL to before it
+            // was opened (the Associated Token program opens a funded address). A mint or another program's account stays nil.
+            let system = (account as? [String: Any])?["owner"] as? String == "11111111111111111111111111111111"
+            return (address, (state.lamports, state.token ?? (system ? 0 : nil)))
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// What each watched balance held before a move: token units for a token rule, lamports for the others. A token rule
+    /// on an account with no token amount (a mint, another program's account) throws: its balance can't be checked.
+    public static func before(_ watch: [(address: String, label: String, token: Bool)],
+                              _ now: [String: (lamports: UInt64, token: UInt64?)]) throws -> [String: Int64] {
+        try Dictionary(watch.map { w in
+            guard let held = (w.token ? now[w.address]?.token : now[w.address]?.lamports).flatMap(Int64.init(exactly:)) else {
+                throw WalletError("\(w.label) isn't a token account, so its balance can't be checked.")
+            }
+            return (w.address, held)
+        }, uniquingKeysWith: { _, last in last })
+    }
+
+    /// One account in jsonParsed: its lamports and, for a token account, the raw amount; nil when it isn't an account.
+    static func state(_ account: Any) -> (lamports: UInt64, token: UInt64?)? {
+        guard let a = account as? [String: Any], let lamports = (a["lamports"] as? NSNumber)?.uint64Value else { return nil }
+        let amount = (((a["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any])
+            .flatMap { ($0["tokenAmount"] as? [String: Any])?["amount"] as? String }.flatMap(UInt64.init)
+        return (lamports, amount)
     }
 
     /// The fee payer can't cover the fee or a new account's rent: it holds no SOL at all (AccountNotFound), too little for

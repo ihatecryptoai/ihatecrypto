@@ -172,7 +172,8 @@ Plain code, not a model. A model can be fooled by text on a page; a check agains
   the user's own accounts or to an address bound to an approved quote. Token approvals, owner changes and other fee
   payers are refused, and the priority fee has a cap.
 - **Simulation:** before sending, the transaction runs on the network, and the balances after are compared with what
-  the user approved. This catches a route that pays its output to someone else inside a program.
+  the user approved. This catches a route that pays its output to someone else inside a program. The balances before
+  are read in one request: a node that fails stops the move, and an account that doesn't exist yet counts as 0.
 - **1Click** (`DepositGuard`): the deposit address must be the one 1Click bound to the user's recipient, refund
   address, assets and amount.
 - **Relay:** only `deposit_token` and `deposit_native` of the Relay Depository, from the user's wallet. The quote must
