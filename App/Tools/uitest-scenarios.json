@@ -1144,5 +1144,35 @@
       "detail_contains": "token:ethereum:",
       "token_card_lacks": "robinhood's registry"
     }
+  },
+  {
+    "name": "top up board: Add block keeps to the right corner above a full chat, off the boards' close buttons",
+    "send": [
+      "how do I top up"
+    ],
+    "expect": {
+      "receive": true,
+      "add_block_clear": true,
+      "no_pending": true
+    },
+    "defaults": {
+      "chatFull": true,
+      "chatX": 0.0,
+      "chatY": -300.0,
+      "chatWidth": 350.0
+    }
+  },
+  {
+    "name": "top up board: «как пополнить кошелёк» opens the board, no money move",
+    "send": [
+      "как пополнить кошелёк"
+    ],
+    "expect": {
+      "receive": true,
+      "no_pending": true
+    },
+    "defaults": {
+      "chatWidth": 350.0
+    }
   }
 ]

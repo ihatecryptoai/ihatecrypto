@@ -735,6 +735,8 @@ private final class Script: LLMClient, @unchecked Sendable {
     // Our own networks keep their forms.
     #expect(WalletCommand.parse("bring 5 USDC from base to solana") != .receiveAcross(network: "base", token: "USDC", amount: 5))
     #expect(WalletCommand.parse("how do I top up") == .receive)
+    #expect(WalletCommand.parse("top up") == .receive)
+    #expect(WalletCommand.parse("пополни кошелёк") == .receive)
     for c in [WalletCommand.receiveAcross(network: "sui", token: "USDC", amount: 50), .receiveAcross(network: "xrp", token: "XRP", amount: 30),
               .receiveAcross(network: "dogecoin", token: "DOGE", amount: 100)] {
         #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")

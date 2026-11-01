@@ -217,17 +217,22 @@ struct StudioView: View {
                     let maxWidth = max(Self.minChat, geo.size.width / 2)
                     let width = min(resizing ?? CGFloat(chatWidth), maxWidth)
                     // Full height, or compact (half the window); the header moves the chat anywhere inside the canvas.
-                    let full = max(200, geo.size.height - 32)
+                    // On the canvas the full chat starts under «Add block», which keeps to the top right corner above it
+                    // (variant A, 2026-10-27): beside the chat the capsule sat on the × of a board in the plan column.
+                    let full = max(200, geo.size.height - 32 - (mode == "plan" ? 48 : 0))
                     let small = min(full, max(260, geo.size.height * 0.5))
                     let height = chatOpen ? full : small
-                    let room = CGSize(width: max(0, geo.size.width - width - 32), height: max(0, geo.size.height - height - 32))
+                    // A full chat on the canvas stays below «Add block»: a place saved while compact can't lift it there.
+                    let room = CGSize(width: max(0, geo.size.width - width - 32),
+                                      height: max(0, geo.size.height - height - 32 - (chatOpen && mode == "plan" ? 48 : 0)))
                     let place = Self.clamp(CGSize(width: chatX + moving.width, height: chatY + moving.height), room: room)
                     // Docked, the canvas keeps clear of the chat; moved away, the chat floats over it.
                     let docked = place.width > -40 && place.height > -40
-                    // «Add block» keeps to the canvas's top right; a chat reaching the top there pushes it to the chat's left.
+                    // «Add block» keeps to the canvas's top right; a chat moved up over it (its 36 pt from 16, and a gap)
+                    // pushes it to the chat's left.
                     let chatLeft = geo.size.width - 16 - width + place.width
                     let chatTop = geo.size.height - 16 - height + place.height
-                    let blocksEdge = chatTop < 70 && chatLeft + width > geo.size.width - 200 ? geo.size.width - chatLeft + 12 : 16
+                    let blocksEdge = chatTop < 60 && chatLeft + width > geo.size.width - 200 ? geo.size.width - chatLeft + 12 : 16
                     ZStack(alignment: .topTrailing) {
                         // A page opened from a board or the chat: beside the docked chat, under the chat when it's moved.
                         if ws.showWeb {
@@ -284,6 +289,8 @@ struct StudioView: View {
                             // «Add block» / «Close blocks» stays at the right; the library itself sits under it or,
                             // moved by its corner button, beside the sidebar, and glides between the two.
                             AddBlockButton(open: $showBlocks)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { ws.addBlockFrame = $0 }
+                                .onDisappear { ws.addBlockFrame = .zero }
                                 .padding(.top, 16).padding(.trailing, blocksEdge)
                             if showBlocks {
                                 BlocksPanel(left: blocksOnLeft, move: { blocksOnLeft.toggle() }) { withAnimation(.snappy) { showBlocks = false } }

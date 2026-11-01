@@ -1054,7 +1054,7 @@ public actor Executor {
         let signature = Base58.encode(signed.subdata(in: 1..<65))
         let toHyperliquid = b.chain == Relay.Chain.hyperliquid
         let hlBefore = toHyperliquid ? try await Hyperliquid.balance(user: wallet.evm).withdrawable : 0
-        try journal.append(.init(chain: "relay", id: b.requestId, kind: .signed, note: "\(b.note ?? "Solana USDC→\(toHyperliquid ? "Hyperliquid" : "chain \(b.chain)")"), tx \(signature)"))
+        try journal.append(.init(chain: "relay", id: b.requestId, kind: .signed, note: "\(b.note ?? "Solana USDC→\(toHyperliquid ? "Hyperliquid" : EVMNetwork.all.first { $0.relayChain == b.chain }?.name ?? "chain \(b.chain)")"), tx \(signature)"))
         try journal.append(.init(chain: "solana", id: signature, kind: .signed, note: "Relay deposit \(b.requestId); valid until block \(b.lastValid)"))
         let started = Date()
         switch try await broadcastSolana(signed, signature: signature, lastValid: b.lastValid) {

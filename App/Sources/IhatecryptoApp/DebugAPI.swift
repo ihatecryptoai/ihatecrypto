@@ -423,6 +423,14 @@ final class DebugAPI {
                            "steps": steps(ws.planRoute(StudioNode.build(ws)).steps)] as [String: Any]
         }
         if ws.showReceive { out["receive"] = true }
+        // «Add block» in the top right corner, off the chat: past the column the canvas fits its boards in, so never on a
+        // board's × (Studio, variant A).
+        if let width = NSApp.windows.first(where: { $0.title == AppMain.mainTitle })?.contentView?.bounds.width, ws.addBlockFrame != .zero {
+            let f = ws.addBlockFrame
+            out["addBlockClear"] = abs(width - 16 - f.maxX) < 2 && !f.intersects(ws.chatFrame)
+            out["addBlock"] = ["x": f.minX, "y": f.minY, "w": f.width, "h": f.height, "chatTop": ws.chatFrame.minY, "window": width,
+                               "chatFull": UserDefaults.standard.bool(forKey: "chatFull")] as [String: Any]
+        }
         if let saved = ws.savedBoard { out["saved"] = saved.displayTitle }
         if let n = ws.noteCard { out["note"] = ["text": n.texts.last ?? "", "texts": n.texts, "folder": n.folder ?? NSNull(), "own": n.canvas == ws.canvasID] as [String: Any] }
         return out

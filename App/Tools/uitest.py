@@ -30,6 +30,35 @@ WORK = os.environ.get("IHATECRYPTO_APP") == "work"
 TOKEN = open(os.path.expanduser("~/Library/Application Support/ihatecrypto" + ("" if WORK else "-dev") + "/debug-token")).read().strip()
 BASE = "http://127.0.0.1:" + ("51789" if WORK else "51790")
 SHOTS = os.environ.get("UITEST_SHOTS")
+DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
+
+
+def settings(values):
+    """Writes app settings a scenario needs («defaults»: the chat full height and docked…), which the window picks up at
+    once; gives back what was there, for putting back after it."""
+    old = {}
+    for key, value in values.items():
+        r = subprocess.run(["defaults", "read", DOMAIN, key], capture_output=True, text=True)
+        old[key] = (r.stdout.strip() if r.returncode == 0 else None, value)
+        write(key, value, value)
+    time.sleep(1.5 if values else 0)
+    return old
+
+
+def write(key, value, kind):
+    """`defaults write` takes a bool as true/false only; `defaults read` gives it back as 1/0."""
+    if isinstance(kind, bool):
+        subprocess.run(["defaults", "write", DOMAIN, key, "-bool", "true" if str(value).lower() in ("true", "1") else "false"])
+    else:
+        subprocess.run(["defaults", "write", DOMAIN, key, "-float", str(value)])
+
+
+def restore_settings(old):
+    for key, (was, value) in old.items():
+        if was is None:
+            subprocess.run(["defaults", "delete", DOMAIN, key], capture_output=True)
+        else:
+            write(key, was, value)
 
 
 def call(method, path, body=None, timeout=240):
@@ -84,6 +113,10 @@ def check(expect, state, replies):
             why.append(f"chart range {text(b.get('chart'))}, expected {want}")
         elif key == "chart_place" and (b.get("chart") or {}).get("place") != want:
             why.append(f"the chart is {(b.get('chart') or {}).get('place')} on the canvas, expected {want}")
+        elif key == "receive" and bool(b.get("receive")) != want:
+            why.append(f"the Top up board is {'not ' if want else ''}on the canvas")
+        elif key == "add_block_clear" and (b.get("addBlockClear") != want or not (b.get("addBlock") or {}).get("chatFull")):
+            why.append(f"«Add block» is {'not ' if want else ''}in the right corner clear of a full chat: {text(b.get('addBlock'))}")
         elif key == "yields" and not b.get("yields"):
             why.append("no rate bubbles")
         elif key == "pnl_period" and (b.get("pnl") or {}).get("period") != want:
@@ -153,6 +186,7 @@ def main():
                     print(f"SKIP  {s['name']}  ({cond['balance']} = {have})")
                     continue
             t0 = time.time()
+            old = settings(s.get("defaults") or {})
             call("POST", "/reset")
             why = []
             for k, turn in enumerate(s.get("turns") or [{"send": s["send"], "expect": s["expect"]}]):
@@ -185,6 +219,7 @@ def main():
                 subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])
             if state["boards"].get("pending"):
                 call("POST", "/cancel")
+            restore_settings(old)
             ok = not why
             failed += not ok
             print(f"{'PASS' if ok else 'FAIL'}  {s['name']}  ({time.time() - t0:.0f} s)")

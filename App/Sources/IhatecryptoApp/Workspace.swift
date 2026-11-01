@@ -299,6 +299,8 @@ final class Workspace {
     @ObservationIgnored var chatFrame: CGRect = .zero
     /// The same for the rail, which floats over the canvas too.
     @ObservationIgnored var railFrame: CGRect = .zero
+    /// «Add block» in the window, for the debug API's check that it keeps clear of the chat and the boards.
+    @ObservationIgnored var addBlockFrame: CGRect = .zero
     /// The plan being assembled on the canvas, block by block (S02: the chat shows the count). Read only by the count
     /// itself (AssemblyCount): it changes with every card put down, and the canvas and the chat ask `assembling`.
     var assembly: (shown: Int, total: Int)? {

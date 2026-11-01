@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage.CIFilterBuiltins
 import EVMChain
+import ExecutionCore
 import IhatecryptoCore
 import SolanaChain
 import SwiftUI
@@ -31,6 +32,8 @@ struct ReceiveBoard: View {
     @State private var held: (network: String, coins: [String: Decimal]) = ("", [:])
     /// What landed, in one line at the board's foot: no card of its own inside the board (the owner, 2026-10-15).
     @State private var arrived: String?
+    /// Money of ihatecrypto's own that rose there meanwhile (a bridge, a swap): said in grey, not taken for the top-up.
+    @State private var own: (text: String, link: URL?)?
     /// The chosen network's gas coin when the wallet has less of it than a move needs: dollars alone can't move there.
     @State private var gasShort: String?
 
@@ -67,6 +70,14 @@ struct ReceiveBoard: View {
                 Label("Waiting for \(order.units != nil ? "\(order.amount ?? 0) \(order.symbol)" : order.coin == .any ? "money" : order.symbol) on \(order.network.title)…",
                       systemImage: "hourglass")
                     .font(.ui(11)).foregroundStyle(.secondary)
+            }
+            if let own, arrived == nil {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "arrow.left.arrow.right")
+                    Text(own.text).fixedSize(horizontal: false, vertical: true)
+                    if let link = own.link { Button("See it") { ws.openWeb(link) }.buttonStyle(.link) }
+                }
+                .font(.ui(11)).foregroundStyle(.secondary)
             }
             if order.coin == .usdc, let gas = gasShort, gas == order.network.coin { gasLine(order, gas) }
             if let problem { Text(problem).font(.ui(11, .semibold)).foregroundStyle(Brand.loss).fixedSize(horizontal: false, vertical: true) }
@@ -331,24 +342,37 @@ struct ReceiveBoard: View {
     // MARK: Watching for it
 
     /// Reads the order's balance (shown as now → after); once a way is used, again every 4 s for up to 20 min. When it
-    /// rises, a line says what landed and the whole portfolio is read again (which says in the chat what came in).
+    /// rises, a line says what landed and the whole portfolio is read again (which says in the chat what came in). A rise
+    /// that is ihatecrypto's own money (a move just made, its bridge landing there) is said in grey and waited past.
     private func watch(_ o: TopUpOrder) async {
-        let before = await Self.balances(o)
+        var before = await Self.balances(o)
         if Task.isCancelled { return }
         held = (o.network.key, before)
+        own = nil
         guard waiting, !before.isEmpty else { return }
         for _ in 0..<300 {
             try? await Task.sleep(for: .seconds(4))
             if Task.isCancelled { return }
             let now = await Self.balances(o)
+            // Against the last read: money that left (an own bridge out) and came back isn't missed.
+            defer { before.merge(now) { $1 } }
             let up = now.compactMap { symbol, value in
                 before[symbol].flatMap { value > $0 ? MoneyMove(place: o.network.title, symbol: symbol, was: $0, after: value) : nil }
             }
             guard !up.isEmpty else { continue }
             held = (o.network.key, now)
             let digits = { (m: MoneyMove) in m.symbol == o.network.usdcSymbol ? 2 : 6 }
-            arrived = "Landed on \(o.network.title): " + up.map {
-                "+\(Fmt.num($0.after - $0.was, maxFraction: digits($0))) \($0.symbol), \(Fmt.num($0.was, maxFraction: digits($0))) → \(Fmt.num($0.after, maxFraction: digits($0)))"
+            let amounts = up.map { "+\(Fmt.num($0.after - $0.was, maxFraction: digits($0))) \($0.symbol)" }
+            // What the browser page saw sent on this network is the top-up, whatever else lands meanwhile.
+            if TopUpPage.shared.sent?.order.network != o.network,
+               let mine = Workspace.ownMoney(on: o.network.key, journal: (try? Journal(url: ws.journalURL).entries()) ?? []) {
+                let bridge = Workspace.bridges.contains(mine.chain) ? mine : nil
+                own = (amounts.joined(separator: ", ") + " came from your own move" + (bridge.map { " \(InTransit.what($0.note)) (\(InTransit.bridge($0).name))" } ?? "")
+                       + ", not counted as this top-up.", bridge.flatMap { TransitDetails.links($0).first?.url })
+                continue
+            }
+            arrived = "Landed on \(o.network.title): " + zip(up, amounts).map {
+                "\($1), \(Fmt.num($0.was, maxFraction: digits($0))) → \(Fmt.num($0.after, maxFraction: digits($0)))"
             }.joined(separator: "; ")
             await ws.refresh()
             return
@@ -552,9 +576,19 @@ enum QR {
 }
 
 extension Workspace {
-    /// Money that came in from outside since the last refresh — not during or right after ihatecrypto's own moves.
+    /// Money that came in from outside since the last refresh — not during or right after ihatecrypto's own moves, nor
+    /// where one of its own bridges lands: 1Click, CCTP and USDT0 can land long after the move gave up waiting, and
+    /// counted as money in they'd take their amount off the P/L.
     func announceIncoming(before: (usdc: Decimal?, sol: Decimal?, base: Decimal?)) {
         guard !executing, !preparing, Date().timeIntervalSince(lastOwnMove) > 120 else { return }
+        let rose = [(before.usdc, solana?.usdc), (before.sol, solana?.sol), (before.base, base?.usdc)].contains { old, new in
+            old.flatMap { o in new.map { $0 > o } } ?? false
+        }
+        guard rose else { return }
+        var before = before
+        let journal = (try? Journal(url: journalURL).entries()) ?? []
+        if Self.ownMoney(on: "solana", journal: journal) != nil { before.usdc = nil; before.sol = nil }
+        if Self.ownMoney(on: "base", journal: journal) != nil { before.base = nil }
         recordIncomingFlows(before: before)
         var lines: [String] = []
         let on = say("on", "на"), now = say("now", "сейчас")
@@ -565,6 +599,57 @@ extension Workspace {
         let text = say("💸 Received ", "💸 Пришло ") + lines.joined(separator: ", ") + "."
         notify(.incoming, say("Money arrived", "Пришли деньги"), text)
         reply(text, note: "incoming")
+    }
+
+    /// ihatecrypto's own money that may be what rose on `network` (a network key): one of its bridges on its way there
+    /// (signed within a day, as Journal.inTransit) or ended within ten minutes — settled there, or refunded back where it
+    /// left — or a transaction of its own on that network within two minutes (a swap, a withdrawal). A «Receive:»
+    /// address is for money from outside and never counts.
+    // ponytail: by place and time, not amount — money from outside landing there in that window is taken for ours (not
+    // said, not counted in the P/L); compare the rise with the amount in the bridge's note if that bites.
+    nonisolated static func ownMoney(on network: String, journal: [Journal.Entry], now: Date = Date()) -> Journal.Entry? {
+        var sent: [String: Journal.Entry] = [:], last: [String: Journal.Entry] = [:]
+        for e in journal where bridges.contains(e.chain) {
+            if e.kind == .signed { sent[e.chain + "|" + e.id] = e }
+            last[e.chain + "|" + e.id] = e
+        }
+        let bridge = sent.first { key, s in
+            guard !s.note.hasPrefix("Receive:"), let end = last[key] else { return false }
+            switch end.kind {
+            case .signed: return now.timeIntervalSince(s.at) < 86_400 && lands(s.note, on: network)
+            case .settled, .confirmed: return now.timeIntervalSince(end.at) < 600 && lands(s.note, on: network)
+            case .failed: return now.timeIntervalSince(end.at) < 600 && lands(s.note, on: network, refund: true)
+            case .expired: return false
+            }
+        }?.value
+        return bridge ?? journal.last { $0.chain == network && now.timeIntervalSince($0.at) < 120 }
+    }
+
+    /// The journal's chains for bridge orders (Journal.inTransit).
+    nonisolated static let bridges: Set = ["relay", "1click", "cctp", "layerzero"]
+
+    /// Whether a bridge's journal note lands on `network`: the last network named after its first arrow («Base USDC→Solana 5»,
+    /// «USDC solana→base 5 USDC», 1Click's «SOL→ETH 1 solana → base», Relay's «Solana USDC→chain 8453»). Not counted: the
+    /// place after «from» («USDC→NEAR 5 from Solana to …»), and after «to», a payee, all but the place after «on» («NEAR→USDC
+    /// 5 to … on Base»). With none named it lands where it started (a swap on one network, «Base ETH→USDC»), unless it
+    /// went to a payee; a `refund` lands there too. What follows «, » is said about it («, tx …», «, BNB Chain paying the
+    /// gas»). A note without an arrow could be anywhere: it counts for every network.
+    nonisolated static func lands(_ note: String, on network: String, refund: Bool = false) -> Bool {
+        let text = note.lowercased().components(separatedBy: ", ")[0]
+        guard let arrow = text.range(of: "→") else { return true }
+        let keys = ["solana", "hyperliquid"] + EVMNetwork.all.map(\.key)
+        func words(_ side: Substring) -> [String] { side.split { !$0.isLetter && !$0.isNumber }.map(String.init) }
+        func networks(_ w: [String]) -> [String] {
+            let payee = w.firstIndex(of: "to") ?? w.endIndex
+            return w.indices.compactMap { i in
+                if i > 0, w[i - 1] == "from" || (i > payee && w[i - 1] != "on") { return nil }
+                if keys.contains(w[i]) { return w[i] }
+                return i == 1 && w[0] == "chain" ? EVMNetwork.all.first { "\($0.relayChain)" == w[i] }?.key : nil
+            }
+        }
+        let after = words(text[arrow.upperBound...]), to = networks(after)
+        if !refund, !to.isEmpty { return to.last == network }
+        return (refund || !after.contains("to")) && networks(words(text[..<arrow.lowerBound])).last == network
     }
 }
 

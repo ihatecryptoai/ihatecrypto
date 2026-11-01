@@ -823,7 +823,7 @@ struct InTransit: View {
 
 /// An in-transit row opened: the bridge's state asked now, when it was signed, the order, its links; for an incoming
 /// deposit address, the address itself with Copy and its QR card.
-private struct TransitDetails: View {
+struct TransitDetails: View {
     @Environment(Workspace.self) private var ws
     let entry: Journal.Entry
     @State private var state = "asking…"
