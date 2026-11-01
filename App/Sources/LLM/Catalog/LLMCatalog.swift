@@ -3,6 +3,7 @@ import LLMApple
 import LLMChatGPT
 import LLMClaudeCode
 import LLMCore
+import LLMNearAI
 import LLMOpenRouter
 
 /// Every way the app can reach a model. Adding a provider: a module under Sources/LLM plus one line here.
@@ -19,7 +20,7 @@ public enum LLMCatalog {
             note: "", unavailable: "A Google AI subscription doesn't cover the API. Connect Gemini with a key from Google AI Studio."
         )),
         OpenRouter(),
-    ] + OpenAICompatible.presets + [AppleIntelligence()]
+    ] + OpenAICompatible.presets + [NearAI(), AppleIntelligence()]
 
     public static func provider(id: String) -> (any LLMProvider)? {
         all.first { $0.info.id == id }

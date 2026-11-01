@@ -29,12 +29,13 @@ let package = Package(
         .target(name: "LLMChatGPT", dependencies: ["LLMCore"], path: "Sources/LLM/ChatGPT"),
         .target(name: "LLMClaudeCode", dependencies: ["LLMCore"], path: "Sources/LLM/ClaudeCode"),
         .target(name: "LLMApple", dependencies: ["LLMCore"], path: "Sources/LLM/Apple"),
+        .target(name: "LLMNearAI", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/NearAI"),
         .target(
             name: "LLMCatalog",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple"],
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMNearAI"],
             path: "Sources/LLM/Catalog"
         ),
-        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
+        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "LLMNearAI", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
 
         // Keys and signatures: BIP-39, derivation, Keccak, EIP-712. Knows nothing about protocols or UI.
         .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1")], path: "Sources/Wallet/Core"),
@@ -95,7 +96,8 @@ let package = Package(
         .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev", "JupiterSwap", "DeFiKamino"]),
         .testTarget(
             name: "LLMTests",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMCatalog"]
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMCatalog", "LLMNearAI"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )
