@@ -72,6 +72,17 @@
     }
   },
   {
+    "name": "sell a count of a stock token («продай 2 акции теслы») → a sale of 2 TSLA, never all of them",
+    "send": [
+      "продай 2 акции теслы"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "command_contains": "sellStock",
+      "command_contains_2": "amount: Optional(2)"
+    }
+  },
+  {
     "name": "sell NEAR with enough of it → the NEAR Intents route",
     "send": [
       "продай весь NEAR"

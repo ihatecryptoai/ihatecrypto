@@ -224,3 +224,20 @@ private let sol = SpotAsset.all[0]
     #expect(!ChatLanguage.auto.isRussian(recentUserMessages: ["deposit USDC to jupiter", "1 sol"]))
     #expect(!ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "buy 5 SOL"]))
 }
+
+/// «Продай 2 акции теслы» sells 2: the form the model writes has a place for the count, and no count is all of it.
+@Test func aStockSaleKeepsItsCount() {
+    #expect(ChatRouter.forms.contains("sell [N] <TICKER> stock"))
+    #expect(WalletCommand.parse("sell 2 TSLA stock") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("sell 0.5 SPCX stock") == .sellStock(symbol: "SPCX", amount: d("0.5")))
+    #expect(WalletCommand.parse("sell 2 Tesla shares") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("продай 2 акции теслы") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("продай 0,5 акции SpaceX") == .sellStock(symbol: "SPCX", amount: d("0.5")))
+    #expect(WalletCommand.parse("sell TSLA stock") == .sellStock(symbol: "TSLA", amount: nil))
+    #expect(WalletCommand.parse("продай все акции теслы") == .sellStock(symbol: "TSLA", amount: nil))
+    // A sale in dollars has no form: never read as that many tokens, which the cap at what's held made all of them.
+    for t in ["sell $50 of TSLA stock", "sell $50 worth of TSLA stock", "sell 50 worth of Tesla shares", "продай акции теслы на $50",
+              "продай на 50 долларов акций теслы", "sell 100 worth of 0x742d35Cc6634C0532925a3b844Bc454e4438f44e"] {
+        #expect(WalletCommand.parse(t) == nil, "\(t)")
+    }
+}

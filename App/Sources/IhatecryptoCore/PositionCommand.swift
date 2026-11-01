@@ -460,9 +460,10 @@ public enum WalletCommand: Equatable, Sendable {
         // isn't one: «займи под акции SpaceX, не продавая» was read as their sale.
         if let symbol = StockNames.symbol(in: text), !q.contains(Self.borrowWords), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it».
+                // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it»; «sell $50
+                // of TSLA stock» and «50 worth of» are dollars, not 50 tokens (capped at what's held, that sold them all).
                 let shares = q.contains(Self.spacedNumber) ? nil
-                    : q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+                    : q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks|of\b|worth\b)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
                         ?? Self.soldCount(q)   // «продай 2 теслы»
                 if shares == nil, Self.namesOtherCount(q) { return nil }
                 return .sellStock(symbol: symbol, amount: shares)
@@ -871,7 +872,7 @@ extension WalletCommand {
     /// «5 тысяч», «1/2») is none either: the sale is then refused, not made smaller.
     static func soldCount(_ q: String) -> Decimal? {
         if q.contains(spacedNumber) { return nil }
-        let n = q.firstMatch(of: /(?:\bsell|\bdump|прода\w*)\s+(?:the\s+|my\s+)?(\d+(?:[.,]\d+)?)(?![\w.,%$\/])(?!\s*(?:\$|%|usd|долл|бакс|bucks|dollars?|percent|процент|тыс|thousand|млн|million|миллион|млрд|billion))/)?.1
+        let n = q.firstMatch(of: /(?:\bsell|\bdump|прода\w*)\s+(?:the\s+|my\s+)?(\d+(?:[.,]\d+)?)(?![\w.,%$\/])(?!\s*(?:\$|%|usd|долл|бакс|bucks|dollars?|worth|percent|процент|тыс|thousand|млн|million|миллион|млрд|billion))/)?.1
             ?? q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/)?.1
         return n.flatMap { Decimal(string: String($0).replacingOccurrences(of: ",", with: ".")) }
     }

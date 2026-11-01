@@ -145,7 +145,7 @@ public enum ChatRouter {
       Jupiter DCA N USDC into <SOL|BTC|ETH|JUP|TICKER> [in K orders] [every <hour|day|week|month|N days> | over N <days|weeks|months>] | cancel Jupiter DCA [<TICKER>] | show Jupiter DCA
       (Jupiter's on-chain DCA: all N goes into an order account of the wallet's own at once and Jupiter's keepers buy each round, even with the app closed; at least 100 USDC and 50 per order; no K = one per 50 USDC. Write it when the user names Jupiter's DCA or wants buys that run on-chain without the app; a plain «buy SOL every week» is the app's own recurring buy above)
       buy NEAR for N USDC | sell [N] NEAR [for USDC on <base|arbitrum|ethereum>]   (native NEAR on the NEAR account → USDC on Solana, or on that network at our own address; no N = all of it; «продай NEAR в USDC на base» = sell NEAR for USDC on base)
-    STOCK TOKENS ON ROBINHOOD CHAIN: buy <COMPANY or TICKER> stock for N USDC | sell <TICKER> stock | move USDG from Robinhood to Solana
+    STOCK TOKENS ON ROBINHOOD CHAIN: buy <COMPANY or TICKER> stock for N USDC | sell [N] <TICKER> stock | move USDG from Robinhood to Solana   (N = that many tokens, never dollars; none = all of them: «продай 2 акции теслы» = sell 2 TSLA stock)
     ANY TOKEN BY ITS CONTRACT (Robinhood Chain): buy token <0xCONTRACT> for N USDC | sell [N] tokens <0xCONTRACT>
     TOKENS ON BASE, ARBITRUM, POLYGON, ETHEREUM, OPTIMISM AND BNB CHAIN (paid where the money is: that network's own USDC when it holds enough — Uniswap there, no
       bridge — else Solana's, by Relay's swap or Relay's bridge + Uniswap, whichever leaves more; a sale comes back as USDC on Solana unless kept there):
