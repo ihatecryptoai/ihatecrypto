@@ -142,6 +142,16 @@ import WalletCore
     }
 }
 
+// A stop by the guard or the signer on Relay's quote is never taken to NEAR Intents, nor is a loss «Send anyway» asks
+// about; a missing route is.
+@Test func relaysGuardStopIsNeverTakenToNearIntents() {
+    #expect(!Executor.intentsMayTake(GuardStop("Relay quote: recipient is 0xdead…, expected 0x9858….")))
+    #expect(!Executor.intentsMayTake(GuardStop("The Relay order refunds someone else. Nothing was signed.")))
+    #expect(!Executor.intentsMayTake(CostlyMove(lost: 1, paid: 10, what: "Relay's swap")))
+    #expect(Executor.intentsMayTake(ExecutionError("Relay doesn't quote BONK for ETH now. Nothing was signed.")))
+    #expect(Executor.intentsMayTake(URLError(.timedOut)))
+}
+
 // Relay's sale with no dollar price for what goes in stops before the swap: read as $0, any loss had passed.
 @Test func relaysSaleWithoutAPriceStops() throws {
     #expect(throws: ExecutionError.self) { try Executor.holdsRelaySale(worthIn: 0, arriving: 5, symbol: "XYZ", network: "Base") }

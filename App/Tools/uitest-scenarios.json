@@ -870,6 +870,27 @@
     }
   },
   {
+    "name": "SOL on Solana for ETH on Arbitrum → Relay's swap across on the card, quoted, not NEAR Intents",
+    "send": [
+      "поменяй 0.01 SOL на ETH на арбитруме"
+    ],
+    "only_if": {
+      "balance": "sol",
+      "at_least": 0.02
+    },
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "SOLANA",
+        "RELAY",
+        "ARBITRUM"
+      ],
+      "steps_lack": "NEAR INTENTS"
+    }
+  },
+  {
     "name": "swap dollars and send them on, in the user's own words → one chain: the buy, then the send of the same amount; never a trade plan",
     "send": [
       "переведи 2 бакса из USDC в USDT на солане и отправить на automation solana usdt"

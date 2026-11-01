@@ -86,8 +86,14 @@ extension Executor {
         return (quote, origin, destination, units)
     }
 
+    /// A failure of Relay's that NEAR Intents may take over: no route, no quote, the network. Never a stop by the guard or
+    /// the signer (GuardStop: nothing is offered around it), nor a loss past the cap (CostlyMove: «Send anyway» asks about
+    /// this route). The card and the run go by this one rule, so the card shows the way Confirm takes.
+    static func intentsMayTake(_ error: any Error) -> Bool { !(error is GuardStop || error is CostlyMove) }
+
     /// The swap's quote for the card: what arrives, its worth, and how long Relay says it takes. Nothing is signed.
-    /// NEAR's side, or a pair Relay has no route for, is NEAR Intents' (IntentSwap.swift).
+    /// NEAR's side, or a pair Relay has no route for, is NEAR Intents' (IntentSwap.swift). A stop by the guard or the
+    /// signer on Relay's quote stays a stop: no quote, not NEAR's.
     public func crossQuoteText(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String? = nil) async throws -> (gets: String, way: String) {
         if from == "near" || to == "near" {
             guard let amount else { throw ExecutionError("Say how much \(a.uppercased()).") }
@@ -96,7 +102,7 @@ extension Executor {
         do {
             let (q, _, d, _) = try await crossQuote(a, on: from, for: b, on: to, amount: amount, capped: false)
             return ("\(Fmt.num(Decimal(string: q.amountOutFormatted) ?? 0, maxFraction: 8)) \(d.symbol) ≈ \(Fmt.usd(Decimal(string: q.amountOutUSD) ?? 0))", "≈ \(max(q.seconds, 1)) s")
-        } catch {
+        } catch where Self.intentsMayTake(error) {
             guard let amount, let other = try? await intentQuoteText(a, on: from, for: b, on: to, amount: amount, near: near) else { throw error }
             return other
         }
@@ -104,12 +110,13 @@ extension Executor {
 
     /// The swap: Relay's quote checked, its one transaction signed on the origin network, then Relay's word that it landed.
     /// NEAR's side goes through NEAR Intents, and so does a pair Relay has no route for when 1Click lists both tokens.
+    /// A stop by the guard or the signer on Relay's quote reaches the user as it is, never taken to NEAR Intents.
     public func crossSwap(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String? = nil) async throws -> String {
         if from == "near" || to == "near" { return try await intentSwap(a, on: from, for: b, on: to, amount: amount, near: near) }
         if let why = Modules.current.refusal(.relay) { throw ExecutionError(why) }
         let quoted: (quote: Relay.Quote, origin: CrossSide, destination: CrossSide, units: Decimal)
         do { quoted = try await crossQuote(a, on: from, for: b, on: to, amount: amount) }
-        catch where !(error is CostlyMove) {
+        catch where Self.intentsMayTake(error) {
             guard let amount, (try? await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true)) != nil else { throw error }
             report("Relay: \(error.localizedDescription) NEAR Intents has a route: taking it.")
             return try await intentSwap(a, on: from, for: b, on: to, amount: amount, near: near)
