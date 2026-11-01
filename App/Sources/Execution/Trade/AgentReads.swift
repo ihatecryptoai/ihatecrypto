@@ -115,8 +115,9 @@ public enum AgentReads {
         func slot(_ i: Int) -> Data? { data.count >= (i + 1) * 32 ? data.subdata(in: (i * 32)..<((i + 1) * 32)) : nil }
         func number(_ w: Data) -> Decimal { w.reduce(Decimal(0)) { $0 * 256 + Decimal($1) } }
         func dynamic(_ i: Int) -> Data? {
+            // The offset is held to the data by ABI.uint; the length is too before it becomes an Int (2⁶⁴ − 1 would trap).
             guard let offset = ABI.uint(in: data, word: i), offset % 32 == 0, let length = ABI.uint(in: data, word: Int(offset / 32)),
-                  data.count >= Int(offset) + 32 + Int(length) else { return nil }
+                  length <= UInt64(data.count), data.count >= Int(offset) + 32 + Int(length) else { return nil }
             return data.subdata(in: (Int(offset) + 32)..<(Int(offset) + 32 + Int(length)))
         }
         return types.enumerated().map { i, t in

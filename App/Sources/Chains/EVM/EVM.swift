@@ -245,7 +245,7 @@ public enum ABI {
     /// Word `i` of a return value as an address.
     public static func address(in data: Data, word i: Int) -> String? {
         let data = Data(data)   // a slice keeps its parent's indices
-        return data.count >= (i + 1) * 32 ? "0x" + data.subdata(in: (i * 32 + 12)..<((i + 1) * 32)).hex : nil
+        return (0..<data.count / 32).contains(i) ? "0x" + data.subdata(in: (i * 32 + 12)..<((i + 1) * 32)).hex : nil
     }
 
     /// A `bytes[]` argument whose offset sits at byte `at` of the arguments; nil when any part runs out of the data.
@@ -267,10 +267,11 @@ public enum ABI {
         return out
     }
 
-    /// Word `i` as a number, nil when it doesn't fit 64 bits.
+    /// Word `i` as a number, nil when it doesn't fit 64 bits. `i` is often read from someone's data (an offset / 32): it's
+    /// held to the words there before any arithmetic, since (i + 1) * 32 of a huge one would overflow and stop the app.
     public static func uint(in data: Data, word i: Int) -> UInt64? {
         let data = Data(data)   // a slice keeps its parent's indices
-        guard data.count >= (i + 1) * 32, data.subdata(in: (i * 32)..<(i * 32 + 24)).allSatisfy({ $0 == 0 }) else { return nil }
+        guard (0..<data.count / 32).contains(i), data.subdata(in: (i * 32)..<(i * 32 + 24)).allSatisfy({ $0 == 0 }) else { return nil }
         return data.subdata(in: (i * 32 + 24)..<((i + 1) * 32)).reduce(0) { $0 << 8 | UInt64($1) }
     }
 
@@ -283,7 +284,7 @@ public enum ABI {
     /// Word `i` as a Decimal (for 256-bit values such as Aave's ray rates).
     public static func decimal(in data: Data, word i: Int) -> Decimal? {
         let data = Data(data)   // a slice keeps its parent's indices
-        guard data.count >= (i + 1) * 32 else { return nil }
+        guard (0..<data.count / 32).contains(i) else { return nil }
         return data.subdata(in: (i * 32)..<((i + 1) * 32)).reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
     }
 }
@@ -781,14 +782,18 @@ public enum EVMCall: Equatable, Sendable {
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:
     /// «send 0.185357 USDC to 0x060b…9Ff0 on Tempo». Read from the calldata by the signer itself, never from the app's
     /// description of it; a token or contract it doesn't know is named by its address.
-    public func summary(chainId: UInt64, to: String, value: UInt64) -> String {
+    public func summary(chainId: UInt64, to: String, value: UInt64) -> String { summary(chainId: chainId, to: to, wei: ABI.uint(value)) }
+
+    /// `wei` as a 32-byte word: a multisig's move carries a uint256, past the 18.4 coins a UInt64 holds.
+    private func summary(chainId: UInt64, to: String, wei: Data) -> String {
+        let paid = wei.contains { $0 != 0 }
         let net = "on " + (EVMRPC.names[chainId] ?? "network \(chainId)")
         func short(_ a: String) -> String { a.count > 12 ? "\(a.prefix(6))…\(a.suffix(4))" : a }
         func units(_ word: Data, _ decimals: Int16) -> String {
             let whole = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
             return NSDecimalNumber(decimal: whole / pow(10, Int(decimals))).stringValue
         }
-        let coins = "\(units(ABI.uint(value), 18)) \(EVMRPC.coin(chainId))"
+        let coins = "\(units(wei, 18)) \(EVMRPC.coin(chainId))"
         if case .plain = self { return "send \(coins) to \(short(to)) \(net)" }
         // A token the signer can't name shows its raw units: an amount on the prompt, never none.
         func amount(_ word: Data, of token: String) -> String {
@@ -797,7 +802,7 @@ public enum EVMCall: Equatable, Sendable {
         // Coins that go into a wrap or a native swap are its input, not a payment: said once, in the sentence.
         switch self {
         case .wrap: return "wrap \(coins) into W\(EVMRPC.coin(chainId)) \(net)"
-        case .v4Swap where value > 0: return "swap \(coins) on Uniswap v4 \(net), paying this wallet"
+        case .v4Swap where paid: return "swap \(coins) on Uniswap v4 \(net), paying this wallet"
         default: break
         }
         let what = switch self {
@@ -821,12 +826,12 @@ public enum EVMCall: Equatable, Sendable {
         case .repay(let asset, let a, _): a.allSatisfy({ $0 == 0xff }) ? "repay all of this wallet's \(EVMRPC.dollars[asset.lowercased()] ?? short(asset)) debt to \(short(to)) \(net)"
             : "repay \(amount(a, of: asset)) of this wallet's debt to \(short(to)) \(net)"
         case .multisigExec(let target, let v, let d, _):
-            "carry out the multisig \(short(to))'s signed move: " + EVMCall.decode(d).summary(chainId: chainId, to: target, value: ABI.uint(in: v, word: 0) ?? .max)
+            "carry out the multisig \(short(to))'s signed move: " + EVMCall.decode(d).summary(chainId: chainId, to: target, wei: v)
         case .contract where to.lowercased() == Tempo.feeManager: "pay Tempo's fees in USDC from now on"
         case .contract where to.lowercased() == Tempo.exchange: "swap dollars on Tempo's exchange, paying this wallet"
         default: "call the contract \(short(to)) \(net)"
         }
-        return value > 0 ? what + ", paying \(coins)" : what
+        return paid ? what + ", paying \(coins)" : what
     }
 
     /// An allowance none of ihatecrypto's own approvals reaches: ≥ 2⁹⁶ units (79 billion tokens of 18 decimals). Drainers

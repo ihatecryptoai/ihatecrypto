@@ -1,3 +1,4 @@
+import EVMChain
 import Foundation
 import Testing
 @testable import TradeExecution
@@ -15,6 +16,18 @@ import WalletCore
     #expect(AgentReads.decode(["uint256", "int256"], max + max) == ["max (2^256−1, unlimited)", "-1"])
     #expect(AgentReads.decode(["string"], abc) == ["«abc»"])
     #expect(AgentReads.decode(["address", "bool"], Data(count: 12) + Data(hex: owner)! + Data(count: 31) + [1]) == [owner, "true"])
+}
+
+/// A contract's answer is someone else's data: an offset or a length near 2⁶⁴ reads as «?», never stops the app.
+@Test func hostileAnswersReadAsNothing() {
+    let words = Data(count: 64)
+    for i in [-1, 2, Int.max / 32, Int.max] {
+        #expect(ABI.uint(in: words, word: i) == nil && ABI.address(in: words, word: i) == nil && ABI.decimal(in: words, word: i) == nil)
+    }
+    let farOffset = Data(count: 24) + [0x80] + Data(count: 7)   // 2⁶³: word 2⁵⁸, whose end overflowed Int
+    let longLength = Data(count: 31) + [0x20] + Data(count: 24) + Data(repeating: 0xff, count: 8)   // 2⁶⁴ − 1 bytes
+    #expect(AgentReads.decode(["string"], farOffset + words) == ["?"])
+    #expect(AgentReads.decode(["bytes"], longLength) == ["?"])
 }
 
 @Test func agentReadsKeepOnlyMatchingItemsAndHideTheUsersAddress() {
