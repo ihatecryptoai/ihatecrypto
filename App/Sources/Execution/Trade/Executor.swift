@@ -518,7 +518,7 @@ public actor Executor {
             let closed: String
             do { closed = try await close(asset: market.name) } catch let failed {
                 let left = await restoreStop(market, stop: stop)
-                throw ExecutionError("The stop didn't go through and the emergency close failed too (\(failed.localizedDescription)). \(left)")
+                throw ExecutionError("The stop didn't go through and the emergency close failed too: \(failed.localizedDescription) \(left)")
             }
             throw ExecutionError("Position closed: the exchange didn't confirm the stop. \(closed)")
         }
@@ -528,20 +528,24 @@ public actor Executor {
         return opened
     }
 
-    /// After an emergency close that failed: close() cancelled every order first, so what is still open gets its stop back.
-    private func restoreStop(_ market: Market, stop: Decimal) async -> String {
+    /// After an emergency close that failed, at whatever step: what is still open keeps the stop it has on the exchange
+    /// (one that showed up late), or gets `stop`.
+    func restoreStop(_ market: Market, stop: Decimal) async -> String {
         guard let positions = try? await HyperliquidAccount.positions(wallet.evm) else {
             return "The positions can't be read now: check \(market.name) on Hyperliquid, it may be open without a stop."
         }
-        guard let p = positions.first(where: { $0.coin == market.name && $0.size != 0 }) else { return "No \(market.name) position is open." }
+        guard let p = positions.first(where: { $0.coin == market.name && $0.size != 0 }) else { return "No \(market.name) position is open now." }
+        let stops = (try? await HyperliquidAccount.openOrders(wallet.evm))?
+            .filter { $0.coin == market.name && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }.compactMap(\.triggerPx) ?? []
+        if let on = p.size > 0 ? stops.max() : stops.min() { return "Its stop at \(Fmt.price(on)) is on the exchange." }
         do {
             let placed = try await post(try Self.protectionAction(asset: market.index, long: p.size > 0, size: abs(p.size), stop: stop, take: nil,
                                                                   szDecimals: market.szDecimals), label: "stop back on")
             if case .error(let e) = placed { throw ExecutionError(e) }
             try await verifyProtection(coin: market.name, stop: stop, take: nil)
-            return "The \(market.name) position is still open, with its stop at \(Fmt.price(stop)) back on the exchange."
+            return "Its stop at \(Fmt.price(stop)) is back on the exchange now."
         } catch {
-            return "The \(market.name) position is still open WITHOUT a stop (\(error.localizedDescription)): set one or close it on Hyperliquid now."
+            return "It is WITHOUT a stop (\(error.localizedDescription)): set one or close it on Hyperliquid now."
         }
     }
 
@@ -602,25 +606,70 @@ public actor Executor {
 
     // MARK: Close
 
-    /// Cancels the asset's stop and take and closes the position at market. Returns a line for the user.
+    /// Closes the position at market. Its stop and take stay on the exchange until the position is flat: a close that
+    /// doesn't fill (a thin book, a move past 2%), fills in part, loses its reply or isn't signed leaves what is open under
+    /// its stop. What could open it again (a limit entry waiting on the book) goes first. Returns a line for the user.
     public func close(asset: String) async throws -> String {
-        let markets = try await Hyperliquid.markets()
-        guard let market = markets[asset], market.index >= 0 else { throw ExecutionError("No \(asset) market.") }
-        let triggers = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset }
-        if !triggers.isEmpty {
-            _ = try await post(HLAction.cancel(triggers.map { (market.index, $0.oid) }), label: "cancel orders")
+        let market = try await market(asset)
+        let num = { (d: Decimal) in Fmt.num(d, maxFraction: market.szDecimals) }
+        let orders = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset }
+        let entries = orders.filter { !$0.reduceOnly }
+        if !entries.isEmpty {
+            let reply = try await post(HLAction.cancel(entries.map { (market.index, $0.oid) }), label: "cancel entries")
+            guard !reply.isError else { throw ExecutionError("Hyperliquid didn't cancel the \(asset) limit: \(reply). Nothing was closed.") }
         }
-        guard let position = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset }), position.size != 0 else {
-            let line = triggers.isEmpty ? "No open \(asset) position." : "\(asset) orders cancelled (\(triggers.count)); there was no position."
+        guard let position = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }) else {
+            let rest = orders.filter { !entries.contains($0) }
+            if !rest.isEmpty { _ = try await post(HLAction.cancel(rest.map { (market.index, $0.oid) }), label: "cancel orders") }
+            let line = orders.isEmpty ? "No open \(asset) position." : "\(asset) orders cancelled (\(orders.count)); there was no position."
             report(line)
             return line
         }
         let buy = position.size < 0
         let px = HLAction.price(market.markPx * (buy ? 1 + 2 * Self.slippage : 1 - 2 * Self.slippage), szDecimals: market.szDecimals)
-        let result = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: buy, price: px, size: abs(position.size),
-                                                                reduceOnly: true, kind: .limit(tif: "Ioc"))]), label: "close")
-        guard case .filled(let size, let avgPx) = result else { throw ExecutionError("The close didn't fill: \(result).") }
-        let line = "\(asset) position closed: \(Fmt.num(size, maxFraction: market.szDecimals)) at \(Fmt.price(avgPx)); PnL before the close \(Fmt.usd(position.unrealizedPnl))."
+        let result: HLReply
+        do {
+            result = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: buy, price: px, size: abs(position.size),
+                                                                    reduceOnly: true, kind: .limit(tif: "Ioc"))]), label: "close")
+        } catch let refused as GuardStop {
+            throw refused   // not sent: the position and its stop are as they were
+        } catch {
+            result = .error(error.localizedDescription)
+        }
+        // What is open now decides, not the reply: it may be lost, or a stop may have filled first (a reduce-only refusal).
+        // A fill of the whole is taken as it is: the positions may not read, or not show it yet.
+        let whole = if case .filled(let size, _) = result { size >= abs(position.size) } else { false }
+        let after: [HyperliquidAccount.Position]? = whole ? [] : (try? await HyperliquidAccount.positions(wallet.evm))
+        let open = after?.first { $0.coin == asset && $0.size != 0 }
+        if after == nil || open != nil {
+            let stops = orders.filter { $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }.compactMap(\.triggerPx)
+            let kept = if let on = buy ? stops.min() : stops.max() {
+                "Its stop at \(Fmt.price(on)) stays on the exchange."
+            } else {
+                "It has no stop on the exchange."
+            }
+            let what = if let open, abs(open.size) < abs(position.size) {
+                "\(num(abs(position.size) - abs(open.size))) of \(num(abs(position.size))) \(asset) closed; \(num(abs(open.size))) is still open."
+            } else if open != nil {
+                "The \(asset) position is still open."
+            } else {
+                "The positions can't be read now: check on Hyperliquid whether \(asset) closed."
+            }
+            throw ExecutionError("The close didn't finish (\(result)). \(what) \(kept)")
+        }
+        var line = if case .filled(let size, let avgPx) = result {
+            "\(asset) position closed: \(num(size)) at \(Fmt.price(avgPx)); PnL before the close \(Fmt.usd(position.unrealizedPnl))."
+        } else {
+            "\(asset) position is closed (the close order: \(result)): its stop or take-profit may have filled first."
+        }
+        // Flat now: what is left of its stop and take goes, so a new plan on the asset isn't refused over them.
+        let rest = (try? await HyperliquidAccount.openOrders(wallet.evm))?.filter { $0.coin == asset } ?? orders.filter { !entries.contains($0) }
+        if !rest.isEmpty {
+            let reply = try? await post(HLAction.cancel(rest.map { (market.index, $0.oid) }), label: "cancel stop and take-profit")
+            if reply?.isError != false {
+                line += " Its leftover \(asset) orders didn't cancel (\(reply?.description ?? "no answer")): «close \(asset)» again clears them."
+            }
+        }
         report(line)
         return line
     }
