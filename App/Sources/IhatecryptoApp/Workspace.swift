@@ -375,6 +375,12 @@ final class Workspace {
     var alerts: [PriceAlert] = LocalStore.load("alerts.json") ?? [] {
         didSet { LocalStore.save(alerts, "alerts.json") }
     }
+    /// Loans whose health factor is read with every refresh (LoanGuards.swift).
+    var loanGuards: [LoanGuard] = LocalStore.load("loanguards.json") ?? [] {
+        didSet { LocalStore.save(loanGuards, "loanguards.json") }
+    }
+    /// Each guarded loan's last health read, for the alerts board: no entry before the first read, nil without a debt.
+    var guardHealth: [UUID: Decimal?] = [:]
     /// Saved addresses — exchanges, other wallets — entered by hand in the address book only (AddressBook.swift).
     var addressBook: [SavedAddress] = LocalStore.load("addressbook.json") ?? [] {
         didSet { LocalStore.save(addressBook, "addressbook.json") }
@@ -1302,6 +1308,10 @@ final class Workspace {
             await addressBookCommand(command)
             return
         }
+        if let command = LoanGuardCommand.parse(text) {
+            await loanGuardCommand(command)
+            return
+        }
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) {
             alertCommand(command)
             return
@@ -1864,6 +1874,10 @@ final class Workspace {
             takeChoices = TakeStyle.allCases
             reply(say("Three ways to take profit are on the canvas. The stop stays the same; pick one.",
                       "На холсте три способа взять прибыль. Стоп остаётся прежним; выбери один."), note: note)
+            return true
+        }
+        if let command = LoanGuardCommand.parse(canonical) {
+            await loanGuardCommand(command, note: note)
             return true
         }
         if let command = AlertCommand.parse(canonical, markets: Set(markets.keys)) {

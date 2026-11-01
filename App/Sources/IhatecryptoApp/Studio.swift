@@ -1391,7 +1391,7 @@ struct StudioCanvas: View {
             if chartAt == .column, let chart = ws.chart, ws.detail != "chart" { ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))") }
             PnLBoard().blockMenu("Profit and loss", radius: 20)
             if ws.showMovers { MoversBoard().blockMenu("Movers") }
-            if ws.showAlerts, !ws.alerts.isEmpty { AlertsBoard().blockMenu("Price alerts") }
+            if ws.showAlerts, !ws.alerts.isEmpty || !ws.loanGuards.isEmpty { AlertsBoard().blockMenu("Alerts") }
             if let yields = ws.yieldOptions ?? ws.heldAnswer?.yields, !yields.isEmpty {
                 YieldBubbles(options: yields).allowsHitTesting(ws.yieldOptions != nil).blockMenu("Rates", radius: nil)
             }

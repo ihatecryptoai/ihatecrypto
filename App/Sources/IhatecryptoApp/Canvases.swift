@@ -2709,7 +2709,7 @@ extension Workspace {
             || EVMNetwork.source(arrive: short, onSolana: solana?.usdc ?? 0, target: net, held: { self.usdc(on: $0) }) != nil)
     }
 
-    private func fundingLegs(_ short: Decimal, _ net: String) -> [String]? {
+    func fundingLegs(_ short: Decimal, _ net: String) -> [String]? {
         let evm = EVMNetwork.searched.map { FundingPlan.Place(key: $0.key, name: $0.name, usdc: usdc(on: $0.key) ?? 0) }
         return FundingPlan.legs(short: short, target: net, targetName: WalletCommand.placeName(net), solana: solana?.usdc ?? 0, evm: evm,
                                 hyperliquid: hl?.withdrawable ?? 0, near: near, nearPrice: markets["NEAR"]?.markPx)

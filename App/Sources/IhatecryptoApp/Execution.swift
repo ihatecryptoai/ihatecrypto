@@ -1112,9 +1112,10 @@ extension Workspace {
     /// stop does not lag a minute behind the price.
     func watch() async {
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(exitRules.isEmpty && alerts.isEmpty ? 30 : 10))
+            try? await Task.sleep(for: .seconds(exitRules.isEmpty && alerts.isEmpty && loanGuards.isEmpty ? 30 : 10))
             await refresh()
             checkAlerts()
+            await checkLoanGuards()
             await guardPositions()
             // A scheduled buy can wait on Touch ID with no one at the Mac: it runs beside the loop, so refreshes and alerts
             // go on meanwhile (the 2026-10-22 review). While it signs, `executing` keeps other moves from starting.

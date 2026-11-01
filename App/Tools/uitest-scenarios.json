@@ -1110,5 +1110,14 @@
         "SELL"
       ]
     }
+  },
+  {
+    "name": "guard my loan → the guard is on the alerts board, nothing waits for Confirm",
+    "send": "следи за займом на камино, не дай его ликвидировать",
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "Kamino",
+      "reply_cyrillic": true
+    }
   }
 ]

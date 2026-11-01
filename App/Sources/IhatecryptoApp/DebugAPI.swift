@@ -316,6 +316,12 @@ final class DebugAPI {
     }
 
     private func dropTestTasks(_ ws: Workspace) {
+        // A loan guard a test message set (every one sent here is untrusted) would watch the Dev wallet's loan for real.
+        let tests = ws.loanGuards.filter { $0.untrusted == true }
+        if !tests.isEmpty {
+            ws.tasks.removeAll { t in tests.contains { $0.fired == t.id } }
+            ws.loanGuards.removeAll { $0.untrusted == true }
+        }
         guard !testTasks.isEmpty else { return }
         ws.tasks.removeAll { testTasks.contains($0.id) }
         testTasks = []

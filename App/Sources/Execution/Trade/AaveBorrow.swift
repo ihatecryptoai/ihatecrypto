@@ -39,6 +39,8 @@ extension Executor {
     /// The wallet's account on an Aave market.
     public func aaveAccount(_ m: AaveV3.Market) async throws -> AaveAccount {
         let d = try await m.rpc.read(m.pool, try AaveV3.accountData(wallet.evm))
+        // Six words, always: a node answering null or 0x would read as an account with nothing on it.
+        guard d.count >= 6 * 32 else { throw ExecutionError("Aave on \(m.chainName) didn't answer. Try again in a minute.") }
         func usd(_ w: Int) -> Decimal { (ABI.decimal(in: d, word: w) ?? 0) / 100_000_000 }
         return AaveAccount(collateral: usd(0), debt: usd(1), available: usd(2), threshold: (ABI.decimal(in: d, word: 3) ?? 0) / 10_000)
     }

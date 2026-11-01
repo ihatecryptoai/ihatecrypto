@@ -272,8 +272,13 @@ public enum ChatRouter {
       check: <WHAT TO LOOK AT AND WHEN TO SPEAK UP> as the COMMAND of a schedule: you, run in the background — when it comes due
       you read the data yourself and say something only when the condition is met; what you suggest waits for their Confirm.
       Written without « then ». («каждое утро сравнивай ставки; если Morpho выше Aave на 1% — предложи переложить» = every day at
-      09:00: check: USDC rates of Morpho and Aave on Base; if Morpho is over 1 point higher, offer to move the USDC there;
-      «следи за health factor на aave, предупреди если меньше 1.6» = every hour: check: Aave health factor on Base; warn under 1.6)
+      09:00: check: USDC rates of Morpho and Aave on Base; if Morpho is over 1 point higher, offer to move the USDC there.
+      A loan's health is the guard form below, not a check)
+      guard my loan [on kamino|on aave [on <base|arbitrum|polygon|ethereum>]] [below H] | stop guarding my loans   (the loan's health
+      factor, liquidation at 1, read with every refresh; under H — 1.25 when they give no number — ihatecrypto prepares a repay back to
+      1.5, the USDC brought first from wherever it is, and it waits for their Confirm with a notification. No protocol = the loan they
+      have, and on Aave without a network the one its debt is on. «следи за займом на камино, не дай ликвидировать» = guard my loan on kamino; «предупреди, если health factor на aave
+      меньше 1.6» = guard my loan on aave below 1.6; «убери защиту займа» = stop guarding my loans)
       when <ASSET> is above|below|at <PRICE>: COMMAND   (once, when the price gets there: a price alert that then prepares COMMAND; a trade plan or a money move waits for their Confirm, with a notification. «поставь алерт на 2680 и пришли лонг ×3 на аппрув» = when ETH is below 2680: long ETH leverage 3x. Build it from the blocks on the canvas when they point at them («на этот план», «вот это»): the plan written in the long|short form from its fields, or the move waiting for Confirm)
       («через неделю переложи депозиты в лучшие ставки» = in 1 week: rebalance USDC; «каждый день в 9 продавай SOL и клади USDC в vault» = every day at 09:00: sell SOL then lend USDC. Recurring BUYS keep their own form above. A step no form can do makes the whole request "clarify": say which step ihatecrypto can't do yet.)
     """
