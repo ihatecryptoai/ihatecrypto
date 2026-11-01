@@ -183,7 +183,15 @@ struct FakeHyperliquid {
         // A part filled: the rest stays under the stop.
         r = await run { s in s.position = Decimal(string: "0.005")!; return filled("0.005") }
         #expect(r.sent == ["close sell"] && r.failed)
-        #expect(r.text.contains("0.005 of 0.01 ETH closed") && r.text.contains("stop at 2,940"))
+        #expect(r.text.contains("0.005 of 0.01 ETH closed") && r.text.contains("stop at 2,940") && !r.text.contains("position closed"))
+
+        // A part filled with no stop on the exchange: it says so, not that a stop stays.
+        r = await run(orders: []) { s in s.position = Decimal(string: "0.005")!; return filled("0.005") }
+        #expect(r.sent == ["close sell"] && r.failed && r.text.contains("0.005 is still open") && r.text.contains("no stop on the exchange"))
+
+        // Two stops on a long: the message names the nearer one, the higher.
+        r = await run(orders: [stop(2, "2900"), stop(6, "2940"), take(3, "3120")]) { _ in noMatch }
+        #expect(r.failed && r.text.contains("stop at 2,940"))
 
         // The reply is lost: the position read afterwards decides, and it is still open.
         r = await run()
@@ -213,6 +221,15 @@ struct FakeHyperliquid {
         r = await run(position: 0, orders: [limit])
         #expect(r.sent == ["cancel 4"] && !r.failed)
         #expect(r.text.contains("there was no position"))
+
+        // A position and a limit entry waiting: the entry goes first (it could open it again), the stop and take after the fill.
+        r = await run(orders: [limit] + guarded) { s in s.position = 0; return filled("0.01") }
+        #expect(r.sent == ["cancel 4", "close sell", "cancel 2,3"] && !r.failed)
+
+        // No position, its stop and take left over: they go in one cancel.
+        r = await run(position: 0)
+        #expect(r.sent == ["cancel 2,3"] && !r.failed)
+        #expect(r.text == "ETH orders cancelled (2); there was no position.")
 
         // The emergency close: no stop on the exchange, the close doesn't fill, restoreStop puts the stop back — once.
         r = await run(orders: [], close: { _ in noMatch }) { e in
