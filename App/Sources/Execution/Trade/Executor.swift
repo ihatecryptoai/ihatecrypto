@@ -203,6 +203,9 @@ public actor Executor {
     /// route under impactCap stops before it): only the Dev copy's `-impactStopTest YES` sets it, for a live run of the
     /// stop's cards (a part now, the whole anyway, nothing) on test sizes.
     nonisolated(unsafe) public static var impactStopTest = false
+    /// A limit entry goes in through the market (0.3% past the mark), so it fills at once, and the stop its group armed
+    /// counts as unconfirmed: only the Dev copy's `-limitFillTest YES` sets it, for a live run of the stop placed again.
+    nonisolated(unsafe) public static var limitFillTest = false
 
     /// Stops a swap whose price impact (0…1) is past `impactCap` and what was accepted: `paid` is what goes in, in USD at
     /// the market price (0 = nobody prices it: the impact alone decides), `amount` the same in the input's own units
@@ -508,6 +511,15 @@ public actor Executor {
         // Stop and take from the actual fill, so the loss at the stop stays the approved risk.
         let (stop, take) = Self.protectionPrices(entry: avgPx, stopPct: p.intent.stopPct ?? 0, takePct: p.intent.takePct, long: long,
                                                  szDecimals: market.szDecimals)
+        try await protect(market, long: long, size: size, stop: stop, take: take)
+        var opened = Opened(asset: market.name, size: size, entry: avgPx, stop: stop, take: take)
+        if p.intent.partialTake == true { opened.partialTake = try? await placePartialTake(market: market, long: long, size: size, entry: avgPx, stop: stop) }
+        return opened
+    }
+
+    /// Stop and take on an open position as one positionTpsl group, checked among open orders. When they don't go on,
+    /// the position is closed so it isn't left unprotected, and when that close fails too, restoreStop puts a stop back.
+    private func protect(_ market: Market, long: Bool, size: Decimal, stop: Decimal, take: Decimal?) async throws {
         do {
             let placed = try await post(try Self.protectionAction(asset: market.index, long: long, size: size, stop: stop, take: take,
                                                                   szDecimals: market.szDecimals), label: "stop and take-profit")
@@ -523,9 +535,6 @@ public actor Executor {
             throw ExecutionError("Position closed: the exchange didn't confirm the stop. \(closed)")
         }
         report("On the exchange: stop \(Fmt.price(stop))\(take.map { " and take-profit \(Fmt.price($0))" } ?? ""). The position is protected.")
-        var opened = Opened(asset: market.name, size: size, entry: avgPx, stop: stop, take: take)
-        if p.intent.partialTake == true { opened.partialTake = try? await placePartialTake(market: market, long: long, size: size, entry: avgPx, stop: stop) }
-        return opened
     }
 
     /// After an emergency close that failed, at whatever step: what is still open keeps the stop it has on the exchange
@@ -578,30 +587,85 @@ public actor Executor {
     }
 
     /// A resting limit entry with its stop and take in one normalTpsl group: the exchange arms them when the
-    /// entry fills, so there is no moment with a position and no stop.
+    /// entry fills, so there is no moment with a position and no stop. One that fills at once (the price was already
+    /// there) and whose stop the exchange doesn't list gets the stop and take again, and is closed when they don't go on.
     private func placeLimit(_ p: Prepared, market: Market, limit: Decimal) async throws -> Opened {
         let long = p.intent.side == .long
-        let px = HLAction.price(limit, szDecimals: market.szDecimals)
+        let through = market.markPx * (long ? Decimal(string: "1.003")! : Decimal(string: "0.997")!)
+        let px = HLAction.price(Self.limitFillTest ? through : limit, szDecimals: market.szDecimals)
         let (stop, take) = Self.protectionPrices(entry: px, stopPct: p.intent.stopPct ?? 0, takePct: p.intent.takePct, long: long,
                                                  szDecimals: market.szDecimals)
         let entry = HLOrder(asset: market.index, isBuy: long, price: px, size: p.sizing.size, reduceOnly: false, kind: .limit(tif: "Gtc"))
         let action = try HLAction.order([entry] + Self.protectionOrders(asset: market.index, long: long, size: p.sizing.size, stop: stop, take: take,
                                                                          szDecimals: market.szDecimals), grouping: "normalTpsl")
         let reply = try await post(action, label: "limit with stop and take-profit")
-        switch reply {
-        case .resting, .ok:
-            let orders = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == market.name }
-            guard orders.contains(where: { !$0.isTrigger && $0.limitPx == px }) else { throw ExecutionError("The limit isn't among open orders: \(reply).") }
-            report("Limit placed: \(long ? "long" : "short") \(Fmt.num(p.sizing.size, maxFraction: market.szDecimals)) \(market.name) at \(Fmt.price(px)). Stop \(Fmt.price(stop))\(take.map { " and take-profit \(Fmt.price($0))" } ?? ""): active once it fills.")
-            return Opened(asset: market.name, size: p.sizing.size, entry: px, stop: stop, take: take, pending: true)
-        case .filled(let size, let avgPx):
-            // The price was already there: the group armed its stop and take at once.
-            try await verifyProtection(coin: market.name, stop: stop, take: take)
-            report("The limit filled at once: \(Fmt.num(size, maxFraction: market.szDecimals)) \(market.name) at \(Fmt.price(avgPx)); stop and take-profit are on the exchange.")
-            return Opened(asset: market.name, size: size, entry: avgPx, stop: stop, take: take)
-        case .error(let e):
-            throw ExecutionError("Limit rejected: \(e). No position.")
+        var filled: (size: Decimal, avgPx: Decimal)?
+        if case .filled(let size, let avgPx) = reply { filled = (size, avgPx) }
+        // Any status's error wins (HLReply.parse): the entry may have filled, or rest, while its stop or take was turned down.
+        let refused: String? = if case .error(let e) = reply { e } else { nil }
+        var unconfirmed = refused   // why the group's stop isn't known to be on the exchange
+        // Otherwise what's there is read back a few times (≈ 2.4 s): /info may list the limit or show its fill a moment late.
+        var read = false, cancelled = false
+        for attempt in 0..<5 where filled == nil {
+            if let entry = (try? await HyperliquidAccount.openOrders(wallet.evm))?.first(where: { $0.coin == market.name && !$0.isTrigger && $0.limitPx == px }) {
+                guard let refused else {
+                    report("Limit placed: \(long ? "long" : "short") \(Fmt.num(p.sizing.size, maxFraction: market.szDecimals)) \(market.name) at \(Fmt.price(px)). Stop \(Fmt.price(stop))\(take.map { " and take-profit \(Fmt.price($0))" } ?? ""): active once it fills.")
+                    return Opened(asset: market.name, size: p.sizing.size, entry: px, stop: stop, take: take, pending: true)
+                }
+                // On the book without the stop or take that was turned down: it goes before it fills unprotected.
+                let cancel = try await post(HLAction.cancel([(market.index, entry.oid)]), label: "cancel limit")
+                guard !cancel.isError else {
+                    throw ExecutionError("Limit rejected: \(refused). Its entry at \(Fmt.price(px)) waits on the book without it, and Hyperliquid didn't cancel it (\(cancel)): cancel the \(market.name) limit there now.")
+                }
+                cancelled = true
+            }
+            if let positions = try? await HyperliquidAccount.positions(wallet.evm) {
+                read = true
+                if let open = positions.first(where: { $0.coin == market.name && $0.size != 0 }) { filled = (abs(open.size), open.entry) }
+            }
+            if filled == nil, !cancelled, attempt < 4 { try await Task.sleep(for: .milliseconds(600)) } else { break }
         }
+        guard let filled else {
+            guard let refused else { throw ExecutionError("The limit isn't among open orders: \(reply).") }
+            throw ExecutionError("Limit rejected: \(refused). " + (cancelled ? "Its entry, waiting on the book without it, was cancelled; no position."
+                : read ? "No position." : "The positions can't be read now: check \(market.name) on Hyperliquid, it may be open without a stop."))
+        }
+        // The price was already there: the group armed its stop and take at once.
+        if unconfirmed == nil {
+            if Self.limitFillTest { unconfirmed = "limitFillTest" } else {
+                do { try await verifyProtection(coin: market.name, stop: stop, take: take) } catch { unconfirmed = error.localizedDescription }
+            }
+        }
+        var opened: Opened
+        if let why = unconfirmed {
+            opened = try await protectFilledLimit(market, long: long, stop: stop, take: take, why: why)
+        } else {
+            report("The limit filled at once: \(Fmt.num(filled.size, maxFraction: market.szDecimals)) \(market.name) at \(Fmt.price(filled.avgPx)); stop and take-profit are on the exchange.")
+            opened = Opened(asset: market.name, size: filled.size, entry: filled.avgPx, stop: stop, take: take)
+        }
+        // The half at 1R waited for a fill that has happened: it goes on now, as on a market entry.
+        if p.intent.partialTake == true {
+            opened.partialTake = try? await placePartialTake(market: market, long: long, size: opened.size, entry: opened.entry, stop: stop)
+        }
+        return opened
+    }
+
+    /// A limit that filled at once without its stop confirmed (`why`): the position read back decides. None open, its stop
+    /// or take has closed it already. Open, the stop and take go on it again (protect), at the prices the card showed from
+    /// the limit: a fill at once is never worse than the limit, so neither is the loss at the stop.
+    private func protectFilledLimit(_ market: Market, long: Bool, stop: Decimal, take: Decimal?, why: String) async throws -> Opened {
+        guard let positions = try? await HyperliquidAccount.positions(wallet.evm) else {
+            throw ExecutionError("The limit filled at once, its stop isn't confirmed (\(why)) and the positions can't be read now. Check \(market.name) on Hyperliquid: it may be open without a stop.")
+        }
+        // prepare() refuses a plan on a coin with any position or order: what is open here is this limit.
+        guard let open = positions.first(where: { $0.coin == market.name && $0.size != 0 }) else {
+            throw ExecutionError("The limit filled at once, and no \(market.name) position is open now: its stop or take-profit has already closed it.")
+        }
+        report("The limit filled at once, but the exchange didn't confirm its stop (\(why)): placing it again.")
+        // ponytail: the group's own stop and take may still show up late; then there are two of each, all reduce-only,
+        // and «close» clears them.
+        try await protect(market, long: long, size: abs(open.size), stop: stop, take: take)
+        return Opened(asset: market.name, size: abs(open.size), entry: open.entry, stop: stop, take: take)
     }
 
     // MARK: Close
