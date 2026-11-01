@@ -4,7 +4,8 @@
 #   2. the uitest scenarios the words name, on the Dev copy's debug API (port 51790; never the installed app on 51789),
 #      with a picture of the window after each scenario
 #   3. a separate Claude reviews each picture against the design rules below: a fresh eye, not the author's
-# Green = everything passed: .build/done/summary.json (what ran, counts, verdicts, pictures), then .build/done/stamp.
+# Green = everything passed: .build/done/summary.json (what ran, counts, verdicts, pictures), then .build/done/stamp
+# with the time this run started, so an edit made while it ran stays unchecked.
 #   ./done.sh [scenario words…]   no words = no UI step (it says so); logs, pictures and reviews in .build/done/
 #   ./done.sh --skip "why"        the change didn't touch what this checks: only record that
 #   ./done.sh --stale             the project's Stop hook: exit 2 while Sources or Tests changed after the last stamp
@@ -30,6 +31,7 @@ zmodload zsh/system
 zsystem flock -t 0 -f lock $OUT/lock 2>/dev/null \
   || { echo "another ./done.sh runs in this checkout: waiting for it"; zsystem flock -f lock $OUT/lock || fail "the lock: $OUT/lock" }
 rm -rf $OUT/*.log(N) $OUT/shots $OUT/small $OUT/review $OUT/summary.json
+touch $OUT/started   # after the lock: a run waiting for it mustn't move this one's start
 
 echo "── build"
 { swift build && swift build --build-tests } > $OUT/build.log 2>&1 \
@@ -140,6 +142,7 @@ json.dump({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "head": head, "words": wo
            "tests": {"passed": int(passed), "failed": int(failed)}, "lint": "clean", "ui": ui, "reviews": reviews},
           open(os.path.join(out, "summary.json"), "w"), ensure_ascii=False, indent=2)
 EOF
-touch $STAMP
+# The start's time: what changed while this ran isn't checked. A --skip made meanwhile (newer) is kept, not undone.
+[[ $STAMP -nt $OUT/started ]] || touch -r $OUT/started $STAMP
 echo "$(date '+%F %R')  ${words[*]}  green" >> $OUT/history
 echo "\nDONE: green. $PWD/$OUT/summary.json"
