@@ -21,6 +21,8 @@ enum Signer {
         case .status:
             var r = SignerReply(ok: true)
             let wallets = Wallets.all
+            // remove() before 2026-11-01 could leave the automation wallet on, its addresses mirrored as «ours»: put them back.
+            if defaults.string(forKey: "activeWallet") != Wallets.active?.id { Wallets.activate(Wallets.active) }
             r.hasWallet = !wallets.isEmpty
             r.wallets = wallets
             r.activeWallet = Wallets.active?.id
@@ -709,7 +711,8 @@ enum Signer {
         return r
     }
 
-    /// Removes a wallet with everything kept for it; signing moves to the first one left.
+    /// Removes a wallet with everything kept for it; signing moves to the first one left that isn't the automation
+    /// wallet, or to none.
     static func remove(_ wallet: SignerWallet) {
         let wasActive = Wallets.active?.id == wallet.id
         SeedStore.delete(id: wallet.id)
@@ -719,7 +722,7 @@ enum Signer {
         defaults.removeObject(forKey: Wallets.scoped("agentActive", wallet.id))
         let rest = Wallets.all.filter { $0.id != wallet.id }
         Wallets.save(rest)
-        if wasActive { Wallets.activate(rest.first) }
+        if wasActive { Wallets.activate(SignerWallet.on(rest, chosen: nil)) }
     }
 
     /// Relay orders this signer checked (relayOrder), by id, until their deadline: a deposit naming any other id isn't

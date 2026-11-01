@@ -212,6 +212,13 @@ public struct SignerWallet: Codable, Sendable, Equatable, Identifiable {
         return [SignerWallet(id: firstID, label: "Main", kind: "phrase", solana: solana, evm: evm, near: near)]
     }
 
+    /// The wallet that's on: the chosen one, else the first left — never the automation wallet, which opens without
+    /// Touch ID and signs only a task's moves (`SignerRequest.asWallet`). nil: none signs until the user picks one.
+    public static func on(_ list: [SignerWallet], chosen: String?) -> SignerWallet? {
+        let can = list.filter { !$0.isAutomation }
+        return can.first { $0.id == chosen } ?? can.first
+    }
+
     /// «this wallet has no Solana key» when a key wallet is asked to sign on another chain.
     public func missing(_ chain: String) -> String? {
         let has = switch chain {
