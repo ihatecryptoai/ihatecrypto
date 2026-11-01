@@ -69,6 +69,8 @@ extension Executor {
         }
         let units = (amount * scale).whole
         guard units > 0 else { throw ExecutionError("\(Fmt.num(amount)) \(origin.symbol) is less than its smallest unit.") }
+        // A coin goes as one transaction's value, under 2⁶⁴ wei (the signer's UInt64): 18.44 coins.
+        guard !origin.coin || units <= Decimal(UInt64.max) else { throw ExecutionError("At most 18 \(origin.symbol) at once. Nothing was signed.") }
         guard units <= held || !capped else {
             throw ExecutionError("\(Fmt.num(held / scale, maxFraction: 8)) \(origin.symbol) on \(WalletCommand.placeName(from)); \(Fmt.num(amount, maxFraction: 8)) is more. Nothing was signed.")
         }
@@ -181,7 +183,7 @@ extension Executor {
         let note = "Relay: \(sent) on \(net.name) → \(quote.recipient == wallet.solana ? "Solana" : "another network")"
         if origin.coin {
             guard let depository = try await Relay.depository(chainId: net.relayChain)?.lowercased(), quote.evm.count == 1, let call = quote.evm.first,
-                  call.to.lowercased() == depository, call.chainId == net.relayChain, Decimal(string: call.value) == units, let value = UInt64(exactly: NSDecimalNumber(decimal: units).uint64Value) else {
+                  call.to.lowercased() == depository, call.chainId == net.relayChain, Decimal(string: call.value) == units, let value = UInt64(exactly: NSDecimalNumber(decimal: units).uint64Value), Decimal(value) == units else {
                 throw ExecutionError("Relay's transaction isn't one deposit of exactly \(sent) to the depository it publishes for \(net.name). Nothing was signed.")
             }
             // Coins to Relay's depository pay Relay: the signer asks to allow that address in person the first time.

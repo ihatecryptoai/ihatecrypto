@@ -565,19 +565,20 @@ func sweepEVM(to destination: String) async throws {
         if net.key == "base" {
             // OP stack: the L1 data fee is charged on top; ask the oracle for this very transaction's size.
             let sample = try EVMTransaction(chainId: chain.chainId, nonce: try await chain.nonce(me), maxPriorityFeePerGas: tip, maxFeePerGas: maxFee,
-                                            gasLimit: gas, to: destination, value: balance, data: Data()).signed(privateKey: signer.keys.evm).raw
+                                            gasLimit: gas, to: destination, value: UInt64(clamping: balance), data: Data()).signed(privateKey: signer.keys.evm).raw
             var call = Data([0x49, 0x94, 0x8e, 0x0e])   // getL1Fee(bytes)
             call += ABI.uint(32) + ABI.uint(UInt64(sample.count)) + sample + Data(count: (32 - sample.count % 32) % 32)
             let l1 = ABI.uint(in: try await chain.read("0x420000000000000000000000000000000000000F", call), word: 0) ?? 0
             fee += l1 + l1 / 2
         }
         guard balance > fee else { print("\(net.name): \(balance) wei is less than the fee (\(fee)); it stays."); continue }
+        guard let move = UInt64(exactly: balance - UInt128(fee)) else { print("\(net.name): \(balance) wei is past one transfer; move it by hand."); continue }
         let tx = EVMTransaction(chainId: chain.chainId, nonce: try await chain.nonce(me), maxPriorityFeePerGas: tip, maxFeePerGas: maxFee,
-                                gasLimit: gas, to: destination, value: balance - fee, data: Data())
+                                gasLimit: gas, to: destination, value: move, data: Data())
         let (raw, hash) = try tx.signed(privateKey: signer.keys.evm)
         _ = try await chain.send(raw)
         let ok = try await chain.waitForReceipt(hash)
-        print("\(net.name): sent \(balance - fee) wei → \(ok ? "confirmed" : "FAILED") \(net.explorer)/tx/\(hash); left \(try await chain.balance(me)) wei")
+        print("\(net.name): sent \(move) wei → \(ok ? "confirmed" : "FAILED") \(net.explorer)/tx/\(hash); left \(try await chain.balance(me)) wei")
     }
 }
 

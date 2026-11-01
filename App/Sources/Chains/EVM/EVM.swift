@@ -461,7 +461,14 @@ public struct EVMRPC: Sendable {
         return n
     }
 
-    public func balance(_ address: String) async throws -> UInt64 { try await quantity("eth_getBalance", [address, "latest"]) }
+    /// The coin at `address`, in wei. 2⁶⁴ wei is 18.45 coins: 20 ETH (0x1158e460913d00000) was «not a number» as UInt64.
+    public func balance(_ address: String) async throws -> UInt128 {
+        let answer = try await call("eth_getBalance", [address, "latest"])
+        guard let wei = Self.wei(answer) else { throw WalletError("EVM RPC eth_getBalance: not a number (\(String(String(describing: answer).prefix(60))))") }
+        return wei
+    }
+    /// A JSON-RPC quantity up to 128 bits; nil for anything else.
+    static func wei(_ answer: Any) -> UInt128? { (answer as? String).flatMap { $0.hasPrefix("0x") ? UInt128($0.dropFirst(2), radix: 16) : nil } }
     public func nonce(_ address: String) async throws -> UInt64 { try await quantity("eth_getTransactionCount", [address, "pending"]) }
 
     public func tokenBalance(_ token: String, owner: String) async throws -> UInt64 {
@@ -522,6 +529,9 @@ public struct EVMRPC: Sendable {
 }
 
 extension Decimal {
+    /// Wei as a Decimal: exact for any UInt128 (its mantissa is 128 bits; Decimal(exactly: UInt128.max) checked).
+    public init(_ value: UInt128) { self = Decimal(exactly: value)! }
+
     /// Rounded down to a whole number.
     public var whole: Decimal {
         var x = self, out = Decimal()

@@ -354,14 +354,16 @@ extension Executor {
     /// The network's own coin to a saved address: a plain transfer, the fee on top of it. nil = all of it but the fee:
     /// a plain transfer's gas is exact, so only the part of the fee the network doesn't take stays, a speck.
     private func sendNative(_ amount: Decimal?, on net: EVMNetwork, to recipient: String, label: String) async throws -> String {
-        func f(_ w: UInt64) -> String { Fmt.num(Decimal(w) / pow(Decimal(10), 18), maxFraction: 18) }
+        func f(_ w: some BinaryInteger) -> String { Fmt.num(Decimal(UInt128(w)) / pow(Decimal(10), 18), maxFraction: 18) }
         let rpc = net.rpc
         let have = try await rpc.balance(wallet.evm)
         let (tip, maxFee) = try await rpc.fees()
         let wei: UInt64, gasLimit: UInt64
         if let amount {
             let weiDecimal = (amount * pow(Decimal(10), 18)).rounded(0, .down)
-            guard weiDecimal > 0, weiDecimal < Decimal(UInt64.max) else { throw ExecutionError("Not an amount of \(net.gasCoin) to send: \(Fmt.num(amount, maxFraction: 18)).") }
+            guard weiDecimal > 0 else { throw ExecutionError("Not an amount of \(net.gasCoin) to send: \(Fmt.num(amount, maxFraction: 18)).") }
+            // One transfer carries under 2⁶⁴ wei (the signer's value is a UInt64): 18.44 coins.
+            guard weiDecimal < Decimal(UInt64.max) else { throw ExecutionError("At most 18 \(net.gasCoin) at once. Nothing was signed.") }
             wei = NSDecimalNumber(decimal: weiDecimal).uint64Value
             let estimate = try await rpc.estimateGas(from: wallet.evm, to: recipient, value: wei, data: Data())
             gasLimit = estimate + estimate / 4
@@ -370,9 +372,10 @@ extension Executor {
             gasLimit = estimate == 21_000 ? estimate : estimate + estimate / 4
             let fee = gasLimit * maxFee + (try await l1FeeBound(net))
             guard have > fee else { throw ExecutionError("\(f(have)) \(net.gasCoin) on \(net.name): no more than the fee (up to \(f(fee))), so nothing goes.") }
-            wei = have - fee
+            guard let all = UInt64(exactly: have - UInt128(fee)) else { throw ExecutionError("At most 18 \(net.gasCoin) at once: say how much. Nothing was signed.") }
+            wei = all
         }
-        guard wei + gasLimit * maxFee <= have else {
+        guard UInt128(wei) + UInt128(gasLimit * maxFee) <= have else {
             throw ExecutionError("\(f(have)) \(net.gasCoin) on \(net.name): not enough for \(f(wei)) and the fee (up to \(f(gasLimit * maxFee))).")
         }
         let note = "Send \(f(wei)) \(net.gasCoin) to \(label)"

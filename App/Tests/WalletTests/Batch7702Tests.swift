@@ -158,6 +158,14 @@ struct ForkSigner: TradeSigner {
                                   to: to, value: value, data: data).signed(privateKey: key).raw
     }
 
+    /// The network's coin to one of `recipients`, no calldata: the signing process's rule for a transfer.
+    func signEVMTransfer(chainId: UInt64, nonce: UInt64, maxPriorityFee: UInt64, maxFee: UInt64, gasLimit: UInt64,
+                         to: String, value: UInt64, recipients: [String]) async throws -> Data {
+        guard recipients.contains(where: { $0.lowercased() == to.lowercased() }) else { throw ExecutionError("pays \(to)") }
+        return try EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee, gasLimit: gasLimit,
+                                  to: to, value: value, data: Data()).signed(privateKey: key).raw
+    }
+
     func signEVMBatch(chainId: UInt64, nonce: UInt64, maxPriorityFee: UInt64, maxFee: UInt64, gasLimit: UInt64,
                       calls: [Batch7702.Call], recipients: [String]) async throws -> Data {
         if let why = Batch7702.problems(calls, owner: address, chainId: chainId).first { throw ExecutionError(why) }
@@ -571,4 +579,49 @@ func forkBorrowsAgainstETHAndRepays() async throws {
 
     print(try await e.aaveRepay(m, usdc: nil))
     #expect(try await e.aaveAccount(m).debt == 0)
+}
+
+/// A coin balance past 64 bits on an anvil fork of Base (NET=base TESTS=forkCoinPast64Bits Tools/fork7702.sh): with the
+/// fork as Base's own node, 20 ETH reads whole; 1 ETH and 18.446744073 ETH (the amount and its fee past UInt64 trapped)
+/// go; all of 20 ETH and a Relay swap of 19 ETH say «At most 18» before anything is signed or quoted.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_ANVIL_CHAIN"] == "8453"))
+func forkCoinPast64Bits() async throws {
+    let env = ProcessInfo.processInfo.environment
+    let fork = URL(string: env["IHATECRYPTO_ANVIL"]!)!
+    let key = Data(hex: env["IHATECRYPTO_ANVIL_KEY"]!)!
+    let me = try EVMAccount.address(privateKey: key)
+    defer { EVMNodes.set(nil, for: 8453) }
+    EVMNodes.set(fork, for: 8453)
+    let rpc = EVMNetwork.base.rpc
+    #expect(rpc.nodes.first == fork)
+    let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("fork64-\(UUID().uuidString).jsonl"))
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: key, address: me), journal: journal) { print("·", $0) }
+    func twenty() async throws { _ = try await rpc.call("anvil_setBalance", [me, "0x1158e460913d00000"]) }
+    let friend = "0x00000000000000000000000000000000000f0a12"
+    let oneETH: UInt128 = 1_000_000_000_000_000_000
+
+    try await twenty()
+    #expect(try await rpc.balance(me) == 20 * oneETH)
+    let f0 = try await rpc.balance(friend)
+    print(try await e.sendToken("ETH", amount: 1, on: "base", to: friend, label: "Friend"))
+    #expect(try await rpc.balance(friend) == f0 + oneETH)
+    try await twenty()
+    print(try await e.sendToken("ETH", amount: Decimal(string: "18.446744073")!, on: "base", to: friend, label: "Friend"))
+    #expect(try await rpc.balance(friend) == f0 + oneETH + 18_446_744_073_000_000_000)
+
+    try await twenty()
+    let nonce = try await rpc.nonce(me)
+    let all = await #expect(throws: ExecutionError.self) { try await e.sendToken("ETH", amount: nil, on: "base", to: friend, label: "Friend") }
+    #expect(all?.message.contains("At most 18 ETH at once") == true, "\(all?.message ?? "")")
+    #expect(try await rpc.nonce(me) == nonce)
+    let relay = await #expect(throws: ExecutionError.self) { try await e.crossQuote("ETH", on: "base", for: "USDC", on: "solana", amount: 19) }
+    #expect(relay?.message.contains("At most 18 ETH at once") == true, "\(relay?.message ?? "")")
+    // Nor through NEAR Intents, Relay's fallback: not on the card, not on Confirm (no 1Click order opened, nothing signed).
+    let card = await #expect(throws: ExecutionError.self) { try await e.crossQuoteText("ETH", on: "base", for: "USDC", on: "solana", amount: 19) }
+    #expect(card?.message.contains("At most 18 ETH at once") == true, "\(card?.message ?? "")")
+    let swap = await #expect(throws: ExecutionError.self) { try await e.crossSwap("ETH", on: "base", for: "USDC", on: "solana", amount: 19) }
+    #expect(swap?.message.contains("At most 18 ETH at once") == true, "\(swap?.message ?? "")")
+    let intent = await #expect(throws: ExecutionError.self) { try await e.intentQuote("ETH", on: "base", for: "USDC", on: "solana", amount: 19, near: nil, dry: true) }
+    #expect(intent?.message.contains("At most 18 ETH at once") == true, "\(intent?.message ?? "")")
+    #expect(try await rpc.nonce(me) == nonce)
 }

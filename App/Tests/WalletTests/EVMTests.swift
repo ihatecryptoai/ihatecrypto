@@ -1,4 +1,4 @@
-import EVMChain
+@testable import EVMChain
 import Foundation
 import Testing
 @testable import TradeExecution
@@ -757,4 +757,28 @@ import WalletCore
     #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: Data([0x8a, 0xf0, 0x33, 0xfb]) + Data(count: 64), sender: me) != nil)
     #expect(KyberSwap.decode(try call(misaligned: true)) == nil)
     #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: try call(misaligned: true), sender: me) != nil)
+}
+
+/// eth_getBalance past 64 bits (2026-10-29): 20 ETH is 2·10¹⁹ wei — as UInt64 it threw and every move on the network stopped.
+@Test func coinBalancePast64Bits() {
+    #expect(EVMRPC.wei("0x1158e460913d00000") == 20_000_000_000_000_000_000)
+    #expect(EVMRPC.wei("0x0") == 0 && EVMRPC.wei("0xffffffffffffffff") == UInt128(UInt64.max))
+    #expect(EVMRPC.wei("0x" + String(repeating: "f", count: 32)) == .max && EVMRPC.wei("0x" + String(repeating: "f", count: 33)) == nil)
+    #expect(EVMRPC.wei("0x") == nil && EVMRPC.wei("1158e460913d00000") == nil && EVMRPC.wei("0xzz") == nil && EVMRPC.wei(NSNull()) == nil)
+    #expect(Decimal(UInt128(20_000_000_000_000_000_000)) / 1e18 == 20 && "\(Decimal(UInt128.max))" == "\(UInt128.max)")
+}
+
+/// IHATECRYPTO_NET=1, reads only: each network's wrapped coin contract holds more than 2⁶⁴ wei of the coin, and the
+/// balance reads whole.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+func liveCoinBalancesPast64Bits() async throws {
+    let wrapped: [(EVMRPC, String)] = [(.base, "0x4200000000000000000000000000000000000006"), (.optimism, "0x4200000000000000000000000000000000000006"),
+                                       (.ethereum, "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), (.arbitrum, "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"),
+                                       (.polygon, "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"), (.bnb, "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+                                       (.hyperevm, "0x5555555555555555555555555555555555555555")]
+    for (rpc, address) in wrapped {
+        let wei = try await rpc.balance(address)
+        print("chain \(rpc.chainId): \(Decimal(wei) / 1e18) coins at \(address)")
+        #expect(wei > UInt128(UInt64.max), "chain \(rpc.chainId)")
+    }
 }

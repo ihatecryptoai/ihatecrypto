@@ -177,13 +177,13 @@ extension Executor {
     /// At least `want` USDC and some ETH for gas on the network: what is missing comes from Solana over Relay.
     /// `gas`: a floor and a top-up for calls heavier than a supply (a Morpho vault deposit is ≈ 450k gas);
     /// the top-up must land above the floor, or the wait below runs out.
-    func ensureEVM(_ net: EVMNetwork, usdc want: UInt64, gas heavier: (floor: UInt64, topupUSD: Decimal)? = nil) async throws {
+    func ensureEVM(_ net: EVMNetwork, usdc want: UInt64, gas heavier: (floor: UInt128, topupUSD: Decimal)? = nil) async throws {
         let me = wallet.evm
         func show(_ u: UInt64) -> String { Fmt.num(Decimal(u) / 1_000_000, maxFraction: 6) }
-        let floor = max(net.gasFloor, heavier?.floor ?? 0), topupUSD = max(net.topupUSD, heavier?.topupUSD ?? 0)
+        let floor = max(UInt128(net.gasFloor), heavier?.floor ?? 0), topupUSD = max(net.topupUSD, heavier?.topupUSD ?? 0)
         // Where fees come out of the stablecoin, the fees ride on the USDC wanted and there's no coin to read.
         let want = want + net.feeReserve
-        func gasThere() async throws -> UInt64 { net.feeToken == nil ? try await net.rpc.balance(me) : floor }
+        func gasThere() async throws -> UInt128 { net.feeToken == nil ? try await net.rpc.balance(me) : floor }
         var there = try await net.usdcBalance(me)
         var gas = try await gasThere()
         guard there < want || gas < floor else { return }
@@ -600,7 +600,7 @@ extension Executor {
             // Short of gas is never a dead end: a top-up of three times what this call may cost comes over first. Coins sent
             // with the call are the user's amount: when they and the fee don't fit, it's said, not topped up.
             let fee = gasLimit * maxFee
-            if value > 0, fee + value > (try await rpc.balance(wallet.evm)) {
+            if value > 0, UInt128(fee) + UInt128(value) > (try await rpc.balance(wallet.evm)) {
                 throw ExecutionError("\(Fmt.num(Decimal(value) / 1e18, maxFraction: 8)) \(net.gasCoin) and the fee don't both fit in the \(net.gasCoin) on \(net.name): \(note). Nothing was signed.")
             }
             if fee > (try await rpc.balance(wallet.evm)) {
@@ -670,7 +670,7 @@ extension Executor {
         let solanaUSDC = Decimal(try await self.rpc.tokenBalance(owner: wallet.solana, mint: Relay.Currency.solanaUSDC)) / 1_000_000
         let dollars = NSDecimalNumber(decimal: ((usd + 1) * 1_000_000).rounded(0, .up)).uint64Value
         if solanaUSDC >= usd + 1 {
-            try await ensureEVM(net, usdc: 0, gas: (floor: before + expected, topupUSD: usd))
+            try await ensureEVM(net, usdc: 0, gas: (floor: before + UInt128(expected), topupUSD: usd))
         } else if try await Hyperliquid.balance(user: me).withdrawable >= usd.rounded(2, .up) + 1 {
             // Hyperliquid's balance brings it with no gas anywhere: the way for BNB Chain and HyperEVM, whose dollars can't pay
             // by signature.
@@ -685,7 +685,7 @@ extension Executor {
                 }
                 report(try await bridgeWithoutGas(net, to: nil, amount: dollars))
             }
-            try await ensureEVM(net, usdc: 0, gas: (floor: before + expected, topupUSD: usd))
+            try await ensureEVM(net, usdc: 0, gas: (floor: before + UInt128(expected), topupUSD: usd))
         } else {
             try await swapForGas(net, usd: usd)
         }

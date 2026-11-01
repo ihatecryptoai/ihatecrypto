@@ -52,8 +52,12 @@ extension Executor {
         async let d = intentSide(b, on: to)
         let (origin, destination) = try await (o, d)
         guard origin.asset != destination.asset else { throw ExecutionError("That's the same token on both sides. Nothing to swap.") }
-        let units = "\((amount * pow(10, origin.decimals)).whole)"
+        let whole = (amount * pow(10, origin.decimals)).whole, units = "\(whole)"
         guard units != "0" else { throw ExecutionError("\(Fmt.num(amount)) \(origin.symbol) is less than its smallest unit.") }
+        // An EVM coin's deposit is one transfer, under 2⁶⁴ wei (sendNative): said before 1Click opens an order.
+        if let net = EVMNetwork.named(from), Self.isCoin(a, on: net), whole >= Decimal(UInt64.max) {
+            throw ExecutionError("At most 18 \(net.gasCoin) at once. Nothing was signed.")
+        }
         // A dry quote to NEAR before the signer has named the account: any implicit account prices it the same.
         let recipient = try intentAddress(to, near: dry ? near ?? String(repeating: "0", count: 64) : near)
         let refund = try intentAddress(from, near: dry ? near ?? String(repeating: "0", count: 64) : near)
