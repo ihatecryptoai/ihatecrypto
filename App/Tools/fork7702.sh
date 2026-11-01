@@ -1,5 +1,5 @@
 #!/bin/bash
-# EIP-7702 batches on an anvil fork: a fresh key gets gas and 20 dollars, then the executor's own approve + Uniswap
+# EIP-7702 batches on an anvil fork: a fresh key gets gas and 30 dollars (the base list spends 23), then the executor's own approve + Uniswap
 # swap runs against the fork (Tests/WalletTests/Batch7702Tests.swift). NET=base (default), arbitrum, ethereum or polygon: Uniswap v3,
 # approve + swap; NET=robinhood: Uniswap v4, approve to Permit2 + Permit2's approve + swap.
 # Nothing touches a real network but the fork's reads. Run from App/: NET=… Tools/fork7702.sh [--skip-build]
@@ -11,7 +11,7 @@ case $NET in
   # Tenderly's gateway: mainnet.base.org's rate limit left a cold fork minutes behind its first swaps.
   base)      FORK=${FORK_URL:-https://base.gateway.tenderly.co}; USDC=0x833589fcd6edb6e08f4c7c32d4f71b54bda02913
              QUOTER=0x3d4e44eb1374240ce5f1b871ab261cd16335b76a; WETH=0x4200000000000000000000000000000000000006
-             TEST="forkApproveAndSwapGoAsOneTransaction forkDepositsGoAsOneTransaction forkBaseV4BuyIsOneTransaction forkV4SwapThroughAVouchedHook forkSwapsTokenForToken forkKyberSwapPaysThisWallet" ;;
+             TEST="forkApproveAndSwapGoAsOneTransaction forkDepositsGoAsOneTransaction forkBaseV4BuyIsOneTransaction forkV4SwapThroughAVouchedHook forkSwapsTokenForToken forkKyberSwapPaysThisWallet forkContractCallSendsItsCoinsWithItsApprove" ;;
   arbitrum)  FORK=${FORK_URL:-https://arb1.arbitrum.io/rpc}; USDC=0xaf88d065e77c8cc2239327c5edb3a432268e5831
              QUOTER=0x61ffe014ba17989e743c5f6cb21bf9697530b21e; WETH=0x82af49447d8a07e3bd95bd0d56f35241523fbab1; TEST=forkApproveAndSwapGoAsOneTransaction ;;
   ethereum)  FORK=${FORK_URL:-https://ethereum-rpc.publicnode.com}; USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
@@ -38,7 +38,7 @@ if [ "$NET" = robinhood ]; then
   cast send $USDC "transfer(address,uint256)" "$ME" 20000000 --from $PM --unlocked --rpc-url $RPC >/dev/null
 else
   # FiatToken keeps balances in a mapping at slot 9.
-  cast rpc --rpc-url $RPC anvil_setStorageAt $USDC "$(cast index address "$ME" 9)" 0x$(printf '%064x' 20000000) >/dev/null
+  cast rpc --rpc-url $RPC anvil_setStorageAt $USDC "$(cast index address "$ME" 9)" 0x$(printf '%064x' 30000000) >/dev/null
   # Warm the fork: anvil fetches state lazily (a first quote took 60 s through drpc), longer than the app's RPC timeout.
   for FEE in 500 3000 10000 100; do
     cast call $QUOTER "quoteExactInputSingle((address,address,uint256,uint24,uint160))(uint256,uint160,uint32,uint256)" \

@@ -54,14 +54,15 @@ public struct ContractTrust: Sendable, Equatable {
 
 extension Executor {
     /// A contract call the chat wrote and the user confirmed: its exact approve first when it has one (with the call as
-    /// one transaction where batches are on), then the call. The contract is passed as a recipient when the approve lets
-    /// it spend or coins go with the call: the signer asks for it in person, address whole, the first time.
+    /// one transaction where batches are on and no coins go with it), then the call with its coins. The contract is passed
+    /// as a recipient when the approve lets it spend or coins go with the call: the signer asks for it in person, address
+    /// whole, the first time.
     public func contractCall(_ net: EVMNetwork, to: String, data: Data, value: UInt64, approve: (token: String, units: Decimal)?,
                              approveNote: String, note: String) async throws -> String {
         let hash: String
         if let a = approve {
             hash = try await approveAndSend(net.rpc, token: a.token, spender: to, units: a.units, approveNote: approveNote,
-                                            to: to, data: data, note: note, recipients: [to])
+                                            to: to, data: data, note: note, recipients: [to], value: value)
         } else {
             hash = try await sendEVM(net.rpc, to: to, data: data, note: note, recipients: value > 0 ? [to] : [], value: value)
         }

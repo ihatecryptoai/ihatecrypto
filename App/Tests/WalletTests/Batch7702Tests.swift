@@ -148,12 +148,13 @@ struct ForkSigner: TradeSigner {
                                   to: to, value: 0, data: data).signed(privateKey: key).raw
     }
 
-    /// Coins sent along, under the signing process's rules: only back to this wallet (a wrap, a native v4 swap).
+    /// Coins sent along, under the signing process's rules: back to this wallet (a wrap, a native v4 swap) or to one of
+    /// `recipients`, the addresses the user approves in person (a contract call with coins).
     func signEVMPayable(chainId: UInt64, nonce: UInt64, maxPriorityFee: UInt64, maxFee: UInt64, gasLimit: UInt64, to: String, value: UInt64,
                         data: Data, recipients: [String]) async throws -> Data {
-        let call = EVMCall.decode(data)
+        let call = EVMCall.decode(data), approved = Set((recipients + [address]).map { $0.lowercased() })
         if let why = call.refusal(sender: address, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: address) { throw ExecutionError(why) }
-        if let payee = call.payees(to: to, value: value, chainId: chainId).first(where: { $0.lowercased() != address.lowercased() }) { throw ExecutionError("pays \(payee)") }
+        if let payee = call.payees(to: to, value: value, chainId: chainId).first(where: { !approved.contains($0.lowercased()) }) { throw ExecutionError("pays \(payee)") }
         return try EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee, gasLimit: gasLimit,
                                   to: to, value: value, data: data).signed(privateKey: key).raw
     }
@@ -624,4 +625,59 @@ func forkCoinPast64Bits() async throws {
     let intent = await #expect(throws: ExecutionError.self) { try await e.intentQuote("ETH", on: "base", for: "USDC", on: "solana", amount: 19, near: nil, dry: true) }
     #expect(intent?.message.contains("At most 18 ETH at once") == true, "\(intent?.message ?? "")")
     #expect(try await rpc.nonce(me) == nonce)
+}
+
+/// A contract call with coins and an approve (the chat's «call … with 0.01 eth approving 1 USDC») on an anvil fork of Base
+/// (NET=base TESTS=forkContractCallSendsItsCoinsWithItsApprove Tools/fork7702.sh): Uniswap v2's addLiquidityETH, batches on.
+/// The coins go with the call, as on the card: the approve on its own first, then the call as a type-2 transaction carrying
+/// them; the pool's shares arrive, the allowance is spent to zero, and the router sends back the ETH the pool didn't take.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_ANVIL_CHAIN"] == "8453"))
+func forkContractCallSendsItsCoinsWithItsApprove() async throws {
+    let env = ProcessInfo.processInfo.environment
+    UserDefaults.standard.set(true, forKey: Executor.batchKey)   // the user's switch, on for the fork runs
+    let rpc = EVMRPC(url: URL(string: env["IHATECRYPTO_ANVIL"]!)!, chainId: 8453)
+    let key = Data(hex: env["IHATECRYPTO_ANVIL_KEY"]!)!
+    let me = try EVMAccount.address(privateKey: key)
+    let b = EVMNetwork.base
+    let net = EVMNetwork(name: b.name, key: b.key, rpc: rpc, usdc: b.usdc, relayChain: b.relayChain, explorer: b.explorer, gasFloor: b.gasFloor, topupUSD: b.topupUSD)
+    let v2 = try #require(UniswapV2.on(8453))
+    let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("forkcall-\(UUID().uuidString).jsonl"))
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: key, address: me), journal: journal) { print("·", $0) }
+    // The pair's address from the router's own factory: factory(), then getPair(USDC, WETH).
+    let factory = try #require(ABI.address(in: try await rpc.read(v2.router, Data([0xc4, 0x5a, 0x01, 0x55])), word: 0))
+    let pair = try #require(ABI.address(in: try await rpc.read(factory, Data([0xe6, 0xa4, 0x39, 0x05]) + (try ABI.address(baseUSDC)) + (try ABI.address(v2.weth))), word: 0))
+    // addLiquidityETH(token, amountTokenDesired, amountTokenMin, amountETHMin, to, deadline): 1 USDC and up to 0.01 ETH.
+    let selector = Keccak.hash256(Data("addLiquidityETH(address,uint256,uint256,uint256,address,uint256)".utf8)).prefix(4)
+    let data = Data(selector) + (try ABI.address(baseUSDC)) + ABI.uint(1_000_000) + ABI.uint(0) + ABI.uint(0) + (try ABI.address(me))
+        + ABI.uint(UInt64(Date().timeIntervalSince1970) + 600)
+    let coins: UInt64 = 10_000_000_000_000_000
+    let usdc0 = try await rpc.tokenBalance(baseUSDC, owner: me), eth0 = try await rpc.balance(me), lp0 = try await e.balance(pair, on: rpc)
+
+    let done = try await e.contractCall(net, to: v2.router, data: data, value: coins, approve: (baseUSDC, 1_000_000),
+                                        approveNote: "Approve exactly 1 USDC to Uniswap v2", note: "addLiquidityETH on Uniswap v2 on Base")
+    let hash = String(try #require(done.split(separator: "/").last))
+    let tx = (try await rpc.call("eth_getTransactionByHash", [hash])) as? [String: Any]
+    #expect(UInt64((tx?["value"] as? String ?? "").dropFirst(2), radix: 16) == coins)
+    #expect(tx?["type"] as? String == "0x2")
+    #expect(try await e.balance(pair, on: rpc) > lp0)
+    #expect(try await rpc.tokenBalance(baseUSDC, owner: me) == usdc0 - 1_000_000)
+    #expect(ABI.decimal(in: try await rpc.read(baseUSDC, try ERC20.allowance(owner: me, spender: v2.router)), word: 0) == 0)
+    // A dollar of ETH and two fees went; the rest of the 0.01 ETH came back.
+    let spent = eth0 - (try await rpc.balance(me))
+    #expect(spent > 0 && spent < UInt128(coins))
+}
+
+/// Coins with an approve on a network that pays its fees in a token (Tempo): refused before the approve, nothing signed.
+/// Its node is a dead port: an approve that started would fail on reading the allowance, with another message.
+@Test func contractCallWithCoinsOnTempoStopsBeforeTheApprove() async {
+    let e = Executor(wallet: TradeWallet(solana: "", evm: owner), signer: ForkSigner(key: key, address: owner),
+                     journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("tempo-\(UUID().uuidString).jsonl"))) { _ in }
+    let t = EVMNetwork.tempo
+    let dead = EVMNetwork(name: t.name, key: t.key, rpc: EVMRPC(url: URL(string: "http://127.0.0.1:9")!, chainId: t.rpc.chainId), usdc: t.usdc,
+                          relayChain: t.relayChain, explorer: t.explorer, gasFloor: t.gasFloor, topupUSD: t.topupUSD)
+    let refused = await #expect(throws: ExecutionError.self) {
+        try await e.contractCall(dead, to: "0x1111111111111111111111111111111111111111", data: Data([1, 2, 3, 4]), value: 1,
+                                 approve: (EVMRPC.tempoUSDC, 1), approveNote: "Approve", note: "Call")
+    }
+    #expect(refused?.message.contains("Coins go only with a single call") == true, "\(refused?.message ?? "")")
 }

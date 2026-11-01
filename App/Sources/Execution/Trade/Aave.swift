@@ -556,19 +556,24 @@ extension Executor {
 
     /// An exact approve and the call that spends it. Where they can batch (`canBatch`) they go as one transaction under one
     /// Touch ID, dry-run together first, so a call that would fail stops before anything is signed; elsewhere the approve,
-    /// its wait, then the call, as before.
+    /// its wait, then the call, as before. `value`: wei of the network's coin sent with the call. A batch carries none
+    /// (Batch7702.Call), so then the approve goes on its own first and the call with its coins after it.
     func approveAndSend(_ rpc: EVMRPC, token: String, spender: String, units: Decimal, approveNote: String,
-                        to: String, data: Data, note: String, recipients: [String] = []) async throws -> String {
-        if canBatch(rpc) {
+                        to: String, data: Data, note: String, recipients: [String] = [], value: UInt64 = 0) async throws -> String {
+        if value == 0, canBatch(rpc) {
             let allowance = ABI.decimal(in: try await rpc.read(token, try ERC20.allowance(owner: wallet.evm, spender: spender)), word: 0) ?? 0
             if allowance < units {
                 let calls = [Batch7702.Call(to: token, data: try ERC20.approve(spender: spender, units: units)), Batch7702.Call(to: to, data: data)]
                 return try await sendEVM(rpc, to: wallet.evm, data: Data(), note: "\(approveNote) + \(note)", recipients: recipients, batch: calls)
             }
         } else {
+            // sendEVM's own rule for coins, before the approve: on a network paying fees in a token it would sign for nothing.
+            guard value == 0 || EVMNetwork.of(chainId: rpc.chainId)?.feeToken == nil else {
+                throw ExecutionError("Coins go only with a single call on a network that pays its fees in them. Nothing was signed.")
+            }
             try await approve(rpc, token: token, spender: spender, units: units, note: approveNote, recipients: recipients)
         }
-        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients)
+        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients, value: value)
     }
 
     /// One EVM transaction: dry run by eth_estimateGas (a call that would revert stops here), the fee within the ETH
@@ -598,10 +603,11 @@ extension Executor {
             }
         } else {
             // Short of gas is never a dead end: a top-up of three times what this call may cost comes over first. Coins sent
-            // with the call are the user's amount: when they and the fee don't fit, it's said, not topped up.
+            // with the call are the user's amount: when they and the fee don't fit, it's said, not topped up — of this call
+            // only, since an approve may already have gone before it (approveAndSend with coins).
             let fee = gasLimit * maxFee
             if value > 0, UInt128(fee) + UInt128(value) > (try await rpc.balance(wallet.evm)) {
-                throw ExecutionError("\(Fmt.num(Decimal(value) / 1e18, maxFraction: 8)) \(net.gasCoin) and the fee don't both fit in the \(net.gasCoin) on \(net.name): \(note). Nothing was signed.")
+                throw ExecutionError("\(Fmt.num(Decimal(value) / 1e18, maxFraction: 8)) \(net.gasCoin) and the fee don't both fit in the \(net.gasCoin) on \(net.name): \(note) wasn't signed.")
             }
             if fee > (try await rpc.balance(wallet.evm)) {
                 // A top-up that itself runs short (Relay's swap for gas with none there) stops instead of looping.
