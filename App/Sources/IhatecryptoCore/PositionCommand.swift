@@ -439,9 +439,9 @@ public enum WalletCommand: Equatable, Sendable {
         // Any token by its contract («купи 0x… токен на $2»): bought on Robinhood Chain, where ihatecrypto trades by contract.
         if let contract = text.firstMatch(of: /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/).map({ String($0.0) }) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                let tokens = q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                // A sale in dollars has no count of tokens to sell: not «all of it».
-                if tokens == nil, amount != nil { return nil }
+                let tokens = Self.soldCount(q)
+                // A sale in dollars, or a number or a share it can't place, is not «all of it».
+                if tokens == nil, Self.namesOtherCount(q.replacingOccurrences(of: contract.lowercased(), with: " ")) { return nil }
                 return .sellStock(symbol: contract, amount: tokens)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buyStock(symbol: contract, usdc: amount) }
@@ -450,8 +450,8 @@ public enum WalletCommand: Equatable, Sendable {
         if let mint = AddressBookCommand.address(in: text), !mint.hasPrefix("0x"), !mint.hasSuffix(".near"), mint.count >= 32,
            SpotAsset.all.allSatisfy({ $0.mint != mint }) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                let tokens = q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                if tokens == nil, amount != nil { return nil }
+                let tokens = Self.soldCount(q)
+                if tokens == nil, Self.namesOtherCount(q.replacingOccurrences(of: mint.lowercased(), with: " ")) { return nil }
                 return .sell(.byMint(mint), amount: tokens)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buy(.byMint(mint), usdc: amount) }
@@ -461,8 +461,10 @@ public enum WalletCommand: Equatable, Sendable {
         if let symbol = StockNames.symbol(in: text), !q.contains(Self.borrowWords), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
                 // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it».
-                let shares = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                if shares == nil, amount != nil { return nil }
+                let shares = q.contains(Self.spacedNumber) ? nil
+                    : q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+                        ?? Self.soldCount(q)   // «продай 2 теслы»
+                if shares == nil, Self.namesOtherCount(q) { return nil }
                 return .sellStock(symbol: symbol, amount: shares)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buyStock(symbol: symbol, usdc: amount) }
@@ -861,6 +863,26 @@ extension WalletCommand {
     /// A network's own coin, the one its fees are paid in: on its network it is swapped for USDC, never bought from a token list.
     static func ownCoin(_ place: String) -> Set<String> {
         place == "polygon" ? ["POL", "MATIC"] : place == "hyperevm" ? ["HYPE"] : place == "bnb" ? ["BNB"] : ["ETH"]
+    }
+
+    /// How many tokens a sale names: the number right after «sell»/«продай» («sell 100 0x…», «продай 1,5 B5AN…»), as
+    /// «sell 100 AERO on base» reads it, or one before «tokens»/«токенов»/«шт» anywhere. Dollars and percents aren't a count,
+    /// and neither is the «0» of «0x…» or the digit a mint starts with. A number it would read only in part («1 000»,
+    /// «5 тысяч», «1/2») is none either: the sale is then refused, not made smaller.
+    static func soldCount(_ q: String) -> Decimal? {
+        if q.contains(spacedNumber) { return nil }
+        let n = q.firstMatch(of: /(?:\bsell|\bdump|прода\w*)\s+(?:the\s+|my\s+)?(\d+(?:[.,]\d+)?)(?![\w.,%$\/])(?!\s*(?:\$|%|usd|долл|бакс|bucks|dollars?|percent|процент|тыс|thousand|млн|million|миллион|млрд|billion))/)?.1
+            ?? q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/)?.1
+        return n.flatMap { Decimal(string: String($0).replacingOccurrences(of: ",", with: ".")) }
+    }
+
+    /// «1 000», «2 500 tokens»: thousands split by a space, which every reader here takes in part («500 tokens»).
+    nonisolated(unsafe) static let spacedNumber = /\d\s\d{3}(?!\w)/
+
+    /// A sale that names a number or a share soldCount didn't read («sell 0x… 100», «sell 50% of …», «продай половину»,
+    /// «продай треть», «sell ten», «… for 10 USDC»): never «all of it».
+    static func namesOtherCount(_ q: String) -> Bool {
+        ChatWords.mayChange(q) || q.contains(/\bthird|\bpart|част[ьи]|частичн|\bsome\b|немного|несколько/)
     }
 
     /// The multisig's three forms, as the chat writes them in English.

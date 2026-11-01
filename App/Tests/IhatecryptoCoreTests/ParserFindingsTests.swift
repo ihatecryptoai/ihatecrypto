@@ -54,6 +54,47 @@ private let sol = SpotAsset.all[0]
     #expect(IntentParser.apply("short ETH risk $5", to: TradeIntent(), markets: m)?.side == .short)
 }
 
+@Test func aNamedCountIsNeverAll() {
+    let c = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", m = "B5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6"
+    let m7 = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"   // a mint that starts with a digit
+    // A bare count is the count, English and Russian: without «tokens» the sale was all of it.
+    #expect(WalletCommand.parse("sell 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 1,5 \(c)") == .sellStock(symbol: c, amount: d("1.5")))
+    #expect(WalletCommand.parse("sell 1,000 \(c)") == .sellStock(symbol: c, amount: 1000))
+    #expect(WalletCommand.parse("sell .5 \(c)") == .sellStock(symbol: c, amount: d("0.5")))
+    #expect(WalletCommand.parse("sell my 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("dump 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("sell 1500 \(m)") == .sell(.byMint(m), amount: 1500))
+    #expect(WalletCommand.parse("продай 1500 \(m)") == .sell(.byMint(m), amount: 1500))
+    #expect(WalletCommand.parse("sell 3 \(m7)") == .sell(.byMint(m7), amount: 3))
+    #expect(WalletCommand.parse("продай 2 теслы") == .sellStock(symbol: "TSLA", amount: 2))
+    // The forms the chat writes keep reading the same.
+    #expect(WalletCommand.parse("sell 100 tokens \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 100 штук \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("sell 1500 tokens \(m)") == .sell(.byMint(m), amount: 1500))
+    // A number or a share it can't place: refused, never «all».
+    for t in ["sell \(c) 100", "sell 50% of \(c)", "продай половину \(c)", "sell half of \(m)", "sell 1k \(c)", "продай \(m) 3",
+              "sell \(m7) 3", "sell \(c) for 10 USDC", "sell $10 of \(c)",
+              // Dollars after a space, numbers it would read in part, percents and shares in words, numbers in words.
+              "sell 100 $ of \(c)", "продай 100 $ \(c)", "sell 100 $ worth of \(m)", "sell 100 $ of tesla stock",
+              "продай 1 000 \(c)", "продай 1\u{a0}000 \(c)", "sell 1 000 tokens \(c)", "sell 1 500 TSLA stock",
+              "продай 5 тысяч \(c)", "sell 1 million \(c)", "продай 2 млн \(m)", "sell 1/2 of \(c)",
+              "sell 50 percent of \(c)", "продай 50 процентов \(c)", "продай 50 процентов теслы",
+              "sell a quarter of \(c)", "sell a third of \(m)", "продай треть \(c)", "продай четверть \(m)", "продай часть \(c)",
+              "sell ten \(c)", "продай десять \(c)"] {
+        #expect(WalletCommand.parse(t) == nil, "\(t)")
+    }
+    // «All» said, or no number at all: still all.
+    #expect(WalletCommand.parse("sell \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("sell all \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("продай весь \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("sell all \(m)") == .sell(.byMint(m), amount: nil))
+    #expect(WalletCommand.parse("sell tokens \(m)") == .sell(.byMint(m), amount: nil))
+    #expect(WalletCommand.parse("sell \(m7)") == .sell(.byMint(m7), amount: nil))
+    #expect(WalletCommand.parse("sell TSLA stock") == .sellStock(symbol: "TSLA", amount: nil))
+}
+
 @Test func hiddenAmountsAreDotsButPercentagesStay() {
     #expect(Fmt.dots("$1,234.56") == "•••")
     #expect(Fmt.dots("−$1.20 · +4.2%") == "••• · +4.2%")

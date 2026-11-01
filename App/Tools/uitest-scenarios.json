@@ -1084,5 +1084,31 @@
       "balance": "jupiterLend",
       "at_least": 1
     }
+  },
+  {
+    "name": "sell a bare count by contract → that count on the card, never all",
+    "send": [
+      "sell 100 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "command_contains": "amount: optional(100)",
+      "steps": [
+        "SELL"
+      ]
+    }
+  },
+  {
+    "name": "продай голое число по контракту (bare count) → на карточке 100, не всё",
+    "send": [
+      "продай 100 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "command_contains": "amount: optional(100)",
+      "steps": [
+        "SELL"
+      ]
+    }
   }
 ]
