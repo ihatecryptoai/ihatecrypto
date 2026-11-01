@@ -450,6 +450,7 @@ extension Executor {
             }
         }
         if dryRun { return "Simulation (nothing signed): " + changes.joined(separator: "; ") }
+        if Self.swapTailTest { throw WalletError("Solana RPC getTokenAccountsByOwner: HTTP 429 (swapTailTest)") }
         let outAfter = nativeOut ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: to.mint)
         var line = "Swapped \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) \(from.symbol) → \(to.symbol) +\(Fmt.num(Decimal(Int64(outAfter) - Int64(outBefore)) / outScale, maxFraction: 8))\(nativeOut ? " (net of fees)" : "")."
         swapped?(from, to, Decimal(units) / scale, Decimal(Int64(outAfter) - Int64(outBefore)) / outScale)

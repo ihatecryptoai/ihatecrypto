@@ -206,6 +206,9 @@ public actor Executor {
     /// A limit entry goes in through the market (0.3% past the mark), so it fills at once, and the stop its group armed
     /// counts as unconfirmed: only the Dev copy's `-limitFillTest YES` sets it, for a live run of the stop placed again.
     nonisolated(unsafe) public static var limitFillTest = false
+    /// A Jupiter swap that went through reads no balance after it, as when the node throttles that read: only the Dev
+    /// copy's `-swapTailTest YES` sets it, for a live run of what the chat says then (Workspace.wentThrough).
+    nonisolated(unsafe) public static var swapTailTest = false
 
     /// Stops a swap whose price impact (0…1) is past `impactCap` and what was accepted: `paid` is what goes in, in USD at
     /// the market price (0 = nobody prices it: the impact alone decides), `amount` the same in the input's own units

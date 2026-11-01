@@ -185,15 +185,30 @@ extension Workspace {
 
     /// What went out since `start` with no outcome yet — signed in the journal and nothing after: a receipt that didn't
     /// come, a Relay order still on its way. Each as where to look.
-    func unsettled(since start: Date) -> [String] {
+    func unsettled(since start: Date) -> [String] { signed(since: start) { try $0.unresolved() } }
+
+    /// «Went through: <links>. Then: <error>. Don't repeat it — check first.» when something this move signed since `start`
+    /// went through before it failed (Journal.wentThrough): a balance read the node throttled right after a swap, a
+    /// bridge's second leg. «Failed» with «Try again» there swapped, borrowed or bridged a second time. nil: nothing did.
+    func wentThrough(since start: Date, then error: any Error) -> String? {
+        let went = signed(since: start) { try $0.wentThrough() }
+        guard !went.isEmpty else { return nil }
+        let e = error.localizedDescription
+        return say("Went through: ", "Прошло: ", "Se hizo: ") + went.joined(separator: " · ") + say(". Then: ", ". Потом: ", ". Después: ") + e
+            + (e.hasSuffix(".") ? "" : ".") + say(" Don't repeat it — check first.", " Не повторяй, сначала проверь.", " No lo repitas: compruébalo antes.")
+    }
+
+    /// The journal's entries signed since `start`, each as where to look.
+    private func signed(since start: Date, _ pick: (Journal) throws -> [Journal.Entry]) -> [String] {
         let from = Date(timeIntervalSince1970: start.timeIntervalSince1970.rounded(.down))   // the journal keeps whole seconds
-        return ((try? Journal(url: journalURL).unresolved()) ?? []).filter { $0.at >= from }.map { e in
+        return ((try? pick(Journal(url: journalURL))) ?? []).filter { $0.at >= from }.map { e in
             switch e.chain {
             case "solana": "https://solscan.io/tx/\(e.id)"
             case "near": "https://nearblocks.io/txns/\(e.id)"
             case "relay": "Relay order \(e.id)"
             case "1click": "1Click deposit \(e.id)"
             case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
+            case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
             case "hyperliquid": "Hyperliquid «\(e.note)»"
             default: EVMNetwork.named(e.chain).map { "\($0.explorer)/tx/\(e.id)" } ?? "\(e.chain) \(e.id)"
             }
@@ -352,6 +367,7 @@ extension Workspace {
         executing = true
         defer { executing = false }
         var done = false
+        let started = Date()
         do {
             let opened = try await executor(wallet).execute(p)
             done = true
@@ -367,8 +383,10 @@ extension Workspace {
             }
             reply("Done: \(opened.asset) \(Fmt.num(opened.size, maxFraction: 6)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))\(opened.take.map { ", take-profit \(Fmt.price($0))" } ?? "").")
         } catch {
-            reply("Execution stopped: \(error.localizedDescription)")
-            noteFailure("\(p.intent.side == .long ? "Long" : "Short") \(IntentParser.pretty(p.market.name))", error)
+            if let went = wentThrough(since: started, then: error) { reply(went) } else {
+                reply("Execution stopped: \(error.localizedDescription)")
+                noteFailure("\(p.intent.side == .long ? "Long" : "Short") \(IntentParser.pretty(p.market.name))", error)
+            }
         }
         await refresh()
         // Only now, with the new position loaded: flipped before, the plan left the canvas and the position's board
@@ -728,7 +746,11 @@ extension Workspace {
         } catch {
             // Sent, but no outcome came back: it may well have gone through, and a second try would pay twice.
             let sent = ownsBoard ? unsettled(since: started) : []
-            if sent.isEmpty, let costly = error as? CostlyMove {
+            // Gone through, then a step after it failed: it stays done, so it's said with its links and never offered again.
+            let went = ownsBoard && sent.isEmpty ? wentThrough(since: started, then: error) : nil
+            if let went {
+                reply(went)
+            } else if sent.isEmpty, let costly = error as? CostlyMove {
                 // More lost than a move may lose on its own: asked, not refused (the user: «показывать диалог и спрашивать
                 // Send anyway?»). The cards run it again with that loss accepted, or leave it.
                 costlyMove = (command, costly)
@@ -761,7 +783,7 @@ extension Workspace {
                 reply(say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + error.localizedDescription + " "
                       + say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + sent.joined(separator: " · "))
             }
-            finish(false, unknown: !sent.isEmpty)
+            finish(false, unknown: !sent.isEmpty || went != nil)
         }
         await refresh()
     }
@@ -1182,14 +1204,18 @@ extension Workspace {
             defer { waiting.cancel() }
             // Nobody may be at the Mac: a session the user opened for 5–30 minutes doesn't cover this buy, it asks again.
             if SignerClient.isAvailable { _ = try? await SignerClient().send(.endSession) }
+            let started = Date()
             do {
                 let line = try await executor(wallet).swap(asset, buy: true, amount: usdc, equity: equity)
                 notify(.moves, say("\(asset.symbol) purchase", "Покупка \(asset.symbol)"), line, schedule: "buy:\(asset.symbol)")
             } catch {
                 let next = find(symbol).map { Fmt.date(schedules[$0].next) } ?? "none, the schedule was stopped"
-                let text = "Scheduled \(asset.symbol) purchase failed: \(error.localizedDescription). Next one: \(next)."
+                // Bought, then the read after it failed: a «purchase failed» notice sent the user to buy it again by hand.
+                let went = wentThrough(since: started, then: error)
+                let text = went.map { "\($0) Next one: \(next)." } ?? "Scheduled \(asset.symbol) purchase failed: \(error.localizedDescription). Next one: \(next)."
                 reply(text)
-                notify(.moves, say("\(asset.symbol) purchase failed", "Покупка \(asset.symbol) не прошла"), text, schedule: "buy:\(asset.symbol)", failed: true)
+                notify(.moves, went == nil ? say("\(asset.symbol) purchase failed", "Покупка \(asset.symbol) не прошла") : say("\(asset.symbol) purchase", "Покупка \(asset.symbol)"),
+                       text, schedule: "buy:\(asset.symbol)", failed: went == nil)
             }
             executing = false
         }

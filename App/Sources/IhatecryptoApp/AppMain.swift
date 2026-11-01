@@ -403,10 +403,11 @@ struct ContentView: View {
             if UserDefaults.standard.bool(forKey: "debugAPI") { DebugAPI.shared.start(ws) }
             // Live runs on the Dev test wallet of what its few dollars never reach: JupiterZ's signed path
             // (`-jupiterZFirst YES`), the price-impact stop's cards (`-impactStopTest YES`), a limit that fills at once
-            // without its stop confirmed (`-limitFillTest YES`).
+            // without its stop confirmed (`-limitFillTest YES`), a swap whose balance read after it fails (`-swapTailTest YES`).
             Executor.jupiterZFirst = UserDefaults.standard.bool(forKey: "jupiterZFirst")
             Executor.impactStopTest = UserDefaults.standard.bool(forKey: "impactStopTest")
             Executor.limitFillTest = UserDefaults.standard.bool(forKey: "limitFillTest")
+            Executor.swapTailTest = UserDefaults.standard.bool(forKey: "swapTailTest")
             #endif
             // The development copy says so in the Dock, beside the working one's same icon.
             if Flavor.dev { NSApp.dockTile.badgeLabel = Flavor.tag }
