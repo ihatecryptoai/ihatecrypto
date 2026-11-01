@@ -544,13 +544,14 @@ extension Executor {
             }
             let ours = Base58.encode(signed.subdata(in: 65..<129))
             try journal.append(.init(chain: "solana", id: ours, kind: .signed, note: "\(note); Jupiter order \(sponsor.requestId), valid until block \(lastValid)"))
-            do {
-                let landed = try await Jupiter.execute(signed, requestId: sponsor.requestId)
-                try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(landed)"))
-            } catch {
-                try journal.append(.init(chain: "solana", id: ours, kind: .failed, note: "\(error.localizedDescription)"))
-                throw ExecutionError("Jupiter didn't send the swap: \(error.localizedDescription)")
+            let landed: String
+            do { landed = try await Jupiter.execute(signed, requestId: sponsor.requestId) } catch {
+                // No answer, or Jupiter's «Failed», isn't the chain's: an ask before it (RPCRetry asks again after a timeout)
+                // may have sent it. Only the chain says: the transaction with our signature, or its blockhash past use without it.
+                try await settleSponsored(ours, blockhash: message.blockhash, after: simulation.slot, jupiter: error)
+                return changes
             }
+            try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(landed)"))
             return changes
         }
         let signed = try await signer.signSolana(unsigned, accounts: accounts, recipients: [], tokenOwners: owners)
@@ -569,6 +570,32 @@ extension Executor {
             throw ExecutionError("The transaction didn't make it into a block; you can retry.")
         }
         return changes
+    }
+
+    /// A swap with no gas of ours that Jupiter's /execute didn't confirm (`jupiter`: its error, a timeout after its retries):
+    /// journaled as the chain has it (SolanaRPC.waitForCosigned). Found: confirmed, the swap goes on. Failed there, or past
+    /// use without landing: said, so it may be tried again. The chain silent: it stays «signed», so the chat says «sent,
+    /// status unknown» with no «Try again». None of these errors starts as the guard's or the simulation's, after which the
+    /// swap takes the pools' route: a fill that went out would be swapped twice.
+    func settleSponsored(_ ours: String, blockhash: String, after slot: UInt64, jupiter: any Error, timeout: TimeInterval = 120) async throws {
+        let said = jupiter.localizedDescription
+        report("Jupiter didn't confirm the swap (\(said)). Looking for it on chain before saying how it went, up to \(Int(timeout)) s.")
+        let found: (outcome: SolanaRPC.Outcome, transaction: String?)
+        do { found = try await rpc.waitForCosigned(ours, signer: wallet.solana, blockhash: blockhash, after: slot, timeout: timeout) } catch {
+            throw ExecutionError("Jupiter didn't say whether it sent the swap (\(said)), and the chain doesn't show it yet. "
+                                 + "Check https://solscan.io/account/\(wallet.solana) before swapping again.")
+        }
+        switch found.outcome {
+        case .confirmed:
+            try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(found.transaction ?? ours)"))
+            report("Found on chain: transaction \(found.transaction ?? ours) went through.")
+        case .failed(let e):
+            try journal.append(.init(chain: "solana", id: ours, kind: .failed, note: e))
+            throw ExecutionError("The swap reached the chain and failed: \(e).")
+        case .expired:
+            try journal.append(.init(chain: "solana", id: ours, kind: .expired, note: said))
+            throw ExecutionError("Jupiter didn't send the swap (\(said)), and now it can't land: nothing moved, you can retry.")
+        }
     }
 
     /// Where «buy NEAR» takes its USDC — the one rule the card shows and the executor signs: Solana when it holds the

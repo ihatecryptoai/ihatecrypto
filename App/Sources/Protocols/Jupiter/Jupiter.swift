@@ -138,10 +138,14 @@ extension Jupiter {
         }
     }
 
+    /// How long one /execute waits for its answer. Only the Dev copy's `-jupiterExecuteTimeout 0.02` sets it, for a live
+    /// run of a swap whose answer doesn't come (Executor.settleSponsored).
+    nonisolated(unsafe) public static var executeTimeout: TimeInterval = 60
+
     /// Hands our signed transaction to Jupiter, which signs as the fee payer and sends it. The same transaction and id may
     /// be sent again (Jupiter answers for the first one), so a dropped answer is asked again. Returns the signature.
     public static func execute(_ signed: Data, requestId: String) async throws -> String {
-        var request = URLRequest(url: URL(string: "\(v2)/execute")!, timeoutInterval: 60)
+        var request = URLRequest(url: URL(string: "\(v2)/execute")!, timeoutInterval: executeTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["signedTransaction": signed.base64EncodedString(), "requestId": requestId])

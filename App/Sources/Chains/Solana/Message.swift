@@ -18,6 +18,8 @@ public struct SolanaMessage: Sendable {
     public let version: Int?
     public let requiredSignatures: Int
     public let staticKeys: [String]
+    /// The recent blockhash the message was built on: once past use, the transaction can never land.
+    public let blockhash: String
     public let instructions: [Instruction]
     public let lookups: [Lookup]
 
@@ -45,6 +47,7 @@ public struct SolanaMessage: Sendable {
         let keyCount = try compact()
         try need(keyCount * 32 + 32)
         let keys = (0..<keyCount).map { Base58.encode(Data(bytes[(p + $0 * 32)..<(p + $0 * 32 + 32)])) }
+        let blockhash = Base58.encode(Data(bytes[(p + keyCount * 32)..<(p + keyCount * 32 + 32)]))
         p += keyCount * 32 + 32 // keys, recent blockhash
         var instructions: [Instruction] = []
         for _ in 0..<(try compact()) {
@@ -68,7 +71,7 @@ public struct SolanaMessage: Sendable {
         }
         // Trailing bytes would be signed without being checked.
         guard p == bytes.count else { throw WalletError("Extra bytes after the message") }
-        return SolanaMessage(version: version, requiredSignatures: required, staticKeys: keys, instructions: instructions, lookups: lookups)
+        return SolanaMessage(version: version, requiredSignatures: required, staticKeys: keys, blockhash: blockhash, instructions: instructions, lookups: lookups)
     }
 
     /// Every account the message can touch, in Solana's order: static keys, then all writable
@@ -106,15 +109,17 @@ extension SolanaRPC {
 
     /// Simulates and returns the watched accounts' state afterwards: lamports and, for token accounts, raw amount.
     /// `sigVerify: false` simulates a transaction before it is signed.
-    public func simulate(_ transaction: Data, watch: [String], sigVerify: Bool = true) async throws -> (error: String?, after: [String: (lamports: UInt64, token: UInt64?)]) {
+    /// `slot`: the slot it ran at. It ran on the transaction's own blockhash, so that node knew the blockhash then.
+    public func simulate(_ transaction: Data, watch: [String], sigVerify: Bool = true) async throws
+        -> (error: String?, after: [String: (lamports: UInt64, token: UInt64?)], slot: UInt64) {
         let r = try await call("simulateTransaction", [transaction.base64EncodedString(), [
             "encoding": "base64", "sigVerify": sigVerify, "commitment": "confirmed",
             "accounts": ["encoding": "jsonParsed", "addresses": watch],
         ]]) as? [String: Any]
-        let value = r?["value"] as? [String: Any]
+        let value = r?["value"] as? [String: Any], slot = ((r?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value ?? 0
         var after: [String: (lamports: UInt64, token: UInt64?)] = [:]
         for (address, account) in zip(watch, value?["accounts"] as? [Any] ?? []) { after[address] = Self.state(account) ?? (0, nil) }
-        guard let err = value?["err"], !(err is NSNull) else { return (nil, after) }
+        guard let err = value?["err"], !(err is NSNull) else { return (nil, after, slot) }
         let text = JSONSerialization.isValidJSONObject(err)
             ? (try? JSONSerialization.data(withJSONObject: err)).map { String(decoding: $0, as: UTF8.self) } ?? "\(err)" : "\(err)"
         let logs = value?["logs"] as? [String] ?? []
@@ -122,11 +127,11 @@ extension SolanaRPC {
         if Self.shortOfSOL(text, logs: logs), let payer = try? SolanaMessage.parse(transaction: transaction).staticKeys.first {
             let have = (try? await balance(payer)).map { " has \(Decimal($0) / 1_000_000_000) SOL and" } ?? ""
             return ("Not enough SOL: the wallet \(payer.prefix(4))…\(payer.suffix(4))\(have) can't pay Solana's fee and the rent of the account "
-                    + "this move opens. Send it ≈ 0.01 SOL, then try again.", after)
+                    + "this move opens. Send it ≈ 0.01 SOL, then try again.", after, slot)
         }
         // The program's own words when it logged any, e.g. «Error: insufficient funds».
         let reason = logs.first { $0.contains("Error") }?.replacingOccurrences(of: "Program log: ", with: "")
-        return (reason.map { "\($0) \(text)" } ?? text, after)
+        return (reason.map { "\($0) \(text)" } ?? text, after, slot)
     }
 
     /// The watched accounts' state now, in one read and one slot: what a move's balance rules compare the simulation with.

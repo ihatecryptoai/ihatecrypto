@@ -201,17 +201,23 @@ extension Workspace {
     /// The journal's entries signed since `start`, each as where to look.
     private func signed(since start: Date, _ pick: (Journal) throws -> [Journal.Entry]) -> [String] {
         let from = Date(timeIntervalSince1970: start.timeIntervalSince1970.rounded(.down))   // the journal keeps whole seconds
-        return ((try? pick(Journal(url: journalURL))) ?? []).filter { $0.at >= from }.map { e in
-            switch e.chain {
-            case "solana": "https://solscan.io/tx/\(e.id)"
-            case "near": "https://nearblocks.io/txns/\(e.id)"
-            case "relay": "Relay order \(e.id)"
-            case "1click": "1Click deposit \(e.id)"
-            case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
-            case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
-            case "hyperliquid": "Hyperliquid «\(e.note)»"
-            default: EVMNetwork.named(e.chain).map { "\($0.explorer)/tx/\(e.id)" } ?? "\(e.chain) \(e.id)"
-            }
+        // A scheduled task's moves are the automation wallet's (executor).
+        let solana = TaskRun.automation?.solana ?? solanaAddress
+        return ((try? pick(Journal(url: journalURL))) ?? []).filter { $0.at >= from }.map { Self.whereToLook($0, solana: solana) }
+    }
+
+    static func whereToLook(_ e: Journal.Entry, solana: String) -> String {
+        switch e.chain {
+        // A swap with no gas of ours, still «signed», is journaled by our signature, the second: an explorer finds it only by
+        // the first, the sponsor's, so the wallet's page. Once through, its entry carries the sponsor's (Journal.wentThrough).
+        case "solana": e.kind == .signed && e.note.contains("; Jupiter order ") ? "https://solscan.io/account/\(solana)" : "https://solscan.io/tx/\(e.id)"
+        case "near": "https://nearblocks.io/txns/\(e.id)"
+        case "relay": "Relay order \(e.id)"
+        case "1click": "1Click deposit \(e.id)"
+        case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
+        case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
+        case "hyperliquid": "Hyperliquid «\(e.note)»"
+        default: EVMNetwork.named(e.chain).map { "\($0.explorer)/tx/\(e.id)" } ?? "\(e.chain) \(e.id)"
         }
     }
 

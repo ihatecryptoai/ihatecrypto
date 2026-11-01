@@ -129,6 +129,48 @@ public struct SolanaRPC: Sendable {
         }
         throw WalletError("Transaction status still unknown after \(Int(timeout)) s: \(signature)")
     }
+
+    /// A transaction we signed second (Jupiter's gasless swap, a JupiterZ fill): the network knows it only by the first
+    /// signature, someone else's, so it's looked for among `signer`'s own transactions, with its id. `slot`: where a node
+    /// knew `blockhash` before we signed (the simulation's), so the transaction can only be in a later one.
+    /// «expired» only once a node finalized past `slot` finds the blockhash past use, at finalized slot D — nothing lands
+    /// after D — and the wallet's transactions, read finalized at or past D, back to `slot`, hold none with ours. A node
+    /// behind either slot refuses (`minContextSlot`): one that doesn't know a blockhash yet says «not valid» too. Finalized,
+    /// since the index of a wallet's transactions is written after a block is replayed: a confirmed one may not be in it yet.
+    public func waitForCosigned(_ signature: String, signer: String, blockhash: String, after slot: UInt64,
+                                timeout: TimeInterval = 120) async throws -> (outcome: Outcome, transaction: String?) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var others: Set<String> = []   // the wallet's transactions already read, without ours
+        while Date() < deadline {
+            do {
+                let valid = try? await call("isBlockhashValid", [blockhash, ["commitment": "finalized", "minContextSlot": slot]]) as? [String: Any]
+                let dead = slot > 0 && (valid?["value"] as? Bool) == false ? ((valid?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value : nil
+                guard let list = try await call("getSignaturesForAddress", [signer, ["limit": 100, "commitment": dead == nil ? "confirmed" : "finalized",
+                                                                                    "minContextSlot": dead ?? slot]]) as? [[String: Any]] else {
+                    throw WalletError("Solana RPC getSignaturesForAddress: no list")
+                }
+                var reached = list.count < 100, unread = false   // a short page is the wallet's whole history
+                for s in list {
+                    guard let id = s["signature"] as? String, let at = (s["slot"] as? NSNumber)?.uint64Value else { unread = true; continue }
+                    if at <= slot { reached = true; break }
+                    guard !others.contains(id) else { continue }
+                    // Read whole or not at all: a reply without its signatures or its outcome may be ours.
+                    guard let tx = try await call("getTransaction", [id, ["encoding": "json", "commitment": "confirmed",
+                                                                          "maxSupportedTransactionVersion": 0]]) as? [String: Any],
+                          let meta = tx["meta"] as? [String: Any],
+                          let signatures = (tx["transaction"] as? [String: Any])?["signatures"] as? [String] else { unread = true; continue }
+                    guard signatures.contains(signature) else { others.insert(id); continue }
+                    let err = meta["err"]
+                    return (err == nil || err is NSNull ? .confirmed : .failed("\(err!)"), id)
+                }
+                if dead != nil, reached, !unread { return (.expired, nil) }
+            } catch {
+                // A node that fails or is behind proves nothing either way: asked again in a moment, until the deadline.
+            }
+            try await Task.sleep(for: .seconds(2))
+        }
+        throw WalletError("Transaction status still unknown after \(Int(timeout)) s: signed \(signature)")
+    }
 }
 
 public enum SolanaTransaction {

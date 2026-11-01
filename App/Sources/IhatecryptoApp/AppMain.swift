@@ -1,5 +1,6 @@
 import AppKit
 import GuardJev
+import JupiterSwap
 import TxGuard
 import TradeExecution
 import IhatecryptoCore
@@ -403,11 +404,15 @@ struct ContentView: View {
             if UserDefaults.standard.bool(forKey: "debugAPI") { DebugAPI.shared.start(ws) }
             // Live runs on the Dev test wallet of what its few dollars never reach: JupiterZ's signed path
             // (`-jupiterZFirst YES`), the price-impact stop's cards (`-impactStopTest YES`), a limit that fills at once
-            // without its stop confirmed (`-limitFillTest YES`), a swap whose balance read after it fails (`-swapTailTest YES`).
+            // without its stop confirmed (`-limitFillTest YES`), a swap whose balance read after it fails (`-swapTailTest YES`),
+            // a gasless or JupiterZ swap whose /execute answer doesn't come in time (`-jupiterExecuteTimeout 0.02`:
+            // RPCRetry asks again, and Jupiter answers a repeat in well under a second).
             Executor.jupiterZFirst = UserDefaults.standard.bool(forKey: "jupiterZFirst")
             Executor.impactStopTest = UserDefaults.standard.bool(forKey: "impactStopTest")
             Executor.limitFillTest = UserDefaults.standard.bool(forKey: "limitFillTest")
             Executor.swapTailTest = UserDefaults.standard.bool(forKey: "swapTailTest")
+            let executeTimeout = UserDefaults.standard.double(forKey: "jupiterExecuteTimeout")
+            if executeTimeout > 0 { Jupiter.executeTimeout = executeTimeout }
             #endif
             // The development copy says so in the Dock, beside the working one's same icon.
             if Flavor.dev { NSApp.dockTile.badgeLabel = Flavor.tag }
