@@ -49,6 +49,8 @@ def write(key, value, kind):
     """`defaults write` takes a bool as true/false only; `defaults read` gives it back as 1/0."""
     if isinstance(kind, bool):
         subprocess.run(["defaults", "write", DOMAIN, key, "-bool", "true" if str(value).lower() in ("true", "1") else "false"])
+    elif isinstance(kind, str):
+        subprocess.run(["defaults", "write", DOMAIN, key, "-string", str(value)])
     else:
         subprocess.run(["defaults", "write", DOMAIN, key, "-float", str(value)])
 

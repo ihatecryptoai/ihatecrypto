@@ -321,6 +321,12 @@ public enum MPP {
         return "Its answer:\n\(w)" + (a.links.isEmpty ? "" : "\n\nLinks it cites:\n" + a.links.joined(separator: "\n"))
     }
 
+    /// All of an answer the chat's model may read, for the guard: reply's digest and, for an AI service (whose digest is
+    /// only its words), the canvas's first 2,000 characters of the JSON (canvasBlocks), where its other fields sit.
+    public static func forModel(_ data: Data) -> String {
+        Answer(data).writing == nil ? digest(data) : digest(data) + "\n\n" + shown(data, limit: 2000)
+    }
+
     /// The service's name in the directory («Brave Search») for its address; nil when it isn't listed.
     public static func serviceName(_ url: String) async -> String? {
         guard let host = URL(string: url)?.host()?.lowercased(), let services = await directory() else { return nil }

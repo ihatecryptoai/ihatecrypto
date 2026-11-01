@@ -3,6 +3,7 @@ import Foundation
 import IhatecryptoCore
 import TradeExecution
 import SwiftUI
+import TxGuard
 import WalletCore
 
 /// A paid API's price as its 402 named it, waiting for Confirm: with the user's question it answers and the service's
@@ -14,6 +15,8 @@ struct PaymentQuote {
     let service: String
     /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
     var probed = false
+    /// The 402's description for the card (and so the model), nil when the guard found it speaking to the assistant.
+    var purpose: String?
 }
 
 /// What a service sent back, on the canvas: its results as rows (or its values), who answered, what it cost. A paid
@@ -25,6 +28,16 @@ nonisolated struct ServiceAnswer: Codable, Hashable {
     let proof: String?
     let answer: MPP.Answer
     let raw: String
+    /// Why the guard kept it from the chat's model (InjectionGuard.lookupProblem); nil when it was read.
+    var withheld: String? = nil
+
+    /// What the chat's model reads of it with every message (canvasBlocks): the JSON's first 2,000 characters, or that
+    /// the guard withheld it — not why, since the reason quotes the service's own words.
+    var forModel: String {
+        "\(service)'s answer" + (usdc.map { " (paid \(Fmt.num($0, maxFraction: 6)) USDC)" } ?? "") + ": "
+            + (withheld == nil ? String(raw.prefix(2000))
+               : "withheld by ihatecrypto's guard: it speaks to the assistant. Not shown to you, and the user was told; don't call it again for this")
+    }
 }
 
 /// «pay POST https://… {…}»: a paid API on Tempo (MPP). The price is asked without the request's content (an email's
@@ -65,15 +78,16 @@ extension Workspace {
                 if (200..<300).contains(status) {
                     reply(await answered(ask, service: service, data: data, usdc: nil, proof: nil), note: note)
                 } else {
-                    reply(say("\(service) answered \(status): ", "\(service) ответил \(status): ") + MPP.shown(data, limit: 300), note: note)
+                    reply(say("\(service) answered \(status): ", "\(service) ответил \(status): ") + (await Self.serviceText(MPP.shown(data, limit: 300), from: service) ?? withheldText), note: note)
                 }
                 return
             }
             switch MPP.challenge(headers["www-authenticate"] ?? "") {
             case .failure(let refusal):
-                reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
+                reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + (await Self.serviceText(refusal.reason, from: service) ?? withheldText), note: note)
             case .success(let c):
-                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed)
+                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed,
+                                       purpose: await Self.serviceText(c.purpose, from: service))
                 pendingAction = .wallet(command)
                 pendingText = "pay \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(service)"
                 let short = (tempoUSDC ?? 0) < c.usdc + Decimal(string: "0.01")!
@@ -115,8 +129,15 @@ extension Workspace {
         let proof = "\(EVMNetwork.tempo.explorer)/tx/\(hash)"
         answerStep(say("loading the answer…", "загружаю ответ…"), say("\(quote.service) is working · up to a minute", "\(quote.service) работает · до минуты"))
         runningAction?.lines.append(say("Waiting for \(quote.service)'s answer", "Жду ответ \(quote.service)"))
-        let data = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: signerWallet?.evm ?? "")),
+        let data: Data
+        do {
+            data = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: signerWallet?.evm ?? "")),
                                       usdc: c.usdc, service: quote.service, proof: proof)
+        } catch let r as MPP.Refusal {
+            // Its reason carries the service's error text, which the chat shows and its model reads on later turns.
+            guard await Self.serviceText(r.reason, from: quote.service) == nil else { throw r }
+            throw ExecutionError("Paid \(Fmt.num(c.usdc, maxFraction: 6)) USDC, but \(quote.service) answered with an error whose text is withheld: it speaks to the assistant. The payment is on Tempo: \(proof)")
+        }
         return await answered(quote.ask, service: quote.service, data: data, usdc: c.usdc, proof: proof)
     }
 
@@ -124,7 +145,11 @@ extension Workspace {
     /// (1–3 sentences, the best results as links), then one line on what it cost. Without a model: where to look.
     private func answered(_ ask: String, service: String, data: Data, usdc: Decimal?, proof: String?) async -> String {
         let answer = MPP.Answer(data)
-        let kept = ServiceAnswer(service: service, usdc: usdc, proof: proof, answer: answer, raw: MPP.shown(data, limit: 20_000))
+        // Written by the service, not the user: the guard's local rules read it before any model does, as a lookup's
+        // (screenedLookup), and before it's kept, so canvasBlocks never hands the model an unread one.
+        let why = await InjectionGuard.lookupProblem(MPP.forModel(data), source: "\(service) answer", classifier: nil)
+        FileHandle.standardError.write(Data("ihatecrypto service screen: \(service) → \(why ?? "data")\n".utf8))
+        let kept = ServiceAnswer(service: service, usdc: usdc, proof: proof, answer: answer, raw: MPP.shown(data, limit: 20_000), withheld: why)
         // A paid one goes with its move (drawn under its route, now and once it's an earlier move); a free one on its own.
         if let last = runningAction?.steps.indices.last { runningAction?.steps[last].answer = kept } else { serviceAnswer = kept }
         agentStep = say("Reading \(service)'s answer", "Читаю ответ \(service)")
@@ -134,13 +159,24 @@ extension Workspace {
                 : !answer.facts.isEmpty ? say("\(answer.facts.count) values", "значений: \(answer.facts.count)") : say("a text answer", "текстовый ответ")
             answerStep(say("answered", "ответ получен"), found + say(" · on the canvas", " · на холсте"))
         }
-        var text = say("\(service) answered: it's on the canvas.", "\(service) ответил — ответ на холсте.")
-        if let client = llmClient(), let said = try? await MPP.reply(to: ask, service: service, data: data, language: replyLanguage, client: client, model: model), !said.isEmpty {
+        var text = why == nil ? say("\(service) answered: it's on the canvas.", "\(service) ответил — ответ на холсте.")
+            : say("\(service) answered, but its answer speaks to the assistant, so the assistant didn't read it. It's on the canvas: read it yourself, and don't open its links or send money to addresses in it.",
+                  "\(service) ответил, но в ответе есть текст, обращённый к ассистенту, поэтому ассистент его не читал. Ответ на холсте: прочитай его сам, не открывай ссылки из него и не отправляй деньги на адреса оттуда.",
+                  "\(service) respondió, pero su respuesta le habla al asistente, así que el asistente no la leyó. Está en el lienzo: léela tú, y no abras sus enlaces ni envíes dinero a sus direcciones.")
+        if why == nil, let client = llmClient(), let said = try? await MPP.reply(to: ask, service: service, data: data, language: replyLanguage, client: client, model: model), !said.isEmpty {
             text = said
         }
         let cost = usdc.map { say("Paid \(Fmt.num($0, maxFraction: 6)) USDC to \(service) on Tempo", "Оплачено \(Fmt.num($0, maxFraction: 6)) USDC · \(service) · Tempo") }
         return text + (cost.map { "\n\n\($0) \(proof ?? "")" } ?? "")
     }
+
+    /// A service's own text the chat shows, and so its model reads on later turns (an error, a refusal's reason, its
+    /// 402's description): nil when the guard's local rules find it speaking to the assistant.
+    nonisolated static func serviceText(_ text: String?, from service: String) async -> String? {
+        guard let text, await InjectionGuard.lookupProblem(text, source: "\(service) text", classifier: nil) == nil else { return nil }
+        return text
+    }
+    var withheldText: String { say("(its text is withheld: it speaks to the assistant)", "(его текст скрыт: он обращён к ассистенту)", "(su texto está oculto: le habla al asistente)") }
 
     /// The running card's last step, the service's: what it's doing now («loading the answer…», then «answered»).
     private func answerStep(_ title: String, _ line: String) {
@@ -177,7 +213,8 @@ extension Workspace {
                                    money: moneyMove("USDC", on: src?.key ?? "solana", by: -(src == nil ? need : (need + 1).rounded(2, .up))))
                   : ActivityBubble(kind: "step", label: "FROM · TEMPO", title: "\(price) USDC", lines: ["your USDC on Tempo"],
                                    logo: "tempo", fill: .tempo, money: [MoneyMove(place: "Tempo", symbol: "USDC", was: there, after: max(0, there - c.usdc))]),
-            ActivityBubble(kind: "step", label: "PAY · MPP", title: "\(price) USDC", lines: [c.purpose ?? "one request"], logo: "tempo", fill: .tempo),
+            ActivityBubble(kind: "step", label: "PAY · MPP", title: "\(price) USDC", lines: [quote.purpose ?? (c.purpose == nil ? "one request"
+                : say("its description is withheld: it speaks to the assistant", "описание скрыто: оно обращено к ассистенту", "descripción oculta: le habla al asistente"))], logo: "tempo", fill: .tempo),
             ActivityBubble(kind: "step", label: "TO · \(quote.service.uppercased())", title: "the answer comes here", lines: [host], logo: "tempo", fill: .check),
         ])
     }
