@@ -395,7 +395,7 @@ enum Signer {
                 return refused(v)
             }
             var r = SignerReply(ok: true)
-            r.signatureBytes = try withKey("solana", reason: "sign text for a site:\n" + String(text.prefix(160))) {
+            r.signatureBytes = try withKey("solana", reason: PersonalMessage.prompt(text)) {
                 try Curve25519.Signing.PrivateKey(rawRepresentation: $0).signature(for: message)
             }
             r.checks = ["Only text was signed, not a transaction."]
@@ -409,7 +409,7 @@ enum Signer {
             }
             let text = String(data: message, encoding: .utf8) ?? "\(message.count) bytes"
             var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: "sign text for a site:\n" + String(text.prefix(160))) {
+            r.signature = try withKey("evm", reason: PersonalMessage.prompt(text)) {
                 try EVMSigner.sign(digest: PersonalMessage.digest(message), privateKey: $0)
             }
             r.checks = ["Text was signed, not a transaction or an approval."]

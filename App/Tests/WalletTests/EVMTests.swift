@@ -398,6 +398,43 @@ import WalletCore
     #expect(!login.prompt.contains("\u{202E}") && login.prompt.split(separator: "\n").count == 4)
     #expect(login.prompt.split(separator: "\n")[1].hasPrefix("ihatecrypto can't tell what this signature allows"))
     #expect(login.prompt.hasPrefix("sign Login for «Examplemoc.evil»"))
+    // A value cut to fit ends in «…», so the prompt never passes off part of it as the whole.
+    let long = try typed("Example", "Login", [("contents", "string", "\"\(String(repeating: "a", count: 100))\"")])
+    #expect(long.prompt.split(separator: "\n").last == "contents: \(String(repeating: "a", count: 70))…")
+    #expect(login.prompt.split(separator: "\n").last == "nonce: 1")
+}
+
+// The Touch ID prompt for a site's text (personal_sign, Solana signMessage) shows 160 characters; a longer text says
+// its whole length on our own first line, before any of the site's text, and ends in «…» where it was cut.
+@Test func textPromptSaysItWasCut() {
+    let fits = String(repeating: "a", count: 160)
+    #expect(PersonalMessage.prompt(fits) == "sign text for a site:\n" + fits)
+    let over = PersonalMessage.prompt(fits + "b")
+    #expect(over == "sign text for a site (161 characters, the first 160 shown):\n" + fits + "…")
+
+    let siwe = """
+    app.example.com wants you to sign in with your Ethereum account:
+    0x14dC79964da2C08b23698B3D3cc7Ca32193d9955
+
+    I accept the Terms of Service: https://app.example.com/tos and confirm this sign-in will not trigger a transaction.
+
+    URI: https://app.example.com/login
+    Version: 1
+    Chain ID: 1
+    Nonce: 32891756
+    Issued At: 2026-11-02T10:00:00Z
+    """
+    let prompt = PersonalMessage.prompt(siwe)
+    #expect(prompt.hasPrefix("sign text for a site (\(siwe.count) characters, the first 160 shown):\n"))
+    #expect(prompt.hasSuffix("…") && !prompt.contains("URI:"))
+
+    // Characters as a person counts them: a family emoji is one, not its 5 scalars or 8 UTF-16 units.
+    let family = String(repeating: "👨‍👩‍👧", count: 200)
+    #expect(PersonalMessage.prompt(family).hasPrefix("sign text for a site (200 characters, the first 160 shown):\n"))
+
+    // A site's right-to-left override lands after our line break: our line comes first and whole, a bidi paragraph of its own.
+    let rtl = PersonalMessage.prompt("\u{202E}" + String(repeating: "x", count: 200))
+    #expect(rtl.split(separator: "\n").first == "sign text for a site (201 characters, the first 160 shown):")
 }
 
 // 54.56 AI of 18 decimals is past 64 bits: the quote and the swap carry it as a whole 256-bit word.
