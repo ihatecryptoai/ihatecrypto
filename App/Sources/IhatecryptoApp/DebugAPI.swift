@@ -287,12 +287,13 @@ final class DebugAPI {
             // EVM transaction (Arbitrum unless named). Nothing can be approved or signed from it.
             var origin = "https://kamino.com", site = SiteCheck.Verdict.known, review = Self.sampleReview
             var evm: EVMReview?
-            if method == "POST", let e = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["evm"] as? [String: String] {
-                let chain = UInt64(e["chain"] ?? "") ?? 42161
-                guard let to = e["to"], let url = Browser.evmRPC[chain].flatMap(URL.init(string:)), let from = ws.signerWallet?.evm else {
+            if method == "POST", let e = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["evm"] as? [String: Any] {
+                // value and chain as a site sends them: hex strings or numbers (Browser.quantity, as the real path reads).
+                guard let to = e["to"] as? String, let value = Browser.quantity(e["value"]), let chain = e["chain"] == nil ? 42161 : Browser.quantity(e["chain"]),
+                      let url = Browser.evmRPC[chain].flatMap(URL.init(string:)), let from = ws.signerWallet?.evm else {
                     return (400, "text/plain", Data("POST {\"evm\": {\"to\", \"data\", \"value\", \"chain\"}}, a chain the browser reads, a wallet in this copy\n".utf8))
                 }
-                evm = await Browser.evmReview(to: to, value: UInt64(e["value"] ?? "") ?? 0, data: Data(hex: e["data"] ?? "0x") ?? Data(), from: from,
+                evm = await Browser.evmReview(to: to, value: value, data: Data(hex: e["data"] as? String ?? "0x") ?? Data(), from: from,
                                               rpc: EVMRPC(url: url, chainId: chain))
                 (origin, site) = ("file://", .local)
             } else if method == "POST" {
