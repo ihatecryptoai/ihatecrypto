@@ -625,7 +625,7 @@ extension Workspace {
         await Task { await readChainCosts() }.value
     }
 
-    private func readChainCosts() async {
+    private func readChainCosts(tries: Int = 3) async {
         typealias Wanted = (key: String, chain: String, contract: String, held: Decimal, price: Decimal?)
         var wanted: [Wanted] = coinLines.map { c in
             (coinKey(c.coin, chain: c.chain), c.chain, c.chain == "solana" ? CostBasis.wsol : "native", c.held, markets[c.coin]?.markPx)
@@ -637,12 +637,13 @@ extension Workspace {
         for w in wanted { chainCost[w.key] = (w.held, CostBasis()) }
         let owner = solanaAddress, evm = isEVMAddress(hlAddress) ? hlAddress : nil
         var solPrices: [Hyperliquid.Candle]?, spot: [String: CostBasis]?, nearTokens: [String: [CostBasis.Change]]?
+        var cutShort = false
         for w in wanted {
             var changes: [CostBasis.Change]?, basis: CostBasis?
             switch w.chain {
             case "solana":
                 guard !owner.isEmpty else { break }
-                let moves = await SolanaMoves.shared.moves(owner: owner, mint: w.contract)
+                guard let moves = await SolanaMoves.shared.moves(owner: owner, mint: w.contract) else { cutShort = true; break }
                 if solPrices == nil, w.contract != CostBasis.wsol, moves.contains(where: { ($0.change[w.contract] ?? 0) > 0 }) {
                     solPrices = (try? await Hyperliquid.candles(coin: "SOL", interval: "4h", from: Date().addingTimeInterval(-800 * 86_400))) ?? []
                 }
@@ -652,7 +653,7 @@ extension Workspace {
                 if spot == nil { spot = await Holdings.hyperliquidEntries(user: evm) }
                 basis = spot.map { $0[w.contract] ?? CostBasis() }
             case "near":
-                if w.contract == "native" { changes = await nearCoinChanges(); break }
+                if w.contract == "native" { changes = await nearCoinChanges(); cutShort = cutShort || changes == nil; break }
                 if nearTokens == nil, let account = nearAddress { nearTokens = await Holdings.nearTokenChanges(account: account) }
                 changes = nearTokens.map { $0[w.contract] ?? [] }
             default:
@@ -674,6 +675,9 @@ extension Workspace {
                 seen(w.key, held: w.held, price: price)
             }
         }
+        // A Solana or 1Click read cut short isn't kept (chainCost stays nil above): read again in a minute, not only
+        // when an amount changes, which may be days. Not awaited: the chat's P/L answers without it.
+        if cutShort, tries > 1 { Task { try? await Task.sleep(for: .seconds(60)); await readChainCosts(tries: tries - 1) } }
     }
 
     /// Re-reads NEAR's cost after a NEAR swap: its chart's P/L.
@@ -685,18 +689,19 @@ extension Workspace {
     /// The NEAR account's changes in NEAR: every 1Click swap in the journal that touched NEAR, as 1Click itself settled
     /// it, oldest first. Buying NEAR never kept a cost, so its chart said «not bought here» for NEAR bought in the app
     /// (the owner, 2026-10-15: «почему не показывает что я купил тут»). NEAR from elsewhere is what was held before.
+    /// nil: no NEAR address, or 1Click didn't answer for one of the swaps: a cost without it is wrong.
     func nearCoinChanges() async -> [CostBasis.Change]? {
         guard let account = nearAddress, let entries = try? Journal(url: journalURL).entries() else { return nil }
         var swaps: [(id: String, at: Date)] = []
         for e in entries where e.chain == "1click" && e.kind == .signed && e.note.contains("NEAR") && !swaps.contains(where: { $0.id == e.id }) {
             swaps.append((e.id, e.at))
         }
-        let settled = await withTaskGroup(of: (String, OneClick.Settled?).self) { group in
-            for s in swaps { group.addTask { (s.id, try? await OneClick.settled(depositAddress: s.id)) } }
+        guard let settled = try? await withThrowingTaskGroup(of: (String, OneClick.Settled?).self, body: { group in
+            for s in swaps { group.addTask { (s.id, try await OneClick.settled(depositAddress: s.id)) } }
             var out: [String: OneClick.Settled] = [:]
-            for await (id, s) in group { out[id] = s }
+            for try await (id, s) in group { out[id] = s }
             return out
-        }
+        }) else { return nil }
         return swaps.compactMap { s in
             settled[s.id]?.near(for: account).map { CostBasis.Change(at: s.at, tokens: $0.amount, paid: $0.amount > 0 ? $0.dollars : nil) }
         }
@@ -718,25 +723,28 @@ actor SolanaMoves {
     private var read: [String: CostBasis.SolanaMove] = [:]
 
     /// The owner's moves in `mint`, oldest first: the 50 newest transactions of its token account (either program's);
-    /// for SOL, of the wallet itself.
+    /// for SOL, of the wallet itself. nil when the node didn't give them all (the list, or a transaction it listed): a
+    /// cost from part of them is wrong. What was read stays read, so the next ask goes on from there. At «confirmed», as
+    /// the portfolio's amounts are read: at the default «finalized» a purchase just made was held but not yet in it.
     // ponytail: 50 a token, as on the EVM networks; what was held before them counts at the price then.
-    func moves(owner: String, mint: String) async -> [CostBasis.SolanaMove] {
-        let rpc = SolanaRPC()
+    func moves(owner: String, mint: String, rpc: SolanaRPC = SolanaRPC()) async -> [CostBasis.SolanaMove]? {
         let accounts = mint == CostBasis.wsol ? [owner]
             : [SPL.tokenProgram, SPL.token2022Program].compactMap { try? SPL.associatedAccount(owner: owner, mint: mint, program: $0) }
         var signatures: [String] = []
         for account in accounts {
-            let list = (try? await rpc.call("getSignaturesForAddress", [account, ["limit": 50]])) as? [[String: Any]] ?? []
+            guard let list = (try? await rpc.call("getSignaturesForAddress", [account, ["limit": 50, "commitment": "confirmed"]])) as? [[String: Any]] else { return nil }
             signatures += list.filter { $0["err"] == nil || $0["err"] is NSNull }.compactMap { $0["signature"] as? String }
         }
         var out: [CostBasis.SolanaMove] = []
         for sig in Set(signatures) {
-            if read[sig] == nil,
-               let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 0]])) as? [String: Any],
-               let move = CostBasis.SolanaMove(tx, owner: owner) {
-                read[sig] = move
+            let key = owner + " " + sig   // a move is the owner's side of it: a send between two wallets is −X and +X
+            if read[key] == nil {
+                // Thrown (throttled past its retries, dropped) or null (a node without it): stop, the rest next time.
+                guard let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"]])) as? [String: Any]
+                else { return nil }
+                if let move = CostBasis.SolanaMove(tx, owner: owner) { read[key] = move }
             }
-            if let m = read[sig] { out.append(m) }
+            if let m = read[key] { out.append(m) }
         }
         return out.sorted { $0.at < $1.at }
     }

@@ -343,7 +343,8 @@ final class Workspace {
     /// The P/L line's running count (Alerts.swift); saved with each point of `equityHistory`.
     @ObservationIgnored var pnlMarks: PnLMarks? = LocalStore.load(Workspace.scoped("pnlmarks") + ".json")
     /// What each held token cost as the chain shows it (`loadChainCosts`), by the same keys, with the amount held when it
-    /// was read: tokens bought outside the app have a P/L too. Read again when that amount changes; not kept.
+    /// was read: tokens bought outside the app have a P/L too. Read again when that amount changes, or a minute after a
+    /// read the node cut short; not kept.
     var chainCost: [String: (held: Decimal, cost: CostBasis)] = [:]
     /// What the Solana tokens bought here cost, by mint: the P/L on their portfolio rows. Kept per wallet.
     var costBasis: [String: CostBasis] = LocalStore.load(Workspace.scoped("costbasis") + ".json") ?? [:] {

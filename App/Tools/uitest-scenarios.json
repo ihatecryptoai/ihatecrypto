@@ -326,9 +326,9 @@
     }
   },
   {
-    "name": "P/L on one market never traded → oil, said plainly, no board of zeros (the test wallet has no oil trades)",
+    "name": "P/L on one market never traded → silver, said plainly, no board of zeros (the test wallet has no silver trades; it has traded oil since 2026-10-30)",
     "send": [
-      "сколько я заработал на нефти"
+      "сколько я заработал на серебре"
     ],
     "expect": {
       "reply_contains": "считать нечего",

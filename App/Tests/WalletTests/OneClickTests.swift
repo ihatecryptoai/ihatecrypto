@@ -212,3 +212,51 @@ func tempoExchangeQuotes() async throws {
     #expect(buy?.near(for: "d523049b8db090f8b47bdbfc027ba4c42df08782835303be44ea61d9f1955dfb") == nil)
     #expect(OneClick.Settled(status(OneClick.Asset.solanaUSDC, near, recipient: me, refundTo: "AULW53", state: "REFUNDED")) == nil)
 }
+
+/// 1Click's /status for the deposit addresses «stub-<case>», as it answers them; every other request goes out as usual.
+private final class StatusStub: URLProtocol {
+    static let installed = URLProtocol.registerClass(StatusStub.self)
+    static let answers: [String: (Int, String)] = [
+        "stub-ok": (200, #"{"status":"SUCCESS","swapDetails":{"amountInFormatted":"1000.0","amountInUsd":"999.75","amountOutFormatted":"185.42"},"quoteResponse":{"quoteRequest":{"originAsset":"\#(OneClick.Asset.solanaUSDC)","destinationAsset":"\#(OneClick.Asset.near)","recipient":"me.near","refundTo":"AULW53"}}}"#),
+        "stub-pending": (200, #"{"status":"PROCESSING"}"#),
+        "stub-unknown": (404, #"{"message":"Deposit address stub-unknown not found","error":"Not Found","statusCode":404}"#),
+        "stub-down": (500, #"{"statusCode":500,"message":"Internal server error"}"#),
+        "stub-busy": (429, #"{"statusCode":429,"message":"ThrottlerException: Too Many Requests"}"#),
+        "stub-page": (502, "<html><body>502 Bad Gateway</body></html>"),
+        "stub-empty": (200, "{}"),
+        "stub-gateway": (404, "<html><body>404 Not Found</body></html>"),
+    ]
+    /// «stub-flaky»: throttled once, then the swap.
+    nonisolated(unsafe) static var flaky = 0
+    static func address(_ r: URLRequest) -> String? {
+        guard r.url?.host == "1click.chaindefuser.com", r.url?.path.hasSuffix("/status") == true else { return nil }
+        return URLComponents(url: r.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "depositAddress" }?.value
+    }
+    override class func canInit(with request: URLRequest) -> Bool { address(request)?.hasPrefix("stub-") == true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var address = Self.address(request) ?? ""
+        if address == "stub-flaky" { Self.flaky += 1; address = Self.flaky == 1 ? "stub-busy" : "stub-ok" }
+        let (code, body) = Self.answers[address] ?? (404, "{}")
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data(body.utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// NEAR's cost reads every 1Click swap's /status: a swap 1Click didn't answer for dropped out, and the cost without it
+/// (its NEAR counted as held before, at that day's price) was kept till the amount changed. 1Click sends its failures as
+/// JSON (NestJS), so an error code, a page (a gateway's 404 too) or JSON with no status is no answer (throws); a swap
+/// that isn't a success, or an address it doesn't know (its own 404), is one (nil). A throttle is asked again first.
+@Test func oneClickSettledTellsNoAnswerFromNoSwap() async throws {
+    _ = StatusStub.installed
+    #expect(try await OneClick.settled(depositAddress: "stub-ok")?.near(for: "me.near")?.amount == Decimal(string: "185.42"))
+    #expect(try await OneClick.settled(depositAddress: "stub-pending") == nil)
+    #expect(try await OneClick.settled(depositAddress: "stub-unknown") == nil)
+    for down in ["stub-down", "stub-busy", "stub-page", "stub-empty", "stub-gateway"] {
+        await #expect(throws: (any Error).self, "\(down)") { try await OneClick.settled(depositAddress: down, delays: []) }
+    }
+    #expect(try await OneClick.settled(depositAddress: "stub-flaky", delays: [.milliseconds(1)]) != nil && StatusStub.flaky == 2)
+}

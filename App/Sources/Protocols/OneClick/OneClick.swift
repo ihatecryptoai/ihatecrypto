@@ -207,9 +207,17 @@ public enum OneClick {
         }
     }
 
-    public static func settled(depositAddress: String) async throws -> Settled? {
-        let (data, _) = try await URLSession.shared.data(for: request(URL(string: "\(base)/status?depositAddress=\(depositAddress)")!))
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]).flatMap(Settled.init)
+    /// nil: 1Click answered and the swap isn't a success, or it doesn't know the address (its own 404). Throws when it
+    /// didn't answer — an error code (sent as JSON), a page, JSON without a status — so a cost isn't counted without the
+    /// swap; a throttle (429) or a server error is asked again first (RPCRetry).
+    public static func settled(depositAddress: String, delays: [Duration] = RPCRetry.delays) async throws -> Settled? {
+        let r = request(URL(string: "\(base)/status?depositAddress=\(depositAddress)")!)
+        return try await RPCRetry.run(delays: delays, { try await URLSession.shared.data(for: r) }) { data, code in
+            let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            if code == 404, j?["statusCode"] as? Int == 404 { return nil }   // not a gateway's 404 page
+            guard (200..<300).contains(code), let j, j["status"] is String else { throw RPCRetry.Again(code == 429 || code >= 500, OneClickError(data)) }
+            return Settled(j)
+        }
     }
 
     static func post(_ path: String, _ body: [String: Any]) async throws -> Data {
