@@ -385,6 +385,7 @@ extension Workspace {
                 rules.partialOrderPending = opened.pending && p.intent.partialTake == true
                 exitRules[opened.asset] = rules
                 partialTries[opened.asset] = nil
+                stopTries[opened.asset] = nil
             } else {
                 exitRules[opened.asset] = nil
             }
@@ -956,8 +957,10 @@ extension Workspace {
     /// «Buy the token 0x… for 2 USDC on Robinhood Chain»: the summary as a canvas title.
     static func canvasTitle(_ command: WalletCommand) -> String { command.summary.prefix(1).uppercased() + command.summary.dropFirst() }
 
-    func manage(_ command: PositionCommand, coin: String) async {
-        if let missing = missingTradingKey { reply(missing); return }
+    /// Whether the command went through. `quiet`: a guardian's try again, whose failure was already said once.
+    @discardableResult
+    func manage(_ command: PositionCommand, coin: String, quiet: Bool = false) async -> Bool {
+        if let missing = missingTradingKey { if !quiet { reply(missing) }; return false }
         updateActivity { a in
             a.coin = coin
             if a.title == nil { a.title = "\(IntentParser.pretty(coin)): \(Self.describe(command))" }
@@ -965,16 +968,16 @@ extension Workspace {
         }
         guard let wallet = signerWallet else {
             reply("Managing a position works in the app once the key is in secure storage.")
-            return
+            return false
         }
         if case .trail(let pct) = command {
-            guard let p = positions.first(where: { $0.coin == coin }) else { reply("There is no open \(IntentParser.pretty(coin)) position to trail."); return }
+            guard let p = positions.first(where: { $0.coin == coin }) else { reply("There is no open \(IntentParser.pretty(coin)) position to trail."); return false }
             var rules = exitRules[coin] ?? ExitRules(openedSize: abs(p.size), entry: p.entry, long: p.size > 0, breakevenAfterPartial: false, trailingPct: nil)
             rules.trailingPct = pct
             exitRules[coin] = rules
             reply("ihatecrypto now keeps the \(IntentParser.pretty(coin)) stop \(Fmt.pct(pct)) behind the best price and only ever tightens it — while ihatecrypto is open or in the menu bar.")
             await guardPositions()
-            return
+            return true
         }
         // As in move(): only what this call set is reset, so a stop moved during a running move leaves that move's board.
         let ownsExecuting = !executing
@@ -989,8 +992,10 @@ extension Workspace {
         var ok = true
         do { _ = try await executor(wallet).manage(command, asset: coin, policy: policy, equity: equity) } catch {
             ok = false
-            reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
-            noteFailure(shown?.title ?? "\(command) on \(IntentParser.pretty(coin))", error)
+            if !quiet {
+                reply(say("Failed: ", "Не вышло: ") + error.localizedDescription)
+                noteFailure(shown?.title ?? "\(command) on \(IntentParser.pretty(coin))", error)
+            }
         }
         if let shown {
             runningAction = nil
@@ -998,6 +1003,7 @@ extension Workspace {
             saveCanvas()
         }
         await refresh()
+        return ok
     }
 
     /// The card shows the position instead of a plan: just executed, or a position in this asset is already open
@@ -1245,6 +1251,7 @@ extension Workspace {
         for coin in exitRules.keys where !positions.contains(where: { $0.coin == coin }) && !orders.contains(where: { $0.coin == coin && !$0.isTrigger }) {
             exitRules[coin] = nil
         }
+        stopTries = stopTries.filter { exitRules[$0.key] != nil }   // a new position in the coin starts with no pause
         for coin in Array(exitRules.keys) {
             // Read afresh: an await for another coin earlier in this pass may have changed these rules («trail» meanwhile).
             guard var rules = exitRules[coin], let p = positions.first(where: { $0.coin == coin }), let mark = markets[coin]?.markPx else { continue }
@@ -1261,33 +1268,74 @@ extension Workspace {
                     continue
                 }
             }
-            let stop = orders.first { $0.coin == coin && $0.isTrigger && ($0.orderType ?? "").contains("Stop") }?.triggerPx
+            // The tightest stop, as Executor.moveStop reads it: a new one whose check failed sits beside the old one.
+            let stops = orders.filter { $0.coin == coin && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }.compactMap(\.triggerPx)
+            let stop = rules.long ? stops.max() : stops.min()
+            let wasAtBreakeven = rules.movedToBreakeven
             let action = Guardian.step(&rules, size: p.size, stop: stop, mark: mark)
             // Only a real change: each write redraws and saves the rules to UserDefaults, and this runs every tick.
             if exitRules[coin] != rules { exitRules[coin] = rules }
-            switch action {
-            case .stopToBreakeven?:
-                let title = say("Partial profit taken on \(coin)", "Частичная прибыль по \(coin)"), body = say("Stop moved to breakeven.", "Стоп перенесён в безубыток.")
-                // Its own activity before the move: `manage` writes into the current one, not into the user's last request.
-                beginActivity(.automatic, title: title, coin: coin, schedule: "perp:\(coin)")
-                await manage(.stopToBreakeven, coin: coin)
-                updateActivity { $0.lines.append(body) }
-                notify(.positions, title, body, record: false)
-            case .stopTo(let price)?:
-                let title = say("Trailing stop on \(coin)", "Трейлинг-стоп по \(coin)")
-                // Moves in a row are one record, a line each: a trend would otherwise fill the history.
-                if let last = activities.last, last.schedule == "perp:\(coin)", last.title == title { currentActivity = last.id }
-                else { beginActivity(.automatic, title: title, coin: coin, schedule: "perp:\(coin)") }
-                await manage(.stopTo(price), coin: coin)
-                updateActivity { $0.lines.append("\(Fmt.time(Date())) · " + say("stop moved to \(Fmt.price(price))", "стоп передвинут на \(Fmt.price(price))")) }
-            case nil: break
+            let breakevenTitle = say("Partial profit taken on \(coin)", "Частичная прибыль по \(coin)")
+            let trailTitle = say("Trailing stop on \(coin)", "Трейлинг-стоп по \(coin)")
+            let atBreakeven = say("Stop moved to breakeven.", "Стоп перенесён в безубыток.")
+            // A failed series ends when the exchange leaves nothing to do: that try's stop went on before its check
+            // failed, it was moved by hand, or (trailing) the price fell back. Its record then says what's there.
+            if rules.movedToBreakeven, !wasAtBreakeven, (stopTries[coin]?[false]?.failures ?? 0) > 0 {
+                stopTries[coin]?[false] = nil
+                updateActivity(stopRecord(coin, breakevenTitle, again: true)) { $0.lines.append(atBreakeven); $0.failed = false }
+                notify(.positions, breakevenTitle, atBreakeven, record: false)
+            }
+            if action == nil, let stop, (stopTries[coin]?[true]?.failures ?? 0) > 0 {
+                stopTries[coin]?[true] = nil
+                let line = "\(Fmt.time(Date())) · " + say("stop on the exchange: \(Fmt.price(stop))", "стоп на бирже: \(Fmt.price(stop))")
+                updateActivity(stopRecord(coin, trailTitle, again: true)) { $0.lines.append(line); $0.failed = false }
+            }
+            guard let action, let evm = signerWallet?.evm else { continue }
+            let trailing = action != .stopToBreakeven
+            let tries = stopTries[coin]?[trailing] ?? .init()
+            guard Date() >= tries.next else { continue }   // between tries: each may ask for Touch ID
+            let command: PositionCommand = if case .stopTo(let price) = action { .stopTo(price) } else { .stopToBreakeven }
+            let title = trailing ? trailTitle : breakevenTitle
+            // Its own record before the move: `manage` writes into the current one, not into the user's last request.
+            let record = stopRecord(coin, title, again: tries.failures > 0, inRow: trailing)
+            stopTries[coin, default: [:]][trailing] = .init(failures: tries.failures, next: .distantFuture)   // under way: a second pass doesn't send it too
+            let ok = await manage(command, coin: coin, quiet: tries.failures > 0)
+            // Another wallet meanwhile has its own rules and tries.
+            guard signerWallet?.evm == evm else { return }
+            // Closed meanwhile (its stop, its take, by hand): moveStop answers «No open … position» without throwing.
+            guard positions.contains(where: { $0.coin == coin }) else { stopTries[coin] = nil; continue }
+            let after = Guardian.afterStopTry(tries, ok: ok)
+            stopTries[coin, default: [:]][trailing] = after.tries
+            if case .stopTo(let price) = command, ok {
+                let line = "\(Fmt.time(Date())) · " + say("stop moved to \(Fmt.price(price))", "стоп передвинут на \(Fmt.price(price))")
+                updateActivity(record) { $0.lines.append(line); $0.failed = false }
+            } else if ok {
+                exitRules[coin]?.movedToBreakeven = true   // only if the rules are still there
+                updateActivity(record) { $0.lines.append(atBreakeven); $0.failed = false }
+                notify(.positions, title, atBreakeven, record: false)
+            } else if after.tell {
+                let line = say("Stop not moved: the old one stays on the exchange. Trying again in a minute, then less often.",
+                               "Стоп не перенесён — на бирже остаётся прежний. Повторю через минуту, потом реже.")
+                updateActivity(record) { $0.lines.append(line); $0.failed = true }
+                notify(.positions, title, line, record: false, failed: true)
             }
         }
     }
 
+    /// The guardian's record for a stop move, made current; its id. `again`: a try after a failure, into the record that
+    /// said it failed. `inRow`: trailing moves in a row are one record, a line each: a trend would otherwise fill the history.
+    @discardableResult
+    private func stopRecord(_ coin: String, _ title: String, again: Bool, inRow: Bool = false) -> UUID? {
+        let schedule = "perp:\(coin)"
+        if again, let last = activities.last(where: { $0.schedule == schedule && $0.title == title }) { currentActivity = last.id }
+        else if inRow, let last = activities.last, last.schedule == schedule, last.title == title { currentActivity = last.id }
+        else { beginActivity(.automatic, title: title, coin: coin, schedule: schedule) }
+        return currentActivity
+    }
+
     /// The half at 1R on a limit that has filled (guardPositions), sized from the real fill. The pending flag goes only once
     /// the exchange has it; a failure is tried again and said at the first time and at the end (Guardian.afterPartialTry).
-    private func placeHalf(_ coin: String, position p: HyperliquidAccount.Position, rules: ExitRules, tries: Guardian.PartialTries,
+    private func placeHalf(_ coin: String, position p: HyperliquidAccount.Position, rules: ExitRules, tries: Guardian.Tries,
                            wallet: TradeWallet) async {
         var rules = rules
         rules.openedSize = abs(p.size)

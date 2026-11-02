@@ -522,7 +522,11 @@ final class Workspace {
     }
     /// The half at 1R per coin: failures so far and when the next try may go; `.distantFuture` while one is under way,
     /// so a second guardian pass doesn't send it too. Not saved: after a restart the pending flag starts it afresh.
-    @ObservationIgnored var partialTries: [String: Guardian.PartialTries] = [:]
+    @ObservationIgnored var partialTries: [String: Guardian.Tries] = [:]
+    /// The guardian's stop moves that failed in a row, by coin, then trailing (true) or breakeven (false), and when the
+    /// next try may go (Guardian.afterStopTry); `.distantFuture` while one is under way. Not saved: after a restart it
+    /// tries again at once.
+    @ObservationIgnored var stopTries: [String: [Bool: Guardian.Tries]] = [:]
     /// The position the plan card shows: the plan's asset if open, otherwise the first one.
     var position: HyperliquidAccount.Position? { positions.first { $0.coin == intent.asset } ?? positions.first }
 

@@ -62,6 +62,7 @@ extension Workspace {
         taskQueue = nil
         exitRules = UserDefaults.standard.data(forKey: Self.scoped("exitRules", id)).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) } ?? [:]
         partialTries = [:]
+        stopTries = [:]
         equityHistory = LocalStore.load(Self.scoped("equity", id) + ".json") ?? []
         pnlMarks = LocalStore.load(Self.scoped("pnlmarks", id) + ".json")
         costBasis = LocalStore.load(Self.scoped("costbasis", id) + ".json") ?? [:]

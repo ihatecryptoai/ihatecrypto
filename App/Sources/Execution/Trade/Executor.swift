@@ -209,6 +209,9 @@ public actor Executor {
     /// A Jupiter swap that went through reads no balance after it, as when the node throttles that read: only the Dev
     /// copy's `-swapTailTest YES` sets it, for a live run of what the chat says then (Workspace.wentThrough).
     nonisolated(unsafe) public static var swapTailTest = false
+    /// This many stop moves fail before anything is sent: only the Dev copy's `-stopMoveFailTest N` sets it, for a live run
+    /// of the guardian's breakeven tried again (Workspace.guardPositions).
+    nonisolated(unsafe) public static var stopMoveFailTest = 0
 
     /// Stops a swap whose price impact (0…1) is past `impactCap` and what was accepted: `paid` is what goes in, in USD at
     /// the market price (0 = nobody prices it: the impact alone decides), `amount` the same in the input's own units
@@ -876,8 +879,8 @@ public actor Executor {
             return "No open \(asset) position."
         }
         let long = position.size > 0
-        let fees = position.entry * 2 * RiskCalc.tradeFee
-        let stop = HLAction.price(target ?? (long ? position.entry + fees : position.entry - fees), szDecimals: market.szDecimals)
+        if Self.stopMoveFailTest > 0 { Self.stopMoveFailTest -= 1; throw ExecutionError("stopMoveFailTest: nothing sent.") }
+        let stop = HLAction.price(target ?? Guardian.breakeven(entry: position.entry, long: long), szDecimals: market.szDecimals)
         guard long ? stop < market.markPx : stop > market.markPx else {
             throw ExecutionError("Stop \(Fmt.price(stop)) is \(long ? "above" : "below") the current price \(Fmt.price(market.markPx)): it would trigger at once. To exit, type «close».")
         }

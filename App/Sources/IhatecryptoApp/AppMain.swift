@@ -406,11 +406,13 @@ struct ContentView: View {
             // (`-jupiterZFirst YES`), the price-impact stop's cards (`-impactStopTest YES`), a limit that fills at once
             // without its stop confirmed (`-limitFillTest YES`), a swap whose balance read after it fails (`-swapTailTest YES`),
             // a gasless or JupiterZ swap whose /execute answer doesn't come in time (`-jupiterExecuteTimeout 0.02`:
-            // RPCRetry asks again, and Jupiter answers a repeat in well under a second).
+            // RPCRetry asks again, and Jupiter answers a repeat in well under a second), the guardian's stop moves failing
+            // (`-stopMoveFailTest 2`: the first two fail before anything is sent).
             Executor.jupiterZFirst = UserDefaults.standard.bool(forKey: "jupiterZFirst")
             Executor.impactStopTest = UserDefaults.standard.bool(forKey: "impactStopTest")
             Executor.limitFillTest = UserDefaults.standard.bool(forKey: "limitFillTest")
             Executor.swapTailTest = UserDefaults.standard.bool(forKey: "swapTailTest")
+            Executor.stopMoveFailTest = UserDefaults.standard.integer(forKey: "stopMoveFailTest")
             let executeTimeout = UserDefaults.standard.double(forKey: "jupiterExecuteTimeout")
             if executeTimeout > 0 { Jupiter.executeTimeout = executeTimeout }
             #endif

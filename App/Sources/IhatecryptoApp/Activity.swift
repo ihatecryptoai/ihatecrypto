@@ -95,8 +95,9 @@ extension Workspace {
         currentActivity = activities.last?.id
     }
 
-    func updateActivity(_ change: (inout Activity) -> Void) {
-        guard let id = currentActivity, let i = activities.lastIndex(where: { $0.id == id }) else { return }
+    /// `id`: that record, not the current one (another may have begun during an await).
+    func updateActivity(_ id: UUID? = nil, _ change: (inout Activity) -> Void) {
+        guard let id = id ?? currentActivity, let i = activities.lastIndex(where: { $0.id == id }) else { return }
         change(&activities[i])
     }
 
