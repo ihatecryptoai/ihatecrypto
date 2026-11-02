@@ -1,6 +1,7 @@
 import ExecutionCore
 import Foundation
 import IhatecryptoCore
+import Ledger
 @testable import TradeExecution
 import Testing
 
@@ -18,11 +19,12 @@ private struct Outcome {
     var sent: [String]
     var opened: Executor.Opened?
     var text: String
+    var error: (any Error)?
     var state: FakeHL.State
 }
 
 /// `execute` against FakeHL as `setup` leaves it: what went to the exchange, and the Opened or the error's words.
-private func execute(_ p: Executor.Prepared, _ setup: (inout FakeHL.State) -> Void) async -> Outcome {
+private func execute(_ p: Executor.Prepared, signer: ZeroSigner = ZeroSigner(), _ setup: (inout FakeHL.State) -> Void) async -> Outcome {
     URLProtocol.registerClass(FakeHL.self)
     defer { URLProtocol.unregisterClass(FakeHL.self) }
     FakeHL.lock.withLock {
@@ -30,13 +32,13 @@ private func execute(_ p: Executor.Prepared, _ setup: (inout FakeHL.State) -> Vo
         setup(&FakeHL.state)
     }
     let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("limit-\(UUID().uuidString).jsonl"))
-    let executor = Executor(wallet: TradeWallet(solana: "", evm: "0x0"), signer: ZeroSigner(), journal: journal) { line in
+    let executor = Executor(wallet: TradeWallet(solana: "", evm: "0x0"), signer: signer, journal: journal) { line in
         FakeHL.lock.withLock { FakeHL.state.reported.append(line) }
     }
-    var opened: Executor.Opened?, text = ""
-    do { opened = try await executor.execute(p) } catch { text = error.localizedDescription }
+    var opened: Executor.Opened?, text = "", failure: (any Error)?
+    do { opened = try await executor.execute(p) } catch { (text, failure) = (error.localizedDescription, error) }
     let state = FakeHL.lock.withLock { FakeHL.state }
-    return Outcome(sent: state.sent, opened: opened, text: text, state: state)
+    return Outcome(sent: state.sent, opened: opened, text: text, error: failure, state: state)
 }
 
 /// The fill of the plan's whole size: the position opens, and with `armed` its group's stop and take are listed.
@@ -201,6 +203,31 @@ extension FakeHyperliquid {
         }
         #expect(r.opened == nil && r.sent == ["leverage", "entry", "sl+tp", "close sell"])
         #expect(r.text.hasPrefix("Position closed: the exchange didn't confirm the stop."))
+    }
+
+    /// A market entry the signer turns down never went out: the refusal comes out as it is — the guard's GuardStop (no
+    /// «try another way» after it), a Ledger declined — never «the reply didn't come», and an ETH position already open
+    /// isn't taken for its fill. Signed and sent with the reply lost, the positions decide, as before.
+    @Test func aStopBeforeTheEntryIsSentIsNotALostReply() async throws {
+        let p = try plan("long ETH risk $0.5 stop 3% take 6% leverage 2x")
+        let guardText = "The guard refused to sign. The order pays a fee to someone other than ihatecrypto."
+        var r = await execute(p, signer: ZeroSigner(refusesOrders: GuardStop(guardText))) { s in s.position = d("0.01") }
+        #expect(r.opened == nil && r.sent == ["leverage"] && r.error is GuardStop && r.text == guardText)
+
+        let declined = LedgerError("You declined it on the Ledger. Nothing was signed.", status: 0x6985)
+        r = await execute(p, signer: ZeroSigner(refusesOrders: declined)) { _ in }
+        #expect(r.opened == nil && r.sent == ["leverage"] && r.error as? LedgerError == declined)
+
+        // Sent, the reply lost, nothing opened: said as a lost reply, the money on the balance.
+        r = await execute(p) { _ in }
+        #expect(r.opened == nil && r.sent == ["leverage", "entry"])
+        #expect(r.text.hasPrefix("The entry's reply didn't come") && r.text.contains("no ETH position is open"))
+
+        // Sent, the reply lost, the position open: it gets its stop.
+        r = await execute(p) { s in s.entry = { s in s.position = p.sizing.size; return nil } }
+        let opened = try #require(r.opened, "\(r.text)")
+        #expect(r.sent == ["leverage", "entry", "sl+tp"] && opened.size == p.sizing.size && opened.entry == 3000)
+        #expect(r.state.reported.contains { $0.hasPrefix("The entry's reply didn't come, but the ETH position is open") })
     }
 }
 

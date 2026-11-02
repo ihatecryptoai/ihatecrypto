@@ -497,17 +497,19 @@ public actor Executor {
         if let limit = p.intent.entryPx { return try await placeLimit(p, market: market, limit: limit) }
 
         let entryPx = HLAction.price(market.markPx * (long ? 1 + Self.slippage : 1 - Self.slippage), szDecimals: market.szDecimals)
+        let order = try HLAction.order([HLOrder(asset: market.index, isBuy: long, price: entryPx, size: p.sizing.size,
+                                                reduceOnly: false, kind: .limit(tif: "Ioc"))])
         let entry: HLReply
         do {
-            entry = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: long, price: entryPx, size: p.sizing.size,
-                                                               reduceOnly: false, kind: .limit(tif: "Ioc"))]), label: "entry")
-        } catch {
+            entry = try await post(order, label: "entry")
+        } catch let lost as NoReply {
             // The reply was lost, not necessarily the order: an entry that filled is a position, and it gets its stop as usual.
+            // A stop before it went out (the guard, the signer, a Ledger declined) isn't caught here: it comes out as it is.
             guard let positions = try? await HyperliquidAccount.positions(wallet.evm) else {
-                throw ExecutionError("The entry's reply didn't come (\(error.localizedDescription)) and the positions can't be read now. Check \(market.name) on Hyperliquid: if it opened, it has no stop yet.")
+                throw ExecutionError("The entry's reply didn't come (\(lost.localizedDescription)) and the positions can't be read now. Check \(market.name) on Hyperliquid: if it opened, it has no stop yet.")
             }
             guard let open = positions.first(where: { $0.coin == market.name && $0.size != 0 }) else {
-                throw ExecutionError("The entry's reply didn't come (\(error.localizedDescription)); no \(market.name) position is open, the money is on your Hyperliquid balance.")
+                throw ExecutionError("The entry's reply didn't come (\(lost.localizedDescription)); no \(market.name) position is open, the money is on your Hyperliquid balance.")
             }
             report("The entry's reply didn't come, but the \(market.name) position is open: placing its stop.")
             entry = .filled(size: abs(open.size), avgPx: open.entry)
@@ -584,7 +586,7 @@ public actor Executor {
 
     /// The half at 1R right after an entry filled: a failure is said, and the position keeps its stop and take.
     private func partialTakeAfterEntry(_ market: Market, long: Bool, size: Decimal, entry: Decimal, stop: Decimal) async -> Decimal? {
-        do { return try await placePartialTake(market: market, long: long, size: size, entry: entry, stop: stop) } catch is URLError {
+        do { return try await placePartialTake(market: market, long: long, size: size, entry: entry, stop: stop) } catch is NoReply {
             report("Partial take-profit: the exchange's reply didn't come, so it may or may not be on. The stop and full take-profit are in place; look for a take at 1R among Hyperliquid's open orders.")
         } catch {
             report("Partial take-profit didn't go through (\(error.localizedDescription)); the stop and full take-profit are still in place.")
@@ -952,14 +954,22 @@ public actor Executor {
         return try await send(action, label: label)
     }
 
+    /// Signed and journaled, then no answer: the action may be on the exchange. Everything `send` throws after the
+    /// `.signed` line is one, so a caller tells «may have gone» from a stop before it went out. Says what the cause says.
+    struct NoReply: LocalizedError {
+        let error: any Error
+        var errorDescription: String? { error.localizedDescription }
+    }
+
     private func send(_ action: MsgPack, label: String) async throws -> HLReply {
         let nonce = nonce()
         let signature = try await signer.signHyperliquid(action, nonce: nonce)
         try journal.append(.init(chain: "hyperliquid", id: "\(nonce)", kind: .signed, note: label))
-        let data = try await HLExchange.send(action: action, nonce: nonce, signature: signature, mainnet: true)
-        let reply = HLReply.parse(data)
-        try journal.append(.init(chain: "hyperliquid", id: "\(nonce)", kind: reply.isError ? .failed : .confirmed, note: "\(reply)"))
-        return reply
+        do {
+            let reply = HLReply.parse(try await HLExchange.send(action: action, nonce: nonce, signature: signature, mainnet: true))
+            try journal.append(.init(chain: "hyperliquid", id: "\(nonce)", kind: reply.isError ? .failed : .confirmed, note: "\(reply)"))
+            return reply
+        } catch { throw NoReply(error: error) }
     }
 
     // MARK: ihatecrypto's fee and referral code (HLBuilder)

@@ -126,10 +126,13 @@ func filled(_ size: String, at px: String = "2999") -> String {
 let noMatch = #"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order could not immediately match against any resting orders. asset=0"}]}}}"#
 
 /// Signs with zeros; `refuses`: the signer turns the order down (Touch ID declined, the guard), as the app's signer does.
+/// `refusesOrders`: only orders are turned down, with this error (leverage before them is signed).
 struct ZeroSigner: TradeSigner {
     var refuses = false
+    var refusesOrders: (any Error)?
     func signHyperliquid(_ action: MsgPack, nonce: UInt64) async throws -> EVMSignature {
         if refuses { throw GuardStop("declined") }
+        if let refusesOrders, HLAction.type(action) == "order" { throw refusesOrders }
         return EVMSignature(r: Data(count: 32), s: Data(count: 32), v: 27)
     }
     func signSolana(_ wire: Data, accounts: [String], recipients: [String], tokenOwners: [String: String]) async throws -> Data { throw ExecutionError("no") }
