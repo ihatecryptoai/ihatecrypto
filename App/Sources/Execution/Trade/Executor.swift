@@ -253,6 +253,9 @@ public actor Executor {
         public var partialTake: Decimal?
     }
 
+    /// What a try at the half at 1R came to: on the book, not yet (the limit is only partly filled), or skipped (under $10).
+    public enum PartialTake: Equatable, Sendable { case placed(Decimal), waiting, skipped }
+
     /// The bridge transaction exactly as it will be signed, with its simulated effect.
     public struct BridgeStep: Sendable {
         public let requestId: String
@@ -516,7 +519,7 @@ public actor Executor {
                                                  szDecimals: market.szDecimals)
         try await protect(market, long: long, size: size, stop: stop, take: take)
         var opened = Opened(asset: market.name, size: size, entry: avgPx, stop: stop, take: take)
-        if p.intent.partialTake == true { opened.partialTake = try? await placePartialTake(market: market, long: long, size: size, entry: avgPx, stop: stop) }
+        if p.intent.partialTake == true { opened.partialTake = await partialTakeAfterEntry(market, long: long, size: size, entry: avgPx, stop: stop) }
         return opened
     }
 
@@ -561,31 +564,53 @@ public actor Executor {
         }
     }
 
-    /// For a limit entry that has filled: half at 1R from the actual entry and stop on the exchange.
-    public func addPartialTake(asset: String) async throws -> Decimal? {
+    /// For a limit entry that has filled: half at 1R from the actual entry and stop on the exchange. `.waiting` while the
+    /// limit is only partly filled: its stop is still the entry's child, armed on the full fill. A failure throws, so the
+    /// guardian can try again; a GuardStop is a declined signature.
+    public func addPartialTake(asset: String) async throws -> PartialTake {
         let market = try await market(asset)
-        guard let p = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }),
-              let stop = try await HyperliquidAccount.openOrders(wallet.evm).first(where: { $0.coin == asset && $0.isTrigger && ($0.orderType ?? "").contains("Stop") })?.triggerPx
-        else { return nil }
-        return try await placePartialTake(market: market, long: p.size > 0, size: abs(p.size), entry: p.entry, stop: stop)
+        let orders = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset }
+        guard let p = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }) else { return .waiting }
+        guard let stop = orders.first(where: { $0.isTrigger && ($0.orderType ?? "").contains("Stop") })?.triggerPx else {
+            if HyperliquidAccount.Order.fillsInPart(orders) { return .waiting }
+            throw ExecutionError("\(asset) has no stop on the exchange, so the half has no 1R to go at.")
+        }
+        return try await placePartialTake(market: market, long: p.size > 0, size: abs(p.size), entry: p.entry, stop: stop, onBook: orders)
+            .map(PartialTake.placed) ?? .skipped
     }
 
-    /// Half the position at 1R as a separate reduce-only take. The position stays protected if this fails.
-    private func placePartialTake(market: Market, long: Bool, size: Decimal, entry: Decimal, stop: Decimal) async throws -> Decimal? {
+    /// The half at 1R right after an entry filled: a failure is said, and the position keeps its stop and take.
+    private func partialTakeAfterEntry(_ market: Market, long: Bool, size: Decimal, entry: Decimal, stop: Decimal) async -> Decimal? {
+        do { return try await placePartialTake(market: market, long: long, size: size, entry: entry, stop: stop) } catch is URLError {
+            report("Partial take-profit: the exchange's reply didn't come, so it may or may not be on. The stop and full take-profit are in place; look for a take at 1R among Hyperliquid's open orders.")
+        } catch {
+            report("Partial take-profit didn't go through (\(error.localizedDescription)); the stop and full take-profit are still in place.")
+        }
+        return nil
+    }
+
+    /// Half the position at 1R as a separate reduce-only take; nil when the half is under the $10 minimum. One already on
+    /// the book (`onBook`: an earlier try whose reply was lost) counts as placed. Throws when Hyperliquid turns it down.
+    private func placePartialTake(market: Market, long: Bool, size: Decimal, entry: Decimal, stop: Decimal,
+                                  onBook: [HyperliquidAccount.Order] = []) async throws -> Decimal? {
         let half = HLAction.size(size / 2, szDecimals: market.szDecimals)
         guard half * entry >= 10 else {
             report("Partial take-profit skipped: half the position is below the $10 minimum order.")
             return nil
         }
         let oneR = HLAction.price(entry + (entry - stop), szDecimals: market.szDecimals)
+        // ponytail: found by price and size; a stop moved by hand between a lost reply and the next try moves 1R, and a
+        // second half goes on (reduce-only, so it can't open anything).
+        let placed = "Partial take-profit: \(Fmt.num(half, maxFraction: market.szDecimals)) \(market.name) at 1R → \(Fmt.price(oneR)). After it fills, the stop moves to breakeven."
+        if onBook.contains(where: { $0.isTrigger && $0.reduceOnly && $0.triggerPx == oneR && $0.size == half }) {
+            report(placed)
+            return oneR
+        }
         let worst = HLAction.price(oneR * (long ? 1 - Self.triggerSlippage : 1 + Self.triggerSlippage), szDecimals: market.szDecimals)
         let reply = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: !long, price: worst, size: half, reduceOnly: true,
                                                                kind: .trigger(price: oneR, isMarket: true, tpsl: "tp"))]), label: "partial take-profit")
-        guard !reply.isError else {
-            report("Partial take-profit didn't go through (\(reply)); the stop and full take-profit are still in place.")
-            return nil
-        }
-        report("Partial take-profit: \(Fmt.num(half, maxFraction: market.szDecimals)) \(market.name) at 1R → \(Fmt.price(oneR)). After it fills, the stop moves to breakeven.")
+        guard !reply.isError else { throw ExecutionError("Hyperliquid turned it down: \(reply)") }
+        report(placed)
         return oneR
     }
 
@@ -648,7 +673,7 @@ public actor Executor {
         }
         // The half at 1R waited for a fill that has happened: it goes on now, as on a market entry.
         if p.intent.partialTake == true {
-            opened.partialTake = try? await placePartialTake(market: market, long: long, size: opened.size, entry: opened.entry, stop: stop)
+            opened.partialTake = await partialTakeAfterEntry(market, long: long, size: opened.size, entry: opened.entry, stop: stop)
         }
         return opened
     }
@@ -1219,6 +1244,12 @@ public enum HyperliquidAccount {
         public let reduceOnly: Bool
         /// A resting entry's own stop and take (normalTpsl): armed when it fills.
         public let children: [Order]
+
+        /// One coin's open orders while its limit is only partly filled: the rest waits on the book, and the stop with
+        /// it as a child, armed on the full fill (Hyperliquid's normalTpsl).
+        public static func fillsInPart(_ orders: [Order]) -> Bool {
+            orders.contains { !$0.isTrigger && !$0.reduceOnly } && !orders.contains { $0.isTrigger && ($0.orderType ?? "").contains("Stop") }
+        }
 
         enum CodingKeys: String, CodingKey { case coin, oid, isTrigger, triggerPx, limitPx, sz, side, orderType, reduceOnly, children }
         public init(from decoder: Decoder) throws {

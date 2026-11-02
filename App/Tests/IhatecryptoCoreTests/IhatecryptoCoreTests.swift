@@ -311,6 +311,37 @@ private struct StubModel: LLMClient {
     #expect(Guardian.step(&s, size: -1, stop: 2060, mark: 1900) == .stopTo(1938))         // short trails from below
 }
 
+/// The half at 1R after a limit fills: the pending flag goes only once it's on; a failure goes again in 1, then 2
+/// minutes, and the third one, or a declined signature, ends it. The chat hears the first failure and the end.
+@Test func partialTakeTriesThreeTimesAndSaysTheFirstAndTheLast() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    // Waiting for the full fill: the flag stays, nothing said, no failure counted.
+    var r = Guardian.afterPartialTry(.init(), placed: false, now: now)
+    #expect(r.pending && !r.tell && r.tries == .init())
+    r = Guardian.afterPartialTry(.init(), placed: nil, now: now)
+    #expect(r.pending && r.tell && r.tries == .init(failures: 1, next: now + 60))
+    // Waiting in between keeps the count: reads that lag and fail by turns still come to an end.
+    let between = Guardian.afterPartialTry(r.tries, placed: false, now: now)
+    #expect(between.pending && !between.tell && between.tries.failures == 1)
+    r = Guardian.afterPartialTry(between.tries, placed: nil, now: now)
+    #expect(r.pending && !r.tell && r.tries == .init(failures: 2, next: now + 120))
+    r = Guardian.afterPartialTry(r.tries, placed: nil, now: now)
+    #expect(!r.pending && r.tell)
+    // A declined signature ends it at once.
+    r = Guardian.afterPartialTry(.init(), placed: nil, refused: true, now: now)
+    #expect(!r.pending && r.tell)
+    // On after a failure: the flag goes, nothing more said here (the executor's own line tells it).
+    r = Guardian.afterPartialTry(.init(failures: 1, next: now), placed: true, now: now)
+    #expect(!r.pending && !r.tell)
+}
+
+/// A limit «in parts» is what leaves the half at 1R to the guardian (partialOrderPending), in both languages.
+@Test(arguments: ["long ETH risk $10 stop 3% limit 1960 take in parts", "лонг ETH риск $10 стоп 3% лимит 1960 частями"])
+func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
+    let i = try #require(IntentParser.apply(phrase, to: TradeIntent(), markets: ["ETH"]))
+    #expect(i.entryPx == 1960 && i.partialTake == true && i.side == .long)
+}
+
 @Test func spotCommandsUseVerifiedMints() {
     #expect(WalletCommand.parse("купи SOL на 2 USDC") == .buy(SpotAsset.all[0], usdc: 2))
     #expect(WalletCommand.parse("купи биткоин на $5") == .buy(SpotAsset.all[1], usdc: 5))

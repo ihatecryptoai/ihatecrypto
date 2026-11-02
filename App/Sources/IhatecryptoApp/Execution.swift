@@ -384,6 +384,7 @@ extension Workspace {
                                       breakevenAfterPartial: partial, trailingPct: p.intent.trailingPct)
                 rules.partialOrderPending = opened.pending && p.intent.partialTake == true
                 exitRules[opened.asset] = rules
+                partialTries[opened.asset] = nil
             } else {
                 exitRules[opened.asset] = nil
             }
@@ -1244,17 +1245,21 @@ extension Workspace {
         for coin in exitRules.keys where !positions.contains(where: { $0.coin == coin }) && !orders.contains(where: { $0.coin == coin && !$0.isTrigger }) {
             exitRules[coin] = nil
         }
-        for (coin, var rules) in exitRules {
-            guard let p = positions.first(where: { $0.coin == coin }), let mark = markets[coin]?.markPx else { continue }
+        for coin in Array(exitRules.keys) {
+            // Read afresh: an await for another coin earlier in this pass may have changed these rules («trail» meanwhile).
+            guard var rules = exitRules[coin], let p = positions.first(where: { $0.coin == coin }), let mark = markets[coin]?.markPx else { continue }
             if rules.partialOrderPending, let wallet = signerWallet {
-                // The limit filled: the half at 1R goes on now, sized from the real fill.
-                rules.partialOrderPending = false
-                rules.openedSize = abs(p.size)
-                rules.entry = p.entry
-                rules.peak = p.entry
-                exitRules[coin] = rules
-                _ = try? await executor(wallet).addPartialTake(asset: coin)
-                continue
+                let tries = partialTries[coin] ?? .init()
+                // Partly filled, the rest of the limit waits with the stop (armed on the full fill): nothing to place yet.
+                guard Date() >= tries.next, !HyperliquidAccount.Order.fillsInPart(orders.filter { $0.coin == coin }) else { continue }
+                if tries.failures > 0, abs(p.size) < abs(rules.openedSize) {
+                    // A try whose reply was lost had put the half on, and it has filled since: the breakeven step below sees it.
+                    rules.partialOrderPending = false
+                    partialTries[coin] = nil
+                } else {
+                    await placeHalf(coin, position: p, rules: rules, tries: tries, wallet: wallet)
+                    continue
+                }
             }
             let stop = orders.first { $0.coin == coin && $0.isTrigger && ($0.orderType ?? "").contains("Stop") }?.triggerPx
             let action = Guardian.step(&rules, size: p.size, stop: stop, mark: mark)
@@ -1278,6 +1283,36 @@ extension Workspace {
             case nil: break
             }
         }
+    }
+
+    /// The half at 1R on a limit that has filled (guardPositions), sized from the real fill. The pending flag goes only once
+    /// the exchange has it; a failure is tried again and said at the first time and at the end (Guardian.afterPartialTry).
+    private func placeHalf(_ coin: String, position p: HyperliquidAccount.Position, rules: ExitRules, tries: Guardian.PartialTries,
+                           wallet: TradeWallet) async {
+        var rules = rules
+        rules.openedSize = abs(p.size)
+        rules.entry = p.entry
+        rules.peak = p.entry
+        if exitRules[coin] != rules { exitRules[coin] = rules }
+        partialTries[coin] = .init(failures: tries.failures, next: .distantFuture)   // under way: a second pass doesn't send it too
+        var placed: Bool?, failure: Error?
+        do { placed = try await executor(wallet).addPartialTake(asset: coin) != .waiting } catch { failure = error }
+        // Another wallet meanwhile has its own rules and tries.
+        guard signerWallet?.evm == wallet.evm else { return }
+        let now = Date()
+        let after = Guardian.afterPartialTry(tries, placed: placed, refused: failure is GuardStop, now: now)
+        partialTries[coin] = after.pending ? after.tries : nil
+        if !after.pending { exitRules[coin]?.partialOrderPending = false }   // only if the rules are still there
+        guard after.tell, let failure else { return }
+        let why = failure.localizedDescription.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        let minutes = Int((after.tries.next.timeIntervalSince(now) / 60).rounded())
+        let text = after.pending
+            ? say("Partial take-profit on \(coin) didn't go through (\(why)). Trying again in \(minutes) min; the stop and take-profit are on the exchange.",
+                  "Частичный тейк по \(coin) не встал (\(why)). Попробую снова через \(minutes) мин; стоп и тейк стоят на бирже.")
+            : say("Partial take-profit on \(coin) not placed (\(why)), and I won't try again. The stop and take-profit protect the position: place the half at 1R on Hyperliquid by hand if you still want it.",
+                  "Частичный тейк по \(coin) не поставлен (\(why)), больше не пробую. Позицию защищают стоп и тейк; если половина на 1R ещё нужна, поставь её на Hyperliquid вручную.")
+        reply(text)
+        notify(.positions, say("Partial take-profit on \(coin)", "Частичный тейк по \(coin)"), text, schedule: "perp:\(coin)", failed: true)
     }
 
     /// A position closed outside ihatecrypto (its stop or take, or by hand elsewhere): say so in the chat and as a notification.

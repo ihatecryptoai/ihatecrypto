@@ -520,6 +520,9 @@ final class Workspace {
     var exitRules: [String: ExitRules] = (UserDefaults.standard.data(forKey: Workspace.scoped("exitRules")).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) }) ?? [:] {
         didSet { UserDefaults.standard.set(try? JSONEncoder().encode(exitRules), forKey: Workspace.scoped("exitRules", activeWalletID)) }
     }
+    /// The half at 1R per coin: failures so far and when the next try may go; `.distantFuture` while one is under way,
+    /// so a second guardian pass doesn't send it too. Not saved: after a restart the pending flag starts it afresh.
+    @ObservationIgnored var partialTries: [String: Guardian.PartialTries] = [:]
     /// The position the plan card shows: the plan's asset if open, otherwise the first one.
     var position: HyperliquidAccount.Position? { positions.first { $0.coin == intent.asset } ?? positions.first }
 

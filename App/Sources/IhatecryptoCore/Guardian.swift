@@ -51,4 +51,30 @@ public enum Guardian {
         let valid = rules.long ? trail < mark : trail > mark
         return better && valid ? .stopTo(trail) : nil
     }
+
+    /// The half at 1R's tries on one coin: failures in a row, and when the next try may go.
+    public struct PartialTries: Equatable, Sendable {
+        public var failures = 0
+        public var next = Date.distantPast
+        public init(failures: Int = 0, next: Date = .distantPast) {
+            self.failures = failures
+            self.next = next
+        }
+    }
+
+    /// What a try at the half at 1R leaves. `placed`: true on the book (or skipped, under $10), false waiting for the
+    /// limit's full fill, nil failed (`refused`: a declined signature). Returns whether the pending flag stays, the tries
+    /// for the next pass, and whether the chat hears of it: the first failure and the end, not every try. A failure goes
+    /// again in 1, then 2 minutes; the third, or a declined signature, ends it. The stop and take on the exchange protect
+    /// the position either way.
+    public static func afterPartialTry(_ tries: PartialTries, placed: Bool?, refused: Bool = false, now: Date = Date())
+        -> (pending: Bool, tries: PartialTries, tell: Bool) {
+        guard let placed else {
+            let failures = tries.failures + 1
+            if refused || failures >= 3 { return (false, PartialTries(failures: failures), true) }
+            return (true, PartialTries(failures: failures, next: now.addingTimeInterval(TimeInterval(60 * failures))), failures == 1)
+        }
+        // Waiting keeps the count: reads that lag and fail by turns still come to an end.
+        return (!placed, PartialTries(failures: placed ? 0 : tries.failures), false)
+    }
 }

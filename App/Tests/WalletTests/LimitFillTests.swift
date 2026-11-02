@@ -79,6 +79,18 @@ extension FakeHyperliquid {
         #expect(opened.partialTake == d("3075.7"))   // 2988 + (2988 − 2900.3)
     }
 
+    /// The half turned down there: the position stays open under its stop and take, and the chat hears why.
+    @Test func limitFilledAtOnceWithItsHalfRefused() async throws {
+        let p = try plan("long ETH limit 2990 risk $2 stop 3% take 6% in parts leverage 2x")
+        let r = await execute(p) { s in fillsAtOnce(p, armed: true)(&s); s.refusals = 1 }
+        let opened = try #require(r.opened, "\(r.text)")
+        #expect(r.sent == ["leverage", "limit sl+tp", "tp"] && opened.partialTake == nil)
+        #expect(r.state.reported.contains { $0.hasPrefix("Partial take-profit didn't go through") })
+        // Its reply lost: it may be on, and the chat isn't told it failed.
+        let lost = await execute(p) { s in fillsAtOnce(p, armed: true)(&s); s.lost = 1 }
+        #expect(lost.opened?.partialTake == nil && lost.state.reported.contains { $0.contains("reply didn't come, so it may or may not be on") })
+    }
+
     /// Filled at once, its stop not listed: the stop and take go on the position again, from the limit's prices, for the
     /// position's size. The trade stays.
     @Test(arguments: phrases) func limitFilledAtOnceWithoutItsStopGetsItAgain(_ phrase: String) async throws {

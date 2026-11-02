@@ -22,6 +22,8 @@ final class FakeHL: URLProtocol {
         var entry: (inout State) -> String? = { _ in nil }
         /// Stops and takes for a position (positionTpsl) turned down before one is taken.
         var refusals = 0
+        /// This many stops or takes go on the book with their reply lost.
+        var lost = 0
         /// The positionTpsl orders sent, and the executor's report lines.
         var protections: [[String: Any]] = []
         var reported: [String] = []
@@ -105,6 +107,7 @@ final class FakeHL: URLProtocol {
             return #"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Trigger order has invalid price."}]}}}"#
         }
         for t in triggers { state.orders.append(stop(100, t["triggerPx"] as? String ?? "")) }
+        if state.lost > 0 { state.lost -= 1; return nil }
         return #"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#
     }
 
