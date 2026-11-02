@@ -85,9 +85,9 @@ extension Executor {
         let problems = envelope.violations(input: Decimal(string: live.quote.amountInFormatted) ?? .greatestFiniteMagnitude,
                                            output: Decimal(string: live.quote.amountOutFormatted) ?? 0, destination: deposit)
         guard problems.isEmpty else { throw ExecutionError("The price moved past what was approved: " + problems.joined(separator: " ")) }
-        if let paid = live.quote.amountInUSD, let worth = live.quote.amountOutUSD {
-            try Self.checkLoss(paid - worth, paid: paid, cap: max(paid * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "NEAR Intents")
-        }
+        // No price for either side stops here too: Relay's refusal of an unpriced swap brings it to this way.
+        try Self.holdsCrossLoss(in: live.quote.amountInUSD ?? 0, out: live.quote.amountOutUSD ?? 0,
+                                unpriced: "1Click doesn't price \(live.origin.symbol) for \(live.destination.symbol)", what: "NEAR Intents")
         let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: live.recipient, refundTo: live.refund,
                                          origin: live.origin.asset, destination: live.destination.asset, amount: live.units)
         guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }

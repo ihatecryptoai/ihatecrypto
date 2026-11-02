@@ -156,10 +156,12 @@ func crossNetworkSwapsAreQuoted() async throws {
 }
 
 /// A Solana node holding 10 USDC for the wallet («cross.stub») and Relay quoting them for $8 of ETH: a $2 loss of $10,
-/// past the cap of max(3%, 15¢). It counts the balance reads and keeps the amounts Relay was asked for.
+/// past the cap of max(3%, 15¢). It counts the balance reads and keeps the amounts Relay was asked for; `worthIn` is
+/// Relay's dollar price of what goes in.
 private final class CrossStub: URLProtocol {
     nonisolated(unsafe) static var balanceReads = 0
     nonisolated(unsafe) static var relayAmounts: [String] = []
+    nonisolated(unsafe) static var worthIn = "10"
     static let sol = "7WktogJEd2wQ9eH2oWusmcoFTgeYi6rS632UviTBJ2jm", evm = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
     override class func canInit(with request: URLRequest) -> Bool {
@@ -185,7 +187,7 @@ private final class CrossStub: URLProtocol {
             Self.relayAmounts.append(j["amount"] as? String ?? "")
             reply = ["requestId": "0xstub", "steps": [] as [Any],
                      "details": ["sender": Self.sol, "recipient": Self.evm, "timeEstimate": 3,
-                                 "currencyIn": ["amount": "10000000", "amountFormatted": "10", "amountUsd": "10"],
+                                 "currencyIn": ["amount": "10000000", "amountFormatted": "10", "amountUsd": Self.worthIn],
                                  "currencyOut": ["amount": "2000000000000000", "amountFormatted": "0.002", "amountUsd": "8"]]]
         }
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
@@ -195,22 +197,51 @@ private final class CrossStub: URLProtocol {
     }
 }
 
-/// «All» of a token on the card: Relay's quote shows even past the loss cap, from one balance read and one quote of
-/// exactly what's held; the run still stops at the cap (CostlyMove, «Send anyway»). Off with IHATECRYPTO_NET=1: the live
-/// tests ask the real Relay while the stub is in.
-@Test(.disabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
-func crossCardQuotesAllOfATokenPastTheLossCap() async throws {
-    URLProtocol.registerClass(CrossStub.self)
-    defer { URLProtocol.unregisterClass(CrossStub.self) }
-    (CrossStub.balanceReads, CrossStub.relayAmounts) = (0, [])
-    let e = Executor(wallet: TradeWallet(solana: CrossStub.sol, evm: CrossStub.evm), signer: OneClickQuoteOnly(),
-                     journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("cs-\(UUID().uuidString).jsonl")),
-                     rpc: SolanaRPC(url: URL(string: "https://cross.stub")!)) { _ in }
-    let card = try await e.crossQuoteText("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
-    #expect(card.gets.contains("0.002 ETH") && card.gets.contains("$8"))
-    #expect(CrossStub.balanceReads == 1 && CrossStub.relayAmounts == ["10000000"])
-    await #expect(throws: CostlyMove.self) {
-        try await e.crossQuote("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
+/// The tests answered by CrossStub, one at a time: its counters and its price are shared. Off with IHATECRYPTO_NET=1: the
+/// live tests ask the real Relay while the stub is in.
+@Suite(.serialized, .disabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+struct CrossStubbed {
+    func executor() -> Executor {
+        Executor(wallet: TradeWallet(solana: CrossStub.sol, evm: CrossStub.evm), signer: OneClickQuoteOnly(),
+                 journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("cs-\(UUID().uuidString).jsonl")),
+                 rpc: SolanaRPC(url: URL(string: "https://cross.stub")!)) { _ in }
+    }
+
+    /// «All» of a token on the card: Relay's quote shows even past the loss cap, from one balance read and one quote of
+    /// exactly what's held; the run still stops at the cap (CostlyMove, «Send anyway»).
+    @Test func crossCardQuotesAllOfATokenPastTheLossCap() async throws {
+        URLProtocol.registerClass(CrossStub.self)
+        defer { URLProtocol.unregisterClass(CrossStub.self) }
+        (CrossStub.balanceReads, CrossStub.relayAmounts, CrossStub.worthIn) = (0, [], "10")
+        let e = executor()
+        let card = try await e.crossQuoteText("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
+        #expect(card.gets.contains("0.002 ETH") && card.gets.contains("$8"))
+        #expect(CrossStub.balanceReads == 1 && CrossStub.relayAmounts == ["10000000"])
+        await #expect(throws: CostlyMove.self) {
+            try await e.crossQuote("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
+        }
+    }
+
+    /// Relay pricing what goes in at nothing (no price, «0», «NaN») stops the swap before signing: read as $0, the loss
+    /// check let any loss through. The card stops too, so it shows the way Confirm takes. With a price it checks as before.
+    @Test func crossQuoteWithoutAPriceStops() async throws {
+        URLProtocol.registerClass(CrossStub.self)
+        defer { URLProtocol.unregisterClass(CrossStub.self); CrossStub.worthIn = "10" }
+        let e = executor()
+        func quote(_ worthIn: String, capped: Bool = true) async throws {
+            CrossStub.worthIn = worthIn
+            _ = try await e.crossQuote("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: 10, capped: capped)
+        }
+        for none in ["", "0", "NaN", "-1"] {
+            for capped in [true, false] {
+                let error = await #expect(throws: ExecutionError.self, "worth in «\(none)»") { try await quote(none, capped: capped) }
+                #expect(error?.message.contains("can't be checked") == true)
+            }
+        }
+        try await quote("8.2")                                              // $0.20 of $8.20 lost, under 3%: passes
+        await #expect(throws: CostlyMove.self) { try await quote("10") }    // $2 of $10: asks «Send anyway»
+        // 1Click pricing only what goes in: refused, never asked about as a 100% loss.
+        #expect(throws: ExecutionError.self) { try Executor.holdsCrossLoss(in: 10, out: 0, unpriced: "1Click doesn't price X for Y", what: "NEAR Intents") }
     }
 }
 

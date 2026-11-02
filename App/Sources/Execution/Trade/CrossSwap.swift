@@ -49,7 +49,8 @@ extension Executor {
     /// Relay's quote for the swap, checked: from this wallet to this wallet, and no more value lost than allowed.
     /// `amount` nil = all of a token held now (never all of a coin: its fees come from it).
     /// `capped` false: for the card, which shows the cost instead of stopping at it, priced at the amount asked even when
-    /// the wallet holds less (the run checks it).
+    /// the wallet holds less (the run checks it). No dollar price for what goes in stops both, so the card shows the way
+    /// Confirm takes.
     func crossQuote(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, capped: Bool = true)
         async throws -> (quote: Relay.Quote, origin: CrossSide, destination: CrossSide, units: Decimal) {
         guard from != to else { throw ExecutionError("Both sides are on \(WalletCommand.placeName(from)): that's a swap there, not between networks.") }
@@ -83,8 +84,18 @@ extension Executor {
         guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         let worthIn = Decimal(string: quote.amountInUSD) ?? 0, worthOut = Decimal(string: quote.amountOutUSD) ?? 0
         guard worthOut > 0 else { throw ExecutionError("Relay doesn't quote \(origin.symbol) for \(destination.symbol) now. Nothing was signed.") }
-        if capped { try Self.checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap") }
+        try Self.holdsCrossLoss(in: worthIn, out: worthOut, unpriced: "Relay doesn't price \(origin.symbol) on \(WalletCommand.placeName(from))",
+                                what: "Relay's swap", capped: capped)
         return (quote, origin, destination, units)
+    }
+
+    /// A swap across networks judged by value: no dollar price for either side stops it before signing (read as $0, it
+    /// let any loss through, or asked about a loss that wasn't); `capped`, at most 3% (or $0.15) lost, past that a
+    /// CostlyMove to ask about.
+    static func holdsCrossLoss(in worthIn: Decimal, out worthOut: Decimal, unpriced: String, what: String, capped: Bool = true) throws {
+        guard worthIn > 0, worthOut > 0 else { throw ExecutionError("\(unpriced) now, so what \(what) keeps can't be checked. Nothing was signed.") }
+        guard capped else { return }
+        try checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: what)
     }
 
     /// A failure of Relay's that NEAR Intents may take over: no route, no quote, the network. Never a stop by the guard or
