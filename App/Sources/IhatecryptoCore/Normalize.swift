@@ -141,7 +141,7 @@ public enum ChatRouter {
       «купи акции Nvidia от Ondo на 5$» = buy NVDAon on solana for 5 USDC, «buy $5 of SPY on Ondo» = buy SPYon on solana for 5 USDC, «продай всю Теслу от Ondo» = sell all TSLAon on solana;
       a stock bought with no «Ondo» said stays the Robinhood form below. USDY is Ondo's dollar that earns the US Treasury rate (its price grows, it isn't a stablecoin):
       «положи 10 долларов в USDY» = buy USDY on solana for 10 USDC, «выведи всё из USDY» = sell all USDY on solana
-      buy <SOL|BTC|ETH|JUP> for N USDC every <day|week|N days> | stop recurring buys
+      buy <SOL|BTC|ETH|JUP> for N USDC every <day|week|month|N days|N weeks|N months> | stop recurring buys
       Jupiter DCA N USDC into <SOL|BTC|ETH|JUP|TICKER> [in K orders] [every <hour|day|week|month|N days> | over N <days|weeks|months>] | cancel Jupiter DCA [<TICKER>] | show Jupiter DCA
       (Jupiter's on-chain DCA: all N goes into an order account of the wallet's own at once and Jupiter's keepers buy each round, even with the app closed; at least 100 USDC and 50 per order; no K = one per 50 USDC. Write it when the user names Jupiter's DCA or wants buys that run on-chain without the app; a plain «buy SOL every week» is the app's own recurring buy above)
       buy NEAR for N USDC | sell [N] NEAR [for USDC on <base|arbitrum|ethereum>]   (native NEAR on the NEAR account → USDC on Solana, or on that network at our own address; no N = all of it; «продай NEAR в USDC на base» = sell NEAR for USDC on base)

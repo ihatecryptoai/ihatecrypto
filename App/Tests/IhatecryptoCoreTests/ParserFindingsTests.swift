@@ -216,6 +216,68 @@ private let sol = SpotAsset.all[0]
     #expect(s.next == start.addingTimeInterval(86_400))
 }
 
+/// A recurring buy's period is read whole — weeks and months with their count, a month as 30 days like Jupiter's DCA —
+/// and what it doesn't know is refused, never a buy every week.
+@Test func recurringBuyPeriods() {
+    for (text, days) in [
+        ("buy SOL for 10 USDC every month", 30), ("buy SOL for 10 USDC each month", 30), ("buy SOL for 10 USDC every 1 month", 30),
+        ("buy SOL for 10 USDC monthly", 30), ("buy SOL for 10 USDC every 2 weeks", 14), ("buy SOL for 10 USDC every two weeks", 14),
+        ("buy SOL for 10 USDC every other week", 14), ("buy SOL for 10 USDC biweekly", 14), ("buy SOL for 10 USDC every 2 months", 60),
+        ("buy SOL for 10 USDC every other month", 60), ("buy SOL for 10 USDC every six months", 180), ("buy SOL for 10 USDC every quarter", 90),
+        ("buy SOL for 10 USDC quarterly", 90), ("buy SOL for 10 USDC every week for 2 months", 7), ("buy SOL for 10 USDC every week", 7),
+        ("buy SOL for 10 USDC every day", 1), ("buy SOL for 10 USDC every 3 days", 3), ("buy SOL for 10 USDC every monday", 7),
+        ("покупай SOL на 10 USDC каждые 2 недели", 14), ("покупай SOL на 10 USDC каждые две недели", 14),
+        ("покупай SOL на 10 USDC раз в 2 недели", 14), ("покупай SOL на 10 USDC каждую вторую неделю", 14),
+        ("покупай SOL на 10 USDC каждый месяц", 30), ("покупай SOL на 10 USDC раз в месяц", 30), ("покупай SOL на 10 USDC ежемесячно", 30),
+        ("купи SOL на 10 USDC ежемесячно", 30), ("купи SOL на 10 USDC еженедельно", 7), ("покупай SOL на 10 USDC каждые 2 месяца", 60),
+        ("купи ETH на 10 USDC раз в два месяца", 60), ("покупай SOL на 10 USDC раз в три месяца", 90),
+        ("покупай SOL на 10 USDC каждый второй месяц", 60), ("покупай SOL на 10 USDC раз в полгода", 180),
+        ("покупай SOL на 10 USDC каждые 3 дня", 3), ("покупай SOL на 10 USDC каждый день", 1), ("покупай SOL на 10 USDC каждую неделю", 7),
+        ("покупай SOL на 10 USDC каждую неделю в течение 2 месяцев", 7), ("покупай SOL на 10 USDC каждый понедельник", 7),
+        ("покупай SOL на 10 USDC частями", 7),
+        // The window's own Russian labels, a day only as the period, years and half-years, «каждое …», «once a …».
+        ("покупай SOL на 10 USDC раз в 2 нед.", 14), ("покупай SOL на 10 USDC раз в 3 мес.", 90), ("покупай SOL на 10 USDC раз в день", 1),
+        ("покупай SOL на 10 USDC каждые сутки", 1), ("покупай SOL на 10 USDC в первый день каждого месяца", 30),
+        ("покупай SOL на 10 USDC каждый месяц в первый день", 30), ("покупай SOL на 10 USDC каждое 1-е число", 30),
+        ("buy SOL for 10 USDC on the first day of every month", 30), ("buy SOL for 10 USDC every half year", 180),
+        ("buy SOL for 10 USDC semi-annually", 180), ("buy SOL for 10 USDC every year", 365), ("buy SOL for 10 USDC every 2 years", 730),
+        ("покупай SOL на 10 USDC раз в 2 года", 730), ("купи SOL на 10 USDC каждое воскресенье", 7), ("buy SOL for 10 USDC once a month", 30),
+        ("buy SOL for 10 USDC once a day", 1), ("покупай SOL на $10 раз в месяц", 30), ("покупай SOL на $10 раз в неделю", 7),
+        ("покупай SOL на 10 USDC каждый месяц в день зарплаты", 30), ("покупай SOL на 10 USDC раз в месяц в день зарплаты", 30),
+        ("buy SOL for 10 USDC every week, starting in a day", 7), ("покупай SOL на 10 USDC каждый рабочий день", 1),
+        ("покупай SOL на 10 USDC каждый божий день", 1), ("buy SOL for 10 USDC per day", 1), ("buy SOL for 10 USDC annually", 365),
+    ] {
+        let asset = text.contains("ETH") ? SpotAsset.all[2] : sol
+        #expect(WalletCommand.parse(text) == .schedule(asset, usdc: 10, days: days), "\(text)")
+    }
+    // Hours, minutes and «every 0 …» are refused: never a week, never a one-off buy.
+    for text in ["buy SOL for 10 USDC every 4 hours", "buy SOL for 10 USDC every hour", "buy SOL for 10 USDC hourly",
+                 "buy SOL for 10 USDC every 30 minutes", "покупай SOL на 10 USDC каждый час", "покупай SOL на 10 USDC каждые 4 часа",
+                 "buy SOL for 10 USDC every 0 weeks", "покупай SOL на 10 USDC каждые 0 месяцев", "buy SOL for 10 USDC every 12h",
+                 "buy SOL for 10 USDC every 2 h", "buy SOL for 10 USDC every 30 seconds", "buy SOL for 10 USDC twice a week",
+                 "покупай SOL на 10 USDC 2 раза в день", "покупай SOL на 10 USDC два раза в неделю",
+                 // A count past ten years is refused, not an overflow.
+                 "buy SOL for 10 USDC every 999999999999999999 months", "buy SOL for 10 USDC every 400000000000000 days",
+                 "buy SOL for 10 USDC every 11 years", "buy SOL for 10 USDC 3 times a week"] {
+        #expect(WalletCommand.parse(text) == nil, "\(text)")
+    }
+    // Stopping is never a new schedule, and a word that only sounds periodic doesn't make one.
+    for text in ["отмени ежемесячные покупки SOL на 10 USDC", "останови еженедельную покупку SOL на 10 USDC", "stop monthly buys"] {
+        #expect(WalletCommand.parse(text) == .stopSchedules, "\(text)")
+    }
+    for text in ["купи SOL на 10 USDC, ежедневный лимит 50 USDC", "buy SOL for 10 USDC, what's the annual return",
+                 "купи SOL на 10 USDC на каждом кошельке", "buy SOL for 10 USDC once a dip comes"] {
+        if case .schedule? = WalletCommand.parse(text) { Issue.record("\(text) became a schedule") }
+    }
+    // The card's command is the summary: it reads back as the same schedule, its period in weeks or months when whole.
+    for d in [1, 2, 3, 7, 10, 14, 21, 28, 30, 45, 60, 90, 180, 210, 365] {
+        let c = WalletCommand.schedule(sol, usdc: 10, days: d)
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+    #expect(WalletCommand.schedule(sol, usdc: 10, days: 14).summary == "buy SOL for 10 USDC every 2 weeks")
+    #expect(WalletCommand.schedule(sol, usdc: 10, days: 30).summary == "buy SOL for 10 USDC every month")
+}
+
 @Test func aBareAmountDoesNotSwitchTheLanguage() {   // R9
     #expect(ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "1 sol"]))
     #expect(ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "10 usdc"]))

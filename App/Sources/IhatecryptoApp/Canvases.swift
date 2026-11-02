@@ -1111,7 +1111,7 @@ struct ScheduleBoard: View {
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Brand.cardBorder))
     }
 
-    private var period: String { schedule.days == 1 ? "day" : schedule.days == 7 ? "week" : schedule.days == 30 ? "month" : "\(schedule.days) days" }
+    private var period: String { ScheduleCanvas.period(schedule.days) }
 }
 
 /// The running Jupiter DCA orders: how much each has spent and bought, the swap size and interval, and Cancel. The
@@ -3319,8 +3319,7 @@ extension Workspace {
     /// Buying over time, the two ways as cards: Jupiter's DCA on-chain (a budget in rounds of at least 50, runs with the
     /// app closed) or the app's own recurring buys (the money stays in the wallet, no minimum, the app must run).
     private func offerDCAChoice(_ asset: SpotAsset, usdc: Decimal, days: Int, note: String?) {
-        let period = days == 1 ? "day" : days == 7 ? "week" : days == 30 ? "month" : "\(days) days"
-        let periodRU = days == 1 ? "день" : days == 7 ? "неделю" : days == 30 ? "месяц" : "\(days) дн."
+        let period = ScheduleCanvas.period(days), periodRU = ScheduleCanvas.periodRU(days)
         // Jupiter takes a budget: four rounds of this amount, or its least (2 × 50) when the amount is under a round.
         let (total, rounds) = usdc >= WalletCommand.jupiterDCAMinimum / 2 ? (usdc * 4, 4) : (WalletCommand.jupiterDCAMinimum, 2)
         let jupiter = WalletCommand.jupiterDCA(asset, usdc: total, orders: rounds, every: days * 86400)

@@ -207,7 +207,7 @@ func formCases() -> [FormCase] {
         add("spot", "sell \(t)", w(.sell(asset, amount: nil)))
         for (a, v) in amounts { add("spot", "sell \(a) \(t)", w(.sell(asset, amount: v))) }
         for (a, v) in amounts {
-            for (every, days) in [("day", 1), ("week", 7), ("3 days", 3), ("10 days", 10)] {
+            for (every, days) in [("day", 1), ("week", 7), ("3 days", 3), ("10 days", 10), ("2 weeks", 14), ("month", 30), ("2 months", 60)] {
                 add("dca", "buy \(t) for \(a) USDC every \(every)", w(.schedule(asset, usdc: v, days: days)))
             }
         }

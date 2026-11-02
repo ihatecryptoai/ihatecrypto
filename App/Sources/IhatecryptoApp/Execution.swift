@@ -724,7 +724,7 @@ extension Workspace {
                 var schedule = Schedule(symbol: asset.symbol, usdc: usdc, days: days, next: Date())
                 schedule.advance()
                 let monthly = usdc * Decimal(30) / Decimal(days)
-                let every = days == 1 ? say("daily", "каждый день") : days == 7 ? say("weekly", "каждую неделю") : say("every \(days) days", "раз в \(days) дн.")
+                let every = days == 1 ? say("daily", "каждый день") : days == 7 ? say("weekly", "каждую неделю") : say("every \(ScheduleCanvas.period(days))", "раз в \(ScheduleCanvas.periodRU(days))")
                 reply(say("Scheduled purchases: \(asset.symbol) for \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) a month. The first one is on the canvas: its Confirm buys now and turns the schedule on, Cancel leaves none. The next ones start \(Fmt.date(schedule.next)) and run while ihatecrypto is open; each goes through the same checks and signing.",
                           "Регулярные покупки: \(asset.symbol) на \(Fmt.usd(usdc)) \(every) — ≈ \(Fmt.usd(monthly)) в месяц. Первая — карточкой на холсте: Confirm купит сейчас и включит расписание, Cancel не оставит его. Следующие пойдут с \(Fmt.date(schedule.next)), пока ihatecrypto открыт; каждая проходит те же проверки и подпись."))
                 await handleWallet(.buy(asset, usdc: usdc), quiet: true)

@@ -143,6 +143,8 @@ def check(expect, state, replies):
             why.append(f"the token card says «{want}»: {text(b.get('tokenCard'))[:240]}" if b.get("tokenCard") else "no token card")
         elif key == "cards_in_chat" and len(next((m.get("cards") or [] for m in reversed(state.get("messages") or []) if not m["user"]), [])) < want:
             why.append(f"the last reply has fewer than {want} cards under it in the chat")
+        elif key == "cards_contain" and not any(want.lower() in c.lower() for c in next((m.get("cards") or [] for m in reversed(state.get("messages") or []) if not m["user"]), [])):
+            why.append(f"no card under the last reply says «{want}»")
         elif key == "next_steps_at_least" and len(b.get("nextSteps") or []) < want:
             why.append(f"{len(b.get('nextSteps') or [])} cards to go on, expected at least {want}: {text(b.get('nextSteps'))[:200]}")
         elif key == "not_executing" and state.get("executing"):

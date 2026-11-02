@@ -1252,5 +1252,27 @@
       "reply": true,
       "reply_cyrillic": true
     }
+  },
+  {
+    "name": "recurring buy every 2 weeks → two ways as cards, «2 нед.» on them",
+    "send": [
+      "покупай SOL на 10 USDC каждые 2 недели"
+    ],
+    "expect": {
+      "no_pending": true,
+      "cards_in_chat": 2,
+      "cards_contain": "2 нед"
+    }
+  },
+  {
+    "name": "recurring buy every month → two ways as cards, a month on them",
+    "send": [
+      "buy SOL for 10 USDC every month"
+    ],
+    "expect": {
+      "no_pending": true,
+      "cards_in_chat": 2,
+      "cards_contain": "every month"
+    }
   }
 ]

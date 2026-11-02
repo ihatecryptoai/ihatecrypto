@@ -567,5 +567,12 @@ enum ScheduleCanvas {
         return s.prefix(1).uppercased() + s.dropFirst()
     }
 
-    static func period(_ days: Int) -> String { days == 1 ? "day" : days == 7 ? "week" : days == 30 ? "month" : "\(days) days" }
+    /// A recurring buy's period, «day», «2 weeks», «month», «45 days», as its command says it; a stored 0 runs daily.
+    static func period(_ days: Int) -> String { WalletCommand.everyText(max(days, 1) * 86_400) }
+
+    /// The same after «раз в»: «день», «неделю», «месяц», «2 нед.», «3 мес.», «10 дн.».
+    static func periodRU(_ days: Int) -> String {
+        days <= 1 ? "день" : days == 7 ? "неделю" : days == 30 ? "месяц"
+            : days % 30 == 0 ? "\(days / 30) мес." : days % 7 == 0 ? "\(days / 7) нед." : "\(days) дн."
+    }
 }

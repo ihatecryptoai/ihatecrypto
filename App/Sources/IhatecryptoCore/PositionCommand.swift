@@ -564,16 +564,37 @@ public enum WalletCommand: Equatable, Sendable {
             if outOf { return .kamino(deposit: false, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
             if into { return .kamino(deposit: true, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
         }
-        if q.contains(/(?:останов|отмен|прекрат|стоп)\w*\s+(?:регулярн\w*\s+)?(?:покупк|dca|расписан)|(?:stop|cancel|end)\s+(?:the\s+|all\s+)?(?:recurring|regular|scheduled)?\s*(?:buys|purchases|dca|schedules?)/) { return .stopSchedules }
-        if q.contains(/покупай|каждый|каждую|каждые|раз\s+в\s+|регулярн|\bdca\b|\bevery\b|\beach\b|weekly|daily|monthly|recurring/), q.contains(/куп|dca|\bbuy/), let asset = SpotAsset.find(q), let amount {
+        if q.contains(/(?:останов|отмен|прекрат|стоп)\w*\s+(?:(?:регулярн|еже)\w*\s+)?(?:покупк|dca|расписан)|(?:stop|cancel|end)\s+(?:the\s+|all\s+)?(?:recurring|regular|scheduled|daily|weekly|monthly)?\s*(?:buys|purchases|dca|schedules?)/) { return .stopSchedules }
+        if q.contains(/покупай|кажд(?:ый|ую|ые|ое)\b|каждого\s+(?:месяц|года|квартал)|каждой\s+недел|раз\s+в\s+|регулярн|\bdca\b|\bevery\b|\beach\b|once\s+(?:a|per|every)\s+(?:day|week|month|year|quarter|fortnight)|twice|times\s+(?:a|an|per)\b|per\s+day|weekly|daily|monthly|recurring|еже(?:часно|дневно|недельно|месячно|квартально|годно)|hourly|quarterly|yearly|annually|semi-?annual|fortnight/), q.contains(/куп|dca|\bbuy/), let asset = SpotAsset.find(q), let amount {
+            // «every 2 weeks», «каждые 3 месяца», «раз в две недели», «каждую вторую неделю»: a count and its unit. A month is
+            // 30 days, as Jupiter's DCA and the «≈ a month» line count it. Hours and minutes aren't a recurring buy's (it runs
+            // in days): nil, never a week. The count goes first, then day, week, month: «каждую неделю в течение 2 месяцев» is weekly.
+            let counts = ["other": 2, "second": 2, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "вторую": 2, "второй": 2,
+                          "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6]
+            let units = ["дн": 1, "де": 1, "су": 1, "da": 1, "не": 7, "we": 7, "ме": 30, "mo": 30, "го": 365, "ye": 365]
+            // A few buys a day or a week is no period in days: «twice a week», «2 раза в день».
+            if q.contains(/twice|thrice|(?:\b\d+|two|three)\s*(?:times|x)\s+(?:a|an|per|every|each)\b|(?:^|\s)(?:[2-9]|\d\d+|два|две|три|четыре|пять|шесть)\s+раза?\s+в\b/) { return nil }
             let days: Int
-            if q.contains(/день|сутки|ежедневн|daily|every\s+day|each\s+day/) && !q.contains(/каждые\s+\d|every\s+\d/) { days = 1 }
-            else if let m = q.firstMatch(of: /(?:каждые|every)\s+(\d+)\s*(?:дн|день|сут|days?)/), let n = Int(m.1) {
-                // «every 0 days» never gets past now and buys without end; ScheduledTask.parse refuses it too.
-                guard n > 0 else { return nil }
-                days = n
+            if let m = q.firstMatch(of: /(?:кажд\w*|every|each|раз\s+в)\s+(\d+|other|second|two|three|four|five|six|вторую|второй|два|две|три|четыре|пять|шесть)\s*(дн|день|сут|days?|нед|weeks?|мес|months?|год|years?|час|hours?|hrs?|h\b|ч\b|мин|min|sec|сек)/),
+               let n = Int(m.1) ?? counts[String(m.1)] {
+                // «every 0 days» never gets past now and buys without end; ScheduledTask.parse refuses it too. Over ten
+                // years is no schedule either, and a count that long would overflow.
+                guard (1...3650).contains(n), let unit = units[String(m.2.prefix(2))],
+                      n * unit <= 3650 else { return nil }
+                days = n * unit
             }
-            else if q.contains(/месяц|monthly/) { days = 30 }
+            else if q.contains(/bi-?weekly|fortnight/) { days = 14 }
+            // The period word right after «каждый / раз в / every» goes before the loose words: «каждый месяц в день зарплаты»
+            // and «в первый день каждого месяца» are monthly, «каждый рабочий день» daily.
+            else if let m = q.firstMatch(of: /(?:кажд\w*|раз\s+в|every|each|once\s+(?:a|per)|per)\s+(?:\w+\s+)??(день|сутки|day\b|недел|week|месяц|month)/),
+                    let d = units[String(m.1.prefix(2))] { days = d }
+            else if q.contains(/\bв\s+(?:день|сутки)|сутк|ежедневн|daily|\ba\s+day\b/) { days = 1 }
+            else if q.contains(/недел|week/) { days = 7 }
+            else if q.contains(/квартал|quarter/) { days = 90 }
+            else if q.contains(/полгода|пол\s+года|half[\s-]?(?:a\s+)?year|semi-?annual/) { days = 180 }
+            else if q.contains(/месяц|месяч|month|числ/) { days = 30 }
+            else if q.contains(/(?:каждый|раз\s+в)\s+год|ежегодн|\byear|annual/) { days = 365 }
+            else if q.contains(/\bhours?\b|hourly|\bчас(?:а|ов)?\b|ежечас|\bminutes?\b|минут/) { return nil }
             else { days = 7 }
             return .schedule(asset, usdc: amount, days: days)
         }
@@ -980,7 +1001,7 @@ extension WalletCommand {
         case .buyNear(let u): return "buy native NEAR for \(n(u)) USDC (to your NEAR account)"
         case .sellNear(let x, let to): return "sell \(n(x)) NEAR from your NEAR account for USDC on \(to.map(Self.placeName) ?? "Solana")"
         case .sell(let a, let x): return "sell \(n(x)) \(a.symbol)"
-        case .schedule(let a, let u, let d): return "buy \(a.symbol) for \(Fmt.num(u)) USDC every \(d == 1 ? "day" : d == 7 ? "week" : "\(d) days")"
+        case .schedule(let a, let u, let d): return "buy \(a.symbol) for \(Fmt.num(u)) USDC every \(Self.everyText(d * 86_400))"
         case .stopSchedules: return "stop recurring buys"
         // The canonical form: it parses back to the same order.
         case .jupiterDCA(let a, let u, let o, let e):
