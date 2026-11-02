@@ -257,3 +257,77 @@ private func sponsored(signers: [String], others: [String] = [], _ transfers: [(
     #expect(t(to: "0x0000000000000000000000000000000000000000").refusal != nil && t(to: "nobody").refusal != nil)
     #expect(t(gas: 200_000).refusal != nil)
 }
+
+/// MegaFuel as a case below scripts it: each method's answers in turn (HTTP status, body), and how often each was asked.
+/// On only inside the one test that uses it: URLProtocol is the whole process's, and the host is MegaFuel's real one.
+private final class ScriptedMegaFuel: URLProtocol {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var answers: [String: [(status: Int, body: String)]] = [:]
+    nonisolated(unsafe) static var asked: [String: Int] = [:]
+
+    static func script(_ answers: [String: [(status: Int, body: String)]]) { lock.withLock { (self.answers, asked) = (answers, [:]) } }
+    static func times(_ method: String) -> Int { lock.withLock { asked[method] ?? 0 } }
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == MegaFuel.endpoint.host }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var body = Data()
+        if let stream = request.httpBodyStream {   // URLProtocol gets the body as a stream, not httpBody
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while case let n = stream.read(&buffer, maxLength: buffer.count), n > 0 { body.append(buffer, count: n) }
+            stream.close()
+        }
+        let method = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["method"] as? String ?? ""
+        let (status, reply) = Self.lock.withLock {
+            Self.asked[method, default: 0] += 1
+            guard Self.answers[method]?.isEmpty == false else { return (200, #"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"not scripted"}}"#) }
+            return Self.answers[method]!.removeFirst()
+        }
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data(reply.utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// A send whose answer was lost is asked again (RPCRetry), and the second ask meets the first one already in: «nonce too
+/// low» once it's mined. MegaFuel's own count past the transfer's nonce says it's in: its hash comes back, and the receipt
+/// decides. A count not past it, or none read, leaves the send's own error. The cases one after another: one stub.
+@Test func megaFuelSendReadsAnErrorByItsNonce() async throws {
+    URLProtocol.registerClass(ScriptedMegaFuel.self)
+    defer { URLProtocol.unregisterClass(ScriptedMegaFuel.self) }
+    let raw = try SponsoredTransfer(chainId: 56, nonce: 5, gasLimit: 60_000, token: EVMRPC.bnbUSDC, to: "0xd2eb0c130cd38ee0da3132d33145a10875879acb",
+                                    amount: "3000000000000000000").signed(privateKey: hardhatKey).raw
+    let hash = "0x" + Keccak.hash256(raw).hex
+    func result(_ json: String) -> (status: Int, body: String) { (200, #"{"jsonrpc":"2.0","id":1,"result":\#(json)}"#) }
+    func refused(_ message: String) -> (status: Int, body: String) {
+        (200, #"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"\#(message)"}}"#)
+    }
+
+    // Taken at the first ask: MegaFuel's hash, its count never asked.
+    ScriptedMegaFuel.script(["eth_sendRawTransaction": [result(#""0xabc""#)]])
+    #expect(try await MegaFuel.send(raw, nonce: 5, from: hardhat) == "0xabc")
+    #expect(ScriptedMegaFuel.times("eth_getTransactionCount") == 0)
+
+    // The answer lost (a gateway's 502 after MegaFuel took it), the second ask «nonce too low», the count at 6: sent.
+    ScriptedMegaFuel.script(["eth_sendRawTransaction": [(502, "<html>502 Bad Gateway</html>"), refused("nonce too low")],
+                             "eth_getTransactionCount": [result(#""0x6""#)]])
+    #expect(try await MegaFuel.send(raw, nonce: 5, from: hardhat) == hash)
+    #expect(ScriptedMegaFuel.times("eth_sendRawTransaction") == 2)
+
+    // Words nobody matches (a duplicate still waiting for its block), the count at 6: sent all the same — the count decides.
+    ScriptedMegaFuel.script(["eth_sendRawTransaction": [refused("bundle already exists")], "eth_getTransactionCount": [result(#""0x6""#)]])
+    #expect(try await MegaFuel.send(raw, nonce: 5, from: hardhat) == hash)
+
+    // Refused, the count still at 5: the refusal stands.
+    ScriptedMegaFuel.script(["eth_sendRawTransaction": [refused("not sponsorable")], "eth_getTransactionCount": [result(#""0x5""#)]])
+    let refusal = await #expect(throws: WalletError.self) { try await MegaFuel.send(raw, nonce: 5, from: hardhat) }
+    #expect(refusal?.message.contains("not sponsorable") == true)
+
+    // The count unreadable: the send's own error, not the count's.
+    ScriptedMegaFuel.script(["eth_sendRawTransaction": [refused("nonce too low")], "eth_getTransactionCount": [refused("unknown block")]])
+    let unread = await #expect(throws: WalletError.self) { try await MegaFuel.send(raw, nonce: 5, from: hardhat) }
+    #expect(unread?.message.contains("nonce too low") == true)
+}

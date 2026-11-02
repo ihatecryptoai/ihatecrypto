@@ -479,7 +479,7 @@ extension Executor {
         let raw = try await signer.signSponsoredTransfer(transfer, recipients: [deposit])
         let hash = "0x" + Keccak.hash256(raw).hex, note = "\(net.name) USDC→\(there) \(show(amount)), BNB Chain paying the gas"
         try journal.append(.init(chain: net.key, id: hash, kind: .signed, note: note))
-        _ = try await MegaFuel.send(raw)
+        _ = try await MegaFuel.send(raw, nonce: transfer.nonce, from: me)
         guard try await net.rpc.waitForReceipt(hash) else {
             try journal.append(.init(chain: net.key, id: hash, kind: .failed, note: note))
             throw ExecutionError("The transfer to Relay failed on \(net.name): \(net.explorer)/tx/\(hash)")
