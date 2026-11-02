@@ -211,6 +211,15 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(ChatRouter.pastedAddress("расскажи про 2FB5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6") == "2FB5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6")
     #expect(ChatRouter.pastedAddress("купи 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18 на $2") == "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18")
     #expect(ChatRouter.pastedAddress("what is the difference between staking and lending") == nil)
+    // A transaction's hash is no token: its first 40 hex aren't looked up as one.
+    let hash = "0x9f2c4e1ab3d57e8f0c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70"
+    #expect(ChatRouter.pastedAddress("что с транзакцией \(hash)?") == nil)
+    #expect(ChatRouter.pastedAddress("tx \(hash) bought 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18") == "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18")
+    // Nor when the model looks it up: the report names the hash whole, so a chart or a call can't take its first 40 hex.
+    let report = await TokenResearch.report(hash)
+    #expect(ChatRouter.addresses(report) == [hash])
+    #expect(!ChatRouter.addressesAllowed("chart token \(hash.prefix(42)) on base", userText: "что за токен \(hash)?", known: [],
+                                        found: ChatRouter.addresses(report), displays: { $0.hasPrefix("chart") }, markets: []))
     let model = Script([#"{"route":"chat","reply":"POKEMON, hot."}"#])
     let reading = try await ChatRouter.route("что за токен B5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6", context: .init(), client: model, model: "m") { l in
         "facts about \(l.arg)"

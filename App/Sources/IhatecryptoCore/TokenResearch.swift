@@ -8,8 +8,12 @@ import WalletCore
 public enum TokenResearch {
     public static func report(_ query: String) async -> String {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let evm = q.firstMatch(of: /0x[0-9a-fA-F]{40}/).map({ String($0.0) }) {
+        if let evm = q.firstMatch(of: /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/).map({ String($0.0) }) {
             return await dex(evm) ?? "DexScreener has no pool for \(evm) on any chain: nothing trades it, or it isn't a token."
+        }
+        // Named whole: its first 40 hex in the report would be an address the chat could chart or call.
+        if let long = q.firstMatch(of: /0x[0-9a-fA-F]{41,}/) {
+            return "\(long.0) is no token contract (an EVM one is 0x and 40 hex): a transaction's hash, a Sui address or a bytes32."
         }
         if let raw = q.firstMatch(of: /[1-9A-HJ-NP-Za-km-z]{30,60}/).map({ String($0.0) }) {
             for mint in repairs(raw) {

@@ -1241,5 +1241,16 @@
     "defaults": {
       "chatWidth": 350.0
     }
+  },
+  {
+    "name": "a pasted tx hash is never bought as a token by its first 40 hex",
+    "send": [
+      "что с транзакцией 0x9f2c4e1ab3d57e8f0c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70? купи этот токен на 2$"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply": true,
+      "reply_cyrillic": true
+    }
   }
 ]

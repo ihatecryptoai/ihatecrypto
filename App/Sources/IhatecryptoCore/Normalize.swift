@@ -785,17 +785,19 @@ public enum ChatRouter {
 
     /// A contract or mint the user pasted, as pasted (a broken one too: the lookup repairs it).
     static func pastedAddress(_ text: String) -> String? {
-        if let evm = text.firstMatch(of: /0x[0-9a-fA-F]{40}/) { return String(evm.0) }
+        // Only 40 hex on their own: a transaction's hash or a Sui address is no EVM contract.
+        if let evm = text.firstMatch(of: /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/) { return String(evm.0) }
         // Whole runs of base58, so a 46-character paste isn't cut to 44.
         return text.matches(of: /[1-9A-HJ-NP-Za-km-z]+/).map { String($0.0) }.first { a in
             (32...60).contains(a.count) && a.contains(where: \.isNumber) && a.contains(where: \.isUppercase) && a.contains(where: \.isLowercase)
         }
     }
 
-    /// Contracts, mints and NEAR accounts in a text.
+    /// Contracts, mints and NEAR accounts in a text. A 0x one is taken whole: a transaction's hash or a Sui address is
+    /// one thing, not the EVM address of its first 40 hex.
     static func addresses(_ text: String) -> [String] {
         // A run of digits is a number (a contract call's max uint256), not a mint or a NEAR account.
-        text.matches(of: /0x[0-9a-fA-F]{40}|[0-9a-f]{64}|[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.near|[1-9A-HJ-NP-Za-km-z]{32,44}/).map { String($0.0) }
+        text.matches(of: /0x[0-9a-fA-F]{40,}|[0-9a-f]{64}|[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.near|[1-9A-HJ-NP-Za-km-z]{32,44}/).map { String($0.0) }
             .filter { !$0.allSatisfy(\.isNumber) }
     }
 
@@ -923,14 +925,17 @@ public enum ChatRouter {
         }
     }
 
-    /// The model never supplies an address: each one in its command must be in the user's own message, character for
-    /// character, or be the contract of one of their favorite tokens.
+    /// The model never supplies an address: each one in its command must be in the user's own message, whole and
+    /// character for character, or be the contract of one of their favorite tokens.
     public static func addressesAllowed(_ command: String, userText: String, known: [String]) -> Bool {
         // A study note or a journal entry is only kept: an address in it («the account 0x… made 561 trades») moves nothing.
         if StudyNote.parse(command) != nil || JournalCommand.parse(command) != nil { return true }
-        let found = addresses(command)
         let knownSet = Set(known.map { $0.lowercased() })
-        return found.allSatisfy { userText.contains($0) || knownSet.contains($0.lowercased()) }
+        // A 0x one only whole: the first 40 hex of a hash they pasted are no address they wrote.
+        let written = Set(addresses(userText).filter { $0.hasPrefix("0x") })
+        return addresses(command).allSatisfy {
+            ($0.hasPrefix("0x") ? written.contains($0) : userText.contains($0)) || knownSet.contains($0.lowercased())
+        }
     }
 
     /// The same, step by step: an address a lookup returned (`found`) only in a step that just shows something
