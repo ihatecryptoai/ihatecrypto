@@ -226,14 +226,14 @@ public enum Kamino {
             return (vault, dec(r["totalShares"]))
         }
         guard !held.isEmpty else { return [] }
-        let vaults = try await VaultNames.shared.all()
         return try await withThrowingTaskGroup(of: VaultPosition.self) { group in
             for h in held {
                 group.addTask {
+                    async let named = vault(h.vault)
                     let m = try JSONSerialization.jsonObject(with: try await get("/kvaults/\(h.vault)/metrics")) as? [String: Any] ?? [:]
-                    let tokens = h.shares * dec(m["tokensPerShare"]), v = vaults[h.vault]
-                    return VaultPosition(vault: h.vault, name: v?.name ?? "Kamino Vault", symbol: v.map { symbols[$0.mint] ?? "\($0.mint.prefix(4))…" } ?? "?",
-                                         mint: v?.mint ?? "", shares: h.shares, tokens: tokens, valueUSD: tokens * dec(m["tokenPrice"]), apy: dec(m["apy"]) * 100)
+                    let tokens = h.shares * dec(m["tokensPerShare"]), v = try await named
+                    return VaultPosition(vault: h.vault, name: v.name, symbol: symbols[v.mint] ?? "\(v.mint.prefix(4))…", mint: v.mint,
+                                         shares: h.shares, tokens: tokens, valueUSD: tokens * dec(m["tokenPrice"]), apy: dec(m["apy"]) * 100)
                 }
             }
             var out: [VaultPosition] = []
@@ -247,21 +247,13 @@ public enum Kamino {
 
     static func dec(_ v: Any?) -> Decimal { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber)?.decimalValue ?? 0 }
 
-    /// Every vault's name and token, read once per launch (≈ 400 KB) and only when the wallet has a vault deposit.
-    actor VaultNames {
-        static let shared = VaultNames()
-        private var names: [String: (name: String, mint: String)]?
-        func all() async throws -> [String: (name: String, mint: String)] {
-            if let names { return names }
-            let rows = try JSONSerialization.jsonObject(with: try await Kamino.get("/kvaults/vaults")) as? [[String: Any]] ?? []
-            var out: [String: (name: String, mint: String)] = [:]
-            for r in rows {
-                guard let address = r["address"] as? String, let state = r["state"] as? [String: Any] else { continue }
-                out[address] = ((state["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Kamino Vault", state["tokenMint"] as? String ?? "")
-            }
-            names = out
-            return out
-        }
+    /// A vault's name and token, read for the vault itself each time: a failed read throws, never a nameless vault with
+    /// no mint. The list of every vault (≈ 400 KB) was read once per launch, and an error answer stayed «no vaults» to a restart.
+    static func vault(_ address: String) async throws -> (name: String, mint: String) {
+        let data = try await get("/kvaults/vaults/\(address)")
+        guard let state = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["state"] as? [String: Any],
+              let mint = state["tokenMint"] as? String, !mint.isEmpty else { throw KaminoError(data) }
+        return ((state["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Kamino Vault", mint)
     }
 
     static func transaction(_ path: String, wallet: String, reserve: String, amount: Decimal, market: String) async throws -> Data {
@@ -286,8 +278,11 @@ public enum Kamino {
         return try await URLSession.shared.data(for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)).0
     }
 
+    /// Kamino's errors are JSON with a real status (500 `{"error":…}`, 401, 429): a status past 2xx throws, never read as data.
     static func get(_ path: String) async throws -> Data {
-        try await URLSession.shared.data(for: URLRequest(url: URL(string: base + path)!, timeoutInterval: 20)).0
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: URL(string: base + path)!, timeoutInterval: 20))
+        guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { throw KaminoError(data) }
+        return data
     }
 }
 
