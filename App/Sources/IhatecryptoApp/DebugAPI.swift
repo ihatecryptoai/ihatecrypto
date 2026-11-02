@@ -283,9 +283,19 @@ final class DebugAPI {
             // The browser's signing sheet for a sample Kamino deposit, drawn off screen («?dark» for the dark look,
             // «?closed» for a site taking all of a token and closing its account): to see a design change without a site
             // asking for a real signature. POST {"wire": base64} reviews that transaction the way a site's is, simulation
-            // included, for this copy's wallet. Nothing can be approved or signed from it.
+            // included, for this copy's wallet. POST {"evm": {"to", "data", "value"?, "chain"?}} does the same for a site's
+            // EVM transaction (Arbitrum unless named). Nothing can be approved or signed from it.
             var origin = "https://kamino.com", site = SiteCheck.Verdict.known, review = Self.sampleReview
-            if method == "POST" {
+            var evm: EVMReview?
+            if method == "POST", let e = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["evm"] as? [String: String] {
+                let chain = UInt64(e["chain"] ?? "") ?? 42161
+                guard let to = e["to"], let url = Browser.evmRPC[chain].flatMap(URL.init(string:)), let from = ws.signerWallet?.evm else {
+                    return (400, "text/plain", Data("POST {\"evm\": {\"to\", \"data\", \"value\", \"chain\"}}, a chain the browser reads, a wallet in this copy\n".utf8))
+                }
+                evm = await Browser.evmReview(to: to, value: UInt64(e["value"] ?? "") ?? 0, data: Data(hex: e["data"] ?? "0x") ?? Data(), from: from,
+                                              rpc: EVMRPC(url: url, chainId: chain))
+                (origin, site) = ("file://", .local)
+            } else if method == "POST" {
                 guard let b64 = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["wire"] as? String,
                       let wire = Data(base64Encoded: b64), let owner = ws.signerWallet?.solana else {
                     return (400, "text/plain", Data("POST {\"wire\": base64 transaction}, with a wallet in this copy\n".utf8))
@@ -297,7 +307,7 @@ final class DebugAPI {
             }
             var png: Data?
             _ = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
-                png = Self.renderApproval(SiteRequest(origin: origin, site: site, kind: .transaction(review, send: false), answer: done),
+                png = Self.renderApproval(SiteRequest(origin: origin, site: site, kind: evm.map { .evmTransaction($0) } ?? .transaction(review, send: false), answer: done),
                                           ws: ws, dark: path.contains("dark"))
                 done.resume(returning: false)
             }
