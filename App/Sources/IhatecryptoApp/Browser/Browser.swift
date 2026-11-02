@@ -295,7 +295,7 @@ final class Browser {
             guard let value = Self.quantity(p["value"]) else { throw SiteError("4200|The amount is larger than ihatecrypto will sign.") }
             guard let url = Self.evmRPC[chain].flatMap(URL.init(string:)) else { throw SiteError("4901|No RPC for chain \(chain).") }
             let rpc = EVMRPC(url: url, chainId: chain)
-            var review = await evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
+            var review = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
             if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
                 review.jev = try? await JevReviewer.site(host: host(origin), title: title, programs: ["EVM \(chain): \(to)"], changes: review.lines + review.changes, apiKey: key)
             }
@@ -340,7 +340,7 @@ final class Browser {
     }
 
     /// Decodes, names the token, simulates the balance changes and estimates gas. Problems mean «do not sign».
-    func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> EVMReview {
+    static func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> EVMReview {
         let call = EVMCall.decode(data)
         var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
         var lines: [String] = []
@@ -350,35 +350,51 @@ final class Browser {
         if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
         let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
-        func token(_ to: String) async -> (symbol: String, decimals: Int) {
+        typealias Token = (address: String, symbol: String, decimals: Int?)
+        func token(_ to: String) async -> Token {
+            // The coin itself, as KyberSwap (0xeeee…) and Uniswap v4 (0x0) name it: no contract to ask.
+            let to = to.lowercased()
+            if to == EVMSimulation.native || to == UniswapV4.native { return (to, native, 18) }
             let symbol = (try? await rpc.call("eth_call", [["to": to, "data": "0x95d89b41"], "latest"]) as? String).flatMap { hex -> String? in
                 guard let d = Data(hex: hex), d.count >= 96 else { return nil }
                 let length = Int(d[d.startIndex + 63])
                 return String(data: d.dropFirst(64).prefix(length), encoding: .utf8)
             } ?? "token \(to.prefix(8))…"
-            let decimals = (try? await rpc.call("eth_call", [["to": to, "data": "0x313ce567"], "latest"]) as? String).flatMap { UInt64($0.dropFirst(2), radix: 16) } ?? 18
-            return (symbol, Int(decimals))
+            return (to, symbol, ABI.decimals(try? await rpc.read(to, Data([0x31, 0x3c, 0xe5, 0x67]))))
+        }
+        // A token that doesn't answer decimals() (a revert, a node down, past 36) has no amount to show: 18 was guessed,
+        // and 5,000,000 USDC read «0.000005 USDC». ihatecrypto doesn't sign an amount it can't show.
+        func unknown(_ t: Token) {
+            let why = "\(t.symbol) (\(t.address.prefix(6))…\(t.address.suffix(4))) didn't answer decimals(), so the amount is unknown. "
+                + "ihatecrypto doesn't sign an amount it can't show — if the network was slow, ask the site to send it again."
+            if !problems.contains(why) { problems.append(why) }
         }
         func amount(_ word: Data, _ decimals: Int) -> String {
             let n = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
             return Fmt.num(n / Decimal(sign: .plus, exponent: decimals, significand: 1), maxFraction: 6)
         }
+        /// «5,000,000 USDC», or «an unknown amount of USDC (… of its smallest units)» and the refusal.
+        func shown(_ units: Decimal, _ t: Token) -> String {
+            guard let d = t.decimals else { unknown(t); return "an unknown amount of \(t.symbol) (\(units) of its smallest units)" }
+            return "\(Fmt.num(units / Decimal(sign: .plus, exponent: d, significand: 1), maxFraction: 6)) \(t.symbol)"
+        }
+        func sum(_ word: Data, _ t: Token) -> String { shown(word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }, t) }
         switch call {
         case .plain:
             lines.append("Transfer \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native) to \(to).")
         case .approve(let spender, let a), .increaseAllowance(let spender, let a):
             let t = await token(to)
-            lines.append("Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol).")
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)).")
         case .transfer(let r, let a):
             let t = await token(to)
-            lines.append("Transfer \(amount(a, t.decimals)) \(t.symbol) to \(r).")
+            lines.append("Transfer \(sum(a, t)) to \(r).")
         case .nftTransfer(let f, let r):
             lines.append("Move NFTs of \(to) from \(f.lowercased() == from.lowercased() ? "this wallet" : f) to \(r).")
         case .delegation(let d, let on):
             lines.append(on ? "Let \(d) borrow against or manage your lending positions." : "Revoke \(d)'s rights over your lending positions.")
         case .transferFrom(let f, let r, let a):
             let t = await token(to)
-            lines.append("Move \(amount(a, t.decimals)) \(t.symbol) from \(f) to \(r).")
+            lines.append("Move \(sum(a, t)) from \(f) to \(r).")
         case .setApprovalForAll(let op, let on):
             lines.append("\(on ? "Rights to all NFTs" : "Revoke NFT rights") for \(op).")
         case .permit:
@@ -387,13 +403,13 @@ final class Browser {
             lines.append("Uniswap swap paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
         case .kyberSwap(let k):
             let t = await token(k.srcToken)
-            lines.append("KyberSwap swap of \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), t.decimals)) \(t.symbol) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")
+            lines.append("KyberSwap swap of \(sum((try? ABI.word(k.amount)) ?? Data(count: 32), t)) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")
         case .borrow(let asset, let a, let owner):
             let t = await token(asset)
-            lines.append("Borrow \(amount(a, t.decimals)) \(t.symbol) from \(to), the debt on \(owner.lowercased() == from.lowercased() ? "this wallet" : owner).")
+            lines.append("Borrow \(sum(a, t)) from \(to), the debt on \(owner.lowercased() == from.lowercased() ? "this wallet" : owner).")
         case .repay(let asset, let a, let owner):
             let t = await token(asset)
-            lines.append("Repay \(a.allSatisfy { $0 == 0xff } ? "all the" : amount(a, t.decimals)) \(t.symbol) debt of \(owner.lowercased() == from.lowercased() ? "this wallet" : owner) to \(to).")
+            lines.append("Repay \(a.allSatisfy { $0 == 0xff } ? "all the \(t.symbol)" : sum(a, t)) debt of \(owner.lowercased() == from.lowercased() ? "this wallet" : owner) to \(to).")
         case .multisigExec:
             lines.append("Carry out a signed move of the multisig \(to): " + call.summary(chainId: rpc.chainId, to: to, value: value) + ".")
         case .cctpBurn(let r, let domain, let a):
@@ -403,11 +419,10 @@ final class Browser {
             lines.append("LayerZero: send \(known ? "\(amount(a, 6)) USDT" : "tokens of \(to)") to \(r.map { $0.lowercased() == from.lowercased() ? "this wallet" : $0 } ?? "an account that can't be read") on \(USDT0.networkName(eid: eid))\(plain ? "" : ", with options or a message of its own").")
         case .v4Swap(let s):
             let (a, b) = (await token(s.currencyIn), await token(s.currencyOut))
-            func n(_ x: Decimal, _ d: Int) -> String { Fmt.num(x / Decimal(sign: .plus, exponent: d, significand: 1), maxFraction: 6) }
-            lines.append("Uniswap v4 swap: \(n(s.amountIn, a.decimals)) \(a.symbol) for at least \(n(s.amountOutMinimum, b.decimals)) \(b.symbol), paid to this wallet.")
+            lines.append("Uniswap v4 swap: \(shown(s.amountIn, a)) for at least \(shown(s.amountOutMinimum, b)), paid to this wallet.")
         case .permit2Approve(let contract, let spender, let a, let expiration):
             let t = await token(contract)
-            lines.append("Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol) through Permit2, until \(Fmt.date(Date(timeIntervalSince1970: TimeInterval(expiration)))).")
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)) through Permit2, until \(Fmt.date(Date(timeIntervalSince1970: TimeInterval(expiration)))).")
         case .vault(let r, let owner):
             lines.append("Vault \(owner == nil ? "deposit" : "withdrawal") crediting \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
         case .lending(let b):
@@ -417,20 +432,28 @@ final class Browser {
         case .wrap:
             lines.append("Wrap \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native) into its token at \(to)\((EVMCall.wrap.payees(to: to, value: value, chainId: rpc.chainId).isEmpty ? ", the network's own WETH" : " — not this network's WETH")).")
         case .unwrap(let a):
-            lines.append("Unwrap \(amount(a, 18)) of the token at \(to) into \(native).")
+            // withdraw(uint256) on any other contract is in its own units, not WETH's 18 decimals.
+            lines.append(to.lowercased() == UniswapV2.on(rpc.chainId)?.weth ? "Unwrap \(amount(a, 18)) W\(native) into \(native)."
+                         : "Call withdraw(uint256) on \(to) with \(a.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }) of its units — not this network's WETH.")
         case .contract(let selector):
             lines.append("Contract call \(to), function \(selector)\(value > 0 ? ", with \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native)" : "").")
         }
         var changes: [String] = []
+        // Coins and tokens, never dollars: Fmt.usd showed 0.004 WBTC as «$0.00».
+        func moved(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }
         let simulator = Self.evmSimulationRPC[rpc.chainId].flatMap(URL.init(string:)).map { EVMRPC(url: $0, chainId: rpc.chainId) } ?? rpc
         do {
             let sim = try await simulator.simulate(from: from, to: to, value: value, data: data)
             if let revert = sim.revert { problems.append("Simulation: the call would revert — \(revert)") }
             for (asset, delta) in sim.changes.sorted(by: { $0.key < $1.key }) {
-                if asset == EVMSimulation.native { changes.insert("\(native): \(signed(delta / 1_000_000_000_000_000_000))", at: 0); continue }
+                if asset == EVMSimulation.native { changes.insert("\(native): \(moved(delta / 1_000_000_000_000_000_000))", at: 0); continue }
                 let t = await token(asset)
-                let name = "\(t.symbol)\(sim.nfts.contains(asset) ? " NFT" : "") (\(asset.prefix(6))…\(asset.suffix(4)))"
-                changes.append("\(name): \(signed(sim.nfts.contains(asset) ? delta : delta / Decimal(sign: .plus, exponent: t.decimals, significand: 1)))")
+                let nft = sim.nfts.contains(asset)
+                let name = "\(t.symbol)\(nft ? " NFT" : "") (\(asset.prefix(6))…\(asset.suffix(4)))"
+                // An NFT counts pieces; a token without decimals() moves an amount nobody can show.
+                if nft { changes.append("\(name): \(moved(delta))") }
+                else if let d = t.decimals { changes.append("\(name): \(moved(delta / Decimal(sign: .plus, exponent: d, significand: 1)))") }
+                else { changes.append("\(name): \(delta < 0 ? "loses" : "gains") \(shown(abs(delta), t))") }
             }
             if sim.revert == nil, changes.isEmpty { changes.append("None of your balances change.") }
         } catch {

@@ -49,7 +49,7 @@ struct ApprovalsBoard: View {
             TokenLogo(name: ModuleNetwork(place: a.chain)?.logo ?? a.chain, size: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(a.symbol) → \(a.spenderName ?? "\(a.spender.prefix(6))…\(a.spender.suffix(4))")").font(.ui(12.5, .semibold)).lineLimit(1)
-                Text("\(WalletCommand.placeName(a.chain))\(a.permit2 ? " · through Permit2" : "") · \(a.unlimited ? "unlimited" : Fmt.num(a.amount / Decimal(sign: .plus, exponent: a.decimals, significand: 1), maxFraction: 6))")
+                Text("\(WalletCommand.placeName(a.chain))\(a.permit2 ? " · through Permit2" : "") · \(a.shown)")
                     .font(.ui(10)).foregroundStyle(a.unlimited ? Brand.loss : .secondary).lineLimit(1)
             }
             Spacer(minLength: 6)

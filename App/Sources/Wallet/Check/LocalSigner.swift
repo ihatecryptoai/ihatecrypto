@@ -372,6 +372,9 @@ func writeBrowserTestPage(_ path: String) async throws {
       await refused('setApprovalForAll', 'eth_sendTransaction', [{ from: addr, to: USDC, data: '0xa22cb465' + pad(spender) + pad('1') }]);
       try { await req('eth_sendTransaction', [{ from: addr, to: USDC, data: '0xa9059cbb' + pad(spender) + pad((1000000).toString(16)) }]); log('FAIL: transfer sent'); }
       catch (e) { log('USDC transfer without balance: refused, code ' + e.code + ' — ' + e.message.slice(0, 90)); }
+      // Uniswap v3's positions (an NFT) answer no decimals(): the amount can't be shown, so it isn't signed — not 18's guess.
+      try { await req('eth_sendTransaction', [{ from: addr, to: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', data: '0x095ea7b3' + pad(spender) + pad((1000000).toString(16)) }]); log('FAIL: approve without decimals() sent'); }
+      catch (e) { log('approve on a contract without decimals(): ' + (e.message.includes('decimals()') ? 'refused' : 'FAIL') + ', code ' + e.code + ' — ' + e.message.slice(0, 120)); }
       let changed = null; eth.on('chainChanged', (c) => { changed = c; });
       await req('wallet_switchEthereumChain', [{ chainId: '0x1' }]);
       log('switch to Ethereum: chainChanged ' + changed + ', balance ' + await req('eth_getBalance', [addr, 'latest']));
