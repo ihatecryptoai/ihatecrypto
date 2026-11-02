@@ -22,7 +22,17 @@ struct LedgerAccount: Codable, Equatable {
     var bluetooth: Bool?
 
     var wallet: SignerWallet { SignerWallet(id: Self.id, label: label, kind: "ledger", solana: solana, evm: evm, near: nil) }
-    var device: LedgerDevice { LedgerDevice(bluetooth == true ? LedgerBLE.shared : LedgerHID()) }
+    var device: LedgerDevice {
+        #if DEBUG_API
+        // `defaults write app.ihatecrypto.mac.dev ledgerSpeculos -bool true`: the Dev copy talks to Speculos
+        // (Tools/speculos.sh), for live runs without a device.
+        if Self.speculos { return LedgerDevice(LedgerTCPTransport()) }
+        #endif
+        return LedgerDevice(bluetooth == true ? LedgerBLE.shared : LedgerHID())
+    }
+    #if DEBUG_API
+    static var speculos: Bool { UserDefaults.standard.bool(forKey: "ledgerSpeculos") }
+    #endif
 
     static var saved: LedgerAccount? {
         get { UserDefaults.standard.data(forKey: "ledger").flatMap { try? JSONDecoder().decode(LedgerAccount.self, from: $0) } }
@@ -48,6 +58,37 @@ struct LedgerConnect: Equatable {
     /// Settings on the device the person should change (blind signing off, an app not installed).
     var notes: [String] = []
     var busy = true
+    /// What «Show on Ledger» got back from the device, by app (true: Solana), and the app showing its address now.
+    var shown: [Bool: String] = [:]
+    var showing: Bool?
+
+    /// The address the Ledger showed for that app, when it isn't the one saved here.
+    func other(solana: Bool) -> String? {
+        guard let shown = shown[solana], !Self.same(solana ? self.solana : evm, shown, solana: solana) else { return nil }
+        return shown
+    }
+
+    /// An EVM address in any letter case (EIP-55 only checksums it); a Solana one exactly (base58 tells cases apart).
+    static func same(_ saved: String?, _ shown: String, solana: Bool) -> Bool {
+        guard let saved else { return false }
+        return solana ? saved == shown : saved.lowercased() == shown.lowercased()
+    }
+
+    /// The address in groups of four, as the person reads it against the device («0x» apart), each group marked where
+    /// it differs from `other` at the same place.
+    /// ponytail: Solana addresses are 32–44 characters, so groups are compared by place; a shorter one marks the rest.
+    static func groups(_ address: String, against other: String? = nil, solana: Bool) -> [(text: String, differs: Bool)] {
+        func split(_ s: String) -> [String] {
+            var rest = Substring(s), out: [String] = []
+            if !solana, rest.hasPrefix("0x") { out.append("0x"); rest = rest.dropFirst(2) }
+            while !rest.isEmpty { out.append(String(rest.prefix(4))); rest = rest.dropFirst(4) }
+            return out
+        }
+        let theirs = other.map(split)
+        return split(address).enumerated().map { i, g in
+            (g, theirs.map { i >= $0.count || !same($0[i], g, solana: solana) } ?? false)
+        }
+    }
 }
 
 extension Workspace {
@@ -145,6 +186,9 @@ extension Workspace {
         reply(say("Connecting your Ledger — follow the card on the canvas.", "Подключаю Ledger — следи за карточкой на холсте."))
         // USB when it's plugged in; otherwise Bluetooth (Nano X, Stax, Flex, Apex), looked for in short rounds.
         var found = LedgerHID.connected()
+        #if DEBUG_API
+        if LedgerAccount.speculos { found = "Speculos" }
+        #endif
         var bluetooth = false
         for _ in 0..<12 where found == nil {
             ledgerConnect?.status = "Plug your Ledger in over USB and unlock it — or, on a Nano X, Stax or Flex, unlock it with Bluetooth on and keep it close."
@@ -183,6 +227,7 @@ extension Workspace {
                     ledgerConnect?.notes.append("Solana \(blind.version): turn on «Blind signing» in the app's settings for USDC transfers, Jupiter swaps and lending. SOL sends work without it.")
                 }
             } catch let e as LedgerError where e.status == 0x6807 {
+                account.solana = nil   // a Solana address kept from another Ledger isn't this one's
                 ledgerConnect?.notes.append("No Solana app on this Ledger: add it in Ledger Live › My Ledger, then connect again. Until then it signs EVM moves only.")
             }
             LedgerAccount.saved = account
@@ -197,22 +242,40 @@ extension Workspace {
 
     /// Shows one of the Ledger's addresses on its own screen, for comparing with the one in ihatecrypto: what the
     /// device says is the truth even if this Mac is not.
+    /// The device answers only after the person approves it there; the card then says whether it is the saved one.
     func showOnLedger(solana: Bool) async {
-        guard let account = LedgerAccount.saved else { return }
+        guard let account = LedgerAccount.saved, ledgerConnect?.busy == false else { return }
         let device = account.device
+        let app = solana ? "Solana" : "EVM"
+        let before = ledgerConnect?.status ?? ""
         ledgerConnect?.problem = nil
-        ledgerConnect?.status = "Compare the address on your Ledger with the one here, then approve it there."
+        ledgerConnect?.shown[solana] = nil
+        ledgerConnect?.showing = solana
+        ledgerConnect?.busy = true
+        ledgerConnect?.status = "Your Ledger shows its \(app) address: every group the same as here → approve it there; any different → reject it."
+        // `showing` marks this card: closed, or replaced by a new connect meanwhile, it is left alone.
+        defer { if ledgerConnect?.showing == solana { ledgerConnect?.showing = nil; ledgerConnect?.busy = false } }
         do {
+            let shown: String
             if solana {
                 try await device.open("Solana")
-                _ = try await device.solanaAddress(account.solanaPath, show: true)
+                shown = try await device.solanaAddress(account.solanaPath, show: true)
             } else {
                 try await device.open("Ethereum")
-                _ = try await device.evmAddress(account.evmPath, show: true)
+                shown = try await device.evmAddress(account.evmPath, show: true)
             }
-            ledgerConnect?.status = "The Ledger showed the same address."
+            guard ledgerConnect?.showing == solana else { return }
+            ledgerConnect?.shown[solana] = shown
+            // A different one is drawn in its row, both addresses whole.
+            let same = ledgerConnect?.other(solana: solana) == nil   // read apart: in one statement with the write it traps
+            ledgerConnect?.status = same ? "The Ledger showed the same \(app) address as here." : before
         } catch {
-            ledgerConnect?.problem = error.localizedDescription
+            guard ledgerConnect?.showing == solana else { return }
+            ledgerConnect?.status = before
+            // 0x6985: the address rejected in the app (0x5501, the menu's «Open app?» refused, keeps its own words).
+            ledgerConnect?.problem = (error as? LedgerError)?.status == 0x6985
+                ? "You rejected the \(app) address on the Ledger. If it wasn't the one here, don't receive money at the saved one: Try again reads this Ledger's addresses anew."
+                : error.localizedDescription
         }
     }
 
@@ -269,8 +332,8 @@ struct LedgerBoard: View {
                     Button { ws.ledgerConnect = nil } label: { Image(systemName: "xmark") }.buttonStyle(.hoverIcon).help("Close")
                 }
                 row("USB", c.model.map { "\($0) found" }, done: c.model != nil)
-                row("ETHEREUM APP · EVM", c.evm.map { "\($0.prefix(6))…\($0.suffix(4))" }, done: c.evm != nil, solana: false)
-                row("SOLANA APP", c.solana.map { "\($0.prefix(4))…\($0.suffix(4))" }, done: c.solana != nil, solana: true)
+                addressRow("ETHEREUM APP · EVM", c.evm, solana: false, c)
+                addressRow("SOLANA APP", c.solana, solana: true, c)
                 if ws.ledgerActive, c.evm != nil {
                     // Orders without the buttons once the Ledger approves a key that can't withdraw.
                     HStack(spacing: 10) {
@@ -288,8 +351,13 @@ struct LedgerBoard: View {
                         }
                     }
                 }
-                Label(SignerActivity.shared.ledger ?? c.status, systemImage: c.busy ? "hand.point.up.left.fill" : "checkmark.seal.fill")
-                    .font(.ui(12, .semibold)).foregroundStyle(c.busy ? Brand.accentInk : Brand.profit)
+                // The Ledger showed another address: its row says so, and no green «all fine» beside it. What the device
+                // waits for now still shows.
+                let mismatch = c.other(solana: false) != nil || c.other(solana: true) != nil
+                if !mismatch || c.busy || SignerActivity.shared.ledger != nil {
+                    Label(SignerActivity.shared.ledger ?? c.status, systemImage: c.busy ? "hand.point.up.left.fill" : "checkmark.seal.fill")
+                        .font(.ui(12, .semibold)).foregroundStyle(c.busy ? Brand.accentInk : Brand.profit)
+                }
                 if let problem = c.problem {
                     HStack(alignment: .top) {
                         Label(problem, systemImage: "exclamationmark.triangle.fill").font(.ui(11)).foregroundStyle(.red)
@@ -303,7 +371,7 @@ struct LedgerBoard: View {
                 }
                 if !c.busy, let account = LedgerAccount.saved {
                     HStack(spacing: 8) {
-                        if !ws.ledgerActive {
+                        if !ws.ledgerActive, !mismatch {
                             Button { Task { await ws.switchWallet(account.wallet) } } label: {
                                 Label("Sign with Ledger", systemImage: "signature").font(.ui(13, .semibold)).padding(.horizontal, 6)
                             }
@@ -323,12 +391,75 @@ struct LedgerBoard: View {
         }
     }
 
-    private func row(_ label: String, _ value: String?, done: Bool, solana: Bool? = nil) -> some View {
+    /// While the Ledger shows the address, and when it showed another one: the whole address in groups of four, the
+    /// groups that differ marked. Once it showed the same one: «same on the Ledger».
+    @ViewBuilder private func addressRow(_ label: String, _ address: String?, solana: Bool, _ c: LedgerConnect) -> some View {
+        let other = c.other(solana: solana)
+        if let address, c.showing == solana || other != nil {
+            let tint: Color = other == nil ? Brand.accentInk : .red
+            VStack(alignment: .leading, spacing: 8) {
+                Label(label + (other == nil ? " · ON THE LEDGER'S SCREEN NOW" : " · THE LEDGER HAS ANOTHER ADDRESS"),
+                      systemImage: other == nil ? "eye.circle" : "xmark.circle.fill")
+                    .font(.ui(9, .heavy)).tracking(0.4).foregroundStyle(tint)
+                if let other {
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+                        GridRow { tag("SAVED HERE"); grouped(address, against: other, solana: solana, mark: .primary) }
+                        GridRow { tag("ON THE LEDGER"); grouped(other, against: address, solana: solana, mark: .red) }
+                    }
+                    .font(.system(size: 13, design: .monospaced))
+                    Text("Don't receive money at the saved address. Usually it's another passphrase or PIN on the Ledger, another Ledger, or this Mac's record was changed. The Ledger's screen is the truth.")
+                        .font(.ui(11.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Use the Ledger's addresses") { Task { await ws.connectLedger() } }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .help("Reads both addresses from this Ledger again and keeps them; money at the old ones stays there")
+                        Button("Show again") { Task { await ws.showOnLedger(solana: solana) } }.controlSize(.small).tint(nil)
+                    }
+                    .disabled(c.busy)
+                } else {
+                    grouped(address, solana: solana).font(.system(size: 15, weight: .semibold, design: .monospaced))
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14).fill(tint.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(tint.opacity(0.45)))
+        } else {
+            row(label, address.map { solana ? "\($0.prefix(4))…\($0.suffix(4))" : "\($0.prefix(6))…\($0.suffix(4))" },
+                done: address != nil, solana: solana, same: c.shown[solana] != nil)
+        }
+    }
+
+    private func tag(_ text: String) -> some View { Text(text).font(.ui(9, .heavy)).tracking(0.4).opacity(0.7) }
+
+    /// The address in groups of four; against `other`, the groups that differ in `mark`, bold and underlined.
+    private func grouped(_ address: String, against other: String? = nil, solana: Bool, mark: Color = .primary) -> Text {
+        var s = AttributedString()
+        for (i, g) in LedgerConnect.groups(address, against: other, solana: solana).enumerated() {
+            if i > 0 { s += AttributedString(" ") }
+            var part = AttributedString(g.text)
+            if g.differs {
+                part.foregroundColor = mark
+                part.underlineStyle = .single
+                part.inlinePresentationIntent = .stronglyEmphasized
+            } else if other != nil {
+                part.foregroundColor = .secondary
+            }
+            s += part
+        }
+        return Text(s)
+    }
+
+    private func row(_ label: String, _ value: String?, done: Bool, solana: Bool? = nil, same: Bool = false) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle.dotted").foregroundStyle(done ? Brand.profit : .secondary)
+            Image(systemName: same ? "checkmark.seal.fill" : done ? "checkmark.circle.fill" : "circle.dotted")
+                .foregroundStyle(done ? Brand.profit : .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label).font(.ui(9, .heavy)).tracking(0.4).opacity(0.7)
-                Text(value ?? "—").font(value == nil ? .ui(13) : .system(size: 13, weight: .semibold, design: .monospaced))
+                HStack(spacing: 6) {
+                    Text(value ?? "—").font(value == nil ? .ui(13) : .system(size: 13, weight: .semibold, design: .monospaced))
+                    if same { Text("same on the Ledger").font(.ui(11, .semibold)).foregroundStyle(Brand.profit) }
+                }
             }
             Spacer()
             if done, let solana, ws.ledgerConnect?.busy == false {
