@@ -98,6 +98,17 @@ import WalletCore
     #expect(Executor.gasExpected(usd: 1, price: 0) == 1)
 }
 
+@Test func gasTopUpIsSaidDoneOnlyWhenTheCoinGrew() {
+    let before: UInt128 = 420_000_000_000_000
+    #expect(Executor.gasLine(.base, before: before, after: 690_000_000_000_000, usd: 1) == "Topped up gas on Base: 0.00042 → 0.00069 ETH (≈ $1.00).")
+    // Not there yet (a node behind): said so, with a wait before another top-up.
+    let same = Executor.gasLine(.base, before: before, after: before, usd: 1)
+    #expect(!same.contains("Topped up") && same.contains("hasn't shown up yet") && same.contains("before topping up again"))
+    // Less than before: the swap's own fees here took more than it brought, and another swap would too.
+    let less = Executor.gasLine(.ethereum, before: before, after: 390_000_000_000_000, usd: 1)
+    #expect(!less.contains("Topped up") && less.contains("0.00042 → 0.00039 ETH") && less.contains("fees") && less.contains("Solana"))
+}
+
 @Test func kaminoWithdrawAllAsksForTokensNotDollars() {
     // 1.3 SOL worth $200 at ≈ $153.85: ask ≈ 1.313 SOL (1% over), not 202.
     let sol = Executor.kaminoAll(valueUSD: 200, priceUSD: Decimal(string: "153.846153")!)

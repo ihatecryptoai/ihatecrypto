@@ -695,8 +695,22 @@ extension Executor {
         } else {
             try await swapForGas(net, usd: usd)
         }
-        let after = try await rpc.balance(me)
-        return "Topped up gas on \(net.name): \(Fmt.num(Decimal(before) / 1e18, maxFraction: 8)) → \(Fmt.num(Decimal(after) / 1e18, maxFraction: 8)) \(net.gasCoin) (≈ \(Fmt.usd(usd)))."
+        return Self.gasLine(net, before: before, after: try await rpc.balance(me), usd: usd)
+    }
+
+    /// A top-up is said done only when the coin grew. Not grown, it's said, not thrown: the money went, and «Try again» would
+    /// buy the gas a second time. The same as before: not seen yet (a node behind). Less: only the swap on the chain spends
+    /// gas here, so its fees took more than it brought, and another one would too.
+    static func gasLine(_ net: EVMNetwork, before: UInt128, after: UInt128, usd: Decimal) -> String {
+        func coin(_ wei: UInt128) -> String { Fmt.num(Decimal(wei) / 1e18, maxFraction: 8) }
+        if after > before { return "Topped up gas on \(net.name): \(coin(before)) → \(coin(after)) \(net.gasCoin) (≈ \(Fmt.usd(usd)))." }
+        if after == before {
+            return "The gas on \(net.name) hasn't shown up yet: still \(coin(before)) \(net.gasCoin), though ≈ \(Fmt.usd(usd)) went to the top-up. "
+                + "Check the balance in a minute before topping up again."
+        }
+        return "The gas on \(net.name) didn't grow: \(coin(before)) → \(coin(after)) \(net.gasCoin), though ≈ \(Fmt.usd(usd)) went to the top-up: "
+            + "\(net.name)'s fees for the swap took more than it brought, and another swap this size would too. With \(Fmt.usd(usd + 1)) of USDC "
+            + "on Solana or Hyperliquid the gas comes from there, with no fee on \(net.name)."
     }
 
     /// Most of the wei `usd` buys at `price`: a top-up's wait ends when 80% of it is there. Rounded first: a quotient's
