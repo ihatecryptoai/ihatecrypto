@@ -47,7 +47,7 @@ extension Executor {
     }
 
     /// Relay's quote for the swap, checked: from this wallet to this wallet, and no more value lost than allowed.
-    /// `amount` nil = all of a token (never all of a coin: its fees come from it).
+    /// `amount` nil = all of a token held now (never all of a coin: its fees come from it).
     /// `capped` false: for the card, which shows the cost instead of stopping at it, priced at the amount asked even when
     /// the wallet holds less (the run checks it).
     func crossQuote(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, capped: Bool = true)
@@ -62,11 +62,12 @@ extension Executor {
         } else {
             origin.coin ? Decimal(try await EVMNetwork.named(from)!.rpc.balance(wallet.evm)) : try await balance(origin.currency, on: EVMNetwork.named(from)!.rpc)
         }
-        guard let amount else {
+        // «All» is what was just read, priced here: a second pass would read it again and drop `capped`.
+        if amount == nil {
             guard !origin.coin else { throw ExecutionError("Say how much \(origin.symbol): its network fees come out of it. Nothing was signed.") }
             guard held > 0 else { throw ExecutionError("No \(origin.symbol) on \(WalletCommand.placeName(from)).") }
-            return try await crossQuote(a, on: from, for: b, on: to, amount: held / scale)
         }
+        let amount = amount ?? held / scale
         let units = (amount * scale).whole
         guard units > 0 else { throw ExecutionError("\(Fmt.num(amount)) \(origin.symbol) is less than its smallest unit.") }
         // A coin goes as one transaction's value, under 2⁶⁴ wei (the signer's UInt64): 18.44 coins.

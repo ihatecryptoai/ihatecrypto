@@ -937,6 +937,50 @@
     }
   },
   {
+    "name": "all of a token across networks (EN) → Relay's card is quoted, not «no quote now»",
+    "send": [
+      "swap all USDC on solana for ETH on arbitrum"
+    ],
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 1
+    },
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "SOLANA",
+        "RELAY",
+        "ARBITRUM"
+      ],
+      "command_contains": "amount: nil",
+      "quote_contains": "ETH"
+    }
+  },
+  {
+    "name": "all of a token across networks (RU) → Relay's card is quoted, not «no quote now»",
+    "send": [
+      "обменяй весь USDC с соланы на ETH в арбитруме"
+    ],
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 1
+    },
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "SOLANA",
+        "RELAY",
+        "ARBITRUM"
+      ],
+      "command_contains": "amount: nil",
+      "quote_contains": "ETH"
+    }
+  },
+  {
     "name": "swap dollars and send them on, in the user's own words → one chain: the buy, then the send of the same amount; never a trade plan",
     "send": [
       "переведи 2 бакса из USDC в USDT на солане и отправить на automation solana usdt"

@@ -699,6 +699,8 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(WalletCommand.parse("swap 0.1 SOL on Solana for ETH on Arbitrum") == .crossSwap(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!))
     #expect(WalletCommand.parse("обменяй 0.1 SOL на ETH в арбитруме") == .crossSwap(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!))
     #expect(WalletCommand.parse("swap all AERO on base for SOL on solana") == .crossSwap(from: "AERO", on: "base", to: "SOL", at: "solana", amount: nil))
+    #expect(WalletCommand.parse("swap all USDC on solana for ETH on arbitrum") == .crossSwap(from: "USDC", on: "solana", to: "ETH", at: "arbitrum", amount: nil))
+    #expect(WalletCommand.parse("обменяй весь USDC с соланы на ETH в арбитруме") == .crossSwap(from: "USDC", on: "solana", to: "ETH", at: "arbitrum", amount: nil))
     #expect(WalletCommand.parse("поменяй 5 AERO с бейса на ARB в арбитруме") == .crossSwap(from: "AERO", on: "base", to: "ARB", at: "arbitrum", amount: 5))
     // One network is a swap there; USDC for USDC is a bridge; ETH with no network named stays the swap on that network.
     #expect(WalletCommand.parse("swap 0.01 ETH for AERO on base") == .swapOn("base", from: "ETH", to: "AERO", amount: Decimal(string: "0.01")!))

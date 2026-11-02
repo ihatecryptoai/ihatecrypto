@@ -101,6 +101,8 @@ def check(expect, state, replies):
             why.append(f"title {text((pending or {}).get('title'))}, expected «{want}»")
         elif key.startswith("command_contains") and want.lower() not in text((pending or {}).get("command")):
             why.append(f"command {text((pending or {}).get('command'))}, expected «{want}»")
+        elif key == "quote_contains" and want.lower() not in text((pending or {}).get("quote")):
+            why.append(f"the card's quote {text((pending or {}).get('quote')) or 'none'}, expected «{want}»")
         elif key == "footer_contains" and want.lower() not in text((pending or {}).get("footer")):
             why.append(f"the card's footer {text((pending or {}).get('footer'))}, expected «{want}»")
         elif key == "no_pending" and pending:

@@ -4,6 +4,7 @@ import Foundation
 import HyperliquidSigning
 @testable import OneClickKit
 import RelayBridge
+import SolanaChain
 import Testing
 @testable import TradeExecution
 import WalletCore
@@ -152,6 +153,65 @@ func crossNetworkSwapsAreQuoted() async throws {
     #expect(there.gets.contains("ETH"))
     // All of a coin is never asked: its fees come out of it.
     await #expect(throws: (any Error).self) { try await e.crossQuoteText("SOL", on: "solana", for: "ETH", on: "base", amount: nil) }
+}
+
+/// A Solana node holding 10 USDC for the wallet («cross.stub») and Relay quoting them for $8 of ETH: a $2 loss of $10,
+/// past the cap of max(3%, 15¢). It counts the balance reads and keeps the amounts Relay was asked for.
+private final class CrossStub: URLProtocol {
+    nonisolated(unsafe) static var balanceReads = 0
+    nonisolated(unsafe) static var relayAmounts: [String] = []
+    static let sol = "7WktogJEd2wQ9eH2oWusmcoFTgeYi6rS632UviTBJ2jm", evm = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "cross.stub" || (request.url?.host == "api.relay.link" && request.url?.path == "/quote/v2")
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var body = Data()
+        if let stream = request.httpBodyStream {   // URLProtocol gets the body as a stream, not httpBody
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while case let n = stream.read(&buffer, maxLength: buffer.count), n > 0 { body.append(buffer, count: n) }
+            stream.close()
+        }
+        let j = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let reply: [String: Any]
+        if request.url?.host == "cross.stub" {
+            Self.balanceReads += 1
+            let held: [String: Any] = ["account": ["data": ["parsed": ["info": ["tokenAmount": ["amount": "10000000"]]]]]]
+            reply = ["jsonrpc": "2.0", "id": 1, "result": ["value": [held]]]
+        } else {
+            Self.relayAmounts.append(j["amount"] as? String ?? "")
+            reply = ["requestId": "0xstub", "steps": [] as [Any],
+                     "details": ["sender": Self.sol, "recipient": Self.evm, "timeEstimate": 3,
+                                 "currencyIn": ["amount": "10000000", "amountFormatted": "10", "amountUsd": "10"],
+                                 "currencyOut": ["amount": "2000000000000000", "amountFormatted": "0.002", "amountUsd": "8"]]]
+        }
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: reply))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// «All» of a token on the card: Relay's quote shows even past the loss cap, from one balance read and one quote of
+/// exactly what's held; the run still stops at the cap (CostlyMove, «Send anyway»). Off with IHATECRYPTO_NET=1: the live
+/// tests ask the real Relay while the stub is in.
+@Test(.disabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+func crossCardQuotesAllOfATokenPastTheLossCap() async throws {
+    URLProtocol.registerClass(CrossStub.self)
+    defer { URLProtocol.unregisterClass(CrossStub.self) }
+    (CrossStub.balanceReads, CrossStub.relayAmounts) = (0, [])
+    let e = Executor(wallet: TradeWallet(solana: CrossStub.sol, evm: CrossStub.evm), signer: OneClickQuoteOnly(),
+                     journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("cs-\(UUID().uuidString).jsonl")),
+                     rpc: SolanaRPC(url: URL(string: "https://cross.stub")!)) { _ in }
+    let card = try await e.crossQuoteText("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
+    #expect(card.gets.contains("0.002 ETH") && card.gets.contains("$8"))
+    #expect(CrossStub.balanceReads == 1 && CrossStub.relayAmounts == ["10000000"])
+    await #expect(throws: CostlyMove.self) {
+        try await e.crossQuote("USDC", on: "solana", for: "ETH", on: "arbitrum", amount: nil)
+    }
 }
 
 /// Live (IHATECRYPTO_NET=1, dry quotes only): what 0.0001 BTC to a real Bitcoin address and 20 USDT on TRON cost in
