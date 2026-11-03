@@ -18,6 +18,25 @@ public struct ScheduledTask: Codable, Equatable, Sendable, Identifiable {
     public var paused: Bool?
     /// Pays from the wallet that's on even when there's an automation wallet: its moves wait for Confirm and Touch ID.
     public var fromActive: Bool?
+    /// The most the user Confirmed on a card for each paid request among its steps («GET https://… body»), in USDC units:
+    /// a run on the automation wallet pays one by itself only up to that; a higher price, or none Confirmed yet, waits
+    /// for its card (paymentauth §11.11: no unseen price is paid).
+    public var prices: [String: UInt64]?
+
+    static func priceKey(_ c: WalletCommand) -> String? {
+        guard case .pay(let method, let url, let body) = c else { return nil }
+        return "\(method) \(url) \(body ?? "")"
+    }
+
+    public func approves(_ units: UInt64, for c: WalletCommand) -> Bool {
+        Self.priceKey(c).flatMap { prices?[$0] }.map { units <= $0 } ?? false
+    }
+
+    /// A price paid in its run: one Confirmed on the card raises what later runs may pay; one paid by itself is never above it.
+    public mutating func approve(_ units: UInt64, for c: WalletCommand) {
+        guard let k = Self.priceKey(c) else { return }
+        prices = (prices ?? [:]).merging([k: units], uniquingKeysWith: max)
+    }
 
     public enum Every: Codable, Equatable, Sendable {
         case hours(Int), days(Int), months(Int)

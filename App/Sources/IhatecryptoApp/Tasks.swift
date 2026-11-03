@@ -10,6 +10,8 @@ import WalletCore
 /// a Confirm pressed meanwhile in the window is another task and still signs with the active wallet.
 nonisolated enum TaskRun {
     @TaskLocal static var automation: SignerWallet?
+    /// The task that run is of, for the prices Confirmed in it (ScheduledTask.prices): set only on the automation wallet.
+    @TaskLocal static var task: UUID?
     /// «Run now» pressed: these go at once, even with the user at the window.
     @MainActor static var now: Set<String> = []
     /// The next run a repeating item had when «Run now» made its run an extra one: it gets it back after that run, so
@@ -137,7 +139,9 @@ extension Workspace {
         checkQuiet = false
         // One made through the debug API runs as if it came through it again: nothing in it signs or sets up a recurring buy.
         await SignerClient.$untrusted.withValue(task.untrusted == true) {
-            await TaskRun.$automation.withValue(automation) { await runSteps(task.steps, confirmed: automation != nil) }
+            await TaskRun.$automation.withValue(automation) {
+                await TaskRun.$task.withValue(automation == nil ? nil : task.id) { await runSteps(task.steps, confirmed: automation != nil) }
+            }
         }
         let failed = finishedAction?.outcome.ok == false
         // Short of SOL, it fails the same way every run: said with what to do, and the way to do it as a card.
@@ -302,8 +306,10 @@ extension Workspace {
                 reply(say("ihatecrypto can’t do “\(step)” — the steps stop here.", "ihatecrypto не умеет «\(step)» — на этом шаги останавливаются."))
                 break
             }
-            // A contract call is never carried out on a chain's Confirm: its own card, simulated, waits for its own.
-            if confirmed, pendingAction != nil || pendingAllocation != nil, ContractCall.parse(step) == nil, AgentCheck.parse(step) == nil {
+            // A contract call is never carried out on a chain's Confirm: its own card, simulated, waits for its own. So
+            // does a paid request whose price the user hasn't seen (paysUnseen).
+            if confirmed, pendingAction != nil || pendingAllocation != nil, ContractCall.parse(step) == nil, AgentCheck.parse(step) == nil,
+               !paysUnseen(command) {
                 finishedAction = nil
                 if let p = pendingAction {
                     pendingAction = nil

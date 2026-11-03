@@ -65,6 +65,27 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect((try? MPP.challenge(#"Payment id="a", realm="r", method="stripe", intent="charge", request="e30""#).get()) == nil)
 }
 
+/// A task's run on the automation wallet pays a service by itself only up to the price the user Confirmed for that
+/// request on its card (ScheduledTask.prices): none yet, more, or another request waits for the card. A lower price paid
+/// by itself doesn't lower what was Confirmed; the prices are saved with the task, and a task saved before them loads.
+@Test func aTaskPaysByItselfOnlyUpToTheConfirmedPrice() throws {
+    let pay = WalletCommand.pay(method: "GET", url: "https://a.example/price", body: nil)
+    var task = try #require(ScheduledTask.parse("every day at 09:00: pay GET https://a.example/price"))
+    #expect(!task.approves(60_000, for: pay))
+    task.approve(60_000, for: pay)
+    #expect(task.approves(60_000, for: pay) && task.approves(50_000, for: pay) && !task.approves(60_001, for: pay))
+    #expect(!task.approves(1, for: .pay(method: "POST", url: "https://a.example/price", body: "{}")))
+    #expect(!task.approves(1, for: .pay(method: "GET", url: "https://b.example/price", body: nil)))
+    task.approve(50_000, for: pay)
+    #expect(task.approves(60_000, for: pay))
+    task.approve(1, for: .solanaTo("tempo", 2))   // not a paid request: nothing kept
+    #expect(task.prices?.count == 1)
+    let back = try JSONDecoder().decode(ScheduledTask.self, from: JSONEncoder().encode(task))
+    #expect(back.approves(60_000, for: pay) && !back.approves(60_001, for: pay))
+    let old = Data(#"{"id":"6B1E6C8A-3F0B-4C55-9C8E-1D2B3A4F5E6D","steps":["pay GET https://a.example/price"],"next":0}"#.utf8)
+    #expect(try !JSONDecoder().decode(ScheduledTask.self, from: old).approves(1, for: pay))
+}
+
 @Test func everyMonthOnTheFirst() throws {
     var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
     let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 10, minute: 30))!

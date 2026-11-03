@@ -49,7 +49,8 @@ nonisolated enum TaskSeal {
     static func tasks(forKey k: String) -> (tasks: [ScheduledTask], tampered: Bool) {
         let (data, intact) = load(forKey: k)
         var tasks = data.flatMap { try? JSONDecoder().decode([ScheduledTask].self, from: $0) } ?? []
-        if !intact { for i in tasks.indices { tasks[i].paused = true } }
+        // The prices Confirmed in them too: the Schedule doesn't show them, so one written in could pass unseen.
+        if !intact { for i in tasks.indices { tasks[i].paused = true; tasks[i].prices = nil } }
         return (tasks, !intact && !tasks.isEmpty)
     }
 }

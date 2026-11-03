@@ -17,6 +17,8 @@ struct PaymentQuote {
     var probed = false
     /// The 402's description for the card (and so the model), nil when the guard found it speaking to the assistant.
     var purpose: String?
+    /// Asked in a run of this task on the automation wallet: paid, the price is what its later runs may pay by themselves.
+    var task: UUID?
 }
 
 /// What a service sent back, on the canvas: its results as rows (or its values), who answered, what it cost. A paid
@@ -87,19 +89,41 @@ extension Workspace {
                 reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + (await Self.serviceText(refusal.reason, from: service) ?? withheldText), note: note)
             case .success(let c):
                 payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed,
-                                       purpose: await Self.serviceText(c.purpose, from: service))
+                                       purpose: await Self.serviceText(c.purpose, from: service), task: automationTask(of: command)?.id)
                 pendingAction = .wallet(command)
                 pendingText = "pay \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(service)"
+                let price = Fmt.num(c.usdc, maxFraction: 6), task = automationTask(of: command)
+                if task?.approves(c.amount, for: command) == true {
+                    reply(say("\(service) asks \(price) USDC — no more than you Confirmed for this task, so it goes without a card, from the automation wallet.",
+                              "\(service) просит \(price) USDC — не больше, чем ты подтвердил для этой задачи, поэтому без карточки, с кошелька автоматизации."), note: note)
+                    return
+                }
                 let short = (tempoUSDC ?? 0) < c.usdc + Decimal(string: "0.01")!
                 let from = tempoSource(max(c.usdc, Decimal(Executor.tempoFloat) / 1_000_000))?.name ?? "Solana"
-                reply(say("\(service) asks \(Fmt.num(c.usdc, maxFraction: 6)) USDC. The card is on the canvas — Confirm pays it in USDC on Tempo"
-                            + (short ? ", first bringing $1 there from \(from) so the next requests don't each need a bridge." : "."),
-                          "\(service) просит \(Fmt.num(c.usdc, maxFraction: 6)) USDC. Карточка на холсте — Confirm оплатит в USDC на Tempo"
-                            + (short ? ", а сначала перекинет туда $1 с \(from), чтобы следующие запросы не гоняли мост каждый раз." : ".")), note: note)
+                reply(say("\(service) asks \(price) USDC. The card is on the canvas — Confirm pays it in USDC on Tempo"
+                            + (short ? ", first bringing $1 there from \(from) so the next requests don't each need a bridge." : ".")
+                            + (task == nil ? "" : " After that, this task pays up to \(price) USDC for this request by itself; a higher price waits for your Confirm again."),
+                          "\(service) просит \(price) USDC. Карточка на холсте — Confirm оплатит в USDC на Tempo"
+                            + (short ? ", а сначала перекинет туда $1 с \(from), чтобы следующие запросы не гоняли мост каждый раз." : ".")
+                            + (task == nil ? "" : " Дальше эта задача будет сама платить за этот запрос до \(price) USDC; если цена вырастет, снова спрошу.")), note: note)
             }
         } catch {
             reply(say("Couldn't reach \(host): ", "Не достучался до \(host): ") + error.localizedDescription, note: note)
         }
+    }
+
+    /// The repeating task this is a run of on the automation wallet (TaskRun.task), with the prices Confirmed in it — when
+    /// the request is one of its steps, not a card a check's model offered during the run.
+    func automationTask(of command: WalletCommand) -> ScheduledTask? {
+        TaskRun.task.flatMap { id in tasks.first { $0.id == id && $0.steps.contains { WalletCommand.parse($0) == command } } }
+    }
+
+    /// A chain's paid request whose price the user hasn't seen: it waits for its own card rather than going on the chain's
+    /// Confirm. Only a run of a task on the automation wallet pays one by itself, up to the price Confirmed for it there.
+    func paysUnseen(_ command: WalletCommand?) -> Bool {
+        guard case .pay? = command else { return false }
+        guard let q = payment else { return true }
+        return automationTask(of: q.command)?.approves(q.challenge.amount, for: q.command) != true
     }
 
     /// After Confirm: the quoted price paid on Tempo, then the request again with the proof. A quote about to expire is
@@ -126,6 +150,7 @@ extension Workspace {
         }
         let hash = try await e.payTempo(c.amount, to: c.payee, memo: c.memo, label: quote.service)
         payment = nil
+        if let id = quote.task, let i = tasks.firstIndex(where: { $0.id == id }) { tasks[i].approve(c.amount, for: command) }
         let proof = "\(EVMNetwork.tempo.explorer)/tx/\(hash)"
         answerStep(say("loading the answer…", "загружаю ответ…"), say("\(quote.service) is working · up to a minute", "\(quote.service) работает · до минуты"))
         runningAction?.lines.append(say("Waiting for \(quote.service)'s answer", "Жду ответ \(quote.service)"))

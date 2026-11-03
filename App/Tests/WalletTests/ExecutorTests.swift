@@ -1,3 +1,4 @@
+import ExecutionCore
 import Foundation
 import HyperliquidSigning
 import IhatecryptoCore
@@ -257,4 +258,15 @@ import WalletCore
     #expect(RPCRetry.transient("You've reached the usage limit for your current plan. To continue … upgrade here: https://www.1rpc.io/#pricing"))
     #expect(RPCRetry.transient("daily request quota exceeded"))
     #expect(!RPCRetry.transient("execution reverted: ERC20: transfer amount exceeds allowance"))
+}
+
+/// A 402's amount is the service's to write: one the fee can't ride on in 64 bits (`units + feeReserve`, Tempo's cent)
+/// is refused before any call, not a crash after Confirm.
+@Test func payTempoRefusesAnAmountTheFeeCantRideOn() async {
+    let me = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: Data(repeating: 1, count: 32), address: me),
+                     journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("paytempo-\(UUID().uuidString).jsonl"))) { _ in }
+    for units in [UInt64.max, UInt64.max - EVMNetwork.tempo.feeReserve + 1] {
+        await #expect(throws: ExecutionError.self) { try await e.payTempo(units, to: me, memo: nil, label: "x") }
+    }
 }

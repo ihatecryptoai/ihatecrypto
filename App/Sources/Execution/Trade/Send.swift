@@ -51,6 +51,8 @@ extension Executor {
     public func payTempo(_ units: UInt64, to payee: String, memo: Data?, label: String) async throws -> String {
         guard units > 0 else { throw ExecutionError("Nothing to pay.") }
         let net = EVMNetwork.tempo
+        // The amount is the service's 402: the fee rides on it below (here and in ensureEVM), and must fit in 64 bits.
+        guard units <= UInt64.max - net.feeReserve else { throw ExecutionError("The service asks more USDC than exists. Nothing was paid.") }
         // Short there: a dollar comes over (or the price, if more), so the next requests don't each pay a bridge.
         let there = try await net.usdcBalance(wallet.evm)
         try await ensureEVM(net, usdc: there >= units + net.feeReserve ? units : max(units, Self.tempoFloat))
