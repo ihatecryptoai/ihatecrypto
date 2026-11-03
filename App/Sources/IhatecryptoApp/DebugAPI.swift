@@ -390,7 +390,10 @@ final class DebugAPI {
         case .position(let command, let coin)?:
             out["pending"] = ["kind": "position", "command": String(describing: command), "coin": coin, "confirm": true] as [String: Any]
         case .transfer(let entry, let amount)?:
-            out["pending"] = ["kind": "transfer", "to": entry.name, "amount": NSDecimalNumber(decimal: amount).stringValue, "confirm": true] as [String: Any]
+            let route = ws.transferRoute(entry, amount)
+            out["pending"] = ["kind": "transfer", "to": entry.name, "amount": NSDecimalNumber(decimal: amount).stringValue, "confirm": true,
+                              "title": route.title, "footer": route.footer, "steps": steps(route.steps), "warning": route.warning ?? NSNull(),
+                              "recipient": (entry.network == .hyperliquid ? ws.hlRecipients[entry.address.lowercased()]?.rawValue : nil) ?? NSNull()] as [String: Any]
         case .orders(let commands, let coin, _)?:
             out["pending"] = ["kind": "orders", "commands": commands.map { String(describing: $0) }, "coin": coin, "confirm": true] as [String: Any]
         case .address(let entry)?:

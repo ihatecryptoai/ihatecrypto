@@ -105,6 +105,10 @@ def check(expect, state, replies):
             why.append(f"the card's quote {text((pending or {}).get('quote')) or 'none'}, expected «{want}»")
         elif key == "footer_contains" and want.lower() not in text((pending or {}).get("footer")):
             why.append(f"the card's footer {text((pending or {}).get('footer'))}, expected «{want}»")
+        elif key == "text_lacks" and want.lower() in text(pending):
+            why.append(f"the card says «{want}»: {text(pending)[:240]}")
+        elif key == "recipient" and (pending or {}).get("recipient") != want:
+            why.append(f"the recipient's Hyperliquid account reads {(pending or {}).get('recipient')}, expected {want}")
         elif key == "no_pending" and pending:
             why.append(f"a card waits: {text(pending)[:160]}")
         elif key == "plan_first" and not ((b.get("plan") or {}).get("steps") or [{}])[0].get("label", "").upper().startswith(want):
@@ -203,6 +207,12 @@ def main():
                 # A swap's card names its way once quoted (Uniswap's until then): asked again for a while.
                 for _ in range(30 if turn["expect"].get("wait_quote") else 0):
                     if (state["boards"].get("pending") or {}).get("quote"):
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
+                # A Hyperliquid send card asks whether the recipient's account is new after it's drawn: asked again for a while.
+                for _ in range(15 if "recipient" in turn["expect"] else 0):
+                    if (state["boards"].get("pending") or {}).get("recipient") != "checking":
                         break
                     time.sleep(1)
                     state = call("GET", "/state")

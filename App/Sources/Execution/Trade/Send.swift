@@ -79,8 +79,17 @@ extension Executor {
         let to = destination.lowercased()
         guard to != wallet.evm.lowercased() else { throw ExecutionError("That is this wallet's own Hyperliquid account.") }
         // The first transfer to an account Hyperliquid hasn't seen yet loses 1 USDC on the way (its ledger, 2026-10-22: sent
-        // 2, fee 1, 1 arrived): 1 more goes, so the amount asked arrives.
-        let opening: Decimal = (try? await Hyperliquid.isNewAccount(to)) == true ? 1 : 0
+        // 2, fee 1, 1 arrived): 1 more goes, so the amount asked arrives. With no answer nothing goes: read as «not new», the
+        // recipient got 1 less than the chat said. Asked again a second later first (a blip; userRole weighs 60 of 1200 a minute).
+        let isNew: Bool
+        do { isNew = try await Hyperliquid.isNewAccount(to) } catch {
+            try await Task.sleep(for: .seconds(1))
+            do { isNew = try await Hyperliquid.isNewAccount(to) } catch {
+                throw ExecutionError("Hyperliquid didn't say whether \(label)'s account is new (\(error.localizedDescription)), so nothing was sent: "
+                                     + "a first transfer to a new account loses 1 USDC on the way. Try again in a minute.")
+            }
+        }
+        let opening: Decimal = isNew ? 1 : 0
         try await ensureHyperliquid(usdc: usdc + opening)
         let free = try await Hyperliquid.balance(user: wallet.evm).withdrawable
         guard usdc > 0, usdc + opening <= free else {

@@ -1318,5 +1318,37 @@
       "cards_in_chat": 2,
       "cards_contain": "every month"
     }
+  },
+  {
+    "name": "send to an open Hyperliquid account → a plain card, no opening fee",
+    "send": [
+      "send 2 USDC to Automation on hyperliquid"
+    ],
+    "only_if": {
+      "balance": "total",
+      "at_least": 3
+    },
+    "expect": {
+      "pending_kind": "transfer",
+      "title_contains": "Send 2 USDC to Automation",
+      "recipient": "open",
+      "text_lacks": "opens"
+    }
+  },
+  {
+    "name": "send to an open Hyperliquid account, in Russian → the same card",
+    "send": [
+      "отправь 2 USDC на Automation в hyperliquid"
+    ],
+    "only_if": {
+      "balance": "total",
+      "at_least": 3
+    },
+    "expect": {
+      "pending_kind": "transfer",
+      "title_contains": "Send 2 USDC to Automation",
+      "recipient": "open",
+      "text_lacks": "opens"
+    }
   }
 ]

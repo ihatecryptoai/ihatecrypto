@@ -1284,6 +1284,9 @@ struct MoveRoute {
     }
 }
 
+/// A Hyperliquid send's recipient there: a new account keeps 1 USDC of the first transfer to it (Executor.sendUSDC).
+enum HLRecipient: String { case checking, open, new, unknown }
+
 /// A route step's color, by place; kept by name, so a saved route draws the same.
 nonisolated enum RouteFill: String, Codable, Hashable, Sendable {
     case solana, relay, hyperliquid, hlp, jupiter, kamino, jito, aave, morpho, base, arbitrum, robinhood, near, tempo, hyperevm
@@ -1628,27 +1631,49 @@ extension Workspace {
     func transferRoute(_ entry: SavedAddress, _ amount: Decimal) -> MoveRoute {
         let net = entry.network, ends = AddressCheck.ends(entry.address), fill = RouteFill(rawValue: net.rawValue) ?? .check
         let free = usdc(on: net.rawValue)
+        // What a new Hyperliquid account keeps goes on top, and the card says it before Confirm, as the signature will.
+        let hl = Self.hlOpening(amount, to: entry.name, net == .hyperliquid ? hlRecipients[entry.address.lowercased()] : nil)
+        let goes = amount + hl.extra
         // Solana comes up only when the money there is short: a plain transfer is a plain transfer. Hyperliquid too: the
         // card said «no bridge» over $3.96 for a 150 send, and the move failed at the signature (2026-10-22).
-        let line = free.map { $0 < amount && net != .solana ? "\(Fmt.num(amount - $0)) USDC short: it comes from Solana first"
-            : net == .hyperliquid ? "perp balance · no bridge, no gas" : "free: \(Fmt.num($0)) USDC" } ?? ""
+        let line = free.map { $0 < goes && net != .solana ? "\(Fmt.num(goes - $0)) USDC short: it comes from Solana first"
+            : net == .hyperliquid ? hl.line ?? "perp balance · no bridge, no gas" : "free: \(Fmt.num($0)) USDC" } ?? ""
         // What Solana gives for it, the bridge fee on top.
-        let short = max(0, amount - (free ?? amount))
+        let short = max(0, goes - (free ?? goes))
         let bridged = net != .solana && short > 0 && (solana?.usdc ?? 0) >= short ? moneyMove("USDC", on: "solana", by: -short, approx: true) : []
         let saved = addressBook.first { $0.id == entry.id }
         let warnings = [
+            hl.warning,
             saved.flatMap { $0.network != net ? "Saved for \($0.network.title), sent on \(net.title) to the same address. Your own wallet has it there too; an exchange's deposit address may not — check that it takes \(net.title)." : nil },
             firstSendWarning(entry),
         ].compactMap { $0 }
         return MoveRoute(title: "Send \(Fmt.num(amount)) USDC to \(entry.name)",
                          footer: (isOwnWallet(entry.address) ? "To your own wallet «\(entry.name)», one transfer on \(net.title)."
-                                  : "Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(amount)) USDC leaving.")
+                                  : "Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(goes)) USDC leaving.")
                             + (net == .ethereum ? " Ethereum mainnet: the fee is in ETH and can be dollars; it's bought for you if the wallet has none there." : "")
-                            + " Press Confirm.",
+                            + hl.footer + " Press Confirm.",
                          steps: [
-            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(amount)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -amount)),
-            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", fill),
+            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(goes)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -goes)),
+            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)" + hl.to, fill),
         ], warning: warnings.isEmpty ? nil : warnings.joined(separator: " "))
+    }
+
+    /// What a Hyperliquid send card adds for its recipient: the dollar a new account keeps on top, or that Hyperliquid
+    /// didn't say (Confirm asks again, and sends nothing without an answer). Open, or still asking: nothing.
+    static func hlOpening(_ amount: Decimal, to name: String, _ state: HLRecipient?)
+        -> (extra: Decimal, line: String?, to: String, warning: String?, footer: String) {
+        let asked = Fmt.num(amount)
+        switch state {
+        case .new?:
+            return (1, "\(asked) arrive · 1 opens \(name)’s account, once", " · new on Hyperliquid",
+                    "\(name)’s Hyperliquid account is new: Hyperliquid keeps 1 USDC of the first transfer to it, so 1 more goes and the \(asked) asked arrive.",
+                    " The signature is for \(Fmt.num(amount + 1)) USDC: \(asked) for \(name) and 1 that Hyperliquid keeps once.")
+        case .unknown?:
+            return (0, nil, "", "Couldn’t ask Hyperliquid whether \(name)’s account is new; a new one keeps 1 USDC of the first transfer. "
+                    + "It’s asked again at Confirm, and with no answer then, nothing is sent.", "")
+        case .open?, .checking?, nil:
+            return (0, nil, "", nil, "")
+        }
     }
 
     /// SOL to a saved Solana address.

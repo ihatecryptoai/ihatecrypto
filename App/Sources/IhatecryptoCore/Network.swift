@@ -15,9 +15,14 @@ public enum Hyperliquid {
     static let info = "https://api.hyperliquid.xyz/info"
 
     /// An address Hyperliquid has never seen: its first deposit pays a one-time fee for opening the account.
+    /// An answer without a role throws: read as «not new», a send to a new account lost its 1 USDC. Any role but «missing»
+    /// (user, agent, vault, subAccount, one added later) is an account Hyperliquid knows.
     public static func isNewAccount(_ address: String) async throws -> Bool {
         let data = try await HTTP.post(info, json: ["type": "userRole", "user": address])
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["role"] as? String == "missing"
+        guard let role = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["role"] as? String, !role.isEmpty else {
+            throw NetError(message: "Hyperliquid's userRole answered without a role: \(String(decoding: data.prefix(200), as: UTF8.self))")
+        }
+        return role == "missing"
     }
 
     /// HIP-3 exchanges whose markets ihatecrypto shows: xyz carries the liquid commodities and stocks (oil, gold,

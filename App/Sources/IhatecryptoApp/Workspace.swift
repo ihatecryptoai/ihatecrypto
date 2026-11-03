@@ -208,6 +208,8 @@ final class Workspace {
     var pendingAllocation: WalletCommand? {
         didSet { if pendingAllocation != nil, oldValue == nil { remindToConfirm() } }
     }
+    /// Whether a Hyperliquid send card's recipient is new there, by lowercased address: asked when the card comes up.
+    var hlRecipients: [String: HLRecipient] = [:]
     /// A command the model read from another language: it waits for «do it», so a wrong reading moves nothing.
     var pendingAction: PendingAction? {
         didSet {
@@ -215,6 +217,16 @@ final class Workspace {
             // A way picked on a route's step belongs to that trade: another move waiting for Confirm drops it.
             if case .wallet(let command)? = pendingAction { routeWays = routeWays.filter { $0.key == command.wayKey } }
             if let p = pendingAction, !isFirstBuy(p) { firstBuyOf = nil }
+            // A new Hyperliquid account keeps 1 USDC of the first transfer to it: asked each time such a card comes up
+            // (a parked one too: a send meanwhile may have opened it), and the card says so once Hyperliquid answers.
+            if case .transfer(let entry, _)? = pendingAction, entry.network == .hyperliquid {
+                let a = entry.address.lowercased()
+                hlRecipients[a] = .checking
+                Task {
+                    let new = try? await Hyperliquid.isNewAccount(a)
+                    hlRecipients[a] = new.map { $0 ? .new : .open } ?? .unknown
+                }
+            }
         }
     }
     /// The recurring buy whose first buy is the card waiting for Confirm: it's kept only when that card is confirmed
