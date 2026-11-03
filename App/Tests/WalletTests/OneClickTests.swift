@@ -134,12 +134,37 @@ func transitResolvesAnOrderThatLandedMeanwhile() async throws {
     #expect(throws: (any Error).self) { try Executor.spotPair("DOGE", tokens: tokens, universe: universe) }
 }
 
-/// Live (IHATECRYPTO_NET=1, reads only): HYPE's USDC pair and its price on Hyperliquid's spot book now.
+extension FakeHyperliquid {
+    /// A spot swap finds both pairs before the sale: a `to` the book can't buy (USDC itself, «USDC.e») or `from` again
+    /// (USDT is USDT0 there) stops with nothing signed or sent, so Try again can't sell twice. A pair the book has goes on.
+    @Test func spotSwapChecksBothPairsBeforeTheSale() async throws {
+        URLProtocol.registerClass(FakeHL.self)
+        defer { URLProtocol.unregisterClass(FakeHL.self) }
+        FakeHL.lock.withLock { FakeHL.state = .init() }
+        let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("spot-\(UUID().uuidString).jsonl"))
+        let e = Executor(wallet: TradeWallet(solana: "", evm: "0x0"), signer: ZeroSigner(), journal: journal) { _ in }
+        for (from, to, why) in [("HYPE", "USDC", "USDC has no USDC pair"), ("HYPE", "USDC.e", "USDC.E has no USDC pair"),
+                                ("HYPE", "hype", "HYPE for HYPE: the same token"), ("USDT", "USDT0", "USDT0 for USDT0: the same token")] {
+            let error = await #expect(throws: ExecutionError.self, "\(from) → \(to)") { try await e.hlSpotSwap(from: from, to: to, amount: 1) }
+            #expect(error?.message.contains(why) == true && error?.message.hasSuffix("Nothing was signed.") == true, "\(error?.message ?? "")")
+        }
+        // HYPE for PURR passes the check and goes on to the spot balance, which this Hyperliquid doesn't answer.
+        let next = await #expect(throws: ExecutionError.self) { try await e.hlSpotSwap(from: "HYPE", to: "PURR", amount: 1) }
+        #expect(next?.message == "Hyperliquid's spot balance didn't come.")
+        #expect(FakeHL.lock.withLock { FakeHL.state.sent } == [])
+        #expect(try journal.entries().isEmpty)
+    }
+}
+
+/// Live (IHATECRYPTO_NET=1, reads only): HYPE's USDC pair and its price on Hyperliquid's spot book now; USDT is USDT0
+/// there, and neither USDC nor «USDC.e» has a USDC pair to buy.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
 func hyperliquidSpotHasHYPE() async throws {
     let pair = try await Executor.spotPair("HYPE"), mid = try await Executor.spotMid(pair)
     print("HYPE spot: asset \(pair.asset), \(pair.key), szDecimals \(pair.szDecimals), mid \(mid)")
     #expect(pair.asset >= 10_000 && mid > 1)
+    #expect(try await Executor.spotPair("USDT").asset == (try await Executor.spotPair("USDT0")).asset)
+    for none in ["USDC", "USDC.E"] { await #expect(throws: ExecutionError.self, "\(none)") { try await Executor.spotPair(none) } }
 }
 
 /// Live (IHATECRYPTO_NET=1, quotes only): Relay's cross-network swaps for the test wallet — SOL on Solana for ETH on

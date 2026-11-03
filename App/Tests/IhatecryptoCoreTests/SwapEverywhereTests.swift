@@ -15,6 +15,13 @@ import Testing
     // Hyperliquid's spot book: a sale and a buy; USDC on a side is one order.
     #expect(WalletCommand.parse("swap 1 HYPE for PURR on hyperliquid spot") == .swapOn("hyperliquid", from: "HYPE", to: "PURR", amount: 1))
     #expect(WalletCommand.parse("swap 20 USDC for HYPE on hyperliquid spot") == .hlSpotBuy(symbol: "HYPE", usdc: 20))
+    // What the book can't swap still parses as a swap there; hlSpotSwap turns it down before the sale.
+    #expect(WalletCommand.parse("swap 1 HYPE for HYPE on hyperliquid spot") == .swapOn("hyperliquid", from: "HYPE", to: "HYPE", amount: 1))
+    #expect(WalletCommand.parse("поменяй 1 HYPE на HYPE на хайперликвиде") == .swapOn("hyperliquid", from: "HYPE", to: "HYPE", amount: 1))
+    #expect(WalletCommand.parse("swap 12 USDT for USDT0 on hyperliquid") == .swapOn("hyperliquid", from: "USDT", to: "USDT0", amount: 12))
+    #expect(WalletCommand.parse("swap 1 HYPE for USDC.e on hyperliquid spot") == .swapOn("hyperliquid", from: "HYPE", to: "USDC.E", amount: 1))
+    #expect(WalletCommand.parse("обменяй 1 HYPE на USDC.e на хайперликвиде") == .swapOn("hyperliquid", from: "HYPE", to: "USDC.E", amount: 1))
+    #expect(WalletCommand.parse("поменяй 1 HYPE на USDC на хайперликвиде") == .hlSpotSell(symbol: "HYPE", amount: 1))
     // Robinhood Chain: Stock Tokens for one another.
     #expect(WalletCommand.parse("swap 1 TSLA for NVDA on robinhood") == .swapOn("robinhood", from: "TSLA", to: "NVDA", amount: 1))
     #expect(WalletCommand.parse("поменяй 1 TSLA на NVDA на робингуде") == .swapOn("robinhood", from: "TSLA", to: "NVDA", amount: 1))

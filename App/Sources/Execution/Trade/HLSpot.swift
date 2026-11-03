@@ -44,7 +44,7 @@ extension Executor {
               let index = (token["index"] as? NSNumber)?.intValue, let szDecimals = (token["szDecimals"] as? NSNumber)?.intValue,
               let pair = universe.first(where: { ($0["tokens"] as? [NSNumber])?.map(\.intValue) == [index, 0] }),
               let pairIndex = (pair["index"] as? NSNumber)?.intValue, let key = pair["name"] as? String else {
-            throw ExecutionError("\(want) has no USDC pair on Hyperliquid's spot book.")
+            throw ExecutionError("\(want) has no USDC pair on Hyperliquid's spot book. Nothing was signed.")
         }
         return SpotPair(asset: 10_000 + pairIndex, key: key, symbol: token["name"] as? String ?? want, szDecimals: szDecimals)
     }
@@ -75,8 +75,13 @@ extension Executor {
     }
 
     /// One spot token for another on Hyperliquid: its book trades each against USDC, so `from` is sold and the USDC it
-    /// fetched buys `to`, each order IOC within 1% of the mid. nil amount = all that's free of `from`.
+    /// fetched buys `to`, each order IOC within 1% of the mid. nil amount = all that's free of `from`. Both pairs are found
+    /// first: a `to` the book can't buy (USDC itself, «USDC.e») or `from` again (USDT is USDT0 there) stops before the sale.
     public func hlSpotSwap(from: String, to: String, amount: Decimal?) async throws -> String {
+        let a = try await Self.spotPair(from), b = try await Self.spotPair(to)
+        guard a.asset != b.asset else {
+            throw ExecutionError("\(a.symbol) for \(b.symbol): the same token on Hyperliquid's spot book. Nothing was signed.")
+        }
         let before = try await spotFree("USDC")
         let sold = try await hlSpot(buy: false, symbol: from, usdc: nil, amount: amount)
         var got: Decimal = 0

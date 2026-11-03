@@ -58,6 +58,11 @@ final class FakeHL: URLProtocol {
         switch body["type"] as? String {
         case "metaAndAssetCtxs": return #"[{"universe":[{"name":"ETH","szDecimals":4,"maxLeverage":25}]},[{"markPx":"3000"}]]"#
         case "perpDexs": return "[]"
+        // The spot book: USDC (token 0), and PURR, HYPE and USDT0 each paired with it.
+        case "spotMeta":
+            return #"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HYPE","index":150,"szDecimals":2},"#
+                + #"{"name":"USDT0","index":268,"szDecimals":2}],"universe":[{"tokens":[1,0],"index":0,"name":"PURR/USDC"},"#
+                + #"{"tokens":[150,0],"index":107,"name":"@107"},{"tokens":[268,0],"index":166,"name":"@166"}]}"#
         case "maxBuilderFee": return "0"
         case "frontendOpenOrders":
             guard main else { return "[]" }
