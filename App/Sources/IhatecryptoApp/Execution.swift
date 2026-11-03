@@ -332,24 +332,37 @@ extension Workspace {
     }
 
     /// Fresh quote, the bridge transaction and its simulation, and Jev's reading of all of it. Nothing is signed.
-    func prepareExecution() async {
-        guard let wallet = previewWallet else { return }
-        // The plan's second check may still be reading it: its warning must be on the card before anything is prepared.
-        await planReviewTask?.value
-        if let missing = missingTradingKey { executionError = missing; return }
-        if let off = tradeRefusal { executionError = off; return }
-        if openVia1Click == nil, let q = quote, q.opening, fundingNet == nil, q.alternativeFee != nil { askOpeningRoute(q); return }
+    /// `rerun` (rerunPlan, Try again) first recalculates the plan from now: balances, prices and a new bridge quote.
+    func prepareExecution(rerun: Bool = false) async {
+        // No wallet to prepare for (its addresses went since): nothing to show, the sheet closes.
+        guard let wallet = previewWallet else { cancelPreparation(); return }
+        // Sign stays locked from the press to Jev's answer, the plan's own check included. Only the newest preparation
+        // writes: a later press or Cancel takes over, so an older one ending never unlocks Sign on signatures still read.
+        preparation += 1
+        let run = preparation
         preparing = true
         executionError = nil
         txReview = nil
-        defer { preparing = false }
+        defer { if run == preparation { preparing = false } }
+        // The sheet stays up («Preparing the trade») through the refresh instead of closing and coming back.
+        if rerun { prepared = nil; await refresh() }
+        // The plan's second check may still be reading it: its warning must be on the card before anything is prepared.
+        await planReviewTask?.value
+        guard run == preparation else { return }
+        // A stale confirmation redone under the sheet goes too: its old steps can't be signed.
+        if let stop = missingTradingKey ?? tradeRefusal { prepared = nil; executionError = stop; return }
+        if openVia1Click == nil, let q = quote, q.opening, fundingNet == nil, q.alternativeFee != nil { prepared = nil; askOpeningRoute(q); return }
         do {
             let p = try await executor(wallet).prepare(intent, policy: policy, openVia1Click: openVia1Click == true, spot: spotHoldings ?? [:])
+            guard run == preparation else { return }
             prepared = p
             if jevScreening, let key = jevKey {
-                txReview = try? await JevReviewer.transactions(plan: planLines, signatures: p.steps, changes: p.changes, apiKey: key)
+                let review = try? await JevReviewer.transactions(plan: planLines, signatures: p.steps, changes: p.changes, apiKey: key)
+                guard run == preparation else { return }
+                txReview = review
             }
         } catch {
+            guard run == preparation else { return }
             prepared = nil
             executionError = error.localizedDescription
             noteFailure("Prepare the \(intent.side == .long ? "long" : "short") \(IntentParser.pretty(intent.asset))", error)
@@ -357,12 +370,22 @@ extension Workspace {
         }
     }
 
+    /// Cancel in the confirmation sheet: the preparation under way stops writing, and the sheet closes at once.
+    func cancelPreparation() {
+        preparation += 1
+        preparing = false
+        prepared = nil
+        executionError = nil
+    }
+
     func confirmExecution() async {
-        guard let p = prepared, let wallet = signerWallet else { return }
+        // Prepared isn't ready to sign while the second check still reads the signatures (or a stale plan is redone).
+        guard !preparing, let p = prepared, let wallet = signerWallet else { return }
         guard p.isFresh else {
             // The bridge transaction's blockhash is about to expire: show fresh numbers and ask again.
             await prepareExecution()
-            executionError = "Numbers refreshed: the confirmation was older than 45 seconds."
+            // Only over new numbers: a Cancel meanwhile closed the sheet, and a failed refresh keeps its own reason.
+            if prepared != nil, executionError == nil { executionError = "Numbers refreshed: the confirmation was older than 45 seconds." }
             return
         }
         // The signature gets its own activity, with the plan exactly as it was signed.
@@ -1443,7 +1466,12 @@ struct ConfirmSheet: View {
                     }
                 }
                 Spacer()
-                if ws.prepared != nil {
+                if ws.prepared != nil, ws.preparing {
+                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(refreshing ? "refreshing numbers" : "checking signatures") }
+                        .font(.ui(10, .semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.fill.tertiary))
+                } else if ws.prepared != nil {
                     Text(concern ? "check the warning" : "all checks passed").font(.ui(10, .semibold))
                         .foregroundStyle(concern ? Color.orange : Brand.profit)
                         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -1473,14 +1501,20 @@ struct ConfirmSheet: View {
                             Label(r.text, systemImage: r.concern ? "exclamationmark.triangle.fill" : "checkmark.seal")
                                 .foregroundStyle(r.concern ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
                         }
+                        if ws.preparing {
+                            HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(refreshing ? "Numbers older than 45 s: recalculating them…" : "The second check is reading the signatures…") }
+                                .foregroundStyle(.secondary)
+                        }
                         if let note = ws.jevNote { Label(note, systemImage: "info.circle").foregroundStyle(.secondary) }
                     }
                 }
                 if concern {
                     Toggle("I understand the second check's warning and execute anyway", isOn: $acknowledged)
+                        // Ticked while Jev still reads, it would pass a signature warning nobody has seen yet.
+                        .disabled(ws.preparing)
                 }
             } else if ws.preparing {
-                HStack { ProgressView().controlSize(.small); Text("Quote, transaction and simulation…").foregroundStyle(.secondary) }
+                HStack { ProgressView().controlSize(.small); Text("Plan check, quote, transaction and simulation…").foregroundStyle(.secondary) }
             }
             if let error = ws.executionError {
                 Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Brand.loss)
@@ -1495,10 +1529,12 @@ struct ConfirmSheet: View {
             HStack(spacing: 12) {
                 Text(ws.signerWallet == nil
                      ? "Signing is available in the app once the key is in secure storage. This is a preview only."
+                     : ws.preparing && ws.prepared != nil
+                     ? (refreshing ? "Sign opens once the new numbers are checked." : "Sign opens once the second check has read the signatures.")
                      : "A separate process signs; the model and websites never see the key.")
                     .font(.ui(10)).foregroundStyle(.secondary)
                 Spacer()
-                Button(ws.signerWallet == nil ? "Close" : "Cancel") { ws.prepared = nil; ws.executionError = nil }
+                Button(ws.signerWallet == nil ? "Close" : "Cancel") { ws.cancelPreparation() }
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.large)
                 if failed {
@@ -1518,7 +1554,7 @@ struct ConfirmSheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Brand.accent)
                     .controlSize(.large)
-                    .disabled(ws.prepared == nil || (concern && !acknowledged) || ws.executing)
+                    .disabled(ws.prepared == nil || ws.preparing || (concern && !acknowledged) || ws.executing)
                 }
             }
         }
@@ -1527,6 +1563,8 @@ struct ConfirmSheet: View {
         .frame(width: 680)
         // A failed preparation is a short note, not a tall empty sheet.
         .frame(minHeight: ws.prepared == nil ? 0 : 460)
+        // A stale plan is prepared again under the open sheet: a tick given to the old warning mustn't pass a new one.
+        .onChange(of: ws.prepared?.preparedAt) { acknowledged = false }
     }
 
     /// The preparation stopped with an error and there is nothing to sign: offer to run the plan again.
@@ -1559,5 +1597,7 @@ struct ConfirmSheet: View {
     }
 
     private var concern: Bool { ws.planReview?.concern == true || ws.txReview?.concern == true }
+    /// A stale confirmation is prepared again under the old steps: the wait is new numbers first, the second check after.
+    private var refreshing: Bool { ws.preparing && ws.prepared?.isFresh == false }
 
 }

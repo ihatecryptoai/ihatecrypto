@@ -163,6 +163,8 @@ final class Workspace {
         didSet { if prepared != nil, oldValue == nil { remindToConfirm(say("The trade is ready to sign.", "Сделка готова к подписи.")) } }
     }
     var preparing = false
+    /// The newest prepareExecution's number: an older one, or one Cancel stopped, writes nothing when it ends.
+    @ObservationIgnored var preparation = 0
     var executing = false {
         didSet {
             // A new move: a failure before it that wasn't reasoned about is old news.
@@ -2314,14 +2316,8 @@ final class Workspace {
     /// The plan again from now: balances, prices and a new bridge quote, then a fresh preparation. For a canvas that has
     /// gone stale or a preparation that failed on old numbers.
     func rerunPlan() async {
-        // The sheet stays up («Preparing the trade») through the refresh instead of closing and coming back.
-        preparing = true
-        defer { preparing = false }
-        prepared = nil
-        executionError = nil
         quotedKey = nil
-        await refresh()
-        await prepareExecution()
+        await prepareExecution(rerun: true)
     }
 
     func loadSigner() async {

@@ -336,7 +336,7 @@ struct StudioView: View {
             }
         }
         .sheet(isPresented: Binding(get: { ws.preparing || ws.prepared != nil || (ws.executionError != nil && !ws.executing) },
-                                    set: { if !$0 { ws.prepared = nil; ws.executionError = nil } })) {
+                                    set: { if !$0 { ws.cancelPreparation() } })) {
             ConfirmSheet().environment(ws)
         }
     }
