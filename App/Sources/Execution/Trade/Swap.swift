@@ -821,7 +821,7 @@ extension Executor {
     }
 
     /// Carries out the swap `p` chose on the network, nothing checked here that the caller hasn't (holdsPairImpact): Relay's
-    /// swap, asked again with the money in place and every check run on that quote; KyberSwap's route, built and read back
+    /// swap, asked again before the coin is wrapped and every check run on that quote; KyberSwap's route, built and read back
     /// (kyberSwap); Uniswap's route, the network's own coin into a v4 pool of it as the call's value or wrapped first (its
     /// WETH, one transaction), out of such a pool as coins or unwrapped after; or a plain wrap or unwrap. Returns the last
     /// transaction and, where the coin's balance can't say it (its fees come out of the same coin), what came out.
@@ -830,15 +830,28 @@ extension Executor {
         let rpc = net.rpc, wrappedName = "W" + net.gasCoin
         let wei = p.coinIn ? NSDecimalNumber(decimal: p.units).uint64Value : 0
         func show(_ raw: Decimal, _ t: EVMTokens.Token) -> String { "\(Fmt.num(raw / Decimal(sign: .plus, exponent: t.decimals, significand: 1), maxFraction: 8)) \(t.symbol)" }
+        // The coin wrapped into its WETH, then what spends it; a failure after the wrap says where the money is now. One
+        // sent with no outcome yet (a receipt that didn't come) is said as it is: the WETH may be swapped already.
+        func wrapThen<T>(_ spend: () async throws -> T) async throws -> T {
+            guard p.coinIn else { return try await spend() }
+            _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei)
+            let wrapped = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))   // the journal keeps whole seconds
+            do { return try await spend() } catch {
+                let inFlight = (try? journal.unresolved())?.contains { $0.chain == net.key && $0.at >= wrapped } ?? false
+                throw inFlight ? error : Self.leftWrapped(error, coins: p.units / 1e18, wrapped: wrappedName, net: net)
+            }
+        }
         if p.relayOut != nil {
-            // The coin is wrapped first (Relay takes its wrapped token through the proxy), then Relay is asked again with the
-            // money in place — the price may have moved — and every check run on that quote.
-            if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
+            // Relay is asked again first, while the coin is still the coin: the price may have moved since the card, and a
+            // refusal or a loss past the cap then leaves nothing wrapped. It quotes the wrapped token the wallet doesn't hold
+            // yet (bestPair's quote does the same). Then the wrap, the exact approve and the call to its proxy.
             let q = try await relayPairQuote(net, from: p.tokenIn.address, to: p.coinOut ? UniswapV4.native : p.tokenOut.address, units: p.units)
             report("\(what) → \(p.tokenOut.symbol) on \(net.name) through Relay's swap: ≈ \(show(q.out, p.tokenOut)).")
-            let last = try await approveAndSend(rpc, token: p.tokenIn.address, spender: q.proxy, units: p.units,
-                                                approveNote: "Approve exactly \(p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what) to Relay",
-                                                to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)")
+            let last = try await wrapThen {
+                try await approveAndSend(rpc, token: p.tokenIn.address, spender: q.proxy, units: p.units,
+                                         approveNote: "Approve exactly \(p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what) to Relay",
+                                         to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)")
+            }
             try journal.append(.init(chain: "relay", id: q.quote.requestId, kind: .signed, note: "\(net.name) \(p.tokenIn.symbol)→\(p.tokenOut.symbol), tx \(last)"))
             return (last, nil)
         }
@@ -852,11 +865,12 @@ extension Executor {
                 let last = try await swapUniswap(route, on: net, uni, tokenIn: p.coinIn ? UniswapV4.native : p.tokenIn.address, units: p.units, what: what, note: note)
                 return (last, p.coinOut ? route.out : nil)
             }
-            if p.coinIn { _ = try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei) }
             let wethBefore = p.coinOut ? try await balance(weth, on: rpc) : 0
-            // The coin is its wrapped token by now: that's what the approve lets Uniswap take.
-            var last = try await swapUniswap(route, on: net, uni, tokenIn: p.tokenIn.address, units: p.units,
-                                             what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what, note: note)
+            // The coin is its wrapped token by then: that's what the approve lets Uniswap take.
+            var last = try await wrapThen {
+                try await swapUniswap(route, on: net, uni, tokenIn: p.tokenIn.address, units: p.units,
+                                      what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what, note: note)
+            }
             guard p.coinOut else { return (last, nil) }
             // A node can answer from before the swap's block: it said 0, the unwrap was skipped and the WETH stayed in the
             // wallet (2026-10-22, after an EIP-7702 batch on Base). So it's asked again while nothing shows.
@@ -873,6 +887,17 @@ extension Executor {
         if p.coinIn, !p.coinOut { return (try await sendEVM(rpc, to: weth, data: Data([0xd0, 0xe3, 0x0d, 0xb0]), note: "Wrap \(what) into \(wrappedName)", value: wei), nil) }
         guard p.coinOut, !p.coinIn, p.tokenIn.address == weth else { throw ExecutionError("No way to swap \(p.tokenIn.symbol) for \(p.tokenOut.symbol) on \(net.name). Nothing was signed.") }
         return (try await sendEVM(rpc, to: weth, data: Data([0x2e, 0x1a, 0x7d, 0x4d]) + (try ABI.word(p.units)), note: "Unwrap \(what) into \(net.gasCoin)"), p.units)
+    }
+
+    /// What a failure after the coin's wrap says: not «Nothing was signed» (the wrap was), and the way back, one unwrap of
+    /// this amount — not «all», which would take WETH the wallet held before. A guard's stop stays a GuardStop: the chat
+    /// keeps it apart (Agent.noteFailure).
+    static func leftWrapped(_ error: any Error, coins: Decimal, wrapped: String, net: EVMNetwork) -> any Error {
+        let n = Fmt.num(coins.rounded(8, .down), maxFraction: 8)   // down: never more than the wrap gave
+        let said = error.localizedDescription.replacingOccurrences(of: " Nothing was signed.", with: "")
+        let text = said + (said.hasSuffix(".") ? "" : ".")
+            + " \(n) \(net.gasCoin) is \(wrapped) in the wallet now: «swap \(n) \(wrapped) for \(net.gasCoin) on \(net.key)» turns it back."
+        return error is GuardStop ? GuardStop(text) : ExecutionError(text)
     }
 
     /// Relay's own swap-and-bridge from a token on the chain: an exact approve to the approval proxy Relay publishes for

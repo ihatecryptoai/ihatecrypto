@@ -550,6 +550,42 @@ func forkSwapsTokenForToken() async throws {
     }
 }
 
+/// Relay's swap of the coin on an anvil fork of Base (NET=base Tools/fork7702.sh): Relay quotes the WETH this fresh key
+/// doesn't hold yet, and that quote, taken before the wrap, still goes through after the wrap and the exact approve —
+/// the USDC it said, no WETH left, the allowance spent to zero. Then a call that fails after the wrap.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_ANVIL_CHAIN"] == "8453"))
+func forkRelaySwapsTheCoinQuotedBeforeTheWrap() async throws {
+    let env = ProcessInfo.processInfo.environment
+    let rpc = EVMRPC(url: URL(string: env["IHATECRYPTO_ANVIL"]!)!, chainId: 8453)
+    let key = Data(hex: env["IHATECRYPTO_ANVIL_KEY"]!)!
+    let me = try EVMAccount.address(privateKey: key)
+    let b = EVMNetwork.base
+    let net = EVMNetwork(name: b.name, key: b.key, rpc: rpc, usdc: b.usdc, relayChain: b.relayChain, explorer: b.explorer, gasFloor: b.gasFloor, topupUSD: b.topupUSD)
+    let weth = try #require(UniswapV2.on(8453)?.weth), uni = try #require(UniswapV3.on(8453))
+    let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("forkrelay-\(UUID().uuidString).jsonl"))
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: key, address: me, batches: false), journal: journal) { print("·", $0) }
+    let units: Decimal = 1_000_000_000_000_000   // 0.001 ETH
+    let weth0 = try await e.balance(weth, on: rpc), usdc0 = try await rpc.tokenBalance(b.usdc, owner: me)
+    let quoted = try await e.relayPairQuote(net, from: weth, to: b.usdc, units: units)
+    let p = Executor.PairSwap(tokenIn: .init(symbol: "ETH", name: "ETH", address: weth, decimals: 18), tokenOut: Executor.usdcToken(net),
+                              coinIn: true, coinOut: false, units: units, route: nil, relayOut: quoted.out)
+    print(try await e.runPair(net, uni, p, what: "0.001 ETH", note: "Swap 0.001 ETH for USDC"))
+    #expect(Decimal(try await rpc.tokenBalance(b.usdc, owner: me) - usdc0) >= (quoted.out * Decimal(string: "0.98")!).whole)
+    #expect(try await e.balance(weth, on: rpc) == weth0)
+    #expect(ABI.decimal(in: try await rpc.read(weth, try ERC20.allowance(owner: me, spender: quoted.proxy)), word: 0) == 0)
+
+    // A failure after the wrap: Relay's proxy, made to revert on the fork, fails the call's dry run. The error says the
+    // coin is WETH now and how it comes back, and that phrase, run, unwraps exactly it.
+    let code = try #require(try await rpc.call("eth_getCode", [quoted.proxy, "latest"]) as? String)
+    _ = try await rpc.call("anvil_setCode", [quoted.proxy, "0x60006000fd"])   // PUSH1 0 PUSH1 0 REVERT
+    let error = await #expect(throws: (any Error).self) { try await e.runPair(net, uni, p, what: "0.001 ETH", note: "Swap 0.001 ETH for USDC") }
+    _ = try await rpc.call("anvil_setCode", [quoted.proxy, code])
+    #expect(error?.localizedDescription.hasSuffix(" 0.001 ETH is WETH in the wallet now: «swap 0.001 WETH for ETH on base» turns it back.") == true)
+    #expect(try await e.balance(weth, on: rpc) == weth0 + units)
+    print(try await e.swapOn(net, from: "WETH", to: "ETH", amount: Decimal(string: "0.001")!))
+    #expect(try await e.balance(weth, on: rpc) == weth0)
+}
+
 /// Borrowing on Aave on an anvil fork of Base (Tools/fork7702.sh, TESTS=forkBorrowsAgainstETHAndRepays): 0.01 ETH in as
 /// collateral, a borrow that would leave a health factor under 1.5 refused before anything is signed, 5 USDC borrowed
 /// with the liquidation price of ETH under today's, then the whole debt paid back.

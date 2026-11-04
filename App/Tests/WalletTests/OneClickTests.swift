@@ -268,6 +268,23 @@ struct CrossStubbed {
         // 1Click pricing only what goes in: refused, never asked about as a 100% loss.
         #expect(throws: ExecutionError.self) { try Executor.holdsCrossLoss(in: 10, out: 0, unpriced: "1Click doesn't price X for Y", what: "NEAR Intents") }
     }
+
+    /// Relay's swap of the network's coin is asked again before the wrap: Relay turning it down (here its quote is from
+    /// someone else, a guard's stop) leaves the coin as it was, the node never asked to wrap it. Until 2026-11-04 the wrap
+    /// went first and the refusal left the ETH as WETH under «Nothing was signed».
+    @Test func relaysRefusalLeavesTheCoinUnwrapped() async throws {
+        URLProtocol.registerClass(CrossStub.self)
+        defer { URLProtocol.unregisterClass(CrossStub.self) }
+        (CrossStub.balanceReads, CrossStub.relayAmounts, CrossStub.worthIn) = (0, [], "10")
+        let b = EVMNetwork.base, weth = try #require(UniswapV2.on(b.rpc.chainId)?.weth), uni = try #require(UniswapV3.on(b.rpc.chainId))
+        let net = EVMNetwork(name: b.name, key: b.key, rpc: EVMRPC(url: URL(string: "https://cross.stub")!, chainId: b.rpc.chainId), usdc: b.usdc,
+                             relayChain: b.relayChain, explorer: b.explorer, gasFloor: b.gasFloor, topupUSD: b.topupUSD)
+        let p = Executor.PairSwap(tokenIn: .init(symbol: "ETH", name: "ETH", address: weth, decimals: 18), tokenOut: Executor.usdcToken(net),
+                                  coinIn: true, coinOut: false, units: 1_000_000_000_000_000, route: nil, relayOut: 2_000_000)
+        await #expect(throws: GuardStop.self) { try await executor().runPair(net, uni, p, what: "0.001 ETH", note: "Swap 0.001 ETH for USDC") }
+        #expect(CrossStub.relayAmounts == ["1000000000000000"])
+        #expect(CrossStub.balanceReads == 0)   // the wrap's gas estimate is the node's first question: never asked
+    }
 }
 
 /// Live (IHATECRYPTO_NET=1, dry quotes only): what 0.0001 BTC to a real Bitcoin address and 20 USDT on TRON cost in

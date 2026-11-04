@@ -154,6 +154,19 @@ import WalletCore
     }
 }
 
+// A failure after the coin's wrap says it's the wrapped token now and how it comes back, never «Nothing was signed»; a
+// guard's stop stays a guard's stop.
+@Test func aFailureAfterTheWrapSaysWhereTheCoinIs() {
+    let back = " 0.001 ETH is WETH in the wallet now: «swap 0.001 WETH for ETH on base» turns it back."
+    let failed = Executor.leftWrapped(ExecutionError("Approve exactly 0.001 WETH to Relay failed. Nothing was signed."), coins: Decimal(string: "0.001")!, wrapped: "WETH", net: .base)
+    #expect(failed is ExecutionError && failed.localizedDescription == "Approve exactly 0.001 WETH to Relay failed." + back)
+    let stop = Executor.leftWrapped(GuardStop("pays 0xdead"), coins: Decimal(string: "0.001")!, wrapped: "WETH", net: .base)
+    #expect(stop is GuardStop && stop.localizedDescription == "pays 0xdead." + back)
+    // «All» of the coin is its balance less the fees, in wei: the way back names it rounded down, never over what was wrapped.
+    let bnb = Executor.leftWrapped(URLError(.timedOut), coins: Decimal(string: "0.012345678987654321")!, wrapped: "WBNB", net: .bnb)
+    #expect(bnb.localizedDescription.hasSuffix(" 0.01234567 BNB is WBNB in the wallet now: «swap 0.01234567 WBNB for BNB on bnb» turns it back."))
+}
+
 // A stop by the guard or the signer on Relay's quote is never taken to NEAR Intents, nor is a loss «Send anyway» asks
 // about; a missing route is.
 @Test func relaysGuardStopIsNeverTakenToNearIntents() {
