@@ -167,13 +167,13 @@ private func jwt(_ claims: [String: Any]) -> String {
     // The test runner has no com.apple.developer.private-cloud-compute.
     #expect(!info.models.contains(AppleIntelligence.privateCloud))
     guard info.models.contains(AppleIntelligence.onDevice) else { return }  // Apple Intelligence is off on this Mac.
-    // The chat's router brief is ~5,000 tokens; the model on this Mac holds 4,096.
+    // The chat's router brief is ~5,000 tokens; the model on this Mac holds what the framework says (4,096 on 27.0).
     let brief = String(repeating: "Answer as the wallet's agent. ", count: 1000)
     let error = await #expect(throws: LLMError.self) {
         try await AppleIntelligenceClient().complete(LLMRequest(model: info.defaultModel, messages: [LLMMessage(.system, brief), LLMMessage(.user, "hi")]))
     }
     // Said as what it is: too small for the chat, not «send it again».
-    #expect(error?.message.contains("4,096 tokens") == true)
+    #expect(error?.message.contains("\(AppleIntelligence.window) tokens") == true)
     #expect(AppleIntelligence.chatRefusal(model: AppleIntelligence.onDevice) != nil && AppleIntelligence.chatRefusal(model: "gpt-6.1-sol") == nil)
 }
 
