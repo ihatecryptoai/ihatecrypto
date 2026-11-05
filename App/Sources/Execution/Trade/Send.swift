@@ -438,12 +438,12 @@ extension Executor {
             }
         }
         // The mint's owner is its token program: SPL Token or Token-2022, and the accounts derive from it.
-        let info = try await rpc.call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "confirmed"]]) as? [String: Any]
+        let info = try await rpc.call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let program = (info?["value"] as? [String: Any])?["owner"] as? String, [SPL.tokenProgram, SPL.token2022Program].contains(program) else {
             throw ExecutionError("\(mint) isn't a token mint on Solana.")
         }
         let mine = try SPL.associatedAccount(owner: wallet.solana, mint: mint, program: program)
-        let value = (try? await rpc.call("getTokenAccountBalance", [mine, ["commitment": "confirmed"]]) as? [String: Any])?["value"] as? [String: Any]
+        let value = (try? await rpc.call("getTokenAccountBalance", [mine, ["commitment": "finalized"]]) as? [String: Any])?["value"] as? [String: Any]
         guard let value, let have = (value["amount"] as? String).flatMap(UInt64.init), let decimals = (value["decimals"] as? NSNumber)?.uint8Value else {
             throw ExecutionError("This wallet holds no \(symbol) on Solana.")
         }
@@ -458,7 +458,7 @@ extension Executor {
     /// The wallet's empty classic SPL token accounts, not frozen, up to 20 (what fits one transaction).
     // ponytail: classic SPL only; an empty Token-2022 account can hold withheld fees that make closing it fail.
     func emptyTokenAccounts() async throws -> [(address: String, lamports: UInt64)] {
-        let r = try await rpc.call("getTokenAccountsByOwner", [wallet.solana, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await rpc.call("getTokenAccountsByOwner", [wallet.solana, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
         let empty: [(String, UInt64)] = (r?["value"] as? [[String: Any]] ?? []).compactMap { item in
             guard let address = item["pubkey"] as? String, let account = item["account"] as? [String: Any],
                   let info = ((account["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any],

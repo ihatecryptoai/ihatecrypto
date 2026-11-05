@@ -351,11 +351,12 @@ public struct EVMRPC: Sendable {
                                          fallbacks: [URL(string: "https://robinhood.drpc.org")!], followsSettings: true)
     /// USDG (Global Dollar), Robinhood Chain's dollar, 6 decimals — docs.robinhood.com/chain/contracts.
     public static let robinhoodUSDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
-    /// mainnet.base.org rate-limits after a few calls and publicnode refuses receipts without a token;
-    /// drpc served calls, estimates and receipts in a burst test (2026-09-26).
-    /// Coinbase's own node takes over while drpc throttles (it limits too, so it isn't the first).
-    public static let base = EVMRPC(url: URL(string: "https://base.drpc.org")!, chainId: 8453,
-                                    fallbacks: [URL(string: "https://mainnet.base.org")!, URL(string: "https://base.gateway.tenderly.co")!],
+    /// Coinbase's own node first: base.drpc.org answers 429 «Public endpoint rate limit» to every call after a short
+    /// burst, so each read lost a second's retry on it. mainnet.base.org served calls, receipts, eth_simulateV1 and
+    /// estimates with an override and 120 calls in bursts of 30 without an error — it queues a burst instead (30 at once:
+    /// p50 5.5 s), one at a time ≈ 0.2 s (2026-11-05). Tenderly refuses eth_simulateV1 («rate limit exceeded»).
+    public static let base = EVMRPC(url: URL(string: "https://mainnet.base.org")!, chainId: 8453,
+                                    fallbacks: [URL(string: "https://base.gateway.tenderly.co")!, URL(string: "https://base.drpc.org")!],
                                     followsSettings: true)
     /// Circle's native USDC on Base (6 decimals).
     public static let baseUSDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
@@ -386,16 +387,19 @@ public struct EVMRPC: Sendable {
     /// Circle's native USDC on HyperEVM, 6 decimals: the one Relay delivers (its /chains, 2026-10-06).
     public static let hyperevmUSDC = "0xb88339cb7199b77e23db6e890353e22632ba630f"
 
-    /// Optimism (OP Mainnet), gas in ETH at ≈ 0.001 gwei plus its L1 data fee; drpc, then Optimism's own node (2026-10-06).
-    public static let optimism = EVMRPC(url: URL(string: "https://optimism.drpc.org")!, chainId: 10,
-                                        fallbacks: [URL(string: "https://mainnet.optimism.io")!], followsSettings: true)
+    /// Optimism (OP Mainnet), gas in ETH at ≈ 0.001 gwei plus its L1 data fee: Optimism's own node, then drpc, which
+    /// answered 429 to every call on 2026-11-05 (the official one served calls, receipts, eth_simulateV1, estimates with
+    /// an override and 120 calls in bursts of 30). publicnode refuses receipts («Archive requests require a personal token»).
+    public static let optimism = EVMRPC(url: URL(string: "https://mainnet.optimism.io")!, chainId: 10,
+                                        fallbacks: [URL(string: "https://optimism.drpc.org")!], followsSettings: true)
     /// Circle's native USDC on Optimism, the one Relay delivers.
     public static let optimismUSDC = "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
 
-    /// BNB Chain (BSC), gas in BNB at 0.05 gwei: drpc, then publicnode and BNB Chain's own seed node (each answered
-    /// chain id 56 and fees, 2026-10-08).
-    public static let bnb = EVMRPC(url: URL(string: "https://bsc.drpc.org")!, chainId: 56,
-                                   fallbacks: [URL(string: "https://bsc-rpc.publicnode.com")!, URL(string: "https://bsc-dataseed.bnbchain.org")!],
+    /// BNB Chain (BSC), gas in BNB at 0.05 gwei: BNB Chain's own seed node, then publicnode, then drpc, which answered 429
+    /// to every call on 2026-11-05 (the other two served calls, receipts, eth_simulateV1, estimates with an override and
+    /// 120 calls in bursts of 30).
+    public static let bnb = EVMRPC(url: URL(string: "https://bsc-dataseed.bnbchain.org")!, chainId: 56,
+                                   fallbacks: [URL(string: "https://bsc-rpc.publicnode.com")!, URL(string: "https://bsc.drpc.org")!],
                                    followsSettings: true)
     /// Binance-Peg USDC on BNB Chain, the one Relay delivers — 18 decimals, not 6 (its decimals(), 2026-10-08).
     public static let bnbUSDC = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"

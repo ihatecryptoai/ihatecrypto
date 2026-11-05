@@ -125,12 +125,13 @@ nonisolated final class MovesNode: URLProtocol {
         #expect(theirs?.count == 1 && theirs?.first?.change[MovesNode.bonk] == nil, "\(String(describing: theirs))")
     }
 
-    /// The portfolio's amounts are read at «confirmed» (Network.swift); history at the node's default «finalized» lagged
-    /// them by ~13 s, so a purchase just made was held but not in the history: counted as held before, at the day's
-    /// price, and kept till the amount changed again.
+    /// The portfolio's amounts and the history are read at one commitment (Network.swift): before Alpenglow, history at
+    /// «finalized» lagged amounts at «confirmed» by ~13 s, so a purchase just made was held but not in the history:
+    /// counted as held before, at the day's price, and kept till the amount changed again. Since Alpenglow (2026-10-21)
+    /// the two are the same slot and «confirmed» is to be removed, so both are «finalized».
     @Test func historyIsReadAtTheCommitmentTheAmountsAre() async {
         _ = await moves(SolanaMoves(), signatures: [("A", false)], transactions: ["A": "ok"])
-        #expect(MovesNode.commitments == ["confirmed", "confirmed"], "\(MovesNode.commitments)")
+        #expect(MovesNode.commitments == ["finalized", "finalized"], "\(MovesNode.commitments)")
     }
 
     /// Live (IHATECRYPTO_NET=1, reads only): the public node gives a wallet's whole history, one move for each of its
@@ -140,7 +141,7 @@ nonisolated final class MovesNode: URLProtocol {
     func theWholeHistoryIsReadOnMainnet() async throws {
         let owner = ProcessInfo.processInfo.environment["IHATECRYPTO_OWNER"] ?? MovesNode.owner
         let node = SolanaRPC(url: SolanaNodes.publicNode)
-        let list = try await node.call("getSignaturesForAddress", [owner, ["limit": 50, "commitment": "confirmed"]]) as? [[String: Any]] ?? []
+        let list = try await node.call("getSignaturesForAddress", [owner, ["limit": 50, "commitment": "finalized"]]) as? [[String: Any]] ?? []
         let ok = Set(list.filter { $0["err"] == nil || $0["err"] is NSNull }.compactMap { $0["signature"] as? String })
         let moves = await SolanaMoves().moves(owner: owner, mint: CostBasis.wsol, rpc: node)
         let read = moves?.count ?? -1

@@ -442,8 +442,8 @@ func sweepSolana(to destination: String) async throws {
     if usdc > 0 { print(try await executor.sendUSDC(Decimal(usdc) / 1_000_000, to: .solana(destination), label: "the new wallet")) }
 
     // Empty token accounts hold ≈ 0.002 SOL of rent each: closing them brings it back before the SOL leaves.
-    // «confirmed», not the default «finalized»: right after the USDC left, finalized still shows it there.
-    let accounts = (try await rpc.call("getTokenAccountsByOwner", [me, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any])?["value"] as? [[String: Any]] ?? []
+    // «finalized», the same slot as «confirmed» since Alpenglow (before it, finalized still showed the USDC that had left).
+    let accounts = (try await rpc.call("getTokenAccountsByOwner", [me, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any])?["value"] as? [[String: Any]] ?? []
     let empty = accounts.compactMap { a -> String? in
         let amount = ((((a["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any])
             .flatMap { ($0["tokenAmount"] as? [String: Any])?["amount"] as? String }
@@ -471,7 +471,7 @@ func sweepSolana(to destination: String) async throws {
         ], data: data)], payer: me, blockhash: hash, microLamportsPerCU: 0)
     }
     let (hash, lastValid) = try await rpc.latestBlockhash()
-    let feeReply = try await rpc.call("getFeeForMessage", [try transfer(lamports, hash).base64EncodedString(), ["commitment": "confirmed"]]) as? [String: Any]
+    let feeReply = try await rpc.call("getFeeForMessage", [try transfer(lamports, hash).base64EncodedString(), ["commitment": "finalized"]]) as? [String: Any]
     guard let fee = (feeReply?["value"] as? NSNumber)?.uint64Value, lamports > fee else { throw WalletError("No fee quote, or nothing to move (\(lamports) lamports).") }
     let wire = SolanaTransaction.unsigned(try transfer(lamports - fee, hash))
     let signed = try await signer.signSolana(wire, accounts: try SolanaMessage.parse(transaction: wire).staticKeys, recipients: [destination], tokenOwners: [:])

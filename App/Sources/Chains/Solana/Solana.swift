@@ -44,7 +44,7 @@ public struct SolanaRPC: Sendable {
     }
 
     public func balance(_ address: String) async throws -> UInt64 {
-        let r = try await call("getBalance", [address, ["commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("getBalance", [address, ["commitment": "finalized"]]) as? [String: Any]
         return (r?["value"] as? NSNumber)?.uint64Value ?? 0
     }
 
@@ -62,19 +62,19 @@ public struct SolanaRPC: Sendable {
     /// What `owner`'s own token account for `mint` holds, in whole tokens; 0 without one. Two light reads (the mint's
     /// program, the account's balance), never getTokenAccountsByOwner, which the public node throttles right after a swap.
     public func ownedAmount(owner: String, mint: String) async throws -> Decimal {
-        let info = try await call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "confirmed"]]) as? [String: Any]
+        let info = try await call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let program = (info?["value"] as? [String: Any])?["owner"] as? String, [SPL.tokenProgram, SPL.token2022Program].contains(program) else {
             throw WalletError("\(mint) isn't a token mint on Solana.")
         }
         let account = try SPL.associatedAccount(owner: owner, mint: mint, program: program)
-        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": "confirmed"]]) as? [String: Any])?["value"] as? [String: Any],
+        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": "finalized"]]) as? [String: Any])?["value"] as? [String: Any],
               let units = (value["amount"] as? String).flatMap({ Decimal(string: $0) }), let decimals = (value["decimals"] as? NSNumber)?.intValue else { return 0 }
         return units / pow(Decimal(10), decimals)
     }
 
     /// Raw units of an SPL token held by `owner` across its accounts.
     public func tokenBalance(owner: String, mint: String) async throws -> UInt64 {
-        let r = try await call("getTokenAccountsByOwner", [owner, ["mint": mint], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("getTokenAccountsByOwner", [owner, ["mint": mint], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
         let accounts = r?["value"] as? [[String: Any]] ?? []
         return accounts.reduce(0) { sum, account in
             let amount = (((account["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])
@@ -84,7 +84,7 @@ public struct SolanaRPC: Sendable {
     }
 
     public func latestBlockhash() async throws -> (blockhash: String, lastValidBlockHeight: UInt64) {
-        let r = try await call("getLatestBlockhash", [["commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("getLatestBlockhash", [["commitment": "finalized"]]) as? [String: Any]
         guard let value = r?["value"] as? [String: Any], let hash = value["blockhash"] as? String,
               let height = (value["lastValidBlockHeight"] as? NSNumber)?.uint64Value else { throw WalletError("No blockhash") }
         return (hash, height)
@@ -93,7 +93,7 @@ public struct SolanaRPC: Sendable {
     /// Simulates first (preflight), then broadcasts. Returns the signature, which is the transaction id.
     public func send(_ transaction: Data) async throws -> String {
         do {
-            let r = try await call("sendTransaction", [transaction.base64EncodedString(), ["encoding": "base64", "preflightCommitment": "confirmed", "maxRetries": 5]])
+            let r = try await call("sendTransaction", [transaction.base64EncodedString(), ["encoding": "base64", "preflightCommitment": "finalized", "maxRetries": 5]])
             guard let signature = r as? String else { throw WalletError("sendTransaction returned no signature") }
             return signature
         } catch let error as WalletError where error.message.contains("already been processed") && transaction.count > 65 {
@@ -104,7 +104,7 @@ public struct SolanaRPC: Sendable {
 
     /// Runs the transaction without sending it, with signature checks on. nil error = it would succeed.
     public func simulate(_ transaction: Data) async throws -> (error: String?, logs: [String]) {
-        let r = try await call("simulateTransaction", [transaction.base64EncodedString(), ["encoding": "base64", "sigVerify": true, "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("simulateTransaction", [transaction.base64EncodedString(), ["encoding": "base64", "sigVerify": true, "commitment": "finalized"]]) as? [String: Any]
         let value = r?["value"] as? [String: Any]
         let err = value?["err"]
         return (err == nil || err is NSNull ? nil : "\(err!)", value?["logs"] as? [String] ?? [])
@@ -156,7 +156,7 @@ public struct SolanaRPC: Sendable {
             do {
                 let valid = try? await call("isBlockhashValid", [blockhash, ["commitment": "finalized", "minContextSlot": slot]]) as? [String: Any]
                 let dead = slot > 0 && (valid?["value"] as? Bool) == false ? ((valid?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value : nil
-                guard let list = try await call("getSignaturesForAddress", [signer, ["limit": 100, "commitment": dead == nil ? "confirmed" : "finalized",
+                guard let list = try await call("getSignaturesForAddress", [signer, ["limit": 100, "commitment": "finalized",
                                                                                     "minContextSlot": dead ?? slot]]) as? [[String: Any]] else {
                     throw WalletError("Solana RPC getSignaturesForAddress: no list")
                 }
@@ -166,7 +166,7 @@ public struct SolanaRPC: Sendable {
                     if at <= slot { reached = true; break }
                     guard !others.contains(id) else { continue }
                     // Read whole or not at all: a reply without its signatures or its outcome may be ours.
-                    guard let tx = try await call("getTransaction", [id, ["encoding": "json", "commitment": "confirmed",
+                    guard let tx = try await call("getTransaction", [id, ["encoding": "json", "commitment": "finalized",
                                                                           "maxSupportedTransactionVersion": 1]]) as? [String: Any],
                           let meta = tx["meta"] as? [String: Any],
                           let signatures = (tx["transaction"] as? [String: Any])?["signatures"] as? [String] else { unread = true; continue }
@@ -375,7 +375,7 @@ extension SolanaNodes {
             guard genesis == mainnetGenesis else { return "That node is on another Solana network (devnet or testnet), not mainnet." }
             _ = try await node.call("getTokenAccountsByOwner", ["11111111111111111111111111111111",
                                                                 ["programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"], ["encoding": "jsonParsed"]])
-            _ = try await node.call("getLatestBlockhash", [["commitment": "confirmed"]])
+            _ = try await node.call("getLatestBlockhash", [["commitment": "finalized"]])
             return nil
         } catch {
             let why = error.localizedDescription

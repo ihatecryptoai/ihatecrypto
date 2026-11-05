@@ -106,7 +106,7 @@ public struct SolanaMessage: Sendable {
 extension SolanaRPC {
     /// Addresses stored in an address lookup table account (56-byte header, then 32-byte keys).
     public func lookupTable(_ address: String) async throws -> [String] {
-        let r = try await call("getAccountInfo", [address, ["encoding": "base64", "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("getAccountInfo", [address, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let value = r?["value"] as? [String: Any], let data = (value["data"] as? [Any])?.first as? String,
               let raw = Data(base64Encoded: data), raw.count >= 56 else { throw WalletError("Address lookup table not found: \(address)") }
         return stride(from: 56, to: raw.count - 31, by: 32).map { Base58.encode(raw.subdata(in: $0..<($0 + 32))) }
@@ -125,7 +125,7 @@ extension SolanaRPC {
     public func simulate(_ transaction: Data, watch: [String], sigVerify: Bool = true) async throws
         -> (error: String?, after: [String: (lamports: UInt64, token: UInt64?)], slot: UInt64) {
         let r = try await call("simulateTransaction", [transaction.base64EncodedString(), [
-            "encoding": "base64", "sigVerify": sigVerify, "commitment": "confirmed",
+            "encoding": "base64", "sigVerify": sigVerify, "commitment": "finalized",
             "accounts": ["encoding": "jsonParsed", "addresses": watch],
         ]]) as? [String: Any]
         let value = r?["value"] as? [String: Any], slot = ((r?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value ?? 0
@@ -148,7 +148,7 @@ extension SolanaRPC {
 
     /// The watched accounts' state now, in one read and one slot: what a move's balance rules compare the simulation with.
     public func accounts(_ addresses: [String]) async throws -> [String: (lamports: UInt64, token: UInt64?)] {
-        let r = try await call("getMultipleAccounts", [addresses, ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await call("getMultipleAccounts", [addresses, ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
         return try Self.accounts(addresses, r?["value"])
     }
 

@@ -727,15 +727,15 @@ actor SolanaMoves {
 
     /// The owner's moves in `mint`, oldest first: the 50 newest transactions of its token account (either program's);
     /// for SOL, of the wallet itself. nil when the node didn't give them all (the list, or a transaction it listed): a
-    /// cost from part of them is wrong. What was read stays read, so the next ask goes on from there. At «confirmed», as
-    /// the portfolio's amounts are read: at the default «finalized» a purchase just made was held but not yet in it.
+    /// cost from part of them is wrong. What was read stays read, so the next ask goes on from there. At «finalized», as
+    /// the portfolio's amounts are read: one commitment for both, or a purchase just made is held but not yet in it.
     // ponytail: 50 a token, as on the EVM networks; what was held before them counts at the price then.
     func moves(owner: String, mint: String, rpc: SolanaRPC = SolanaRPC()) async -> [CostBasis.SolanaMove]? {
         let accounts = mint == CostBasis.wsol ? [owner]
             : [SPL.tokenProgram, SPL.token2022Program].compactMap { try? SPL.associatedAccount(owner: owner, mint: mint, program: $0) }
         var signatures: [String] = []
         for account in accounts {
-            guard let list = (try? await rpc.call("getSignaturesForAddress", [account, ["limit": 50, "commitment": "confirmed"]])) as? [[String: Any]] else { return nil }
+            guard let list = (try? await rpc.call("getSignaturesForAddress", [account, ["limit": 50, "commitment": "finalized"]])) as? [[String: Any]] else { return nil }
             signatures += list.filter { $0["err"] == nil || $0["err"] is NSNull }.compactMap { $0["signature"] as? String }
         }
         var out: [CostBasis.SolanaMove] = []
@@ -743,7 +743,7 @@ actor SolanaMoves {
             let key = owner + " " + sig   // a move is the owner's side of it: a send between two wallets is −X and +X
             if read[key] == nil {
                 // Thrown (throttled past its retries, dropped) or null (a node without it): stop, the rest next time.
-                guard let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 1, "commitment": "confirmed"]])) as? [String: Any]
+                guard let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 1, "commitment": "finalized"]])) as? [String: Any]
                 else { return nil }
                 if let move = CostBasis.SolanaMove(tx, owner: owner) { read[key] = move }
             }

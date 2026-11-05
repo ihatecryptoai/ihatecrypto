@@ -59,7 +59,7 @@ extension Executor {
 
     /// The mint's token program, SPL Token or Token-2022: its owner on chain.
     func tokenProgram(_ mint: String) async throws -> String {
-        let info = try await rpc.call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "confirmed"]]) as? [String: Any]
+        let info = try await rpc.call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let program = (info?["value"] as? [String: Any])?["owner"] as? String, [SPL.tokenProgram, SPL.token2022Program].contains(program) else {
             throw ExecutionError("\(mint) isn't a token mint on Solana.")
         }

@@ -23,7 +23,7 @@ public enum SNS {
 
     public static func resolve(_ name: String, rpc: SolanaRPC = SolanaRPC()) async throws -> String {
         guard isName(name) else { throw WalletError("\(name) isn't a .sol name ihatecrypto reads: plain letters, digits and hyphens.") }
-        let r = try await rpc.call("getAccountInfo", [try account(name), ["encoding": "base64", "commitment": "confirmed"]]) as? [String: Any]
+        let r = try await rpc.call("getAccountInfo", [try account(name), ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let value = r?["value"] as? [String: Any], (value["owner"] as? String) == program,
               let data = (value["data"] as? [Any])?.first as? String, let raw = Data(base64Encoded: data), raw.count >= 96 else {
             throw WalletError("\(name) isn't registered.")

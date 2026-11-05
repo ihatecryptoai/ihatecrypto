@@ -591,7 +591,7 @@ final class Browser {
     private func tokenAccounts(_ owner: String) async throws -> [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)] {
         var items: [[String: Any]] = []
         for program in [SPL.tokenProgram, SPL.token2022Program] {
-            let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+            let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
             items += r?["value"] as? [[String: Any]] ?? []
         }
         var out: [String: (String, UInt64, Int, UInt64)] = [:]
