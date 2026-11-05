@@ -296,7 +296,7 @@ func siteRightsCheck(_ address: String?) async throws {
     let owner = try address ?? LocalSigner().wallet.solana
     let usdc = try SPL.associatedAccount(owner: owner, mint: Jupiter.usdcMint)
     let stranger = Base58.encode(Data((0..<32).map { _ in UInt8.random(in: 0...255) })), key = try Base58.decode(stranger)
-    let info = try await rpc.call("getAccountInfo", [usdc, ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+    let info = try await rpc.call("getAccountInfo", [usdc, ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
     guard let before = info?["value"].flatMap(SolanaRPC.rights) else { throw WalletError("The test wallet has no USDC account: \(usdc)") }
     let (hash, _) = try await rpc.latestBlockhash()
     func le<T: FixedWidthInteger>(_ n: T) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
