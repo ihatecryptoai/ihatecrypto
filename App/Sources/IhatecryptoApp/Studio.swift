@@ -2218,9 +2218,13 @@ extension Workspace {
                 if let tp = z.takePrice {
                     lines.append(row("take", "\(Fmt.price(tp)) · +\(Fmt.pct((abs(tp - z.entry) / z.entry * 100).rounded(1, .plain)))"))
                 }
-                lines.append(z.takePrice != nil ? "both wait on the exchange" : intent.isHedge ? "guards the margin" : "waits on the exchange")
+                // The trailing stop is Hyperliquid's own: the sheet says so, or the second check reads it as missing.
+                if let t = intent.trailingPct { lines.append(row("trailing", "\(Fmt.pct(t)) behind the best price")) }
+                let orders = 1 + (z.takePrice == nil ? 0 : 1) + (intent.trailingPct == nil ? 0 : 1)
+                lines.append(orders == 3 ? "all wait on the exchange" : orders == 2 ? "both wait on the exchange" : intent.isHedge ? "guards the margin" : "waits on the exchange")
             }
-            steps.append(card("PROTECT", sizing?.takePrice != nil ? "Stop + take" : "Stop", lines, state(s.status), logo: "hype", .hyperliquid))
+            let title = (["Stop"] + (sizing?.takePrice == nil ? [] : ["take"]) + (intent.trailingPct == nil ? [] : ["trailing"])).joined(separator: " + ")
+            steps.append(card("PROTECT", title, lines, state(s.status), logo: "hype", .hyperliquid))
         }
         // What Confirm does: the simulation first, then Touch ID for every signature — ihatecrypto's fee approval on the
         // first trade is one of them.

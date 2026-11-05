@@ -262,6 +262,7 @@ extension Workspace {
             out.append("Size \(Fmt.num(s.size, maxFraction: 6)) \(intent.asset) at ≈ \(Fmt.price(s.entry)), notional \(Fmt.usd(s.notional)), margin \(Fmt.usd(s.margin)).")
             out.append("Stop \(Fmt.pct(intent.stopPct ?? 0)) → \(Fmt.price(s.stopPrice)), loss ≈ \(Fmt.usd(s.lossAtStopUSD)) (risk \(Fmt.usd(intent.riskUSD ?? 0))).")
             if let t = s.takePrice { out.append("Take-profit \(Fmt.pct(intent.takePct ?? 0)) → \(Fmt.price(t)), profit ≈ \(Fmt.usd(s.profitAtTakeUSD ?? 0)).") }
+            if let t = intent.trailingPct { out.append("Trailing stop \(Fmt.pct(t)) behind the best price, held by Hyperliquid itself (reduce-only, the whole position), beside the fixed stop.") }
         }
         // Tied to a price alert, the plan waits for it: without this line the check reads «long below 117.44» against
         // today's entry and cries mismatch.
