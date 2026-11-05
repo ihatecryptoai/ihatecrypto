@@ -383,6 +383,17 @@
     }
   },
   {
+    "name": "a buy spread over hours («купи ETH на $2000 за 2 часа») → one TWAP plan on Hyperliquid, not recurring buys",
+    "send": [
+      "Купи ETH на $2000 за 2 часа"
+    ],
+    "expect": {
+      "plan": "ETH",
+      "reply_contains": "Entry: TWAP over 2 h on Hyperliquid",
+      "no_pending": true
+    }
+  },
+  {
     "name": "a price alert added to the plan on the canvas → the plan's first card, tied to it",
     "send": [
       "long SOL risk $0.3 stop 3% take 6% leverage 2x",

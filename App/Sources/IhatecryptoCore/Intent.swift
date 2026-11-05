@@ -28,6 +28,11 @@ public struct TradeIntent: Codable, Equatable, Sendable {
     public var partialTake: Bool?
     /// «трейлинг 2%»: the stop follows the best price at this distance while the app is open.
     public var trailingPct: Decimal?
+    /// «за 2 часа», «over 30 min»: the entry is one TWAP on Hyperliquid, parts at the market spread over this many minutes
+    /// (5 min to 7 days, $100 at least), instead of one order. Hyperliquid's TWAP takes no builder fee.
+    public var twapMinutes: Int?
+    /// «randomize»: each part of the TWAP up to ±20% of its size.
+    public var twapRandomize: Bool?
     /// «hedge 0.1 SOL»: a short of this many of the coins the wallet holds (Hedge); sized by them, not by a risk.
     public var hedge: Decimal?
     /// «hedge SOL» = 1, «hedge SOL half» = 0.5: the share of what the wallet holds, turned into `hedge` by Plan.resolve.
@@ -52,6 +57,9 @@ public struct TradeIntent: Codable, Equatable, Sendable {
         if autoRules != old.autoRules, autoRules == true { out.append("the rest by the risk rules") }
         if partialTake != old.partialTake, partialTake == true { out.append("take in parts: half at 1R, then stop to breakeven") }
         if trailingPct != old.trailingPct { out.append("trailing \(opt(trailingPct, Fmt.pct))") }
+        if twapMinutes != old.twapMinutes || twapRandomize != old.twapRandomize {
+            out.append(twapMinutes.map { "TWAP over \(Self.duration($0))" + (twapRandomize == true ? ", randomized" : "") } ?? "one market order")
+        }
         if isHedge, hedge != old.hedge || hedgeShare != old.hedgeShare {
             out.append(hedge.map { "hedge \(Fmt.num($0, maxFraction: 6)) \(asset)" }
                        ?? hedgeShare.map { $0 < 1 ? "hedge \(Fmt.pct($0 * 100)) of the \(asset) held" : "hedge all the \(asset) held" } ?? "")
@@ -94,7 +102,14 @@ public struct TradeIntent: Codable, Equatable, Sendable {
         if let v = pullbackPct { parts.append("pullback \(n(v))%") } else if let v = entryPx { parts.append("limit \(n(v))") }
         if let v = trailingPct { parts.append("trailing \(n(v))%") }
         if partialTake == true { parts.append("take in parts") }
+        if let v = twapMinutes { parts.append("over \(v) min") }
+        if twapRandomize == true { parts.append("randomize") }
         return parts.joined(separator: " ")
+    }
+
+    /// «2 h», «90 min», «3 d»: a TWAP's running time.
+    public static func duration(_ minutes: Int) -> String {
+        minutes % 1440 == 0 ? "\(minutes / 1440) d" : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes) min"
     }
 }
 
@@ -216,6 +231,22 @@ public enum IntentParser {
         if q.contains(/по\s+рынку|market/) { next.entryPx = nil; next.pullbackPct = nil; hit = true }
         if q.contains(/частям|частичн|scale\s*out|in\s+parts|partial/) { next.partialTake = true; hit = true }
         if let v = number(q, /(?:трейл\w*|скользящ\w*|trail\w*)(?:[- ]?(?:стоп\w*|stop))?[^\d]{0,6}?(\d+(?:[.,]\d+)?)\s*%/) { next.trailingPct = v; hit = true }
+        // «over 2 h», «за 2 часа», «в течение 30 минут», «twap 90 min»: the entry as one TWAP. Not «in 2 hours» or «через
+        // 2 часа»: those say when, not how long. «one order» / «одним ордером» goes back to a single order.
+        if let m = q.firstMatch(of: /(?:\bover|\bduring|\btwap|(?:^|\s)за|в\s+течени\w*)\s+(?:the\s+next\s+)?(\d+(?:[.,]\d+)?)\s*(минут\w*|мин\b|min\w*|m\b|час\w*|ч\b|hours?\b|hrs?\b|h\b|дн\w*|день|сут\w*|days?\b|d\b)/),
+           let v = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: ".")) {
+            let unit: Decimal = m.2.hasPrefix("m") || m.2.hasPrefix("м") ? 1 : m.2.hasPrefix("h") || m.2.hasPrefix("ч") ? 60 : 1440
+            next.twapMinutes = NSDecimalNumber(decimal: (v * unit).rounded(0, .plain)).intValue; hit = true
+        } else if q.contains(/(?:^|\s)за\s+(?:один\s+)?час\b|\bover\s+(?:an|one)\s+hour\b/) {
+            next.twapMinutes = 60; hit = true
+        } else if q.contains(/(?:^|\s)за\s+полчаса|\bover\s+half\s+an\s+hour/) {
+            next.twapMinutes = 30; hit = true
+        }
+        // Only about a TWAP: «a random coin» elsewhere is no change to a plan.
+        if next.twapMinutes != nil, q.contains(/\brandomi[sz]\w*|\brandom\b|рандом\w*|случайн\w*/) { next.twapRandomize = true; hit = true }
+        if intent.twapMinutes != nil, q.contains(/\bone\s+(?:market\s+)?order\b|одн\w*\s+(?:рыночн\w*\s+)?ордер\w*|сразу\s+целиком/) {
+            next.twapMinutes = nil; next.twapRandomize = nil; hit = true
+        }
         if hedging {
             // Only a coin named: «хедж мне что-нибудь» is the model's to pick from what the wallet holds.
             guard named else { return nil }
@@ -231,6 +262,7 @@ public enum IntentParser {
         if next.isHedge {
             next.riskUSD = nil; next.takePct = nil; next.takeR = nil; next.amountUSDC = nil; next.autoRules = nil
             next.entryPx = nil; next.pullbackPct = nil; next.partialTake = nil; next.trailingPct = nil
+            next.twapMinutes = nil; next.twapRandomize = nil
         }
 
         return hit ? next : nil

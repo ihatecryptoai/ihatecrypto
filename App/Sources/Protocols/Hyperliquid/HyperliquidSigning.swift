@@ -134,12 +134,30 @@ public enum HLAction {
         ])
     }
 
+    /// A TWAP: `size` bought (or sold) in parts at the market over `minutes`, each part up to ±20% when `randomize`.
+    /// {"type", "twap": {a, b, s, r, m, t}} as the exchange hashes it (checked 2026-11-05 like trailingStop); no builder field.
+    public static func twapOrder(asset: Int, isBuy: Bool, size: Decimal, reduceOnly: Bool = false, minutes: Int, randomize: Bool) throws -> MsgPack {
+        .map([
+            ("type", .string("twapOrder")),
+            ("twap", .map([("a", .uint(UInt64(asset))), ("b", .bool(isBuy)), ("s", .string(try number(size))), ("r", .bool(reduceOnly)),
+                           ("m", .uint(UInt64(max(0, minutes)))), ("t", .bool(randomize))])),
+        ])
+    }
+
+    /// Stops a running TWAP by its id; what it has bought stays.
+    public static func twapCancel(asset: Int, id: UInt64) -> MsgPack {
+        .map([("type", .string("twapCancel")), ("a", .uint(UInt64(asset))), ("t", .uint(id))])
+    }
+
     /// A cancel, or orders that are all reduce-only (a stop, a take, a close): nothing that opens or adds to a position.
     public static func onlyReduces(_ action: MsgPack) -> Bool {
         guard case .map(let pairs) = action else { return false }
         switch type(action) {
-        case "cancel", "cancelByCloid": return true
+        case "cancel", "cancelByCloid", "twapCancel": return true
         case "trailingStop": return pairs.first(where: { $0.0 == "reduceOnly" })?.1 == .bool(true)
+        case "twapOrder":
+            guard case .map(let t)? = pairs.first(where: { $0.0 == "twap" })?.1 else { return false }
+            return t.first(where: { $0.0 == "r" })?.1 == .bool(true)
         case "order":
             guard case .array(let orders)? = pairs.first(where: { $0.0 == "orders" })?.1, !orders.isEmpty else { return false }
             return orders.allSatisfy { o in
@@ -215,7 +233,8 @@ public enum HLSigner {
     /// Orders, cancels, leverage and the referral code: what a trading (agent) key may sign. Nothing here moves money out
     /// of the account (the guard holds an order's fee and the code to ihatecrypto's own, a trailing stop to reduce-only).
     public static func isTrading(_ action: MsgPack) -> Bool {
-        HLAction.type(action).map(["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer", "trailingStop"].contains) ?? false
+        HLAction.type(action).map(["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer", "trailingStop",
+                                   "twapOrder", "twapCancel"].contains) ?? false
     }
 
     /// keccak256(msgpack(action) ‖ nonce ‖ vault flag [‖ vault] [‖ 0x00 ‖ expiresAfter]).

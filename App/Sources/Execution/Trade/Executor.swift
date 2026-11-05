@@ -256,6 +256,8 @@ public actor Executor {
         public var partialTake: Decimal?
         /// The plan's trailing stop went on the exchange, which moves it from now on; false leaves it to the app.
         public var trailingOnExchange = false
+        /// The entry runs as this TWAP on the exchange; `size` is what it buys in all, `entry` its first part's price.
+        public var twapId: UInt64?
     }
 
     /// What a try at the half at 1R came to: on the book, not yet (the limit is only partly filled), or skipped (under $10).
@@ -344,6 +346,9 @@ public actor Executor {
         if positions.contains(where: { $0.coin == market.name }) || orders.contains(where: { $0.coin == market.name }) {
             throw ExecutionError("There's already a position or order on \(market.name). Manage it in chat («stop to breakeven», «close half», «cancel the limit») or pick another asset.")
         }
+        if !(try await HyperliquidAccount.runningTwaps(wallet.evm, coin: market.name)).isEmpty {
+            throw ExecutionError("A TWAP is still running on \(market.name). «cancel the TWAP» stops it, or pick another asset.")
+        }
         let openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: spot)
         let blocked = RiskRules.check(intent, sizing, market: market, equity: equity, policy: policy, openRisk: openRisk).filter { $0.level == .block }
         guard blocked.isEmpty else { throw ExecutionError(blocked.map(\.text).joined(separator: " ")) }
@@ -426,7 +431,12 @@ public actor Executor {
             steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Wallet › Hyperliquid can take it back.")
         }
         steps.append("Leverage \(leverage)×, isolated margin.")
-        if let limit = intent.entryPx {
+        if let minutes = intent.twapMinutes {
+            steps.append("TWAP on Hyperliquid: \(intent.side == .long ? "buy" : "sell") \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) over \(TradeIntent.duration(minutes)), "
+                + "parts at the market every 30 s or more, each within 3% of the price, \(intent.twapRandomize == true ? "sizes randomized ±20%" : "equal sizes"). "
+                + "ihatecrypto's \(HLBuilder.rate) isn't charged on it: Hyperliquid's TWAP takes no builder fee.")
+            steps.append("Stop \(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit \(Fmt.pct($0))" } ?? "") from the first part's price, on the exchange for the whole position, once that part fills. «cancel the TWAP» stops the rest.")
+        } else if let limit = intent.entryPx {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) as a limit at \(Fmt.price(HLAction.price(limit, szDecimals: market.szDecimals))) (now \(Fmt.price(market.markPx))), waiting on the exchange, with stop −\(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit +\(Fmt.pct($0))" } ?? ""), active once it fills.")
         } else {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) at market, no worse than \(Fmt.price(HLAction.price(market.markPx * (intent.side == .long ? 1 + Self.slippage : 1 - Self.slippage), szDecimals: market.szDecimals))).")
@@ -500,6 +510,7 @@ public actor Executor {
         guard case .ok = lev else { throw ExecutionError("Hyperliquid rejected leverage \(p.leverage)×: \(lev).") }
         report("Leverage \(p.leverage)×, isolated margin.")
 
+        if let minutes = p.intent.twapMinutes { return try await runTwap(p, market: market, minutes: minutes) }
         if let limit = p.intent.entryPx { return try await placeLimit(p, market: market, limit: limit) }
 
         let entryPx = HLAction.price(market.markPx * (long ? 1 + Self.slippage : 1 - Self.slippage), szDecimals: market.szDecimals)
@@ -539,6 +550,64 @@ public actor Executor {
             } catch let refused as GuardStop { report("The trailing stop wasn't signed (\(refused.localizedDescription)): ihatecrypto moves the stop while it's open.") }
             catch { report("The trailing stop didn't go on (\(error.localizedDescription)): ihatecrypto moves the stop while it's open.") }
         }
+        return opened
+    }
+
+    /// The entry as one TWAP: started, then the stop and take for the whole position once its first part fills (size 0:
+    /// Hyperliquid's position TP/SL grows with it). A TWAP that fills nothing in 90 s, or whose stop doesn't go on, is
+    /// stopped: it never builds a position without a stop.
+    // ponytail: the stop is set from the first part's price; a TWAP that buys higher later risks a little more than planned.
+    private func runTwap(_ p: Prepared, market: Market, minutes: Int) async throws -> Opened {
+        let long = p.intent.side == .long
+        let action = try HLAction.twapOrder(asset: market.index, isBuy: long, size: p.sizing.size, minutes: minutes,
+                                            randomize: p.intent.twapRandomize == true)
+        let id: UInt64
+        do {
+            let reply = try await post(action, label: "TWAP over \(minutes) min")
+            guard case .running(let started) = reply else { throw ExecutionError("Hyperliquid didn't start the TWAP (\(reply)). Nothing was bought.") }
+            id = started
+        } catch let lost as NoReply {
+            // The reply was lost, not necessarily the TWAP: one running on the coin now is this one.
+            guard let started = try? await HyperliquidAccount.runningTwaps(wallet.evm, coin: market.name).first else {
+                throw ExecutionError("The TWAP's reply didn't come (\(lost.localizedDescription)) and none runs on \(market.name). Check Hyperliquid before trying again.")
+            }
+            id = started
+        }
+        report("TWAP \(id) on Hyperliquid: \(long ? "buying" : "selling") \(Fmt.num(p.sizing.size, maxFraction: market.szDecimals)) \(market.name) over \(TradeIntent.duration(minutes)).")
+        func stopTwap() async -> String {
+            guard let r = try? await post(HLAction.twapCancel(asset: market.index, id: id), label: "cancel TWAP") else {
+                return "The TWAP's cancel got no answer: «cancel the TWAP» stops it."
+            }
+            return r.isError ? "The TWAP didn't stop (\(r)): «cancel the TWAP» stops it." : "The TWAP is stopped."
+        }
+        // The first part goes at once: the position shows within seconds.
+        var first: HyperliquidAccount.Position?
+        for attempt in 0..<45 {
+            first = try? await HyperliquidAccount.positions(wallet.evm).first { $0.coin == market.name && $0.size != 0 }
+            if first != nil || attempt == 44 { break }
+            try? await Task.sleep(for: .seconds(2))
+        }
+        guard let first else { throw ExecutionError("The TWAP's first part didn't fill within 90 s. \(await stopTwap()) Nothing is open.") }
+        let (stop, take) = Self.protectionPrices(entry: first.entry, stopPct: p.intent.stopPct ?? 0, takePct: p.intent.takePct, long: long,
+                                                 szDecimals: market.szDecimals)
+        do {
+            func protection(_ size: Decimal) async throws -> HLReply {
+                try await post(try Self.protectionAction(asset: market.index, long: long, size: size, stop: stop, take: take, szDecimals: market.szDecimals),
+                               label: "stop and take-profit")
+            }
+            // Size 0 is the whole position as it grows; refused, the whole TWAP's size (reduce-only: no more than what's open).
+            var placed = try await protection(0)
+            if placed.isError { placed = try await protection(p.sizing.size) }
+            if case .error(let e) = placed { throw ExecutionError(e) }
+            try await verifyProtection(coin: market.name, stop: stop, take: take)
+        } catch {
+            let stopped = await stopTwap()
+            let closed = (try? await close(asset: market.name)) ?? "The close didn't go through either: check \(market.name) on Hyperliquid."
+            throw ExecutionError("The TWAP's stop didn't go on (\(error.localizedDescription)). \(stopped) \(closed)")
+        }
+        report("On the exchange: stop \(Fmt.price(stop))\(take.map { " and take-profit \(Fmt.price($0))" } ?? "") for the whole \(market.name) position as the TWAP builds it.")
+        var opened = Opened(asset: market.name, size: p.sizing.size, entry: first.entry, stop: stop, take: take)
+        opened.twapId = id
         return opened
     }
 
@@ -744,6 +813,10 @@ public actor Executor {
     /// its stop. What could open it again (a limit entry waiting on the book) goes first. Returns a line for the user.
     public func close(asset: String) async throws -> String {
         let market = try await market(asset)
+        // A TWAP still buying would open it again: it stops first. A close never waits on that read: it goes on without it.
+        do { _ = try await stopTwaps(market) } catch {
+            report("A running TWAP on \(asset) couldn't be checked or stopped (\(error.localizedDescription)): closing anyway.")
+        }
         let num = { (d: Decimal) in Fmt.num(d, maxFraction: market.szDecimals) }
         let orders = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset }
         let entries = orders.filter { !$0.reduceOnly }
@@ -853,7 +926,14 @@ public actor Executor {
     /// «cancel the limit»: only the entries waiting on the book go. A position, its stop and its take stay as they are.
     private func cancelEntries(asset: String) async throws -> String {
         let market = try await market(asset)
+        // A TWAP still building the position is an entry too: it stops by its id, what it bought keeps its stop and take.
+        let twaps = try await stopTwaps(market)
         let entries = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset && !$0.isTrigger && !$0.reduceOnly }
+        if !twaps.isEmpty, entries.isEmpty {
+            let line = "\(asset) TWAP stopped (\(twaps.count)). What it bought stays open with its stop and take-profit."
+            report(line)
+            return line
+        }
         guard !entries.isEmpty else {
             let line = "No \(asset) limit is waiting on the book; nothing was cancelled."
             report(line)
@@ -865,6 +945,19 @@ public actor Executor {
         let line = "\(asset) limit cancelled (\(entries.count))." + (open == true ? " The open position keeps its stop and take-profit." : "")
         report(line)
         return line
+    }
+
+    /// Every TWAP running on the market, stopped by its id (twapCancel). Returns their ids; one that won't stop throws.
+    private func stopTwaps(_ market: Market) async throws -> [UInt64] {
+        let ids = try await HyperliquidAccount.runningTwaps(wallet.evm, coin: market.name)
+        for id in ids {
+            let reply = try await post(HLAction.twapCancel(asset: market.index, id: id), label: "cancel TWAP \(id)")
+            // Finished or stopped meanwhile is what was asked.
+            if case .error(let e) = reply, !e.contains("never placed, already canceled, or filled") {
+                throw ExecutionError("Hyperliquid didn't stop the \(market.name) TWAP: \(e). Nothing else was changed.")
+            }
+        }
+        return ids
     }
 
     /// New take first, then the old one is cancelled.
@@ -1247,6 +1340,8 @@ public enum HLReply: Equatable, Sendable, CustomStringConvertible {
     case ok
     case filled(size: Decimal, avgPx: Decimal)
     case resting
+    /// A TWAP the exchange runs now, by its id.
+    case running(twapId: UInt64)
     case error(String)
 
     public var isError: Bool { if case .error = self { true } else { false } }
@@ -1256,6 +1351,7 @@ public enum HLReply: Equatable, Sendable, CustomStringConvertible {
         case .ok: "ok"
         case .filled(let s, let p): "filled \(s) at \(p)"
         case .resting: "resting on the book"
+        case .running(let id): "TWAP \(id) running"
         case .error(let e): e
         }
     }
@@ -1268,6 +1364,9 @@ public enum HLReply: Equatable, Sendable, CustomStringConvertible {
         let data = (j["response"] as? [String: Any])?["data"] as? [String: Any]
         // One status, not a list: a TWAP's or a trailing stop's.
         if let e = (data?["status"] as? [String: Any])?["error"] as? String { return .error(e) }
+        if let id = (((data?["status"] as? [String: Any])?["running"] as? [String: Any])?["twapId"] as? NSNumber)?.uint64Value {
+            return .running(twapId: id)
+        }
         let statuses = data?["statuses"] as? [Any] ?? []
         // Several statuses (stop and take): any error wins, otherwise the first one describes the action.
         for case let s as [String: Any] in statuses {
@@ -1384,6 +1483,16 @@ public enum HyperliquidAccount {
             out += try JSONDecoder().decode([Order].self, from: try await info(body))
         }
         return out
+    }
+
+    /// The ids of the TWAPs still running on `coin` (twapHistory's «activated», or waiting for a trigger).
+    public static func runningTwaps(_ user: String, coin: String) async throws -> [UInt64] {
+        struct State: Decodable { let coin: String }
+        struct Status: Decodable { let status: String }
+        struct Row: Decodable { let state: State; let status: Status; let twapId: UInt64? }
+        // An account Hyperliquid hasn't seen answers null: no TWAPs.
+        return (try JSONDecoder().decode([Row]?.self, from: try await info(["type": "twapHistory", "user": user])) ?? [])
+            .filter { $0.state.coin == coin && ["activated", "waitingForTrigger"].contains($0.status.status) }.compactMap(\.twapId)
     }
 
     /// Positions on the main exchange and the HIP-3 ones.

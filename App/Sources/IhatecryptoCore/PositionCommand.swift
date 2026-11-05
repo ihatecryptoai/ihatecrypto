@@ -21,7 +21,10 @@ public enum PositionCommand: Equatable, Sendable {
         if IntentParser.isQuestion(text) || q.contains(/(?:^|[^\p{L}'’])(?:не|нельзя|don['’]?t|dont|do\s+not|never|not)(?![\p{L}'’])|should\s+(?:i|we)\b|стоит\s+ли|(?:а|что)\s+если/) {
             return nil
         }
-        if q.contains(/отмени\w*\s+(?:лимит|ордер|заявк)|сними\w*\s+(?:лимит|ордер|заявк)|cancel\s+(?:the\s+|my\s+)?(?:limit|order)|remove\s+(?:the\s+)?(?:limit|order)/) { return .cancelOrders }
+        // A TWAP still buying is an entry waiting too: «cancel the TWAP», «останови твап».
+        if q.contains(/(?:отмени|сними|останови|прекрати)\w*\s+(?:лимит|ордер|заявк|twap|твап)|(?:cancel|stop)\s+(?:the\s+|my\s+)?twap|cancel\s+(?:the\s+|my\s+)?(?:limit|order)|remove\s+(?:the\s+)?(?:limit|order)/) {
+            return .cancelOrders
+        }
         if q.contains(/безубыт|стоп\w*\s+(?:в|на)\s+(?:ноль|бу\b|вход)|break\s*-?\s*even|stop\s+(?:to|at)\s+entry/) { return .stopToBreakeven }
         if let m = q.firstMatch(of: /(?:(?:перенес\w*|передвин\w*|подвин\w*|постав\w*)?\s*стоп\w*\s+(?:на|в)|(?:move|set|put)?\s*(?:the\s+)?stop(?:[- ]?loss)?\s+(?:to|at))\s+\$?(\d+(?:[.,]\d+)?)(?!\s*%|\d|[.,]\d)/),
            let v = Decimal(string: m.1.replacingOccurrences(of: ",", with: ".")) {

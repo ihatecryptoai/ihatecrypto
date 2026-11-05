@@ -593,6 +593,20 @@ public enum HLGuard {
             let market = if case .uint(let a)? = pairs.first(where: { $0.0 == "asset" })?.1 { "market #\(a)" } else { "a market" }
             let pct = if case .map(let r)? = pairs.first(where: { $0.0 == "retracement" })?.1, case .string(let p)? = r.first?.1 { p } else { "?" }
             v.checks.append("Trailing stop: \(side) \(text("sz") ?? "?") on \(market) once the price falls back \(pct) from its best, only reducing a position → your account")
+        case "twapOrder":
+            // Parts at the market inside the account, like an order; it takes no builder field, so no fee can ride on it.
+            guard case .map(let t)? = pairs.first(where: { $0.0 == "twap" })?.1, t.count == 6,
+                  case .uint(let minutes)? = t.first(where: { $0.0 == "m" })?.1, (5...10_080).contains(minutes) else {
+                v.problems.append("A TWAP that isn't 5 minutes to 7 days of parts inside your account is not allowed.")
+                return v
+            }
+            func field(_ k: String) -> MsgPack? { t.first(where: { $0.0 == k })?.1 }
+            let side = field("b") == .bool(true) ? "buy" : "sell"
+            let size = if case .string(let s)? = field("s") { s } else { "?" }
+            let market = if case .uint(let a)? = field("a") { "market #\(a)" } else { "a market" }
+            v.checks.append("TWAP: \(side) \(size) on \(market) over \(minutes) min at the market\(field("r") == .bool(true) ? ", only reducing a position" : "") → your account")
+        case "twapCancel":
+            v.checks.append("Stops a TWAP inside your account.")
         case "setReferrer":
             if text("code") == HLBuilder.referralCode { v.checks.append("Referral code \(HLBuilder.referralCode): 4% off your Hyperliquid fees.") }
             else { v.problems.append("Referral code \(text("code") ?? "?") is not ihatecrypto's.") }

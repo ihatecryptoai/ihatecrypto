@@ -414,7 +414,12 @@ extension Workspace {
             } else {
                 exitRules[opened.asset] = nil
             }
-            reply("Done: \(opened.asset) \(Fmt.num(opened.size, maxFraction: 6)) at \(Fmt.price(opened.entry)), stop \(Fmt.price(opened.stop))\(opened.take.map { ", take-profit \(Fmt.price($0))" } ?? "").")
+            let protection = "stop \(Fmt.price(opened.stop))\(opened.take.map { ", take-profit \(Fmt.price($0))" } ?? "")"
+            if let id = opened.twapId, let minutes = p.intent.twapMinutes {
+                reply("TWAP \(id) runs on Hyperliquid: \(Fmt.num(opened.size, maxFraction: 6)) \(opened.asset) over \(TradeIntent.duration(minutes)), the first part at \(Fmt.price(opened.entry)), \(protection) for the whole position. «cancel the TWAP» stops the rest.")
+            } else {
+                reply("Done: \(opened.asset) \(Fmt.num(opened.size, maxFraction: 6)) at \(Fmt.price(opened.entry)), \(protection).")
+            }
         } catch {
             if let went = wentThrough(since: started, then: error) { reply(went) } else {
                 reply("Execution stopped: \(error.localizedDescription)")

@@ -25,6 +25,8 @@ public enum BlockCatalog {
     public static let all: [Block] = [
         Block(group: "Trade", label: "OPEN LONG · HYPERLIQUID", title: "Long or short", form: "long|short ASSET · risk $N · stop N% · take N% · leverage Nx",
               example: "long SOL by the book", fill: "hyperliquid", logo: "hype"),
+        Block(group: "Trade", label: "OPEN LONG · TWAP", title: "Buy over time", form: "long|short ASSET N USDC over N min|h · randomize · from $100",
+              example: "long ETH 200 USDC over 2 h leverage 1x", fill: "hyperliquid", logo: "hype"),
         Block(group: "Trade", label: "PROTECT", title: "Stop and take", form: "take NR · take in parts · trailing N% · move stop to breakeven",
               example: "take in parts", fill: "hyperliquid", logo: "hype"),
         Block(group: "Trade", label: "CHECK RULES", title: "Risk rules", form: "risk ≤ 2% of capital · reward/risk ≥ 1.5 · leverage ≤ 5×",

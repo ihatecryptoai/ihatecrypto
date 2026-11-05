@@ -27,6 +27,8 @@ final class FakeHL: URLProtocol {
         /// The positionTpsl orders sent, and the executor's report lines.
         var protections: [[String: Any]] = []
         var reported: [String] = []
+        /// twapHistory's rows; a twapOrder is answered by `entry`, a twapCancel stops the row with its id.
+        var twaps: [[String: Any]] = []
     }
     nonisolated(unsafe) static var state = State()
     static let lock = NSLock()
@@ -64,6 +66,7 @@ final class FakeHL: URLProtocol {
                 + #"{"name":"USDT0","index":268,"szDecimals":2}],"universe":[{"tokens":[1,0],"index":0,"name":"PURR/USDC"},"#
                 + #"{"tokens":[150,0],"index":107,"name":"@107"},{"tokens":[268,0],"index":166,"name":"@166"}]}"#
         case "maxBuilderFee": return "0"
+        case "twapHistory": return json(state.twaps)
         case "frontendOpenOrders":
             guard main else { return "[]" }
             if state.down > 0 { state.down -= 1; return nil }
@@ -82,6 +85,16 @@ final class FakeHL: URLProtocol {
             let pct = (action["retracement"] as? [String: Any])?["pct"] as? String ?? "?"
             state.sent.append("trailing \(action["isBuy"] as? Bool == true ? "buy" : "sell") \(action["sz"] as? String ?? "?") \(pct)")
             return #"{"status":"ok","response":{"type":"trailingStop","data":{"oid":11}}}"#
+        }
+        if action["type"] as? String == "twapOrder" {
+            state.sent.append("twap \((action["twap"] as? [String: Any])?["m"] ?? "?") min")
+            return state.entry(&state)
+        }
+        if action["type"] as? String == "twapCancel" {
+            let id = (action["t"] as? NSNumber)?.uint64Value ?? 0
+            state.sent.append("twap cancel \(id)")
+            state.twaps.removeAll { ($0["twapId"] as? NSNumber)?.uint64Value == id }
+            return #"{"status":"ok","response":{"type":"twapCancel","data":{"status":"success"}}}"#
         }
         if action["type"] as? String == "updateLeverage" {
             state.sent.append("leverage")

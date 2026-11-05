@@ -112,6 +112,11 @@ public enum ChatRouter {
     public static let forms = """
     TRADE PLAN (a perp on Hyperliquid; ASSET is a crypto ticker like BTC, ETH, SOL, HYPE, or oil, brent, gold, silver, or a stock ticker like TSLA, NVDA):
       long|short <ASSET> [N USDC] [risk $N] [stop N%] [take N% | take NR] [leverage Nx] [by the book] [on a N% pullback] [limit <PRICE>] [take in parts] [trailing N%]
+      long|short <ASSET> N USDC over N min|h [randomize] [stop N%] [take N%] [leverage Nx] [by the book]   (one TWAP on Hyperliquid:
+      parts at the market spread over that time, 5 min to 7 days, $100 at least, the same risk rules as one order. A buy of a
+      Hyperliquid coin spread over minutes or hours is this form, never recurring buys or a Jupiter DCA: «купи ETH на $2000 за 2
+      часа» = long ETH 2000 USDC over 2 h leverage 1x, «набери BTC на 500$ за 30 минут рандомно» = long BTC 500 USDC over 30 min
+      randomize leverage 1x. No leverage said = 1x. «одним ордером» on a TWAP plan = one order)
       hedge <ASSET> [half | N%] | hedge N <ASSET> [leverage Nx]   (a hedge of coins the wallet HOLDS — SOL, ETH on any network,
       wrapped BTC, HYPE, a stock token as its xyz market: a short on Hyperliquid the size of them, so a fall is covered. No
       take-profit, a far stop only guards the margin, the rules count it net of the coins; the size, leverage and stop are code's.
@@ -122,7 +127,7 @@ public enum ChatRouter {
       hedging, "clarify" with a card per coin). A coin they don't hold can't be hedged: say so, and a short of it is a trade with
       its own risk)
       with a plan already on the canvas, a change alone: N USDC | risk $N | stop N% | take N% | take NR | leverage Nx | limit <PRICE> | at market | by the book
-        | take in parts («фиксируй частями») | trailing N% | on a N% pullback
+        | take in parts («фиксируй частями») | trailing N% | on a N% pullback | over N min|h | randomize | one order
       N USDC is the money put into the trade (its margin; the size follows from it and the stop): «на 5 баксов», «увеличь до 5 USDC»,
       «сумма 10», «зайди на 20$». risk $N is only what is lost at the stop: «риск 1$», «рискну долларом», «потерять не больше 2».
       «by the book» fills whatever they didn't give — risk, stop, take and leverage (the rules' cap) — so «max leverage by the
@@ -132,9 +137,9 @@ public enum ChatRouter {
       with $30 = risk $0.6). A limit N% away from the price is «on a N% pullback» (below it for a long, above for a short).
       take profit options   (how pros take profit)
     OPEN POSITION (add the asset when there are several, e.g. "close ETH"):
-      move stop to breakeven | stop at <PRICE> | take at <PRICE> | trail N% | close | close half | close N% | cancel orders
+      move stop to breakeven | stop at <PRICE> | take at <PRICE> | trail N% | close | close half | close N% | cancel orders | cancel the TWAP
       («cancel orders» = «cancel the limit»: only limit entries still waiting on the book go; an open position, its stop and its
-      take stay as they are. Nothing else removes a stop.)
+      take stay as they are. «cancel the TWAP» stops a TWAP still buying, what it bought keeps its stop. Nothing else removes a stop.)
     SPOT ON SOLANA (Jupiter): buy <SOL|BTC|ETH|JUP|JitoSOL> for N USDC | sell [N] <SOL|BTC|ETH|JUP>
       any other Jupiter-verified token by its ticker: buy <TICKER> on solana for N USDC | sell [N] <TICKER> on solana   (BONK, WIF, USDT, JTO, PYTH, POPCAT, RENDER…)
       Ondo's tokenized US stocks and ETFs are such tokens, the US ticker + «on» (NVDAon, TSLAon, AAPLon, MSFTon, GOOGLon, SPYon, QQQon…), filled at the market makers' price:
