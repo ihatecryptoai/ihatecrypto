@@ -118,7 +118,9 @@ public enum Hyperliquid {
     /// spot USDC is the whole account (positions' profit and loss included) and what open positions and orders hold
     /// of it is its `hold`.
     // ponytail: portfolio margin's other collateral (HYPE, BTC) isn't counted here, and a USDC loan reads as 0; the
-    // spot tokens show in the portfolio on their own.
+    // spot tokens show in the portfolio on their own. Its `hold` goes negative by what can be borrowed against them:
+    // loan room, not free money, so «free» stays within the account. With positions open and more loan room than their
+    // margin it reads the whole account: too high by that margin, which the exchange then refuses or borrows.
     public static func balance(user: String) async throws -> Balance {
         struct Summary: Decodable { let accountValue: String }
         struct Perp: Decodable { let marginSummary: Summary; let withdrawable: String }
@@ -132,7 +134,7 @@ public enum Hyperliquid {
         let usdc = spot.balances.first { $0.coin == "USDC" }
         if try await one {
             let total = max(0, try dec(usdc?.total ?? "0"))
-            return Balance(accountValue: total, withdrawable: max(0, total - (try dec(usdc?.hold ?? "0"))), spotUSDC: 0, unified: true)
+            return Balance(accountValue: total, withdrawable: min(total, max(0, total - (try dec(usdc?.hold ?? "0")))), spotUSDC: 0, unified: true)
         }
         return Balance(
             accountValue: try dec(perp.marginSummary.accountValue),

@@ -97,7 +97,10 @@ public enum RiskCalc {
         let perCoinLoss = entry * (s + drift) + (worst + stop) * tradeFee
         let size = (hedge ?? riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
         let notional = size * entry
-        let fees = size * (worst + stop) * tradeFee
+        // A TWAP's parts (drift) pay Hyperliquid only: it takes no builder fee on them. The exit pays both.
+        // ponytail: the size above still counts both fees on the entry, a few cents of headroom on a TWAP.
+        let entryFee = drift > 0 ? takerFee : tradeFee
+        let fees = size * (worst * entryFee + stop * tradeFee)
         let take = takePct.map { entry * (1 + dir * $0 / 100) }
         let profit = take.map { size * abs($0 - entry) - size * (entry + $0) * tradeFee }
         // Isolated margin, lowest tier: maintenance = 1 / (2 · max leverage).
@@ -107,7 +110,7 @@ public enum RiskCalc {
         return Sizing(
             size: size, entry: entry, notional: notional, margin: notional / leverage,
             stopPrice: stop, takePrice: take, liquidationPrice: liq,
-            feesUSD: fees, builderFeesUSD: size * (entry + stop) * builderFee,
+            feesUSD: fees, builderFeesUSD: size * ((drift > 0 ? 0 : entry) + stop) * builderFee,
             // A hedge loses at its stop what the coins it covers gain: the fees are what's left.
             lossAtStopUSD: (hedge == nil ? size * entry * (s + drift) : 0) + fees, profitAtTakeUSD: profit
         )

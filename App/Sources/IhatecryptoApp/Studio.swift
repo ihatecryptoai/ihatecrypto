@@ -2206,7 +2206,8 @@ extension Workspace {
                          row("liquidation", "≈ \(Fmt.price(s.liquidationPrice))")]
             }
             // What stops it goes first, in red.
-            if p.status == .blocked, let problem = evaluation.problem ?? p.lines.last { lines.insert(problem, at: 0) }
+            // Unsized, the block's lines are already the problem: once is enough.
+            if p.status == .blocked, let problem = evaluation.problem ?? p.lines.last, !lines.contains(problem) { lines.insert(problem, at: 0) }
             // The size and the leverage are the title: the first thing read.
             steps.append(card("OPEN \(p.long ? "LONG" : "SHORT") · \(name.uppercased())", sizing.map { "\(Fmt.usd($0.notional)) · \(leverage)" } ?? "\(name) \(leverage)",
                               lines, state(p.status), logo: TokenLogo.name(forAsset: intent.asset) ?? "hype", .hyperliquid))

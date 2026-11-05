@@ -36,6 +36,11 @@ private func parse(_ text: String, to intent: TradeIntent = TradeIntent()) -> Tr
     }
     #expect(ChatRouter.forms.contains("long|short <ASSET> N USDC over N min|h [randomize]"))
     #expect(ChatRouter.forms.contains("= long ETH 2000 USDC over 2 h leverage 1x"))
+    // Sized by its risk too: the form says so, or the model refused «риск $3.8 … за 5 минут» (live run 2026-11-05).
+    #expect(ChatRouter.forms.contains("= long ETH risk $4 stop 0.5% over 5 min leverage 1x"))
+    let risked = try #require(parse("long ETH risk $4 stop 0.5% over 5 min"))
+    #expect(risked.riskUSD == 4 && risked.stopPct == Decimal(string: "0.5") && risked.twapMinutes == 5 && risked.amountUSDC == nil)
+    #expect(parse("лонг ETH риск $4 стоп 0.5% за 5 минут").map { $0.riskUSD == 4 && $0.twapMinutes == 5 } == true)
     // Stopping it: by its id, found from the words.
     for text in ["cancel the TWAP", "stop the twap", "отмени TWAP", "останови твап"] { #expect(PositionCommand.parse(text) == .cancelOrders, "\(text)") }
 }
@@ -52,10 +57,18 @@ private func parse(_ text: String, to intent: TradeIntent = TradeIntent()) -> Tr
     let s = try #require(e.sizing), single = try #require(Plan.evaluate(one, market: eth).sizing)
     #expect(s.size == Decimal(string: "0.0385") && single.size == Decimal(string: "0.0914") && s.stopPrice == single.stopPrice)
     #expect(s.lossAtStopUSD <= 6 && s.lossAtStopUSD > Decimal(string: "5.9")!, "\(s.lossAtStopUSD)")
+    // ihatecrypto's 0.05% only on the exit: a TWAP's parts pay Hyperliquid alone.
+    #expect(s.builderFeesUSD == s.size * s.stopPrice * RiskCalc.builderFee && single.builderFeesUSD == single.size * (single.entry + single.stopPrice) * RiskCalc.builderFee)
     // «N USDC» buys what it says: the money's risk counts the 3% too, so the size comes back to it.
     var money = try #require(parse("long ETH 300 USDC over 2 h stop 2% leverage 1x"))
     money = Plan.resolve(money, market: eth, equity: 100_000, policy: RiskPolicy()).intent
     #expect(Plan.evaluate(money, market: eth).sizing.map { $0.notional > 295 && $0.notional <= 300 } == true)
+    // Started from the chat with no risk named, the rest goes by the rules, and they take no half at 1R off a TWAP:
+    // that left «long ETH 11 USDC over 5 min stop 0.5%» never ready (live run 2026-11-05).
+    let ruled = Plan.resolve(try #require(parse("long ETH 300 USDC over 2 h stop 2% leverage 1x")).started, market: eth, equity: 100_000,
+                             policy: RiskPolicy()).intent
+    #expect(ruled.autoRules == true && ruled.partialTake == nil && ruled.takePct == 4)
+    #expect(Plan.evaluate(ruled, market: eth).problem == nil)
     var live = Live()
     live.market = eth
     let lines = Plan.position(i, e, live).lines

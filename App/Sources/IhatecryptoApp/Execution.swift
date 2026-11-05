@@ -262,6 +262,12 @@ extension Workspace {
             out.append("Size \(Fmt.num(s.size, maxFraction: 6)) \(intent.asset) at ≈ \(Fmt.price(s.entry)), notional \(Fmt.usd(s.notional)), margin \(Fmt.usd(s.margin)).")
             out.append("Stop \(Fmt.pct(intent.stopPct ?? 0)) → \(Fmt.price(s.stopPrice)), loss ≈ \(Fmt.usd(s.lossAtStopUSD)) (risk \(Fmt.usd(intent.riskUSD ?? 0))).")
             if let t = s.takePrice { out.append("Take-profit \(Fmt.pct(intent.takePct ?? 0)) → \(Fmt.price(t)), profit ≈ \(Fmt.usd(s.profitAtTakeUSD ?? 0)).") }
+            // Without it the check read a TWAP's risk (parts may fill 3% worse) against a single fill at today's price and
+            // doubted it, holding Sign (live run 2026-11-05).
+            if let minutes = intent.twapMinutes {
+                out.append("Entry: a TWAP over \(TradeIntent.duration(minutes)) on Hyperliquid, parts at the market every 30 s or more, each within 3% of the price. "
+                           + "The risk and the size count every part filling 3% worse than now, so from today's price the stop loses less than the risk.")
+            }
             if let t = intent.trailingPct {
                 out.append(intent.entryPx == nil
                     ? "Trailing stop \(Fmt.pct(t)) behind the best price, held by Hyperliquid itself (reduce-only, the whole position), beside the fixed stop."
@@ -276,7 +282,10 @@ extension Workspace {
         }
         if !resolved.notes.isEmpty { out.append("The user asked to fill in the rest by the rules: " + resolved.notes.joined(separator: " ")) }
         // From where the card says: Solana, or the EVM network that holds it when Solana is short.
-        out.append("Fees on each side: Hyperliquid's \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))% and ihatecrypto's \(HLBuilder.rate) (the user approves it once, on the first trade).")
+        let hlFee = "Hyperliquid's \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))%"
+        out.append(intent.twapMinutes == nil
+            ? "Fees on each side: \(hlFee) and ihatecrypto's \(HLBuilder.rate) (the user approves it once, on the first trade)."
+            : "Fees: the TWAP's parts pay \(hlFee) only, no ihatecrypto fee on them. The exit pays \(hlFee) and ihatecrypto's \(HLBuilder.rate).")
         if let a = intent.amountUSDC { out.append("Move \(Fmt.num(a)) USDC from \(fundingNet?.name ?? "Solana") to Hyperliquid.") }
         else if let q = quote { out.append("Bridge \(q.provider): \(Fmt.num(q.amountIn)) USDC from \(fundingNet?.name ?? "Solana") to Hyperliquid.") }
         return out
@@ -1473,7 +1482,9 @@ extension Workspace {
 
     /// A position closed outside ihatecrypto (its stop or take, or by hand elsewhere): say so in the chat and as a notification.
     func closedByExchange(_ coin: String) async {
-        exitRules[coin] = nil
+        // A TWAP may still be buying after its stop or take closed the position: its rules stay for the guardian, which
+        // stops it and closes what it bought after. Dropped here, it bought 0.035 ETH on with no stop (live run 2026-11-05).
+        if exitRules[coin]?.twapId == nil { exitRules[coin] = nil }
         guard let close = try? await HyperliquidAccount.lastClose(hlAddress, coin: coin), Date().timeIntervalSince(close.time) < 600 else { return }
         // HyperCore fills do not say whether a trigger or a person closed it; only that it was not ihatecrypto.
         let text = say("\(coin) position closed outside ihatecrypto (stop, take-profit or by hand) at \(Fmt.price(close.price)): \(close.pnl >= 0 ? "profit" : "loss") \(Fmt.usd(abs(close.pnl))).",

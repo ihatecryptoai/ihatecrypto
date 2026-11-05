@@ -11,6 +11,7 @@ import WalletCore
 /// /exchange writes down each action's type and answers ok.
 final class HLModeStub: URLProtocol {
     nonisolated(unsafe) static var mode = "unifiedAccount"
+    nonisolated(unsafe) static var hold = "55.8"
     nonisolated(unsafe) static var sent: [String] = []
     static let lock = NSLock()
 
@@ -36,7 +37,7 @@ final class HLModeStub: URLProtocol {
             case "clearinghouseState":
                 return body["dex"] == nil ? #"{"marginSummary":{"accountValue":"55.8"},"withdrawable":"0.0","assetPositions":[]}"#
                     : #"{"marginSummary":{"accountValue":"30"},"withdrawable":"14","assetPositions":[]}"#
-            case "spotClearinghouseState": return #"{"balances":[{"coin":"USDC","token":0,"total":"484.57","hold":"55.8"}]}"#
+            case "spotClearinghouseState": return #"{"balances":[{"coin":"USDC","token":0,"total":"484.57","hold":"\#(Self.hold)"}]}"#
             case "spotMeta":
                 return #"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HYPE","index":150,"szDecimals":2}],"#
                     + #""universe":[{"tokens":[150,0],"index":107,"name":"@107"}]}"#
@@ -82,5 +83,15 @@ extension FakeHyperliquid {
             #expect(try await Hyperliquid.dexBalance(user: user, dex: "xyz") == (30, 14))
             #expect(await Holdings.hyperliquidSpot(user: user)?.map(\.contract) == ["USDC"])
         }
+    }
+
+    /// Portfolio margin's spot USDC `hold` goes negative by what can be borrowed against HYPE or BTC (read live
+    /// 2026-11-05: total 5.9M, hold −10.4M). That loan room isn't free money: «free» never reads above the account.
+    @Test func portfolioMarginNegativeHoldIsNotFree() async throws {
+        URLProtocol.registerClass(HLModeStub.self)
+        defer { URLProtocol.unregisterClass(HLModeStub.self); HLModeStub.lock.withLock { HLModeStub.hold = "55.8"; HLModeStub.mode = "unifiedAccount" } }
+        HLModeStub.lock.withLock { HLModeStub.mode = "portfolioMargin"; HLModeStub.hold = "-10" }
+        let b = try await Hyperliquid.balance(user: "0x0000000000000000000000000000000000000001")
+        #expect(b.accountValue == Decimal(string: "484.57")! && b.withdrawable == Decimal(string: "484.57")!)
     }
 }

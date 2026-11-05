@@ -113,7 +113,9 @@ public enum ChatRouter {
     TRADE PLAN (a perp on Hyperliquid; ASSET is a crypto ticker like BTC, ETH, SOL, HYPE, or oil, brent, gold, silver, or a stock ticker like TSLA, NVDA):
       long|short <ASSET> [N USDC] [risk $N] [stop N%] [take N% | take NR] [leverage Nx] [by the book] [on a N% pullback] [limit <PRICE>] [take in parts] [trailing N%]
       long|short <ASSET> N USDC over N min|h [randomize] [stop N%] [take N%] [leverage Nx] [by the book]   (one TWAP on Hyperliquid:
-      parts at the market spread over that time, 5 min to 4 h, $100 at least, the same risk rules as one order. A buy of a
+      parts at the market spread over that time, 5 min to 4 h, a position of $100 at least, which is N USDC × leverage (11
+      USDC at 10x is $110: enough, code checks it), the same risk rules as one order. «risk $N» in place of N USDC works too
+      («лонг ETH риск $4 стоп 0.5% за 5 минут» = long ETH risk $4 stop 0.5% over 5 min leverage 1x): code sizes it. A buy of a
       Hyperliquid coin spread over minutes or hours is this form, never recurring buys or a Jupiter DCA: «купи ETH на $2000 за 2
       часа» = long ETH 2000 USDC over 2 h leverage 1x, «набери BTC на 500$ за 30 минут рандомно» = long BTC 500 USDC over 30 min
       randomize leverage 1x. No leverage said = 1x. «одним ордером» on a TWAP plan = one order. Over more than 4 hours, or

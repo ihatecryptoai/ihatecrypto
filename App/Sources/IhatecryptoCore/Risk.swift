@@ -152,7 +152,8 @@ extension Plan {
             r.leverage = min(p.maxLeverage, Decimal(m.maxLeverage))
             notes.append("Leverage \(Fmt.num(r.leverage!))×, the rules' cap; the stop sets the loss, leverage only shrinks the margin.")
         }
-        if r.partialTake == nil, auto {
+        // A TWAP is the whole entry (Plan.evaluate): no half at 1R beside it.
+        if r.partialTake == nil, auto, r.twapMinutes == nil {
             r.partialTake = true
             notes.append("Exit in parts: half at 1R, then stop to breakeven, the rest runs to the take-profit.")
         }
