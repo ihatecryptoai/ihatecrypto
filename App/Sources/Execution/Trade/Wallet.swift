@@ -366,11 +366,13 @@ extension Executor {
         // Jupiter's /order, where someone else pays the fee and signs first, our wallet second: JupiterZ's market makers when
         // their price beats the pools' (/quote) — big swaps mostly (2M WIF: $362k against $321k, 2026-10-28; on small ones
         // its fee makes it the worse) — and, under the fee floor (USDC came without SOL), Jupiter's own gasless swap, which
-        // Jupiter grants a wallet that can't pay (a few thousandths of SOL still gets the ordinary swap below).
+        // Jupiter grants a wallet that can't pay from $5 (a few thousandths of SOL still gets the ordinary swap below).
         let lowSOL = !nativeIn && lamports < TopUpOrder.solanaFeeFloor
-        // The Dev copy's JupiterZ run: Jupiter's other routers left out, so its market makers answer even a test size.
+        // Jupiter's other routers left out, so its market makers answer a small size: the Dev copy's JupiterZ run, and SOL
+        // for fees bought under Jupiter's $5, which only a maker pays the fee for (from $0.30 at 0.02%, measured 2026-11-05).
+        let makersOnly = Self.jupiterZFirst || buyingGas && units < 5_000_000
         let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana,
-                                             excludeRouters: Self.jupiterZFirst ? ["metis", "iris", "dflow", "okx"] : [])
+                                             excludeRouters: makersOnly ? ["metis", "iris", "dflow", "okx"] : [])
         let payer = order.flatMap { $0.gasless ? try? SolanaMessage.parse(transaction: $0.wire).staticKeys.first : nil }.flatMap { $0 == wallet.solana ? nil : $0 }
         var sponsored: (order: Jupiter.Order, sponsor: String)? = nil
         if let order, let payer, Self.sponsorable(router: order.router, wire: order.wire, from: from.mint, to: to.mint) {
@@ -384,7 +386,7 @@ extension Executor {
         // its minimum read from the network) and a fee, and Jupiter won't pay: said before a simulation fails on it.
         if sponsored == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000,
            lamports < (try? await rpc.rentMinimum(bytes: 165)).map({ $0 + 60_000 }) ?? 2_100_000 {
-            throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and Jupiter pays the fee only for a bigger one ($5 and up). Swap more, or add ≈ 0.01 SOL first.")
+            throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and neither a market maker nor Jupiter (from $5) took its fee. Swap more, or add ≈ 0.01 SOL first.")
         }
         if let (order, sponsor) = sponsored {
             let maker = order.router == "jupiterz"

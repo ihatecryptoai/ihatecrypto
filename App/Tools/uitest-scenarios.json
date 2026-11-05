@@ -166,6 +166,24 @@
     }
   },
   {
+    "name": "a small SOL buy → a Solana swap card through Jupiter waiting for Confirm",
+    "send": [
+      "купи SOL на 0.3 USDC"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "SOL",
+      "steps": [
+        "SOLANA",
+        "JUPITER"
+      ]
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 0.3
+    }
+  },
+  {
     "name": "where to keep USDC → rate bubbles",
     "send": [
       "где держать USDC"

@@ -667,9 +667,10 @@ struct StuckDollars {
 }
 
 extension Workspace {
-    /// The least USDC Jupiter's wallet pays a swap's fee for (gasless, for a wallet that can't pay): $5, at 0.19% then and
-    /// 0.03% from $10 (measured 2026-10-23).
-    nonisolated static let gaslessSwapUSD: Decimal = 5
+    /// The least USDC swapped for SOL where the wallet can't pay the fee: JupiterZ's market makers pay it from $0.30 at
+    /// 0.02% (measured 2026-11-05), Jupiter's own wallet from $5 at 0.19% (2026-10-23). A dollar buys more than the
+    /// 0.005 SOL fee floor while SOL is under $200: past that one swap doesn't clear it (Executor.convert).
+    nonisolated static let gaslessSwapUSD: Decimal = 1
 
     /// Where the wallet holds dollars but not the coin fees are paid in, so a first move there would stop: Solana without
     /// SOL; an EVM network without its gas coin when Solana can't bring it either (topUpGas buys it with Solana's USDC,
@@ -693,10 +694,11 @@ extension Workspace {
         let solanaPays = solanaSOL >= Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
         var out: [StuckDollars] = []
         if usd >= 1, !solanaPays {
-            let swap = gaslessSwapUSD
+            // From $5 Jupiter's own gasless swap backs the makers up when none answers: the swap that can't fail to find a payer.
+            let swap: Decimal = usd >= 5 ? 5 : gaslessSwapUSD
             out.append(StuckDollars(network: "Solana", key: "solana", coin: "SOL", usd: 1, usdc: usd, ways: usd >= swap ? [
                 ChatRouter.Option(title: say("Swap \(Fmt.num(swap)) USDC for SOL", "Обменять \(Fmt.num(swap)) USDC на SOL"),
-                                  comment: say("Jupiter pays this swap's fee; then SOL pays the rest", "Комиссию этого обмена платит Jupiter, дальше платит SOL"),
+                                  comment: say("Jupiter pays this swap's fee, then SOL pays the rest", "Комиссию этого обмена платит Jupiter, дальше платит SOL"),
                                   command: "buy SOL for \(Fmt.num(swap)) USDC", recommended: true),
             ] : []))
         }

@@ -12,9 +12,13 @@ private func stuck(solana: Decimal = 0, sol: Decimal = 0, hyperliquid: Decimal =
 @Test func solanaDollarsWithoutSOLGetJupitersSwap() {
     let ten = stuck(solana: 10)
     #expect(ten.map(\.key) == ["solana"])
+    // From $5 Jupiter's own gasless swap backs the market makers up: $5 as before.
     #expect(ten[0].ways.map(\.command) == ["buy SOL for 5 USDC"])
-    // Under Jupiter's $5: only adding SOL works, and that's what the chat asks.
-    #expect(stuck(solana: 3)[0].ways.isEmpty)
+    // Under it only JupiterZ's market makers pay the fee (from $0.30, measured 2026-11-05): a dollar.
+    #expect(stuck(solana: 3)[0].ways.map(\.command) == ["buy SOL for 1 USDC"])
+    #expect(stuck(solana: 1)[0].ways.map(\.command) == ["buy SOL for 1 USDC"])
+    // Under a dollar nothing is offered: too little to be stuck.
+    #expect(stuck(solana: Decimal(string: "0.5")!).isEmpty)
     // With SOL for fees nothing is stuck.
     #expect(stuck(solana: 10, sol: Decimal(string: "0.01")!).isEmpty)
 }
