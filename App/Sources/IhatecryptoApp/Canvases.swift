@@ -1807,7 +1807,8 @@ extension Workspace {
             let vault = kaminoVault(s)
             // All of a coin on the main market reads as what Kamino holds of it, never the wallet's: «all SOL» read 0.108
             // in the wallet while 0.05 was up there.
-            let x = x ?? vault?.tokens ?? (s == "USDC" && kamino > 0 ? kamino : nil) ?? kaminoMainLoan?.collateral.first { $0.symbol == s }?.tokens
+            // `kamino` is every main-market deposit's dollars (SOL up as collateral too): only a fallback for USDC.
+            let x = x ?? vault?.tokens ?? kaminoMainLoan?.collateral.first { $0.symbol == s }?.tokens ?? (s == "USDC" && kamino > 0 ? kamino : nil)
             return (step("kamino", vault == nil ? "FROM · KAMINO LEND" : "FROM · KAMINO EARN", "\(n(x)) \(s)", vault.map { "\($0.name): \($0.amount ?? "")" } ?? "", .kamino,
                          money: vault == nil && s == "USDC" ? vaultMove("Kamino Lend", s, was: kamino, by: x.map { -$0 }) : []),
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))

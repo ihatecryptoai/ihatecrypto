@@ -215,7 +215,7 @@ extension Executor {
             + (p.liquidationPrice.map { ", liquidation if \(p.stock ?? "the collateral") ≤ \(Fmt.usd($0))" } ?? "")
             + ", owed \(Fmt.num(max(Self.usdcOwed(now), usdc), maxFraction: 6)) USDC. "
             + (p.market == Kamino.backpackMarket ? "Stock prices stand still while US markets are closed; a gap at the open can reach that line at once. " : "")
-            + "Say «repay all USDC on kamino» to pay it back."
+            + "Say «repay all USDC on kamino\(p.market == Kamino.mainMarket ? " against SOL" : "")» to pay it back."
         report(line)
         return line
     }

@@ -1033,7 +1033,7 @@ extension Executor {
             if requested.map({ $0 > free }) ?? true {
                 throw ExecutionError("A loan of \(Fmt.usd(loan.debtUSD)) stands on this \(symbol) on Kamino: "
                                      + (free > 0 ? "up to \(Fmt.num(free, maxFraction: 6)) \(symbol) can come out now. " : "")
-                                     + "Pay it back first — «repay all USDC on kamino» — and the rest comes out. Nothing was signed.")
+                                     + "Pay it back first — «repay all USDC on kamino\(stock ? "" : " against SOL")» — and the rest comes out. Nothing was signed.")
             }
         }
         // A deposit made on kamino.com sits in a Kamino Vault (Earn), not in Lend.

@@ -2219,8 +2219,10 @@ extension Workspace {
                     lines.append(row("take", "\(Fmt.price(tp)) · +\(Fmt.pct((abs(tp - z.entry) / z.entry * 100).rounded(1, .plain)))"))
                 }
                 // The trailing stop is Hyperliquid's own: the sheet says so, or the second check reads it as missing.
-                if let t = intent.trailingPct { lines.append(row("trailing", "\(Fmt.pct(t)) behind the best price")) }
-                let orders = 1 + (z.takePrice == nil ? 0 : 1) + (intent.trailingPct == nil ? 0 : 1)
+                if let t = intent.trailingPct {
+                    lines.append(row("trailing", "\(Fmt.pct(t)) behind the best price" + (intent.entryPx == nil ? "" : ", moved by ihatecrypto while it's open")))
+                }
+                let orders = 1 + (z.takePrice == nil ? 0 : 1) + (intent.trailingPct == nil || intent.entryPx != nil ? 0 : 1)
                 lines.append(orders == 3 ? "all wait on the exchange" : orders == 2 ? "both wait on the exchange" : intent.isHedge ? "guards the margin" : "waits on the exchange")
             }
             let title = (["Stop"] + (sizing?.takePrice == nil ? [] : ["take"]) + (intent.trailingPct == nil ? [] : ["trailing"])).joined(separator: " + ")

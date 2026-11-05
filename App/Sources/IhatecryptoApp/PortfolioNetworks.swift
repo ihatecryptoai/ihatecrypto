@@ -132,7 +132,7 @@ extension Workspace {
                                    help: "\(amounts) put up on \(market), \(Fmt.num(debt, maxFraction: 6)) USDC borrowed against it"
                                       + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2)) (liquidation at 1)" } ?? "")
                                       + (loan.liquidationPrice.map { ", liquidation if \(main?.symbol ?? "it") ≤ \(Fmt.usd($0))" } ?? "")
-                                      + ". «repay all USDC on kamino» pays it back, «withdraw \(main?.symbol ?? "SPCX") from kamino» takes it back.",
+                                      + ". «repay all USDC on kamino\(market == "Kamino" ? " against SOL" : "")» pays it back, «withdraw \(main?.symbol ?? "SPCX") from kamino» takes it back.",
                                    coin: main?.symbol ?? "USDC",
                                    facts: [(Fmt.usd(loan.depositUSD), "collateral"), ("−" + Fmt.usd(loan.debtUSD), "borrowed")]
                                       + (loan.health.map { [(Fmt.num($0, maxFraction: 2), "health")] } ?? []))
