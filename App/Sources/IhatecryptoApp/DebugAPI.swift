@@ -350,8 +350,8 @@ final class DebugAPI {
             // Jev reads the chat (Settings › Second check, with OpenRouter connected): uitest skips what needs it otherwise.
             "secondCheck": ws.jevScreening && ws.jevKey != nil,
             "busy": ws.busy,
-            // The chip over the field: tokens the model read with the last message, its window, the answers' dollars.
-            "context": ["used": ws.meter.used ?? NSNull(), "window": ws.meter.window ?? NSNull(), "sent": ws.meter.sent, "lines": ws.meter.lines,
+            // The chip over the field: tokens the model read with the last message (the cache's part), its window, the answers' dollars.
+            "context": ["used": ws.meter.used ?? NSNull(), "cached": ws.meter.cached ?? NSNull(), "window": ws.meter.window ?? NSNull(), "sent": ws.meter.sent, "lines": ws.meter.lines,
                         "spent": ws.meter.spent, "credits": ws.meter.credits ?? false] as [String: Any],
             "messages": ws.messages.dropFirst(since).map { ["user": $0.fromUser, "text": $0.text, "note": $0.note ?? NSNull(),
                                                              "cards": ($0.options ?? []).map(\.title)] as [String: Any] },

@@ -8,6 +8,8 @@ import LLMCore
 nonisolated struct ContextMeter: Codable, Equatable {
     /// Tokens the model read with the last message, as its service counted them; nil before the first answer.
     var used: Int?
+    /// Of `used`: the part read from the service's cache (debug API only, for checking the cache works).
+    var cached: Int?
     /// The model's context window; nil when its service doesn't say.
     var window: Int?
     /// Of `used`: the instructions and the chat's lines. The rest is the canvas, the balances and the message.
@@ -69,6 +71,7 @@ extension Workspace {
             let bytes = max(1, request.messages.reduce(0) { $0 + $1.text.utf8.count }), brief = request.system.utf8.count
             let all = chatLines(), sent = sentChat(all)
             meter.used = usage.input
+            meter.cached = usage.cached
             meter.window = usage.window ?? facts?.window
             meter.instructions = usage.input * min(brief, bytes) / bytes
             meter.chat = usage.input * min(max(0, bytes - brief), sent.reduce(0) { $0 + $1.utf8.count }) / bytes

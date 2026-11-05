@@ -34,6 +34,16 @@ import Testing
     #expect(!ContextMeter.credits(provider: "anthropic", model: "claude-fable-5-1", overage: true))
 }
 
+/// The meter keeps the part read from the cache, and a canvas saved before it did still loads.
+@Test func aMeterSavedBeforeTheCacheCountStillLoads() throws {
+    let old = #"{"used":18622,"instructions":18000,"chat":0,"sent":0,"lines":0,"spent":0.01,"billed":false}"#
+    let meter = try JSONDecoder().decode(ContextMeter.self, from: Data(old.utf8))
+    #expect(meter.used == 18_622 && meter.cached == nil)
+    var now = meter
+    now.cached = 18_210
+    #expect(try JSONDecoder().decode(ContextMeter.self, from: JSONEncoder().encode(now)).cached == 18_210)
+}
+
 @Test func accountsSayTheirKind() {
     let kinds = Dictionary(uniqueKeysWithValues: LLMCatalog.all.map { ($0.info.id, $0.info.kindName) })
     #expect(kinds["chatgpt"] == "Subscription" && kinds["openai"] == "API key" && kinds["ollama"] == "On this Mac · free")

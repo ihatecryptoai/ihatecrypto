@@ -230,6 +230,38 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(error?.message == "Anthropic: Overloaded")
 }
 
+/// A model whose safety check can decline a request asks Anthropic for its recommended fallback model then. Haiku 5.5
+/// has none («a declined request stays declined»), nor have Sonnet 5 and the 4.x models.
+@Test func anthropicAsksForAFallbackOnTheModelsThatHaveOne() {
+    func asks(_ model: String) -> Bool {
+        AnthropicClient.body(LLMRequest(model: model, messages: [LLMMessage(.user, "x")]), think: false)["fallbacks"] as? String == "default"
+    }
+    for model in ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-opus-5", "claude-fable-5"] { #expect(asks(model), "\(model)") }
+    for model in ["claude-haiku-5-5", "claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-5"] { #expect(!asks(model), "\(model)") }
+    #expect(AnthropicClient.body(LLMRequest(model: "claude-opus-5-5", messages: [LLMMessage(.user, "x")]), think: false, fallback: false)["fallbacks"] == nil)
+}
+
+/// A refusal midway: the declined model's words stay, a fallback block marks the switch, and the fallback model goes on
+/// from them (docs: refusals-and-fallback). Read as one answer.
+@Test func anthropicStreamReadsAFallbackAsOneAnswer() throws {
+    let events = [
+        #"data: {"type":"message_start","message":{"model":"claude-opus-5-5","usage":{"input_tokens":40,"output_tokens":1}}}"#,
+        #"data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"route\":\"chat\",\"re"}}"#,
+        #"data: {"type":"content_block_stop","index":0}"#,
+        #"data: {"type":"content_block_start","index":1,"content_block":{"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-4-8"}}}"#,
+        #"data: {"type":"content_block_stop","index":1}"#,
+        #"data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}"#,
+        #"data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"ply\":\"ok\"}"}}"#,
+        #"data: {"type":"content_block_stop","index":2}"#,
+        #"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}"#,
+        #"data: {"type":"message_stop"}"#,
+    ]
+    var stream = AnthropicStream(), ended = false
+    for line in events where !ended { ended = try stream.feed(line) }
+    #expect(ended && stream.text == #"{"route":"chat","reply":"ok"}"# && stream.stop == "end_turn")
+}
+
 /// api.anthropic.com as the test answers it: each request kept with its body, the replies given in turn.
 nonisolated final class AnthropicStub: URLProtocol {
     nonisolated(unsafe) static var replies: [(status: Int, body: String)] = []
@@ -256,7 +288,8 @@ nonisolated final class AnthropicStub: URLProtocol {
 }
 
 /// The whole way through the client: the key and version sent, the words told as they come, what the answer used told to
-/// the meter. A model that refuses adaptive thinking (Haiku 4.5) is asked again without it.
+/// the meter. A model that refuses adaptive thinking (Haiku 4.5) is asked again without it, and a refused fallback
+/// field is dropped.
 @Test func anthropicClientStreamsTheAnswerAndCountsIt() async throws {
     URLProtocol.registerClass(AnthropicStub.self)
     defer { URLProtocol.unregisterClass(AnthropicStub.self) }
@@ -300,6 +333,31 @@ nonisolated final class AnthropicStub: URLProtocol {
     let list = await #expect(throws: LLMError.self) { try await AnthropicClient(key: "k").models() }
     #expect(list?.message == AnthropicAPI.noWorkspace)
     #expect(AnthropicAPI().info.note.contains("platform.claude.com/settings/keys"))
+
+    // The fallback field goes with its beta header. If Anthropic refuses them (the beta renamed or ended), the request
+    // is asked again without them, thinking and length as before, even when the refusal names max_tokens: the
+    // old-model retry would cut both.
+    // (Here, not in a test of its own: tests run in parallel and the stub is one for all.)
+    AnthropicStub.asked = []
+    AnthropicStub.replies = [
+        (400, #"{"type":"error","error":{"type":"invalid_request_error","message":"fallbacks: max_tokens 32000 is not valid for claude-opus-4-8"}}"#),
+        (200, [#"data: {"type":"message_start","message":{"usage":{"input_tokens":30,"output_tokens":1}}}"#,
+               #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}"#,
+               #"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#,
+               #"data: {"type":"message_stop"}"#].joined(separator: "\n\n") + "\n\n"),
+    ]
+    let retried = try await AnthropicClient(key: "k").complete(LLMRequest(model: "claude-opus-5-5", messages: [LLMMessage(.user, "x")], thinking: true))
+    #expect(retried == "ok" && AnthropicStub.asked.count == 2)
+    let (first, second) = (AnthropicStub.asked[0], AnthropicStub.asked[1])
+    #expect(first.body["fallbacks"] as? String == "default" && first.headers["anthropic-beta"] == "server-side-fallback-2026-07-01")
+    #expect(second.body["fallbacks"] == nil && second.headers["anthropic-beta"] == nil)
+    #expect((second.body["thinking"] as? [String: String]) == ["type": "adaptive"] && second.body["max_tokens"] as? Int == 32_000)
+
+    // A model without a fallback sends neither.
+    AnthropicStub.asked = []
+    AnthropicStub.replies = [(500, "overloaded")]
+    _ = try? await AnthropicClient(key: "k").complete(LLMRequest(model: "claude-haiku-5-5", messages: [LLMMessage(.user, "x")]))
+    #expect(AnthropicStub.asked.count == 1 && AnthropicStub.asked[0].headers["anthropic-beta"] == nil && AnthropicStub.asked[0].body["fallbacks"] == nil)
 }
 
 /// The starter lists before a sign-in carry the newest models, by the ids their services use (OpenRouter's list and the

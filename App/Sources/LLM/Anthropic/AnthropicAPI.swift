@@ -4,7 +4,8 @@ import LLMCore
 /// An Anthropic API key, on Anthropic's own Messages API. Its OpenAI-compatible endpoint, used before, is «not long-term
 /// or production-ready» by Anthropic's word: it ignored «Think before answering» and cached nothing. Here the chat's
 /// instructions are cached (a repeat within 5 minutes reads them at a tenth of the price or less), the effort follows
-/// «Think before answering», and the cache's tokens reach the context chip.
+/// «Think before answering», and the cache's tokens reach the context chip. A request the model's safety check declines
+/// is answered by the fallback model Anthropic recommends for that kind of refusal.
 public struct AnthropicAPI: LLMProvider {
     static let base = "https://api.anthropic.com/v1"
 
@@ -41,6 +42,8 @@ public struct AnthropicAPI: LLMProvider {
 struct AnthropicClient: LLMClient {
     let key: String
     static let version = "2026-10-21"
+    /// The beta that takes `"fallbacks": "default"` (the array form takes server-side-fallback-2026-06-01 instead).
+    static let fallbackBeta = "server-side-fallback-2026-07-01"
 
     var headers: [String: String] { ["x-api-key": key, "anthropic-version": Self.version] }
 
@@ -48,7 +51,7 @@ struct AnthropicClient: LLMClient {
     /// so only the first in 5 minutes pays for them in full. A JSON answer is asked for in the instructions: the API's own
     /// JSON mode needs a schema. Thinking: Claude 5 models think as they see fit without being asked, at their own
     /// effort, and «Think before answering» raises it to high, as the Claude Code and ChatGPT clients do.
-    static func body(_ r: LLMRequest, think: Bool, cap: Int = 32_000) -> [String: Any] {
+    static func body(_ r: LLMRequest, think: Bool, cap: Int = 32_000, fallback: Bool = true) -> [String: Any] {
         var body: [String: Any] = [
             "model": r.model,
             // A cap, not a target: thinking counts toward it, and a JSON answer is a few hundred tokens.
@@ -61,24 +64,46 @@ struct AnthropicClient: LLMClient {
             body["thinking"] = ["type": "adaptive"]
             body["output_config"] = ["effort": "high"]
         }
+        // ponytail: the chip prices a fallback's answer at the asked model's rates, and a declined partial
+        // (usage.iterations) isn't counted; read iterations when refusals become common.
+        if fallback && fallsBack(r.model) { body["fallbacks"] = "default" }
         return body
+    }
+
+    /// Opus 5 and 5.5, Sonnet 5.5, Fable 5 and 5.1: the models whose declined request Anthropic answers with a fallback
+    /// model. Haiku 5.5 has none («a declined request stays declined»), nor have Sonnet 5 and the 4.x models.
+    static func fallsBack(_ model: String) -> Bool {
+        ["claude-opus-5", "claude-sonnet-5-5", "claude-fable-5"].contains { model.hasPrefix($0) }
     }
 
     func complete(_ r: LLMRequest) async throws -> String { try await stream(r) { _ in } }
 
-    /// An older model picked from the live list is asked once more as plainly as it gets: Haiku 4.5 and before take
-    /// neither adaptive thinking nor an effort, and some write 4,096 tokens at most.
+    /// A refused fallback field (its beta renamed or ended) is dropped and the request asked again as it was.
+    // ponytail: refused again on every request after a beta ends (one 400 more each); remember it if that happens.
     func stream(_ r: LLMRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
-        do { return try await streamOnce(r, think: r.thinking, partial: partial) } catch let refused as NetError
-            where refused.message.hasPrefix("HTTP 400") && ["thinking", "effort", "max_tokens"].contains(where: { refused.message.contains($0) }) {
-            return try await streamOnce(r, think: false, cap: 4_096, partial: partial)
+        do { return try await streamPlainer(r, fallback: true, partial: partial) } catch let refused as NetError
+            where Self.fallsBack(r.model) && refused.message.hasPrefix("HTTP 400") && refused.message.contains("fallback") {
+            return try await streamPlainer(r, fallback: false, partial: partial)
         }
     }
 
-    private func streamOnce(_ r: LLMRequest, think: Bool, cap: Int = 32_000, partial: @escaping @Sendable (String) -> Void) async throws -> String {
+    /// An older model picked from the live list is asked once more as plainly as it gets: Haiku 4.5 and before take
+    /// neither adaptive thinking nor an effort, and some write 4,096 tokens at most.
+    private func streamPlainer(_ r: LLMRequest, fallback: Bool, partial: @escaping @Sendable (String) -> Void) async throws -> String {
+        do { return try await streamOnce(r, think: r.thinking, fallback: fallback, partial: partial) } catch let refused as NetError
+            where refused.message.hasPrefix("HTTP 400") && !refused.message.contains("fallback")
+                && ["thinking", "effort", "max_tokens"].contains(where: { refused.message.contains($0) }) {
+            return try await streamOnce(r, think: false, cap: 4_096, fallback: fallback, partial: partial)
+        }
+    }
+
+    private func streamOnce(_ r: LLMRequest, think: Bool, cap: Int = 32_000, fallback: Bool, partial: @escaping @Sendable (String) -> Void) async throws -> String {
+        let body = Self.body(r, think: think, cap: cap, fallback: fallback)
+        var sent = headers.merging(["Accept": "text/event-stream"]) { mine, _ in mine }
+        if body["fallbacks"] != nil { sent["anthropic-beta"] = Self.fallbackBeta }
         let request = try HTTP.request(AnthropicAPI.base + "/messages", method: "POST",
-                                       body: try JSONSerialization.data(withJSONObject: Self.body(r, think: think, cap: cap)),
-                                       contentType: "application/json", headers: headers.merging(["Accept": "text/event-stream"]) { mine, _ in mine },
+                                       body: try JSONSerialization.data(withJSONObject: body),
+                                       contentType: "application/json", headers: sent,
                                        timeout: think ? 180 : 90)
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         if !(200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) {
@@ -92,7 +117,8 @@ struct AnthropicClient: LLMClient {
             if try stream.feed(line) { ended = true; break }
             if stream.text.count != before { partial(stream.text) }
         }
-        // A refusal is billed for what was read: counted before it's said.
+        // A refusal is billed for what was read: counted before it's said. Said only when the fallback model declined
+        // too, or there was none.
         LLMUsage.report(stream.usage)
         if stream.stop == "refusal" {
             throw LLMError("Claude declined this request (Anthropic's safety check). Put it in other words, or pick another model.")
@@ -131,7 +157,8 @@ struct AnthropicStream {
         case "message_start":
             counts = (event["message"] as? [String: Any])?["usage"] as? [String: Any] ?? [:]
         case "content_block_delta":
-            // Thinking comes in blocks of its own (empty unless asked to show): only the answer's text is kept.
+            // Thinking comes in blocks of its own (empty unless asked to show): only the answer's text is kept. A fallback
+            // block (a declined model's switch) has no deltas, and the fallback model goes on from the text so far.
             guard let delta = event["delta"] as? [String: Any], delta["type"] as? String == "text_delta" else { break }
             text += delta["text"] as? String ?? ""
         case "message_delta":

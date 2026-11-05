@@ -5,7 +5,7 @@ Each way of connecting is a separate SwiftPM module in its own folder. The tradi
 ```
 Core/        LLMClient, LLMProvider, Credential, HTTP, PKCE, LoopbackServer
 APIKey/      OpenAI-compatible APIs: DeepSeek, OpenAI, xAI, Gemini, Ollama, LM Studio
-Anthropic/   an Anthropic key on the Messages API: the instructions cached, effort from «Think before answering»
+Anthropic/   an Anthropic key on the Messages API: the instructions cached, effort from «Think before answering», a declined request answered by Anthropic's recommended fallback
 OpenRouter/  browser sign-in (OAuth PKCE) or a key; every model through one account
 ChatGPT/     Plus/Pro subscription through the Codex backend; sign in via the browser or from ~/.codex/auth.json
 ClaudeCode/  Claude subscription through the installed Claude Code (`claude -p` with no tools)
