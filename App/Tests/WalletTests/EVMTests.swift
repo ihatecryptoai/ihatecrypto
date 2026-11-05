@@ -835,3 +835,48 @@ func liveCoinBalancesPast64Bits() async throws {
         #expect(wei > UInt128(UInt64.max), "chain \(rpc.chainId)")
     }
 }
+
+/// Research E-2 and E-3 (2026-11-05): Morpho's and Compound's Authorization as typed data (an address and a bool, no
+/// amount), increaseApproval (WBTC, LINK, old OpenZeppelin) and the operator calls allow and setOperator. The signer
+/// reads the same rules, so a site's request is refused there too. A revoke and a login still sign.
+@Test func authorizationsAndIncreaseApprovalAreReadNotSignedBlind() throws {
+    let me = "0x1111111111111111111111111111111111111111", stranger = "0x000000000000000000000000000000000000dead"
+    func typed(_ fields: [(String, String, String)]) throws -> TypedData {
+        let types = fields.map { #"{"name":"\#($0.0)","type":"\#($0.1)"}"# }.joined(separator: ",")
+        let message = fields.map { #""\#($0.0)":\#($0.2)"# }.joined(separator: ",")
+        return try TypedData.parse(Data(#"{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"chainId","type":"uint256"}],"Authorization":[\#(types)]},"primaryType":"Authorization","domain":{"name":"Morpho","chainId":1},"message":{\#(message)}}"#.utf8))
+    }
+    func morpho(_ on: String) throws -> TypedData {
+        try typed([("authorizer", "address", #""\#(me)""#), ("authorized", "address", #""\#(stranger)""#), ("isAuthorized", "bool", on),
+                   ("nonce", "uint256", "0"), ("deadline", "uint256", "99999999999")])
+    }
+    func comet(_ on: String) throws -> TypedData {
+        try typed([("owner", "address", #""\#(me)""#), ("manager", "address", #""\#(stranger)""#), ("isAllowed", "bool", on),
+                   ("nonce", "uint256", "0"), ("expiry", "uint256", "99999999999")])
+    }
+    #expect(try morpho("true").refusal(owner: me)?.contains(stranger) == true)
+    #expect(try comet("true").refusal(owner: me) != nil)
+    #expect(try comet(#""true""#).refusal(owner: me) != nil)
+    #expect(try morpho("false").refusal(owner: me) == nil)
+    #expect(try comet("false").refusal(owner: me) == nil)
+    // WalletCheck's test page login (Wallet/Check/LocalSigner.swift) names no one else.
+    let login = #"{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"}],"Login":[{"name":"contents","type":"string"},{"name":"nonce","type":"uint256"}]},"primaryType":"Login","domain":{"name":"ihatecrypto test","version":"1","chainId":42161},"message":{"contents":"Sign in to the ihatecrypto test page","nonce":1}}"#
+    #expect(try TypedData.parse(Data(login.utf8)).refusal(owner: me) == nil)
+
+    func word(_ hex: String) -> String { String(repeating: "0", count: 64 - hex.count) + hex }
+    func call(_ signature: String, _ args: [String]) throws -> Data {
+        try #require(Data(hex: Keccak.hash256(Data(signature.utf8)).prefix(4).hex + args.map(word).joined()))
+    }
+    let x = String(stranger.dropFirst(2)), wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599"
+    #expect(try call("increaseApproval(address,uint256)", []).hex == "d73dd623")
+    #expect(EVMCall.decode(try call("increaseApproval(address,uint256)", [x, String(repeating: "f", count: 64)])).refusal(sender: me)?.contains("Unlimited") == true)
+    let one = EVMCall.decode(try call("increaseApproval(address,uint256)", [x, "1"]))
+    #expect(one.refusal(sender: me) == nil)
+    #expect(one.payees(to: wbtc, value: 0, chainId: 1) == [stranger])
+    #expect(one.summary(chainId: 1, to: wbtc, value: 0) == "let 0x0000…dead spend 1 units of the token 0x2260…c599 more on Ethereum")
+    for f in ["allow(address,bool)", "setOperator(address,bool)"] {
+        #expect(EVMCall.decode(try call(f, [x, "1"])).refusal(sender: me)?.contains(stranger) == true, "\(f)")
+        #expect(EVMCall.decode(try call(f, [x, "0"])).refusal(sender: me) == nil, "\(f)")
+    }
+    #expect(try ["allow(address,bool)", "setOperator(address,bool)"].map { try call($0, []).hex } == ["110496e5", "558a7297"])
+}

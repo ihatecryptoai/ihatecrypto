@@ -454,9 +454,59 @@ public enum SolanaGuard {
         return v
     }
 
+    /// Rights a transaction hands out that no balance shows (research E-1; SlowMist, December 2025: a program outside the
+    /// list Assigned wallets to itself while the signing window's balances didn't move). Read from the simulation: the
+    /// wallet still belongs to the System program and holds no data, and each of our token accounts in `before` keeps its
+    /// owner and gets no new close authority, no new delegate and no more for its delegate to spend. A change is refused,
+    /// never a field already set: spam accounts others open for a wallet carry a stranger's close authority from the start.
+    /// A token account of the wallet's in `after` that isn't in `before` was opened by this transaction: it starts with no
+    /// one else's rights (a delegate on it would drain every later deposit). An account missing from `after` was closed:
+    /// it has no rights left. `names`: a token account's coin, «USDC».
+    /// ponytail: the wallet and its token accounts only (variant A); stake, nonce and lookup-table authorities and Token-2022's
+    /// extensions aren't compared — every writable account's address fields (variant B) once wallets hold those.
+    public static func rightsProblems(owner: String, before: [String: SolanaAccountRights], after: [String: SolanaAccountRights],
+                                      names: [String: String] = [:]) -> [String] {
+        var out: [String] = []
+        if let w = after[owner] {
+            if w.program != system {
+                out.append("Your wallet would be handed to \(w.program.isEmpty ? "a program the simulation doesn't name" : "the program \(w.program)"): "
+                           + "from then on that program, not your key, decides what leaves it.")
+            }
+            if w.space > 0 { out.append("Your wallet would get \(w.space) bytes of data and could no longer pay Solana's fee.") }
+        }
+        let opened = after.filter { before[$0.key] == nil && $0.value.owner == owner }.mapValues { _ in SolanaAccountRights() }
+        for (address, was) in before.merging(opened, uniquingKeysWith: { a, _ in a }).sorted(by: { $0.key < $1.key }) {
+            guard let now = after[address], let holder = now.owner else { continue }
+            let coin = names[address] ?? "tokens in \(address.prefix(4))…\(address.suffix(4))"
+            let account = names[address].map { "\($0) account" } ?? "token account \(address.prefix(4))…\(address.suffix(4))"
+            if holder != owner { out.append("Your \(account) would belong to \(holder).") }
+            if let c = now.closeAuthority, c != owner, c != was.closeAuthority { out.append("\(c) could close your \(account) and take its rent.") }
+            if let d = now.delegate, d != owner, d != was.delegate || now.delegatedAmount > was.delegatedAmount { out.append("\(d) could spend your \(coin).") }
+        }
+        return out
+    }
+
     static func le16(_ d: Data, _ at: Int) -> UInt16 { UInt16(d[d.startIndex + at]) | UInt16(d[d.startIndex + at + 1]) << 8 }
     static func le32(_ d: Data, _ at: Int) -> UInt32 { (0..<4).reduce(0) { $0 | UInt32(d[d.startIndex + at + $1]) << (8 * $1) } }
     static func le64(_ d: Data, _ at: Int) -> UInt64 { (0..<8).reduce(0) { $0 | UInt64(d[d.startIndex + at + $1]) << (8 * $1) } }
+}
+
+// MARK: - A second simulation
+
+/// What a second simulation, run after the user pressed Sign, may differ in from the one the window showed (research E-4;
+/// ScamSniffer: a site changes the state in the seconds between the look and the signature).
+public enum SimulationDrift {
+    /// Why what leaves now isn't what was shown: an asset leaves that didn't, or more than 1 % more of one leaves. Keys are
+    /// assets, values their signed change. Arrivals aren't compared: the transaction's own minimum holds them, and a price
+    /// moves in half a minute. `names`: how an asset reads in the reason.
+    public static func outflowsGrew(shown: [String: Decimal], now: [String: Decimal], names: [String: String] = [:]) -> String? {
+        for (asset, change) in now.sorted(by: { $0.key < $1.key }) where change < 0 {
+            let name = names[asset] ?? asset
+            guard let was = shown[asset], was < 0 else { return "\(name) would leave too, which the window didn't show" }
+            if -change > -was * Decimal(string: "1.01")! { return "more \(name) would leave than the window showed" }
+        }
+        return nil
+    }
 }
 
 // MARK: - Hyperliquid

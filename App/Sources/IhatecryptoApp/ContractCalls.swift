@@ -290,7 +290,7 @@ extension Workspace {
 
     /// The node that runs eth_simulateV1 for a network: Arbitrum's own crashes on it (Browser.evmSimulationRPC).
     static func simulator(_ net: EVMNetwork) -> EVMRPC {
-        Browser.evmSimulationRPC[net.rpc.chainId].flatMap(URL.init(string:)).map { EVMRPC(url: $0, chainId: net.rpc.chainId) } ?? net.rpc
+        Browser.evmSimulationRPC[net.rpc.chainId] ?? net.rpc
     }
 
     nonisolated static func delta(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }

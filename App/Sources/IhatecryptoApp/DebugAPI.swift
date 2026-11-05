@@ -294,7 +294,7 @@ final class DebugAPI {
                     return (400, "text/plain", Data("POST {\"evm\": {\"to\", \"data\", \"value\", \"chain\"}}, a chain the browser reads, a wallet in this copy\n".utf8))
                 }
                 evm = await Browser.evmReview(to: to, value: value, data: Data(hex: e["data"] as? String ?? "0x") ?? Data(), from: from,
-                                              rpc: EVMRPC(url: url, chainId: chain))
+                                              rpc: EVMRPC(url: url, chainId: chain), simulator: Browser.evmSimulationRPC[chain])
                 (origin, site) = ("file://", .local)
             } else if method == "POST" {
                 guard let b64 = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["wire"] as? String,

@@ -631,6 +631,8 @@ public struct EVMSimulation: Equatable, Sendable {
     static func grant(asset: String, topics: [String], data: Data, me: String) -> Grant? {
         guard let e = grantEvents.first(where: { $0.topic == topics.first }), topics.count > max(e.owner, e.to), topics[e.owner].hasSuffix(me) else { return nil }
         let to = "0x" + topics[e.to].suffix(40)
+        // Nobody: the zero address clears an approval (older ERC-721s log Approval(owner, 0, id) on every transfer).
+        guard to != "0x" + String(repeating: "0", count: 40) else { return nil }
         // An ERC-721 approve carries its token id as a fourth topic: one NFT, no amount in the data.
         if e.kind == "approve", topics.count == 4 { return Grant(kind: "nft", asset: asset, to: to, unlimited: false) }
         if e.kind == "ownership" { return Grant(kind: e.kind, asset: asset, to: to, unlimited: true) }
@@ -670,7 +672,8 @@ public enum EVMCall: Equatable, Sendable {
     case kyberSwap(KyberSwap.Swap)
     /// ERC-721 or ERC-1155 safeTransferFrom / safeBatchTransferFrom: NFTs (or game items) from `from` to `to`.
     case nftTransfer(from: String, to: String)
-    /// Aave's approveDelegation or Morpho Blue's setAuthorization: `to` may borrow against, or manage, this wallet's positions.
+    /// Aave's approveDelegation, Morpho Blue's setAuthorization, Compound III's allow, ERC-6909's setOperator: `to` may
+    /// borrow against or manage this wallet's positions, or move its tokens in that contract.
     case delegation(to: String, granted: Bool)
     /// WETH9.deposit(): the coins sent with it come back to the sender as the wrapped token.
     case wrap
@@ -705,7 +708,8 @@ public enum EVMCall: Equatable, Sendable {
         }
         switch selector {
         case "095ea7b3": if let s = address(0), let a = word(1) { return .approve(spender: s, amount: a) }
-        case "39509351": if let s = address(0), let a = word(1) { return .increaseAllowance(spender: s, amount: a) }
+        // increaseAllowance, and increaseApproval of older tokens (WBTC, LINK, OpenZeppelin before 2.0).
+        case "39509351", "d73dd623": if let s = address(0), let a = word(1) { return .increaseAllowance(spender: s, amount: a) }
         // Tempo's transferWithMemo pays like transfer: the same recipient check applies.
         case "a9059cbb", "95777d59": if let t = address(0), let a = word(1) { return .transfer(to: t, amount: a) }
         case "23b872dd": if let f = address(0), let t = address(1), let a = word(2) { return .transferFrom(from: f, to: t, amount: a) }
@@ -742,7 +746,8 @@ public enum EVMCall: Equatable, Sendable {
         case "e21fd0e9": if let swap = KyberSwap.decode(data) { return .kyberSwap(swap) }
         case "42842e0e", "b88d4fde", "f242432a", "2eb2c2d6": if let f = address(0), let t = address(1) { return .nftTransfer(from: f, to: t) }
         case "c04a8a10": if let d = address(0), let a = word(1) { return .delegation(to: d, granted: a.contains { $0 != 0 }) }
-        case "eecea000": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
+        // Morpho Blue's setAuthorization, Compound III's allow and ERC-6909's setOperator: (address, bool).
+        case "eecea000", "110496e5", "558a7297": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
         case "d0e30db0": return .wrap
         case "2e1a7d4d": if let a = word(0) { return .unwrap(amount: a) }
         case "8e0250ee", "779b432d": if let b = CCTP.readBurn(data) { return .cctpBurn(recipient: b.recipient, domain: b.domain, amount: b.amount) }
@@ -1009,7 +1014,7 @@ public enum EVMCall: Equatable, Sendable {
         case .setApprovalForAll(_, true):
             "Rights to all your NFTs in this contract (setApprovalForAll) — an NFT drainer trick. Refused."
         case .delegation(let to, true):
-            "Lets \(to) borrow against or manage your lending positions (Aave credit delegation, Morpho authorization). Refused."
+            "Lets \(to) manage your positions or move your tokens in this contract (credit delegation, an authorization, an operator). Refused."
         case .permit:
             "A permit call grants approval to spend your tokens. Refused."
         case .transferFrom(let from, _, _) where from.lowercased() == sender.lowercased():

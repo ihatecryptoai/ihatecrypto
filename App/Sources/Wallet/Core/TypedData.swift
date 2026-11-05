@@ -48,6 +48,13 @@ public struct TypedData: Sendable {
         // (an open order). Beside it, any number that isn't a nonce, a time or a choice may be the amount (the 2026-10-24
         // review: «total», «amt» and «num» passed a list of amount words).
         let others = fields.filter { $0.type == "address" && ![owner, verifyingContract].contains($0.value.lowercased()) }
+        // A right given by a yes, no amount at all (research E-2): Morpho's Authorization(authorizer, authorized,
+        // isAuthorized…) and Compound's (owner, manager, isAllowed…) let someone else manage the wallet's positions.
+        // A false is a revoke and signs.
+        if let other = others.first, let flag = fields.first(where: { $0.type == "bool" && ["1", "true"].contains($0.value) }) {
+            return "\(primaryType) gives \(other.value) («\(other.name)») rights over your account («\(flag.name)»): Morpho's and Compound's "
+                + "Authorization work like this. ihatecrypto doesn't sign it for a site."
+        }
         let notAmounts = ["nonce", "deadline", "expir", "valid", "time", "chainid", "salt", "version", "choice"]
         let amount = fields.first { f in
             f.type.hasPrefix("uint") && f.value != "0" && !notAmounts.contains { f.name.lowercased().contains($0) }

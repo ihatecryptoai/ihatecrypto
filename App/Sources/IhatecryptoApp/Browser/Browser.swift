@@ -96,6 +96,10 @@ struct EVMReview {
     let gas: UInt64
     let problems: [String]
     var jev: JevReview?
+    /// The simulation the window shows (nil: none), and how each of its assets reads: «USDC (0x8335…2913)». What's signed
+    /// is simulated again after Sign and held to it.
+    var simulation: EVMSimulation?
+    var names: [String: String] = [:]
 }
 
 @Observable
@@ -116,8 +120,13 @@ final class Browser {
     /// EVM chain a site switched to (Arbitrum by default). Only reading goes to that chain's public RPC.
     private var evmChain: [String: UInt64] = [:]
     static let evmRPC: [UInt64: String] = [1: "https://ethereum-rpc.publicnode.com", 42161: "https://arb1.arbitrum.io/rpc", 8453: "https://mainnet.base.org"]
-    /// arb1 crashes on eth_simulateV1; publicnode runs it but refuses receipts without a token (2026-09-29).
-    static let evmSimulationRPC: [UInt64: String] = [42161: "https://arbitrum-one-rpc.publicnode.com"]
+    /// The nodes that run a site's eth_simulateV1, with spares, since no simulation means no signature (research E-4):
+    /// Ethereum's and Base's shared ones (EVMRPC), and for Arbitrum publicnode, since arb1 crashes on it (publicnode
+    /// refuses receipts without a token, 2026-09-29), with drpc behind it. Each answered it on 2026-11-05.
+    static let evmSimulationRPC: [UInt64: EVMRPC] = [
+        1: .ethereum, 8453: .base,
+        42161: EVMRPC(url: URL(string: "https://arbitrum-one-rpc.publicnode.com")!, chainId: 42161, fallbacks: [URL(string: "https://arbitrum.drpc.org")!]),
+    ]
     static let readOnly: Set<String> = ["eth_call", "eth_blockNumber", "eth_getBalance", "eth_getCode", "eth_getTransactionCount", "eth_getTransactionReceipt",
                                         "eth_getTransactionByHash", "eth_estimateGas", "eth_gasPrice", "eth_feeHistory", "eth_getBlockByNumber",
                                         "eth_getLogs", "eth_maxPriorityFeePerGas", "eth_getStorageAt"]
@@ -214,6 +223,18 @@ final class Browser {
                 review.jevNote = "The second check isn't connected (Settings › Second check). The code checks decide."
             }
             guard await ask(.transaction(review, send: send), origin: origin, site: site), review.problems.isEmpty else { throw SiteError("Transaction declined.") }
+            // Simulated again now (research E-4): the state can change in the seconds between the look and the signature.
+            let again: TxReview
+            do { again = try await self.review(wire, owner: owner) } catch {
+                workspace?.reply("Site \(origin): nothing signed — ihatecrypto couldn't check it again after Sign (\(error.localizedDescription)). Ask the site for it again.", note: "browser")
+                throw SiteError("Nothing signed: ihatecrypto couldn't check it again after Sign.")
+            }
+            func outflows(_ r: TxReview) -> [String: Decimal] { Dictionary(r.deltas.map { ($0.mint, $0.amount) }, uniquingKeysWith: +) }
+            if let why = Self.recheck(again.problems, SimulationDrift.outflowsGrew(shown: outflows(review), now: outflows(again),
+                                                                                   names: Dictionary(again.deltas.map { ($0.mint, $0.symbol) }, uniquingKeysWith: { a, _ in a }))) {
+                workspace?.reply("Site \(origin): nothing signed — \(why) Ask the site for it again.", note: "browser")
+                throw SiteError("Nothing signed: \(why)")
+            }
             let reply = try await SignerClient().send(.signSolana(wire: wire, accounts: review.accounts, recipients: [], tokenOwners: review.tokenOwners,
                                                                   extraPrograms: review.unknownPrograms))
             guard reply.ok, let signed = reply.signedWire else { throw SiteError(XPCTradeSigner.reason(reply)) }
@@ -295,7 +316,7 @@ final class Browser {
             guard let value = Self.quantity(p["value"]) else { throw SiteError("4200|The amount is larger than ihatecrypto will sign.") }
             guard let url = Self.evmRPC[chain].flatMap(URL.init(string:)) else { throw SiteError("4901|No RPC for chain \(chain).") }
             let rpc = EVMRPC(url: url, chainId: chain)
-            var review = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
+            var review = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc, simulator: Self.evmSimulationRPC[chain])
             if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
                 review.jev = try? await JevReviewer.site(host: host(origin), title: title, programs: ["EVM \(chain): \(to)"], changes: review.lines + review.changes, apiKey: key)
             }
@@ -303,11 +324,20 @@ final class Browser {
                 if let refusal = review.problems.first { workspace?.reply("Site \(origin): EVM transaction declined — \(refusal)", note: "browser") }
                 throw SiteError("4001|" + (review.problems.first ?? "The user declined."))
             }
+            // Simulated again now (research E-4): what's signed may take no more, pay or allow no one else, give no other right.
+            let again = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc, simulator: Self.evmSimulationRPC[chain])
+            let drift = SimulationDrift.outflowsGrew(shown: review.simulation?.changes ?? [:], now: again.simulation?.changes ?? [:], names: again.names)
+                ?? (again.recipients != review.recipients ? "it would pay or let spend other addresses than the window showed" : nil)
+                ?? (again.simulation?.grants != review.simulation?.grants ? "it would hand out other rights than the window showed" : nil)
+            if let why = Self.recheck(again.problems, drift) {
+                workspace?.reply("Site \(origin): EVM transaction, nothing signed — \(why) Ask the site for it again.", note: "browser")
+                throw SiteError("4001|Nothing signed: \(why)")
+            }
             let nonce = try await rpc.nonce(address)
             let fees = try await rpc.fees()
             let reply = try await SignerClient().send(.signEVMTransaction(chainId: chain, nonce: nonce, maxPriorityFee: fees.maxPriority, maxFee: fees.maxFee,
-                                                                         gasLimit: review.gas, to: to, value: value, data: data,
-                                                                         recipients: review.recipients))
+                                                                         gasLimit: again.gas, to: to, value: value, data: data,
+                                                                         recipients: again.recipients))
             guard reply.ok, let raw = reply.signedRaw else { throw SiteError("4001|" + XPCTradeSigner.reason(reply)) }
             do {
                 let hash = try await rpc.send(raw)
@@ -339,16 +369,23 @@ final class Browser {
         return s == "0x" ? 0 : UInt64(s.dropFirst(2), radix: 16)
     }
 
+    /// Why the second look after Sign stops a site's transaction: a refusal of its own, or how it drifted from the first.
+    static func recheck(_ problems: [String], _ drift: String?) -> String? {
+        problems.first.map { "checked again after Sign: \($0)" } ?? drift.map { "since you looked at it, \($0)." }
+    }
+
     /// Decodes, names the token, simulates the balance changes and estimates gas. Problems mean «do not sign».
-    static func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> EVMReview {
+    /// `simulator`: the node that runs eth_simulateV1 (Browser.evmSimulationRPC), `rpc` when nil.
+    static func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC, simulator: EVMRPC? = nil) async -> EVMReview {
         let call = EVMCall.decode(data)
         var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
+        let refusedByCall = !problems.isEmpty
         var lines: [String] = []
         // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
         // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
         if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
-        let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
+        var recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
         typealias Token = (address: String, symbol: String, decimals: Int?)
         func token(_ to: String) async -> Token {
@@ -382,16 +419,19 @@ final class Browser {
         switch call {
         case .plain:
             lines.append("Transfer \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native) to \(to).")
-        case .approve(let spender, let a), .increaseAllowance(let spender, let a):
+        case .approve(let spender, let a):
             let t = await token(to)
             lines.append("Allow \(spender) to spend up to \(sum(a, t)).")
+        case .increaseAllowance(let spender, let a):
+            let t = await token(to)
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)) more.")
         case .transfer(let r, let a):
             let t = await token(to)
             lines.append("Transfer \(sum(a, t)) to \(r).")
         case .nftTransfer(let f, let r):
             lines.append("Move NFTs of \(to) from \(f.lowercased() == from.lowercased() ? "this wallet" : f) to \(r).")
         case .delegation(let d, let on):
-            lines.append(on ? "Let \(d) borrow against or manage your lending positions." : "Revoke \(d)'s rights over your lending positions.")
+            lines.append(on ? "Let \(d) manage your positions or move your tokens in \(to)." : "Revoke \(d)'s rights in \(to).")
         case .transferFrom(let f, let r, let a):
             let t = await token(to)
             lines.append("Move \(sum(a, t)) from \(f) to \(r).")
@@ -441,27 +481,50 @@ final class Browser {
         var changes: [String] = []
         // Coins and tokens, never dollars: Fmt.usd showed 0.004 WBTC as «$0.00».
         func moved(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }
-        let simulator = Self.evmSimulationRPC[rpc.chainId].flatMap(URL.init(string:)).map { EVMRPC(url: $0, chainId: rpc.chainId) } ?? rpc
+        var simulation: EVMSimulation?, names = [EVMSimulation.native: native]
         do {
-            let sim = try await simulator.simulate(from: from, to: to, value: value, data: data)
+            let sim = try await (simulator ?? rpc).simulate(from: from, to: to, value: value, data: data)
+            simulation = sim
             if let revert = sim.revert { problems.append("Simulation: the call would revert — \(revert)") }
             for (asset, delta) in sim.changes.sorted(by: { $0.key < $1.key }) {
                 if asset == EVMSimulation.native { changes.insert("\(native): \(moved(delta / 1_000_000_000_000_000_000))", at: 0); continue }
                 let t = await token(asset)
                 let nft = sim.nfts.contains(asset)
                 let name = "\(t.symbol)\(nft ? " NFT" : "") (\(asset.prefix(6))…\(asset.suffix(4)))"
+                names[asset] = name
                 // An NFT counts pieces; a token without decimals() moves an amount nobody can show.
                 if nft { changes.append("\(name): \(moved(delta))") }
                 else if let d = t.decimals { changes.append("\(name): \(moved(delta / Decimal(sign: .plus, exponent: d, significand: 1)))") }
                 else { changes.append("\(name): \(delta < 0 ? "loses" : "gains") \(shown(abs(delta), t))") }
             }
             if sim.revert == nil, changes.isEmpty { changes.append("None of your balances change.") }
+            // Rights the call hands out that only its events show (research E-3). Only the contract the wallet calls itself
+            // can log a new right of the wallet's: everywhere else the wallet isn't msg.sender, and an Approval of its there
+            // is what's left of an old allowance after a transferFrom (OpenZeppelin before 5 logs it). Rights over everything,
+            // credit, ownership and anything unlimited are refused. A limited approve to an address the calldata didn't name
+            // becomes a recipient: allowed here by the tick and in person by Touch ID, which names it.
+            let known = EVMCall.knownSpenders(chainId: rpc.chainId)
+            let rights = ["approve": "spending", "nft": "an NFT", "all": "all NFTs", "permit2": "Permit2 spending", "operator": "operator",
+                          "authorization": "authorization", "credit": "borrowing", "ownership": "ownership"]
+            for g in sim.grants where g.asset == to.lowercased() && g.to.lowercased() != from.lowercased() {
+                let who = g.to.lowercased()
+                let asset = if let n = names[g.asset] { n } else { "\(await token(g.asset).symbol) (\(g.asset.prefix(6))…\(g.asset.suffix(4)))" }
+                if g.unlimited || ["all", "operator", "authorization", "credit", "ownership"].contains(g.kind) {
+                    // A call refused by its calldata already says so: the events would only repeat it.
+                    let why = "The simulation shows it gives \(who) \(g.unlimited && ["approve", "permit2", "credit"].contains(g.kind) ? "unlimited " : "")\(rights[g.kind] ?? g.kind) rights over your \(asset). Refused."
+                    if !refusedByCall, !problems.contains(why) { problems.append(why) }
+                } else if !known.contains(who), !recipients.contains(who) {
+                    lines.append("Allow \(who) to spend from \(asset) (\(g.kind)): seen in the simulation, not in the call.")
+                    recipients.append(who)
+                }
+            }
         } catch {
-            // The node can't simulate: at least check that the call doesn't revert.
-            changes.append("Unavailable: \(error.localizedDescription)")
-            let tx: [String: Any] = ["from": from, "to": to, "value": "0x" + String(value, radix: 16), "data": "0x" + data.hex]
-            do { _ = try await rpc.call("eth_call", [tx, "latest"]) } catch {
-                problems.append("Simulation: the call would revert — \(error.localizedDescription)")
+            // No simulation, no signature (research E-4): the chat refuses the same way. Short of gas is said as it is
+            // (EVMRPC.shortOfGas), with what to do: asking again in a minute wouldn't help.
+            changes.append("Not simulated.")
+            if error.localizedDescription.hasPrefix("Not enough") { problems.append(error.localizedDescription) } else {
+            problems.append("\(EVMRPC.names[rpc.chainId] ?? "Network \(rpc.chainId)")'s node couldn't simulate it (\(error.localizedDescription)), "
+                            + "and ihatecrypto signs nothing it hasn't simulated. Ask the site to send it again in a minute.")
             }
         }
         var gas: UInt64 = 0
@@ -475,7 +538,8 @@ final class Browser {
                 problems.append("Couldn't estimate gas: \(error.localizedDescription)")
             }
         }
-        return EVMReview(chain: rpc.chainId, to: to, value: value, data: data, lines: lines, changes: changes, recipients: recipients, gas: gas, problems: problems)
+        return EVMReview(chain: rpc.chainId, to: to, value: value, data: data, lines: lines, changes: changes, recipients: recipients, gas: gas,
+                         problems: problems, simulation: simulation, names: names)
     }
 
     private func ask(_ kind: SiteRequest.Kind, origin: String, site: SiteCheck.Verdict) async -> Bool {
@@ -515,13 +579,16 @@ final class Browser {
         let unknown = programs.filter { SolanaGuard.knownPrograms[$0] == nil }.sorted()
         var allowed = SolanaGuard.knownPrograms
         for p in unknown { allowed[p] = "unknown program \(p.prefix(6))…" }
-        let tokens = try await tokenAccounts(owner)
+        let (tokens, rights) = try await tokenAccounts(owner)
         let touched = tokens.filter { accounts.contains($0.key) }
         let owners = touched.mapValues { _ in owner }
         let verdict = SolanaGuard.check(message, accounts: accounts,
                                         policy: SolanaPolicy(owner: owner, programs: allowed, trustLookupTables: false), tokenOwners: owners)
         let solBefore = try await rpc.balance(owner)
-        let simulation = try await rpc.simulate(wire, watch: [owner] + touched.keys, sigVerify: false)
+        // Every other account it may write too: one it opens as the wallet's token account is checked for rights like ours.
+        var watch = [owner] + touched.keys.sorted()
+        for a in message.writable(accounts) where !watch.contains(a) { watch.append(a) }
+        let simulation = try await rpc.simulate(wire, watch: watch, sigVerify: false)
         var problems = verdict.problems
         var balances = Balances()
         if let error = simulation.error {
@@ -529,6 +596,9 @@ final class Browser {
         } else {
             balances = Self.balances(owner: owner, solBefore: solBefore, touched: touched, after: simulation.after)
             problems += balances.problems
+            // Rights no balance shows (research E-1): the wallet handed to a program, a token account's new owner or delegate.
+            problems += SolanaGuard.rightsProblems(owner: owner, before: rights.filter { touched[$0.key] != nil }, after: simulation.rights,
+                                                   names: touched.mapValues { Self.symbol($0.mint) })
         }
         // Programs ihatecrypto knows by name but doesn't sign for without asking are named, still marked as not on its list.
         let named = programs.sorted().map { p in
@@ -587,22 +657,25 @@ final class Browser {
     }
 
     /// Our token accounts, classic SPL and Token-2022 alike (the guard lets both run, so a drain through either shows):
-    /// address → mint, raw amount, decimals, the lamports it holds as rent.
-    private func tokenAccounts(_ owner: String) async throws -> [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)] {
+    /// address → mint, raw amount, decimals, the lamports it holds as rent; and who has a say over each before the move.
+    private func tokenAccounts(_ owner: String) async throws
+        -> (accounts: [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)], rights: [String: SolanaAccountRights]) {
         var items: [[String: Any]] = []
         for program in [SPL.tokenProgram, SPL.token2022Program] {
             let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
             items += r?["value"] as? [[String: Any]] ?? []
         }
         var out: [String: (String, UInt64, Int, UInt64)] = [:]
+        var rights: [String: SolanaAccountRights] = [:]
         for item in items {
             guard let address = item["pubkey"] as? String, let account = item["account"] as? [String: Any],
                   let info = (((account["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
                   let mint = info["mint"] as? String, let amount = info["tokenAmount"] as? [String: Any] else { continue }
             out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0,
                             (account["lamports"] as? NSNumber)?.uint64Value ?? 0)
+            rights[address] = SolanaRPC.rights(account)
         }
-        return out
+        return (out, rights)
     }
 
     /// WebKit's side: page messages in, answers out as the promise's value or error.

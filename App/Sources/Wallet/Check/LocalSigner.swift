@@ -287,6 +287,42 @@ func printPosition() async throws {
     try await printBalances()
 }
 
+/// `site-rights`: research E-1's live half. The browser reads rights no balance shows from the simulation's jsonParsed
+/// accounts; this proves the node returns them. Builds, never signs, an Assign and an Allocate of the test wallet and an
+/// Approve, SetAuthority(AccountOwner) and SetAuthority(CloseAccount) of its USDC account to a stranger, simulates each with
+/// both watched and compares the rights as the browser does. A memo must show none. Nothing is signed, so any wallet's
+/// address does (the Dev copy's test wallet, from its /state); the test wallet's when none is given.
+func siteRightsCheck(_ address: String?) async throws {
+    let owner = try address ?? LocalSigner().wallet.solana
+    let usdc = try SPL.associatedAccount(owner: owner, mint: Jupiter.usdcMint)
+    let stranger = Base58.encode(Data((0..<32).map { _ in UInt8.random(in: 0...255) })), key = try Base58.decode(stranger)
+    let info = try await rpc.call("getAccountInfo", [usdc, ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+    guard let before = info?["value"].flatMap(SolanaRPC.rights) else { throw WalletError("The test wallet has no USDC account: \(usdc)") }
+    let (hash, _) = try await rpc.latestBlockhash()
+    func le<T: FixedWidthInteger>(_ n: T) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
+    let wallet = SolanaInstruction.Account(pubkey: owner, isSigner: true, isWritable: true)
+    let account = SolanaInstruction.Account(pubkey: usdc, isSigner: false, isWritable: true)
+    let cases: [(name: String, ix: SolanaInstruction, refused: Bool)] = [
+        ("memo", SolanaInstruction(program: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", accounts: [wallet], data: Data("ihatecrypto site-rights".utf8)), false),
+        ("Assign", SolanaInstruction(program: SolanaGuard.system, accounts: [wallet], data: le(UInt32(1)) + key), true),
+        ("Allocate", SolanaInstruction(program: SolanaGuard.system, accounts: [wallet], data: le(UInt32(8)) + le(UInt64(64))), true),
+        ("Approve", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, .init(pubkey: stranger, isSigner: false, isWritable: false), wallet],
+                                      data: Data([4]) + le(UInt64(1_000_000))), true),
+        ("SetAuthority owner", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, wallet], data: Data([6, 2, 1]) + key), true),
+        ("SetAuthority close", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, wallet], data: Data([6, 3, 1]) + key), true),
+    ]
+    var failed = 0
+    for c in cases {
+        let wire = SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([c.ix], payer: owner, blockhash: hash))
+        let sim = try await rpc.simulate(wire, watch: [owner, usdc], sigVerify: false)
+        let problems = SolanaGuard.rightsProblems(owner: owner, before: [usdc: before], after: sim.rights, names: [usdc: "USDC"])
+        let pass = sim.error == nil && problems.isEmpty != c.refused
+        if !pass { failed += 1 }
+        print("\(pass ? "PASS" : "FAIL") \(c.name): \(sim.error.map { "the simulation failed — \($0)" } ?? problems.first ?? "no right changes")")
+    }
+    if failed > 0 { throw WalletError("\(failed) of \(cases.count) checks failed") }
+}
+
 /// `browser-test-page <path>`: a local dApp page for the in-app browser test, with fresh unsigned transactions
 /// for the test wallet: a Memo (a program outside ihatecrypto's list) and a token Approve to a stranger (a drainer).
 func writeBrowserTestPage(_ path: String) async throws {

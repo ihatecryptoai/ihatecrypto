@@ -36,6 +36,7 @@ import WalletCore
 //   relay-back <USDC> [--yes]     Hyperliquid perp USDC → USDC on Solana through Relay, timed
 //   evm-sig                       sign an Arbitrum transfer with a random key; the node must name our address
 //   guard-demo                    feed the guard a real transaction with a swapped-in scam address
+//   site-rights [address]         a site's Assign, Allocate, Approve and SetAuthority, simulated, never signed: the browser must see each
 //   return <USDC> [--yes]         HyperCore spot USDC → Solana USDC through 1Click (spotSend to the deposit address)
 //   reconcile                     check every signed-but-unfinished entry of the journal on chain
 //   hl-sig                        testnet signature check with a random key
@@ -102,6 +103,7 @@ do {
     case "sweep-hyperliquid": try await sweepHyperliquid(to: args.dropFirst().first { !$0.hasPrefix("--") } ?? "")
     case "ledger": try await ledgerCheck(Array(args.dropFirst()))
     case "browser-test-page": try await writeBrowserTestPage(args.dropFirst().first ?? "/tmp/ihatecrypto-test.html")
+    case "site-rights": try await siteRightsCheck(args.dropFirst().first)
     default: print("Unknown command: \(command)"); exit(2)
     }
 } catch {

@@ -120,12 +120,19 @@ and the older `navigator.wallets`) and an EVM provider (EIP-1193, announced thro
 through a confirmation window.
 
 - Solana transactions are parsed and simulated. Programs outside the built-in list sign only after a separate
-  permission (`extraPrograms` to the signer), named on the Touch ID prompt.
+  permission (`extraPrograms` to the signer), named on the Touch ID prompt. The simulation's accounts also show rights
+  no balance does (`SolanaGuard.rightsProblems`): the wallet handed to a program or given data, a token account's new
+  owner, delegate or close authority — refused.
 - EVM sign-in (`personal_sign`) and flat typed data: the signer hashes the JSON itself (`Wallet/Core/TypedData.swift`)
-  and refuses Permit and Permit2, nested types and bare hashes.
+  and refuses Permit and Permit2, nested types, bare hashes, and someone else's address beside an amount or a `true`
+  (Morpho's and Compound's Authorization).
 - EVM transactions (`eth_sendTransaction`): calldata is decoded (`EVMCall` in `Chains/EVM/EVM.swift`). Unlimited
-  approvals, `setApprovalForAll`, permits and `transferFrom` out of the user's wallet are refused in the app and in
-  the signer. The call is checked with `eth_call`, gas is estimated, and the signer builds and signs the transaction.
+  approvals and increases, `setApprovalForAll`, authorizations and operators, permits and `transferFrom` out of the
+  user's wallet are refused in the app and in the signer. The call is simulated with `eth_simulateV1` (no simulation,
+  no signature), rights its events show are refused or asked about like a recipient, gas is estimated, and the signer
+  builds and signs the transaction.
+- After Sign, both kinds are simulated again: more leaving than the window showed, another recipient or right, or a
+  new refusal stops it with a note in the chat (`SimulationDrift`).
 - `SiteCheck` flags hosts that look like known dApps, and the browser checks MetaMask's phishing list. Jev
   (`JevReviewer.site`) gives a second opinion on the site and the transaction.
 

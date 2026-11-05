@@ -17,6 +17,8 @@ public struct SolanaMessage: Sendable {
 
     public let version: Int?
     public let requiredSignatures: Int
+    /// The header's counts of signers and of other accounts that are only read.
+    public var readonlySigned = 0, readonlyUnsigned = 0
     public let staticKeys: [String]
     /// The recent blockhash the message was built on: once past use, the transaction can never land.
     public let blockhash: String
@@ -55,7 +57,7 @@ public struct SolanaMessage: Sendable {
         if bytes[0] & 0x80 != 0 { version = Int(bytes[0] & 0x7f); p = 1 }
         guard version == nil || version == 0 else { throw unsupported(version!) }
         try need(3)
-        let required = Int(bytes[p]); p += 3
+        let required = Int(bytes[p]), readonly = (Int(bytes[p + 1]), Int(bytes[p + 2])); p += 3
         let keyCount = try compact()
         try need(keyCount * 32 + 32)
         let keys = (0..<keyCount).map { Base58.encode(Data(bytes[(p + $0 * 32)..<(p + $0 * 32 + 32)])) }
@@ -83,7 +85,18 @@ public struct SolanaMessage: Sendable {
         }
         // Trailing bytes would be signed without being checked.
         guard p == bytes.count else { throw WalletError("Extra bytes after the message") }
-        return SolanaMessage(version: version, requiredSignatures: required, staticKeys: keys, blockhash: blockhash, instructions: instructions, lookups: lookups)
+        var message = SolanaMessage(version: version, requiredSignatures: required, staticKeys: keys, blockhash: blockhash, instructions: instructions, lookups: lookups)
+        (message.readonlySigned, message.readonlyUnsigned) = readonly
+        return message
+    }
+
+    /// The accounts the message may write, from `accounts(tables:)`'s list: signers but the last `readonlySigned`, other
+    /// static keys but the last `readonlyUnsigned`, then every lookup table's writable entries.
+    public func writable(_ accounts: [String]) -> [String] {
+        let signed = 0..<max(0, requiredSignatures - readonlySigned)
+        let unsigned = requiredSignatures..<max(requiredSignatures, staticKeys.count - readonlyUnsigned)
+        let looked = staticKeys.count..<(staticKeys.count + lookups.reduce(0) { $0 + $1.writable.count })
+        return accounts.indices.filter { signed.contains($0) || unsigned.contains($0) || looked.contains($0) }.map { accounts[$0] }
     }
 
     /// Every account the message can touch, in Solana's order: static keys, then all writable
@@ -100,6 +113,25 @@ public struct SolanaMessage: Sendable {
             }
         }
         return out
+    }
+}
+
+/// Who has a say over an account, read from jsonParsed: what a balance can't show (research E-1, 2026-11-05).
+public struct SolanaAccountRights: Sendable, Equatable {
+    /// The program that owns it: the System program for a wallet.
+    public var program: String
+    /// Bytes of data it holds: none for a wallet.
+    public var space: Int
+    /// A token account's owner, its delegate and how much that one may still spend, and who may close it. nil: unset,
+    /// or not a token account.
+    public var owner: String?
+    public var delegate: String?
+    public var delegatedAmount: UInt64
+    public var closeAuthority: String?
+
+    /// With no arguments, no one's rights: a token account before the transaction opens it.
+    public init(program: String = "", space: Int = 0, owner: String? = nil, delegate: String? = nil, delegatedAmount: UInt64 = 0, closeAuthority: String? = nil) {
+        (self.program, self.space, self.owner, self.delegate, self.delegatedAmount, self.closeAuthority) = (program, space, owner, delegate, delegatedAmount, closeAuthority)
     }
 }
 
@@ -122,16 +154,21 @@ extension SolanaRPC {
     /// Simulates and returns the watched accounts' state afterwards: lamports and, for token accounts, raw amount.
     /// `sigVerify: false` simulates a transaction before it is signed.
     /// `slot`: the slot it ran at. It ran on the transaction's own blockhash, so that node knew the blockhash then.
+    /// `rights`: who has a say over each watched account afterwards; one the transaction closes (null) is missing.
     public func simulate(_ transaction: Data, watch: [String], sigVerify: Bool = true) async throws
-        -> (error: String?, after: [String: (lamports: UInt64, token: UInt64?)], slot: UInt64) {
+        -> (error: String?, after: [String: (lamports: UInt64, token: UInt64?)], slot: UInt64, rights: [String: SolanaAccountRights]) {
         let r = try await call("simulateTransaction", [transaction.base64EncodedString(), [
             "encoding": "base64", "sigVerify": sigVerify, "commitment": "finalized",
             "accounts": ["encoding": "jsonParsed", "addresses": watch],
         ]]) as? [String: Any]
         let value = r?["value"] as? [String: Any], slot = ((r?["context"] as? [String: Any])?["slot"] as? NSNumber)?.uint64Value ?? 0
         var after: [String: (lamports: UInt64, token: UInt64?)] = [:]
-        for (address, account) in zip(watch, value?["accounts"] as? [Any] ?? []) { after[address] = Self.state(account) ?? (0, nil) }
-        guard let err = value?["err"], !(err is NSNull) else { return (nil, after, slot) }
+        var rights: [String: SolanaAccountRights] = [:]
+        for (address, account) in zip(watch, value?["accounts"] as? [Any] ?? []) {
+            after[address] = Self.state(account) ?? (0, nil)
+            rights[address] = Self.rights(account)
+        }
+        guard let err = value?["err"], !(err is NSNull) else { return (nil, after, slot, rights) }
         let text = JSONSerialization.isValidJSONObject(err)
             ? (try? JSONSerialization.data(withJSONObject: err)).map { String(decoding: $0, as: UTF8.self) } ?? "\(err)" : "\(err)"
         let logs = value?["logs"] as? [String] ?? []
@@ -139,11 +176,11 @@ extension SolanaRPC {
         if Self.shortOfSOL(text, logs: logs), let payer = try? SolanaMessage.parse(transaction: transaction).staticKeys.first {
             let have = (try? await balance(payer)).map { " has \(Decimal($0) / 1_000_000_000) SOL and" } ?? ""
             return ("Not enough SOL: the wallet \(payer.prefix(4))…\(payer.suffix(4))\(have) can't pay Solana's fee and the rent of the account "
-                    + "this move opens. Send it ≈ 0.01 SOL, then try again.", after, slot)
+                    + "this move opens. Send it ≈ 0.01 SOL, then try again.", after, slot, rights)
         }
         // The program's own words when it logged any, e.g. «Error: insufficient funds».
         let reason = logs.first { $0.contains("Error") }?.replacingOccurrences(of: "Program log: ", with: "")
-        return (reason.map { "\($0) \(text)" } ?? text, after, slot)
+        return (reason.map { "\($0) \(text)" } ?? text, after, slot, rights)
     }
 
     /// The watched accounts' state now, in one read and one slot: what a move's balance rules compare the simulation with.
@@ -184,6 +221,20 @@ extension SolanaRPC {
         let amount = (((a["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any])
             .flatMap { ($0["tokenAmount"] as? [String: Any])?["amount"] as? String }.flatMap(UInt64.init)
         return (lamports, amount)
+    }
+
+    /// One account in jsonParsed: its program, its size (the node's «space», else the length of its raw data) and, for a
+    /// token account, its owner, delegate and close authority; nil when it isn't an account (null: closed or never opened).
+    public static func rights(_ account: Any) -> SolanaAccountRights? {
+        guard let a = account as? [String: Any] else { return nil }
+        let parsed = a["data"] as? [String: Any]
+        let info = (parsed?["parsed"] as? [String: Any])?["info"] as? [String: Any]
+        let raw = ((a["data"] as? [Any])?.first as? String).flatMap { Data(base64Encoded: $0) }?.count
+        return SolanaAccountRights(program: a["owner"] as? String ?? "",
+                                   space: (a["space"] as? NSNumber)?.intValue ?? (parsed?["space"] as? NSNumber)?.intValue ?? raw ?? 0,
+                                   owner: info?["owner"] as? String, delegate: info?["delegate"] as? String,
+                                   delegatedAmount: ((info?["delegatedAmount"] as? [String: Any])?["amount"] as? String).flatMap(UInt64.init) ?? 0,
+                                   closeAuthority: info?["closeAuthority"] as? String)
     }
 
     /// The fee payer can't cover the fee or a new account's rent: it holds no SOL at all (AccountNotFound), too little for

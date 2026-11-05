@@ -489,3 +489,80 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     // A flash loan on the same position: not an instruction ihatecrypto uses.
     #expect(try !verdict([0x87, 0xe7, 0x34, 0xa7, 0x07, 0x34, 0xd4, 0xc1], obligation: mine).ok)
 }
+
+/// Research E-1 (2026-11-05): a program outside the list can hand the wallet to itself (Assign) or give it data (Allocate),
+/// and make someone else the owner, delegate or close authority of a token account, while no balance moves (SlowMist,
+/// December 2025). The simulation's jsonParsed accounts show it. A spam account's stranger close authority from before is
+/// not a change, a smaller allowance for the same delegate isn't either, and an account that closes has no rights left.
+@Test func rightsTheSimulationShowsChangingAreRefused() throws {
+    let usdc = deposit
+    func wallet(program: String = SolanaGuard.system, data: Int = 0, space: Bool = true) -> Any {
+        var a: [String: Any] = ["lamports": 1_000_000_000, "owner": program, "executable": false,
+                                "data": [Data(count: data).base64EncodedString(), "base64"]]
+        if space { a["space"] = data }
+        return a
+    }
+    func token(owner: String = me, delegate: String? = nil, delegated: String = "0", close: String? = nil) -> Any {
+        var info: [String: Any] = ["mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "owner": owner, "state": "initialized", "isNative": false,
+                                   "tokenAmount": ["amount": "5000000", "decimals": 6, "uiAmountString": "5"]]
+        if let delegate { info["delegate"] = delegate; info["delegatedAmount"] = ["amount": delegated, "decimals": 6, "uiAmountString": delegated] }
+        if let close { info["closeAuthority"] = close }
+        return ["lamports": 2_039_280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "space": 165,
+                "data": ["program": "spl-token", "space": 165, "parsed": ["type": "account", "info": info]]]
+    }
+    func problems(wallet w: Any = wallet(), before: Any = token(), after: Any = token()) throws -> [String] {
+        var now: [String: SolanaAccountRights] = [:]
+        now[me] = SolanaRPC.rights(w)
+        now[usdc] = SolanaRPC.rights(after)
+        return SolanaGuard.rightsProblems(owner: me, before: [usdc: try #require(SolanaRPC.rights(before))], after: now, names: [usdc: "USDC"])
+    }
+    #expect(try problems().isEmpty)
+    // The wallet: handed to a program, or given data (read from the data itself when the node doesn't say «space»).
+    #expect(try problems(wallet: wallet(program: unknownProgram)) == ["Your wallet would be handed to the program \(unknownProgram): from then on that program, not your key, decides what leaves it."])
+    #expect(try problems(wallet: wallet(data: 8)) == ["Your wallet would get 8 bytes of data and could no longer pay Solana's fee."])
+    #expect(try problems(wallet: wallet(data: 8, space: false)).count == 1)
+    // A token account: a new delegate, a bigger allowance, another owner, a new close authority.
+    #expect(try problems(after: token(delegate: scam, delegated: "1000000")) == ["\(scam) could spend your USDC."])
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token(delegate: scam, delegated: "9")).count == 1)
+    #expect(try problems(before: token(delegate: me, delegated: "5"), after: token(delegate: scam, delegated: "5")).count == 1)
+    #expect(try problems(after: token(owner: scam)) == ["Your USDC account would belong to \(scam)."])
+    #expect(try problems(after: token(close: scam)) == ["\(scam) could close your USDC account and take its rent."])
+    // Not a change: the same delegate with less left, a revoke, a stranger's close authority from the start, the
+    // wallet's own authority, an account the transaction closes (the node answers null).
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token(delegate: scam, delegated: "3")).isEmpty)
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token()).isEmpty)
+    #expect(try problems(before: token(close: scam), after: token(close: scam)).isEmpty)
+    #expect(try problems(after: token(close: me)).isEmpty)
+    #expect(try problems(after: NSNull()).isEmpty)
+    // A token account the transaction opens for the wallet starts with no one else's rights: a delegate or a close
+    // authority on it would take every later deposit. Opened plainly, it passes.
+    let opened = "NewTokenAccount11111111111111111111111111111"
+    func open(_ account: Any) -> [String] {
+        SolanaGuard.rightsProblems(owner: me, before: [:], after: [me: SolanaRPC.rights(wallet())!, opened: SolanaRPC.rights(account)!], names: [:])
+    }
+    #expect(open(token()).isEmpty)
+    #expect(open(token(delegate: scam, delegated: "18446744073709551615")) == ["\(scam) could spend your tokens in NewT…1111."])
+    #expect(open(token(close: scam)).count == 1)
+    #expect(open(token(owner: scam, delegate: scam, delegated: "1")).isEmpty)   // someone else's account: not the wallet's rights
+
+    // What the browser watches: the accounts the transaction may write, by the header's readonly counts and the lookup
+    // tables' writable entries. A read-only one can't change.
+    let ix = SolanaInstruction(program: SPL.tokenProgram, accounts: [.init(pubkey: me, isSigner: true, isWritable: true),
+                                                                     .init(pubkey: usdc, isSigner: false, isWritable: true),
+                                                                     .init(pubkey: SolanaGuard.system, isSigner: false, isWritable: false)], data: Data())
+    let m = try SolanaMessage.parse(transaction: SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([ix], payer: me, blockhash: usdc)))
+    #expect(Set(m.writable(m.staticKeys)) == [me, usdc])
+}
+
+/// Research E-4: what's signed is simulated again after Sign. More than 1 % more of anything leaving, or something leaving
+/// that didn't, stops it; less leaving, or less arriving (the transaction's own minimum holds that), doesn't.
+@Test func aSecondSimulationMayNotTakeMoreThanTheWindowShowed() {
+    let shown: [String: Decimal] = ["usdc": -5, "sol": Decimal(string: "-0.001")!, "jup": 10]
+    let names = ["usdc": "USDC"]
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: shown) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": Decimal(string: "-5.04")!, "sol": Decimal(string: "-0.001")!, "jup": 9]) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -4, "sol": Decimal(string: "-0.001")!]) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": Decimal(string: "-5.1")!], names: names) == "more USDC would leave than the window showed")
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "bonk": -1]) == "bonk would leave too, which the window didn't show")
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "jup": -1]) != nil)
+}
