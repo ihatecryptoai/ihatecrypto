@@ -134,7 +134,9 @@ public enum WalletCommand: Equatable, Sendable {
     /// SOL and the deposits there — and paid back (nil = all of it). `against`: what the loan stands on («SPCX», «SOL»);
     /// `adding`: that many of its tokens put up as collateral first (nil = what's there already).
     case kaminoBorrow(Decimal?, against: String? = nil, adding: Decimal? = nil)
-    case kaminoRepay(Decimal?)
+    /// `against`: the loan to pay back by what it stands on («SOL»: the main market, a stock: the Backpack one); nil =
+    /// the Backpack market's first, then the main one's.
+    case kaminoRepay(Decimal?, against: String? = nil)
     /// SOL into JitoSOL (liquid staking) and back; nil = all.
     case stake(Decimal?)
     case unstake(Decimal?)
@@ -544,7 +546,7 @@ public enum WalletCommand: Equatable, Sendable {
                 return .kaminoBorrow(amount ?? (bare == adding ? nil : bare), against: stock ?? (againstSOL ? "SOL" : nil), adding: adding)
             }
             if q.contains(Self.repayWords) {
-                return .kaminoRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare)
+                return .kaminoRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare, against: stock ?? (againstSOL ? "SOL" : nil))
             }
         }
         // Borrowing on Aave and paying it back, and ETH as its collateral: «borrow 10 USDC on aave», «займи 10 USDC в aave»,
@@ -1071,7 +1073,7 @@ extension WalletCommand {
             return "move \(n(x)) USDT from \(Self.placeName(from)) to \(Self.placeName(to))" + (layerZero ? " via LayerZero" : "")
         case .aaveBorrow(let x, let net): return "borrow \(n(x)) USDC on Aave on \(Self.placeName(net))"
         case .kaminoBorrow(let x, let s, let add): return "borrow \(n(x)) USDC on kamino" + (s.map { " against " + (add.map { "\(n($0)) " } ?? "") + $0 } ?? "")
-        case .kaminoRepay(let x): return x == nil ? "repay all USDC on kamino" : "repay \(n(x)) USDC on kamino"
+        case .kaminoRepay(let x, let s): return (x == nil ? "repay all USDC on kamino" : "repay \(n(x)) USDC on kamino") + (s.map { " against \($0)" } ?? "")
         case .aaveRepay(let x, let net): return x == nil ? "repay all USDC on Aave on \(Self.placeName(net))" : "repay \(n(x)) USDC on Aave on \(Self.placeName(net))"
         case .aaveCollateral(let x, let net): return "supply \(n(x)) ETH as collateral on Aave on \(Self.placeName(net))"
         case .claimRewards: return "claim rewards on Merkl"

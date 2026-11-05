@@ -222,10 +222,10 @@ extension Executor {
 
     /// Pays back `usdc` of the USDC debt on Kamino (nil = all of it, interest included) from the USDC on Solana, on the
     /// market that holds the debt. Kamino takes no more than is owed.
-    public func kaminoRepay(usdc: Decimal?) async throws -> String {
+    public func kaminoRepay(usdc: Decimal?, against: String? = nil) async throws -> String {
         // One market a time, the Backpack market first; a loan on the other one too is named in the reply.
         var found: (market: String, loan: Kamino.Loan, owed: Decimal, reserve: Kamino.Reserve)?, other: (market: String, owed: Decimal)?
-        for m in [Kamino.backpackMarket, Kamino.mainMarket] {
+        for m in Kamino.markets(against: against) {
             guard let loan = try await Kamino.loan(wallet: wallet.solana, market: m), let d = loan.debts.first(where: { $0.symbol == "USDC" }), d.tokens > 0,
                   let r = try await Kamino.reserves(market: m).first(where: { $0.symbol == "USDC" }) else { continue }
             // The stored amount stands still between the position's refreshes on chain; Kamino's refreshed dollars
@@ -233,7 +233,7 @@ extension Executor {
             let refreshed = loan.debts.count == 1 && r.priceUSD > 0 ? loan.debtUSD / r.priceUSD : 0
             if found == nil { found = (m, loan, max(d.tokens, refreshed), r) } else { other = (m, max(d.tokens, refreshed)) }
         }
-        guard let found else { throw ExecutionError("No USDC debt on Kamino.") }
+        guard let found else { throw ExecutionError(against == "SOL" ? "No USDC debt against SOL on Kamino's main market." : "No USDC debt on Kamino.") }
         let place = Self.kaminoMarketName(found.market), usdcReserve = found.reserve
         // All of it: the interest of the next minutes too, a tenth of a percent over; Kamino takes only what's owed.
         var asked = usdc.map { min($0, found.owed) } ?? (found.owed * Decimal(string: "1.001")!).rounded(6, .up)
@@ -259,7 +259,7 @@ extension Executor {
         let line = "Paid back \(Fmt.num(paid > 0 ? paid : max(found.owed - left, 0), maxFraction: 6)) USDC on \(place): "
             + (left > Decimal(string: "0.00001")! ? "\(Fmt.num(left, maxFraction: 6)) USDC still owed" + (caughtUp ? ", health factor \(now?.health.map { Fmt.num($0, maxFraction: 2) } ?? "∞")." : ".")
                : "no debt left." + (stocks.isEmpty ? "" : " The \(stocks.joined(separator: ", ")) stays as collateral: «withdraw \(stocks[0]) from kamino» takes it back."))
-            + (other.map { " \(Fmt.num($0.owed, maxFraction: 6)) USDC is still owed on Kamino's \($0.market == Kamino.backpackMarket ? "Backpack" : "main") market too: «repay all USDC on kamino» again pays it." } ?? "")
+            + (other.map { " \(Fmt.num($0.owed, maxFraction: 6)) USDC is still owed on Kamino's \($0.market == Kamino.backpackMarket ? "Backpack market too: «repay all USDC on kamino» again" : "main market too: «repay all USDC on kamino against SOL»") pays it." } ?? "")
         report(line)
         return line
     }

@@ -89,3 +89,11 @@ import TxGuard
     #expect(await e.kaminoBorrowedJustNow(on: Kamino.mainMarket))
     #expect(await !e.kaminoBorrowedJustNow(on: Kamino.backpackMarket))
 }
+
+/// «Repay» finds the loan by what it stands on: SOL on the main market, a Backpack stock on the Backpack one, and with
+/// nothing named the Backpack market first (a wallet with both loans pays back the one it names, not always Backpack's).
+@Test func repayLooksForTheLoanOnTheMarketOfItsCollateral() {
+    #expect(Kamino.markets(against: "SOL") == [Kamino.mainMarket])
+    #expect(Kamino.markets(against: "SPCX") == [Kamino.backpackMarket])
+    #expect(Kamino.markets(against: nil) == [Kamino.backpackMarket, Kamino.mainMarket])
+}

@@ -1363,7 +1363,7 @@ extension Workspace {
         case .aaveBorrow(let x?, let net), .aaveCollateral(let x?, let net): aaveDebtRoute(command, x, net)
         case .aaveRepay(let x, let net): aaveDebtRoute(command, x, net)
         case .kaminoBorrow(let x?, let stock, let adding): kaminoDebtRoute(command, x, stock, adding)
-        case .kaminoRepay(let x): kaminoDebtRoute(command, x, nil, nil)
+        case .kaminoRepay(let x, _): kaminoDebtRoute(command, x, nil, nil)
         case .gas(let place, let usd): gasRoute(place, usd ?? 1)
         case .claimRewards, .sweepRewards: claimRoute()
         default: ends(command).map { from, to in
@@ -2545,10 +2545,10 @@ extension Workspace {
                   let a = try? await executor(wallet).aaveAccount(m), !Task.isCancelled else { return }
             swapQuote = (command, [("debt", Fmt.usd(a.debt), a.debt)])
             return
-        case .kaminoRepay:
+        case .kaminoRepay(_, let against):
             // What is owed now, on the market that holds the loan.
             let owner = solanaAddress
-            for m in [Kamino.backpackMarket, Kamino.mainMarket] {
+            for m in Kamino.markets(against: against) {
                 if let loan = try? await Kamino.loan(wallet: owner, market: m), loan.debtUSD > 0 {
                     guard !Task.isCancelled else { return }
                     swapQuote = (command, [("debt", Fmt.usd(loan.debtUSD), loan.debtUSD),

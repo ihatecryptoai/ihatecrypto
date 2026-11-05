@@ -10,6 +10,11 @@ public enum Kamino {
     /// The stocks it takes as collateral, by ticker: Backpack Securities' Token-2022 tokens, each backed one to one by a
     /// US-listed share, tradable on Solana (Orca's pools, through Jupiter) by any wallet. Kamino's reserve stats on
     /// 2026-10-28: SPCX and SNDK borrow up to 30% of their value and liquidate at 50%, MU and SKHY 40% and 60%.
+    /// The markets a loan against `collateral` can be on, in the order «repay» looks: SOL on the main market, a Backpack
+    /// stock on the Backpack one, unnamed the Backpack market first.
+    public static func markets(against collateral: String?) -> [String] {
+        switch collateral { case "SOL": [mainMarket]; case nil: [backpackMarket, mainMarket]; default: [backpackMarket] }
+    }
     public static let backpackStocks = ["SPCX": "SpaceX", "MU": "Micron", "SKHY": "SK Hynix", "SNDK": "SanDisk"]
     /// The market a token goes into: Backpack's stocks the Backpack market, everything else the main one.
     public static func market(for symbol: String) -> String { backpackStocks[symbol.uppercased()] == nil ? mainMarket : backpackMarket }

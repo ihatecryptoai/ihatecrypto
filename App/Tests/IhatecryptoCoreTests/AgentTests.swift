@@ -827,6 +827,11 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(WalletCommand.parse("repay all USDC on kamino") == .kaminoRepay(nil))
     #expect(WalletCommand.parse("погаси долг на камино") == .kaminoRepay(nil))
     #expect(WalletCommand.parse("repay 1.5 USDC on kamino") == .kaminoRepay(Decimal(string: "1.5")!))
+    // Two loans: the one to pay back by what it stands on — SOL is the main market, a stock the Backpack one.
+    #expect(WalletCommand.parse("repay all USDC on kamino against SOL") == .kaminoRepay(nil, against: "SOL"))
+    #expect(WalletCommand.parse("погаси долг под SOL на камино") == .kaminoRepay(nil, against: "SOL"))
+    #expect(WalletCommand.parse("погаси 0.5 USDC долга под SPCX на камино") == .kaminoRepay(Decimal(string: "0.5")!, against: "SPCX"))
+    #expect(WalletCommand.kaminoRepay(nil, against: "SOL").summary == "repay all USDC on kamino against SOL")
     #expect(WalletCommand.parse("deposit 0.05 SPCX to kamino") == .kamino(deposit: true, symbol: "SPCX", amount: five))
     #expect(WalletCommand.parse("withdraw SPCX from kamino") == .kamino(deposit: false, symbol: "SPCX", amount: nil))
     #expect(WalletCommand.parse("выведи 0.02 SNDK из камино") == .kamino(deposit: false, symbol: "SNDK", amount: Decimal(string: "0.02")!))

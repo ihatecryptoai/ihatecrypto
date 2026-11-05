@@ -664,7 +664,7 @@ extension Workspace {
                 default: reply(try await e.aaveSupplyETH(m, eth: x ?? 0), note: "\(m.place) · collateral")
                 }
             case .kaminoBorrow(let x, let stock, let adding): reply(try await e.kaminoBorrow(usdc: x ?? 0, against: stock, adding: adding), note: "Kamino · borrow")
-            case .kaminoRepay(let x): reply(try await e.kaminoRepay(usdc: x), note: "Kamino · repay")
+            case .kaminoRepay(let x, let against): reply(try await e.kaminoRepay(usdc: x, against: against), note: "Kamino · repay")
             case .receiveAcross: break   // no card: the deposit address goes on the canvas (prepareReceiveAcross)
             case .crossSwap(let a, let from, let b, let to, let amount):
                 // NEAR's side: the wallet's NEAR account, which only the signer derives.
@@ -957,7 +957,7 @@ extension Workspace {
                       "На рынке Backpack в Kamino пока ничего не заложено. В кошельке \(n) \(s): «borrow \(x) USDC on kamino against \(n) \(s)» заложит их и займёт за один раз.")
                 : say("There's no \(s) on Kamino or in the wallet. Buy it first — «buy \(s) on solana for 5 USDC» — then borrow against it.",
                       "\(s) нет ни в Kamino, ни в кошельке. Сначала купи — «купи \(s) на солане на 5 USDC», — потом займи под него.")
-        case .kaminoRepay(let asked) where !inChain:
+        case .kaminoRepay(let asked, _) where !inChain:
             if solana != nil, kaminoLoanRead, (kaminoLoan?.debtUSD ?? 0) <= 0, kamino <= 0 {
                 return say("No USDC debt on Kamino — nothing to pay back.", "Долга в USDC на Kamino нет — возвращать нечего.")
             }
