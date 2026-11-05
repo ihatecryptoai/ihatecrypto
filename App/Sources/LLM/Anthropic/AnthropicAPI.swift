@@ -48,11 +48,11 @@ struct AnthropicClient: LLMClient {
     /// so only the first in 5 minutes pays for them in full. A JSON answer is asked for in the instructions: the API's own
     /// JSON mode needs a schema. Thinking: Claude 5 models think as they see fit without being asked, at their own
     /// effort, and «Think before answering» raises it to high, as the Claude Code and ChatGPT clients do.
-    static func body(_ r: LLMRequest, think: Bool) -> [String: Any] {
+    static func body(_ r: LLMRequest, think: Bool, cap: Int = 32_000) -> [String: Any] {
         var body: [String: Any] = [
             "model": r.model,
             // A cap, not a target: thinking counts toward it, and a JSON answer is a few hundred tokens.
-            "max_tokens": 32_000,
+            "max_tokens": cap,
             "stream": true,
             "messages": r.dialogue.map { ["role": $0.role.rawValue, "content": $0.text] },
         ]
@@ -66,17 +66,18 @@ struct AnthropicClient: LLMClient {
 
     func complete(_ r: LLMRequest) async throws -> String { try await stream(r) { _ in } }
 
-    /// A model that doesn't take adaptive thinking or an effort (Haiku 4.5 and older) answers without them.
+    /// An older model picked from the live list is asked once more as plainly as it gets: Haiku 4.5 and before take
+    /// neither adaptive thinking nor an effort, and some write 4,096 tokens at most.
     func stream(_ r: LLMRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
         do { return try await streamOnce(r, think: r.thinking, partial: partial) } catch let refused as NetError
-            where r.thinking && refused.message.hasPrefix("HTTP 400") && ["thinking", "effort"].contains(where: { refused.message.contains($0) }) {
-            return try await streamOnce(r, think: false, partial: partial)
+            where refused.message.hasPrefix("HTTP 400") && ["thinking", "effort", "max_tokens"].contains(where: { refused.message.contains($0) }) {
+            return try await streamOnce(r, think: false, cap: 4_096, partial: partial)
         }
     }
 
-    private func streamOnce(_ r: LLMRequest, think: Bool, partial: @escaping @Sendable (String) -> Void) async throws -> String {
+    private func streamOnce(_ r: LLMRequest, think: Bool, cap: Int = 32_000, partial: @escaping @Sendable (String) -> Void) async throws -> String {
         let request = try HTTP.request(AnthropicAPI.base + "/messages", method: "POST",
-                                       body: try JSONSerialization.data(withJSONObject: Self.body(r, think: think)),
+                                       body: try JSONSerialization.data(withJSONObject: Self.body(r, think: think, cap: cap)),
                                        contentType: "application/json", headers: headers.merging(["Accept": "text/event-stream"]) { mine, _ in mine },
                                        timeout: think ? 180 : 90)
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -85,10 +86,10 @@ struct AnthropicClient: LLMClient {
             for try await byte in bytes.prefix(600) { body.append(byte) }
             do { try HTTP.check(response, body: body) } catch { throw AnthropicAPI.explained(error) }
         }
-        var stream = AnthropicStream()
+        var stream = AnthropicStream(), ended = false
         for try await line in bytes.lines {
             let before = stream.text.count
-            if try stream.feed(line) { break }
+            if try stream.feed(line) { ended = true; break }
             if stream.text.count != before { partial(stream.text) }
         }
         // A refusal is billed for what was read: counted before it's said.
@@ -96,6 +97,9 @@ struct AnthropicClient: LLMClient {
         if stream.stop == "refusal" {
             throw LLMError("Claude declined this request (Anthropic's safety check). Put it in other words, or pick another model.")
         }
+        // Half an answer is never taken for a whole one.
+        guard ended else { throw LLMError("Anthropic's answer was cut off on the way. Send it again.") }
+        if stream.stop == "max_tokens" { throw LLMError("The model's answer ran past its length limit. Send it again, or pick another model.") }
         guard !stream.text.isEmpty else { throw LLMError("The model returned an empty reply.") }
         return stream.text
     }

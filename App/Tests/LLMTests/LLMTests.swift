@@ -279,6 +279,14 @@ nonisolated final class AnthropicStub: URLProtocol {
     #expect(heard.usage == [LLMUsage(input: 5_030, written: 5_000, output: 3)])
     #expect(AnthropicStub.asked.count == 2 && AnthropicStub.asked.allSatisfy { $0.headers["x-api-key"] == "sk-ant-test" && $0.headers["anthropic-version"] == "2026-10-21" })
     #expect(AnthropicStub.asked[0].body["thinking"] != nil && AnthropicStub.asked[1].body["thinking"] == nil && AnthropicStub.asked[1].body["output_config"] == nil)
+    #expect(AnthropicStub.asked[0].body["max_tokens"] as? Int == 32_000 && AnthropicStub.asked[1].body["max_tokens"] as? Int == 4_096)
+
+    // A stream that ends before message_stop is half an answer: said, not taken for the whole.
+    AnthropicStub.replies = [(200, #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\"rep"}}"# + "\n\n")]
+    let cut = await #expect(throws: LLMError.self) {
+        try await AnthropicClient(key: "k").complete(LLMRequest(model: "claude-opus-5-5", messages: [LLMMessage(.user, "x")]))
+    }
+    #expect(cut?.message.contains("cut off") == true)
 
     // A key that isn't scoped to a workspace: Anthropic's 400 (docs: manage-claude/authentication) is said as what to do,
     // in the chat and in Settings' model list alike, and not asked again without thinking.
