@@ -740,7 +740,7 @@ actor SolanaMoves {
             let key = owner + " " + sig   // a move is the owner's side of it: a send between two wallets is −X and +X
             if read[key] == nil {
                 // Thrown (throttled past its retries, dropped) or null (a node without it): stop, the rest next time.
-                guard let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"]])) as? [String: Any]
+                guard let tx = (try? await rpc.call("getTransaction", [sig, ["encoding": "jsonParsed", "maxSupportedTransactionVersion": 1, "commitment": "confirmed"]])) as? [String: Any]
                 else { return nil }
                 if let move = CostBasis.SolanaMove(tx, owner: owner) { read[key] = move }
             }

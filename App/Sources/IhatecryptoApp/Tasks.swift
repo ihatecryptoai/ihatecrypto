@@ -18,7 +18,8 @@ nonisolated enum TaskRun {
     /// «every month on the 1st» run by hand on the 14th still runs on the 1st (it moved to the 14th).
     @MainActor static var kept: [String: Date] = [:]
     /// Below this the automation wallet can't pay Solana's fee plus a new account's rent (a Jupiter Lend deposit failed
-    /// with 0.00198 SOL on 2026-10-06; rent-exempt minimum 0.00089 + a token account 0.00204 + fees).
+    /// with 0.00198 SOL on 2026-10-06; the rent minimum, read from the network, then 0.00089 + a token account's 0.00204
+    /// + fees, 0.00065 + 0.00149 in Nov 2026 and falling).
     static let solFloor = Decimal(string: "0.005")!
 }
 

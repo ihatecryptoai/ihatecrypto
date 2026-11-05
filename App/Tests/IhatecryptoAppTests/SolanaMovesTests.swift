@@ -29,21 +29,25 @@ nonisolated final class MovesNode: URLProtocol {
         let j = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         let params = j["params"] as? [Any] ?? []
         Self.commitments.append((params.last as? [String: Any])?["commitment"] as? String ?? "none")
-        var result: Any?
+        var result: Any?, error: [String: Any]?
         switch j["method"] as? String {
         case "getSignaturesForAddress":
             result = Self.signatures.map { $0.map { ["signature": $0.sig, "err": $0.failed ? ["InstructionError": [0, "Custom"]] : NSNull()] as [String: Any] } }
         case "getTransaction":
             let sig = params.first as? String ?? ""
             Self.asked[sig, default: 0] += 1
+            let version = ((params.last as? [String: Any])?["maxSupportedTransactionVersion"] as? NSNumber)?.intValue ?? -1
             switch Self.transactions[sig] {
-            case "ok": result = Self.buy(at: sig == "A" ? 1_000 : 2_000)
+            case "v1" where version < 1:   // mainnet's answer to a v1 asked for without version 1 (2026-11-05)
+                error = ["code": -32015, "message": "Transaction version (1) is not supported by the requesting client. Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": 1"]
+            case "ok", "v1": result = Self.buy(at: sig == "A" ? 1_000 : 2_000)
             case "null": result = NSNull()
             default: result = nil
             }
         default: result = nil
         }
-        let reply = result.map { try! JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "result": $0]) }
+        let reply = error.map { try! JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "error": $0]) }
+            ?? result.map { try! JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "result": $0]) }
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: reply == nil ? 400 : 200, httpVersion: nil, headerFields: nil)!,
                             cacheStoragePolicy: .notAllowed)
         client!.urlProtocol(self, didLoad: reply ?? Data("bad request".utf8))
@@ -91,6 +95,13 @@ nonisolated final class MovesNode: URLProtocol {
     /// null for a signature the node itself listed: one it doesn't have (another node in the pool), not «no transaction».
     @Test func aListedTransactionNullIsNotRead() async {
         #expect(await moves(SolanaMoves(), signatures: [("A", false), ("B", false)], transactions: ["A": "ok", "B": "null"]) == nil)
+    }
+
+    /// A v1 transaction (a fifth of mainnet's since Nov 2026) is read like any other: asked for with version 1. Asked with
+    /// 0 the node refused it (-32015), and the coin's P/L was never whole.
+    @Test func aV1TransactionIsRead() async {
+        let all = await moves(SolanaMoves(), signatures: [("A", false), ("B", false)], transactions: ["A": "ok", "B": "v1"])
+        #expect(all?.count == 2, "\(String(describing: all))")
     }
 
     @Test func signaturesNotReadAnswerNothing() async {

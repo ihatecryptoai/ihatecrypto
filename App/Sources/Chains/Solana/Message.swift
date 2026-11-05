@@ -1,7 +1,7 @@
 import Foundation
 import WalletCore
 
-/// A decoded Solana transaction message (legacy or v0), for checking what is about to be signed.
+/// A decoded Solana transaction message (legacy or v0), for checking what is about to be signed. v1 is refused.
 public struct SolanaMessage: Sendable {
     public struct Instruction: Sendable {
         public let programIndex: Int
@@ -25,9 +25,20 @@ public struct SolanaMessage: Sendable {
 
     /// Parses a full wire transaction (signatures + message).
     public static func parse(transaction wire: Data) throws -> SolanaMessage {
+        // Legacy and v0 start with the count of signatures, always under 128. A first byte of 128 or more is a version:
+        // v1's 0x81 puts the message first and the signatures last (SIMD-0385).
+        if let first = wire.first, first & 0x80 != 0 { throw unsupported(Int(first & 0x7f)) }
         var o = 0
         let signatures = try SolanaTransaction.readCompact(wire, &o)
+        guard o + signatures * 64 <= wire.count else { throw WalletError("Transaction truncated") }
         return try parse(message: wire.subdata(in: (wire.startIndex + o + signatures * 64)..<wire.endIndex))
+    }
+
+    /// Only legacy and v0 are read. v1 moves the signatures and puts the priority fee in its header, so every check here
+    /// would read it wrong: refused until it's read in full.
+    static func unsupported(_ version: Int) -> WalletError {
+        WalletError(version == 1 ? "This transaction is in Solana's new v1 format, which ihatecrypto doesn't sign yet. Nothing was signed."
+                                 : "This isn't a Solana transaction ihatecrypto can read. Nothing was signed.")
     }
 
     public static func parse(message m: Data) throws -> SolanaMessage {
@@ -42,6 +53,7 @@ public struct SolanaMessage: Sendable {
         try need(1)
         var version: Int?
         if bytes[0] & 0x80 != 0 { version = Int(bytes[0] & 0x7f); p = 1 }
+        guard version == nil || version == 0 else { throw unsupported(version!) }
         try need(3)
         let required = Int(bytes[p]); p += 3
         let keyCount = try compact()

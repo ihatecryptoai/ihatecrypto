@@ -22,6 +22,9 @@ private final class CosignedNode: URLProtocol {
         var noMeta: Set<String> = []          // getTransaction answers these without their outcome
         var transactions: [String: (signatures: [String], err: String?)] = [:]
         var silent = false                    // every call: HTTP 400, the node doesn't answer anything useful
+        var v1: Set<String> = []              // v1 transactions: getTransaction refuses them unless asked with version 1
+        var rentRate: UInt64 = 5_080          // lamports a byte: an account's rent minimum is (128 + its size) × this
+        var balances: [String: UInt64] = [:]
     }
 
     static let lock = NSLock()
@@ -61,6 +64,14 @@ private final class CosignedNode: URLProtocol {
             least > state.listSlot ? behind : result("[" + (config?["commitment"] as? String == "finalized" ? state.indexedLate + state.list : state.list).map {
                 #"{"signature":"\#($0.signature)","slot":\#($0.slot),"err":null,"confirmationStatus":"confirmed","blockTime":1790000000}"#
             }.joined(separator: ",") + "]")
+        case "getTransaction" where state.v1.contains(params.first as? String ?? "")
+                                    && (config?["maxSupportedTransactionVersion"] as? NSNumber)?.intValue ?? -1 < 1:
+            // Mainnet's words, 2026-11-05.
+            #"{"jsonrpc":"2.0","id":1,"error":{"code":-32015,"message":"Transaction version (1) is not supported by the requesting client. Please try the request again with the following configuration parameter: \"maxSupportedTransactionVersion\": 1"}}"#
+        case "getMinimumBalanceForRentExemption":
+            result("\((128 + ((params.first as? NSNumber)?.uint64Value ?? 0)) * state.rentRate)")
+        case "getBalance":
+            result(#"{"context":{"slot":130},"value":\#(state.balances[params.first as? String ?? ""] ?? 0)}"#)
         case "getTransaction":
             (params.first as? String).flatMap { id in state.transactions[id].map { (id, $0) } }.map { id, tx in
                 let meta = state.noMeta.contains(id) ? "null" : #"{"err":\#(tx.err ?? "null")}"#
@@ -113,6 +124,49 @@ private func gone() -> CosignedNode.State {
     let rpc = CosignedNode.node("gone", gone())
     let found = try await rpc.waitForCosigned(ours, signer: wallet, blockhash: "hash", after: simulated, timeout: 5)
     #expect(found.outcome == .expired && found.transaction == nil)
+}
+
+/// Someone else's v1 transaction newer than ours in the wallet's list (spam mostly: v1 is a fifth of mainnet's since
+/// Nov 2026): read with version 1, so ours is found, not waited for till the timeout.
+@Test func cosignedReadsV1Neighbours() async throws {
+    var s = landed()
+    s.list.insert(("spamV1", 127), at: 0)
+    s.transactions["spamV1"] = (["SpamSender"], nil)
+    s.v1 = ["spamV1"]
+    let found = try await CosignedNode.node("v1", s).waitForCosigned(ours, signer: wallet, blockhash: "hash", after: simulated, timeout: 5)
+    #expect(found.outcome == .confirmed && found.transaction == sponsor)
+}
+
+/// Rent is the network's word, never a constant: it fell from 6,960 lamports a byte to 5,080 in Sep 2026 and steps
+/// down again with Agave 4.4 (SIMD-0437). Kamino's first-deposit rent, measured at 5,080, scales with it.
+@Test func rentIsReadFromTheNetwork() async throws {
+    #expect(try await CosignedNode.node("rent", .init()).rentMinimum() == 650_240)
+    #expect(try await CosignedNode.node("rent", .init()).rentMinimum(bytes: 165) == 1_488_440)
+    var step3 = CosignedNode.State()
+    step3.rentRate = 2_575
+    let kamino = await Executor.kaminoFirstRent(CosignedNode.node("rentStep3", step3))
+    #expect(abs(kamino - Decimal(string: "0.0151")!) < Decimal(string: "0.0001")!, "\(kamino)")
+    var silent = CosignedNode.State()
+    silent.silent = true
+    #expect(await Executor.kaminoFirstRent(CosignedNode.node("rentSilent", silent)) == Decimal(string: "0.0298")!)
+}
+
+/// A send to an empty account: refused under the network's rent minimum, with that minimum named; 0.0007 SOL, which the
+/// old constant (0.00089088) refused, goes on past it (to the blockhash this node doesn't give).
+@Test func anEmptyAccountOpensWithTheNetworksRentMinimum() async throws {
+    var s = CosignedNode.State()
+    s.balances = [wallet: 1_000_000_000]
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("rent-\(UUID().uuidString).jsonl")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let executor = Executor(wallet: TradeWallet(solana: wallet, evm: "0x0"), signer: ZeroSigner(), journal: Journal(url: url),
+                            rpc: CosignedNode.node("rentSend", s)) { _ in }
+    func said(_ sol: String) async -> String {
+        do { _ = try await executor.sendSOL(Decimal(string: sol)!, to: "EmptyAccount", label: "Savings"); return "sent" } catch { return error.localizedDescription }
+    }
+    let short = await said("0.0006")
+    #expect(short.contains("at least 0.00065024 SOL"), "\(short)")
+    let enough = await said("0.0007")
+    #expect(!enough.contains("rent minimum"), "\(enough)")
 }
 
 /// A wallet with fewer transactions than one page: the list is its whole history, so nothing older can hide ours.

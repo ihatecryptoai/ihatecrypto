@@ -63,12 +63,14 @@ extension Executor {
         let hlp: (equity: Decimal, withdrawable: Decimal, lockedUntil: Date?) = (try? await HyperliquidAccount.vaultEquity(user: wallet.evm, vault: HLGuard.hlpVault)) ?? (0, 0, nil)
         let solPrice = (try? await Hyperliquid.markets()["SOL"]?.markPx) ?? 0
         func apy(_ place: String) -> Decimal? { options.first { $0.place == place }?.apy }
-        // Estimates, shown as such: Kamino's first deposit opens accounts for ≈ 0.03 SOL of rent (0.0176 of it comes
-        // back on a full exit); an EVM place's round trip is split half out, half in (EVMPlaces.swift).
+        // Estimates, shown as such: Kamino's first deposit opens accounts for ≈ 0.03 SOL of rent at September's rate, less as
+        // rent falls (kaminoFirstRent; 0.0176 of it comes back on a full exit); an EVM place's round trip is split half out,
+        // half in (EVMPlaces.swift).
+        let kaminoRent = kamino > 0 ? 0 : await Self.kaminoFirstRent(rpc)
         var places: [Rebalance.Place] = []
         if let a = apy("Jupiter Lend") { places.append(.init(name: "Jupiter Lend", apy: a, amount: jupiter)) }
         if let a = apy("Kamino Lend") {
-            places.append(.init(name: "Kamino Lend", apy: a, amount: kamino, entryCost: kamino > 0 ? 0 : Decimal(string: "0.0298")! * solPrice))
+            places.append(.init(name: "Kamino Lend", apy: a, amount: kamino, entryCost: kaminoRent * solPrice))
         }
         for p in await evmCall {
             places.append(.init(name: p.name, apy: p.apy, amount: p.supplied, exitCost: p.roundTripUSD / 2, entryCost: p.roundTripUSD / 2,

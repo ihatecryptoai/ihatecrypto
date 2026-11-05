@@ -189,7 +189,7 @@ extension Executor {
             throw ExecutionError("The transfer failed: \(e). The money stayed.")
         case .expired:
             try journal.append(.init(chain: "solana", id: signature, kind: .expired))
-            throw ExecutionError("The transfer didn't make it into a block; nothing moved. You can retry.")
+            throw ExecutionError("The transfer didn't make it into a block, so nothing moved. You can retry.")
         }
     }
 }
@@ -250,9 +250,13 @@ extension Executor {
         guard sol == nil || have >= lamports + 20_000 else {
             throw ExecutionError("\(Fmt.num(Decimal(have) / 1_000_000_000, maxFraction: 9)) SOL on Solana: not enough for \(shown) and the fee.")
         }
-        // An empty account opens only with Solana's rent minimum; less than that is refused by the network.
-        if try await rpc.balance(owner) == 0, lamports < 890_880 {
-            throw ExecutionError("\(label)'s Solana account is empty: Solana opens it only with at least 0.00089088 SOL (its rent minimum). Send at least that.")
+        // An empty account opens only with Solana's rent minimum, the network's word (0.00065024 SOL in Nov 2026, falling):
+        // less than that is refused by the network.
+        if try await rpc.balance(owner) == 0 {
+            let least = try await rpc.rentMinimum()
+            guard lamports >= least else {
+                throw ExecutionError("\(label)'s Solana account is empty: Solana opens it only with at least \(Fmt.num(Decimal(least) / 1_000_000_000, maxFraction: 9)) SOL (its rent minimum). Send at least that.")
+            }
         }
         let (blockhash, lastValid) = try await rpc.latestBlockhash()
         let transfer = SolanaInstruction(program: SolanaGuard.system, accounts: [
@@ -296,7 +300,7 @@ extension Executor {
             throw ExecutionError("The transfer failed: \(e). The SOL stayed.")
         case .expired:
             try journal.append(.init(chain: "solana", id: signature, kind: .expired))
-            throw ExecutionError("The transfer didn't make it into a block; nothing moved. You can retry.")
+            throw ExecutionError("The transfer didn't make it into a block, so nothing moved. You can retry.")
         }
     }
 }

@@ -343,7 +343,7 @@ extension Executor {
         let spendable = nativeIn ? (have > 10_000_000 ? have - 10_000_000 : 0) : have
         let units = requested.map { NSDecimalNumber(decimal: ($0 * scale).rounded(0, .down)).uint64Value } ?? spendable
         guard units > 0, units <= spendable else {
-            throw ExecutionError("You have \(Fmt.num(Decimal(spendable) / scale, maxFraction: 6)) \(from.symbol)\(nativeIn ? " (0.01 SOL is kept for fees)" : ""); need \(Fmt.num(Decimal(units) / scale, maxFraction: 6)).")
+            throw ExecutionError("You have \(Fmt.num(Decimal(spendable) / scale, maxFraction: 6)) \(from.symbol)\(nativeIn ? " (0.01 SOL is kept for fees)" : ""), and the swap needs \(Fmt.num(Decimal(units) / scale, maxFraction: 6)).")
         }
         let inAccount = try SPL.associatedAccount(owner: wallet.solana, mint: from.mint, program: from.token2022 ? SPL.token2022Program : SPL.tokenProgram)
         let outAccount = try SPL.associatedAccount(owner: wallet.solana, mint: to.mint, program: to.token2022 ? SPL.token2022Program : SPL.tokenProgram)
@@ -354,7 +354,7 @@ extension Executor {
         func holdsShown(_ out: UInt64, feeBps: Decimal = 0) throws {
             guard let shown, Decimal(out) < Decimal(shown) * (1 - (100 + feeBps) / 10_000) else { return }
             throw ExecutionError("Jupiter now gives \(Fmt.num(Decimal(out) / outScale, maxFraction: 8)) \(to.symbol), more than 1% under the "
-                                 + "\(Fmt.num(Decimal(shown) / outScale, maxFraction: 8)) the card showed. Nothing was signed; Refresh shows the new price.")
+                                 + "\(Fmt.num(Decimal(shown) / outScale, maxFraction: 8)) the card showed. Nothing was signed. Refresh shows the new price.")
         }
         // The swap moves the price past impactCap: asked, not signed. What goes in, in USD: the USDC itself, else what comes
         // out (Jupiter's own price for it) before the impact.
@@ -380,9 +380,10 @@ extension Executor {
                 sponsored = (order, payer)
             }
         }
-        // Not even the rent of an account the swap opens (the temporary wSOL one, or the coin's own: ≈ 0.00204 SOL) and Jupiter
-        // won't pay: said before a simulation fails on it.
-        if sponsored == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000 {
+        // Not even the rent of an account the swap opens (the temporary wSOL one, or the coin's own: a 165-byte token account,
+        // its minimum read from the network) and a fee, and Jupiter won't pay: said before a simulation fails on it.
+        if sponsored == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000,
+           lamports < (try? await rpc.rentMinimum(bytes: 165)).map({ $0 + 60_000 }) ?? 2_100_000 {
             throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and Jupiter pays the fee only for a bigger one ($5 and up). Swap more, or add ≈ 0.01 SOL first.")
         }
         if let (order, sponsor) = sponsored {
@@ -446,7 +447,7 @@ extension Executor {
                 guard attempt < 3 else { throw failure }
                 firstFailure = firstFailure ?? failure
                 excluded += quote.dexes.filter { !excluded.contains($0) }
-                report("Route \(quote.route) \(why); nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
+                report("Route \(quote.route) \(why), so nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
             }
         }
         if dryRun { return "Simulation (nothing signed): " + changes.joined(separator: "; ") }
@@ -822,7 +823,7 @@ extension Executor {
         // Aave and Morpho on the EVM networks, USDC only: rates and balances from the pools and vaults themselves.
         let evm = isSOL ? [] : await evmPlaces()
         let total = free + jupiter + kamino + jito + evm.reduce(0) { $0 + $1.supplied }
-        let kaminoRentUSD = Decimal(string: "0.0298")! * solPrice
+        let kaminoRentUSD = await Self.kaminoFirstRent(rpc) * solPrice
         // A vault switched off in Settings › Modules is skipped, with the reason in the notes; so is one they asked to leave out.
         let modules = Modules.current
         func leftOut(_ place: String) -> String? { without.contains { place.lowercased().contains($0) } ? "left out, as asked" : nil }
@@ -959,6 +960,14 @@ extension Executor {
     static func pullToSolana(slices: [(network: String?, amount: Decimal)], idle: [(network: String, usdc: Decimal)],
                              onSolana: Decimal) -> [(network: String, usdc: Decimal)] {
         spreadMoves(slices: slices, idle: idle, onSolana: onSolana).moves.filter { $0.to == "solana" }.map { ($0.from, $0.usdc) }
+    }
+
+    /// SOL of rent Kamino's first deposit opens its accounts with: 0.0298 measured 2026-09-27, when an empty account's
+    /// minimum was 650,240 lamports, scaled to today's (rent keeps falling, SIMD-0437). That measure when the node is silent.
+    static func kaminoFirstRent(_ rpc: SolanaRPC) async -> Decimal {
+        let measured = Decimal(string: "0.0298")!
+        guard let now = try? await rpc.rentMinimum() else { return measured }
+        return measured * Decimal(now) / 650_240
     }
 
     /// SOL spent according to a simulation's change lines (the «SOL: −0.0298» line), as a positive number.

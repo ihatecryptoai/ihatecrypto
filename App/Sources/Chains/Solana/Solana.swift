@@ -48,6 +48,17 @@ public struct SolanaRPC: Sendable {
         return (r?["value"] as? NSNumber)?.uint64Value ?? 0
     }
 
+    /// The lamports an account of `bytes` must hold to open: its rent minimum as the network says it now. Never written
+    /// down: it fell from 890,880 for an empty account to 650,240 in Sep 2026 and keeps stepping down (SIMD-0437).
+    public func rentMinimum(bytes: Int = 0) async throws -> UInt64 {
+        // Bounded, so no sum with it can overflow: a node's -1 or 1e30 is no rent (2^40 lamports ≈ 1,100 SOL).
+        guard let lamports = (try await call("getMinimumBalanceForRentExemption", [bytes]) as? NSNumber)?.int64Value,
+              lamports > 0, lamports < 1 << 40 else {
+            throw WalletError("Solana RPC getMinimumBalanceForRentExemption: no rent minimum in the answer")
+        }
+        return UInt64(lamports)
+    }
+
     /// What `owner`'s own token account for `mint` holds, in whole tokens; 0 without one. Two light reads (the mint's
     /// program, the account's balance), never getTokenAccountsByOwner, which the public node throttles right after a swap.
     public func ownedAmount(owner: String, mint: String) async throws -> Decimal {
@@ -156,7 +167,7 @@ public struct SolanaRPC: Sendable {
                     guard !others.contains(id) else { continue }
                     // Read whole or not at all: a reply without its signatures or its outcome may be ours.
                     guard let tx = try await call("getTransaction", [id, ["encoding": "json", "commitment": "confirmed",
-                                                                          "maxSupportedTransactionVersion": 0]]) as? [String: Any],
+                                                                          "maxSupportedTransactionVersion": 1]]) as? [String: Any],
                           let meta = tx["meta"] as? [String: Any],
                           let signatures = (tx["transaction"] as? [String: Any])?["signatures"] as? [String] else { unread = true; continue }
                     guard signatures.contains(signature) else { others.insert(id); continue }
@@ -219,13 +230,14 @@ public enum SolanaTransaction {
         let signaturesStart = offset
         let messageStart = offset + signatureCount * 64
         guard signatureCount >= 1, wire.count > messageStart else { throw WalletError("Incomplete transaction") }
-        let message = wire.subdata(in: messageStart..<wire.count)
+        let message = wire.subdata(in: (wire.startIndex + messageStart)..<wire.endIndex)
 
         var m = message.startIndex
         if message[m] & 0x80 != 0 { m += 1 }                    // versioned (v0) prefix
+        guard m < message.endIndex else { throw WalletError("Incomplete transaction") }
         let signers = sponsor == nil ? 1 : 2
         guard message[m] == signers, signatureCount == signers else {
-            throw WalletError("The transaction needs \(message[m]) signatures; expected \(sponsor == nil ? "only ours" : "the fee payer's and ours")")
+            throw WalletError("The transaction needs \(message[m]) signatures, but \(sponsor == nil ? "only ours was" : "the fee payer's and ours were") expected")
         }
         m += 3
         var keyOffset = m - message.startIndex
@@ -253,16 +265,22 @@ public enum SolanaTransaction {
         return out
     }
 
+    /// Solana's compact-u16, read as the network reads it: at most three bytes, at most 65,535, no padded form. Anything
+    /// else is refused, so every count is 0…65,535 and no length math after it can stop the app (a site's bytes once did).
     static func readCompact(_ data: Data, _ offset: inout Int) throws -> Int {
-        var value = 0, shift = 0
-        while true {
+        var value = 0
+        for shift in [0, 7, 14] {
             guard data.startIndex + offset < data.endIndex else { throw WalletError("Truncated length") }
             let byte = data[data.startIndex + offset]
             offset += 1
+            guard byte != 0 || shift == 0 else { throw WalletError("Bad length") }
             value |= Int(byte & 0x7f) << shift
-            if byte & 0x80 == 0 { return value }
-            shift += 7
+            if byte & 0x80 == 0 {
+                guard value <= 0xFFFF else { throw WalletError("Bad length") }
+                return value
+            }
         }
+        throw WalletError("Bad length")
     }
 
     static func le<T: FixedWidthInteger>(_ v: T) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }

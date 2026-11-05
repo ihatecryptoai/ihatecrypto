@@ -101,6 +101,75 @@ private let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     #expect(throws: WalletError.self) { try SolanaMessage.parse(transaction: wire + Data([0])) }
 }
 
+/// A v1 transaction (SIMD-0385, on mainnet since Oct 2026): the message first — 0x81, the header, the config mask, the
+/// blockhash, the counts, the addresses — and the signatures last. Read as legacy, 0x81 0x01 was 129 signatures and the
+/// range past them ran backwards: a site's signTransaction stopped the app (2026-11-05).
+private let v1Message = Data([0x81, 1, 0, 1]) + Data(count: 4) + Data(repeating: 1, count: 32) + Data([0, 2])
+    + Data(repeating: 7, count: 32) + Data(repeating: 9, count: 32)
+
+@Test func parseRefusesV1() throws {
+    let refused = #expect(throws: WalletError.self) { try SolanaMessage.parse(transaction: v1Message + Data(count: 64)) }
+    #expect(refused?.message.contains("v1") == true && refused?.message.contains("Nothing was signed") == true, "\(String(describing: refused))")
+    // The same message inside the old envelope (a count, a signature, the message) is v1 too, never read as v0.
+    #expect(#expect(throws: WalletError.self) { try SolanaMessage.parse(message: v1Message) }?.message.contains("v1") == true)
+    #expect(#expect(throws: WalletError.self) { try SolanaMessage.parse(transaction: Data([1]) + Data(count: 64) + v1Message) }?.message.contains("v1") == true)
+    #expect(throws: WalletError.self) { try SolanaTransaction.unsigned(v1Message + Data(count: 64), payer: Data(repeating: 7, count: 32)) }
+    // Any other first byte of 128 or more is no transaction at all: never called «v0», which is read.
+    #expect(#expect(throws: WalletError.self) { try SolanaMessage.parse(transaction: Data([0x80, 1, 0, 0])) }?.message.contains("can read") == true)
+}
+
+/// Whatever bytes a site sends, the parsers answer or throw: the app and the signer never stop on them. Random buffers,
+/// a real transfer with bytes changed or cut, and lengths made to overflow.
+@Test func parseNeverTraps() throws {
+    struct SplitMix: RandomNumberGenerator {   // seeded, so a failure repeats
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+    var random = SplitMix(state: 2026_11_05)
+    let payer = Data(repeating: 7, count: 32)
+    let transfer = try SolanaTransaction.transfer(from: payer, to: Base58.encode(Data(repeating: 9, count: 32)),
+                                                  lamports: 1, blockhash: Base58.encode(Data(repeating: 1, count: 32))).wire
+    var buffers: [Data] = [Data(repeating: 0x80, count: 9) + Data([0x01]), Data([0xff, 0xff, 0xff, 0x7f]),
+                           Data([0x01]) + Data(count: 64) + Data([0x80]), Data([0x80]), Data(), v1Message]
+    for _ in 0..<2_000 {
+        buffers.append(Data((0..<Int.random(in: 0...600, using: &random)).map { _ in UInt8.random(in: 0...255, using: &random) }))
+        var changed = transfer
+        for _ in 0..<Int.random(in: 1...3, using: &random) {
+            changed[Int.random(in: 0..<changed.count, using: &random)] = UInt8.random(in: 0...255, using: &random)
+        }
+        buffers.append(changed.prefix(Int.random(in: 0...changed.count, using: &random)))
+    }
+    for whole in buffers {
+      for wire in [whole, (Data([0]) + whole).dropFirst()] {   // a slice too: its indices start at 1
+        _ = try? SolanaMessage.parse(transaction: wire)
+        _ = try? SolanaMessage.parse(message: wire)
+        _ = try? SolanaTransaction.unsigned(wire, payer: payer)
+      }
+    }
+    // A transaction read from a slice is the same transaction.
+    #expect(try SolanaMessage.parse(transaction: (Data([0]) + transfer).dropFirst()).staticKeys == SolanaMessage.parse(transaction: transfer).staticKeys)
+    let us = try Curve25519.Signing.PrivateKey(rawRepresentation: payer).publicKey.rawRepresentation
+    let whole = try SolanaTransaction.unsigned(transfer, payer: us), sliced = try SolanaTransaction.unsigned((Data([0]) + transfer).dropFirst(), payer: us)
+    #expect(sliced.message == whole.message && sliced.slot.lowerBound == whole.slot.lowerBound + 1)
+}
+
+/// Solana's compact-u16, as the network reads it: at most three bytes, at most 65,535, no padded form.
+@Test func compactIsU16() throws {
+    func read(_ bytes: [UInt8]) throws -> Int { var o = 0; return try SolanaTransaction.readCompact(Data(bytes), &o) }
+    #expect(try read([0x7f]) == 127)
+    #expect(try read([0x80, 0x01]) == 128)
+    #expect(try read([0xff, 0xff, 0x03]) == 65_535)
+    for bad: [UInt8] in [[0xff, 0xff, 0x04], [0x80, 0x80, 0x80, 0x01], [0x80, 0x00], [0xff, 0xff, 0xff, 0x7f]] {
+        #expect(throws: WalletError.self, "\(bad)") { try read(bad) }
+    }
+}
+
 /// Token-2022 accounts derive from that program: real holders of POKÉMON CARDS (a Token-2022 mint) from a mainnet
 /// transaction, 2026-09-29.
 @Test func token2022AccountsDeriveFromTheirProgram() throws {
