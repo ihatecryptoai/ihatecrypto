@@ -49,6 +49,9 @@ public enum BlockCatalog {
               example: "send 1 USDC to Bybit", fill: "solana", logo: "usdc"),
         Block(group: "Move money", label: "ANY TOKEN · AS IT IS", title: "Send a token", form: "send N|all TICKER|0xCONTRACT|MINT on NETWORK to NAME from the address book",
               example: "send all RAY on solana to Bybit", fill: "solana", logo: "sol"),
+        Block(group: "Move money", label: "PRIVATE · NEAR INTENTS", title: "Send privately",
+              form: "send N USDC privately to NAME from the address book · on chain the deposit and the payout can't be matched",
+              example: "send 2 USDC privately to Bybit", fill: "check", logo: "near"),
 
         Block(group: "Buy and sell", label: "SWAP · JUPITER", title: "Tokens on Solana", form: "buy|sell SOL, BTC, ETH, JUP, BONK… for N USDC",
               example: "buy SOL for 2 USDC", fill: "jupiter", logo: "jup"),
