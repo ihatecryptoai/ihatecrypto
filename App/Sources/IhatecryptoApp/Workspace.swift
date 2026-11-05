@@ -1444,7 +1444,8 @@ final class Workspace {
     /// Which position a position command is about. Never a guess: the asset the message names, else the plan's asset
     /// if it has a position, else the only position when no plan is on screen. nil means ask.
     func targetCoin(for text: String) -> String? {
-        let open = Set(positions.map(\.coin) + (pendingEntry.map { [$0.coin] } ?? []))
+        // A TWAP the app started is one too, with its position flat («cancel the TWAP» after its stop fired).
+        let open = Set(positions.map(\.coin) + (pendingEntry.map { [$0.coin] } ?? []) + exitRules.filter { $0.value.twapId != nil }.map(\.key))
         if let named = IntentParser.namedAsset(text, markets: Set(markets.keys)) { return open.contains(named) ? named : nil }
         if intent != TradeIntent(), open.contains(intent.asset) { return intent.asset }
         if intent == TradeIntent(), open.count == 1 { return open.first }

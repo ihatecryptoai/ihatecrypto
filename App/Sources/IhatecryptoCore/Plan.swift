@@ -413,6 +413,8 @@ public enum Plan {
         }
         if i.twapMinutes != nil {
             lines.append("They go on once the TWAP's first part fills, for the whole position: as it grows, they cover all of it.")
+            lines.append("The stop is set from the first part's price: parts bought \(i.side == .long ? "higher" : "lower") later lose more at it than the risk above.")
+            lines.append("If the stop or take fires while the TWAP still runs, ihatecrypto stops the TWAP, while it's open or in the menu bar.")
         }
         lines.append("Triggers on mark price; a market exit may fill worse.")
         return Block(id: "protection", label: label, title: "Stop & take-profit", lines: lines, status: e.problem == nil ? .ready : .blocked)

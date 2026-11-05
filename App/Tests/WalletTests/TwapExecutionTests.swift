@@ -91,8 +91,10 @@ extension FakeHyperliquid {
         let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("twapcancel-\(UUID().uuidString).jsonl"))
         let e = Executor(wallet: TradeWallet(solana: "", evm: "0x0"), signer: ZeroSigner(), journal: journal) { _ in }
         let row: [String: Any] = ["state": ["coin": "ETH", "side": "B", "sz": "0.1", "minutes": 120], "status": ["status": "activated"], "twapId": 77]
-        let done: [String: Any] = ["state": ["coin": "ETH"], "status": ["status": "finished"], "twapId": 5]
-        FakeHL.lock.withLock { FakeHL.state = .init(position: Decimal(string: "0.01")!, orders: [stop(2, "2940"), take(3, "3120")]); FakeHL.state.twaps = [row, done] }
+        // twapHistory is a log: a TWAP that finished has its «activated» row too, and isn't running.
+        let done: [[String: Any]] = [["state": ["coin": "ETH"], "status": ["status": "finished"], "twapId": 5],
+                                     ["state": ["coin": "ETH"], "status": ["status": "activated"], "twapId": 5]]
+        FakeHL.lock.withLock { FakeHL.state = .init(position: Decimal(string: "0.01")!, orders: [stop(2, "2940"), take(3, "3120")]); FakeHL.state.twaps = [row] + done }
         let line = try await e.manage(.cancelOrders, asset: "ETH")
         #expect(line == "ETH TWAP stopped (1). What it bought stays open with its stop and take-profit.")
         #expect(FakeHL.lock.withLock { FakeHL.state.sent } == ["twap cancel 77"])
@@ -103,5 +105,39 @@ extension FakeHyperliquid {
         }
         _ = try await e.close(asset: "ETH")
         #expect(FakeHL.lock.withLock { FakeHL.state.sent }.prefix(2) == ["twap cancel 77", "close sell"])
+
+        // The guardian: with the stop on the exchange nothing is done; a stop that fired leaves the TWAP buying a position with
+        // no stop, which is closed (the TWAP stopped first); flat, only the TWAP stops.
+        let wholeStop: [String: Any] = ["coin": "ETH", "oid": 2, "isTrigger": true, "triggerPx": "2940", "orderType": "Stop Market", "reduceOnly": true,
+                                        "side": "A", "sz": "0.0", "isPositionTpsl": true]
+        FakeHL.lock.withLock { FakeHL.state = .init(position: Decimal(string: "0.01")!, orders: [wholeStop]); FakeHL.state.twaps = [row] }
+        #expect(try await e.guardTwap(asset: "ETH") == nil && FakeHL.lock.withLock { FakeHL.state.sent }.isEmpty)
+        FakeHL.lock.withLock {
+            FakeHL.state = .init(position: Decimal(string: "0.004")!, close: { s in s.position = 0; return filled("0.004") })
+            FakeHL.state.twaps = [row]
+        }
+        #expect(try await e.guardTwap(asset: "ETH")?.hasPrefix("The ETH TWAP kept buying after its stop: ETH position closed") == true)
+        #expect(FakeHL.lock.withLock { FakeHL.state.sent } == ["twap cancel 77", "close sell"])
+        FakeHL.lock.withLock { FakeHL.state = .init(position: 0); FakeHL.state.twaps = [row] }
+        #expect(try await e.guardTwap(asset: "ETH") == "The ETH TWAP is stopped: its position's stop or take closed it.")
+        #expect(FakeHL.lock.withLock { FakeHL.state.sent } == ["twap cancel 77"])
+
+        // A stop moved by hand during a TWAP stays one for the whole position (size 0).
+        FakeHL.lock.withLock { FakeHL.state = .init(position: Decimal(string: "0.01")!, orders: [wholeStop]) }
+        _ = try await e.manage(.stopTo(2970), asset: "ETH")
+        #expect(FakeHL.lock.withLock { (FakeHL.state.sent, FakeHL.state.protections.map { $0["s"] as? String }) } == (["sl", "cancel 2"], ["0"]))
     }
+}
+
+/// A running TWAP's parts not yet bought count in the open risk at its coin's stop; with no stop the sum is unknown.
+@Test func aRunningTwapCountsInTheOpenRisk() {
+    let twap = HyperliquidAccount.Twap(id: 1, coin: "ETH", size: Decimal(string: "0.1")!, isBuy: true)
+    let marks: [String: Decimal] = ["ETH": 3000]
+    let position = HyperliquidAccount.Position(coin: "ETH", size: Decimal(string: "0.04")!, entry: 3000, unrealizedPnl: 0, liquidation: nil)
+    let stopOrder = try! JSONDecoder().decode(HyperliquidAccount.Order.self, from: Data(
+        #"{"coin":"ETH","oid":2,"isTrigger":true,"triggerPx":"2940","orderType":"Stop Market","reduceOnly":true,"side":"A","sz":"0.0"}"#.utf8))
+    // 0.06 ETH still to buy, $60 above the stop.
+    #expect(HyperliquidAccount.twapRisk([twap], positions: [position], orders: [stopOrder], marks: marks) == Decimal(string: "3.6"))
+    #expect(HyperliquidAccount.twapRisk([twap], positions: [position], orders: [], marks: marks) == nil)
+    #expect(HyperliquidAccount.twapRisk([], positions: [], orders: [], marks: marks) == 0)
 }

@@ -17,6 +17,9 @@ public struct ExitRules: Codable, Equatable, Sendable {
     public var movedToBreakeven = false
     /// A limit entry with a take in parts: the half at 1R is placed once the entry fills.
     public var partialOrderPending = false
+    /// The entry is this TWAP on the exchange. Its stop firing doesn't stop it: the guardian does, and closes what it
+    /// bought after, so it never builds a position without a stop.
+    public var twapId: UInt64?
 
     public init(openedSize: Decimal, entry: Decimal, long: Bool, breakevenAfterPartial: Bool, trailingPct: Decimal?) {
         self.openedSize = openedSize

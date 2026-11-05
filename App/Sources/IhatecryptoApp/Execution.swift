@@ -404,10 +404,11 @@ extension Workspace {
             let partial = opened.partialTake != nil || (opened.pending && p.intent.partialTake == true)
             // A trailing stop the exchange holds needs nothing from the app; one that didn't go on (or a limit's) is moved here.
             let trailing = opened.trailingOnExchange ? nil : p.intent.trailingPct
-            if partial || trailing != nil {
+            if partial || trailing != nil || opened.twapId != nil {
                 var rules = ExitRules(openedSize: opened.size, entry: opened.entry, long: p.intent.side == .long,
                                       breakevenAfterPartial: partial, trailingPct: trailing)
                 rules.partialOrderPending = opened.pending && p.intent.partialTake == true
+                rules.twapId = opened.twapId
                 exitRules[opened.asset] = rules
                 partialTries[opened.asset] = nil
                 stopTries[opened.asset] = nil
@@ -1304,8 +1305,19 @@ extension Workspace {
             }
             return
         }
+        // A TWAP entry whose stop or take fired keeps buying: what the exchange shows now is checked afresh by the executor,
+        // which stops the TWAP and closes what it bought with no stop. Tried again next pass when it fails.
+        for (coin, rules) in exitRules where rules.twapId != nil {
+            let open = positions.contains { $0.coin == coin }
+            let stopped = orders.contains { $0.coin == coin && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }
+            guard !open || !stopped, let wallet = signerWallet, let line = try? await executor(wallet).guardTwap(asset: coin) else { continue }
+            exitRules[coin]?.twapId = nil
+            if !line.isEmpty { notify(.positions, say("TWAP on \(coin) stopped", "TWAP по \(coin) остановлен"), line) }
+        }
         // Rules live exactly as long as their position (or its waiting limit), however it was closed.
-        for coin in exitRules.keys where !positions.contains(where: { $0.coin == coin }) && !orders.contains(where: { $0.coin == coin && !$0.isTrigger }) {
+        // A TWAP not yet seen stopped keeps its rules.
+        for coin in exitRules.keys where !positions.contains(where: { $0.coin == coin }) && !orders.contains(where: { $0.coin == coin && !$0.isTrigger })
+            && exitRules[coin]?.twapId == nil {
             exitRules[coin] = nil
         }
         stopTries = stopTries.filter { exitRules[$0.key] != nil }   // a new position in the coin starts with no pause
