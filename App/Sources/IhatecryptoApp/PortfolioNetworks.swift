@@ -1,4 +1,5 @@
 import DeFiJupiterLend
+import DeFiKamino
 import EVMChain
 import ExecutionCore
 import IhatecryptoCore
@@ -120,20 +121,30 @@ extension Workspace {
                 return earning("jup", "Jupiter Lend", apy: d.apy, usd: d.amount * price, coin: d.coin, amount: d.amount,
                                earned: lendEarned[d.address].map { $0 / pow(10, d.decimals) * price }, place: "jupiter")
             }
-            lines += kaminoDeposits.map { earning("kamino", "Kamino Lend", apy: $0.apy, usd: $0.usd, coin: $0.coin, place: "kamino") }
-            // Backpack's stocks put up on Kamino stay on the card, worth the collateral less the debt.
-            if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
+            // What's put up on Kamino stays on the card, worth the collateral less the debt: Backpack's stocks, and the
+            // main market's deposits once something is borrowed against them (SOL), in place of their earning lines.
+            func loanLine(_ loan: Kamino.Loan, _ title: String, _ market: String, usd: Decimal) -> NetworkLine {
                 let main = loan.collateral.max { $0.valueUSD < $1.valueUSD }
                 let amounts = loan.collateral.filter { $0.tokens > 0 }.map { "\(Fmt.num($0.tokens, maxFraction: 6)) \($0.symbol)" }.joined(separator: " · ")
                 let debt = loan.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
-                lines.append(NetworkLine(kind: .earning, logo: "kamino", title: "Kamino Backpack", detail: "collateral", usd: loan.depositUSD - loan.debtUSD,
-                                         amount: amounts.isEmpty ? nil : amounts, place: "kamino",
-                                         help: "\(amounts) put up on Kamino's Backpack market, \(Fmt.num(debt, maxFraction: 6)) USDC borrowed against it"
-                                            + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2)) (liquidation at 1)" } ?? "")
-                                            + ". «repay all USDC on kamino» pays it back; «withdraw \(main?.symbol ?? "SPCX") from kamino» takes the stock back.",
-                                         coin: main?.symbol ?? "USDC",
-                                         facts: [(Fmt.usd(loan.depositUSD), "collateral"), ("−" + Fmt.usd(loan.debtUSD), "borrowed")]
-                                            + (loan.health.map { [(Fmt.num($0, maxFraction: 2), "health")] } ?? [])))
+                return NetworkLine(kind: .earning, logo: "kamino", title: title, detail: "collateral", usd: usd,
+                                   amount: amounts.isEmpty ? nil : amounts, place: "kamino",
+                                   help: "\(amounts) put up on \(market), \(Fmt.num(debt, maxFraction: 6)) USDC borrowed against it"
+                                      + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2)) (liquidation at 1)" } ?? "")
+                                      + (loan.liquidationPrice.map { ", liquidation if \(main?.symbol ?? "it") ≤ \(Fmt.usd($0))" } ?? "")
+                                      + ". «repay all USDC on kamino» pays it back, «withdraw \(main?.symbol ?? "SPCX") from kamino» takes it back.",
+                                   coin: main?.symbol ?? "USDC",
+                                   facts: [(Fmt.usd(loan.depositUSD), "collateral"), ("−" + Fmt.usd(loan.debtUSD), "borrowed")]
+                                      + (loan.health.map { [(Fmt.num($0, maxFraction: 2), "health")] } ?? []))
+            }
+            if let loan = kaminoMainLoan, loan.debtUSD > 0 {
+                // All the main market's deposits less the debt, so the card still adds up to the total.
+                lines.append(loanLine(loan, "Kamino Lend", "Kamino", usd: kamino - loan.debtUSD))
+            } else {
+                lines += kaminoDeposits.map { earning("kamino", "Kamino Lend", apy: $0.apy, usd: $0.usd, coin: $0.coin, place: "kamino") }
+            }
+            if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
+                lines.append(loanLine(loan, "Kamino Backpack", "Kamino's Backpack market", usd: loan.depositUSD - loan.debtUSD))
             }
             // Deposits made on a site: Kamino's vaults, Jupiter's other platforms.
             lines += protocolPositions.map { p in

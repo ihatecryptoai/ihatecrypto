@@ -30,7 +30,37 @@ import Testing
     let deep = Executor.kaminoAfter(nil, adding: d("0.05"), held: 0, price: 150, risk: spcx, usdc: d("2.6"), borrowFactor: 1)
     #expect(deep.health! < Executor.minimumHealth)
     // What may leave with $1 owed: what's left must carry it at 30%, 1% to spare.
-    #expect(Executor.kaminoFreeCollateral(loan, maxLTV: d("0.3"), priceUSD: 150) == d("1.25") / d("0.3") / 150 * d("0.99"))
+    #expect(Executor.kaminoFreeCollateral(loan, maxLTV: d("0.3"), liquidationLTV: d("0.5"), priceUSD: 150) == d("1.25") / d("0.3") / 150 * d("0.99"))
+}
+
+/// A loan against SOL on Kamino's main market (its numbers on 2026-11-05: borrow up to 74%, liquidation at 80%): 0.5 SOL
+/// at $96 put up, 20 USDC borrowed. The position's own liquidation price agrees with the card's; a SOL deposit's rent
+/// is what left beyond the SOL itself.
+@Test func kaminoLoanAgainstSOLNamesItsLiquidationPriceAndRent() {
+    let d = { (s: String) in Decimal(string: s)! }
+    let sol = Kamino.Risk(maxLTV: d("0.74"), liquidationLTV: d("0.8"), borrowFactor: d("1.25"))
+    let first = Executor.kaminoAfter(nil, adding: d("0.5"), held: 0, price: 96, risk: sol, usdc: 20, borrowFactor: 1)
+    #expect(first.collateral == 48)
+    #expect(first.available == d("35.52"))
+    #expect(first.health == d("1.92"))
+    // 0.5 SOL × p × 0.8 = $20: p = $50.
+    #expect(first.liquidation == 50)
+    let loan = Kamino.Loan(collateral: [.init(reserve: "r", symbol: "SOL", mint: "So11111111111111111111111111111111111111112", tokens: d("0.5"), valueUSD: 48)],
+                           debts: [.init(reserve: "u", symbol: "USDC", tokens: 20)], depositUSD: 48, debtUSD: 20,
+                           borrowLimitUSD: d("35.52"), liquidationLimitUSD: d("38.4"), adjustedDebtUSD: 20)
+    #expect(loan.liquidationPrice == 50)
+    // What may leave with 20 USDC owed: Kamino's 74% limit would free $20.97 and leave a health factor of 1.08; the 1.5
+    // line frees $10.50 (38.4 − 8.4 = 30 = 1.5 × 20), 1% to spare.
+    #expect(Executor.kaminoFreeCollateral(loan, maxLTV: d("0.74"), liquidationLTV: d("0.8"), priceUSD: 96) == d("10.5") / 96 * d("0.99"))
+    // No debt, or two coins up: no single price to name.
+    #expect(Kamino.Loan(collateral: loan.collateral, debts: [], depositUSD: 48, debtUSD: 0, borrowLimitUSD: d("35.52"),
+                        liquidationLimitUSD: d("38.4"), adjustedDebtUSD: 0).liquidationPrice == nil)
+    #expect(Kamino.Loan(collateral: loan.collateral + loan.collateral, debts: loan.debts, depositUSD: 96, debtUSD: 20, borrowLimitUSD: 71,
+                        liquidationLimitUSD: d("76.8"), adjustedDebtUSD: 20).liquidationPrice == nil)
+    // A first 0.1 SOL deposit's simulation (2026-11-05): 0.13837 SOL left the wallet, 0.03837 of it rent and fee.
+    #expect(Executor.kaminoRentSpent(["SOL: -0.13837 (fee and rent for new accounts)"], deposited: d("0.1")) == d("0.03837"))
+    #expect(Executor.kaminoRentSpent(["USDC: -1000000 (raw units)", "SOL: -0.0298 (fee and rent for new accounts)"], deposited: 0) == d("0.0298"))
+    #expect(Kamino.market(for: "SOL") == Kamino.mainMarket)
 }
 
 @Test func backpackStocksAreTheSameInTheChatAndOnKamino() {

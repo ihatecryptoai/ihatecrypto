@@ -857,10 +857,32 @@ extension Workspace {
         otherTokens = otherTokens.filter { !($0.chain == place && $0.contract == net.usdc) } + (units > 0 ? [fresh] : [])
     }
 
-    /// The wallet's tokens of a Backpack stock on Solana, by its mint; nil before the balance loads.
+    /// The wallet's tokens of a Backpack stock on Solana, by its mint, or its SOL; nil before the balance loads.
     func heldOnSolana(_ stock: String) -> Decimal? {
+        if stock == "SOL" { return solana?.sol }
         guard let s = solana, let mint = WalletCommand.kaminoStockMints[stock] else { return nil }
         return s.tokens.first { $0.contract == mint }?.amount ?? 0
+    }
+
+    /// A loan against SOL with none up on Kamino yet: the words that put up SOL worth 2.5 times the loan and borrow in one
+    /// go (a health factor of 2 at Kamino's 80% liquidation line for SOL, 2026-11-05), or the loan the wallet's SOL
+    /// carries. 0.05 SOL stays out of it for the fees and the first deposit's rent (≈ 0.04); the move checks them exactly.
+    func solLoanWay(_ usdc: Decimal, sol: Decimal) -> String? {
+        guard let price = markets["SOL"]?.markPx, price > 0 else { return nil }
+        let free = sol - Decimal(string: "0.05")!, need = (usdc * 5 / 2 / price).rounded(2, .up), x = Fmt.num(usdc)
+        if need <= free {
+            let n = Fmt.num(need, maxFraction: 2)
+            return say("Nothing is up on Kamino yet. «borrow \(x) USDC on kamino against \(n) SOL» puts \(n) SOL up (≈ \(Fmt.usd(need * price)), 2.5 times the loan) and borrows in one go, nothing sold.",
+                       "В Kamino пока ничего не заложено. «borrow \(x) USDC on kamino against \(n) SOL» заложит \(n) SOL (≈ \(Fmt.usd(need * price)), в 2,5 раза больше займа) и займёт за один раз, ничего не продавая.")
+        }
+        let have = Fmt.num(sol, maxFraction: 4)
+        guard free >= Decimal(string: "0.01")! else {
+            return say("Kamino lends USDC against SOL put up there, and the wallet has \(have) SOL: too little to put up and still pay the fees. Top up SOL first.",
+                       "Kamino даёт USDC под заложенный SOL, а в кошельке \(have) SOL — слишком мало, чтобы заложить и заплатить комиссии. Сначала пополни SOL.")
+        }
+        let n = Fmt.num(free.rounded(2, .down), maxFraction: 2), can = Fmt.num((free * price * 2 / 5).rounded(2, .down))
+        return say("The wallet's \(have) SOL carries about \(can) USDC at a health factor of 2: «borrow \(can) USDC on kamino against \(n) SOL» puts it up and borrows, a little SOL stays for the fees.",
+                   "Твои \(have) SOL выдержат заём около \(can) USDC при факторе здоровья 2: «borrow \(can) USDC on kamino against \(n) SOL» заложит их и займёт, немного SOL останется на комиссии.")
     }
 
     /// A move that can't go through with what the wallet holds is said so at once, instead of a card whose Confirm
@@ -906,11 +928,19 @@ extension Workspace {
         case .kamino(deposit: true, symbol: let s, amount: let asked?) where WalletCommand.kaminoStockMints[s] != nil:
             return lacks(heldOnSolana(s), asked, "Solana", s)
         case .kaminoBorrow(_, against: let s?, adding: let asked?) where !inChain: return lacks(heldOnSolana(s), asked, "Solana", s)
+        // Against SOL with none up on Kamino's main market: how much to put up, from the wallet's SOL.
+        case .kaminoBorrow(let usdc, against: .some("SOL"), adding: nil) where !inChain:
+            guard let sol = solana?.sol, kaminoLoanRead, !kaminoDeposits.contains(where: { $0.coin == "SOL" && $0.usd > 0 }) else { return nil }
+            return solLoanWay(usdc ?? 1, sol: sol)
         // A loan with nothing put up yet, on a stock named or none: the way to put one up, or to get it, before any card.
         case .kaminoBorrow(let usdc, against: let named, adding: nil) where !inChain && named.map { WalletCommand.kaminoStockMints[$0] != nil } ?? true:
-            guard solana != nil, kaminoLoanRead, (kaminoLoan?.depositUSD ?? 0) <= 0 else { return nil }
-            // Unnamed: the Backpack stock the wallet holds, else SpaceX's for the example.
-            let s = named ?? WalletCommand.kaminoStocks.first { (heldOnSolana($0) ?? 0) > 0 } ?? "SPCX"
+            // None named borrows on the main market too, against SOL put up there.
+            guard solana != nil, kaminoLoanRead, (kaminoLoan?.depositUSD ?? 0) <= 0,
+                  named != nil || !kaminoDeposits.contains(where: { $0.coin == "SOL" && $0.usd > 0 }) else { return nil }
+            // Unnamed: the Backpack stock the wallet holds, else SOL when there's some, else SpaceX's for the example.
+            let stockHeld = WalletCommand.kaminoStocks.first { (heldOnSolana($0) ?? 0) > 0 }
+            if named == nil, stockHeld == nil, let sol = solana?.sol, sol > Decimal(string: "0.06")!, let way = solLoanWay(usdc ?? 1, sol: sol) { return way }
+            let s = named ?? stockHeld ?? "SPCX"
             let held = heldOnSolana(s) ?? 0, n = Fmt.num(held, maxFraction: 6), x = usdc.map { Fmt.num($0) } ?? "1"
             return held > 0
                 ? say("Nothing is up on Kamino's Backpack market yet. The wallet has \(n) \(s): «borrow \(x) USDC on kamino against \(n) \(s)» puts it up and borrows in one go.",

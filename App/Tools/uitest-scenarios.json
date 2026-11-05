@@ -611,6 +611,39 @@
     }
   },
   {
+    "name": "a loan against SOL in the wallet, Kamino unnamed → a Kamino card: the SOL put up on the main market, the loan with its health factor and liquidation price, the rent, the USDC to the wallet",
+    "only_if": {
+      "balance": "sol",
+      "at_least": 0.1
+    },
+    "send": "займи 1 USDC под 0.05 SOL",
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "Borrow 1 USDC on Kamino against SOL",
+      "footer_contains": "health factor of 1.5",
+      "steps": [
+        "FROM · SOLANA",
+        "COLLATERAL · KAMINO",
+        "BORROW · KAMINO",
+        "TO · SOLANA"
+      ]
+    }
+  },
+  {
+    "name": "a loan against SOL with none put up and no amount of it → the words that put SOL up on Kamino, no card, never Aave",
+    "only_if": {
+      "balance": "kaminoSOL",
+      "below": 1e-06
+    },
+    "send": "займи 1 USDC под SOL",
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "SOL",
+      "reply_lacks": "Aave",
+      "reply_cyrillic": true
+    }
+  },
+  {
     "name": "conversation: a spread waits while asked about, grows, loses Kamino, is cancelled",
     "only_if": {
       "balance": "total",

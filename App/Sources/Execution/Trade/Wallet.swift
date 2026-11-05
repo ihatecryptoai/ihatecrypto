@@ -978,6 +978,10 @@ extension Executor {
         return max(0, -(Decimal(string: number) ?? 0))
     }
 
+    /// The first Kamino deposit's rent and fee from its simulation's change lines: what SOL left beyond `deposited`, the
+    /// SOL that went in itself. A first SOL deposit was read as all rent, and every one was asked about as a loss.
+    static func kaminoRentSpent(_ changes: [String], deposited: Decimal) -> Decimal { max(0, solSpent(changes) - deposited) }
+
     /// What «withdraw all» asks Kamino for, in tokens: the position's dollars at the token's price, 1% over. In dollars it
     /// asked 202 «SOL» for 1.3 SOL, and the guard refused every time.
     static func kaminoAll(valueUSD: Decimal, priceUSD: Decimal) -> Decimal {
@@ -1006,15 +1010,16 @@ extension Executor {
         let supply = try await rpc.call("getTokenSupply", [reserve.mint]) as? [String: Any]
         let decimals = ((supply?["value"] as? [String: Any])?["decimals"] as? NSNumber)?.intValue ?? 6
         let scale = Decimal(sign: .plus, exponent: decimals, significand: 1)
-        // On the Backpack market a position is collateral, and a loan may stand on it.
-        let loan = stock ? try await Kamino.loan(wallet: wallet.solana, market: market) : nil
+        // On the Backpack market a position is collateral, and a loan may stand on it; on the main market one may too (USDC
+        // borrowed against SOL), so a withdrawal reads it.
+        let loan = stock || !deposit ? try await Kamino.loan(wallet: wallet.solana, market: market) : nil
         let positionUSD = stock
             ? loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD
             : try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }?.valueUSD
-        if stock, !deposit, let loan, loan.debtUSD > 0 {
+        if !deposit, let loan, loan.debtUSD > 0, loan.collateral.contains(where: { $0.reserve == reserve.address }) {
             // Kamino lets collateral out only while what's left still carries the debt at its borrow limit.
             let risk = try await Kamino.risk(reserve: reserve.address)
-            let free = Self.kaminoFreeCollateral(loan, maxLTV: risk.maxLTV, priceUSD: reserve.priceUSD)
+            let free = Self.kaminoFreeCollateral(loan, maxLTV: risk.maxLTV, liquidationLTV: risk.liquidationLTV, priceUSD: reserve.priceUSD)
             if requested.map({ $0 > free }) ?? true {
                 throw ExecutionError("A loan of \(Fmt.usd(loan.debtUSD)) stands on this \(symbol) on Kamino: "
                                      + (free > 0 ? "up to \(Fmt.num(free, maxFraction: 6)) \(symbol) can come out now. " : "")
@@ -1038,8 +1043,16 @@ extension Executor {
         let expected = Int64(all ? units * 100 / 101 : units)
         // Backpack's stocks are Token-2022 tokens: their account derives from that program.
         let myToken = try SPL.associatedAccount(owner: wallet.solana, mint: reserve.mint, program: try await tokenProgram(reserve.mint))
+        // SOL put in leaves the wallet the fees of what comes after — a repay, a withdrawal — and the first deposit's rent
+        // (the first move needs gas): `kept` SOL stays in the wallet.
+        let kept = Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+        func shortOfSOL(_ have: UInt64, rent: Decimal) -> ExecutionError {
+            ExecutionError("Putting \(Fmt.num(amount, maxFraction: 6)) SOL into Kamino would leave the wallet under \(Fmt.num(kept, maxFraction: 3)) SOL, too little for the fees "
+                           + "of a repay or a withdrawal later" + (rent > 0 ? " (this first deposit also pays ≈ \(Fmt.num(rent, maxFraction: 4)) SOL of rent for Kamino's accounts)" : "")
+                           + ": up to \(Fmt.num(max(0, Decimal(have) / scale - rent - kept).rounded(4, .down), maxFraction: 4)) SOL can go in now. Nothing was signed.")
+        }
+        let have = deposit ? (native ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)) : 0
         if deposit {
-            let have = native ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)
             guard have >= units else { throw ExecutionError("You have \(Fmt.num(Decimal(have) / scale, maxFraction: 6)) \(symbol); need \(Fmt.num(amount, maxFraction: 6)).") }
         }
         let wire = deposit
@@ -1053,19 +1066,33 @@ extension Executor {
         if !native { rules.append((myToken, symbol, true, deposit ? -Int64(units) : expected * 99 / 100)) }
         let lamports: Int64 = native ? (deposit ? -Int64(units) - (firstTime ? 60_000_000 : 5_000_000) : expected * 99 / 100 - 5_000_000)
                                      : (firstTime ? -60_000_000 : -5_000_000)
+        if native, deposit, !firstTime, have < units + TopUpOrder.solanaFeeFloor { throw shortOfSOL(have, rent: 0) }
         // A stock put up on the Backpack market isn't asked about: its position's rent (≈ 0.0176 SOL) comes back when
         // everything is taken out — Kamino closes the position then (measured live 2026-10-28).
-        if firstTime, !dryRun, !acceptRent, !stock {
-            // The first deposit pays ~0.03 SOL of rent for Kamino's user accounts and lookup table. Not worth it for
+        if firstTime, !dryRun, native || (!acceptRent && !stock) {
+            // The first deposit pays ~0.03–0.04 SOL of rent for Kamino's user accounts and lookup table. Not worth it for
             // a small amount: simulate first, and when the rent is over a tenth of what goes in, stop and ask (CostlyMove:
             // «Send anyway», or Jupiter Lend, which has no rent). It was refused outright, which stopped a chain of moves
             // at its last step with no way on.
-            let preview = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
+            let preview: [String]
+            do {
+                preview = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
                                                 note: "Kamino \(symbol)", lamportsAtLeast: lamports, dryRun: true)
-            let solPrice = try await Hyperliquid.markets()["SOL"]?.markPx ?? 0
-            let rentSOL = Self.solSpent(preview)
-            let valueUSD = native ? amount * solPrice : amount
-            if let stop = Self.kaminoRent(sol: rentSOL, solPrice: solPrice, depositUSD: valueUSD, accepted: Self.lossAccepted) { throw stop }
+            } catch where native {
+                // Too little SOL for the rent as well: a small deposit's simulation says what the rent is, and so how much fits.
+                if let rent = await kaminoDepositCost(reserve, amount: Decimal(string: "0.001")!, market: market), Decimal(have) / scale < amount + rent + kept {
+                    throw shortOfSOL(have, rent: rent)
+                }
+                throw error
+            }
+            // A SOL deposit's own amount leaves the wallet too: the rent is what left beyond it.
+            let rentSOL = Self.kaminoRentSpent(preview, deposited: native ? amount : 0)
+            if native, Decimal(have) / scale < amount + rentSOL + kept { throw shortOfSOL(have, rent: rentSOL) }
+            if !acceptRent, !stock {
+                let solPrice = try await Hyperliquid.markets()["SOL"]?.markPx ?? 0
+                let valueUSD = native ? amount * solPrice : amount
+                if let stop = Self.kaminoRent(sol: rentSOL, solPrice: solPrice, depositUSD: valueUSD, accepted: Self.lossAccepted) { throw stop }
+            }
         }
         let changes = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
                                             note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, dryRun: dryRun)

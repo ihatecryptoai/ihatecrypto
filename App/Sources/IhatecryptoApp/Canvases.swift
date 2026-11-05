@@ -1403,16 +1403,19 @@ extension Workspace {
                                 + "The collateral stays until you withdraw it. Press Confirm.",
                              steps: [step("usdc", "FROM · SOLANA", out.map { "\(amount == nil ? "all ≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "all owed · reading…", free, .solana,
                                           money: out.map { moneyMove("USDC", on: "solana", by: -$0) } ?? []),
-                                     step("kamino", "REPAY · KAMINO", line("debt").map { "debt \($0)" } ?? "\(what) USDC", "the debt goes down, the collateral stays", .kamino)])
+                                     step("kamino", "REPAY · KAMINO", line("debt").map { "debt \($0)" } ?? "\(what) USDC",
+                                          (line("market").map { "\($0) · " } ?? "") + "the debt goes down, the collateral stays", .kamino)])
         }
         let logo = stockLogo(stock)
-        // What Kamino holds of the stock and what the wallet owes there now, and after: the cards' was → after boxes.
-        let up = kaminoLoan?.collateral.first { $0.symbol == stock }?.tokens ?? 0, owed = kaminoLoan?.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
+        // SOL stands on Kamino's main market, a Backpack stock on its own one.
+        let sol = stock == "SOL", position = kaminoPosition(stock)
+        // What Kamino holds of the collateral and what the wallet owes there now, and after: the cards' was → after boxes.
+        let up = position?.collateral.first { $0.symbol == stock }?.tokens ?? 0, owed = position?.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
         var steps: [ActivityBubble] = []
         if let stock, let adding {
             steps.append(step(logo, "FROM · SOLANA", "\(Fmt.num(adding, maxFraction: 6)) \(stock)", "", .solana, money: moneyMove(stock, on: "solana", by: -adding)))
         }
-        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", stock == nil ? "what you put up on Kamino" : "Backpack market · not sold", .kamino,
+        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", stock == nil ? "what you put up on Kamino" : sol ? "Kamino Lend · not sold" : "Backpack market · not sold", .kamino,
                        money: stock.map { vaultMove("Kamino", $0, was: up, by: adding ?? 0) } ?? []),
                   step("kamino", "BORROW · KAMINO", "\(what) USDC", line("health").map { "health factor \($0)" } ?? "health factor: reading…", .kamino,
                        money: vaultMove("Kamino debt", "USDC", was: owed, by: amount)),
@@ -1420,15 +1423,25 @@ extension Workspace {
                        money: amount.map { moneyMove("USDC", on: "solana", by: $0) } ?? [])]
         // A loan the executor would refuse says so on the card, with how much it would take.
         let health = q?.first { $0.way == "health" }?.worth, available = q?.first { $0.way == "available" }?.worth
+        let rent = q?.first { $0.way == "rent" }?.worth, back = q?.first { $0.way == "rentBack" }?.worth
+        let kept = Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
         let refused: String? = if let amount, let available, amount > available {
             "Kamino lends at most \(Fmt.usd(available)) against this collateral: ihatecrypto won't sign \(what) USDC. Borrow less, or put more up."
         } else if let health, health > 0, health < Executor.minimumHealth {
             "That leaves a health factor of \(Fmt.num(health, maxFraction: 2)), under ihatecrypto's 1.5: it won't sign this. Borrow less, or put more up."
+        } else if sol, let adding, let have = solana?.sol, adding + (rent ?? 0) + kept > have {
+            // SOL put up leaves the wallet its fees and the first deposit's rent: the move refuses what doesn't fit.
+            "The wallet has \(Fmt.num(have, maxFraction: 4)) SOL: \(Fmt.num(adding, maxFraction: 6)) SOL put up" + (rent.map { ", ≈ \(Fmt.num($0, maxFraction: 4)) of Kamino's rent" } ?? "")
+                + " and \(Fmt.num(kept, maxFraction: 3)) SOL for later fees don't all fit. Put up at most \(Fmt.num(max(0, have - (rent ?? 0) - kept).rounded(4, .down), maxFraction: 4)) SOL."
         } else { nil }
-        let first = stock.flatMap { s in adding.map { _ in "Two transactions: the \(s) goes in as collateral, then Kamino lends \(what) USDC against it, nothing sold (the first time ≈ 0.023 SOL of rent, most of it back when all comes out). " } }
+        // A first deposit opens the wallet's Kamino accounts: SOL's rent as simulated now, and what comes back.
+        let rentWords = !sol ? " (the first time ≈ 0.023 SOL of rent, most of it back when all comes out)"
+            : rent.map { r in " (the first time ≈ \(Fmt.num(r, maxFraction: 4)) SOL of rent and fee" + (back.map { ", ≈ \(Fmt.num($0, maxFraction: 4)) of it back when all comes out" } ?? "") + ")" }
+            ?? (up > 0 ? "" : " (the first time's rent: reading…)")
+        let first = stock.flatMap { s in adding.map { _ in "Two transactions: the \(s) goes in as collateral, then Kamino lends \(what) USDC against it, nothing sold\(rentWords). " } }
         return MoveRoute(title: "Borrow \(what) USDC on Kamino" + (stock.map { " against \($0)" } ?? ""),
                          footer: (first ?? "Kamino lends \(what) USDC against what's up there, nothing sold. ")
-                            + "ihatecrypto stops at a health factor of 1.5" + (stock != nil ? "; stock prices stand still while US markets are closed. " : ". ") + "Press Confirm.",
+                            + "ihatecrypto stops at a health factor of 1.5. " + (stock != nil && !sol ? "Stock prices stand still while US markets are closed. " : "") + "Press Confirm.",
                          steps: steps,
                          warning: refused ?? line("liquidation").flatMap { $0.isEmpty ? nil : "Liquidation if \($0): Kamino sells your \(stock ?? "collateral") at a penalty. Keep an eye on it, or borrow less." })
     }
@@ -2515,7 +2528,9 @@ extension Workspace {
                                            ("liquidation", p.liquidationPrice.map { "\(p.stock ?? "the collateral") ≤ \(Fmt.usd($0))" } ?? "", 0),
                                            ("collateral", p.stock.map { "\(Fmt.num(p.stockTokens, maxFraction: 6)) \($0) · \(Fmt.usd(p.collateralUSD))" } ?? Fmt.usd(p.collateralUSD), p.collateralUSD),
                                            ("rate", "\(Fmt.num(p.borrowAPY.rounded(2, .plain)))% a year", p.borrowAPY),
-                                           ("available", Fmt.usd(p.availableUSD), p.availableUSD)])
+                                           ("available", Fmt.usd(p.availableUSD), p.availableUSD)]
+                                          + (p.firstRentSOL.map { [("rent", "≈ \(Fmt.num($0, maxFraction: 4)) SOL", $0)] } ?? [])
+                                          + (p.rentBackSOL.map { [("rentBack", "≈ \(Fmt.num($0, maxFraction: 4)) SOL", $0)] } ?? []))
                 }
                 try? await Task.sleep(for: .seconds(30))
             }
@@ -2532,7 +2547,8 @@ extension Workspace {
             for m in [Kamino.backpackMarket, Kamino.mainMarket] {
                 if let loan = try? await Kamino.loan(wallet: owner, market: m), loan.debtUSD > 0 {
                     guard !Task.isCancelled else { return }
-                    swapQuote = (command, [("debt", Fmt.usd(loan.debtUSD), loan.debtUSD)])
+                    swapQuote = (command, [("debt", Fmt.usd(loan.debtUSD), loan.debtUSD),
+                                           ("market", m == Kamino.backpackMarket ? "Backpack market" : "main market", 0)])
                     return
                 }
             }

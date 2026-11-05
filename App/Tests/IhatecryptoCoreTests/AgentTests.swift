@@ -787,6 +787,32 @@ private final class Script: LLMClient, @unchecked Sendable {
     }
 }
 
+/// Kamino's main market: USDC borrowed against SOL, Kamino named or not, in English and Russian; the SOL put up first when
+/// a number of it is said. Aave keeps its own loans, and a SOL deposit or withdrawal stays one.
+@Test func kaminoBorrowingAgainstSOLIsParsed() {
+    let half = Decimal(string: "0.5")!
+    #expect(WalletCommand.parse("займи 50 USDC под SOL") == .kaminoBorrow(50, against: "SOL"))
+    #expect(WalletCommand.parse("займи 50 USDC под 0.5 SOL") == .kaminoBorrow(50, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("займи 1 под 0,5 SOL на камино") == .kaminoBorrow(1, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("возьми в долг 20 долларов под залог моих SOL") == .kaminoBorrow(20, against: "SOL"))
+    #expect(WalletCommand.parse("borrow 50 USDC against my SOL") == .kaminoBorrow(50, against: "SOL"))
+    #expect(WalletCommand.parse("borrow 50 USDC on kamino against 0.5 SOL") == .kaminoBorrow(50, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("borrow 10 USDC using 0.5 SOL as collateral") == .kaminoBorrow(10, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("займи 3 USDC под мои соланы") == .kaminoBorrow(3, against: "SOL"))
+    #expect(WalletCommand.kaminoBorrow(nil, against: "SOL").amountQuestion == "How many USDC to borrow on Kamino against SOL?")
+    // «на солане» is the network, and a count of SOL beside a stock isn't the stock's.
+    #expect(WalletCommand.parse("займи 5 USDC под залог в камино на солане") == .kaminoBorrow(5))
+    #expect(WalletCommand.parse("borrow 5 USDC on kamino against SPCX, keep 0.1 SOL") == .kaminoBorrow(5, against: "SPCX"))
+    // Not a loan against SOL: Aave's, a SOL deposit and its way back, a repay.
+    #expect(WalletCommand.parse("borrow 10 USDC on aave") == .aaveBorrow(10, network: "base"))
+    #expect(WalletCommand.parse("deposit 0.5 SOL to kamino") == .kamino(deposit: true, symbol: "SOL", amount: half))
+    #expect(WalletCommand.parse("выведи SOL из камино") == .kamino(deposit: false, symbol: "SOL", amount: nil))
+    #expect(WalletCommand.parse("погаси долг на камино") == .kaminoRepay(nil))
+    for c in [WalletCommand.kaminoBorrow(50, against: "SOL", adding: half), .kaminoBorrow(5, against: "SOL")] {
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+}
+
 /// Kamino's Backpack market: USDC borrowed against Backpack's tokenized stocks without selling them, paid back, the
 /// stock put up and taken back — in English and Russian, by ticker or company. Aave keeps its own words.
 @Test func kaminoBorrowingAgainstStocksIsParsed() {

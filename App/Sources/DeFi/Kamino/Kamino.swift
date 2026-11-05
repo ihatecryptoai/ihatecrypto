@@ -14,6 +14,9 @@ public enum Kamino {
     /// The market a token goes into: Backpack's stocks the Backpack market, everything else the main one.
     public static func market(for symbol: String) -> String { backpackStocks[symbol.uppercased()] == nil ? mainMarket : backpackMarket }
     public static let program = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+    /// A position's account on chain (klend's Obligation): its rent comes back when Kamino closes it, everything taken
+    /// out (0.017633 SOL back, measured live 2026-09-27, = the rent minimum of 3,344 bytes less the fee).
+    public static let obligationBytes = 3344
     static let base = "https://api.kamino.finance"
 
     public struct Reserve: Sendable {
@@ -118,6 +121,12 @@ public enum Kamino {
         public let adjustedDebtUSD: Decimal
         /// Liquidation at 1; nil without debt.
         public var health: Decimal? { adjustedDebtUSD > 0 ? liquidationLimitUSD / adjustedDebtUSD : nil }
+        /// The price of the one coin put up at which the health factor reaches 1 (its price over the health factor, the
+        /// debt in dollars); nil without debt or with several coins up.
+        public var liquidationPrice: Decimal? {
+            guard collateral.count == 1, let c = collateral.first, c.tokens > 0, let h = health, h > 0 else { return nil }
+            return c.valueUSD / c.tokens / h
+        }
 
         public init(collateral: [Collateral], debts: [Debt], depositUSD: Decimal, debtUSD: Decimal, borrowLimitUSD: Decimal,
                     liquidationLimitUSD: Decimal, adjustedDebtUSD: Decimal) {

@@ -575,6 +575,15 @@ final class Workspace {
     var kaminoLoanRead = false
     /// What it's worth: the collateral less the debt.
     var kaminoLoanUSD: Decimal { kaminoLoan.map { $0.depositUSD - $0.debtUSD } ?? 0 }
+    /// The position on Kamino's main market (its deposits are collateral, SOL put up to borrow USDC against): read when
+    /// something is deposited there. Its deposits count in `kamino`; a debt on it is subtracted from the total.
+    var kaminoMainLoan: Kamino.Loan?
+    /// The Kamino position a loan against `stock` stands on: SOL's on the main market, a Backpack stock's on that one;
+    /// none named, the Backpack market when something is up there, else the main one when SOL is (as the executor picks).
+    func kaminoPosition(_ stock: String?) -> Kamino.Loan? {
+        if let stock { return Kamino.market(for: stock) == Kamino.mainMarket ? kaminoMainLoan : kaminoLoan }
+        return (kaminoLoan?.depositUSD ?? 0) <= 0 && kaminoMainLoan?.collateral.contains(where: { $0.symbol == "SOL" }) == true ? kaminoMainLoan : kaminoLoan
+    }
     /// The NEAR implicit account the signer derived from the same phrase; nil until it has been asked once.
     var nearAddress: String?
     /// NEAR on that account: native and wNEAR, in NEAR.
@@ -957,7 +966,7 @@ final class Workspace {
     var equity: Decimal? {
         guard solana != nil || hl != nil else { return nil }
         return (solana?.usdc ?? 0) + shownTokensUSD + (hl?.accountValue ?? 0) + lendUSD + dexBalances.values.reduce(0) { $0 + $1.accountValue }
-            + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino + kaminoLoanUSD + hlp.equity + nearUSD + protocolUSD
+            + (base.map { $0.usdc + $0.aave + $0.morpho } ?? 0) + lendingElsewhereUSD + (arbitrumUSDC ?? 0) + robinhoodTotal + kamino - (kaminoMainLoan?.debtUSD ?? 0) + kaminoLoanUSD + hlp.equity + nearUSD + protocolUSD
     }
     /// What the wallet holds of each Hyperliquid market's coin (Hedge.spot): SOL and ETH as the networks report them,
     /// tokens priced like their market. nil until a balance is read; a network not read yet counts as nothing, which can
@@ -1767,12 +1776,16 @@ final class Workspace {
         if hlp.equity > 0 { c.balances.append("HLP vault \(Fmt.usd(hlp.equity))" + (hlp.lockedUntil.map { ", locked until \(Fmt.date($0))" } ?? "")) }
         for d in lendDeposits { c.balances.append("Jupiter Lend \(Fmt.num(d.amount, maxFraction: 6)) \(d.coin)") }
         if kamino > 0 { c.balances.append("Kamino \(Fmt.usd(kamino))") }
-        if let loan = kaminoLoan, loan.depositUSD > 0 || loan.debtUSD > 0 {
-            // What stands on Kamino's Backpack market: the model offers a repay and the stock's way back from this.
+        // What stands on Kamino's Backpack market, and SOL or a debt on the main one: the model offers a repay and the
+        // collateral's way back from this.
+        let mainLoan = kaminoMainLoan.flatMap { l in l.debtUSD > 0 || l.collateral.contains { $0.symbol == "SOL" } ? l : nil }
+        for (name, loan) in [("Kamino Backpack market", kaminoLoan), ("Kamino main market", mainLoan)] {
+            guard let loan, loan.depositUSD > 0 || loan.debtUSD > 0 else { continue }
             let put = loan.collateral.filter { $0.tokens > 0 }.map { "\(Fmt.num($0.tokens, maxFraction: 6)) \($0.symbol)" }.joined(separator: ", ")
             let owed = loan.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
-            c.balances.append("Kamino Backpack market: \(put.isEmpty ? "no" : put) collateral (\(Fmt.usd(loan.depositUSD))), \(Fmt.num(owed, maxFraction: 6)) USDC borrowed"
+            c.balances.append("\(name): \(put.isEmpty ? "no" : put) collateral (\(Fmt.usd(loan.depositUSD))), \(Fmt.num(owed, maxFraction: 6)) USDC borrowed"
                               + (loan.health.map { ", health factor \(Fmt.num($0, maxFraction: 2))" } ?? "")
+                              + (loan.liquidationPrice.map { ", liquidation if \(loan.collateral[0].symbol) ≤ \(Fmt.usd($0))" } ?? "")
                               + (loan.borrowLimitUSD > loan.adjustedDebtUSD ? ", up to \(Fmt.usd(loan.borrowLimitUSD - loan.adjustedDebtUSD)) more can be borrowed" : ""))
         }
         if let b = base {
@@ -2165,6 +2178,12 @@ final class Workspace {
                     if let again = try? await Kamino.loan(wallet: owner, market: Kamino.backpackMarket) { b = (true, again); break }
                 }
             }
+            // The main market's position, for a loan on it: only with something deposited there (nothing, nothing owed).
+            // ok false: unread, and the last read stays.
+            var main: (ok: Bool, loan: Kamino.Loan?) = (k != nil, nil)
+            if let k, !k.isEmpty {
+                do { main = (true, try await Kamino.loan(wallet: owner, market: Kamino.mainMarket)) } catch { main = (false, nil) }
+            }
             land { [self] in
                 guard current() else { return }
                 solana = s.pricing(from: solana?.tokens ?? [])
@@ -2178,6 +2197,7 @@ final class Workspace {
                 // None is no position: Kamino closes it when everything comes out (its rent comes back with it).
                 if b.ok, b.loan != kaminoLoan { kaminoLoan = b.loan }
                 if b.ok, !kaminoLoanRead { kaminoLoanRead = true }
+                if main.ok, main.loan != kaminoMainLoan { kaminoMainLoan = main.loan }
                 if let n { near = n.near + n.wrapped }
             }
             // What the deposits earned: not with every balance read (Jupiter's free API answers 429 to many).

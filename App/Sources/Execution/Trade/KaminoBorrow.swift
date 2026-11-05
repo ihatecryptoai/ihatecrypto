@@ -5,12 +5,12 @@ import IhatecryptoCore
 import SolanaChain
 
 /// Borrowing USDC on Kamino against what the wallet put up there — Backpack's tokenized stocks on the Backpack market,
-/// or its deposits on the main market — and paying it back. A borrow keeps the health factor (the debt at which
-/// liquidation starts, over the debt) at `Executor.minimumHealth` or more, the same line as on Aave, and never past
-/// Kamino's own borrow limit; the card says at which price of the stock the position would be liquidated.
+/// or SOL (and its other deposits) on the main market — and paying it back. A borrow keeps the health factor (the debt
+/// at which liquidation starts, over the debt) at `Executor.minimumHealth` or more, the same line as on Aave, and never
+/// past Kamino's own borrow limit; the card says at which price of the collateral the position would be liquidated.
 public struct KaminoLoanPreview: Sendable, Equatable {
     public let market: String
-    /// The stock the loan stands on, when one does («SPCX»), and how much of it is (or will be) collateral.
+    /// What the loan stands on, when one coin does («SPCX», «SOL»), and how much of it is (or will be) collateral.
     public let stock: String?
     public let stockTokens: Decimal
     /// Dollars, after the deposit the borrow brings in first.
@@ -25,14 +25,24 @@ public struct KaminoLoanPreview: Sendable, Equatable {
     public let liquidationPrice: Decimal?
     /// The USDC loan's rate, % a year.
     public let borrowAPY: Decimal
+    /// The first deposit on a market opens the wallet's accounts there: SOL it costs beyond what goes in (rent and fee,
+    /// from a simulation of the deposit Kamino builds now), and the position's rent that comes back when everything is
+    /// taken out. nil with a position there already, or when it couldn't be read (too little SOL to simulate it).
+    public var firstRentSOL: Decimal? = nil
+    public var rentBackSOL: Decimal? = nil
+    /// Tokens of the collateral named that carry this loan alone at a health factor of 2 (SOL: 2.5 times the loan's dollars).
+    public var forHealthTwo: Decimal? = nil
 }
 
 extension Executor {
     /// Tokens of a collateral that may leave a Kamino position with debt: what's left must still carry the debt at the
-    /// borrow limit (Kamino's own rule for a withdrawal), with 1% to spare for the price moving meanwhile.
-    static func kaminoFreeCollateral(_ loan: Kamino.Loan, maxLTV: Decimal, priceUSD: Decimal) -> Decimal {
-        guard maxLTV > 0, priceUSD > 0 else { return 0 }
-        return max(0, (loan.borrowLimitUSD - loan.adjustedDebtUSD) / maxLTV / priceUSD * Decimal(string: "0.99")!)
+    /// borrow limit (Kamino's own rule for a withdrawal) and at a health factor of `minimumHealth` (ihatecrypto's, as for
+    /// a borrow: SOL's 74% borrow limit alone left 1.08), with 1% to spare for the price moving meanwhile.
+    static func kaminoFreeCollateral(_ loan: Kamino.Loan, maxLTV: Decimal, liquidationLTV: Decimal, priceUSD: Decimal) -> Decimal {
+        guard maxLTV > 0, liquidationLTV > 0, priceUSD > 0 else { return 0 }
+        let byLimit = (loan.borrowLimitUSD - loan.adjustedDebtUSD) / maxLTV
+        let byHealth = (loan.liquidationLimitUSD - minimumHealth * loan.adjustedDebtUSD) / liquidationLTV
+        return max(0, min(byLimit, byHealth) / priceUSD * Decimal(string: "0.99")!)
     }
 
     /// The position after putting up `adding` of a stock at `price` (its reserve's `risk`) and borrowing `usdc` (a debt
@@ -67,13 +77,20 @@ extension Executor {
     }
 
     /// What borrowing `usdc` would do, read now; `adding` of `stock` goes in as collateral first. Nothing is signed.
-    /// Loans are taken on the Backpack market only: a debt on the main market would show nowhere in the portfolio.
+    /// A Backpack stock borrows on the Backpack market, SOL on the main market; none named, on the Backpack market when
+    /// something is up there, else on the main one when SOL is.
     public func kaminoBorrowPreview(usdc: Decimal, against stock: String?, adding: Decimal?) async throws -> KaminoLoanPreview {
-        if let stock, Kamino.market(for: stock) != Kamino.backpackMarket {
-            throw ExecutionError("ihatecrypto borrows on Kamino against Backpack's stocks (\(Kamino.backpackStocks.keys.sorted().joined(separator: ", "))), not against \(stock).")
+        let market: String, loan: Kamino.Loan?
+        if let stock {
+            market = Kamino.market(for: stock)
+            loan = try await Kamino.loan(wallet: wallet.solana, market: market)
+        } else {
+            async let main = Kamino.loan(wallet: wallet.solana, market: Kamino.mainMarket)
+            let backpack = try await Kamino.loan(wallet: wallet.solana, market: Kamino.backpackMarket)
+            // The main market's USDC savings alone aren't something to borrow USDC against.
+            if (backpack?.depositUSD ?? 0) <= 0, let m = try await main, m.collateral.contains(where: { $0.symbol == "SOL" }) { (market, loan) = (Kamino.mainMarket, m) }
+            else { (market, loan) = (Kamino.backpackMarket, backpack) }
         }
-        let market = Kamino.backpackMarket
-        let loan = try await Kamino.loan(wallet: wallet.solana, market: market)
         let reserves = try await Kamino.reserves(market: market)
         guard let usdcReserve = reserves.first(where: { $0.symbol == "USDC" }) else { throw ExecutionError("Kamino lends no USDC on that market.") }
         // The stock the loan stands on: the one named, else the biggest collateral there.
@@ -86,9 +103,31 @@ extension Executor {
         let held = loan?.collateral.first { $0.reserve == reserve?.address }?.tokens ?? 0
         let after = Self.kaminoAfter(loan, adding: adding ?? 0, held: held, price: reserve?.priceUSD ?? 0, risk: risk, usdc: usdc,
                                      borrowFactor: try await usdcRisk.borrowFactor)
-        return KaminoLoanPreview(market: market, stock: reserve?.symbol, stockTokens: held + (adding ?? 0), collateralUSD: after.collateral,
-                                 availableUSD: after.available, debtUSD: after.debt, healthNow: loan?.health, healthAfter: after.health,
-                                 liquidationPrice: after.liquidation, borrowAPY: usdcReserve.borrowAPY)
+        var p = KaminoLoanPreview(market: market, stock: reserve?.symbol, stockTokens: held + (adding ?? 0), collateralUSD: after.collateral,
+                                  availableUSD: after.available, debtUSD: after.debt, healthNow: loan?.health, healthAfter: after.health,
+                                  liquidationPrice: after.liquidation, borrowAPY: usdcReserve.borrowAPY)
+        if let reserve, let ltv = risk?.liquidationLTV, ltv > 0, reserve.priceUSD > 0 { p.forHealthTwo = (usdc * 2 / ltv / reserve.priceUSD).rounded(4, .up) }
+        // The main market's card names them (the Backpack market's first deposit and borrow have their own measured words).
+        // The coin's first deposit is the executor's «first time» too, a position there or not. Too little SOL for the
+        // whole deposit and its rent: a small one's simulation still says the rent.
+        if held == 0, market == Kamino.mainMarket, let reserve, let adding, adding > 0 {
+            p.firstRentSOL = await kaminoDepositCost(reserve, amount: adding, market: market)
+            if p.firstRentSOL == nil { p.firstRentSOL = await kaminoDepositCost(reserve, amount: Decimal(string: "0.001")!, market: market) }
+            if loan == nil { p.rentBackSOL = (try? await rpc.rentMinimum(bytes: Kamino.obligationBytes)).map { Decimal($0) / 1_000_000_000 } }
+        }
+        return p
+    }
+
+    /// SOL a deposit of `amount` into `reserve` costs beyond itself — the fee and, the first time on a market, the rent of
+    /// the accounts it opens — from a simulation of the deposit Kamino builds now (a first SOL deposit on the main market:
+    /// 0.0384 on 2026-11-05). Nothing is signed; nil when it can't be read (too little SOL to run it).
+    func kaminoDepositCost(_ reserve: Kamino.Reserve, amount: Decimal, market: String) async -> Decimal? {
+        guard let wire = try? await Kamino.depositTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount, market: market),
+              let before = try? await rpc.balance(wallet.solana),
+              let run = try? await rpc.simulate(wire, watch: [wallet.solana], sigVerify: false), run.error == nil,
+              let after = run.after[wallet.solana]?.lamports else { return nil }
+        let spent = (Decimal(before) - Decimal(after)) / 1_000_000_000
+        return reserve.mint == "So11111111111111111111111111111111111111112" ? spent - amount : spent
     }
 
     /// The position once Kamino's API shows the move just made (`done`): it lags behind the chain — a first deposit
@@ -115,8 +154,9 @@ extension Executor {
         let p = try await kaminoBorrowPreview(usdc: usdc, against: stock, adding: adding)
         let place = Self.kaminoMarketName(p.market)
         guard p.collateralUSD > 0 else {
-            throw ExecutionError("Nothing on Kamino to borrow against: put a stock up first — «borrow \(Fmt.num(usdc)) USDC on kamino against 0.05 SPCX» "
-                                 + "puts 0.05 SPCX in as collateral and borrows against it. Nothing was signed.")
+            let put = p.stock.map { "\(Fmt.num(p.forHealthTwo ?? 0, maxFraction: 4)) \($0)" } ?? "0.05 SPCX"
+            throw ExecutionError("Nothing on Kamino to borrow against: put \(p.stock ?? "SOL or a stock") up first — «borrow \(Fmt.num(usdc)) USDC on kamino against \(put)» "
+                                 + "puts \(put) in as collateral and borrows against it" + (p.stock == nil ? "" : " at a health factor of 2") + ". Nothing was signed.")
         }
         guard usdc <= p.availableUSD else {
             throw ExecutionError("\(place) lets this wallet borrow \(Fmt.usd(p.availableUSD)) more against \(Fmt.usd(p.collateralUSD)) of collateral; "
@@ -130,7 +170,8 @@ extension Executor {
             throw ExecutionError("Kamino lends no USDC on that market just now. Nothing was signed.")
         }
         var deposited = false
-        if let stock, let adding, adding > 0 { _ = try await kamino(stock, amount: adding, deposit: true); deposited = true }
+        // The card showed what a first deposit's rent is: no question about it here.
+        if let stock, let adding, adding > 0 { _ = try await kamino(stock, amount: adding, deposit: true, acceptRent: true); deposited = true }
         do {
             // Kamino builds a borrow only once it sees the position a deposit just opened: a few seconds after it lands.
             var wire: Data?
@@ -145,6 +186,7 @@ extension Executor {
                    + (p.liquidationPrice.map { "; liquidation if \(p.stock ?? "the collateral") ≤ \(Fmt.usd($0))" } ?? "") + ".")
             // The first borrow also opens the position's account in Kamino's farm for the debt (init_obligation_farms_for_reserve):
             // ≈ 0.0053 SOL of rent on top of the fee (measured live 2026-10-28), so the floor is 0.012 SOL, not the usual 0.005.
+            // The main market's USDC opens none (a first borrow there cost only the fee in simulation, 2026-11-05).
             _ = try await signAndSend(wire, lastValid: lastValid, owners: [myUSDC: wallet.solana], rules: [(myUSDC, "USDC", true, Int64(units) * 99 / 100)],
                                       note: "Kamino borrow \(Fmt.num(usdc)) USDC", lamportsAtLeast: -12_000_000)
         } catch where deposited {
@@ -167,14 +209,15 @@ extension Executor {
     /// Pays back `usdc` of the USDC debt on Kamino (nil = all of it, interest included) from the USDC on Solana, on the
     /// market that holds the debt. Kamino takes no more than is owed.
     public func kaminoRepay(usdc: Decimal?) async throws -> String {
-        var found: (market: String, loan: Kamino.Loan, owed: Decimal, reserve: Kamino.Reserve)?
+        // One market a time, the Backpack market first; a loan on the other one too is named in the reply.
+        var found: (market: String, loan: Kamino.Loan, owed: Decimal, reserve: Kamino.Reserve)?, other: (market: String, owed: Decimal)?
         for m in [Kamino.backpackMarket, Kamino.mainMarket] {
             guard let loan = try await Kamino.loan(wallet: wallet.solana, market: m), let d = loan.debts.first(where: { $0.symbol == "USDC" }), d.tokens > 0,
                   let r = try await Kamino.reserves(market: m).first(where: { $0.symbol == "USDC" }) else { continue }
             // The stored amount stands still between the position's refreshes on chain; Kamino's refreshed dollars
             // carry the interest since (USDC at its price there).
             let refreshed = loan.debts.count == 1 && r.priceUSD > 0 ? loan.debtUSD / r.priceUSD : 0
-            found = (m, loan, max(d.tokens, refreshed), r); break
+            if found == nil { found = (m, loan, max(d.tokens, refreshed), r) } else { other = (m, max(d.tokens, refreshed)) }
         }
         guard let found else { throw ExecutionError("No USDC debt on Kamino.") }
         let place = Self.kaminoMarketName(found.market), usdcReserve = found.reserve
@@ -202,6 +245,7 @@ extension Executor {
         let line = "Paid back \(Fmt.num(paid > 0 ? paid : max(found.owed - left, 0), maxFraction: 6)) USDC on \(place): "
             + (left > Decimal(string: "0.00001")! ? "\(Fmt.num(left, maxFraction: 6)) USDC still owed" + (caughtUp ? ", health factor \(now?.health.map { Fmt.num($0, maxFraction: 2) } ?? "∞")." : ".")
                : "no debt left." + (stocks.isEmpty ? "" : " The \(stocks.joined(separator: ", ")) stays as collateral: «withdraw \(stocks[0]) from kamino» takes it back."))
+            + (other.map { " \(Fmt.num($0.owed, maxFraction: 6)) USDC is still owed on Kamino's \($0.market == Kamino.backpackMarket ? "Backpack" : "main") market too: «repay all USDC on kamino» again pays it." } ?? "")
         report(line)
         return line
     }

@@ -128,8 +128,8 @@ public enum WalletCommand: Equatable, Sendable {
     /// collateral to borrow against.
     case kamino(deposit: Bool, symbol: String, amount: Decimal?)
     /// USDC borrowed on Kamino — on the Backpack market against Backpack's tokenized stocks, or on the main market against
-    /// deposits there — and paid back (nil = all of it). `against`: the stock the loan stands on («SPCX»); `adding`: that
-    /// many of its tokens put up as collateral first (nil = what's there already).
+    /// SOL and the deposits there — and paid back (nil = all of it). `against`: what the loan stands on («SPCX», «SOL»);
+    /// `adding`: that many of its tokens put up as collateral first (nil = what's there already).
     case kaminoBorrow(Decimal?, against: String? = nil, adding: Decimal? = nil)
     case kaminoRepay(Decimal?)
     /// SOL into JitoSOL (liquid staking) and back; nil = all.
@@ -526,13 +526,19 @@ public enum WalletCommand: Equatable, Sendable {
         // The network the lending command names; Base when it names none.
         let lendingNetwork = Self.network(in: q) ?? "base"
         // Borrowing on Kamino and paying it back: «borrow 2 USDC on kamino against 0.05 SPCX», «займи 2 USDC под SPCX на
-        // камино», «repay all USDC on kamino», «погаси долг на камино». A Backpack stock named is Kamino, not Aave.
+        // камино», «repay all USDC on kamino», «погаси долг на камино». A Backpack stock named is Kamino, not Aave, and so
+        // is a loan against SOL (Kamino's main market): «займи 50 USDC под 1 SOL», «borrow 50 USDC against my SOL».
         let stock = Self.kaminoStock(in: q)
-        if q.contains(/kamino|камино/) || (stock != nil && !q.contains(/\baave\b|ааве|\bаав/)) {
+        // «солана» is the coin only right after «под»/«залог» («под мои соланы»): further on, «на солане» is the network.
+        let againstSOL = stock == nil
+            && q.contains(/(?:\bagainst\b|\bпод\b|залог\w*|collateral)\s+(?:[\w.,]+\s+){0,3}?(?:\bsol\b|\bсол[аы]?\b)|(?:\bпод\b|залог\w*)\s+(?:мо\w+\s+)?солан\w*|(?:\bsol\b|\bсол[аы]?\b)\s+(?:as\s+collateral|в\s+залог)/)
+        if q.contains(/kamino|камино/) || ((stock != nil || (againstSOL && q.contains(Self.borrowWords))) && !q.contains(/\baave\b|ааве|\bаав/)) {
             if q.contains(Self.borrowWords), !q.contains(Self.repayWords) {
-                let adding = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?\s+of\s+|акци\w*\s+)?(?:spcx|sndk|skhy|\bmu\b|space\s*x|спейс\w*|micron|микрон\w*|hynix|хайникс\w*|sandisk|сандиск\w*)/)
+                let adding = (stock == nil
+                    ? againstSOL ? q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:\bsol\b|\bсол[аы]?\b|солан\w*)/) : nil
+                    : q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?\s+of\s+|акци\w*\s+)?(?:spcx|sndk|skhy|\bmu\b|space\s*x|спейс\w*|micron|микрон\w*|hynix|хайникс\w*|sandisk|сандиск\w*)/))
                     .flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                return .kaminoBorrow(amount ?? (bare == adding ? nil : bare), against: stock, adding: adding)
+                return .kaminoBorrow(amount ?? (bare == adding ? nil : bare), against: stock ?? (againstSOL ? "SOL" : nil), adding: adding)
             }
             if q.contains(Self.repayWords) {
                 return .kaminoRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare)
