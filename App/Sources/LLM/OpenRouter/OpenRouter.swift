@@ -14,9 +14,10 @@ public struct OpenRouter: LLMProvider {
             id: "openrouter", name: "OpenRouter", kind: .apiKey, defaultModel: "deepseek/deepseek-v4.1-flash",
             note: "One sign-in for OpenAI, Anthropic, Google, xAI and DeepSeek models. Paid with OpenRouter credits.",
             takesKey: true, signInLabel: "Sign in with OpenRouter",
-            // A few current ones from its list (checked 2026-09-30); Settings loads all of them.
-            models: ["deepseek/deepseek-v4.1-flash", "openai/gpt-6.1-sol", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5",
-                     "google/gemini-3.8-flash", "x-ai/grok-4.7", "qwen/qwen3.8-flash"]
+            // A few current ones from its list (checked 2026-11-05); Settings loads all of them.
+            models: ["deepseek/deepseek-v4.1-flash", "openai/gpt-6.1-sol", "openai/gpt-6.1-terra", "anthropic/claude-sonnet-5.5",
+                     "anthropic/claude-opus-5.5", "anthropic/claude-haiku-5.5", "google/gemini-3.8-flash", "google/gemini-4-argon",
+                     "x-ai/grok-4.7", "qwen/qwen3.8-flash"]
         )
     }
 

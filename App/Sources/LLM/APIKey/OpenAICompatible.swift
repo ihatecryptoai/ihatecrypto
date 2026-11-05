@@ -20,13 +20,13 @@ public struct OpenAICompatible: LLMProvider {
               baseURL: "https://api.deepseek.com"),
         .init(info: ProviderInfo(id: "openai", name: "OpenAI API", kind: .apiKey, defaultModel: "gpt-6.1-sol",
                                  note: "Key from platform.openai.com, billed separately from a ChatGPT subscription.", takesKey: true,
-                                 models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]),
+                                 models: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]),
               baseURL: "https://api.openai.com/v1"),
         .init(info: ProviderInfo(id: "xai", name: "xAI Grok API", kind: .apiKey, defaultModel: "grok-4.7",
                                  note: "Key from console.x.ai, paid with credits.", takesKey: true, models: ["grok-4.7", "grok-4.6"]),
               baseURL: "https://api.x.ai/v1"),
         .init(info: ProviderInfo(id: "gemini", name: "Google Gemini API", kind: .apiKey, defaultModel: "gemini-3.8-flash",
-                                 note: "Key from Google AI Studio.", takesKey: true, models: ["gemini-3.8-flash"]),
+                                 note: "Key from Google AI Studio.", takesKey: true, models: ["gemini-3.8-flash", "gemini-4-argon"]),
               baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"),
         // The biggest first: the app takes the first that fits this Mac's memory (OllamaModels.fits). The chat's exam
         // here (2026-10-06, 32 GB Mac): gemma4:26b 9/10 at 5.4 s, gemma4:12b 8/10 at 8.4 s (nimble:9b 8/10, gpt-oss:20b

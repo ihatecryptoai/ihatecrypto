@@ -247,7 +247,7 @@ nonisolated final class AnthropicStub: URLProtocol {
             stream.close()
         }
         Self.asked.append((request.allHTTPHeaderFields ?? [:], (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]))
-        let reply = Self.replies.removeFirst()
+        let reply = Self.replies.isEmpty ? (status: 500, body: "no reply left in the test") : Self.replies.removeFirst()
         client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: nil, headerFields: nil)!,
                             cacheStoragePolicy: .notAllowed)
         client!.urlProtocol(self, didLoad: Data(reply.body.utf8))
@@ -279,6 +279,30 @@ nonisolated final class AnthropicStub: URLProtocol {
     #expect(heard.usage == [LLMUsage(input: 5_030, written: 5_000, output: 3)])
     #expect(AnthropicStub.asked.count == 2 && AnthropicStub.asked.allSatisfy { $0.headers["x-api-key"] == "sk-ant-test" && $0.headers["anthropic-version"] == "2026-10-21" })
     #expect(AnthropicStub.asked[0].body["thinking"] != nil && AnthropicStub.asked[1].body["thinking"] == nil && AnthropicStub.asked[1].body["output_config"] == nil)
+
+    // A key that isn't scoped to a workspace: Anthropic's 400 (docs: manage-claude/authentication) is said as what to do,
+    // in the chat and in Settings' model list alike, and not asked again without thinking.
+    let noWorkspace = #"{"type":"error","error":{"type":"invalid_request_error","message":"This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use. Add the header, or use an API key that is scoped to a workspace."},"request_id":"req_011CSHoEeqs5C35K2UUqR7Fy"}"#
+    AnthropicStub.asked = []
+    AnthropicStub.replies = [(400, noWorkspace), (400, noWorkspace)]
+    let chat = await #expect(throws: LLMError.self) {
+        try await AnthropicClient(key: "k").complete(LLMRequest(model: "claude-opus-5-5", messages: [LLMMessage(.user, "x")], thinking: true))
+    }
+    #expect(chat?.message.contains("platform.claude.com/settings/keys › Create key") == true && AnthropicStub.asked.count == 1)
+    let list = await #expect(throws: LLMError.self) { try await AnthropicClient(key: "k").models() }
+    #expect(list?.message == AnthropicAPI.noWorkspace)
+    #expect(AnthropicAPI().info.note.contains("platform.claude.com/settings/keys"))
+}
+
+/// The starter lists before a sign-in carry the newest models, by the ids their services use (OpenRouter's list and the
+/// providers' docs, 2026-11-05).
+@Test func starterListsCarryTheNewestModels() throws {
+    func models(_ id: String) -> [String] { LLMCatalog.provider(id: id)?.info.models ?? [] }
+    #expect(models("anthropic").contains("claude-haiku-5-5") && models("claude-code").contains("claude-haiku-5-5"))
+    #expect(!(models("anthropic") + models("claude-code")).contains("claude-haiku-4-5"))
+    #expect(models("openai").contains("gpt-6.1-terra") && models("chatgpt").contains("gpt-6.1-terra"))
+    #expect(models("gemini").contains("gemini-4-argon"))
+    #expect(Set(["openai/gpt-6.1-terra", "google/gemini-4-argon", "anthropic/claude-haiku-5.5"]).isSubset(of: models("openrouter")))
 }
 
 @Test func catalogIDsAreUniqueAndUsableEntriesHaveAModelOrAreLocal() {
@@ -405,6 +429,15 @@ nonisolated final class AnthropicStub: URLProtocol {
     #expect(abs(opus.cost(LLMUsage(input: 11_000, cached: 10_000, output: 100)) - 0.008) < 1e-12)
     // The first request writes the instructions to the cache at 1.25× (18,000 tokens), the next reads them at a twentieth.
     #expect(abs(opus.cost(LLMUsage(input: 18_500, written: 18_000, output: 100)) - 0.094) < 1e-12)
+    // Haiku 5.5 as OpenRouter lists it (2026-11-05): 5× every token once the prompt passes 100k.
+    let haikuRow = #"{"data":[{"id":"anthropic/claude-haiku-5.5","context_length":1000000,"pricing":{"prompt":"0.0000001","completion":"0.0000005","input_cache_read":"0.00000001","input_cache_write":"0.000000125","overrides":[{"min_prompt_tokens":100000,"prompt":"0.0000005","completion":"0.0000025","input_cache_read":"0.00000005","input_cache_write":"0.000000625"}]}}]}"#
+    let haiku = try #require(ModelFacts.table(Data(haikuRow.utf8))[ModelFacts.key("claude-haiku-5-5")])
+    #expect(haiku.longer.map(\.over) == [100_000])
+    #expect(abs(haiku.cost(LLMUsage(input: 100_000, output: 1_000)) - 0.0105) < 1e-12)
+    #expect(abs(haiku.cost(LLMUsage(input: 100_001, output: 1_000)) - 0.0525005) < 1e-12)
+    // A tier that names only some prices keeps the base for the rest.
+    let partial = #"{"data":[{"id":"x/m","context_length":10,"pricing":{"prompt":"1","completion":"2","overrides":[{"min_prompt_tokens":5,"prompt":"3"}]}}]}"#
+    #expect(ModelFacts.table(Data(partial.utf8))[ModelFacts.key("m")]?.cost(LLMUsage(input: 6, output: 1)) == 20)
     // Ollama's window is the one its client asks for: known before its first answer.
     #expect(LLMCatalog.window(provider: "ollama") == 16_384 && LLMCatalog.window(provider: "openai") == nil)
 }

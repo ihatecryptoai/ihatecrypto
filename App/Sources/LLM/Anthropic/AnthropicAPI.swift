@@ -12,8 +12,16 @@ public struct AnthropicAPI: LLMProvider {
 
     public var info: ProviderInfo {
         ProviderInfo(id: "anthropic", name: "Anthropic API", kind: .apiKey, defaultModel: "claude-opus-5-5",
-                     note: "Key from platform.claude.com, billed separately from a Claude subscription.", takesKey: true,
-                     models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-4-5"])
+                     note: "Key from platform.claude.com/settings/keys › Create key, scoped to a workspace: Anthropic refuses a key without one. Billed separately from a Claude subscription.",
+                     takesKey: true, models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"])
+    }
+
+    /// Anthropic's 400 for a key that isn't scoped to a workspace (it would need the anthropic-workspace-id header,
+    /// docs: manage-claude/authentication), said as what to do.
+    static let noWorkspace = "This Anthropic key isn't scoped to a workspace, so Anthropic refuses it. Make one that is: platform.claude.com/settings/keys › Create key › scope it to a workspace, then paste it in Settings › AI model."
+
+    static func explained(_ error: any Error) -> any Error {
+        (error as? NetError)?.message.contains("anthropic-workspace-id") == true ? LLMError(noWorkspace) : error
     }
 
     public func client(_ credential: Credential?, save: @escaping SaveCredential) throws -> any LLMClient {
@@ -75,7 +83,7 @@ struct AnthropicClient: LLMClient {
         if !(200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) {
             var body = Data()
             for try await byte in bytes.prefix(600) { body.append(byte) }
-            try HTTP.check(response, body: body)
+            do { try HTTP.check(response, body: body) } catch { throw AnthropicAPI.explained(error) }
         }
         var stream = AnthropicStream()
         for try await line in bytes.lines {
@@ -95,7 +103,8 @@ struct AnthropicClient: LLMClient {
     func models() async throws -> [String] {
         struct Model: Decodable { let id: String }
         struct List: Decodable { let data: [Model] }
-        let data = try await HTTP.get(AnthropicAPI.base + "/models?limit=1000", headers: headers)
+        let data: Data
+        do { data = try await HTTP.get(AnthropicAPI.base + "/models?limit=1000", headers: headers) } catch { throw AnthropicAPI.explained(error) }
         return try JSONDecoder().decode(List.self, from: data).data.map(\.id)
     }
 }

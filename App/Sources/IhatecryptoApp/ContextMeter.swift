@@ -18,6 +18,8 @@ nonisolated struct ContextMeter: Codable, Equatable {
     var spent = 0.0, last: Double?
     /// The dollars are the service's own bill (OpenRouter), not tokens at the list price.
     var billed = false
+    /// The dollars are Fable's on a Claude subscription: usage credits, at Claude Code's price (`credits`).
+    var credits: Bool?
 
     /// The part of the window in use; nil when the window isn't known.
     var share: Double? {
@@ -37,6 +39,11 @@ nonisolated struct ContextMeter: Codable, Equatable {
         if tokens >= 1_000 { return trimmed(Double(tokens) / 1000, 1) + "k" }
         return "\(tokens)"
     }
+
+    /// Fable on a Claude subscription: a Pro plan's limits don't cover it, Claude bills it as usage credits (a Max plan
+    /// spends up to half its weekly limit on it first). Its answers are counted in dollars, Claude Code's price for them.
+    /// support.claude.com/en/articles/15424964, 2026-11-05.
+    static func credits(provider: String, model: String) -> Bool { provider == "claude-code" && model.contains("fable") }
 
     /// «$1.24», «$0.04», «$0.004»; under a tenth of a cent «<$0.001».
     static func dollars(_ value: Double) -> String {
@@ -65,10 +72,12 @@ extension Workspace {
             meter.sent = sent.count
             meter.lines = all.count
         }
-        if paid, let cost = usage.cost ?? facts?.cost(usage) {
+        let credits = ContextMeter.credits(provider: id, model: request.model)
+        if paid || credits, let cost = usage.cost ?? facts?.cost(usage) {
             meter.spent += cost
             meter.last = cost
             meter.billed = usage.cost != nil
+            meter.credits = credits
         }
     }
 
@@ -99,7 +108,9 @@ struct ContextChip: View {
         let m = ws.meter
         if let used = m.used {
             // Under a fifth of the window left: the rim and the number light up; the chip itself stays still.
-            let tight = (m.share ?? 0) >= 0.8, paid = ws.provider.info.kind == .apiKey && m.spent > 0
+            // Dollars while the chat's model is paid for (a key, or Fable on a subscription), said as what they were spent on.
+            let tight = (m.share ?? 0) >= 0.8, credits = m.credits == true
+            let paid = (ws.provider.info.kind == .apiKey || ContextMeter.credits(provider: ws.providerID, model: ws.model)) && m.spent > 0
             Button {
                 if open { open = false; return }
                 guard Date.now.timeIntervalSince(closedAt) > 0.3 else { return }
@@ -109,6 +120,7 @@ struct ContextChip: View {
                     if let share = m.share { ContextRing(share: share, ink: tight ? Brand.accent : Color.primary.opacity(0.82)) }
                     if paid {
                         Text(ContextMeter.dollars(m.spent)).foregroundStyle(tight ? Brand.accentInk : .primary)
+                        if credits { Text(ws.say("credits", "за кредиты", "con créditos")).font(.ui(12, .medium)).foregroundStyle(.secondary) }
                     } else {
                         Text(ContextMeter.short(used)).foregroundStyle(tight ? Brand.accentInk : .primary)
                         if let window = m.window { Text("/ " + ContextMeter.short(window)).font(.ui(12, .medium)).foregroundStyle(.secondary) }
@@ -123,15 +135,15 @@ struct ContextChip: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel(m.window.map { "Context: \(ContextMeter.short(used)) of \(ContextMeter.short($0)) tokens" } ?? "Context: \(ContextMeter.short(used)) tokens")
-            .help(paid ? "This chat's answers cost \(ContextMeter.dollars(m.spent)) so far. Click for the context they read."
+            .help(paid ? (credits ? "Fable is paid for with usage credits. " : "") + "This chat's answers cost \(ContextMeter.dollars(m.spent)) so far. Click for the context they read."
                        : "What the model read with your last message" + (m.window == nil ? "." : ", of what its window holds."))
-            .popover(isPresented: $open, arrowEdge: .top) { details(m, used: used) }
+            .popover(isPresented: $open, arrowEdge: .top) { details(m, used: used, credits: credits) }
             .onChange(of: open) { if !open { closedAt = .now } }
             .transition(.opacity)
         }
     }
 
-    private func details(_ m: ContextMeter, used: Int) -> some View {
+    private func details(_ m: ContextMeter, used: Int, credits: Bool) -> some View {
         let rest = max(0, used - m.instructions - m.chat)
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -169,7 +181,8 @@ struct ContextChip: View {
                     row(nil, "This chat’s answers", ContextMeter.dollars(m.spent))
                     if let last = m.last { row(nil, "The last one", ContextMeter.dollars(last)) }
                 }
-                Text(m.billed ? "As OpenRouter charged it." : "Tokens at the service’s list price; its own invoice is the final word.")
+                Text(credits ? "Claude Code’s price for these tokens. A Pro plan doesn’t cover Fable: Claude takes it from usage credits. A Max plan spends up to half its weekly limit on Fable first."
+                     : m.billed ? "As OpenRouter charged it." : "Tokens at the service’s list price. Its own invoice is the final word.")
                     .font(.ui(11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Divider()

@@ -85,6 +85,11 @@ public struct ModelFacts: Sendable, Equatable {
     public var input: Double, cached: Double, output: Double
     /// Dollars a token written to the cache: the read price where the list names none.
     public var written: Double
+    /// A prompt of more tokens than this is billed at these prices, every token of it: 0 for the base prices.
+    public var over = 0
+    /// The model's dearer prices for long prompts, by size (`pricing.overrides`): Haiku 5.5 costs 5× past 100k tokens,
+    /// GPT-6.1 Sol and Terra 2× past 272k.
+    public var longer: [ModelFacts] = []
 
     public init(window: Int, input: Double, cached: Double, output: Double, written: Double? = nil) {
         self.window = window
@@ -94,11 +99,11 @@ public struct ModelFacts: Sendable, Equatable {
         self.written = written ?? input
     }
 
-    // ponytail: the base list price. A service's dearer tier for prompts over 200–272k tokens and DeepSeek's hours of
-    // the day aren't applied: the chat sends a few thousand tokens. Read `pricing.overrides` if that changes.
+    // ponytail: DeepSeek's cheaper hours of the day aren't applied (OpenRouter's list doesn't carry them).
     public func cost(_ usage: LLMUsage) -> Double {
-        Double(usage.input - usage.cached - usage.written) * input + Double(usage.cached) * cached + Double(usage.written) * written
-            + Double(usage.output) * output
+        let p = longer.last { usage.input > $0.over } ?? self
+        return Double(usage.input - usage.cached - usage.written) * p.input + Double(usage.cached) * p.cached + Double(usage.written) * p.written
+            + Double(usage.output) * p.output
     }
 
     public static let source = "https://openrouter.ai/api/v1/models"
@@ -118,11 +123,23 @@ public struct ModelFacts: Sendable, Equatable {
         for row in rows {
             guard let id = row["id"] as? String, let window = LLMUsage.int(row["context_length"]), window > 0,
                   table[key(id)] == nil else { continue }
-            let prices = row["pricing"] as? [String: Any] ?? [:]
-            func price(_ name: String) -> Double? { (prices[name] as? String).flatMap(Double.init) ?? (prices[name] as? NSNumber)?.doubleValue }
-            let input = price("prompt") ?? 0
-            table[key(id)] = ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0,
-                                        written: price("input_cache_write"))
+            let base = row["pricing"] as? [String: Any] ?? [:]
+            func facts(_ prices: [String: Any]) -> ModelFacts {
+                func price(_ name: String) -> Double? { (prices[name] as? String).flatMap(Double.init) ?? (prices[name] as? NSNumber)?.doubleValue }
+                let input = price("prompt") ?? 0
+                return ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0,
+                                  written: price("input_cache_write"))
+            }
+            var model = facts(base)
+            // A tier names only what changes: the rest is the base price.
+            model.longer = (base["overrides"] as? [[String: Any]] ?? []).compactMap { tier in
+                // A number in the list (2026-11-05), read as a string too, as its prices are.
+                guard let over = LLMUsage.int(tier["min_prompt_tokens"]) ?? (tier["min_prompt_tokens"] as? String).flatMap(Int.init) else { return nil }
+                var long = facts(base.merging(tier) { _, new in new })
+                long.over = over
+                return long
+            }.sorted { $0.over < $1.over }
+            table[key(id)] = model
         }
         return table
     }

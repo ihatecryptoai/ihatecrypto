@@ -13,8 +13,9 @@ public struct ClaudeCodeSubscription: LLMProvider {
             id: "claude-code", name: "Claude (subscription via Claude Code)", kind: .subscription, defaultModel: "claude-opus-5-5",
             note: "Runs the installed Claude Code with no tools. Anthropic doesn't officially allow third-party sign-in — a gray area.",
             existingLoginLabel: "Use the installed Claude Code",
-            // All answer through `claude -p` (checked 2026-09-30).
-            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-4-5"]
+            // All answer through `claude -p` (checked 2026-09-30). Haiku 5.5 needs Claude Code 2.1.293 or later. Fable isn't in a
+            // Pro plan's limits: Claude bills it as usage credits (the context chip says so, ContextMeter.credits).
+            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"]
         )
     }
 

@@ -23,6 +23,15 @@ import Testing
     }
 }
 
+/// Fable on a Claude subscription is paid for with usage credits: its chip counts dollars. Other Claude models, and
+/// Fable on a key (counted as a key's anyway), aren't this.
+@Test func fableOnASubscriptionIsCountedAsCredits() {
+    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-fable-5-1"))
+    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-fable-5"))
+    #expect(!ContextMeter.credits(provider: "claude-code", model: "claude-opus-5-5"))
+    #expect(!ContextMeter.credits(provider: "anthropic", model: "claude-fable-5-1"))
+}
+
 @Test func accountsSayTheirKind() {
     let kinds = Dictionary(uniqueKeysWithValues: LLMCatalog.all.map { ($0.info.id, $0.info.kindName) })
     #expect(kinds["chatgpt"] == "Subscription" && kinds["openai"] == "API key" && kinds["ollama"] == "On this Mac · free")
