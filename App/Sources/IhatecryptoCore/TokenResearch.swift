@@ -74,6 +74,41 @@ public enum TokenResearch {
         }
     }
 
+    /// What a Token-2022 mint's extensions let its creator do to a holder, from getAccountInfo's jsonParsed answer for the
+    /// mint (research E-8): Jupiter's token list doesn't carry them (checked 2026-11-05). Worst first. A 0 % transfer fee
+    /// and a hook with no program (PYUSD's, Ondo's) do nothing today and aren't named.
+    public static func extensionWarnings(_ account: Any?, russian: Bool = false) -> [String] {
+        let info = (((account as? [String: Any])?["value"] as? [String: Any])?["data"] as? [String: Any]).flatMap { ($0["parsed"] as? [String: Any])?["info"] as? [String: Any] }
+        var state: [String: [String: Any]] = [:]
+        for e in info?["extensions"] as? [[String: Any]] ?? [] { if let name = e["extension"] as? String { state[name] = e["state"] as? [String: Any] ?? [:] } }
+        func set(_ v: Any?) -> Bool { v != nil && !(v is NSNull) }
+        var out: [String] = []
+        if set(state["permanentDelegate"]?["delegate"]) {
+            out.append(russian ? "создатель может забрать или сжечь его в любом кошельке, в твоём тоже (permanent delegate)"
+                               : "its creator can take or burn it in any wallet, yours too (permanent delegate)")
+        }
+        if state["nonTransferable"] != nil { out.append(russian ? "его нельзя перевести, а значит и продать (non-transferable)" : "it can't be transferred, so it can't be sold (non-transferable)") }
+        if state["pausableConfig"]?["paused"] as? Bool == true {
+            out.append(russian ? "переводы сейчас на паузе: продать не получится (pausable)" : "its transfers are paused now, so it can't be sold (pausable)")
+        } else if set(state["pausableConfig"]?["authority"]) {
+            out.append(russian ? "эмитент может поставить все переводы на паузу (pausable)" : "its issuer can pause all transfers (pausable)")
+        }
+        if set(state["transferHook"]?["programId"]) {
+            out.append(russian ? "каждый перевод запускает программу создателя, она может не дать продать (transfer hook)"
+                               : "every transfer runs its creator's program, which can refuse a sale (transfer hook)")
+        }
+        // A fee with a cap of 0 takes nothing.
+        let fee = ["newerTransferFee", "olderTransferFee"].compactMap { key -> Int? in
+            guard let f = state["transferFeeConfig"]?[key] as? [String: Any], (f["maximumFee"] as? NSNumber)?.intValue != 0 else { return nil }
+            return (f["transferFeeBasisPoints"] as? NSNumber)?.intValue
+        }.max() ?? 0
+        if fee > 0 {
+            let p = String(format: "%g%%", Double(fee) / 100)
+            out.append(russian ? "с каждого перевода создатель берёт \(p) (transfer fee)" : "every transfer pays its creator \(p) (transfer fee)")
+        }
+        return out
+    }
+
     /// Jupiter's token search: keyless on api.jup.ag (lite-api.jup.ag is being retired), 5 requests in 10 s per IP.
     public static let jupiterSearch = "https://api.jup.ag/tokens/v2/search?query="
 
@@ -107,7 +142,7 @@ public enum TokenResearch {
         let audit = t["audit"] as? [String: Any] ?? [:]
         let tags = t["tags"] as? [String] ?? []
         let verified = t["isVerified"] as? Bool == true || tags.contains("verified")
-        return SolanaToken(name: t["name"] as? String ?? "?", symbol: t["symbol"] as? String ?? "?", decimals: decimals,
+        return SolanaToken(name: Holding.plain(t["name"] as? String ?? "?", max: 32), symbol: Holding.plain(t["symbol"] as? String ?? "?"), decimals: decimals,
                            token2022: t["tokenProgram"] as? String == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" || tags.contains("token-2022"),
                            verified: verified, liquidityUSD: dec(t["liquidity"]), freezable: audit["freezeAuthorityDisabled"] as? Bool == false,
                            mintable: audit["mintAuthorityDisabled"] as? Bool == false, topHolders: dec(audit["topHoldersPercentage"]))
@@ -128,7 +163,7 @@ public enum TokenResearch {
         let audit = t["audit"] as? [String: Any] ?? [:]
         let tags = t["tags"] as? [String] ?? []
         let verified = t["isVerified"] as? Bool == true || tags.contains("verified")
-        var lines = ["Solana token \(t["name"] as? String ?? "?") (\(t["symbol"] as? String ?? "?")), mint \(mint), chain id solana. Jupiter: "
+        var lines = ["Solana token \(Holding.plain(t["name"] as? String ?? "?", max: 32)) (\(Holding.plain(t["symbol"] as? String ?? "?"))), mint \(mint), chain id solana. Jupiter: "
                      + (verified ? "verified" : "not verified") + (tags.isEmpty ? "" : ", tags \(tags.joined(separator: ", "))") + "."]
         lines.append("Price \(price(dec(t["usdPrice"]))), market cap \(usd(dec(t["mcap"]))), FDV \(usd(dec(t["fdv"]))), liquidity \(usd(dec(t["liquidity"])))"
                      + ((t["holderCount"] as? NSNumber).map { ", \($0.intValue) holders" } ?? "") + ".")
@@ -186,7 +221,7 @@ public enum TokenResearch {
     static func dexFacts(_ data: Data, address: String, now: Date = Date()) -> String? {
         let chains = TokenLookup.parse(data, address: address)
         guard let top = chains.first, let m = TokenMarket.parse(data, address: address, chain: top.chain) else { return nil }
-        return (["DexScreener: \(m.name) (\(m.symbol)), contract \(top.address), chain id \(top.chain)"
+        return (["DexScreener: \(Holding.plain(m.name, max: 32)) (\(Holding.plain(m.symbol))), contract \(top.address), chain id \(top.chain)"
                  + (chains.count > 1 ? "; also trades on " + chains.dropFirst().map(\.chain).joined(separator: ", ") : "") + "."]
                 + poolFacts(m, now: now)).joined(separator: "\n")
     }
@@ -242,7 +277,7 @@ public enum TokenResearch {
             guard liquidity > (best[key]?.liquidity ?? -1) else { continue }
             let opened = (p["pairCreatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
             let change = dec((p["priceChange"] as? [String: Any])?["h24"])
-            best[key] = (liquidity, address, "\(base["symbol"] as? String ?? "?") (\(base["name"] as? String ?? "?")) on chain id \(chain), contract \(address): "
+            best[key] = (liquidity, address, "\(Holding.plain(base["symbol"] as? String ?? "?")) (\(Holding.plain(base["name"] as? String ?? "?", max: 32))) on chain id \(chain), contract \(address): "
                          + "price \(price(dec(p["priceUsd"]))), liquidity \(usd(liquidity))" + (change.map { ", 24h \(pct($0))" } ?? "")
                          + (opened.map { ", pool opened \(age($0, now: now)) ago" } ?? ""))
         }

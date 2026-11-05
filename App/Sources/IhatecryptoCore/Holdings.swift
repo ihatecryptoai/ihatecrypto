@@ -34,10 +34,18 @@ public struct Holding: Sendable, Identifiable, Equatable {
 
     public init(chain: String, contract: String, amount: Decimal, symbol: String, icon: URL? = nil, price: Decimal? = nil,
                 verified: Bool = false, liquidity: Decimal? = nil, native: Bool = false, change24h: Decimal? = nil) {
-        (self.chain, self.contract, self.amount, self.symbol, self.icon, self.price) = (chain, contract, amount, symbol, icon, price)
+        (self.chain, self.contract, self.amount, self.symbol, self.icon, self.price) = (chain, contract, amount, Holding.plain(symbol), icon, price)
         (self.verified, self.liquidity, self.native, self.change24h) = (verified, liquidity, native, change24h)
     }
     public var usd: Decimal? { price.map { $0 * amount } }
+
+    /// A token's ticker or name as anyone deploying it wrote it, made fit for the chat's model and the screen (research
+    /// E-9): no line breaks or invisible characters (AddressCheck.hidden), at most `max` characters — a «symbol» can be a
+    /// paragraph of instructions.
+    public static func plain(_ text: String, max: Int = 16) -> String {
+        let s = String(String.UnicodeScalarView(text.unicodeScalars.filter { !AddressCheck.hidden($0) })).trimmingCharacters(in: .whitespaces)
+        return s.count > max ? s.prefix(max - 1) + "…" : s
+    }
     /// Airdropped look-alikes are unverified with no real pool behind them: they stay out of sight until the user
     /// asks. A token the user bought has a pool (or a market list's check) and shows.
     public var looksReal: Bool { verified || ((liquidity ?? 0) >= 10_000 && (usd ?? 0) >= 0.01) }

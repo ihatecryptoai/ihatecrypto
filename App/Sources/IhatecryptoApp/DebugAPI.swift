@@ -385,7 +385,7 @@ final class DebugAPI {
             let route = ws.route(command)
             let drawn = route ?? ws.fallbackRoute(command)
             out["pending"] = ["kind": "wallet", "command": String(describing: command), "title": drawn.title, "footer": drawn.footer,
-                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "drawnRoute": route != nil, "confirm": true,
+                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "drawnRoute": route != nil, "confirm": true, "warning": drawn.warning ?? NSNull(),
                               // What the swap gets as quoted now, the chat's line; nil while quoting or for a move without a price.
                               "quote": ws.swapLine(command) ?? NSNull(), "quoteState": "\(ws.quoteState(at: Date()))"] as [String: Any]
         case .position(let command, let coin)?:

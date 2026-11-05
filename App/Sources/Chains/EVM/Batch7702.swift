@@ -25,6 +25,16 @@ public enum Batch7702 {
     /// More calls than any of ihatecrypto's moves makes (Robinhood's v4 swap is three).
     public static let maxCalls = 4
 
+    /// The contract an address's code (eth_getCode) delegates it to by EIP-7702 — 0xef0100 ‖ 20 bytes — when it isn't
+    /// ours: set up outside ihatecrypto, a phishing signature or a leaked key's sweeper as a rule, so what arrives at the
+    /// address can be taken. nil for no code, a contract, or our own `delegate`.
+    public static func foreignDelegate(code: String) -> String? {
+        let c = code.lowercased()
+        guard c.count == 2 + 46, c.hasPrefix("0xef0100") else { return nil }
+        let to = "0x" + c.dropFirst(8)
+        return to == delegate ? nil : to
+    }
+
     /// One call of the batch; no coins go with it.
     public struct Call: Codable, Sendable, Equatable {
         public let to: String

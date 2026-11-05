@@ -717,3 +717,12 @@ func forkContractCallSendsItsCoinsWithItsApprove() async throws {
     }
     #expect(refused?.message.contains("Coins go only with a single call") == true, "\(refused?.message ?? "")")
 }
+
+/// Research E-7: the wallet's address delegated by EIP-7702 to someone else's contract is told apart from ours and from none.
+@Test func foreignDelegationIsReadFromTheCode() {
+    let sweeper = "0x8a67b5020ee254ef48e3b6a04927f39baf7e408a"
+    #expect(Batch7702.foreignDelegate(code: "0xef0100" + sweeper.dropFirst(2).uppercased()) == sweeper)
+    #expect(Batch7702.foreignDelegate(code: "0xef0100" + Batch7702.delegate.dropFirst(2)) == nil)
+    #expect(Batch7702.foreignDelegate(code: "0x") == nil)
+    #expect(Batch7702.foreignDelegate(code: "0x6080604052" + String(repeating: "00", count: 20)) == nil)
+}

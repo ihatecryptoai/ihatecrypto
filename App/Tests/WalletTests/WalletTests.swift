@@ -230,3 +230,19 @@ private func order(_ kind: HLOrder.Kind, cloid: String? = nil) throws -> MsgPack
     #expect(AddressCheck.xAddress("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", tag: 12345) == "XVPcpSm47b1CZkf5AkKM9a84dQHe3mTAxgxfLw2qYoe7Boa")
     #expect(AddressCheck.xAddress("rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf", tag: 4_294_967_295) == "XVLhHMPHU98es4dbozjVtdWzVrDjtV18pX8yuPT7y4xaEHi")
 }
+
+/// Research E-5: a twin of a known address — the same first and last 4 characters, another middle — is named; the same
+/// address in another case, a different one, and a Solana address against an EVM one aren't.
+@Test func addressTwinsAreNamed() {
+    let known = [(name: "«Bybit · USDC»", address: "0x7a3F9c1D2e448B0a51f7c3D906aE4b2E77c1e91C"),
+                 (name: "«Phantom»", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")]
+    #expect(AddressCheck.lookalike("0x7a3F0d5eA1b377F29e084Ac1b6D20f93a5E8e91C", among: known)?.name == "«Bybit · USDC»")
+    #expect(AddressCheck.lookalike(" 0x7A3f0d5ea1b377f29e084ac1b6d20f93a5e8E91c ", among: known)?.name == "«Bybit · USDC»")
+    #expect(AddressCheck.lookalike("0x7a3f9c1d2e448b0a51f7c3d906ae4b2e77c1e91c", among: known) == nil)
+    #expect(AddressCheck.lookalike("0x7a3c0d5eA1b377F29e084Ac1b6D20f93a5E8e91C", among: known) == nil)
+    #expect(AddressCheck.lookalike("7xKXzzzzW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", among: known)?.name == "«Phantom»")
+    #expect(AddressCheck.lookalike("7XKXzzzzW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", among: known) == nil)
+    // NEAR names aren't compared by their ends; bc1q is every segwit address's start, so it isn't a match.
+    #expect(AddressCheck.lookalike("alice-wallet.near", among: [(name: "«A»", address: "alice-buyers.near")]) == nil)
+    #expect(AddressCheck.lookalike("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", among: [(name: "«B»", address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")]) == nil)
+}

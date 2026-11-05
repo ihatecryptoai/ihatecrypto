@@ -178,8 +178,11 @@ enum Signer {
             }
             // The whole address on the prompt, not its ends: a look-alike differs in the middle. It starts the line, before
             // the name, so no name can stand where an address should be.
+            // A twin of an address already known goes on the prompt under it: saving it stays the user's call (E-5, variant B).
+            let known = knownAddresses()
             let lines = entries.map { e in
                 "\(e.address) on \(AddressCheck.Network(rawValue: e.network)?.title ?? e.network) as «\(e.name)»" + (e.memo.isEmpty ? "" : ", memo \(e.memo)")
+                    + (AddressCheck.lookalike(e.address, among: known).map { "\n  looks like \($0.name): same start and end, a different middle" } ?? "")
             }
             try SeedStore.confirm("save to your address book (check every character):\n" + lines.joined(separator: "\n"))
             defer { SeedStore.endSession() } // a confirmation, not a move: it leaves no session for an unrelated signature
@@ -883,8 +886,20 @@ enum Signer {
         guard !new.isEmpty else { return }
         // The automation wallet signs with no one at the Mac: its prompt closes by itself after a minute.
         let what = calls ? "allow ihatecrypto to call a contract whose call it can't read:\n" : "allow ihatecrypto to send money to a new address:\n"
-        try SeedStore.confirm(what + new.joined(separator: "\n") + "\nfor this move: " + doing, within: Wallets.signing == nil ? nil : 60)
+        let others = knownAddresses()
+        let lines = new.map { a in a + (AddressCheck.lookalike(a, among: others).map { "\n  looks like \($0.name): same start and end, a different middle" } ?? "") }
+        try SeedStore.confirm(what + lines.joined(separator: "\n") + "\nfor this move: " + doing, within: Wallets.signing == nil ? nil : 60)
         try RecipientStore.add(new, to: calls ? RecipientStore.calls : RecipientStore.money)
+    }
+
+    /// What a new address is compared with for a twin, each with the words the prompt names it by: the saved book, this
+    /// wallet, the Mac's other wallets and every address money went to from this wallet — the signer's own lists, not the app's.
+    static func knownAddresses() -> [(name: String, address: String)] {
+        AddressBookStore.all().map { ("«\($0.name)»", $0.address) }
+            + [try? address("solana"), try? address("evm")].compactMap { $0 }.map { ("this wallet", $0) }
+            + Wallets.all.flatMap { w in [w.solana, w.evm].compactMap { $0 }.map { ("one of your wallets", $0) } }
+            + OwnStore.all().map { ("one of your wallets", $0) }
+            + RecipientStore.all().map { ("an address you sent money to", $0) }
     }
 
     /// A NEAR receiver ihatecrypto may pay: a valid account, among the saved addresses the app passed, with a real block hash.

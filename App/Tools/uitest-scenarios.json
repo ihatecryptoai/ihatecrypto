@@ -829,6 +829,28 @@
     }
   },
   {
+    "name": "buy PYUSD → its permanent delegate is said in the chat and on the card, Confirm stays",
+    "send": [
+      "купи PYUSD на 0.2 доллара"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "reply_contains": "permanent delegate",
+      "warning_contains": "permanent delegate"
+    }
+  },
+  {
+    "name": "a twin of a known address → saving warns it looks like address poisoning, Save anyway stays",
+    "send": [
+      "сохрани {twin} как Twin на base"
+    ],
+    "expect": {
+      "pending_kind": "address",
+      "pending_name": "Twin",
+      "reply_contains": "подмену адреса"
+    }
+  },
+  {
     "name": "an address saved on Tempo → the card says Tempo, the name stays the name",
     "send": [
       "сохрани 0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f как Tester на tempo"

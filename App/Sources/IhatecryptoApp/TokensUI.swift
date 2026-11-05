@@ -1,6 +1,7 @@
 import AppKit
 import EVMChain
 import IhatecryptoCore
+import SolanaChain
 import SwiftUI
 import WalletCore
 
@@ -56,11 +57,12 @@ extension Workspace {
                 reply("DexScreener doesn’t know this contract\(chain.map { " on \($0)" } ?? ""): no pool trades it, so there’s no price to watch.", note: note)
                 return
             }
-            var token = FavoriteToken(chain: info.chain, address: info.address, name: info.name, symbol: info.symbol, image: info.imageURL)
+            // Names as the token's maker wrote them, made plain for the screen and the chat (research E-9).
+            var token = FavoriteToken(chain: info.chain, address: info.address, name: Holding.plain(info.name, max: 32), symbol: Holding.plain(info.symbol), image: info.imageURL)
             // What the contract says about itself wins over any listing.
             if let rpc = token.rpc, let s = ABI.string((try? await rpc.read(address, Data([0x95, 0xd8, 0x9b, 0x41]))) ?? Data()),
                let n = ABI.string((try? await rpc.read(address, Data([0x06, 0xfd, 0xde, 0x03]))) ?? Data()) {
-                token = FavoriteToken(chain: info.chain, address: info.address, name: n, symbol: s, image: info.imageURL)
+                token = FavoriteToken(chain: info.chain, address: info.address, name: Holding.plain(n, max: 32), symbol: Holding.plain(s), image: info.imageURL)
             }
             if !favoriteTokens.contains(where: { $0.id == token.id }) { favoriteTokens.append(token) }
             tokenInfo[token.id] = info
@@ -125,8 +127,12 @@ extension Workspace {
         // Ondo's own tokens: not the freeze, mint and thin-pool warnings, which an issuer's token always has (its market
         // makers, not the pools, set the price); its terms go on the buy's card (Canvases, the route's footer).
         let ondo = t.verified && Ondo.issued(mint)
-        let warnings = ondo ? [] : t.warnings(russian: modulesRussian)
-        if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: "; ") + ".", note: note) }
+        // Token-2022's extensions are read from the mint itself (research E-8). Unread, the buy goes on with Jupiter's facts.
+        let account = ondo || !t.token2022 ? nil : try? await SolanaRPC().call("getAccountInfo", [mint, ["encoding": "jsonParsed", "commitment": "finalized"]])
+        let warnings = ondo ? [] : TokenResearch.extensionWarnings(account, russian: modulesRussian) + t.warnings(russian: modulesRussian)
+        // The card's in English, as cards are.
+        tokenWarnings[mint] = ondo ? nil : TokenResearch.extensionWarnings(account) + t.warnings()
+        if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: ", ") + ".", note: note) }
         return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022, ondo: ondo)
     }
 

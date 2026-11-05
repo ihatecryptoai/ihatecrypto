@@ -628,6 +628,10 @@ struct AddressEditor: View {
                 Label("Valid \(network.title) address. Compare it with the source: starts \(ends.start), ends \(ends.end).", systemImage: "checkmark.seal.fill")
                     .foregroundStyle(Brand.profit)
                 if let duplicate { Label("Already saved as “\(duplicate.name)”.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.jevInk) }
+                if duplicate == nil, let twin = ws.lookalike(trimmed) {
+                    Label("Looks like \(twin.name): same start and end, a different middle. That is how address poisoning looks. Check it against the source.",
+                          systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.loss)
+                }
                 if isOwn { Label("This is your own wallet.", systemImage: "person.crop.circle.badge.checkmark").foregroundStyle(.secondary) }
                 if let saveError { Label(saveError, systemImage: "xmark.octagon.fill").foregroundStyle(Brand.loss) }
                 if isExchange {
@@ -983,7 +987,10 @@ extension Workspace {
         pendingAction = .address(entry)
         pendingText = "save “\(name)”"
         let ends = AddressCheck.ends(address)
-        if let domain {
+        if let twin = lookalike(address), let ru = lookalike(address, russian: true) {
+            reply(say("This looks like address poisoning: it starts \(ends.start) and ends \(ends.end) like \(twin.name), but the middle is different. Check it against the source. You can still save it: Save asks for \(Presence.name), and the prompt shows the warning.",
+                      "Похоже на подмену адреса: начало \(ends.start) и конец \(ends.end) как у \(ru.name), а середина другая. Сверь с источником. Сохранить всё равно можно: Save спросит \(Presence.ru), и в запросе будет предупреждение."), note: note)
+        } else if let domain {
             reply(say("\(domain) points at \(ends.start)…\(ends.end) on \(network.title), read on-chain just now. Check it on the canvas; Save asks for \(Presence.name) with the whole address.",
                       "\(domain) ведёт на \(ends.start)…\(ends.end) в \(network.title) — прочитано в сети только что. Сверь на холсте; Save спросит \(Presence.ru) с полным адресом."), note: note)
         } else {
@@ -1007,6 +1014,12 @@ extension Workspace {
 struct PendingAddressBoard: View {
     @Environment(Workspace.self) private var ws
 
+    /// «0x7a3F 0d5e A1b3 …»: groups of four after the 0x, the way to compare a middle by eye.
+    static func grouped(_ address: String) -> String {
+        let evm = address.hasPrefix("0x"), body = evm ? String(address.dropFirst(2)) : address
+        return (evm ? "0x" : "") + stride(from: 0, to: body.count, by: 4).map { String(body.dropFirst($0).prefix(4)) }.joined(separator: " ")
+    }
+
     var body: some View {
         if case .address(let entry)? = ws.pendingAction {
             VStack(alignment: .leading, spacing: 10) {
@@ -1019,8 +1032,19 @@ struct PendingAddressBoard: View {
                       ? "Taken from your own message and checked for \(entry.network.title). Compare it with the source: Save asks for \(Presence.name) with the whole address on the prompt."
                       : "Resolved from \(entry.note.components(separatedBy: " — ").first ?? "") on \(entry.network.title) just now and checked. Save asks for \(Presence.name) with the whole address on the prompt.",
                       systemImage: "checkmark.shield")
-                    .font(.ui(10)).foregroundStyle(.secondary).frame(width: 470, alignment: .leading)
-                PendingButtons(confirm: "Save")
+                    .font(.ui(10)).foregroundStyle(.secondary).frame(width: 340, alignment: .leading)
+                let twin = ws.lookalike(entry.address)
+                if let twin {
+                    // Both whole, one under the other: the middle is where they differ.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Looks like \(twin.name): same start and end, a different middle. That is how address poisoning looks.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.ui(11, .semibold)).foregroundStyle(Brand.loss)
+                        Text("Known · " + Self.grouped(twin.address)).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                        Text("New   · " + Self.grouped(entry.address)).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    }
+                    .frame(width: 340, alignment: .leading)
+                }
+                PendingButtons(confirm: twin == nil ? "Save" : "Save anyway")
             }
             .transition(.opacity)
         }
@@ -1045,6 +1069,14 @@ extension Workspace {
         return wallets.first { $0.id != activeWalletID && ($0.label.lowercased() == key || ledger && $0.kind == "ledger") }.flatMap { w in
             w.solana.map { SavedAddress(name: w.label, address: $0, network: .solana, category: "Your wallet", icon: .logo("sol")) }
         }
+    }
+
+    /// The saved address or own wallet `address` is a twin of (AddressCheck.lookalike), as «name»; nil when none. The
+    /// signer compares it again with its own lists and says so on the prompt.
+    /// `russian`: the name as «как у …» takes it.
+    func lookalike(_ address: String, russian: Bool = false) -> (name: String, address: String)? {
+        let own = wallets.flatMap { w in [w.solana, w.evm].compactMap { $0 }.map { (russian ? "твоего кошелька «\(w.label)»" : "your wallet «\(w.label)»", $0) } }
+        return AddressCheck.lookalike(address, among: addressBook.map { ("«\($0.name)»", $0.address) } + own)
     }
 
     func markSent(_ entry: SavedAddress) {

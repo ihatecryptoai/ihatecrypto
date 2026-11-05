@@ -1325,7 +1325,47 @@ extension Workspace {
     /// The route of a money move waiting for «do it»: a withdrawal to Solana, USDC into Aave on Base, a stock token,
     /// a way back to Solana, or any move between the user's own places. nil for commands that aren't drawn as one.
     /// `ahead`: for a step of a chain, the USDC the steps before it add to a network (or take off it), see `chainSteps`.
+    /// The move's card, with what the research's E-7 and E-8 found on top of its own warning: the user decides, Confirm
+    /// stays (variant B, 2026-11-05).
     func route(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
+        guard var r = drawnRoute(command, ahead: ahead) else { return nil }
+        let extra = [Self.delegationWarning(command, foreignDelegates), boughtTokenWarning(command)].compactMap { $0 }
+        if !extra.isEmpty { r.warning = ([r.warning].compactMap { $0 } + extra).joined(separator: " ") }
+        return r
+    }
+
+    /// The EVM network a move leaves money on at this wallet's own address; nil for any other move.
+    static func lands(_ c: WalletCommand) -> String? {
+        switch c {
+        case .bridge(_, let to, _), .cctp(_, let to, _), .usdt(_, let to, _, _), .solanaTo(let to, _): to
+        case .buyOn(let n, _, _, _), .swapOn(let n, _, _, _), .gas(let n, _), .crossSwap(_, _, _, let n, _): n
+        // Aave's and Morpho's deposits pass through the address and leave their receipt tokens on it; a loan pays out to it.
+        case .aave(_, _, let n), .morpho(_, _, let n), .aaveBorrow(_, let n), .aaveCollateral(_, let n), .sellOn(let n, _, _, _): n
+        case .buyStock, .sellStock: "robinhood"
+        case .sellNear(_, let to?): to
+        default: nil
+        }
+    }
+
+    /// Money a move brings to an address of ours that runs someone else's EIP-7702 contract there (readDelegations).
+    static func delegationWarning(_ c: WalletCommand, _ delegates: [String: String]) -> String? {
+        guard let net = lands(c), let delegate = delegates[net] else { return nil }
+        return "Your \(EVMNetwork.named(net)?.name ?? net) address runs someone else's contract (\(delegate.prefix(6))…\(delegate.suffix(4))), set up outside ihatecrypto. "
+            + "Money arriving there can be taken by it. Confirm only if you set it up yourself, in MetaMask for example."
+    }
+
+    /// A Solana token's risks (TokenResearch.SolanaToken.warnings, Token-2022's extensions among them) on its buy's card.
+    func boughtTokenWarning(_ c: WalletCommand) -> String? {
+        let asset: SpotAsset? = switch c {
+        case .buy(let a, _), .jupiterDCA(let a, _, _, _): a
+        case .swapOn("solana", _, let to, _), .crossSwap(_, _, let to, "solana", _): spotAssets[to]
+        default: nil
+        }
+        guard let asset, let w = tokenWarnings[asset.mint], !w.isEmpty else { return nil }
+        return "\(asset.symbol): " + w.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }.joined(separator: " ")
+    }
+
+    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
         switch command {
         case .withdrawToSolana(let asked): withdrawRoute(asked)
         case .aave(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, network: net)

@@ -210,6 +210,12 @@ final class Workspace {
     }
     /// Whether a Hyperliquid send card's recipient is new there, by lowercased address: asked when the card comes up.
     var hlRecipients: [String: HLRecipient] = [:]
+    /// EVM network key → the contract someone else's EIP-7702 delegation runs at this wallet's address there (readDelegations).
+    var foreignDelegates: [String: String] = [:]
+    @ObservationIgnored var delegatesReadFor = ""
+    @ObservationIgnored var delegatesUnread = false
+    /// A Solana token's warnings by mint, as the buy's chat line said them: the card repeats them above Confirm.
+    @ObservationIgnored var tokenWarnings: [String: [String]] = [:]
     /// A command the model read from another language: it waits for «do it», so a wrong reading moves nothing.
     var pendingAction: PendingAction? {
         didSet {
@@ -1765,7 +1771,7 @@ final class Workspace {
         }
         // As its board shows it: size, entry, stop, take and the P/L now.
         c.positions = positions.map { "\($0.size > 0 ? "long" : "short") \(IntentParser.pretty($0.coin)) \(positionSummary($0)), unrealized \(signed($0.unrealizedPnl))" }
-        c.favorites = favoriteTokens.map { "\($0.symbol) (\($0.name)) = \($0.address) on \($0.chainTitle)" }
+        c.favorites = favoriteTokens.map { "\(Holding.plain($0.symbol)) (\(Holding.plain($0.name, max: 32))) = \($0.address) on \($0.chainTitle)" }
         // With its network, so «по эфир сети» to a Base entry is answered with Base, not a guess.
         c.addressBook = addressBook.map { "\($0.name) (\($0.network.title))" }
         c.replyLanguage = replyLanguage
@@ -1814,7 +1820,7 @@ final class Workspace {
         if let r = robinhood {
             c.balances.append("Robinhood Chain \(Fmt.num(r.usdg)) USDG" + r.stocks.map { ", \(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol) stock" }.joined())
         }
-        for t in favoriteTokens { if let held = tokenBalances[t.id], held > 0 { c.balances.append("\(t.symbol) token on \(t.chainTitle) \(Fmt.num(held, maxFraction: 4))") } }
+        for t in favoriteTokens { if let held = tokenBalances[t.id], held > 0 { c.balances.append("\(Holding.plain(t.symbol)) token on \(t.chainTitle) \(Fmt.num(held, maxFraction: 4))") } }
         // Tokens the portfolio shows on every network — a vault's shares among them (fUSDC, mUSDC…), read from the chain.
         for t in shownTokens where !t.native && t.symbol.uppercased() != "USDC" && (t.usd ?? 0) >= Decimal(string: "0.5")!
             && !favoriteTokens.contains(where: { $0.id == t.id }) {
@@ -2037,6 +2043,8 @@ final class Workspace {
         if same() { updatedAt = Date(); recordEquity(); rememberBalance() }
         // Not waited for: a spammed address takes many pages, and the balances above shouldn't sit behind it.
         if !holdingsLoading { Task { await loadHoldings() } }
+        if delegatesReadFor != hlAddress.lowercased(), !foreignDelegates.isEmpty { foreignDelegates = [:] }   // the last wallet's
+        if isEVMAddress(hlAddress), delegatesReadFor != hlAddress.lowercased() || delegatesUnread { Task { await readDelegations() } }
         if let w = previewWallet {
             Task {
                 let open = await executor(w).resolveTransit()
@@ -2044,6 +2052,27 @@ final class Workspace {
             }
         }
         await refreshQuote()
+    }
+
+    /// The wallet's EVM address on every network ihatecrypto knows: delegated by EIP-7702 to someone else's contract there
+    /// (research E-7), money a move brings to it can be taken, so that move's card says so (variant B: Confirm stays).
+    /// Read once per wallet a launch: the signer has no network to read it with.
+    func readDelegations() async {
+        let me = hlAddress.lowercased()
+        delegatesReadFor = me
+        delegatesUnread = false
+        var found: [String: String] = [:], unread = false
+        await withTaskGroup(of: (String, String??).self) { group in
+            for net in EVMNetwork.all {
+                group.addTask { (net.key, ((try? await net.rpc.call("eth_getCode", [me, "latest"])) as? String).map(Batch7702.foreignDelegate)) }
+            }
+            for await (key, delegate) in group {
+                if let delegate { if let d = delegate { found[key] = d } } else { unread = true }
+            }
+        }
+        guard hlAddress.lowercased() == me else { return }
+        if found != foreignDelegates { foreignDelegates = found }
+        if unread { delegatesUnread = true }   // a node that didn't answer is asked again at the next refresh
     }
 
     /// While refresh() reads the networks at once, what each one read waits and lands with the rest: the reads end a few

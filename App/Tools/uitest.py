@@ -106,6 +106,8 @@ def check(expect, state, replies):
             why.append(f"the card's quote {text((pending or {}).get('quote')) or 'none'}, expected «{want}»")
         elif key == "footer_contains" and want.lower() not in text((pending or {}).get("footer")):
             why.append(f"the card's footer {text((pending or {}).get('footer'))}, expected «{want}»")
+        elif key == "warning_contains" and want.lower() not in text((pending or {}).get("warning")):
+            why.append(f"the card's warning {text((pending or {}).get('warning'))}, expected «{want}»")
         elif key == "text_lacks" and want.lower() in text(pending):
             why.append(f"the card says «{want}»: {text(pending)[:240]}")
         elif key == "recipient" and (pending or {}).get("recipient") != want:
@@ -167,6 +169,13 @@ def check(expect, state, replies):
     return why
 
 
+def twin(address):
+    """The wallet's EVM address with its middle changed and its first and last 4 characters kept: address poisoning's
+    look-alike, for «{twin}» in a scenario's phrase."""
+    a = address.lower()
+    return a[:6] + "".join("0123456789abcdef"[(int(c, 16) + 1) % 16] for c in a[6:-4]) + a[-4:] if len(a) == 42 else address
+
+
 def main():
     scenarios = json.load(open(os.path.join(HERE, "uitest-scenarios.json")))
     only = [a.lower() for a in sys.argv[1:]]
@@ -205,7 +214,7 @@ def main():
             for k, turn in enumerate(s.get("turns") or [{"send": s["send"], "expect": s["expect"]}]):
                 replies, state = [], None
                 for phrase in [turn["send"]] if isinstance(turn["send"], str) else turn["send"]:
-                    state = call("POST", "/send", {"text": phrase})
+                    state = call("POST", "/send", {"text": phrase.replace("{twin}", twin(start["wallet"].get("evm") or ""))})
                     replies += [m["text"] for m in state["messages"] if not m["user"]]
                 # A swap's card names its way once quoted (Uniswap's until then): asked again for a while.
                 for _ in range(30 if turn["expect"].get("wait_quote") else 0):
