@@ -40,3 +40,13 @@ import WalletCore
     let me = AgentReads.Me(evm: "0xAbCdEf0000000000000000000000000000000001", solana: nil)
     #expect(AgentReads.masked("from 0xabcdef0000000000000000000000000000000001 to 0x2", me) == "from me to 0x2")
 }
+
+/// A call's address argument is encoded only as 0x and 40 hex digits: written without the 0x it slipped past the chat's
+/// checks of the addresses in a call (GoPlus, «yours or verified code»), which find them that way.
+@Test func aCallsAddressArgumentNeedsItsPrefix() throws {
+    let me = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    #expect(throws: (any Error).self) { try AgentReads.calldata("supplyFor(address,uint256)", ["012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me) }
+    #expect(throws: (any Error).self) { try AgentReads.calldata("supplyFor(address,uint256)", ["0X012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me) }
+    #expect(try AgentReads.calldata("supplyFor(address,uint256)", ["0x012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me).count == 68)
+    #expect(try AgentReads.calldata("deposit(uint256,address)", ["100", "me"], me: me).count == 68)
+}

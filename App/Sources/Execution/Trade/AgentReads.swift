@@ -94,7 +94,11 @@ public enum AgentReads {
 
     static func word(_ type: String, _ value: String) throws -> Data {
         switch type {
-        case "address": return try ABI.address(value)
+        // Only as 0x and 40 hex digits: the chat's checks of the addresses in a call find them that way, and ABI.address
+        // would take one without the 0x too.
+        case "address":
+            guard value.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil else { throw LLMError("«\(value)» isn't an address: write it as 0x and 40 hex digits.") }
+            return try ABI.address(value)
         case "bool": return ABI.uint(["true", "1"].contains(value.lowercased()) ? 1 : 0)
         case let t where t.hasPrefix("uint") || t.hasPrefix("int"):
             // «max»: all of it (type(uint256).max), the way vaults and Compound take «everything».

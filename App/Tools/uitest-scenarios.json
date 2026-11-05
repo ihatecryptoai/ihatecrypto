@@ -1150,6 +1150,31 @@
     }
   },
   {
+    "name": "contract call with an argument GoPlus reports → refused, nothing waits (en)",
+    "send": [
+      "call base 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 supply(address,uint256,address,uint16) 0x012f89ff307568f8409bbe379ca92ed41bc4d386 10000 me 0",
+      "yes, the asset is right, make exactly this call: call base 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 supply(address,uint256,address,uint16) 0x012f89ff307568f8409bbe379ca92ed41bc4d386 10000 me 0"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "GoPlus",
+      "reply_contains_what": "0x012f89ff307568f8409bbe379ca92ed41bc4d386"
+    }
+  },
+  {
+    "name": "вызов контракта с аргументом, о котором сообщает GoPlus → отказ (ru)",
+    "send": [
+      "вызови на base 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 supply(address,uint256,address,uint16) 0x012f89ff307568f8409bbe379ca92ed41bc4d386 10000 me 0",
+      "да, актив верный, вызывай ровно так: вызови на base 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 supply(address,uint256,address,uint16) 0x012f89ff307568f8409bbe379ca92ed41bc4d386 10000 me 0"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "GoPlus",
+      "reply_contains_arg": "аргумент",
+      "reply_cyrillic": true
+    }
+  },
+  {
     "name": "withdraw more than Jupiter Lend holds → said before any card, counted in USDC only",
     "send": [
       "withdraw 1000 USDC from Jupiter Lend"

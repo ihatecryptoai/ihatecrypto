@@ -62,7 +62,7 @@ extension Workspace {
         let trust = await ContractTrust.check(c.contract, on: net.key)
         if !trust.unknown, !trust.isContract { refuse("\(c.contract) isn't a contract on \(net.name).", "\(c.contract) — не контракт в сети \(net.name)."); return }
         // A protocol outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) must look like one: verified code, a
-        // month old at least, money in it as DefiLlama prices it, on no scam list. Each of these blocks.
+        // month old at least, money in it as DefiLlama prices it, no scam report at GoPlus Security. Each of these blocks.
         let listed = EVMCall.knownSpenders(chainId: net.rpc.chainId).contains(c.contract.lowercased())
         var reputation = ContractReputation()
         if !listed {
@@ -72,13 +72,13 @@ extension Workspace {
                 return
             }
             guard let days = trust.days, days >= ContractReputation.minDays else {
-                refuse("the contract is \(trust.days.map { "\($0) days" } ?? "of unknown age") old; ihatecrypto calls only contracts a month old or more.",
-                       "контракту \(trust.days.map { "\($0) дн." } ?? "неизвестно сколько дней"); ihatecrypto вызывает только контракты старше месяца.")
+                refuse("the contract is \(trust.days.map { "\($0) days" } ?? "of unknown age") old. ihatecrypto calls only contracts a month old or more.",
+                       "контракту \(trust.days.map { "\($0) дн." } ?? "неизвестно сколько дней"), а ihatecrypto вызывает только контракты старше месяца.")
                 return
             }
             agentStep = say("Checking its reputation", "Проверяю репутацию")
             reputation = await ContractReputation.check(c.contract, on: net, me: me)
-            if let why = reputation.scam { refuse("\(why).", "\(why) — это скам-адрес."); return }
+            if let why = reputation.scam { refuse("\(why.en).", "\(why.ru)."); return }
             guard let tvl = reputation.tvlUSD, tvl >= ContractReputation.minTVL else {
                 refuse("DefiLlama \(reputation.tvlUSD.map { "prices only \(Fmt.usd($0)) in it" } ?? "doesn't price it") — ihatecrypto calls only protocols with \(Fmt.usd(ContractReputation.minTVL)) or more in them.",
                        "DefiLlama \(reputation.tvlUSD.map { "оценивает в нём только \(Fmt.usd($0))" } ?? "его не оценивает") — ihatecrypto вызывает только протоколы, где лежит от \(Fmt.usd(ContractReputation.minTVL)).")
@@ -87,13 +87,23 @@ extension Workspace {
         }
         // The zero address («no referrer», «none») gives nobody anything; the network's USDC, the big stablecoins there, the
         // token approved and ihatecrypto's own protocols are known; anything else is checked.
-        let known = Set(([net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address }
-                         + [c.approve?.token].compactMap { $0 }.filter { $0.hasPrefix("0x") }).map { $0.lowercased() })
+        let vouched = Set(([net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address }).map { $0.lowercased() })
             .union(EVMCall.knownSpenders(chainId: net.rpc.chainId))
-        for a in c.args where a.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil && !usersOwn(a) && a.lowercased() != c.contract.lowercased()
-            && a.dropFirst(2).contains(where: { $0 != "0" }) && !known.contains(a.lowercased()) {
+        let known = vouched.union([c.approve?.token].compactMap { $0?.lowercased() })
+        func isAddress(_ a: String) -> Bool { a.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil && a.dropFirst(2).contains { $0 != "0" } && a.lowercased() != c.contract.lowercased() }
+        // GoPlus Security is asked about every address among the arguments and the token approved, the user's own typing
+        // too: a drainer's address pasted from a site is what this is for. This Mac's wallets aren't sent.
+        let own = Set(([me] + wallets.compactMap(\.evm)).map { $0.lowercased() })
+        let asked = (c.args + [c.approve?.token].compactMap { $0 }).filter { isAddress($0) && !vouched.contains($0.lowercased()) && !own.contains($0.lowercased()) }
+        let scams = await ScamList.shared.verdicts(asked, chainId: net.rpc.chainId)
+        for a in asked {
+            guard case .reported(let why) = scams[a.lowercased()] else { continue }
+            if c.args.contains(a) { refuse("the argument \(a) — \(why.en).", "аргумент \(a) — \(why.ru).") } else { refuse("the token \(a) — \(why.en).", "токен \(a) — \(why.ru).") }
+            return
+        }
+        reputation.unchecked = reputation.unchecked || scams.values.contains(.unchecked)
+        for a in c.args where isAddress(a) && !known.contains(a.lowercased()) && !usersOwn(a) {
             let t = await ContractTrust.check(a, on: net.key)
-            if let why = await ScamList.shared.names(a) { refuse("the argument \(a): \(why).", "аргумент \(a): \(why)."); return }
             guard t.isContract, t.verified else {
                 refuse("the argument \(a) is neither yours nor a verified contract — money could go there.",
                        "аргумент \(a) — не твой адрес и не проверенный контракт: туда могут уйти деньги.")
@@ -200,7 +210,10 @@ extension Workspace {
         if !sim.changes.isEmpty, sim.changes.values.allSatisfy({ $0 < 0 }) {
             warnings.append(say("Nothing comes back to this wallet in this transaction.", "В этой транзакции на кошелёк ничего не возвращается."))
         }
-        if reputation.unchecked { warnings.append(say("The scam list didn't load this time; the other checks passed.", "Список скама в этот раз не загрузился; остальные проверки пройдены.")) }
+        if reputation.unchecked {
+            warnings.append(say("The scam check (GoPlus Security) didn't answer this time. The other checks passed.",
+                                "Проверка на скам (GoPlus Security) в этот раз не ответила. Остальные проверки пройдены."))
+        }
         var badges: [String] = []
         if reputation.firstTime { badges.append(say("First time with this contract", "Первый раз с этим контрактом")) }
         if trust.implementation != nil { badges.append(say("Proxy: its owner can change the code", "Прокси: владелец может поменять код")) }

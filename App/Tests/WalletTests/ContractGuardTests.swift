@@ -71,3 +71,32 @@ private func simulated(_ logs: [[String: Any]]) throws -> EVMSimulation {
     #expect(ContractCallGuard.atRisk(leaving: [(usdc, "USDC", nil)], approve: nil, priced: priced) == .uncounted("USDC"))
     #expect(ContractCallGuard.atRisk(leaving: [(evil, "EVIL", nil)], approve: nil, priced: priced) == .unpriced("EVIL"))
 }
+
+/// GoPlus Security's address_security answer, read as ScamList's verdict. Its rate limit comes as HTTP 200 with code
+/// 4029: never read as clean. A clean contract shows only contract_address=1.
+@Test func goPlusAnswersReadAsAVerdict() throws {
+    func answer(_ fields: [String: String], code: Int = 1) -> Data {
+        let all = ["cybercrime", "money_laundering", "number_of_malicious_contracts_created", "phishing_activities", "contract_address",
+                   "blacklist_doubt", "stealing_attack", "sanctioned", "mixer", "honeypot_related_address", "data_source"]
+        let result = Dictionary(uniqueKeysWithValues: all.map { ($0, $0 == "data_source" ? "" : "0") }).merging(fields) { $1 }
+        return try! JSONSerialization.data(withJSONObject: ["code": code, "message": "ok", "result": result])
+    }
+    guard case .reported(let theft) = ScamList.verdict(answer(["stealing_attack": "1", "data_source": "SlowMist"])) else { Issue.record("theft"); return }
+    #expect(theft.en.contains("theft") && theft.en.contains("SlowMist"), "\(theft.en)")
+    #expect(theft.ru.contains("кража") && theft.ru.contains("SlowMist"), "\(theft.ru)")
+    #expect(!theft.en.contains(";") && !theft.ru.contains(";"))
+    guard case .reported(let both) = ScamList.verdict(answer(["phishing_activities": "1", "blacklist_doubt": "1", "data_source": "SlowMist,ScamSniffer"]))
+    else { Issue.record("phishing"); return }
+    #expect(both.en.contains("phishing") && both.en.contains("ScamSniffer") && both.ru.contains("фишинг"), "\(both)")
+    #expect(ScamList.verdict(answer(["contract_address": "1"])) == .clean)
+    #expect(ScamList.verdict(answer([:])) == .clean)
+    guard case .reported = ScamList.verdict(answer(["number_of_malicious_contracts_created": "2"])) else { Issue.record("creator"); return }
+    #expect(ScamList.verdict(Data(#"{"code":4029,"message":"too many requests"}"#.utf8)) == .unchecked)
+    #expect(ScamList.verdict(answer(["stealing_attack": "1"], code: 4029)) == .unchecked)
+    #expect(ScamList.verdict(Data(#"{"code":1,"message":"ok","result":{}}"#.utf8)) == .unchecked)
+    #expect(ScamList.verdict(Data("<html>bad gateway</html>".utf8)) == .unchecked)
+    // GoPlus's networks are asked as they are; one it doesn't serve (HyperEVM, Tempo) answers zeros even for a drainer,
+    // so Ethereum's labels are asked: they're per address.
+    #expect(ScamList.chain(8453) == 8453 && ScamList.chain(42161) == 42161 && ScamList.chain(56) == 56)
+    #expect(ScamList.chain(999) == 1 && ScamList.chain(4217) == 1)
+}

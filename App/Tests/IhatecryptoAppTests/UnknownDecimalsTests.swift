@@ -7,16 +7,31 @@ import Testing
 
 /// A Base node that names its token «USDC» and answers decimals() with `decimals` (nil: a revert); the coin's stand-in
 /// addresses have no code, so «0x», as a real node answers. eth_simulateV1 answers `simulated` (nil: a node that doesn't
-/// serve it). Every other method is one it doesn't serve.
+/// serve it). Every other method is one it doesn't serve. It's GoPlus Security too: `drainer` is reported for theft,
+/// `silent` gets the rate limit's HTTP 200 with code 4029, any other address is clean; each URL asked is kept.
 nonisolated final class DecimalsNode: URLProtocol {
     nonisolated(unsafe) static var decimals: String?
     static let quiet = #"[{"calls":[{"status":"0x1","logs":[]}]}]"#
     nonisolated(unsafe) static var simulated: String? = quiet
+    /// The name.com DNS hijack's payout wallet (2026-10-31), a public attacker address; Hardhat's third account.
+    static let drainer = "0x012f89ff307568f8409bbe379ca92ed41bc4d386", silent = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    nonisolated(unsafe) static var goplusAsked: [String] = []
 
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "decimals.stub" }
+    override class func canInit(with request: URLRequest) -> Bool { ["decimals.stub", "api.gopluslabs.io"].contains(request.url?.host) }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
     override func startLoading() {
+        if let url = request.url, url.host == "api.gopluslabs.io" {
+            Self.goplusAsked.append(url.absoluteString)
+            let address = url.path.split(separator: "/").last.map(String.init)?.lowercased() ?? ""
+            let flags = address == Self.drainer ? #""stealing_attack":"1","data_source":"SlowMist""# : #""stealing_attack":"0","data_source":"""#
+            let body = address == Self.silent ? #"{"code":4029,"message":"too many requests"}"#
+                : #"{"code":1,"message":"ok","result":{"phishing_activities":"0","contract_address":"0",\#(flags)}}"#
+            client!.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client!.urlProtocol(self, didLoad: Data(body.utf8))
+            client!.urlProtocolDidFinishLoading(self)
+            return
+        }
         var body = Data()
         if let stream = request.httpBodyStream {   // URLProtocol gets the body as a stream, not httpBody
             stream.open()
@@ -93,6 +108,43 @@ nonisolated final class DecimalsNode: URLProtocol {
         let r = try await review(decimals: "6", to: try #require(UniswapV4.on(8453)).router, value: 1_000_000_000_000_000, data: swap)
         #expect(r.lines[0] == "Uniswap v4 swap: 0.001 ETH for at least 3 USDC, paid to this wallet.", "\(r.lines)")
         #expect(!r.problems.contains { $0.contains("decimals") }, "\(r.problems)")
+    }
+
+    /// Research B-5/E-6 (2026-11-05): a site's approve to an address GoPlus Security reports isn't signed, and the window
+    /// says who reports what. This wallet's own address is never asked: `goplusAsked` keeps every test's requests, so a
+    /// cached answer for it from an earlier one would show here too.
+    @Test func anApproveToAnAddressGoPlusReportsIsRefused() async throws {
+        let r = try await review(decimals: "6", data: ERC20.approve(spender: DecimalsNode.drainer, amount: 5_000_000))
+        #expect(r.problems.contains { $0.contains("GoPlus Security") && $0.contains(DecimalsNode.drainer) && $0.contains("theft") }, "\(r.problems)")
+        #expect(r.gas == 0, "nothing to estimate for a refused call")
+        #expect(!DecimalsNode.goplusAsked.contains { $0.lowercased().contains(me.lowercased()) }, "\(DecimalsNode.goplusAsked)")
+    }
+
+    /// GoPlus not answering (its rate limit) blocks nothing: the window says the check didn't answer, the rest holds.
+    @Test func aScamCheckThatDoesntAnswerIsSaidNotBlocking() async throws {
+        let r = try await review(decimals: "6", data: ERC20.approve(spender: DecimalsNode.silent, amount: 5_000_000))
+        #expect(r.problems.isEmpty, "\(r.problems)")
+        #expect(r.lines.contains { $0.contains("GoPlus Security didn't answer") }, "\(r.lines)")
+        let clean = try await review(decimals: "6")
+        #expect(clean.problems.isEmpty && !clean.lines.contains { $0.contains("GoPlus") }, "\(clean.problems) \(clean.lines)")
+    }
+
+    /// An answer is kept an hour, a silence isn't kept at all; a network GoPlus doesn't serve asks Ethereum's labels.
+    @Test func goPlusVerdictsAreKeptButASilenceIsAskedAgain() async {
+        URLProtocol.registerClass(DecimalsNode.self)
+        defer { URLProtocol.unregisterClass(DecimalsNode.self) }
+        let list = ScamList(), before = DecimalsNode.goplusAsked.count
+        var asked: Int { DecimalsNode.goplusAsked.count - before }
+        #expect(await list.check(DecimalsNode.drainer, chainId: 8453) != .clean)
+        #expect(await list.check(DecimalsNode.drainer.uppercased().replacingOccurrences(of: "0X", with: "0x"), chainId: 8453) != .clean)
+        #expect(asked == 1, "\(DecimalsNode.goplusAsked)")
+        #expect(await list.check(DecimalsNode.silent, chainId: 8453) == .unchecked)
+        #expect(await list.check(DecimalsNode.silent, chainId: 8453) == .unchecked)
+        #expect(asked == 3, "\(DecimalsNode.goplusAsked)")
+        #expect(await list.check(spender, chainId: 999) == .clean)
+        #expect(DecimalsNode.goplusAsked.last?.hasSuffix("chain_id=1") == true, "\(DecimalsNode.goplusAsked)")
+        #expect(await list.check("not an address", chainId: 8453) == .unchecked)
+        #expect(asked == 4)
     }
 }
 

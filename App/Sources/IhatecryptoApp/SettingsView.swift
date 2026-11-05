@@ -458,7 +458,7 @@ struct SettingsView: View {
                     Toggle("One transaction for approve and swap", isOn: $batches).toggleStyle(AccentSwitch()).labelsHidden()
                 }
                 SettingsRow("Cap for unknown protocols", icon: "shield.lefthalf.filled",
-                            info: "A contract the chat calls outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) may put at most this much at risk in one call — what leaves the wallet, its approve and the coins sent with it. It must also have verified code, be a month old, hold $1M or more by DefiLlama and be on no scam list. Every check can be fooled; this caps what that costs.") {
+                            info: "A contract the chat calls outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) may put at most this much at risk in one call — what leaves the wallet, its approve and the coins sent with it. It must also have verified code, be a month old and hold $1M or more by DefiLlama, and GoPlus Security (SlowMist and ScamSniffer data) must not report it. Every check can be fooled, and this caps what that costs.") {
                     Picker("Cap for unknown protocols", selection: $contractCap) {
                         ForEach([10.0, 25, 50, 100, 250, 500, 1000], id: \.self) { Text(Fmt.usd(Decimal($0))).tag($0) }
                     }

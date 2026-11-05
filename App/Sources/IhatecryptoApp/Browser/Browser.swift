@@ -4,6 +4,7 @@ import IhatecryptoCore
 import SignerAPI
 import SolanaChain
 import SwiftUI
+import TradeExecution
 import TxGuard
 import WalletCore
 import WebKit
@@ -386,6 +387,11 @@ final class Browser {
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
         if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
         var recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
+        // The contract and everyone it pays or lets spend, asked of GoPlus Security (SlowMist's and ScamSniffer's data)
+        // while it's simulated. ihatecrypto's own protocols and this wallet aren't asked.
+        let ours = EVMCall.knownSpenders(chainId: rpc.chainId).union([from.lowercased()])
+        let asked = Set([to.lowercased()] + recipients).subtracting(ours)
+        async let scams = ScamList.shared.verdicts(asked, chainId: rpc.chainId)
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
         typealias Token = (address: String, symbol: String, decimals: Int?)
         func token(_ to: String) async -> Token {
@@ -527,6 +533,13 @@ final class Browser {
                             + "and ihatecrypto signs nothing it hasn't simulated. Ask the site to send it again in a minute.")
             }
         }
+        // A report blocks, a silence is said: GoPlus doesn't know every drainer, so nothing here says «clean».
+        var verdicts = await scams
+        verdicts.merge(await ScamList.shared.verdicts(Set(recipients).subtracting(asked).subtracting(ours), chainId: rpc.chainId)) { $1 }
+        for (a, v) in verdicts.sorted(by: { $0.key < $1.key }) {
+            if case .reported(let why) = v { problems.append("\(a): \(why.en). ihatecrypto doesn't sign for it.") }
+        }
+        if verdicts.values.contains(.unchecked) { lines.append("Scam check: GoPlus Security didn't answer this time.") }
         var gas: UInt64 = 0
         if problems.isEmpty {
             do {
