@@ -31,11 +31,12 @@ public struct AppleIntelligence: LLMProvider {
         )
     }()
 
-    /// Why a model can't be the chat's: the one on this Mac holds `window` tokens (4,096 on macOS 27.0) and reads no
-    /// Russian, and the chat's brief alone is 5,042. Settings › Test still asks it.
+    /// Why a model can't be the chat's: the one on this Mac holds `window` tokens (4,096 on macOS 27.0), less than the
+    /// chat's brief alone, and reads no Russian. The words name no brief size: it grows with every form. Settings › Test
+    /// still asks it.
     public static func chatRefusal(model: String) -> String? {
-        model == onDevice ? "Apple's model on this Mac holds \(window) tokens and doesn't read Russian, while the chat's brief alone is 5,042: "
-            + "it can't be the chat's model. Test it in Settings; the bigger Apple model comes once Apple grants the app its entitlement." : nil
+        model == onDevice ? "Apple's model on this Mac holds \(window) tokens, less than the chat's brief needs, and doesn't read Russian: "
+            + "it can't be the chat's model. Test it in Settings. The bigger Apple model comes once Apple grants the app its entitlement." : nil
     }
 
     /// The window of the model on this Mac as the framework tells it, «4,096» (before macOS 27 the framework answers
@@ -88,7 +89,7 @@ public struct AppleIntelligence: LLMProvider {
         switch availability {
         case .unavailable(.deviceNotEligible): "This Mac can't run Apple Intelligence."
         case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in System Settings, then restart ihatecrypto."
-        case .unavailable(.modelNotReady): "Apple Intelligence is still downloading its model; restart ihatecrypto when it's done."
+        case .unavailable(.modelNotReady): "Apple Intelligence is still downloading its model. Restart ihatecrypto when it's done."
         default: "Apple Intelligence isn't available on this Mac."
         }
     }
