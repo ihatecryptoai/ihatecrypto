@@ -17,7 +17,7 @@ pcc=":com.apple.developer.private-cloud-compute"
 signing=(-allowProvisioningUpdates)
 [[ $mode == --unsigned ]] && signing=(CODE_SIGNING_ALLOWED=NO 'OTHER_LDFLAGS=$(inherited) -Xlinker -no_adhoc_codesign')
 xcodebuild -project Xcode/ihatecrypto.xcodeproj -scheme ihatecrypto -configuration Release -derivedDataPath $root/build \
-  -archivePath "$archive" -skipPackagePluginValidation "${signing[@]}" \
+  -archivePath "$archive" "${signing[@]}" \
   MARKETING_VERSION=$version CURRENT_PROJECT_VERSION=$build SPARKLE_FEED_URL=$feed \
   XCODEGEN_VERSION=$(xcodegen --version | awk '{ print $2 }') archive > $root/build.log 2>&1 || {
   grep -E "error:|Command .* failed|FAILED" $root/build.log | cut -c1-300 | head -20; echo "full log: $root/build.log"; exit 1; }

@@ -16,10 +16,10 @@ let package = Package(
     ],
     dependencies: [
         // libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
-        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.23.2"),
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.24.0"),
         // Updates for the copy from the site (Updater.swift). Declared here too, so `swift build` and the Xcode
         // project resolve the same packages and stop rewriting Package.resolved over each other.
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
     ],
     targets: [
         // Model access: one protocol in Core, one folder per way to connect, Catalog lists them all.
@@ -37,7 +37,8 @@ let package = Package(
         .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
 
         // Keys and signatures: BIP-39, derivation, Keccak, EIP-712. Knows nothing about protocols or UI.
-        .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1")], path: "Sources/Wallet/Core"),
+        .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1"),
+                                                   .product(name: "libsecp256k1", package: "swift-secp256k1")], path: "Sources/Wallet/Core"),
         // Hyperliquid wire format and signing, checked against the official Python SDK vectors.
         .target(name: "HyperliquidSigning", dependencies: ["WalletCore"], path: "Sources/Protocols/Hyperliquid"),
         .target(name: "SolanaChain", dependencies: ["WalletCore"], path: "Sources/Chains/Solana"),

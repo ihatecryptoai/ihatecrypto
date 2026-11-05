@@ -53,3 +53,20 @@ import WalletCore
     let flipped = EVMSignature(r: signature.r, s: signature.s, v: signature.v == 27 ? 28 : 27)
     #expect(try EVMSigner.recover(digest: try tx.signingHash(), signature: flipped) != (try EVMAccount.address(privateKey: key)))
 }
+
+@Test func aSignatureThatRecoversNoKeyIsRefusedNotACrash() throws {
+    let digest = Data(repeating: 0x11, count: 32)
+    let n = Data(hex: "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")!
+    let gx = Data(hex: "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")!
+    let one = Data(repeating: 0, count: 31) + [1]
+    let bad: [(r: Data, s: Data)] = [
+        (Data(repeating: 0, count: 32), one),          // r = 0
+        (one, n),                                        // s = n
+        (one, Data(repeating: 0xff, count: 32)),        // s > n
+        (Data(repeating: 0, count: 31) + [5], one),     // r = 5: no point on the curve has that x
+        (gx, digest),                                    // R = G and s = e: the key comes out at infinity
+    ]
+    for (r, s) in bad {
+        #expect(throws: WalletError("The signature didn't verify.")) { try EVMSigner.recover(digest: digest, signature: EVMSignature(r: r, s: s, v: 27)) }
+    }
+}
