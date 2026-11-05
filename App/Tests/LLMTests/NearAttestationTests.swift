@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 @testable import LLMNearAI
 import Testing
@@ -36,4 +37,25 @@ private func fixture() throws -> (report: Data, nonce: String) {
         let tampered = try JSONSerialization.data(withJSONObject: root)
         await #expect(throws: NearAttestation.Failure.self) { try await NearAttestation.verify(tampered, nonce: nonce, model: "Qwen/Qwen3.8-27B") { _ in true } }
     }
+}
+
+@Test func aReplyCountsOnlyWhenItsOwnBytesAreSignedByTheAttestedKey() throws {
+    func hex(_ d: Data) -> String { d.map { String(format: "%02x", $0) }.joined() }
+    let model = Curve25519.Signing.PrivateKey(), gateway = Curve25519.Signing.PrivateKey(), stranger = Curve25519.Signing.PrivateKey()
+    let v = NearAttestation.Verified(model: "m/x", gatewayKey: hex(gateway.publicKey.rawRepresentation),
+                                     modelKeys: [hex(model.publicKey.rawRepresentation)], at: Date())
+    let request = Data(#"{"model":"m/x"}"#.utf8), response = Data(#"{"id":"chatcmpl-1"}"#.utf8)
+    let hashes = hex(Data(SHA256.hash(data: request))) + ":" + hex(Data(SHA256.hash(data: response)))
+    func signed(_ key: Curve25519.Signing.PrivateKey, _ text: String, _ kind: String) throws -> [String: Any] {
+        ["text": text, "signature": hex(try key.signature(for: Data(text.utf8))), "signing_address": hex(key.publicKey.rawRepresentation),
+         "signing_algo": "ed25519", "signature_kind": kind]
+    }
+    #expect(NearAI.check(try signed(model, "m/x:" + hashes, "provider_tee"), model: "m/x", request: request, response: response, verified: v) == .model)
+    #expect(NearAI.check(try signed(gateway, hashes, "gateway"), model: "m/x", request: request, response: response, verified: v) == .gateway)
+    // Other bytes, a key the attestation never saw, a forged signature: not verified.
+    if case .model = NearAI.check(try signed(model, "m/x:" + hashes, "provider_tee"), model: "m/x", request: request, response: Data("{}".utf8), verified: v) { Issue.record("other bytes") }
+    if case .model = NearAI.check(try signed(stranger, "m/x:" + hashes, "provider_tee"), model: "m/x", request: request, response: response, verified: v) { Issue.record("stranger") }
+    var forged = try signed(model, "m/x:" + hashes, "provider_tee")
+    forged["text"] = "m/x:" + hashes.replacingOccurrences(of: "a", with: "b")
+    if case .model = NearAI.check(forged, model: "m/x", request: request, response: response, verified: v) { Issue.record("forged") }
 }

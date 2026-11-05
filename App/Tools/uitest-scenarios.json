@@ -1119,5 +1119,84 @@
       "reply_contains": "Kamino",
       "reply_cyrillic": true
     }
+  },
+  {
+    "name": "chat on NEAR AI Cloud → the enclave checked before the message, the reply signed by the attested model key, the TEE chip on, a send drawn for Confirm",
+    "provider": "nearai",
+    "send": [
+      "переведи 1 USDC на Automation в base"
+    ],
+    "expect": {
+      "tee": true,
+      "tee_reply": "model",
+      "pending_kind": "transfer"
+    }
+  },
+  {
+    "name": "send USDC privately → a NEAR Intents Confidential Intents card to the saved address, quoted, waiting for Confirm",
+    "send": [
+      "переведи приватно 2 USDC на Automation в base"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        
+        "CONFIDENTIAL INTENTS"
+      ],
+      "title_contains": "privately",
+      "footer_contains": "can't be matched"
+    },
+    "only_if": {
+      "wallet": "test"
+    }
+  },
+  {
+    "name": "create an agent wallet → the rules the NEAR key signs drawn as a card, waiting for Confirm",
+    "send": [
+      "создай кошелёк агента с лимитом 20$ в день"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "agent wallet",
+      "steps": [
+        "YOUR NEAR KEY",
+        "RULES",
+        "GRANT"
+      ],
+      "footer_contains": "refuses"
+    }
+  },
+  {
+    "name": "pay an x402 API → a card paying USDC on Base by signature, the facilitator paying the fee, waiting for Confirm",
+    "send": [
+      "pay GET https://api.402rates.com/v1/ping"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "api.402rates.com",
+      "steps": [
+        "X402",
+        "TO"
+      ],
+      "footer_contains": "x402"
+    }
+  },
+  {
+    "name": "move USDC via NEAR Intents → a 1Click card from Base to Solana at our own address, waiting for Confirm",
+    "send": [
+      "переведи 1 USDC с бейза на солану через NEAR Intents"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "NEAR Intents",
+      "steps": [
+        "FROM",
+        "NEAR INTENTS",
+        "TO"
+      ],
+      "footer_contains": "1Click"
+    }
   }
 ]

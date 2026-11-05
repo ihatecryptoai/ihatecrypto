@@ -23,10 +23,13 @@ public enum FundingPlan {
 
     /// The legs bringing `short` USDC to `target` («solana» or an EVM network's key); nil when all the free money together
     /// isn't enough — the move's own check says what's missing.
+    /// `intents`: the EVM networks NEAR Intents pays USDC on, when every leg must go through NEAR Intents (a loan guard's
+    /// top-up): Hyperliquid is left out, and each move says «via NEAR Intents». A target outside them plans as usual.
     public static func legs(short: Decimal, target: String, targetName: String, solana: Decimal, evm: [Place],
-                            hyperliquid: Decimal, near: Decimal, nearPrice: Decimal?) -> [String]? {
+                            hyperliquid: Decimal, near: Decimal, nearPrice: Decimal?, intents: Set<String>? = nil) -> [String]? {
         guard short > 0 else { return [] }
         let toSolana = target == "solana"
+        let intents = intents.flatMap { toSolana || $0.contains(target) ? $0 : nil }, via = intents == nil ? "" : " via NEAR Intents"
         var direct: [String] = [], intoSolana: [String] = []
         var own: Decimal = 0, landed: Decimal = 0, delivered: Decimal = 0
         func amount(_ d: Decimal) -> String { NSDecimalNumber(decimal: d).stringValue }
@@ -39,17 +42,17 @@ public enum FundingPlan {
 
         // Solana's own leg delivers at least Relay's half-dollar minimum.
         if !toSolana, solana >= fee + half, need() > 0 { own = take(solana, max(need(), half) + fee) }
-        for p in evm where p.key != target && need() > 0 && p.usdc >= floor {
+        for p in evm where p.key != target && need() > 0 && p.usdc >= floor && intents?.contains(p.key) != false {
             let x = take(p.usdc, need() + fee)
             if toSolana {
-                intoSolana.append("move \(amount(x)) USDC from \(p.name) to Solana")
+                intoSolana.append("move \(amount(x)) USDC from \(p.name) to Solana\(via)")
                 landed += x - fee
             } else {
-                direct.append("move \(amount(x)) USDC from \(p.name) to \(targetName)")
+                direct.append("move \(amount(x)) USDC from \(p.name) to \(targetName)\(via)")
                 delivered += x - fee
             }
         }
-        if need() > 0, hyperliquid >= floor {
+        if need() > 0, hyperliquid >= floor, intents == nil {
             let x = take(hyperliquid, need() + fee + poolFee())
             intoSolana.append("withdraw \(amount(x)) USDC to Solana")
             landed += x - fee
@@ -63,7 +66,8 @@ public enum FundingPlan {
         guard need() <= 0 else { return nil }
         // What arrives: the pool less the dollar kept for the fee. Asking the whole pool to arrive left Solana short of
         // the fee on top, and the chain stopped after its first legs.
-        let arriving = (own + landed - fee).rounded(2, .down)
-        return direct + intoSolana + (toSolana || arriving <= 0 ? [] : ["move \(amount(arriving)) USDC from Solana to \(targetName)"])
+        // Through NEAR Intents the leg names what's sent, not what arrives: the whole pool goes, the fee dollar covering 1Click's cents.
+        let arriving = (own + landed - (intents == nil ? fee : 0)).rounded(2, .down)
+        return direct + intoSolana + (toSolana || arriving <= 0 ? [] : ["move \(amount(arriving)) USDC from Solana to \(targetName)\(via)"])
     }
 }

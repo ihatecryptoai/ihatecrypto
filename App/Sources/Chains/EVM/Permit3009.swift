@@ -66,6 +66,53 @@ public struct Permit3009: Codable, Sendable, Equatable {
     }
 }
 
+/// A paid API's price by x402 (the `exact` scheme on EVM): EIP-3009 TransferWithAuthorization of a dollar the signer
+/// knows by its own domain (Permit3009.tokens), from this wallet to the service's `payTo`, which the service's facilitator
+/// sends and pays the fee for. The signer builds the typed data itself and refuses more than `cap` or longer than an hour.
+public struct X402Authorization: Codable, Sendable, Equatable {
+    public let chainId: UInt64
+    public let token: String
+    public let from: String
+    public let to: String
+    public let value: UInt64
+    public let validBefore: UInt64
+    public let nonce: Data
+
+    /// At most 5 dollars a payment: x402 prices an API call, not a transfer.
+    public static let cap: UInt64 = 5_000_000
+
+    public init(chainId: UInt64, token: String, from: String, to: String, value: UInt64, validBefore: UInt64, nonce: Data) {
+        (self.chainId, self.token, self.from, self.to, self.value, self.validBefore, self.nonce) = (chainId, token, from, to, value, validBefore, nonce)
+    }
+
+    var known: (name: String, version: String, symbol: String)? { Permit3009.tokens["\(chainId):\(token.lowercased())"] }
+
+    /// Why the signer won't sign it, or nil. `now`: Unix seconds.
+    public func refusal(owner: String, now: UInt64) -> String? {
+        guard known != nil, chainId == 8453 else { return "\(token) on network \(chainId) isn't a dollar ihatecrypto pays an API with (USDC on Base only)." }
+        guard from.lowercased() == owner.lowercased() else { return "The payment isn't from this wallet." }
+        guard to.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil, to.lowercased() != owner.lowercased() else { return "Not a service's address: \(to)." }
+        guard value > 0, value <= Self.cap else { return "An API payment is at most \(Decimal(Self.cap) / 1_000_000) dollars; this one asks \(Decimal(value) / 1_000_000)." }
+        guard nonce.count == 32 else { return "The payment by signature is incomplete." }
+        guard validBefore > now, validBefore <= now + 3600 else { return "The signature would stay valid for more than an hour, or has run out." }
+        return nil
+    }
+
+    public func typed() throws -> EIP712.Typed {
+        guard let known else { throw WalletError("Unknown dollar token \(token) on network \(chainId).") }
+        return EIP712.Typed(domain: [.init("name", "string", .string(known.name)), .init("version", "string", .string(known.version)),
+                                     .init("chainId", "uint256", .uint(chainId)), .init("verifyingContract", "address", .address(token))],
+                            type: "TransferWithAuthorization",
+                            message: [.init("from", "address", .address(from)), .init("to", "address", .address(to)),
+                                      .init("value", "uint256", .uint(value)), .init("validAfter", "uint256", .uint(0)),
+                                      .init("validBefore", "uint256", .uint(validBefore)), .init("nonce", "bytes32", .bytes32(nonce))])
+    }
+
+    public var summary: String {
+        "pay \(Decimal(value) / 1_000_000) \(known?.symbol ?? "dollars") on \(EVMRPC.names[chainId] ?? "network \(chainId)") to \(to) for an API (x402; its facilitator pays the fee)"
+    }
+}
+
 /// Relay's ERC-3009 payment on its v3.2 approval proxy (from 2026-10-26): a second signature, MulticallAuthorization,
 /// ties the dollar to the exact calls the proxy then runs with it, and its EIP-712 digest is the ERC-3009 nonce. The
 /// signer checks those calls itself — one call into Relay's router that deposits this dollar into Relay's depository with

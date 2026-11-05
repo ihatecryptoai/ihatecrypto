@@ -65,6 +65,15 @@ import Testing
     #expect(read("when ETH is below 2680: long ETH leverage 3x") != .loanGuard(.clear))
 }
 
+/// The router lets the guard's forms through: «stop guarding my loans» was refused as no command at all.
+@Test func theRouterAcceptsTheGuardForms() {
+    #expect(ChatRouter.parses("stop guarding my loans", markets: []))
+    #expect(ChatRouter.parses("guard my loan on kamino below 3.5", markets: []))
+    // The line the user names is kept, however high: 3.5 came out as the default 1.25.
+    #expect(LoanGuardCommand.parse("guard my loan on kamino below 3.5") == .set(loan: "kamino", network: nil, below: Decimal(string: "3.5")))
+    #expect(LoanGuardCommand.parse("следи за займом на камино, ниже 3,5 погашай") == .set(loan: "kamino", network: nil, below: Decimal(string: "3.5")))
+}
+
 /// Aave's health as AaveAccount counts it (Execution can't be imported here).
 private enum AaveHealth {
     static func of(collateral: Decimal, debt: Decimal, threshold: Decimal) -> Decimal { collateral * threshold / debt }

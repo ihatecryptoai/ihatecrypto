@@ -317,6 +317,9 @@ public struct Modules: Equatable, Sendable {
         case .sendNear, .closeNear: return refusal(network: .near, ru: ru)
         case .sendSol: return refusal(network: .solana, ru: ru)
         case .sendToken(_, _, _, let net): return net.flatMap(ModuleNetwork.init(place:)).flatMap { refusal(network: $0, ru: ru) }
+        case .agentCreate, .agentSend, .agentFreeze: return nil
+        case .agentFund: return r(.oneClick, via: [.solana])
+        case .sendPrivately(_, _, _, let net): return r(.oneClick, via: [.solana] + (net.flatMap(ModuleNetwork.init(place:)).map { [$0] } ?? []))
         case .showApprovals, .revokeApproval: return nil   // reading them and setting one to zero is always allowed
         case .contractCall(let c): return ModuleNetwork(place: c.network).flatMap { refusal(network: $0, ru: ru) }
         case .sweepDust: return isOn(.swaps) ? r(.uniswap) : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
@@ -326,6 +329,7 @@ public struct Modules: Equatable, Sendable {
         case .pay: return r(.mpp)
         case .gas(let place, _): return r(.relay, via: ModuleNetwork(place: place).map { [$0] } ?? [])
         case .bridge(let from, let to, _): return r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))
+        case .intents(let from, let to, _): return r(.oneClick, via: [from, to].compactMap(ModuleNetwork.init(place:)))
         case .cctp(let from, let to, _):
             if let off = [from, to].compactMap(ModuleNetwork.init(place:)).lazy.compactMap({ self.refusal(network: $0, ru: ru) }).first { return off }
             return isOn(.bridges) ? nil : ru ? "\(ModuleKind.bridges.name) выключены в Settings › Modules." : "\(ModuleKind.bridges.name) is off in Settings › Modules."

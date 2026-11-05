@@ -183,6 +183,7 @@ struct SettingsView: View {
         keepRunning
         NodesSection()
         OneClickKeySection()
+        AgentKeySection()
         about
     }
 

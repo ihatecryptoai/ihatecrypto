@@ -73,7 +73,8 @@ public enum LoanGuardCommand: Equatable, Sendable {
             : q.contains(/ethereum|mainnet|эфириум|мейннет/) ? "ethereum" : q.contains(/\bbase\b|\bбейс/) ? "base" : nil
         let below = q.firstMatch(of: /(?:below|under|\bat|ниже|меньше)\s*(\d+(?:[.,]\d+)?)/)
             .flatMap { Decimal(string: $0.1.replacingOccurrences(of: ",", with: ".")) }
-            .flatMap { $0 > 1 && $0 < 3 ? $0 : nil }
+            // Any line above liquidation the user names (3.5 was dropped for the default 1.25); 10+ is a typo, not a health.
+            .flatMap { $0 > 1 && $0 < 10 ? $0 : nil }
         return .set(loan: loan, network: loan == "aave" ? network : nil, below: below)
     }
 }

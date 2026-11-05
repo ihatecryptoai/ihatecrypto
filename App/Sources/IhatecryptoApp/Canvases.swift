@@ -1350,11 +1350,15 @@ extension Workspace {
         case .sendToken(let name, let token, let amount, let network):
             if let r = try? acrossRecipient(name, token: token, network: network) { acrossRoute(command, r, amount) }
             else { tokenOutRoute(to: name, token: token, amount: amount, network: network) }
+        case .agentCreate, .agentFund, .agentSend, .agentFreeze: agentRoute(command)
+        case .sendPrivately(let name, let token, let amount, let network):
+            (try? privateRecipient(name, token: token, network: network)).map { acrossRoute(command, ($0.entry, $0.symbol, $0.address), amount, privateOn: $0.network) }
         case .pay: payRoute(command)
         case .contractCall: callRoute(command)
         case .multisigCreate, .multisigSend: multisigRoute(command)
         case .bridge(let from, let to, let amount): bridgeRoute(from, to, amount)
         case .cctp(let from, let to, let amount): bridgeRoute(from, to, amount, cctp: true)
+        case .intents(let from, let to, let amount): intentsRoute(from, to, amount)
         case .usdt(let from, let to, let amount, let layerZero): usdtRoute(command, from, to, amount, layerZero: layerZero)
         case .aaveBorrow(let x?, let net), .aaveCollateral(let x?, let net): aaveDebtRoute(command, x, net)
         case .aaveRepay(let x, let net): aaveDebtRoute(command, x, net)
@@ -1915,7 +1919,7 @@ extension Workspace {
         var ahead: [String: Decimal] = [:]
         func count(_ c: WalletCommand) {
             let sent: Decimal?? = switch c {
-            case .bridge(_, _, let a), .cctp(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
+            case .bridge(_, _, let a), .cctp(_, _, let a), .intents(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
                  .arbitrumToSolana(let a), .robinhoodToSolana(let a), .withdrawToSolana(let a): a
             default: nil
             }
@@ -1967,6 +1971,7 @@ extension Workspace {
     static func arrives(_ c: WalletCommand) -> String? {
         switch c {
         case .bridge(_, let to, _): to == "hyperliquid" ? nil : to
+        case .intents(_, let to, _): to
         case .evmToSolana, .baseToSolana, .arbitrumToSolana, .robinhoodToSolana, .withdrawToSolana, .sellNear: "solana"
         case .solanaTo(let to, _): to
         default: nil
@@ -1979,6 +1984,7 @@ extension Workspace {
         case .aave(true, _, let n), .morpho(true, _, let n), .buyOn(let n, _, _, _): n
         case .lendDeposit, .kamino(true, _, _), .buy, .hlp(true, _), .allocate(_, _, _, _, from: "solana"), .solanaTo, .jupiterDCA: "solana"
         case .buyStock: "robinhood"
+        case .intents(from: "solana", _, _): "solana"
         default: nil
         }
     }
@@ -2311,23 +2317,63 @@ extension Workspace {
 
     /// A coin to a saved address on a network only NEAR Intents reaches: the USDC it costs and where from (once quoted),
     /// 1Click's swap for exactly that much, and the saved address.
-    private func acrossRoute(_ command: WalletCommand, _ r: (entry: SavedAddress, symbol: String, address: String), _ amount: Decimal?) -> MoveRoute {
-        let ends = AddressCheck.ends(r.entry.address), title = r.entry.network.title
+    /// The agent wallet on NEAR Intents: the rules the owner's NEAR key signs, money into it, or money out by its rules.
+    private func agentRoute(_ command: WalletCommand) -> MoveRoute {
+        let a = agentWallet, rules = a.map { "at most $\(Fmt.num($0.dailyUSD)) a day · your own and saved addresses only" } ?? "no agent wallet yet"
+        switch command {
+        case .agentCreate(let daily):
+            return MoveRoute(title: "Create an agent wallet · $\(Fmt.num(daily)) a day",
+                             footer: "NEAR Intents' Agent API keeps the agent wallet; your NEAR key signs its rules on this Mac (\(Presence.name)). Tasks then spend from it without your key, and NEAR Intents refuses anything the rules don't allow. Press Confirm.",
+                             steps: [step("near", "OWNER · YOUR NEAR KEY", "Signs the rules", "NEP-366, sent on chain by NEAR Intents", .near),
+                                     step("near", "RULES", "$\(Fmt.num(daily)) a day", "USDC only · to your own and saved addresses", .check),
+                                     step("near", "GRANT · THIS MAC", "Acts within them", "30 days · NEP-413, revocable", .check)])
+        case .agentFund(let usdc):
+            return MoveRoute(title: "Fund the agent wallet with \(Fmt.num(usdc)) USDC",
+                             footer: "The USDC goes from Solana to the deposit address the Agent API gives — 1Click's, checked to be bound to the agent wallet's own account before anything is sent. Press Confirm.",
+                             steps: [step("sol", "FROM · SOLANA", "\(Fmt.num(usdc)) USDC", "your wallet", .solana, money: moneyMove("USDC", on: "solana", by: -usdc)),
+                                     step("near", "TO · AGENT WALLET", "\(Fmt.num(usdc)) USDC", rules, .near)])
+        case .agentSend(let usdc, let name):
+            return MoveRoute(title: "Agent wallet: send \(Fmt.num(usdc)) USDC to \(name)",
+                             footer: "The agent wallet sends it by its own grant, without your key: NEAR Intents checks it against the rules you signed (\(rules)) and refuses what they don't allow. Press Confirm.",
+                             steps: [step("near", "FROM · AGENT WALLET", "\(Fmt.num(usdc)) USDC", rules, .near),
+                                     step("near", "RULES CHECKED BY", "NEAR Intents", "not by this app", .check),
+                                     (try? agentPayee(name)).map { p in
+                                         step(p.chain == "sol" ? "sol" : "base", "TO · \(p.entry.label?.uppercased() ?? "SAVED ADDRESS")", p.entry.name,
+                                              "\(AddressCheck.ends(p.address).start) … \(AddressCheck.ends(p.address).end) · \(p.chain == "sol" ? "Solana" : "Base")", .check)
+                                     } ?? step("usdc", "TO", name, "not a saved Solana or Base address", .check)])
+        default:
+            let on = { if case .agentFreeze(let on) = command { return on }; return true }()
+            return MoveRoute(title: on ? "Freeze the agent wallet" : "Unfreeze the agent wallet",
+                             footer: (on ? "Nothing moves from the agent wallet until you unfreeze it." : "The agent wallet acts again, within its rules.") + " Your NEAR key signs it (\(Presence.name)). Press Confirm.",
+                             steps: [step("near", "OWNER · YOUR NEAR KEY", on ? "Freeze" : "Unfreeze", rules, .near)])
+        }
+    }
+
+    /// `privateOn`: a private send through Confidential Intents, paid on that network.
+    private func acrossRoute(_ command: WalletCommand, _ r: (entry: SavedAddress, symbol: String, address: String), _ amount: Decimal?,
+                             privateOn: String? = nil) -> MoveRoute {
+        let ends = AddressCheck.ends(r.entry.address), title = privateOn.map(WalletCommand.placeName) ?? r.entry.network.title
         let quote = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
         let what = "\(amount.map { Fmt.num($0, maxFraction: 9) } ?? "?") \(r.symbol)"
         let from = quote?.first?.way ?? "Solana"
         let steps = [
             step(from == "Solana" ? "sol" : ModuleNetwork(place: from.lowercased())?.logo ?? "usdc", "FROM · \(from.uppercased())", "USDC",
-                 quote.map { $0.first.map { "\($0.gets) · the rest comes back" } ?? "no quote now · asked again every 30 s" } ?? "quoting…", RouteFill(rawValue: from.lowercased()) ?? .solana,
+                 quote.map { $0.first.map(\.gets) ?? "no quote now · asked again every 30 s" } ?? "quoting…", RouteFill(rawValue: from.lowercased()) ?? .solana,
                  money: Self.quotedAmount(quote?.first?.gets).map { moneyMove("USDC", on: from.lowercased(), by: -$0, approx: true) } ?? []),
-            step("near", "SWAP · NEAR INTENTS", what, "exactly this much arrives", .check),
-            step(r.entry.network.logo, "TO · \(r.entry.label?.uppercased() ?? "SAVED ADDRESS")", r.entry.name, "\(ends.start) … \(ends.end) · \(title)", .check),
+            privateOn == nil ? step("near", "SWAP · NEAR INTENTS", what, "exactly this much arrives", .check)
+                : step("near", "PRIVATE · CONFIDENTIAL INTENTS", what, "exactly this much arrives · not linkable to your deposit", .check,
+                       // What goes through the private hop: the payout itself, exactly (the rest of the USDC comes back).
+                       money: amount.map { [MoneyMove(place: "Pays out", symbol: r.symbol, was: 0, after: $0)] } ?? []),
+            step(privateOn.flatMap { ModuleNetwork(place: $0)?.logo } ?? r.entry.network.logo, "TO · \(r.entry.label?.uppercased() ?? "SAVED ADDRESS")", r.entry.name,
+                 "\(ends.start) … \(ends.end) · \(title)", .check),
         ]
         let warning = r.entry.network == .xrp && r.entry.memo.isEmpty
             ? "An exchange's XRP address needs its destination tag: without it the exchange can't credit you. Save the tag as this address's memo first."
             : firstSendWarning(r.entry)
-        return MoveRoute(title: "Send \(what) to \(r.entry.name)",
-                         footer: "NEAR Intents' 1Click turns USDC into \(r.symbol) on \(title) and pays this saved address exactly \(what); what's left of the USDC comes back. "
+        return MoveRoute(title: "Send \(what) \(privateOn == nil ? "" : "privately ")to \(r.entry.name)",
+                         footer: (privateOn == nil
+                            ? "NEAR Intents' 1Click turns USDC into \(r.symbol) on \(title) and pays this saved address exactly \(what); what's left of the USDC comes back. "
+                            : "NEAR Intents' Confidential Intents pays this saved address exactly \(what) on \(title). On chain your deposit and that payout can't be matched to each other; what's left of the USDC comes back. ")
                             + "Its deposit address is fresh: it needs \(Presence.name) before anything is sent. Press Confirm.",
                          steps: steps, warning: warning)
     }
@@ -2514,6 +2560,19 @@ extension Workspace {
         case .sendToken(let name, let token, let x?, let network):
             if let r = try? acrossRecipient(name, token: token, network: network) { await quoteAcross(command, r.symbol, x, r.entry.network.rawValue, r.address) }
             return
+        case .sendPrivately(let name, let token, let x, let network):
+            if let r = try? privateRecipient(name, token: token, network: network) { await quoteAcross(command, r.symbol, x, r.network, r.address, confidential: true) }
+            return
+        case .intents(let from, let to, let x):
+            // What lands, every 30 s while the card waits: the executor holds the move to it (within 1%).
+            guard let wallet = previewWallet, let amount = x ?? (from == "solana" ? solana?.usdc : self.usdc(on: from)), amount > 0 else { return }
+            while !Task.isCancelled {
+                let q = await executor(wallet).intentsQuote(from: from, to: to, usdc: amount)
+                guard !Task.isCancelled else { return }
+                if let q { swapQuote = (command, [("arrives", "\(Fmt.num(q.out, maxFraction: 4)) USDC on \(WalletCommand.placeName(to))" + (q.seconds.map { " · ≈ \($0) s" } ?? ""), q.out)]) }
+                try? await Task.sleep(for: .seconds(30))
+            }
+            return
         default: return
         }
         var from: String?, keep = false
@@ -2591,6 +2650,7 @@ extension Workspace {
     func swapLine(_ c: WalletCommand) -> String? {
         guard let q = swapQuote, q.command == c, let best = q.ways.first else { return nil }
         if case .sendToken = c { return best.gets }   // a coin bought on the way: its cost in USDC, the fees, the time
+        if case .sendPrivately = c { return best.gets }
         guard let m = best.gets.firstMatch(of: /([\d,]+(?:\.\d+)?)\s+([^\s·≈(]+)/),
               let out = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: "")), out > 0 else { return "You get ≈ \(best.gets)" }
         let got = String(m.2)
@@ -2631,11 +2691,12 @@ extension Workspace {
 
     /// A coin to an address on a network only NEAR Intents reaches: what it costs in USDC and where that comes from, again
     /// every 30 s.
-    private func quoteAcross(_ command: WalletCommand, _ symbol: String, _ amount: Decimal, _ network: String, _ address: String) async {
+    private func quoteAcross(_ command: WalletCommand, _ symbol: String, _ amount: Decimal, _ network: String, _ address: String,
+                             confidential: Bool = false) async {
         guard let wallet = previewWallet else { return }
         pricedCommand = command
         while !Task.isCancelled {
-            let q = try? await executor(wallet).acrossQuote(symbol, amount: amount, network: network, to: address)
+            let q = try? await executor(wallet).acrossQuote(symbol, amount: amount, network: network, to: address, confidential: confidential)
             guard !Task.isCancelled else { return }
             if let q {
                 // What it's worth there, and what 1Click and the network keep: a small BTC send loses a fifth to fees.
@@ -2709,10 +2770,12 @@ extension Workspace {
             || EVMNetwork.source(arrive: short, onSolana: solana?.usdc ?? 0, target: net, held: { self.usdc(on: $0) }) != nil)
     }
 
-    func fundingLegs(_ short: Decimal, _ net: String) -> [String]? {
+    /// `intents`: every leg through NEAR Intents (a loan guard's top-up).
+    func fundingLegs(_ short: Decimal, _ net: String, intents: Bool = false) -> [String]? {
         let evm = EVMNetwork.searched.map { FundingPlan.Place(key: $0.key, name: $0.name, usdc: usdc(on: $0.key) ?? 0) }
         return FundingPlan.legs(short: short, target: net, targetName: WalletCommand.placeName(net), solana: solana?.usdc ?? 0, evm: evm,
-                                hyperliquid: hl?.withdrawable ?? 0, near: near, nearPrice: markets["NEAR"]?.markPx)
+                                hyperliquid: hl?.withdrawable ?? 0, near: near, nearPrice: markets["NEAR"]?.markPx,
+                                intents: intents ? Set(["base", "arbitrum", "ethereum"]) : nil)   // OneClick.Asset.usdc(onEVM:)
     }
 
     /// A move asking for more than its place holds, as the person said it: what there is in a line, and the ways on as
@@ -2879,6 +2942,25 @@ extension Workspace {
                  : bridgeStep(quoted, title: "\(shown) USDC", fallback: ("relay", "BRIDGE · RELAY", "≈ $0.03 · a few seconds · no stop on Solana")),
             step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", bridgeLands(quoted) ?? "≈ \(shown) \(stable)", "your own address ✓", fill(to),
                  money: moving.map { moneyMove(stable, on: to, by: $0, approx: true) } ?? []),
+        ])
+    }
+
+    /// «move N USDC from A to B via NEAR Intents»: 1Click's deposit address, checked against what 1Click bound to it.
+    private func intentsRoute(_ from: String, _ to: String, _ amount: Decimal?) -> MoveRoute {
+        let a = WalletCommand.placeName(from), b = WalletCommand.placeName(to)
+        // The amount asked is the amount signed (a step before it in a chain may bring it); all of it = what's there now.
+        let moving = amount ?? usdc(on: from)
+        let shown = moving.map { Fmt.num($0) } ?? "all"
+        func fill(_ place: String) -> RouteFill { RouteFill(rawValue: place) ?? .relay }
+        return MoveRoute(title: "Move \(shown) USDC · \(a) → \(b) · NEAR Intents",
+                         footer: "NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays "
+                            + "your own address on \(b) and refunds to \(a). Its solvers deliver in about a minute. Press Confirm.",
+                         steps: [
+            step(ModuleNetwork(place: from)?.logo ?? "eth", "FROM · \(a.uppercased())", "\(shown) USDC", "USDC on \(a)", fill(from),
+                 money: moneyMove("USDC", on: from, by: moving.map { -$0 })),
+            step("near", "BRIDGE · NEAR INTENTS", "\(shown) USDC", "1Click · ≈ a minute · deposit checked first", .near),
+            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", "≈ \(shown) USDC", "your own address ✓", fill(to),
+                 money: moving.map { moneyMove("USDC", on: to, by: $0, approx: true) } ?? []),
         ])
     }
 
@@ -3235,6 +3317,9 @@ extension Workspace {
             reply(say("Your addresses are on the canvas\(sol.map { " — \($0) for USDC and SOL (recommended)" } ?? ""), plus Base for USDC and ETH. ihatecrypto can’t pull money in; send it there from an exchange or another wallet, on that network. It shows up within about 30 s and I’ll tell you when it arrives. To put money you already have into a vault, say “deposit 1 USDC into Jupiter”.",
                       "Твои адреса на холсте\(sol.map { " — \($0) для USDC и SOL (рекомендую)" } ?? ""), и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через 30 с, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter»."), note: note)
             return
+        }
+        if case .sendPrivately(let name, let token, _, let network) = command {
+            do { _ = try privateRecipient(name, token: token, network: network) } catch { reply(error.localizedDescription, note: note); return }
         }
         if case .sendToken(let name, let token, let amount, let network) = command {
             do {

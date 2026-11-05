@@ -141,6 +141,7 @@ extension Workspace {
         case .showApprovals, .multisigShow: []
         case .multisigCreate, .multisigSend: ["evm"]
         case .crossSwap(_, let from, _, let to, _): Array(Set([from, to].map { $0 == "solana" || $0 == "near" ? $0 : "evm" })).sorted()
+        case .intents(let from, let to, _): Array(Set([from, to].map { $0 == "solana" ? "solana" : "evm" })).sorted()
         case .gas: ["evm", "solana"]
         case .sendNear, .closeNear: ["near"]
         case .buyNear, .sellNear: ["solana", "near"]

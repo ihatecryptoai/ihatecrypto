@@ -1417,7 +1417,8 @@ struct StudioCanvas: View {
                         if ws.thinking || ws.busy || ws.executing || ws.preparing || ws.managesPosition,
                            let last = ws.canvases.first(where: { $0.id == ws.canvasID }), !last.bubbles.isEmpty {
                             SavedBoard(canvas: last).blockMenu(ws.readable(last.title), radius: nil)
-                        } else if ws.currentScheduleKey == nil {
+                        } else if ws.currentScheduleKey == nil, !(ws.showAlerts && (!ws.alerts.isEmpty || !ws.loanGuards.isEmpty)) {
+                            // The alerts board is the canvas's answer then: no starter blocks under it.
                             placeholder
                         }
                     }
@@ -2905,6 +2906,7 @@ private struct ChatComposer: View {
             } else {
                 HStack(spacing: 6) {
                     ChatModelMenu()
+                    TEEChip()
                     NetworksChip()
                     Spacer(minLength: 0)
                     // What the chat fills of the model's window, or what a key paid for its answers; after the first answer.
@@ -3545,6 +3547,8 @@ struct ModelCompany: Identifiable {
         .init(name: "Google", logo: "llm-gemini", tile: 0xFFFFFF, ids: ["gemini-subscription", "gemini"]),
         .init(name: "xAI", logo: "llm-grok", tile: 0x000000, ink: 0xFFFFFF, ids: ["grok-subscription", "xai"]),
         .init(name: "DeepSeek", logo: "llm-deepseek", tile: 0xFFFFFF, ids: ["deepseek"]),
+        // The network's own logo (Logos/near.png) is already its green square: the tile is that same green.
+        .init(name: "NEAR AI Cloud (private)", logo: "near", tile: 0x01EC97, ids: ["nearai"]),
         .init(name: "OpenRouter", logo: "llm-openrouter", tile: 0x6566F1, ink: 0xFFFFFF, ids: ["openrouter"]),
         .init(name: "Ollama", logo: "llm-ollama", tile: 0xFFFFFF, ink: 0x000000, ids: ["ollama"]),
         .init(name: "LM Studio", logo: "llm-lmstudio", tile: 0x4338CA, ink: 0xFFFFFF, ids: ["lmstudio"]),

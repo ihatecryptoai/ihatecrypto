@@ -42,7 +42,10 @@ extension Workspace {
             if let old = loanGuards.first(where: { $0.loan == g.loan && $0.network == g.network && $0.owner == g.owner }) {
                 // A test message never replaces the user's own guard (tests' guards go at /reset).
                 if g.untrusted == true, old.untrusted != true {
-                    reply(say("That loan is already guarded.", "Этот займ уже под защитой."), note: note)
+                    // The guard it means is on the alerts board: shown, so the line points at something.
+                    withAnimation(StudioView.spring) { showAlerts = true }
+                    reply(say("Your \(guardName(old)) loan is already guarded below \(Fmt.num(old.below)).",
+                              "Займ на \(guardName(old)) уже под защитой: ниже \(Fmt.num(old.below)) пришлю погашение."), note: note)
                     return
                 }
                 // The same guard with a new line: a fired one stays fired, so it can't prepare a second repay.
@@ -90,14 +93,14 @@ extension Workspace {
             loanGuards[i].armed = false
             let h = Fmt.num(health, maxFraction: 2)
             var usdc = LoanGuard.repay(debt: read.debt, health: health, target: g.target)
-            // The USDC the place lacks comes first, from wherever it is (FundingPlan: Relay or NEAR Intents, whichever
-            // lands more; NEAR sold through 1Click), and the repay takes what arrived (fittedToArrival). With too little
-            // anywhere, it repays what the place has and says what's missing.
+            // The USDC the place lacks comes first, from wherever it is, every leg through NEAR Intents (the owner,
+            // 2026-11-03: the guard's top-up always goes through NEAR; NEAR sold through 1Click too), and the repay takes
+            // what arrived (fittedToArrival). With too little anywhere, it repays what the place has and says what's missing.
             let net = g.loan == "aave" ? g.network ?? "base" : "solana"
             let have = self.usdc(on: net) ?? 0, short = usdc - have
             var legs: [String] = []
             if short > 0 {
-                if let found = fundingLegs(short, net) { legs = found } else {
+                if let found = fundingLegs(short, net, intents: true) { legs = found } else {
                     var cents = have * 100, down = Decimal()
                     NSDecimalRound(&down, &cents, 0, .down)
                     let missing = Fmt.num(usdc - down / 100)

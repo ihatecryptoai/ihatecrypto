@@ -176,7 +176,7 @@ func moveMoney(_ text: String) async throws {
     case .evmToSolana(let net, let amount):
         guard let n = EVMNetwork.named(net) else { throw ExecutionError("ihatecrypto doesn't move money on \(net).") }
         print(try await executor.evmToSolana(n, usdc: amount))
-    case .sendTo, .sendNear, .closeNear, .sendSol, .sendToken: throw ExecutionError("Sending to a saved address works in the ihatecrypto app, where the address book is.")
+    case .sendTo, .sendNear, .closeNear, .sendSol, .sendToken, .sendPrivately, .agentCreate, .agentFund, .agentSend, .agentFreeze: throw ExecutionError("Sending to a saved address works in the ihatecrypto app, where the address book is.")
     case .buyStock(let symbol, let usdc): print(try await executor.buyStock(symbol, usdc: usdc ?? 1))
     case .sellStock(let symbol, let amount): print(try await executor.sellStock(symbol, amount: amount))
     case .buyOn(let place, let token, let usdc, let from): print(try await executor.buyOn(EVMNetwork.named(place) ?? .base, token, usdc: usdc ?? 1, from: from))
@@ -191,6 +191,7 @@ func moveMoney(_ text: String) async throws {
     case .sweepDust: throw ExecutionError("Sweeping dust works in the ihatecrypto app, where the portfolio is.")
     case .swapOn(let place, let from, let to, let amount): print(try await executor.swapOn(EVMNetwork.named(place) ?? .base, from: from, to: to, amount: amount))
     case .cctp(let from, let to, let amount): print(try await executor.cctpBridge(from: EVMNetwork.named(from) ?? .base, to: EVMNetwork.named(to) ?? .arbitrum, usdc: amount))
+    case .intents(let from, let to, let amount): print(try await executor.intentsBridge(from: from, to: to, usdc: amount))
     case .usdt(let from, let to, let amount, let layerZero):
         guard let a = EVMNetwork.named(from), let b = EVMNetwork.named(to) else { throw ExecutionError("ihatecrypto doesn't move USDT between \(from) and \(to).") }
         print(try await executor.usdtMove(from: a, to: b, usdt: amount, layerZero: layerZero))

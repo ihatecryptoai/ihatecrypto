@@ -184,7 +184,7 @@ struct AlertsBoard: View {
                 },
                 Block(id: "\(g.id)-then", icon: "arrow.uturn.backward", label: "THEN · REPAY",
                       title: "USDC back to health \(Fmt.num(g.target))",
-                      line: "USDC from wherever it is, via Relay or NEAR Intents"),
+                      line: "USDC it lacks comes through NEAR Intents"),
                 Block(id: "\(g.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
                       title: "A notification, then your Confirm", line: "Prepared on its own canvas; nothing moves without \(Presence.name).")]
     }

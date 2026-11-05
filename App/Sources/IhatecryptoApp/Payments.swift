@@ -1,4 +1,5 @@
 import EVMChain
+import ExecutionCore
 import Foundation
 import IhatecryptoCore
 import TradeExecution
@@ -9,7 +10,9 @@ import WalletCore
 /// name in the directory («Brave Search»).
 struct PaymentQuote {
     let command: WalletCommand
-    let challenge: MPP.Challenge
+    /// Tempo's MPP challenge, or nil for an x402 offer (USDC on Base by signature).
+    let challenge: MPP.Challenge?
+    var x402: X402.Offer? = nil
     let ask: String
     let service: String
     /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
@@ -69,7 +72,20 @@ extension Workspace {
                 }
                 return
             }
-            switch MPP.challenge(headers["www-authenticate"] ?? "") {
+            let mpp = MPP.challenge(headers["www-authenticate"] ?? "")
+            // No payable MPP challenge: x402 in USDC on Base, by a signature its facilitator settles.
+            if case .failure = mpp, let offer = X402.offer(header: headers["payment-required"]) {
+                payment = PaymentQuote(command: command, challenge: nil, x402: offer, ask: ask, service: service, probed: probed)
+                pendingAction = .wallet(command)
+                pendingText = "pay \(Fmt.num(offer.usdc, maxFraction: 6)) USDC to \(service)"
+                let short = (usdc(on: "base") ?? 0) < offer.usdc
+                reply(say("\(service) asks \(Fmt.num(offer.usdc, maxFraction: 6)) USDC by x402 on Base. The card is on the canvas — Confirm signs it and its facilitator pays the fee"
+                            + (short ? "; Base's USDC comes from Solana through NEAR Intents first." : "."),
+                          "\(service) просит \(Fmt.num(offer.usdc, maxFraction: 6)) USDC по x402 в Base. Карточка на холсте — Confirm подпишет, а комиссию заплатит его посредник"
+                            + (short ? "; USDC в Base сначала придут с Solana через NEAR Intents." : ".")), note: note)
+                return
+            }
+            switch mpp {
             case .failure(let refusal):
                 reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
             case .success(let c):
@@ -88,6 +104,80 @@ extension Workspace {
         }
     }
 
+    /// After Confirm, x402: the same price asked again, USDC brought to Base through NEAR Intents if it's short, an
+    /// EIP-3009 authorization the signer builds and checks itself, and the request again with it. Nothing moves unless
+    /// the service's facilitator settles it; the settlement's transaction is the proof.
+    func payX402(_ method: String, _ url: String, _ body: String?, quote: PaymentQuote, offer: X402.Offer, _ e: Executor) async throws -> String {
+        // The signature is this wallet's own key, whose Base address pays: never a schedule's automation wallet (its
+        // top-up would land there while the main key is asked) or a Ledger (it can't sign EIP-3009 here).
+        guard TaskRun.automation == nil, !ledgerActive else {
+            throw ExecutionError("An x402 payment is signed by this wallet's own key, so it can't run from the automation wallet or a Ledger. Nothing was paid.")
+        }
+        let (status, headers, _) = try await MPP.call(method, url, body)
+        guard status == 402, let fresh = X402.offer(header: headers["payment-required"]), fresh.amount == offer.amount,
+              fresh.payTo.lowercased() == offer.payTo.lowercased() else {
+            throw ExecutionError("\(quote.service)'s price changed or it didn't quote again (\(status)); nothing was paid. Ask again to see the new card.")
+        }
+        guard let from = signerWallet?.evm else { throw ExecutionError("No EVM address in this wallet.") }
+        if let bring = Self.x402TopUp(price: fresh.usdc, onBase: usdc(on: "base") ?? 0) {
+            runningAction?.lines.append(say("Bringing USDC to Base through NEAR Intents", "Перевожу USDC в Base через NEAR Intents"))
+            let arrived = try await e.usdcByIntents(to: "base", usdc: bring)
+            guard (usdc(on: "base") ?? 0) + arrived >= fresh.usdc else {
+                throw ExecutionError("Only \(Fmt.num(arrived)) USDC reached Base; nothing was paid. Ask again.")
+            }
+        }
+        var nonce = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, 32, &nonce) == errSecSuccess else { throw ExecutionError("No randomness for the payment.") }
+        // As long as the service asks and no longer than 10 minutes: an unsettled signature runs out soon.
+        let validBefore = UInt64(Date().timeIntervalSince1970) + UInt64(min(max(fresh.maxTimeoutSeconds, 60), 600))
+        let signature = try await XPCTradeSigner().signX402(chainId: fresh.chainId, token: fresh.asset, to: fresh.payTo, value: fresh.amount,
+                                                             validBefore: validBefore, nonce: Data(nonce), service: quote.service)
+        payment = nil
+        answerStep(say("loading the answer…", "загружаю ответ…"), say("\(quote.service) is working · up to a minute", "\(quote.service) работает · до минуты"))
+        let header = X402.payment(fresh, from: from, validBefore: validBefore, nonce: Data(nonce), signature: signature)
+        // Whatever goes wrong now, the signature may still be settled until it runs out: said, so nobody pays twice.
+        let pending = say("the signed payment of \(Fmt.num(fresh.usdc, maxFraction: 6)) USDC can still be settled until \(Date(timeIntervalSince1970: TimeInterval(validBefore)).formatted(date: .omitted, time: .shortened)) — check your Base USDC before asking again",
+                          "подписанная оплата \(Fmt.num(fresh.usdc, maxFraction: 6)) USDC ещё может пройти до \(Date(timeIntervalSince1970: TimeInterval(validBefore)).formatted(date: .omitted, time: .shortened)) — проверь USDC в Base, прежде чем спрашивать снова")
+        // Written down before it's used: a failure from here on reads «status unknown», not «Failed» with Try again,
+        // since the signature may still be settled (a second Confirm would sign a second payment).
+        let journal = try? Journal(url: journalURL), id = Data(nonce).hex
+        try? journal?.append(.init(chain: "x402", id: id, kind: .signed, note: "\(quote.service) · \(Fmt.num(fresh.usdc, maxFraction: 6)) USDC"))
+        let paidStatus: Int, paidHeaders: [String: String], data: Data
+        do { (paidStatus, paidHeaders, data) = try await MPP.call(method, url, body, credential: header) }
+        catch { throw ExecutionError("\(quote.service) didn't answer (\(error.localizedDescription)); \(pending).") }
+        guard (200..<300).contains(paidStatus) else {
+            throw ExecutionError("\(quote.service) answered \(paidStatus): \(MPP.shown(data, limit: 300)); \(pending).")
+        }
+        try? journal?.append(.init(chain: "x402", id: id, kind: .settled, note: quote.service))
+        let proof = X402.settled(paidHeaders["payment-response"]).map { "\(EVMNetwork.base.explorer)/tx/\($0)" }
+        return await answered(quote.ask, service: quote.service, data: data, usdc: fresh.usdc, proof: proof)
+    }
+
+    /// What to bring to Base for an x402 price, or nil when Base has it: what's short plus 1Click's ≈ 1% and a cent,
+    /// at least a dollar (its minimum; the next requests need no bridge).
+    nonisolated static func x402TopUp(price: Decimal, onBase: Decimal) -> Decimal? {
+        guard onBase < price else { return nil }
+        return max(1, ((price - onBase) * Decimal(string: "1.02")! + Decimal(string: "0.01")!).rounded(2, .up))
+    }
+
+    /// The x402 card: USDC on Base (brought from Solana through NEAR Intents when short) → a signature → the service.
+    func x402Route(_ url: String, quote: PaymentQuote, offer: X402.Offer) -> MoveRoute {
+        let host = URL(string: url)?.host() ?? quote.service, price = Fmt.num(offer.usdc, maxFraction: 6)
+        let there = usdc(on: "base") ?? 0, bring = Self.x402TopUp(price: offer.usdc, onBase: there), short = bring != nil, ends = AddressCheck.ends(offer.payTo)
+        return MoveRoute(title: "Pay \(price) USDC · \(quote.service)",
+                         footer: "x402: a signature that lets \(host)'s facilitator move exactly \(price) USDC from your Base address to \(ends.start) … \(ends.end), valid 10 minutes at most; it pays the network fee. "
+                            + (bring.map { "Base has \(Fmt.num(there)) USDC, so \(Fmt.num($0)) USDC come from Solana through NEAR Intents first. " } ?? "")
+                            + "Then the request goes again with it. Press Confirm.",
+                         steps: [
+            short ? ActivityBubble(kind: "step", label: "FROM · SOLANA → BASE", title: "\(Fmt.num(bring ?? 1)) USDC", lines: ["through NEAR Intents · 1Click"], logo: "sol", fill: .near,
+                                   money: moneyMove("USDC", on: "solana", by: -(bring ?? 1)))
+                  : ActivityBubble(kind: "step", label: "FROM · BASE", title: "\(price) USDC", lines: ["your USDC on Base"], logo: "base", fill: .base,
+                                   money: [MoneyMove(place: "Base", symbol: "USDC", was: there, after: max(0, there - offer.usdc))]),
+            ActivityBubble(kind: "step", label: "PAY · X402", title: "\(price) USDC", lines: ["EIP-3009 signature · no gas"], logo: "base", fill: .base),
+            ActivityBubble(kind: "step", label: "TO · \(quote.service.uppercased())", title: "the answer comes here", lines: [host], logo: "base", fill: .check),
+        ])
+    }
+
     /// After Confirm: the quoted price paid on Tempo, then the request again with the proof. A quote about to expire is
     /// asked for again, and only the same price to the same payee is paid.
     /// Services whose price came out different once they saw the request's content: quoted with it from then on.
@@ -97,7 +187,8 @@ extension Workspace {
         guard case .pay(let method, let url, let body) = command, let quote = payment, quote.command == command else {
             throw ExecutionError("The service's price is gone; ask for it again.")
         }
-        var c = quote.challenge
+        if let offer = quote.x402 { return try await payX402(method, url, body, quote: quote, offer: offer, e) }
+        guard var c = quote.challenge else { throw ExecutionError("The service's price is gone; ask for it again.") }
         if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 30 }) == true {
             let (status, headers, _) = try await MPP.call(method, url, body)
             guard status == 402, case .success(let fresh) = MPP.challenge(headers["www-authenticate"] ?? "") else {
@@ -159,7 +250,9 @@ extension Workspace {
     /// The card: USDC on Tempo (with what comes from Solana, or the network holding it, first) → the payment → the service.
     func payRoute(_ command: WalletCommand) -> MoveRoute? {
         guard case .pay(_, let url, _) = command, let quote = payment, quote.command == command else { return nil }
-        let c = quote.challenge, host = URL(string: url)?.host() ?? c.realm, price = Fmt.num(c.usdc, maxFraction: 6)
+        if let offer = quote.x402 { return x402Route(url, quote: quote, offer: offer) }
+        guard let c = quote.challenge else { return nil }
+        let host = URL(string: url)?.host() ?? c.realm, price = Fmt.num(c.usdc, maxFraction: 6)
         let there = tempoUSDC ?? 0, short = there < c.usdc + Decimal(string: "0.01")!
         let floatUSD = Decimal(Executor.tempoFloat) / 1_000_000, requests = NSDecimalNumber(decimal: (max(c.usdc, floatUSD) / c.usdc).rounded(0, .down)).intValue
         let need = max(c.usdc, floatUSD) - there + Decimal(string: "0.01")!, src = tempoSource(need)
@@ -197,7 +290,7 @@ struct ServiceAnswerBoard: View {
                 TokenLogo(name: "tempo", size: 28, round: true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(answer.service).font(.ui(15, .bold)).lineLimit(1)
-                    Text(answer.usdc.map { "paid \(Fmt.num($0, maxFraction: 6)) USDC on Tempo" } ?? "free answer").font(.ui(10.5)).foregroundStyle(.secondary)
+                    Text(answer.usdc.map { "paid \(Fmt.num($0, maxFraction: 6)) USDC on \(answer.proof?.contains("basescan") == true ? "Base" : "Tempo")" } ?? "free answer").font(.ui(10.5)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 if let proof = answer.proof.flatMap(URL.init(string:)) {

@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "IhatecryptoKit", targets: [
             "IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
             "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
+            "LLMNearAI", "AgentAPIKit",
         ]),
         .library(name: "IhatecryptoSignerKit", targets: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"]),
     ],
@@ -47,6 +48,7 @@ let package = Package(
         .target(name: "ExecutionCore", path: "Sources/Execution", exclude: ["Trade"]),
         .target(name: "JupiterSwap", dependencies: ["WalletCore"], path: "Sources/Protocols/Jupiter"),
         .target(name: "OneClickKit", dependencies: ["WalletCore"], path: "Sources/Protocols/OneClick"),
+        .target(name: "AgentAPIKit", dependencies: ["WalletCore"], path: "Sources/Protocols/AgentAPI"),
         .target(name: "RelayBridge", dependencies: ["SolanaChain", "WalletCore"], path: "Sources/Protocols/Relay"),
         // DeFi: one folder per protocol. Jupiter Lend Earn first.
         .target(name: "DeFiJupiterLend", dependencies: ["WalletCore"], path: "Sources/DeFi/JupiterLend"),
@@ -79,7 +81,7 @@ let package = Package(
         .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge", "HyperliquidSigning"]),
         .executableTarget(
             name: "IhatecryptoApp",
-            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
+            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "LLMNearAI", "AgentAPIKit", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
                            "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
                            .product(name: "Sparkle", package: "Sparkle")],
             // Logos, sounds and the stories are bundled by the Xcode project; `swift run` shows lettered circles instead.

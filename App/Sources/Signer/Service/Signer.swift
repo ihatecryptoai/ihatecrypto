@@ -363,6 +363,33 @@ enum Signer {
             r.checks = ["\(NearTransaction.near(yocto)) NEAR → \(receiver)"]
             return r
 
+        case .signAgentMessage(let payload):
+            let m = try AgentOwner.message(payload)
+            try confirmAfresh(m.doing)
+            var r = SignerReply(ok: true)
+            r.signedRaw = try withNearKey(reason: m.doing) { secret, _ in
+                try NearOwnerSigning.nep413(message: m.message, nonce: m.nonce, recipient: m.recipient, privateKey: secret)
+            }
+            r.checks = ["NEP-413 to \(m.recipient): \(m.doing)"]
+            return r
+
+        case .signAgentDelegate(let payload, let nonce, let maxBlockHeight, let policy):
+            let d = try AgentOwner.delegate(payload)
+            // The rules in words from the signer's own reading: only addresses it knows, the owner being this wallet.
+            let rules = try policy.map { json in
+                let owner = try address("near")
+                let known = RecipientStore.all().union(AddressBookStore.all().map(\.address))
+                return try AgentOwner.policy(json, owner: owner, own: OwnStore.all(), known: known)
+            }
+            let doing = "agent wallet on NEAR Intents: \(d.doing)" + (rules.map { " — \($0)" } ?? "")
+            try confirmAfresh(doing)
+            var r = SignerReply(ok: true)
+            r.signedRaw = try withNearKey(reason: doing) { secret, _ in
+                try NearOwnerSigning.signDelegate(receiver: d.receiver, actions: d.actions, nonce: nonce, maxBlockHeight: maxBlockHeight, privateKey: secret)
+            }
+            r.checks = ["NEP-366 to \(d.receiver): \(d.doing)"]
+            return r
+
         case .signNearDeleteAccount(let beneficiary, let recipients, let nonce, let blockHash):
             try checkNearRecipient(beneficiary, recipients, blockHash)
             try approve([beneficiary], doing: "delete your NEAR account into \(beneficiary)")
@@ -555,6 +582,25 @@ enum Signer {
             var v = Verdict()
             v.problems.append("A payment by signature that names no Relay order: whom it pays can't be checked, so ihatecrypto doesn't sign it.")
             return refused(v)
+
+        case .signX402(let chainId, let token, let to, let value, let validBefore, let nonce, let service):
+            let owner = try address("evm")
+            let a = X402Authorization(chainId: chainId, token: token, from: owner, to: to, value: value, validBefore: validBefore, nonce: nonce)
+            if let refusal = a.refusal(owner: owner, now: UInt64(Date().timeIntervalSince1970)) {
+                var v = Verdict()
+                v.problems.append(refusal)
+                return refused(v)
+            }
+            // Each payment confirmed in person with its amount and payee; the payee isn't saved as a recipient, so it
+            // can't receive anything else later without its own prompt.
+            let name = String(service.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(60).map(Character.init))
+            let doing = a.summary + " · \(name)"
+            try confirmAfresh(doing)
+            let digest = try a.typed().parts().digest
+            var r = SignerReply(ok: true)
+            r.signatures = try withKey("evm", reason: doing) { key in [try EVMSigner.sign(digest: digest, privateKey: key)] }
+            r.checks = ["The signer built the x402 authorization itself: a dollar it knows, from this wallet, at most $5, valid an hour."]
+            return r
 
         case .signSponsoredTransfer(let chainId, let nonce, let gasLimit, let token, let to, let amount, let recipients):
             let owner = try address("evm")

@@ -150,6 +150,27 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         return raw
     }
 
+    /// An x402 payment's EIP-3009 authorization, built and checked by the signer: the 65-byte signature.
+    func signX402(chainId: UInt64, token: String, to: String, value: UInt64, validBefore: UInt64, nonce: Data, service: String) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signX402(chainId: chainId, token: token, to: to, value: value, validBefore: validBefore, nonce: nonce, service: service)) }
+        guard reply.ok, let sig = reply.signatures?.first else { throw GuardStop(Self.reason(reply)) }
+        // r ‖ s ‖ v: the 65 bytes x402 sends.
+        return sig.r + sig.s + Data([UInt8(sig.v)])
+    }
+
+    /// An agent wallet's owner request (NEAR Intents' Agent API), signed by this wallet's NEAR key after the signer
+    /// read and confirmed it: a NEP-413 signature, or a borsh SignedDelegateAction.
+    func signAgentMessage(payload: Data) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signAgentMessage(payload: payload)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
+        return raw
+    }
+    func signAgentDelegate(payload: Data, nonce: UInt64, maxBlockHeight: UInt64, policy: Data?) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signAgentDelegate(payload: payload, nonce: nonce, maxBlockHeight: maxBlockHeight, policy: policy)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
+        return raw
+    }
+
     func signNearDeleteAccount(beneficiary: String, recipients: [String], nonce: UInt64, blockHash: Data) async throws -> Data {
         let reply = try await Self.signing { try await send(.signNearDeleteAccount(beneficiary: beneficiary, recipients: recipients, nonce: nonce, blockHash: blockHash)) }
         guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
@@ -193,6 +214,7 @@ extension Workspace {
             case "near": "https://nearblocks.io/txns/\(e.id)"
             case "relay": "Relay order \(e.id)"
             case "1click": "1Click deposit \(e.id)"
+            case "x402": "x402 payment to \(e.note), signed and maybe still settling (authorization \(e.id.prefix(10))…)"
             case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
             case "hyperliquid": "Hyperliquid «\(e.note)»"
             default: EVMNetwork.named(e.chain).map { "\($0.explorer)/tx/\(e.id)" } ?? "\(e.chain) \(e.id)"
@@ -530,6 +552,15 @@ extension Workspace {
                 reply(try await e.sendAcross(r.symbol, amount: amount, network: r.entry.network.rawValue, to: r.address, label: r.entry.name),
                       note: "NEAR Intents · \(r.entry.network.title)")
                 markSent(r.entry)
+            case .agentCreate(let daily): reply(try await agentCreate(dailyUSD: daily), note: "NEAR Intents · Agent API")
+            case .agentFund(let usdc): reply(try await agentFund(usdc), note: "NEAR Intents · Agent API")
+            case .agentSend(let usdc, let name): reply(try await agentSend(usdc, to: name), note: "NEAR Intents · Agent API")
+            case .agentFreeze(let on): reply(try await agentFreeze(on), note: "NEAR Intents · Agent API")
+            case .sendPrivately(let name, let token, let amount, let network):
+                let r = try privateRecipient(name, token: token, network: network)
+                reply(try await e.sendAcross(r.symbol, amount: amount, network: r.network, to: r.address, label: r.entry.name, confidential: true),
+                      note: "NEAR Intents · private · \(WalletCommand.placeName(r.network))")
+                markSent(r.entry)
             case .sendToken(let name, let token, let amount, let network):
                 let (entry, net) = try tokenRecipient(name, network: network)
                 reply(try await e.sendToken(token, amount: amount, on: net, to: entry.address, label: entry.name),
@@ -589,6 +620,11 @@ extension Workspace {
             case .swapOn(let place, let from, let to, let amount):
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't swap on \(place).") }
                 reply(try await e.swapOn(net, from: from, to: to, amount: amount), note: "\(net.name) · Uniswap")
+            case .intents(let from, let to, let amount):
+                // What the card showed landing holds the move (a step of a chain had no card of its own: its quote does).
+                let shown = swapQuote.flatMap { $0.command == command ? $0.ways.first?.worth : nil }
+                reply(try await e.intentsBridge(from: from, to: to, usdc: amount, shown: shown),
+                      note: "NEAR Intents · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
             case .cctp(let from, let to, let amount):
                 guard let a = EVMNetwork.named(from), let b = EVMNetwork.named(to) else { throw ExecutionError("Circle's CCTP moves USDC between Ethereum, Arbitrum, Base and Polygon.") }
                 reply(try await e.cctpBridge(from: a, to: b, usdc: amount), note: "Circle's CCTP · \(a.name) → \(b.name)")
@@ -793,7 +829,7 @@ extension Workspace {
             return
         }
         let place: String? = switch command {
-        case .evmToSolana(let n, _), .bridge(from: let n, to: _, _), .cctp(from: let n, to: _, _): n
+        case .evmToSolana(let n, _), .bridge(from: let n, to: _, _), .cctp(from: let n, to: _, _), .intents(from: let n, to: _, _): n
         case .buyOn(_, _, _, let from?): from
         default: nil
         }
@@ -837,6 +873,8 @@ extension Workspace {
         // Not inside a chain: a step before it may have just brought the money, and those balances load after the refresh.
         case .evmToSolana(let net, let asked) where !inChain, .bridge(from: let net, to: _, let asked) where !inChain:
             return lacks(usdc(on: net), asked, WalletCommand.placeName(net), net == "robinhood" ? "USDG" : "USDC")
+        case .intents(let from, _, let asked) where !inChain:
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
         case .usdt(let net, _, let asked, _) where !inChain:
             return lacks(heldUSDT(net), asked, WalletCommand.placeName(net), "USDT")
         // A buy that names where its money comes from («с арбитрума») pays from there or not at all: said before the card.
