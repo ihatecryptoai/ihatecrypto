@@ -6,15 +6,18 @@ public struct LLMUsage: Sendable, Equatable {
     public var input: Int
     /// The part of `input` read from the service's cache, billed lower.
     public var cached: Int
+    /// The part of `input` written to the service's cache (Anthropic bills it at 1.25× the input price).
+    public var written: Int
     public var output: Int
     /// The model's context window, when the service says it (Claude Code, the Codex backend, Ollama).
     public var window: Int?
     /// The service's own price for the answer in dollars, when it sends one (OpenRouter, Claude Code).
     public var cost: Double?
 
-    public init(input: Int, cached: Int = 0, output: Int, window: Int? = nil, cost: Double? = nil) {
+    public init(input: Int, cached: Int = 0, written: Int = 0, output: Int, window: Int? = nil, cost: Double? = nil) {
         self.input = input
         self.cached = cached
+        self.written = written
         self.output = output
         self.window = window
         self.cost = cost
@@ -27,7 +30,7 @@ public struct LLMUsage: Sendable, Equatable {
         guard let usage, let read = Self.int(usage["prompt_tokens"] ?? usage["input_tokens"]) else { return nil }
         let details = (usage["prompt_tokens_details"] ?? usage["input_tokens_details"]) as? [String: Any]
         let written = Self.int(usage["cache_creation_input_tokens"]) ?? 0, hit = Self.int(usage["cache_read_input_tokens"])
-        self.init(input: read + written + (hit ?? 0), cached: hit ?? Self.int(details?["cached_tokens"]) ?? 0,
+        self.init(input: read + written + (hit ?? 0), cached: hit ?? Self.int(details?["cached_tokens"]) ?? 0, written: written,
                   output: Self.int(usage["completion_tokens"] ?? usage["output_tokens"]) ?? 0,
                   cost: (usage["cost"] as? NSNumber)?.doubleValue)
     }
@@ -78,20 +81,24 @@ public final class ModelWindows: @unchecked Sendable {
 /// the services themselves publish prices only as web pages.
 public struct ModelFacts: Sendable, Equatable {
     public var window: Int
-    /// Dollars a token: read, read from the cache, written.
+    /// Dollars a token: read, read from the cache, written as the answer.
     public var input: Double, cached: Double, output: Double
+    /// Dollars a token written to the cache: the read price where the list names none.
+    public var written: Double
 
-    public init(window: Int, input: Double, cached: Double, output: Double) {
+    public init(window: Int, input: Double, cached: Double, output: Double, written: Double? = nil) {
         self.window = window
         self.input = input
         self.cached = cached
         self.output = output
+        self.written = written ?? input
     }
 
     // ponytail: the base list price. A service's dearer tier for prompts over 200–272k tokens and DeepSeek's hours of
     // the day aren't applied: the chat sends a few thousand tokens. Read `pricing.overrides` if that changes.
     public func cost(_ usage: LLMUsage) -> Double {
-        Double(usage.input - usage.cached) * input + Double(usage.cached) * cached + Double(usage.output) * output
+        Double(usage.input - usage.cached - usage.written) * input + Double(usage.cached) * cached + Double(usage.written) * written
+            + Double(usage.output) * output
     }
 
     public static let source = "https://openrouter.ai/api/v1/models"
@@ -114,7 +121,8 @@ public struct ModelFacts: Sendable, Equatable {
             let prices = row["pricing"] as? [String: Any] ?? [:]
             func price(_ name: String) -> Double? { (prices[name] as? String).flatMap(Double.init) ?? (prices[name] as? NSNumber)?.doubleValue }
             let input = price("prompt") ?? 0
-            table[key(id)] = ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0)
+            table[key(id)] = ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0,
+                                        written: price("input_cache_write"))
         }
         return table
     }

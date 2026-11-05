@@ -28,10 +28,11 @@ let package = Package(
         .target(name: "LLMOpenRouter", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/OpenRouter"),
         .target(name: "LLMChatGPT", dependencies: ["LLMCore"], path: "Sources/LLM/ChatGPT"),
         .target(name: "LLMClaudeCode", dependencies: ["LLMCore"], path: "Sources/LLM/ClaudeCode"),
+        .target(name: "LLMAnthropic", dependencies: ["LLMCore"], path: "Sources/LLM/Anthropic"),
         .target(name: "LLMApple", dependencies: ["LLMCore"], path: "Sources/LLM/Apple"),
         .target(
             name: "LLMCatalog",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple"],
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple"],
             path: "Sources/LLM/Catalog"
         ),
         .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
@@ -96,7 +97,7 @@ let package = Package(
         .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev", "JupiterSwap", "DeFiKamino"]),
         .testTarget(
             name: "LLMTests",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMCatalog"]
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMCatalog"]
         ),
     ]
 )

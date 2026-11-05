@@ -1,8 +1,8 @@
 import Foundation
 import LLMCore
 
-/// Any service with the OpenAI chat-completions format: DeepSeek, OpenAI, Anthropic, xAI, Gemini, Ollama, LM Studio.
-/// A new one is a new preset, not new code.
+/// Any service with the OpenAI chat-completions format: DeepSeek, OpenAI, xAI, Gemini, Ollama, LM Studio. A new one is a
+/// new preset, not new code. An Anthropic key has a module of its own (LLM/Anthropic): Anthropic's own API caches.
 public struct OpenAICompatible: LLMProvider {
     public let info: ProviderInfo
     public let baseURL: String
@@ -22,10 +22,6 @@ public struct OpenAICompatible: LLMProvider {
                                  note: "Key from platform.openai.com, billed separately from a ChatGPT subscription.", takesKey: true,
                                  models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]),
               baseURL: "https://api.openai.com/v1"),
-        .init(info: ProviderInfo(id: "anthropic", name: "Anthropic API", kind: .apiKey, defaultModel: "claude-opus-5-5",
-                                 note: "Key from platform.claude.com, billed separately from a Claude subscription.", takesKey: true,
-                                 models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-4-5"]),
-              baseURL: "https://api.anthropic.com/v1", jsonMode: false),
         .init(info: ProviderInfo(id: "xai", name: "xAI Grok API", kind: .apiKey, defaultModel: "grok-4.7",
                                  note: "Key from console.x.ai, paid with credits.", takesKey: true, models: ["grok-4.7", "grok-4.6"]),
               baseURL: "https://api.x.ai/v1"),

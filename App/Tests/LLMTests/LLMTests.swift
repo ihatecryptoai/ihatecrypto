@@ -1,4 +1,5 @@
 import Foundation
+@testable import LLMAnthropic
 @testable import LLMAPIKey
 @testable import LLMApple
 @testable import LLMCatalog
@@ -127,7 +128,7 @@ private func jwt(_ claims: [String: Any]) -> String {
 @Test func jsonModeOnlyWhereTheAPISupportsIt() {
     let request = LLMRequest(model: "m", messages: [LLMMessage(.user, "x")], wantsJSON: true)
     #expect(OpenAIChatClient(baseURL: "https://api.deepseek.com/", key: "k", jsonMode: true).body(request)["response_format"] != nil)
-    #expect(OpenAIChatClient(baseURL: "https://api.anthropic.com/v1", key: "k", jsonMode: false).body(request)["response_format"] == nil)
+    #expect(OpenAIChatClient(baseURL: "http://localhost:1234/v1", key: nil, jsonMode: false).body(request)["response_format"] == nil)
     #expect(OpenAIChatClient(baseURL: "https://api.deepseek.com/", key: nil, jsonMode: true).baseURL == "https://api.deepseek.com")
 }
 
@@ -136,6 +137,148 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(throws: LLMError.self) { try deepseek.client(nil, save: { _ in }) }
     let ollama = OpenAICompatible.presets.first { $0.info.id == "ollama" }!
     #expect((try? ollama.client(nil, save: { _ in })) != nil)
+}
+
+// MARK: Anthropic's Messages API
+
+/// An Anthropic key goes to Anthropic's own API, in its old place in the list, and the same Keychain entry («anthropic»).
+@Test func anAnthropicKeyUsesTheMessagesAPI() throws {
+    let ids = LLMCatalog.all.map(\.info.id)
+    #expect(ids.firstIndex(of: "anthropic") == ids.firstIndex(of: "openai").map { $0 + 1 })
+    let anthropic = try #require(LLMCatalog.provider(id: "anthropic"))
+    #expect(anthropic is AnthropicAPI && anthropic.info.kind == .apiKey && anthropic.info.takesKey)
+    #expect(throws: LLMError.self) { try anthropic.client(nil, save: { _ in }) }
+    #expect(try anthropic.client(.apiKey("k"), save: { _ in }) is AnthropicClient)
+    #expect(!OpenAICompatible.presets.contains { $0.info.id == "anthropic" })
+    #expect(AnthropicClient(key: "k").headers == ["x-api-key": "k", "anthropic-version": "2026-10-21"])
+}
+
+/// The instructions go as one cached block, the dialogue as it is; «Think before answering» is adaptive thinking at high
+/// effort, and without it the model keeps its own.
+@Test func anthropicRequestCachesTheInstructionsAndThinksWhenAsked() throws {
+    let r = LLMRequest(model: "claude-opus-5-5", messages: [
+        LLMMessage(.system, "Answer as JSON."), LLMMessage(.user, "купи SOL на $5"), LLMMessage(.assistant, "{}"), LLMMessage(.user, "ещё раз"),
+    ], wantsJSON: true)
+    let body = AnthropicClient.body(r, think: false)
+    #expect(body["model"] as? String == "claude-opus-5-5" && body["stream"] as? Bool == true && body["max_tokens"] as? Int == 32_000)
+    let system = try #require(body["system"] as? [[String: Any]])
+    #expect(system.count == 1 && system[0]["text"] as? String == "Answer as JSON.")
+    #expect((system[0]["cache_control"] as? [String: String]) == ["type": "ephemeral"])
+    let messages = try #require(body["messages"] as? [[String: String]])
+    #expect(messages.map { $0["role"]! } == ["user", "assistant", "user"] && messages[0]["content"] == "купи SOL на $5")
+    // No OpenAI-style fields, and no thinking settings unless asked.
+    #expect(body["response_format"] == nil && body["thinking"] == nil && body["output_config"] == nil)
+    let thinking = AnthropicClient.body(r, think: true)
+    #expect((thinking["thinking"] as? [String: String]) == ["type": "adaptive"])
+    #expect((thinking["output_config"] as? [String: String]) == ["effort": "high"])
+    // No instructions, no system field (an empty block is refused).
+    #expect(AnthropicClient.body(LLMRequest(model: "m", messages: [LLMMessage(.user, "x")]), think: false)["system"] == nil)
+}
+
+/// The event stream as the Messages API sends it (the docs' shape, with a thinking block before the text and a cache hit):
+/// the text, the stop reason and the counts, cache parts included.
+@Test func anthropicStreamReadsTheTextAndWhatTheAnswerUsed() throws {
+    let events = #"""
+    event: message_start
+    data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"usage":{"input_tokens":412,"cache_creation_input_tokens":0,"cache_read_input_tokens":18210,"output_tokens":1}}}
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQB"}}
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{\"reply\":"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\"ok\"}"}}
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1}
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":57,"cache_creation_input_tokens":null}}
+
+    event: message_stop
+    data: {"type":"message_stop"}
+    """#
+    var stream = AnthropicStream(), texts: [String] = [], ended = false
+    for line in events.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) where !ended {
+        let before = stream.text
+        ended = try stream.feed(line)
+        if stream.text != before { texts.append(stream.text) }
+    }
+    #expect(ended && stream.text == #"{"reply":"ok"}"# && texts == [#"{"reply":"#, #"{"reply":"ok"}"#])
+    #expect(stream.stop == "end_turn")
+    #expect(stream.usage == LLMUsage(input: 18_622, cached: 18_210, output: 57))
+
+    // A refusal is told by its stop reason, an overloaded API by an error event.
+    var refused = AnthropicStream()
+    _ = try refused.feed(#"data: {"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":0}}"#)
+    #expect(refused.stop == "refusal" && refused.text.isEmpty)
+    var failing = AnthropicStream()
+    let error = #expect(throws: LLMError.self) {
+        try failing.feed(#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
+    }
+    #expect(error?.message == "Anthropic: Overloaded")
+}
+
+/// api.anthropic.com as the test answers it: each request kept with its body, the replies given in turn.
+nonisolated final class AnthropicStub: URLProtocol {
+    nonisolated(unsafe) static var replies: [(status: Int, body: String)] = []
+    nonisolated(unsafe) static var asked: [(headers: [String: String], body: [String: Any])] = []
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.anthropic.com" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var body = Data()
+        if let stream = request.httpBodyStream {   // URLProtocol gets the body as a stream, not httpBody
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while case let n = stream.read(&buffer, maxLength: buffer.count), n > 0 { body.append(buffer, count: n) }
+            stream.close()
+        }
+        Self.asked.append((request.allHTTPHeaderFields ?? [:], (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]))
+        let reply = Self.replies.removeFirst()
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data(reply.body.utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// The whole way through the client: the key and version sent, the words told as they come, what the answer used told to
+/// the meter. A model that refuses adaptive thinking (Haiku 4.5) is asked again without it.
+@Test func anthropicClientStreamsTheAnswerAndCountsIt() async throws {
+    URLProtocol.registerClass(AnthropicStub.self)
+    defer { URLProtocol.unregisterClass(AnthropicStub.self) }
+    AnthropicStub.asked = []
+    AnthropicStub.replies = [
+        (400, #"{"type":"error","error":{"type":"invalid_request_error","message":"adaptive thinking is not supported on this model"}}"#),
+        (200, [#"data: {"type":"message_start","message":{"usage":{"input_tokens":30,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0,"output_tokens":1}}}"#,
+               #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"wor"}}"#,
+               #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"king"}}"#,
+               #"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#,
+               #"data: {"type":"message_stop"}"#].joined(separator: "\n\n") + "\n\n"),
+    ]
+    final class Heard: @unchecked Sendable { let lock = NSLock(); var usage: [LLMUsage] = []; var partial: [String] = [] }
+    let heard = Heard()
+    let client = MeteredClient(AnthropicClient(key: "sk-ant-test")) { usage, _ in heard.lock.withLock { heard.usage.append(usage) } }
+    let answer = try await client.stream(LLMRequest(model: "claude-haiku-4-5", messages: [LLMMessage(.system, "s"), LLMMessage(.user, "x")], thinking: true)) { text in
+        heard.lock.withLock { heard.partial.append(text) }
+    }
+    #expect(answer == "working" && heard.partial == ["wor", "working"])
+    #expect(heard.usage == [LLMUsage(input: 5_030, written: 5_000, output: 3)])
+    #expect(AnthropicStub.asked.count == 2 && AnthropicStub.asked.allSatisfy { $0.headers["x-api-key"] == "sk-ant-test" && $0.headers["anthropic-version"] == "2026-10-21" })
+    #expect(AnthropicStub.asked[0].body["thinking"] != nil && AnthropicStub.asked[1].body["thinking"] == nil && AnthropicStub.asked[1].body["output_config"] == nil)
 }
 
 @Test func catalogIDsAreUniqueAndUsableEntriesHaveAModelOrAreLocal() {
@@ -227,7 +370,7 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(LLMUsage(reported: responses) == LLMUsage(input: 9_000, cached: 8_000, output: 25))
     // Anthropic: the cached parts are beside input_tokens, not in them.
     let anthropic = ["input_tokens": 521, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 10_000, "output_tokens": 36] as [String: Any]
-    #expect(LLMUsage(reported: anthropic) == LLMUsage(input: 10_621, cached: 10_000, output: 36))
+    #expect(LLMUsage(reported: anthropic) == LLMUsage(input: 10_621, cached: 10_000, written: 100, output: 36))
     #expect(LLMUsage(reported: ["total_tokens": 5]) == nil && LLMUsage(reported: nil) == nil)
 }
 
@@ -249,7 +392,7 @@ private func jwt(_ claims: [String: Any]) -> String {
 }
 
 @Test func modelFactsReadOpenRoutersListAndPriceAnAnswer() throws {
-    let list = #"{"data":[{"id":"anthropic/claude-opus-5.5","context_length":1000000,"pricing":{"prompt":"0.000004","completion":"0.00002","input_cache_read":"0.0000002"}},{"id":"deepseek/deepseek-v4.1-flash:free","context_length":1048576,"pricing":{"prompt":"0","completion":"0"}},{"id":"~deepseek/deepseek-flash-latest","context_length":1048576,"pricing":{"prompt":"0.00000015","completion":"0.0000006"}},{"id":"no-window"}]}"#
+    let list = #"{"data":[{"id":"anthropic/claude-opus-5.5","context_length":1000000,"pricing":{"prompt":"0.000004","completion":"0.00002","input_cache_read":"0.0000002","input_cache_write":"0.000005"}},{"id":"deepseek/deepseek-v4.1-flash:free","context_length":1048576,"pricing":{"prompt":"0","completion":"0"}},{"id":"~deepseek/deepseek-flash-latest","context_length":1048576,"pricing":{"prompt":"0.00000015","completion":"0.0000006"}},{"id":"no-window"}]}"#
     let table = ModelFacts.table(Data(list.utf8))
     // The Anthropic API's own spelling of the model finds OpenRouter's row; a «:free» variant is a row of its own.
     let opus = try #require(table[ModelFacts.key("claude-opus-5-5")])
@@ -260,6 +403,8 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(table[ModelFacts.key("deepseek-flash-latest")] == ModelFacts(window: 1_048_576, input: 0.00000015, cached: 0.00000015, output: 0.0000006))
     // 1,000 tokens read anew, 10,000 from the cache, 100 written.
     #expect(abs(opus.cost(LLMUsage(input: 11_000, cached: 10_000, output: 100)) - 0.008) < 1e-12)
+    // The first request writes the instructions to the cache at 1.25× (18,000 tokens), the next reads them at a twentieth.
+    #expect(abs(opus.cost(LLMUsage(input: 18_500, written: 18_000, output: 100)) - 0.094) < 1e-12)
     // Ollama's window is the one its client asks for: known before its first answer.
     #expect(LLMCatalog.window(provider: "ollama") == 16_384 && LLMCatalog.window(provider: "openai") == nil)
 }

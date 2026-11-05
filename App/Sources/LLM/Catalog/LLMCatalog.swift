@@ -1,3 +1,4 @@
+import LLMAnthropic
 import LLMAPIKey
 import LLMApple
 import LLMChatGPT
@@ -19,7 +20,8 @@ public enum LLMCatalog {
             note: "", unavailable: "A Google AI subscription doesn't cover the API. Connect Gemini with a key from Google AI Studio."
         )),
         OpenRouter(),
-    ] + OpenAICompatible.presets + [AppleIntelligence()]
+        // An Anthropic key keeps its place in the list, after OpenAI's.
+    ] + OpenAICompatible.presets.flatMap { p -> [any LLMProvider] in p.info.id == "openai" ? [p, AnthropicAPI()] : [p] } + [AppleIntelligence()]
 
     public static func provider(id: String) -> (any LLMProvider)? {
         all.first { $0.info.id == id }
