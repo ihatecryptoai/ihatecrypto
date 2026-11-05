@@ -174,6 +174,22 @@ import WalletCore
     #expect(throws: (any Error).self) { try EVMSimulation(["nope"], owner: me) }
 }
 
+/// EIP-7708 (Glamsterdam): the coin's moves are Transfer logs from SYSTEM_ADDRESS and geth's traceTransfers is off, so
+/// they're the coin, not a token without decimals(); a node that still traces too is counted once.
+@Test func simulationReadsEIP7708CoinLogsAsTheCoin() throws {
+    let me = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", pad = "0x000000000000000000000000"
+    let t = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    let other = pad + "1111111111111111111111111111111111111111", mine = pad + me.dropFirst(2)
+    func log(_ address: String, _ from: String, _ to: String, _ wei: UInt64) -> [String: Any] {
+        ["address": address, "topics": [t, from, to], "data": "0x" + ABI.uint(wei).hex]
+    }
+    let system = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
+    let after = try EVMSimulation([["calls": [["status": "0x1", "logs": [log(system, mine, other, 3_000), log(system, other, mine, 500)]]]]], owner: me)
+    #expect(after.changes == [EVMSimulation.native: -2_500])
+    let both = try EVMSimulation([["calls": [["status": "0x1", "logs": [log(system, mine, other, 3_000), log(EVMSimulation.native, mine, other, 3_000)]]]]], owner: me)
+    #expect(both.changes == [EVMSimulation.native: -3_000])
+}
+
 @Test func bigTokenAmountsAndUniswapPaths() throws {
     // 256-bit words: a thousand tokens of 18 decimals doesn't fit 64 bits.
     #expect(try ABI.word(0).hex == String(repeating: "0", count: 64))

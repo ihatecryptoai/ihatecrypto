@@ -550,6 +550,9 @@ extension Decimal {
 /// logs (plus WETH9's Deposit/Withdrawal, which emit none) — a contract can log anything, so a token is shown by its address.
 public struct EVMSimulation: Equatable, Sendable {
     public static let native = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    /// EIP-7708 (Glamsterdam): the chain itself logs every coin move as a Transfer from SYSTEM_ADDRESS, and geth turns
+    /// traceTransfers off once it's live. Read as `native`; a node that sends both is counted once, by 0xeeee.
+    static let system = "0xfffffffffffffffffffffffffffffffffffffffe"
     /// WETH9 on Ethereum and Base; Arbitrum's WETH logs a Transfer on wrap.
     /// WETH on Ethereum and the OP chains, WHYPE on HyperEVM, WBNB on BNB Chain (the same WETH9 code).
     static let weth9: Set<String> = ["0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "0x4200000000000000000000000000000000000006",
@@ -598,8 +601,14 @@ public struct EVMSimulation: Equatable, Sendable {
             return
         }
         let me = owner.lowercased().dropFirst(2)
-        for log in calls.flatMap({ $0["logs"] as? [[String: Any]] ?? [] }) {
-            guard let asset = (log["address"] as? String)?.lowercased(), let topics = log["topics"] as? [String], let event = topics.first else { continue }
+        let logs = calls.flatMap { $0["logs"] as? [[String: Any]] ?? [] }
+        let traced = logs.contains { ($0["address"] as? String)?.lowercased() == Self.native }
+        for log in logs {
+            guard var asset = (log["address"] as? String)?.lowercased(), let topics = log["topics"] as? [String], let event = topics.first else { continue }
+            if asset == Self.system {
+                if traced { continue }
+                asset = Self.native
+            }
             if let g = Self.grant(asset: asset, topics: topics.map { $0.lowercased() }, data: Data(hex: log["data"] as? String ?? "0x") ?? Data(), me: String(me)) {
                 grants.append(g)
             }
