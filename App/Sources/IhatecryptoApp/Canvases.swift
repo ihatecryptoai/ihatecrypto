@@ -2637,6 +2637,14 @@ extension Workspace {
     func swapLine(_ c: WalletCommand) -> String? {
         guard let q = swapQuote, q.command == c, let best = q.ways.first else { return nil }
         if case .sendToken = c { return best.gets }   // a coin bought on the way: its cost in USDC, the fees, the time
+        // A loan's card is quoted with its health and debt, not with a coin it gets: «You get ≈ ∞ → 3.82» was the health.
+        switch c {
+        case .kaminoBorrow, .aaveBorrow, .aaveCollateral:
+            if let h = q.ways.first(where: { $0.way == "health" }) { return "Health factor \(h.gets)" }
+        case .kaminoRepay, .aaveRepay:
+            if let d = q.ways.first(where: { $0.way == "debt" }) { return "Owed \(d.gets)" }
+        default: break
+        }
         guard let m = best.gets.firstMatch(of: /([\d,]+(?:\.\d+)?)\s+([^\s·≈(]+)/),
               let out = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: "")), out > 0 else { return "You get ≈ \(best.gets)" }
         let got = String(m.2)
