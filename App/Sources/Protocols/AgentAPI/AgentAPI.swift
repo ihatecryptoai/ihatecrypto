@@ -125,11 +125,17 @@ public enum AgentAPI {
     }
 
     /// Until it's final: UNCERTAIN keeps being asked, NEEDS_REVIEW stops (never retried).
+    /// A dropped connection or a timeout while asking is asked again until `seconds` pass: the operation runs on
+    /// regardless, and giving up on the first one read a send that went as «failed» (2026-11-05).
     public static func final(_ correlationID: String, within seconds: Double = 600) async throws -> Status {
         let end = Date().addingTimeInterval(seconds)
         while true {
-            let s = try await status(correlationID)
-            if s.final || Date() > end { return s }
+            do {
+                let s = try await status(correlationID)
+                if s.final || Date() > end { return s }
+            } catch is URLError where Date() < end {
+                try await Task.sleep(for: .seconds(3))
+            }
         }
     }
 }

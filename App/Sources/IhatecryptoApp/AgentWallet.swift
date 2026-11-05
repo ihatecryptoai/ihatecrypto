@@ -185,6 +185,17 @@ extension Workspace {
             }
             policy = shown
         }
+        // A freeze or unfreeze stores the same rules again with only «frozen» flipped (a live agent_freeze, 2026-11-05):
+        // the rules it shows must be frozen as asked and within today's cap, and the signer checks them like new ones.
+        if policy == nil, type == "agent_freeze" || type == "agent_unfreeze" {
+            guard let shown = g.previewPolicy, let hash = g.previewHash, AgentAPI.policyHash(shown) == hash,
+                  let p = (try? JSONSerialization.jsonObject(with: shown)) as? [String: Any], p["frozen"] as? Bool == (type == "agent_freeze"),
+                  let cap = ((p["budget"] as? [String: Any])?["daily_usd"] as? String).flatMap({ Decimal(string: $0) }),
+                  let today = agentWallet?.dailyUSD, cap <= today else {
+                throw ExecutionError("The Agent API would install other rules with this \(type == "agent_freeze" ? "freeze" : "unfreeze"). Nothing was signed.")
+            }
+            policy = shown
+        }
         try await AgentAPI.submit(g, signedData: try await agentOwnerSigned(g, owner: owner, policy: policy))
         let s = try await AgentAPI.final(g.correlationID)
         guard s.ok else { throw ExecutionError("NEAR Intents' Agent API: \(g.type.replacingOccurrences(of: "_", with: " ")) ended \(s.status).") }
@@ -255,7 +266,9 @@ extension Workspace {
             throw ExecutionError("The agent wallet takes at least \(Fmt.num(Decimal(min) / 1_000_000)) USDC. Nothing was sent.")
         }
         _ = try await executor(wallet).fundAgent(units: units, depositAddress: deposit, agentAccount: account)
-        let s = try await AgentAPI.final(op, within: 900)
+        // The USDC has left Solana: from here on nothing reads as «failed», which would invite a second deposit.
+        let s = try? await AgentAPI.final(op, within: 900)
+        guard let s, s.final else { throw ExecutionError(Self.mayHaveGone("The \(Fmt.num(usdc)) USDC left Solana for the agent wallet", op)) }
         guard s.ok else { throw ExecutionError("The deposit into the agent wallet ended \(s.status).") }
         return "\(Fmt.num(usdc)) USDC are in the agent wallet. It spends them only within the rules you signed."
     }
@@ -265,7 +278,7 @@ extension Workspace {
         try NodeStore.agentAPIReady()
         let (a, _) = try await ownAgent()
         guard let grant = NodeStore.agentGrant else { throw ExecutionError("This Mac has no grant for the agent wallet.") }
-        let (entry, chain, address) = try agentPayee(name)
+        let (payee, _, chain, address) = try agentPayee(name)
         let body = AgentAPI.json(["asset": Self.agentUSDC.solana, "amount": "\(Self.agentUnits(usdc))", "chain": chain, "recipient": address])
         let data: Data
         do {
@@ -273,19 +286,34 @@ extension Workspace {
         } catch let e as AgentAPI.Failure {
             // The policy at work: say what NEAR Intents refused and why.
             throw ExecutionError("NEAR Intents refused the agent wallet's send: \(e.text) (\(e.code)). Your rules: at most $\(Fmt.num(a.dailyUSD)) a day, only to your own and saved addresses.")
+        } catch is URLError {
+            // Asked, and no answer: NEAR Intents may have taken it (a 0.3 USDC send that went read «timed out», 2026-11-05).
+            throw ExecutionError(Self.mayHaveGone("The agent wallet's send of \(Fmt.num(usdc)) USDC was asked of NEAR Intents", nil))
         }
         guard let op = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["correlation_id"] as? String else { throw ExecutionError("The Agent API gave no operation id.") }
-        let s = try await AgentAPI.final(op, within: 900)
+        let s = try? await AgentAPI.final(op, within: 900)
+        guard let s, s.final else { throw ExecutionError(Self.mayHaveGone("The agent wallet's send of \(Fmt.num(usdc)) USDC is with NEAR Intents", op)) }
         guard s.ok else { throw ExecutionError("The agent wallet's send ended \(s.status).") }
-        return "The agent wallet sent \(Fmt.num(usdc)) USDC to «\(entry.name)» on \(chain == "sol" ? "Solana" : "Base") — within your rules, without your key."
+        return "The agent wallet sent \(Fmt.num(usdc)) USDC to «\(payee)» on \(chain == "sol" ? "Solana" : "Base") — within your rules, without your key."
+    }
+
+    /// A move NEAR Intents may have made with no word back: it says so and that it mustn't be asked again yet.
+    static func mayHaveGone(_ what: String, _ op: String?) -> String {
+        "\(what), but no final answer came back, so it may have gone. Status unknown: don't send it again until the balance shows it\(op.map { " (NEAR Intents operation \($0))" } ?? "")."
     }
 
     /// The saved address an agent's send pays, and where: a Solana one on Solana, a Base one on Base — the same the
     /// card names; anything else (a multisig, another network) is refused.
-    func agentPayee(_ name: String) throws -> (entry: SavedAddress, chain: String, address: String) {
-        guard let entry = savedEntry(name, network: nil) else { throw ExecutionError("There's no “\(name)” in Addresses.") }
-        if entry.network == .solana { return (entry, "sol", entry.address) }
-        if entry.network.rawValue == "base", isEVMAddress(entry.address) { return (entry, "base", entry.address.lowercased()) }
+    func agentPayee(_ name: String) throws -> (name: String, label: String?, chain: String, address: String) {
+        guard let entry = savedEntry(name, network: nil) else {
+            // The wallet itself («Main», «me»): its own Solana address, on the rules since the agent wallet was made.
+            if WalletCommand.isOwnWallet(name, label: activeWallet?.label), !solanaAddress.isEmpty {
+                return (activeWallet?.label ?? "This wallet", "Your wallet", "sol", solanaAddress)
+            }
+            throw ExecutionError("There's no “\(name)” in Addresses.")
+        }
+        if entry.network == .solana { return (entry.name, entry.label, "sol", entry.address) }
+        if entry.network.rawValue == "base", isEVMAddress(entry.address) { return (entry.name, entry.label, "base", entry.address.lowercased()) }
         throw ExecutionError("The agent wallet pays a saved Solana or Base address; “\(entry.name)” is on \(entry.network.title).")
     }
 

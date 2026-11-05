@@ -491,7 +491,7 @@ extension Workspace {
             notify(.moves, confirmedRoute?.title ?? readable(Self.canvasTitle(command)),
                    ok ? say("Done — checked, signed and confirmed.", "Готово — проверено, подписано и подтверждено сетью.")
                       : unknown ? say("Sent, status unknown — check the links in the chat before doing it again.", "Отправлено, статус неизвестен — проверь ссылки в чате, прежде чем повторять.")
-                      : say("It didn’t go through; the chat says why.", "Не прошло — причина в чате."), record: false, failed: !ok)
+                      : say("It didn’t go through. The chat says why.", "Не прошло. Причина в чате."), record: false, failed: !ok)
         }
         if ownsBoard {
             withAnimation(StudioView.spring) {

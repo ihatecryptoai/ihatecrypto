@@ -279,6 +279,14 @@ public enum WalletCommand: Equatable, Sendable {
     /// «create an agent wallet with $20 a day», «fund the agent wallet with 5 USDC», «send 1 USDC from the agent wallet
     /// to Mom», «freeze the agent wallet»; «создай кошелёк агента с лимитом 20$ в день», «пополни кошелёк агента на 5
     /// USDC», «переведи 1 USDC с кошелька агента на Маму», «заморозь кошелёк агента».
+    /// A payee that is the wallet itself — «me», «my wallet», «Main», «себе», «мой кошелёк» — or the active wallet's
+    /// own name: the agent wallet's rules allow its own addresses from the start, no saved entry needed.
+    public static func isOwnWallet(_ name: String, label: String?) -> Bool {
+        let n = name.lowercased().replacingOccurrences(of: "ё", with: "е").trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if let label, !label.isEmpty, n == label.lowercased() { return true }
+        return n.wholeMatch(of: /me|myself|main|my(?:\s+own)?(?:\s+main)?\s+(?:wallet|account|address)|себе|мне|основно\w*(?:\s+кошел\w*)?|(?:мой|мо\w+)\s+(?:основно\w*\s+)?(?:кошел\w*|счет\w*|адрес\w*)/) != nil
+    }
+
     static func agent(_ text: String) -> WalletCommand? {
         let q = IntentParser.plainNumbers(text).lowercased()
         guard q.contains(agentWallet) else { return nil }

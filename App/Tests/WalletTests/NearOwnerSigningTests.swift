@@ -129,3 +129,13 @@ import EVMChain
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.message(grant(days: 60)) }
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.message(grant(days: 30, inner: "evil.example")) }
 }
+
+/// agent_freeze as the API asked it live (2026-11-05): the rules stored again, then freeze_wallet, no NEAR attached.
+@Test func agentFreezeIsSignedAndSaidButCostsNoNEAR() throws {
+    func freeze(_ deposit: String) -> Data {
+        Data(#"{"actions":[{"type":"FunctionCall","params":{"gas":"50000000000000","args":{"wallet_pubkey":"ed25519:00","encrypted_data":"AQ==","wallet_signature":"00","agent_policy_hash":"00"},"deposit":"0","methodName":"store_wallet_policy"}},{"type":"FunctionCall","params":{"gas":"50000000000000","args":{"wallet_pubkey":"ed25519:00"},"deposit":"\#(deposit)","methodName":"freeze_wallet"}}],"receiverId":"outlayer.near"}"#.utf8)
+    }
+    let d = try AgentOwner.delegate(freeze("0"))
+    #expect(d.actions.count == 2 && d.doing.contains("freeze the agent wallet") && !d.doing.contains(";"))
+    #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.delegate(freeze("1000000000000000000000000")) }
+}

@@ -427,6 +427,9 @@ final class Workspace {
     }
     /// When the swap waiting for Confirm was quoted: its Confirm holds `quoteLife` after that, then Refresh asks again.
     var swapQuotedAt: Date?
+    /// A send through NEAR Intents waiting for Confirm, as its quote reads: the receipt over Cancel and Confirm
+    /// (Studio's receiptRow) — what it pays and from where, what 1Click and the network keep, how long it takes.
+    var acrossReceipt: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?)?
     /// The swap whose card shows a price (Workspace.quoteSwap): the one Confirm waits on a fresh quote for.
     var pricedCommand: WalletCommand?
     /// A Solana swap's output as its card showed it, in the token's units: the swap won't go for 1% less (Executor.convert).

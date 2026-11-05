@@ -2338,7 +2338,7 @@ extension Workspace {
                              steps: [step("near", "FROM · AGENT WALLET", "\(Fmt.num(usdc)) USDC", rules, .near),
                                      step("near", "RULES CHECKED BY", "NEAR Intents", "not by this app", .check),
                                      (try? agentPayee(name)).map { p in
-                                         step(p.chain == "sol" ? "sol" : "base", "TO · \(p.entry.label?.uppercased() ?? "SAVED ADDRESS")", p.entry.name,
+                                         step(p.chain == "sol" ? "sol" : "base", "TO · \(p.label?.uppercased() ?? "SAVED ADDRESS")", p.name,
                                               "\(AddressCheck.ends(p.address).start) … \(AddressCheck.ends(p.address).end) · \(p.chain == "sol" ? "Solana" : "Base")", .check)
                                      } ?? step("usdc", "TO", name, "not a saved Solana or Base address", .check)])
         default:
@@ -2703,6 +2703,7 @@ extension Workspace {
                 let cost = Decimal(string: q.quote.amountInFormatted) ?? 0, worth = q.quote.amountOutUSD
                 let fees = worth.map { cost - $0 }.map { $0 > 0 ? " · fees ≈ \(Fmt.usd($0)) (\(Fmt.num($0 / cost * 100, maxFraction: 0))%)" : "" } ?? ""
                 let time = q.quote.timeEstimate.map { $0 >= 120 ? " · ≈ \($0 / 60) min" : " · ≈ \($0) s" } ?? ""
+                acrossReceipt = (command, symbol.uppercased(), network, cost, q.source?.name ?? "Solana", worth, q.quote.timeEstimate)
                 swapQuote = (command, [(q.source?.name ?? "Solana", "≈ \(Fmt.num(cost)) USDC for \(worth.map(Fmt.usd) ?? "?") of it\(fees)\(time)", 0)])
                 return
             }

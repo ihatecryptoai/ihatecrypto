@@ -13,8 +13,9 @@ public enum AgentOwner {
     /// The custody contract's methods an owner's delegate action may call, pinned from what the API was seen to ask
     /// (a live generate-intent, 2026-11-04): agent_create stores the wallet's first policy with `store_wallet_policy`
     /// (args: wallet_pubkey, encrypted_data, wallet_signature, agent_policy_hash, storage_refund_to).
-    // ponytail: freeze/unfreeze/policy_update methods get pinned the same way when a live run first asks for them.
-    public static let methods: Set<String> = ["store_wallet_policy"]
+    // and agent_freeze stores it again frozen, then calls `freeze_wallet` (2026-11-05), no NEAR attached.
+    // ponytail: unfreeze/policy_update methods get pinned the same way when a live run first asks for them.
+    public static let methods: Set<String> = ["store_wallet_policy", "freeze_wallet"]
     /// The NEAR a policy's storage may take from the owner's account (store_wallet_policy asked 0.01882 NEAR).
     static let maxStorage: UInt128 = 50_000_000_000_000_000_000_000   // 0.05 NEAR
     /// A grant lasts at most this long: a bearer token on the Mac shouldn't outlive a month.
@@ -99,7 +100,7 @@ public enum AgentOwner {
             }
             words.append(said)
         }
-        return Delegate(receiver: receiver, actions: actions, doing: words.joined(separator: "; "))
+        return Delegate(receiver: receiver, actions: actions, doing: words.joined(separator: ", then "))
     }
 
     /// yoctoNEAR as NEAR, to 5 decimals.
@@ -162,6 +163,7 @@ public enum AgentOwner {
     static func sayCall(_ method: String, _ args: [String: Any]) -> String {
         // The policy a call carries, when it carries one: the daily budget and where money may go.
         let policy = (args["policy"] as? [String: Any]) ?? args
+        if method == "freeze_wallet" { return "freeze the agent wallet: nothing leaves it until you unfreeze it" }
         var parts = [method.replacingOccurrences(of: "_", with: " ")]
         if let budget = (policy["budget"] as? [String: Any])?["daily_usd"] as? String { parts.append("at most $\(budget) a day") }
         if let d = policy["destinations"] as? [String: Any], let mode = d["mode"] as? String {

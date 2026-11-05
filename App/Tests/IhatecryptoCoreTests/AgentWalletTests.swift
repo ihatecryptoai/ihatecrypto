@@ -13,6 +13,17 @@ import Testing
     #expect(WalletCommand.parse("разморозь кошелёк агента") == .agentFreeze(false))
 }
 
+/// «send … from the agent wallet to Main» pays the wallet's own address, which its rules allow from the start; a saved
+/// name or anyone else is not the wallet.
+@Test func theAgentWalletPaysTheWalletItselfByItsOwnWords() {
+    for own in ["me", "Main", "my wallet", "my main wallet", "myself", "себе", "мой кошелёк", "основной кошелек", "Trading"] {
+        #expect(WalletCommand.isOwnWallet(own, label: "Trading"), "\(own)")
+    }
+    for other in ["Mom", "Automation", "Маме", "my mom", "Binance deposit", "maine"] {
+        #expect(!WalletCommand.isOwnWallet(other, label: "Trading"), "\(other)")
+    }
+}
+
 @Test func agentWalletCommandsWriteBackToThemselves() {
     for c: WalletCommand in [.agentCreate(dailyUSD: 20), .agentFund(usdc: Decimal(string: "2.5")!), .agentSend(usdc: 1, name: "Mom"), .agentFreeze(true), .agentFreeze(false)] {
         #expect(WalletCommand.parse(c.summary) == c)

@@ -3052,9 +3052,63 @@ private struct ChatComposer: View {
             }
         }
         .disabled(ws.busy || ws.executing)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
-            VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+        return Group {
+            if !ws.executing, case .wallet(let c)? = ws.pendingAction, let r = ws.acrossReceipt, r.command == c, let sent = Self.across(c) {
+                receiptRow(r, to: sent.name, amount: sent.amount, privately: sent.privately, state: state, buttons: buttons)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
+                    VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+                }
+            }
+        }
+    }
+
+    /// A send through NEAR Intents: who gets how much, and whether privately.
+    private static func across(_ c: WalletCommand) -> (name: String, amount: Decimal, privately: Bool)? {
+        switch c {
+        case .sendPrivately(let name, _, let x, _): (name, x, true)
+        case .sendToken(let name, _, let x?, _): (name, x, false)
+        default: nil
+        }
+    }
+
+    /// Variant A «Receipt» (owner, 2026-11-05): a send through NEAR Intents as a receipt — what arrives where, then what
+    /// it costs from where, the blockchain's fees (1Click's and the network's, none of them ours) and how long it takes.
+    private func receiptRow(_ r: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?),
+                            to name: String, amount: Decimal, privately: Bool, state: Workspace.QuoteState, buttons: some View) -> some View {
+        let fee = r.worth.map { r.pays - $0 }.flatMap { $0 > 0 ? $0 : nil }
+        let time = r.seconds.map { $0 >= 120 ? "in ≈ \($0 / 60) min" : "in ≈ \($0) s" } ?? "in a few minutes"
+        func cell(_ label: String, _ value: String, _ note: String) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.ui(9.5, .semibold)).kerning(0.6).foregroundStyle(.secondary)
+                Text(value).font(.ui(13, .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                Text(note).font(.ui(10.5)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
+        }
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 8) {
+                Label(privately ? "PRIVATE SEND · NEAR INTENTS" : "SEND · NEAR INTENTS", systemImage: privately ? "lock.fill" : "arrow.left.arrow.right")
+                    .font(.ui(10.5, .semibold)).kerning(0.6).foregroundStyle(Brand.accentInk)
+                Spacer(minLength: 6)
+                QuoteClock(state: state)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(Fmt.num(amount)) \(r.symbol)").font(.ui(21, .bold)).monospacedDigit()
+                Text("→").font(.ui(16)).foregroundStyle(.secondary)
+                Text(name).font(.ui(16, .semibold)).lineLimit(1)
+                Text("on \(WalletCommand.placeName(r.network))").font(.ui(11)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 2).overlay(Capsule().strokeBorder(Brand.cardBorder))
+            }
+            HStack(alignment: .top, spacing: 6) {
+                cell("YOU PAY", "≈ \(Fmt.num(r.pays)) USDC", "from \(r.from)")
+                cell("BLOCKCHAIN FEES", fee.map { "≈ \(Fmt.usd($0)) · \(Fmt.num($0 / r.pays * 100, maxFraction: 0))%" } ?? "—", "NEAR Intents + gas, none to us")
+                cell("ARRIVES", time, r.worth.map { "worth \(Fmt.usd($0))" } ?? "")
+            }
+            HStack { Spacer(); buttons }
         }
     }
 
@@ -4222,3 +4276,23 @@ struct RailRound: ButtonStyle {
     }
 }
 
+/// How long the price on a card still holds: a ring that empties over `Workspace.quoteLife`, then «price over 15 s old».
+private struct QuoteClock: View {
+    let state: Workspace.QuoteState
+
+    var body: some View {
+        switch state {
+        case .fresh(let left):
+            HStack(spacing: 5) {
+                Circle().stroke(Color.primary.opacity(0.14), lineWidth: 2.2)
+                    .overlay(Circle().trim(from: 0, to: min(1, Double(left) / Workspace.quoteLife)).stroke(Brand.accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round)).rotationEffect(.degrees(-90)))
+                    .frame(width: 13, height: 13)
+                Text("price held \(left) s").monospacedDigit()
+            }
+            .font(.ui(10.5)).foregroundStyle(.secondary)
+        case .stale: Text("price over 15 s old").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .quoting: Text("getting the price…").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .none: EmptyView()
+        }
+    }
+}
