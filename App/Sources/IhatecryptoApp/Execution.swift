@@ -1353,12 +1353,17 @@ extension Workspace {
 struct ConfirmSheet: View {
     @Environment(Workspace.self) private var ws
     @State private var acknowledged = false
+    /// The steps, the balances and the checks under «How ›».
+    @State private var details = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.ui(22, .heavy))
+                    if ws.prepared != nil, ws.signerWallet != nil {
+                        Text("Look it over, then sign with \(Presence.name).").font(.ui(13)).foregroundStyle(.secondary)
+                    }
                     if let p = ws.prepared {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             Text("numbers refreshed \(Int(context.date.timeIntervalSince(p.preparedAt))) s ago · after 45 s they are recalculated")
@@ -1375,29 +1380,52 @@ struct ConfirmSheet: View {
                 }
             }
             if let p = ws.prepared {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("WHAT WILL BE SIGNED · \(p.steps.count) \(p.steps.count == 1 ? "ACTION" : "ACTIONS")")
-                        .font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                    ForEach(Array(p.steps.enumerated()), id: \.offset) { n, step in
-                        HStack(spacing: 12) {
-                            icon(for: step, asset: p.market.name)
-                            Text(step).fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            Text("\(n + 1)").font(.ui(10, .bold)).foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.fill.quaternary))
-                    }
+                // Variant W2 «You give, they get» (owner, 2026-11-05): the margin that goes in and the position it buys,
+                // as coins; the risk in plain lines; the checks in one line, their details a click away.
+                giveGet(p)
+                VStack(alignment: .leading, spacing: 9) {
+                    line("shield.lefthalf.filled", "If the stop hits", "−\(Fmt.usd(p.sizing.lossAtStopUSD))", Brand.loss)
+                    if let take = p.sizing.profitAtTakeUSD { line("arrow.up.forward", "If the take hits", "+\(Fmt.usd(take))", Brand.profit) }
+                    line("dollarsign", "Fees, in and out at the stop", "\(Fmt.usd(p.sizing.feesUSD)) · ours \(Fmt.usd(p.sizing.builderFeesUSD))", nil)
+                    if let b = p.bridge { line("arrow.left.arrow.right", "First from Solana", "\(Fmt.num(b.spend)) USDC · fees \(b.feesUSD)", nil) }
                 }
-                HStack(alignment: .top, spacing: 12) {
-                    box("WHAT CHANGES") { ForEach(p.changes, id: \.self) { Text($0).fixedSize(horizontal: false, vertical: true) } }
-                    box("CHECKS") {
-                        Label("Recipients are yours only, programs are on the list, the simulation matches the plan.", systemImage: "checkmark.shield")
-                        ForEach([ws.planReview, ws.txReview].compactMap { $0 }, id: \.text) { r in
-                            Label(r.text, systemImage: r.concern ? "exclamationmark.triangle.fill" : "checkmark.seal")
-                                .foregroundStyle(r.concern ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                Button { withAnimation(.snappy) { details.toggle() } } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: concern ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.system(size: 17)).foregroundStyle(concern ? Color.orange : Brand.profit)
+                        Text(concern ? "The second check has a doubt: read it before you sign" : "We checked it matches what you asked")
+                        Spacer(minLength: 6)
+                        Text(details ? "Hide" : "How ›").foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
+                    .background(RoundedRectangle(cornerRadius: 14).fill((concern ? Color.orange : Brand.profit).opacity(0.08)))
+                }
+                .buttonStyle(.plain).pointerStyle(.link)
+                if details || concern {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("WHAT WILL BE SIGNED · \(p.steps.count) \(p.steps.count == 1 ? "ACTION" : "ACTIONS")")
+                            .font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                        ForEach(Array(p.steps.enumerated()), id: \.offset) { n, step in
+                            HStack(spacing: 12) {
+                                icon(for: step, asset: p.market.name)
+                                Text(step).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                                Text("\(n + 1)").font(.ui(10, .bold)).foregroundStyle(.secondary).monospacedDigit()
+                            }
+                            .padding(10)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(.fill.quaternary))
                         }
-                        if let note = ws.jevNote { Label(note, systemImage: "info.circle").foregroundStyle(.secondary) }
+                    }
+                    HStack(alignment: .top, spacing: 12) {
+                        box("WHAT CHANGES") { ForEach(p.changes, id: \.self) { Text($0).fixedSize(horizontal: false, vertical: true) } }
+                        box("CHECKS") {
+                            Label("Recipients are yours only, programs are on the list, the simulation matches the plan.", systemImage: "checkmark.shield")
+                            ForEach([ws.planReview, ws.txReview].compactMap { $0 }, id: \.text) { r in
+                                Label(r.text, systemImage: r.concern ? "exclamationmark.triangle.fill" : "checkmark.seal")
+                                    .foregroundStyle(r.concern ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                            }
+                            if let note = ws.jevNote { Label(note, systemImage: "info.circle").foregroundStyle(.secondary) }
+                        }
                     }
                 }
                 if concern {
@@ -1448,7 +1476,7 @@ struct ConfirmSheet: View {
         }
         .font(.ui(13))
         .padding(26)
-        .frame(width: 680)
+        .frame(width: 600)
         // A failed preparation is a short note, not a tall empty sheet.
         .frame(minHeight: ws.prepared == nil ? 0 : 460)
     }
@@ -1470,6 +1498,54 @@ struct ConfirmSheet: View {
         else if step.hasPrefix("Stop") { Image(systemName: "shield.lefthalf.filled").font(.system(size: 16)).frame(width: 28, height: 28).foregroundStyle(Brand.profit) }
         else if step.hasPrefix("Trailing") { Image(systemName: "arrow.up.forward").frame(width: 28, height: 28).foregroundStyle(Brand.jevCursor) }
         else { Image(systemName: "checkmark.circle").frame(width: 28, height: 28).foregroundStyle(.secondary) }
+    }
+
+    /// You give the margin, from where it is; you get the position. Coins with their network, the mascot between.
+    private func giveGet(_ p: Executor.Prepared) -> some View {
+        let from: (logo: String, name: String) = p.bridge != nil || p.openVia1Click != nil ? ("sol", "Solana")
+            : p.fundFrom.map { ($0.net.key, $0.net.name) } ?? ("hype", "Hyperliquid")
+        let long = p.intent.side == .long
+        func coin(_ face: some View, badge: some View) -> some View {
+            face.frame(width: 58, height: 58).overlay(alignment: .bottomTrailing) { badge.offset(x: 5, y: 5) }
+        }
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(spacing: 7) {
+                Text("YOU GIVE").font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                coin(TokenLogo(name: "usdc", size: 58), badge: TokenLogo(name: from.logo, size: 24, round: true))
+                Text(Fmt.usd(p.sizing.margin)).font(.ui(26, .bold)).monospacedDigit()
+                Text("USDC margin from \(from.name)").font(.ui(12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 16).padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 20).fill(.fill.quaternary))
+            VStack(spacing: 6) {
+                BrandLogo(size: 46, mood: .waiting)
+                Image(systemName: "arrow.right").font(.system(size: 16, weight: .semibold)).foregroundStyle(Brand.accentInk)
+                Text("×\(p.leverage)").font(.ui(11, .semibold)).foregroundStyle(Brand.accentInk)
+            }
+            .frame(width: 58)
+            VStack(spacing: 7) {
+                Text("YOU GET").font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(Brand.accentInk)
+                coin(AssetBadge(coin: p.market.name, size: 58, dark: true),
+                     badge: Text(long ? "LONG" : "SHORT").font(.ui(9, .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 2).background(Capsule().fill(long ? Brand.profit : Brand.loss)))
+                Text(Fmt.usd(p.sizing.notional)).font(.ui(26, .bold)).monospacedDigit()
+                Text("\(long ? "a long" : "a short") on \(IntentParser.pretty(p.market.name).components(separatedBy: " (").first ?? p.market.name) · \(Fmt.num(p.sizing.size, maxFraction: 6))")
+                    .font(.ui(12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 16).padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 20).fill(Brand.accent.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Brand.accent.opacity(0.35)))
+        }
+    }
+
+    /// One plain line: an icon, what it is, and its number.
+    private func line(_ icon: String, _ what: String, _ value: String, _ tint: Color?) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).frame(width: 22).foregroundStyle(tint ?? .secondary)
+            Text(what)
+            Spacer(minLength: 6)
+            Text(value).font(.ui(13, .semibold)).monospacedDigit().foregroundStyle(tint ?? .primary)
+        }
     }
 
     private func box(_ title: String, @ViewBuilder content: () -> some View) -> some View {

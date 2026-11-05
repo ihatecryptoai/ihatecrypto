@@ -156,6 +156,9 @@ final class DebugAPI {
             if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.deleteCanvas(id) } else { ws.newCanvas() }
             if let asked, asked != ws.providerID { providerBefore = ws.providerID; ws.providerID = asked }
+            // A trade's signing sheet left open (a failed preparation) would sit over every scenario after it.
+            ws.prepared = nil
+            ws.executionError = nil
             freshCanvas = true
             dropTestTasks(ws)
             return (200, "application/json", json(state(ws, since: ws.messages.count)))
