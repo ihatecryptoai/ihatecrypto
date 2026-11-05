@@ -392,7 +392,8 @@ public enum Plan {
                 : "Can't take in parts: half the position is below the $10 minimum order.")
         }
         if let trail = i.trailingPct {
-            lines.append("Trailing \(Fmt.pct(trail)) from the best price; moves while ihatecrypto is open.")
+            lines.append(i.entryPx == nil ? "Trailing \(Fmt.pct(trail)) from the best price, held by Hyperliquid itself."
+                                          : "Trailing \(Fmt.pct(trail)) from the best price, moved by ihatecrypto while it's open.")
         }
         lines.append("Triggers on mark price; a market exit may fill worse.")
         return Block(id: "protection", label: label, title: "Stop & take-profit", lines: lines, status: e.problem == nil ? .ready : .blocked)

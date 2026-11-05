@@ -254,6 +254,8 @@ public actor Executor {
         public var pending = false
         /// First partial take (half at 1R), when the plan asked for one.
         public var partialTake: Decimal?
+        /// The plan's trailing stop went on the exchange, which moves it from now on; false leaves it to the app.
+        public var trailingOnExchange = false
     }
 
     /// What a try at the half at 1R came to: on the book, not yet (the limit is only partly filled), or skipped (under $10).
@@ -433,7 +435,11 @@ public actor Executor {
                 : "Stop \(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit \(Fmt.pct($0))" } ?? "") from the entry price (\(intent.side == .long ? "stop below, take above" : "stop above, take below")), on the exchange.")
         }
         if intent.partialTake == true, intent.entryPx == nil { steps.append("Partial take-profit: half the position at 1R, as a separate order on the exchange; then the stop moves to breakeven.") }
-        if let trail = intent.trailingPct { steps.append("Trailing \(Fmt.pct(trail)): ihatecrypto moves the stop while the app is open (each move is a signature).") }
+        if let trail = intent.trailingPct {
+            steps.append(intent.entryPx == nil
+                ? "Trailing stop \(Fmt.pct(trail)) on the exchange after the entry, reduce-only: Hyperliquid moves it behind the best price, with ihatecrypto closed too."
+                : "Trailing \(Fmt.pct(trail)): ihatecrypto moves the stop once the limit fills, while the app is open (each move is a signature).")
+        }
         changes.append("Hyperliquid, free: \(Fmt.usd(hl.withdrawable)) → ≈ \(Fmt.usd(hl.withdrawable + arriving - sizing.margin - sizing.feesUSD / 2)) (margin \(Fmt.usd(sizing.margin)) goes into the position).")
         changes.append(intent.isHedge
             ? "Position: short \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name), a hedge of the \(market.name) the wallet holds; net of them it costs ≈ \(Fmt.usd(sizing.feesUSD)) in fees."
@@ -525,7 +531,37 @@ public actor Executor {
         try await protect(market, long: long, size: size, stop: stop, take: take)
         var opened = Opened(asset: market.name, size: size, entry: avgPx, stop: stop, take: take)
         if p.intent.partialTake == true { opened.partialTake = await partialTakeAfterEntry(market, long: long, size: size, entry: avgPx, stop: stop) }
+        if let pct = p.intent.trailingPct {
+            // The position is open and has its stop: a trailing stop that didn't go on is left to the app, not a failed trade.
+            do {
+                report(try await placeTrailing(market, long: long, size: size, pct: pct))
+                opened.trailingOnExchange = true
+            } catch let refused as GuardStop { report("The trailing stop wasn't signed (\(refused.localizedDescription)): ihatecrypto moves the stop while it's open.") }
+            catch { report("The trailing stop didn't go on (\(error.localizedDescription)): ihatecrypto moves the stop while it's open.") }
+        }
         return opened
+    }
+
+    /// A trailing stop on the exchange for the whole position, reduce-only. Returns the line for the user.
+    private func placeTrailing(_ market: Market, long: Bool, size: Decimal, pct: Decimal) async throws -> String {
+        let reply = try await post(try HLAction.trailingStop(asset: market.index, isBuy: !long, size: size, pct: pct), label: "trailing stop \(Fmt.pct(pct))")
+        if case .error(let e) = reply { throw ExecutionError(e) }
+        return "On the exchange: a trailing stop \(Fmt.pct(pct)) behind the best price. Hyperliquid moves it, with ihatecrypto closed too."
+    }
+
+    /// «trail 2%»: a trailing stop on the exchange for the open position, then any earlier one on it cancelled. The fixed
+    /// stop stays: whichever is nearer fires first.
+    private func trail(asset: String, pct: Decimal) async throws -> String {
+        guard pct > 0, pct < 100 else { throw ExecutionError("A trailing stop needs a distance between 0 and 100%.") }
+        let market = try await market(asset)
+        guard let position = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }) else {
+            return "No open \(asset) position."
+        }
+        let old = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset && ($0.orderType ?? "").contains("Trailing") }
+        let line = try await placeTrailing(market, long: position.size > 0, size: abs(position.size), pct: pct)
+        if !old.isEmpty { _ = try? await post(HLAction.cancel(old.map { (market.index, $0.oid) }), label: "cancel old trailing stop") }
+        report(line)
+        return line
     }
 
     /// Stop and take on an open position as one positionTpsl group, checked among open orders. When they don't go on,
@@ -810,7 +846,7 @@ public actor Executor {
         case .stopToBreakeven: return try await moveStop(asset: asset, to: nil, policy: policy, equity: equity)
         case .stopTo(let price): return try await moveStop(asset: asset, to: price, policy: policy, equity: equity)
         case .takeTo(let price): return try await moveTake(asset: asset, to: price)
-        case .trail: throw ExecutionError("A trailing stop is kept by the ihatecrypto app, not placed on the exchange.")
+        case .trail(let pct): return try await trail(asset: asset, pct: pct)
         }
     }
 
@@ -886,7 +922,10 @@ public actor Executor {
         guard long ? stop < market.markPx : stop > market.markPx else {
             throw ExecutionError("Stop \(Fmt.price(stop)) is \(long ? "above" : "below") the current price \(Fmt.price(market.markPx)): it would trigger at once. To exit, type «close».")
         }
-        let old = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset && $0.isTrigger && ($0.orderType ?? "").contains("Stop") }
+        // A trailing stop on the exchange («Trailing Stop Market») isn't this stop: it stays and moves by itself.
+        let old = try await HyperliquidAccount.openOrders(wallet.evm).filter {
+            $0.coin == asset && $0.isTrigger && ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing")
+        }
         let current = long ? old.compactMap(\.triggerPx).max() : old.compactMap(\.triggerPx).min()
         if let loss = Self.stopBreaksRule(long: long, entry: position.entry, size: abs(position.size), stop: stop, current: current, equity: equity, policy: policy),
            let equity {
@@ -1226,7 +1265,10 @@ public enum HLReply: Equatable, Sendable, CustomStringConvertible {
             return .error(String(decoding: data.prefix(200), as: UTF8.self))
         }
         guard j["status"] as? String == "ok" else { return .error("\(j["response"] ?? j)") }
-        let statuses = ((j["response"] as? [String: Any])?["data"] as? [String: Any])?["statuses"] as? [Any] ?? []
+        let data = (j["response"] as? [String: Any])?["data"] as? [String: Any]
+        // One status, not a list: a TWAP's or a trailing stop's.
+        if let e = (data?["status"] as? [String: Any])?["error"] as? String { return .error(e) }
+        let statuses = data?["statuses"] as? [Any] ?? []
         // Several statuses (stop and take): any error wins, otherwise the first one describes the action.
         for case let s as [String: Any] in statuses {
             if let e = s["error"] as? String { return .error(e) }

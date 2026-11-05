@@ -582,6 +582,17 @@ public enum HLGuard {
             v.checks.append("Trading action inside your account; ihatecrypto's fee \(HLBuilder.rate).")
         case "cancel":
             v.checks.append("Trading action inside your account.")
+        case "trailingStop":
+            // The trading key signs it without a prompt: only one that can close, never open or add to, a position. The
+            // exchange holds a reduce-only order to the position's own coin and size.
+            guard pairs.first(where: { $0.0 == "reduceOnly" })?.1 == .bool(true) else {
+                v.problems.append("A trailing stop that could open or add to a position is not allowed.")
+                return v
+            }
+            let side = pairs.first(where: { $0.0 == "isBuy" })?.1 == .bool(true) ? "buy" : "sell"
+            let market = if case .uint(let a)? = pairs.first(where: { $0.0 == "asset" })?.1 { "market #\(a)" } else { "a market" }
+            let pct = if case .map(let r)? = pairs.first(where: { $0.0 == "retracement" })?.1, case .string(let p)? = r.first?.1 { p } else { "?" }
+            v.checks.append("Trailing stop: \(side) \(text("sz") ?? "?") on \(market) once the price falls back \(pct) from its best, only reducing a position → your account")
         case "setReferrer":
             if text("code") == HLBuilder.referralCode { v.checks.append("Referral code \(HLBuilder.referralCode): 4% off your Hyperliquid fees.") }
             else { v.problems.append("Referral code \(text("code") ?? "?") is not ihatecrypto's.") }

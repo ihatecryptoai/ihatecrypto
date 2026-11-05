@@ -122,11 +122,24 @@ public enum HLAction {
     /// The action's "type" field.
     public static func type(_ action: MsgPack) -> String? { text(action, "type") }
 
+    /// A trailing stop on the exchange: a reduce-only market order that fires once the mark falls back `pct` % from its
+    /// best since placing (the low for a short). Hyperliquid moves it, the Mac may sleep. The keys in this order and
+    /// activationPx as nil are what the exchange hashes (checked 2026-11-05 by the address a signature recovers to);
+    /// it takes no builder field (422), so ihatecrypto's fee isn't on it.
+    public static func trailingStop(asset: Int, isBuy: Bool, size: Decimal, pct: Decimal) throws -> MsgPack {
+        .map([
+            ("type", .string("trailingStop")), ("asset", .uint(UInt64(asset))), ("isBuy", .bool(isBuy)),
+            ("sz", .string(try number(size))), ("reduceOnly", .bool(true)),
+            ("retracement", .map([("pct", .string(try number(pct) + "%"))])), ("activationPx", .null),
+        ])
+    }
+
     /// A cancel, or orders that are all reduce-only (a stop, a take, a close): nothing that opens or adds to a position.
     public static func onlyReduces(_ action: MsgPack) -> Bool {
         guard case .map(let pairs) = action else { return false }
         switch type(action) {
         case "cancel", "cancelByCloid": return true
+        case "trailingStop": return pairs.first(where: { $0.0 == "reduceOnly" })?.1 == .bool(true)
         case "order":
             guard case .array(let orders)? = pairs.first(where: { $0.0 == "orders" })?.1, !orders.isEmpty else { return false }
             return orders.allSatisfy { o in
@@ -200,9 +213,9 @@ public enum HLAction {
 
 public enum HLSigner {
     /// Orders, cancels, leverage and the referral code: what a trading (agent) key may sign. Nothing here moves money out
-    /// of the account (the guard holds an order's fee and the code to ihatecrypto's own).
+    /// of the account (the guard holds an order's fee and the code to ihatecrypto's own, a trailing stop to reduce-only).
     public static func isTrading(_ action: MsgPack) -> Bool {
-        HLAction.type(action).map(["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer"].contains) ?? false
+        HLAction.type(action).map(["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer", "trailingStop"].contains) ?? false
     }
 
     /// keccak256(msgpack(action) ‖ nonce ‖ vault flag [‖ vault] [‖ 0x00 ‖ expiresAfter]).

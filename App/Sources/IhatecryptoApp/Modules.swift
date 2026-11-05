@@ -166,7 +166,8 @@ struct ChartBoard: View {
         for (i, o) in ws.orders.filter({ $0.coin == state.coin && $0.isTrigger }).enumerated() {
             guard let px = o.triggerPx else { continue }
             let stop = (o.orderType ?? "").contains("Stop")
-            out.append(ChartLevel(id: "o\(i)", price: d(px), label: stop ? "Stop" : "Take", color: stop ? Brand.loss : Brand.profit, dashed: false))
+            let label = (o.orderType ?? "").contains("Trailing") ? "Trailing" : stop ? "Stop" : "Take"
+            out.append(ChartLevel(id: "o\(i)", price: d(px), label: label, color: stop ? Brand.loss : Brand.profit, dashed: false))
         }
         for a in ws.alerts where a.coin == state.coin {
             out.append(ChartLevel(id: a.id.uuidString, price: d(a.price), label: "Alert", color: .orange, dashed: true))

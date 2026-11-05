@@ -551,11 +551,14 @@ final class Workspace {
     /// «0,369 по 93,417 · стоп 96,033 · тейк 90,801 и 88,186»: size, entry and the exchange's trigger orders.
     func positionSummary(_ p: HyperliquidAccount.Position) -> String {
         let triggers = orders.filter { $0.coin == p.coin && $0.isTrigger }
-        let stop = triggers.first { ($0.orderType ?? "").contains("Stop") }?.triggerPx
+        // The exchange's trailing stop («Trailing Stop Market») apart from the fixed one: its trigger follows the price.
+        let trailing = triggers.first { ($0.orderType ?? "").contains("Trailing") }?.triggerPx
+        let stop = triggers.first { ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing") }?.triggerPx
         // Nearest take first: a partial one fills before the full one.
         let takes = triggers.filter { ($0.orderType ?? "").contains("Take") }.compactMap(\.triggerPx)
             .sorted { p.size > 0 ? $0 < $1 : $0 > $1 }
         return "\(Fmt.num(abs(p.size), maxFraction: 6)) at \(Fmt.price(p.entry)) · stop \(stop.map(Fmt.price) ?? "none")"
+            + (trailing.map { " · trailing \(Fmt.price($0))" } ?? "")
             + (takes.isEmpty ? "" : " · take " + takes.map(Fmt.price).joined(separator: " and "))
     }
     var orders: [HyperliquidAccount.Order] = []

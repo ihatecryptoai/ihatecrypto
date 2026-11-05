@@ -372,6 +372,17 @@
     }
   },
   {
+    "name": "a long with a trailing stop → the checklist says Hyperliquid holds the trailing stop itself",
+    "send": [
+      "long ETH risk $0.3 stop 2% trailing 1%"
+    ],
+    "expect": {
+      "plan": "ETH",
+      "reply_contains": "Trailing: 1% behind the best price, a trailing stop Hyperliquid holds itself",
+      "no_pending": true
+    }
+  },
+  {
     "name": "a price alert added to the plan on the canvas → the plan's first card, tied to it",
     "send": [
       "long SOL risk $0.3 stop 3% take 6% leverage 2x",

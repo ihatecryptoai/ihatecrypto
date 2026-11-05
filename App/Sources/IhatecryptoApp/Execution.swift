@@ -402,9 +402,11 @@ extension Workspace {
             done = true
             // Always replaced: rules left from an earlier position in the same coin must not steer this one.
             let partial = opened.partialTake != nil || (opened.pending && p.intent.partialTake == true)
-            if partial || p.intent.trailingPct != nil {
+            // A trailing stop the exchange holds needs nothing from the app; one that didn't go on (or a limit's) is moved here.
+            let trailing = opened.trailingOnExchange ? nil : p.intent.trailingPct
+            if partial || trailing != nil {
                 var rules = ExitRules(openedSize: opened.size, entry: opened.entry, long: p.intent.side == .long,
-                                      breakevenAfterPartial: partial, trailingPct: p.intent.trailingPct)
+                                      breakevenAfterPartial: partial, trailingPct: trailing)
                 rules.partialOrderPending = opened.pending && p.intent.partialTake == true
                 exitRules[opened.asset] = rules
                 partialTries[opened.asset] = nil
@@ -1023,14 +1025,9 @@ extension Workspace {
             reply("Managing a position works in the app once the key is in secure storage.")
             return false
         }
-        if case .trail(let pct) = command {
-            guard let p = positions.first(where: { $0.coin == coin }) else { reply("There is no open \(IntentParser.pretty(coin)) position to trail."); return false }
-            var rules = exitRules[coin] ?? ExitRules(openedSize: abs(p.size), entry: p.entry, long: p.size > 0, breakevenAfterPartial: false, trailingPct: nil)
-            rules.trailingPct = pct
-            exitRules[coin] = rules
-            reply("ihatecrypto now keeps the \(IntentParser.pretty(coin)) stop \(Fmt.pct(pct)) behind the best price and only ever tightens it — while ihatecrypto is open or in the menu bar.")
-            await guardPositions()
-            return true
+        if case .trail = command, !positions.contains(where: { $0.coin == coin }) {
+            reply("There is no open \(IntentParser.pretty(coin)) position to trail.")
+            return false
         }
         // As in move(): only what this call set is reset, so a stop moved during a running move leaves that move's board.
         let ownsExecuting = !executing
@@ -1050,6 +1047,8 @@ extension Workspace {
                 noteFailure(shown?.title ?? "\(command) on \(IntentParser.pretty(coin))", error)
             }
         }
+        // The exchange trails it now: the app's own trailing for this coin would only move the fixed stop after it.
+        if ok, case .trail = command, exitRules[coin]?.trailingPct != nil { exitRules[coin]?.trailingPct = nil }
         if let shown {
             runningAction = nil
             finishedAction = (shown.title, CanvasOutcome(at: Date(), ok: ok), shown.steps)

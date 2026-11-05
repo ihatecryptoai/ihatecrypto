@@ -78,6 +78,11 @@ final class FakeHL: URLProtocol {
     }
 
     static func exchange(_ action: [String: Any]) -> String? {
+        if action["type"] as? String == "trailingStop" {
+            let pct = (action["retracement"] as? [String: Any])?["pct"] as? String ?? "?"
+            state.sent.append("trailing \(action["isBuy"] as? Bool == true ? "buy" : "sell") \(action["sz"] as? String ?? "?") \(pct)")
+            return #"{"status":"ok","response":{"type":"trailingStop","data":{"oid":11}}}"#
+        }
         if action["type"] as? String == "updateLeverage" {
             state.sent.append("leverage")
             return #"{"status":"ok","response":{"type":"default"}}"#
