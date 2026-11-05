@@ -13,6 +13,7 @@ import WalletCore
     // GET /currencies/token/price/v2?address=0x0…0&chainId=8453 (2026-11-05), and the docs' sub-micro example.
     #expect(try Relay.price(in: Data(#"{"price":"2415.813385"}"#.utf8)) == Decimal(string: "2415.813385"))
     #expect(try Relay.price(in: Data(#"{"price":"0.000000000349076496006"}"#.utf8)) == Decimal(string: "0.000000000349076496006"))
+    #expect(try Relay.price(in: Data(#"{"price":2415.670903}"#.utf8)) == Decimal(string: "2415.670903"))  // v1's number
     #expect(try Relay.price(in: Data(#"{"error":"Could not get price"}"#.utf8)) == nil)
 }
 
