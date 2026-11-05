@@ -167,12 +167,15 @@ struct AlertsBoard: View {
             }
             return Block(id: "\(a.id)-\(k)", icon: "bolt.fill", label: "THEN", title: ScheduleCanvas.readable(step))
         }
-        return [Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
-                      line: now) { withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } } }]
-            + steps
+        // A plain alert only tells you: said on its own card, not as a second «A notification» card under it.
+        let when = Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
+                         line: steps.isEmpty ? (now.map { $0 + " · then a notification" } ?? "then a notification") : now) {
+            withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } }
+        }
+        guard !steps.isEmpty else { return [when] }
+        return [when] + steps
             + [Block(id: "\(a.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
-                     title: steps.isEmpty ? "A notification" : "A notification, then your Confirm",
-                     line: steps.isEmpty ? nil : "Prepared on its own canvas; nothing moves without \(Presence.name).")]
+                     title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
     }
 
     /// A guarded loan: its line, the repay it prepares, and the Confirm it waits for (LoanGuards.swift).
@@ -186,7 +189,7 @@ struct AlertsBoard: View {
                       title: "USDC back to health \(Fmt.num(g.target))",
                       line: "USDC it lacks comes through NEAR Intents"),
                 Block(id: "\(g.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
-                      title: "A notification, then your Confirm", line: "Prepared on its own canvas; nothing moves without \(Presence.name).")]
+                      title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
     }
 
     private func chain(_ blocks: [Block]) -> some View {
