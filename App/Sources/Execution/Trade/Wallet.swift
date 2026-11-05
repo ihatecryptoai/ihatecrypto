@@ -503,10 +503,12 @@ extension Executor {
 
     /// Guard and simulation here, the signer's own guard, then send and wait. `rules`: (account, label, token?, least change).
     /// Returns the simulated change per watched balance; `dryRun` stops before signing. `sponsor`: Jupiter's wallet pays the
-    /// fee and signs first, and the transaction goes back through Jupiter's /execute with its order id.
+    /// fee and signs first, and the transaction goes back through Jupiter's /execute with its order id. `atMost`: the most a
+    /// watched account (the wallet itself for its SOL) may grow by, for a move that brings money in.
     @discardableResult
     func signAndSend(_ unsigned: Data, lastValid: UInt64, owners: [String: String], rules: [(String, String, Bool, Int64)], note: String,
-                             lamportsAtLeast: Int64 = -5_000_000, dryRun: Bool = false, sponsor: (key: String, requestId: String)? = nil) async throws -> [String] {
+                             lamportsAtLeast: Int64 = -5_000_000, atMost: [String: Int64] = [:], dryRun: Bool = false,
+                             sponsor: (key: String, requestId: String)? = nil) async throws -> [String] {
         let message = try SolanaMessage.parse(transaction: unsigned)
         let accounts = try await rpc.resolveAccounts(message)
         var verdict = SolanaGuard.check(message, accounts: accounts, policy: SolanaPolicy(owner: wallet.solana, sponsor: sponsor?.key), tokenOwners: owners)
@@ -527,8 +529,10 @@ extension Executor {
         // A failed simulation says nothing about balances: stop here rather than quote made-up changes.
         if let error = simulation.error { throw ExecutionError("The simulation failed, so nothing was signed: \(error)") }
         verdict.merge(SolanaGuard.balances(rules.map { account, label, token, least in
-            .init(label: label, before: before[account] ?? 0, after: Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0), atLeast: least)
-        } + [.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: lamportsAtLeast)]))
+            .init(label: label, before: before[account] ?? 0, after: Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0), atLeast: least,
+                  atMost: atMost[account])
+        } + [.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: lamportsAtLeast,
+                   atMost: atMost[wallet.solana])]))
         guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         var changes = rules.map { account, label, token, _ in
             let after = Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0)
@@ -1016,8 +1020,14 @@ extension Executor {
         let positionUSD = stock
             ? loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD
             : try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }?.valueUSD
+        // The 1.5 line here reads Kamino's API, which lags a borrow by 10–30 s: right after one, its debt may read as none.
+        // A vault (Earn) withdrawal below carries no loan.
+        if !deposit, positionUSD != nil, kaminoBorrowedJustNow(on: market) {
+            throw ExecutionError("A Kamino loan was taken on this market less than a minute ago, and Kamino's numbers lag it: "
+                                 + "say the withdrawal again in a minute, when how much can come out is sure. Nothing was signed.")
+        }
         if !deposit, let loan, loan.debtUSD > 0, loan.collateral.contains(where: { $0.reserve == reserve.address }) {
-            // Kamino lets collateral out only while what's left still carries the debt at its borrow limit.
+            // Kamino lets collateral out only while what's left still carries the debt at its borrow limit and at a health factor of 1.5.
             let risk = try await Kamino.risk(reserve: reserve.address)
             let free = Self.kaminoFreeCollateral(loan, maxLTV: risk.maxLTV, liquidationLTV: risk.liquidationLTV, priceUSD: reserve.priceUSD)
             if requested.map({ $0 > free }) ?? true {
@@ -1094,8 +1104,14 @@ extension Executor {
                 if let stop = Self.kaminoRent(sol: rentSOL, solPrice: solPrice, depositUSD: valueUSD, accepted: Self.lossAccepted) { throw stop }
             }
         }
+        // A withdrawal brings what was asked, 1% over at most (all: what's there, asked 1% over): more would be collateral
+        // the card didn't say leaves, past the 1.5 line on a loan. SOL also gets back the rent of the accounts Kamino closes
+        // when everything comes out (≈ 0.0176 for the position): 0.03 SOL of room for it, and the wallet's own wrapped SOL,
+        // which Kamino's transaction unwraps as it closes that account.
+        let wrapped = native && !deposit ? Int64(try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)) : 0
+        let most: [String: Int64] = deposit ? [:] : native ? [wallet.solana: Int64(units) * 101 / 100 + 30_000_000 + wrapped] : [myToken: Int64(units) * 101 / 100]
         let changes = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
-                                            note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, dryRun: dryRun)
+                                            note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, atMost: most, dryRun: dryRun)
         if stock, !dryRun {
             // Read on: the portfolio right after must find the stock under Kamino, not lose it.
             let was = loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD ?? 0

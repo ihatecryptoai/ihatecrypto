@@ -108,6 +108,13 @@ public enum SolanaGuard {
         "91b20de14cf09348": 1, "74aed54cb435d290": 1,
         "ea75b57db98edc1d": nil,                                                  // redeem_reserve_collateral
     ]
+    /// KLend's borrows and withdrawals by discriminator: the index of the account they pay into (user_destination_liquidity,
+    /// klend's IDL; v2 adds its farm accounts after it). Its amount is the u64 after the discriminator: a borrow's in the
+    /// coin, a withdrawal's in Kamino's shares of it (checked on transactions ktx built, 2026-11-05).
+    static let kaminoPayouts: [String: (to: Int, borrow: Bool)] = [
+        "797f12cc49f5e141": (8, true), "a1808ff5abc7c206": (8, true),             // borrow_obligation_liquidity(_v2)
+        "4b5d5ddc2296dac4": (9, false), "eb34779895c51407": (9, false),           // withdraw_obligation_collateral_and_redeem_reserve_collateral(_v2)
+    ]
     /// Vault withdrawals (withdraw, sell, withdraw_from_available, redeem_in_kind): to the signer's own accounts. No deposits.
     static let kaminoVaultAllowed: Set<String> = ["b712469c946da122", "33e685a4017f83ad", "1383709baadc2239", "663abdfcc0db8c59"]
     /// Farms: unstake, withdraw_unstaked_deposits, harvest_reward (to the owner), refresh_farm, refresh_user_state, initialize_user.
@@ -186,6 +193,9 @@ public enum SolanaGuard {
         "So11111111111111111111111111111111111111112": ("SOL", 9),
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": ("USDC", 6),
         "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": ("USDT", 6),
+        // Backpack's stocks, Token-2022 (Kamino's Backpack market): a withdrawal of one names it.
+        "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb": ("SPCX", 6), "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1": ("MU", 6),
+        "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3": ("SKHY", 6), "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH": ("SNDK", 6),
     ]
 
     /// `accounts`: the message's full account list (static keys plus lookup tables).
@@ -374,6 +384,19 @@ public enum SolanaGuard {
                     v.problems.append("Instruction \(n + 1): Kamino's account setup names a referrer.")
                     continue
                 }
+                // A borrow or a withdrawal pays this wallet's own account, and the prompt says how much, read here: a borrow
+                // ten times the card's would otherwise sign as «Calls Kamino Lend» (the 2026-11-05 review).
+                if program == kaminoLend, let payout = kaminoPayouts[kind] {
+                    guard ix.data.count >= 16, let to = account(payout.to), staticKeys.contains(to), mine(to) else {
+                        v.problems.append("Instruction \(n + 1): Kamino would pay an account that isn't yours.")
+                        continue
+                    }
+                    let raw = le64(ix.data, 8)
+                    let what = mintNames.first { ownTokenAccount(to, owner: policy.owner, mint: $0.key) }
+                        .map { "\(Decimal(raw) / pow(10, $0.value.decimals)) \($0.value.symbol)" } ?? "\(raw) units"
+                    v.checks.append(payout.borrow ? "Kamino lends \(what) → your account, owed back to Kamino."
+                                                  : "Kamino withdrawal: up to \(what) in Kamino's shares, each worth one or more → your account.")
+                }
                 v.checks.append("Calls \(programName) on your own position: it pays only you, and a repay pays only your debt. The balance simulation checks the amount.")
             case jupiterZ:
                 // One fill, this wallet the taker: what it gives comes from its own account for the input mint (or, with none
@@ -434,12 +457,15 @@ public enum SolanaGuard {
         public let after: Int64
         /// The change must be at least this (negative: at most this much may leave).
         public let atLeast: Int64
+        /// And at most this, when set: a borrow or a withdrawal brings no more than the card said.
+        public let atMost: Int64?
 
-        public init(label: String, before: Int64, after: Int64, atLeast: Int64) {
+        public init(label: String, before: Int64, after: Int64, atLeast: Int64, atMost: Int64? = nil) {
             self.label = label
             self.before = before
             self.after = after
             self.atLeast = atLeast
+            self.atMost = atMost
         }
     }
 
@@ -448,8 +474,9 @@ public enum SolanaGuard {
         var v = Verdict()
         for r in rules {
             let delta = r.after - r.before
-            if delta >= r.atLeast { v.checks.append("Simulation: \(r.label) \(delta >= 0 ? "+" : "")\(delta).") }
-            else { v.problems.append("Simulation: \(r.label) changes by \(delta); the minimum allowed is \(r.atLeast).") }
+            if delta < r.atLeast { v.problems.append("Simulation: \(r.label) changes by \(delta); the minimum allowed is \(r.atLeast).") }
+            else if let most = r.atMost, delta > most { v.problems.append("Simulation: \(r.label) changes by \(delta), over the most allowed, \(most).") }
+            else { v.checks.append("Simulation: \(r.label) \(delta >= 0 ? "+" : "")\(delta).") }
         }
         return v
     }

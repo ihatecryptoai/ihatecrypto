@@ -468,17 +468,24 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 @Test func kaminoLoansRunOnlyOnTheOwnersPosition() throws {
     let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
     #expect(SolanaGuard.kaminoObligation(owner: owner, market: SolanaGuard.kaminoBackpackMarket) != SolanaGuard.kaminoObligation(owner: owner))
-    func verdict(_ discriminator: [UInt8], obligation: String, market: String) throws -> Verdict {
+    let borrowV2: [UInt8] = [0xa1, 0x80, 0x8f, 0xf5, 0xab, 0xc7, 0xc2, 0x06], repayV2: [UInt8] = [0x74, 0xae, 0xd5, 0x4c, 0xb4, 0x35, 0xd2, 0x90]
+    let repay: [UInt8] = [0x91, 0xb2, 0x0d, 0xe1, 0x4c, 0xf0, 0x93, 0x48], withdrawV2: [UInt8] = [0xeb, 0x34, 0x77, 0x98, 0x95, 0xc5, 0x14, 0x07]
+    // A borrow pays account 8, a withdrawal account 9: the owner's own USDC account here, its amount after the discriminator.
+    let usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let myUSDC = try SPL.associatedAccount(owner: owner, mint: usdc), theirUSDC = try SPL.associatedAccount(owner: me, mint: usdc)
+    func verdict(_ discriminator: [UInt8], obligation: String, market: String, amount: UInt64 = 1_500_000, payTo: String? = nil) throws -> Verdict {
+        let pays: Int? = discriminator == borrowV2 ? 8 : discriminator == withdrawV2 ? 9 : nil
+        let filler = (3..<(pays ?? 3)).map { _ in SolanaInstruction.Account(pubkey: SolanaGuard.kaminoLend, isSigner: false, isWritable: false) }
         let ix = SolanaInstruction(program: SolanaGuard.kaminoLend, accounts: [
             .init(pubkey: owner, isSigner: true, isWritable: false), .init(pubkey: obligation, isSigner: false, isWritable: true),
             .init(pubkey: market, isSigner: false, isWritable: false),
-        ], data: Data(discriminator) + Data(repeating: 0, count: 8))
+        ] + filler + (pays == nil ? [] : [.init(pubkey: payTo ?? myUSDC, isSigner: false, isWritable: true)]),
+        data: Data(discriminator) + withUnsafeBytes(of: amount.littleEndian) { Data($0) })
         let wire = SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([ix], payer: owner, blockhash: deposit))
         let m = try SolanaMessage.parse(transaction: wire)
-        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: owner, trustLookupTables: false), tokenOwners: [:])
+        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: owner, trustLookupTables: false),
+                                 tokenOwners: [myUSDC: owner, theirUSDC: me])
     }
-    let borrowV2: [UInt8] = [0xa1, 0x80, 0x8f, 0xf5, 0xab, 0xc7, 0xc2, 0x06], repayV2: [UInt8] = [0x74, 0xae, 0xd5, 0x4c, 0xb4, 0x35, 0xd2, 0x90]
-    let repay: [UInt8] = [0x91, 0xb2, 0x0d, 0xe1, 0x4c, 0xf0, 0x93, 0x48]
     // Kamino's «Jito» market: a real one, not ihatecrypto's.
     let elsewhere = try #require(SolanaGuard.kaminoObligation(owner: owner, market: "H6rHXmXoCQvq8Ue81MqNh7ow5ysPa1dSozwW3PU1dDH6"))
     for market in SolanaGuard.kaminoMarkets {
@@ -493,6 +500,13 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         }
         // A flash loan on the same position: not an instruction ihatecrypto uses.
         #expect(try !verdict([0x87, 0xe7, 0x34, 0xa7, 0x07, 0x34, 0xd4, 0xc1], obligation: mine, market: market).ok)
+        // The prompt says how much a borrow or a withdrawal pays, read from the instruction, and it pays only the owner.
+        let borrowed = try verdict(borrowV2, obligation: mine, market: market)
+        #expect(borrowed.checks.contains("Kamino lends 1.5 USDC → your account, owed back to Kamino."), "\(borrowed.checks)")
+        let out = try verdict(withdrawV2, obligation: mine, market: market, amount: 2_000_000)
+        #expect(out.ok, "\(out.problems)")
+        #expect(out.checks.contains { $0.hasPrefix("Kamino withdrawal: up to 2 USDC") })
+        for d in [borrowV2, withdrawV2] { #expect(try !verdict(d, obligation: mine, market: market, payTo: theirUSDC).ok) }
     }
 }
 

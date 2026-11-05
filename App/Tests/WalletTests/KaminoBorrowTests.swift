@@ -1,8 +1,10 @@
 @testable import DeFiKamino
+import ExecutionCore
 import Foundation
 import IhatecryptoCore
 @testable import TradeExecution
 import Testing
+import TxGuard
 
 /// A loan on Kamino's Backpack market, worked out before anything is signed: 0.05 SPCX at $150 ($7.50) put up, borrowed
 /// against at most 30% of it, liquidated at 50%.
@@ -67,4 +69,23 @@ import Testing
     #expect(Set(WalletCommand.kaminoStockMints.keys) == Set(Kamino.backpackStocks.keys))
     #expect(WalletCommand.kaminoStockMints.keys.allSatisfy { Kamino.market(for: $0) == Kamino.backpackMarket })
     #expect(Kamino.market(for: "USDC") == Kamino.mainMarket)
+}
+
+/// A borrow or a withdrawal brings no more than the card said (the simulation's ceiling), and a withdrawal right after
+/// a borrow on the same market waits a minute: Kamino's API, which the 1.5 line reads, lags the borrow.
+@Test func kaminoPayoutsHaveACeilingAndAWithdrawalWaitsOutABorrow() async throws {
+    // 1 USDC asked, 1% either way: ten times it is refused.
+    #expect(SolanaGuard.balances([.init(label: "USDC", before: 0, after: 1_000_000, atLeast: 990_000, atMost: 1_010_000)]).ok)
+    #expect(!SolanaGuard.balances([.init(label: "USDC", before: 0, after: 10_000_000, atLeast: 990_000, atMost: 1_010_000)]).ok)
+    #expect(SolanaGuard.balances([.init(label: "USDC", before: 0, after: 10_000_000, atLeast: 990_000)]).ok)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("kamino-journal-\(UUID().uuidString).jsonl")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let journal = Journal(url: url)
+    let e = Executor(wallet: TradeWallet(solana: "", evm: ""), signer: ForkSigner(key: Data(count: 32), address: "", batches: false), journal: journal) { _ in }
+    #expect(await !e.kaminoBorrowedJustNow(on: Kamino.mainMarket))
+    try journal.append(.init(at: Date().addingTimeInterval(-90), chain: "solana", id: "a", kind: .signed, note: "Kamino borrow 1 USDC on the main market; valid until block 1"))
+    #expect(await !e.kaminoBorrowedJustNow(on: Kamino.mainMarket))
+    try journal.append(.init(chain: "solana", id: "b", kind: .signed, note: "Kamino borrow 1 USDC on the main market; valid until block 2"))
+    #expect(await e.kaminoBorrowedJustNow(on: Kamino.mainMarket))
+    #expect(await !e.kaminoBorrowedJustNow(on: Kamino.backpackMarket))
 }

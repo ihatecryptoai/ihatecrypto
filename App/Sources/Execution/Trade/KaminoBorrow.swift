@@ -144,6 +144,17 @@ extension Executor {
     static func usdcOwed(_ loan: Kamino.Loan?) -> Decimal { loan?.debts.first { $0.symbol == "USDC" }?.tokens ?? 0 }
 
     static func kaminoMarketName(_ market: String) -> String { market == Kamino.backpackMarket ? "Kamino's Backpack market" : "Kamino" }
+    /// «Backpack» or «main»: the journal's note of a borrow names its market with it.
+    static func kaminoMarketWord(_ market: String) -> String { market == Kamino.backpackMarket ? "Backpack" : "main" }
+
+    /// Signed a borrow on `market` in the last minute, by this app's own journal. Kamino's API, which the 1.5 line on a
+    /// withdrawal reads, shows a borrow only 10–30 s after it lands (live, 2026-10-29): a withdrawal waits that out.
+    /// ponytail: the API's word, not the chain's; read the obligation account on chain if a minute's wait isn't enough.
+    func kaminoBorrowedJustNow(on market: String) -> Bool {
+        let note = "Kamino borrow", on = "on the \(Self.kaminoMarketWord(market)) market"
+        return (try? journal.entries())?.last { $0.kind == .signed && $0.note.hasPrefix(note) && $0.note.contains(on) }
+            .map { Date().timeIntervalSince($0.at) < 60 } ?? false
+    }
 
     /// Borrows `usdc` on Kamino to this wallet; `adding` of `stock` goes in as collateral first (its own transaction,
     /// the first one on the market pays the position's rent). Refused when the health factor would fall under
@@ -187,8 +198,11 @@ extension Executor {
             // The first borrow also opens the position's account in Kamino's farm for the debt (init_obligation_farms_for_reserve):
             // ≈ 0.0053 SOL of rent on top of the fee (measured live 2026-10-28), so the floor is 0.012 SOL, not the usual 0.005.
             // The main market's USDC opens none (a first borrow there cost only the fee in simulation, 2026-11-05).
+            // What arrives is what the card said, give or take 1%: a borrow Kamino built bigger would owe more than shown,
+            // down to Kamino's own limit instead of the 1.5 line.
             _ = try await signAndSend(wire, lastValid: lastValid, owners: [myUSDC: wallet.solana], rules: [(myUSDC, "USDC", true, Int64(units) * 99 / 100)],
-                                      note: "Kamino borrow \(Fmt.num(usdc)) USDC", lamportsAtLeast: -12_000_000)
+                                      note: "Kamino borrow \(Fmt.num(usdc)) USDC on the \(Self.kaminoMarketWord(p.market)) market", lamportsAtLeast: -12_000_000,
+                                      atMost: [myUSDC: Int64(units) * 101 / 100])
         } catch where deposited {
             // The stock is up already: the same words again would put it up twice.
             throw ExecutionError("The \(Fmt.num(adding ?? 0, maxFraction: 6)) \(stock ?? "") is up as collateral on \(place) now, but the borrow didn't go through: "

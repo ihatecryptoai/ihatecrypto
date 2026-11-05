@@ -1415,7 +1415,11 @@ extension Workspace {
         if let stock, let adding {
             steps.append(step(logo, "FROM · SOLANA", "\(Fmt.num(adding, maxFraction: 6)) \(stock)", "", .solana, money: moneyMove(stock, on: "solana", by: -adding)))
         }
-        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", stock == nil ? "what you put up on Kamino" : sol ? "Kamino Lend · not sold" : "Backpack market · not sold", .kamino,
+        // On the main market every deposit is collateral: savings there (USDC) hold the loan too, and count in the total.
+        let savings = sol && position?.collateral.contains { $0.symbol != "SOL" && $0.valueUSD > 0 } == true
+        let held = stock == nil ? "what you put up on Kamino" : savings ? "Kamino Lend · your savings there count as collateral too"
+            : sol ? "Kamino Lend · not sold" : "Backpack market · not sold"
+        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", held, .kamino,
                        money: stock.map { vaultMove("Kamino", $0, was: up, by: adding ?? 0) } ?? []),
                   step("kamino", "BORROW · KAMINO", "\(what) USDC", line("health").map { "health factor \($0)" } ?? "health factor: reading…", .kamino,
                        money: vaultMove("Kamino debt", "USDC", was: owed, by: amount)),
