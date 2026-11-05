@@ -16,15 +16,19 @@ public enum TokenResearch {
             return "\(long.0) is no token contract (an EVM one is 0x and 40 hex): a transaction's hash, a Sui address or a bytes32."
         }
         if let raw = q.firstMatch(of: /[1-9A-HJ-NP-Za-km-z]{30,60}/).map({ String($0.0) }) {
+            var unanswered = false
             for mint in repairs(raw) {
                 let note = mint == raw ? nil : "The pasted «\(raw)» is not a valid Solana address (\(raw.count) characters). Without "
                     + (raw.hasPrefix("2F" + mint) ? "the «2F» in front — a link's %2F («/») copied along —" : "the extra characters")
                     + " it is this token: \(mint)."
                 async let jupiter = jupiter(mint)
                 async let pools = dex(mint)
-                let facts = [note, await jupiter, await pools].compactMap { $0 }
-                if facts.count > (note == nil ? 0 : 1) { return facts.joined(separator: "\n") }
+                var said: String?
+                do { said = try await jupiter } catch { unanswered = true }
+                let facts = [note, said, await pools].compactMap { $0 }
+                if facts.count > (note == nil ? 0 : 1) { return ((unanswered ? [busy] : []) + facts).joined(separator: "\n") }
             }
+            if unanswered { return busy + " DexScreener has no pool for \(raw) either." }
             return valid(raw)
                 ? "Neither Jupiter nor DexScreener knows \(raw) as a token: it may be a wallet address, or a token with no pool yet."
                 : "«\(raw)» is not a valid Solana address, and no near fix of it is a known token. Ask for the address again, copied from the token's page."
@@ -70,12 +74,15 @@ public enum TokenResearch {
         }
     }
 
+    /// Jupiter's token search: keyless on api.jup.ag (lite-api.jup.ag is being retired), 5 requests in 10 s per IP.
+    public static let jupiterSearch = "https://api.jup.ag/tokens/v2/search?query="
+
     /// The Jupiter-verified token trading under a ticker («BONK»; «WIF» finds «$WIF») or named so («SPX6900», whose
     /// ticker is SPX), the most liquid when several do: its mint. Unverified namesakes — the usual fakes — are never picked.
-    public static func solanaMint(symbol: String) async -> String? {
+    /// nil: Jupiter answered and has none. Throws: Jupiter didn't answer (`get`).
+    public static func solanaMint(symbol: String) async throws -> String? {
         let query = symbol.trimmingCharacters(in: CharacterSet(charactersIn: "$")).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? symbol
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(query)") else { return nil }
-        return solanaMint(data, symbol: symbol)
+        return solanaMint(try await get(jupiterSearch + query), symbol: symbol)
     }
 
     static func solanaMint(_ data: Data, symbol: String) -> String? {
@@ -89,9 +96,9 @@ public enum TokenResearch {
         }.max { (dec($0["liquidity"]) ?? 0) < (dec($1["liquidity"]) ?? 0) }?["id"] as? String
     }
 
-    public static func solanaToken(_ mint: String) async -> SolanaToken? {
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(mint)") else { return nil }
-        return solanaToken(data, mint: mint)
+    /// nil: Jupiter answered and doesn't know the mint. Throws: Jupiter didn't answer (`get`).
+    public static func solanaToken(_ mint: String) async throws -> SolanaToken? {
+        solanaToken(try await get(jupiterSearch + mint), mint: mint)
     }
 
     static func solanaToken(_ data: Data, mint: String) -> SolanaToken? {
@@ -108,10 +115,12 @@ public enum TokenResearch {
 
     // MARK: Sources
 
-    static func jupiter(_ mint: String) async -> String? {
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(mint)") else { return nil }
-        return jupiterFacts(data, mint: mint)
+    static func jupiter(_ mint: String) async throws -> String? {
+        jupiterFacts(try await get(jupiterSearch + mint), mint: mint)
     }
+
+    /// For the model when Jupiter's search didn't answer: whether a token is the verified one isn't known.
+    static let busy = "Jupiter didn't answer just now, so whether it knows or verified this token isn't known: ask again in a minute."
 
     /// Jupiter's entry for the mint, as lines.
     static func jupiterFacts(_ data: Data, mint: String, now: Date = Date()) -> String? {
@@ -201,19 +210,25 @@ public enum TokenResearch {
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         let data = try? await get("https://api.dexscreener.com/latest/dex/search?q=\(q ?? query)")
         let found = data.flatMap { searchFacts($0, query: query) }
-        if let mint = await verified {
+        // Jupiter not answering is no «not verified»: the deepest pool below may be a copy, and the model is told so.
+        let mint: String?, head: [String]
+        do { (mint, head) = (try await verified, []) } catch {
+            (mint, head) = (nil, ["Jupiter didn't answer just now, so which «\(query)» on Solana is the verified one "
+                                  + "isn't known: the deepest pool below may be a copy. Ask again in a minute before buying by this name."])
+        }
+        if let mint {
             async let jupiter = jupiter(mint)
             async let pools = dex(mint)
             return (["«\(query)» on Solana is the Jupiter-verified token with mint \(mint); use this one. Other tokens under the name are copies."]
-                    + [await jupiter, await pools].compactMap { $0 }
+                    + [try? await jupiter, await pools].compactMap { $0 }
                     + (found.map { ["For comparison, everything DexScreener finds under the name (the copies claim any liquidity):", $0.text] } ?? []))
                 .joined(separator: "\n")
         }
-        guard data != nil else { return "DexScreener didn't answer the search." }
-        guard let (list, top) = found else { return "No token called «\(query)» trades anywhere DexScreener sees." }
+        guard data != nil else { return (head + ["DexScreener didn't answer the search."]).joined(separator: "\n") }
+        guard let (list, top) = found else { return (head + ["No token called «\(query)» trades anywhere DexScreener sees."]).joined(separator: "\n") }
         async let jupiter = top.hasPrefix("0x") ? nil : jupiter(top)
         async let pools = dex(top)
-        return ([list, "The deepest one in full:"] + [await jupiter, await pools].compactMap { $0 }).joined(separator: "\n")
+        return (head + [list, "The deepest one in full:"] + [try? await jupiter, await pools].compactMap { $0 }).joined(separator: "\n")
     }
 
     /// The matches as lines, and the address of the deepest.
@@ -239,10 +254,30 @@ public enum TokenResearch {
 
     // MARK: Formatting
 
-    static func get(_ url: String) async throws -> Data {
+    /// The Dev copy's «Jupiter is busy» (`-jupiterBusyTest YES`, read at every call): each Jupiter request is answered
+    /// 429 without going out, for a live run of what the chat says then.
+    nonisolated(unsafe) public static var busyTest: () -> Bool = { false }
+
+    /// A GET whose status is read: a throttle (429) or a server error is asked again 1, 2, 4 and 8 s later (RPCRetry),
+    /// past Jupiter's 10-second window, and then throws. Jupiter's 429 carries a JSON error, which read as data was
+    /// «no such token».
+    public static func get(_ url: String) async throws -> Data {
         var request = URLRequest(url: URL(string: url)!, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return try await URLSession.shared.data(for: request).0
+        let jupiter = request.url?.host?.hasSuffix("jup.ag") == true, busy = jupiter && busyTest()
+        return try await RPCRetry.run {
+            if busy { return (Data(#"{"code":429,"message":"Too many requests"}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: nil)! as URLResponse) }
+            return try await URLSession.shared.data(for: request)
+        } answer: { data, status in try answer(data, status: status, from: jupiter ? "Jupiter" : request.url?.host ?? "The service") }
+    }
+
+    /// Data only with a 2xx. 429 and 5xx are worth asking again; anything else is final. Either way it is no answer.
+    static func answer(_ data: Data, status: Int, from source: String = "Jupiter") throws -> Data {
+        guard (200..<300).contains(status) else {
+            let why = status == 429 ? "too many requests right now" : "HTTP \(status)"
+            throw RPCRetry.Again(status == 429 || status >= 500, WalletError("\(source) didn't answer (\(why)). Nothing was signed — try again in a minute."))
+        }
+        return data
     }
 
     static func dec(_ v: Any?) -> Decimal? { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber).map { $0.decimalValue } }

@@ -78,7 +78,9 @@ extension Workspace {
     /// A Solana token named by ticker: the Jupiter-verified one trading under it, then the same checks as by mint.
     func spotToken(_ asset: SpotAsset, note: String?) async -> SpotAsset? {
         guard asset.mint.isEmpty else { return await spotToken(asset.mint, note: note) }
-        guard let mint = await TokenResearch.solanaMint(symbol: asset.symbol) else {
+        let found: String?
+        do { found = try await TokenResearch.solanaMint(symbol: asset.symbol) } catch { jupiterUnanswered(note); return nil }
+        guard let mint = found else {
             reply(say("Jupiter has no verified token called \(asset.symbol) on Solana, so nothing is bought by that name — namesakes are the usual fakes. Name it by its mint instead (with Safe search off).",
                       "У Jupiter нет проверенного токена \(asset.symbol) на Solana, поэтому по имени ничего не покупаю — одноимённые токены обычно подделки. Назови его mint-адресом (с выключенным Safe search)."), note: note)
             return nil
@@ -100,8 +102,16 @@ extension Workspace {
         return asset
     }
 
+    /// Jupiter throttled or down past TokenResearch.get's retries: said as that, never as «no such token».
+    private func jupiterUnanswered(_ note: String?) {
+        reply(say("Jupiter didn't answer just now, so nothing moved. Try again in a minute.",
+                  "Jupiter сейчас не ответил, поэтому ничего не ушло. Попробуй через минуту."), note: note)
+    }
+
     func spotToken(_ mint: String, note: String?) async -> SpotAsset? {
-        guard let t = await TokenResearch.solanaToken(mint) else {
+        let found: TokenResearch.SolanaToken?
+        do { found = try await TokenResearch.solanaToken(mint) } catch { jupiterUnanswered(note); return nil }
+        guard let t = found else {
             reply(say("Jupiter doesn’t know the token \(mint), so there’s no route to trade it — nothing moved.",
                       "Jupiter не знает токен \(mint), поэтому торговать им нельзя — ничего не ушло."), note: note)
             return nil

@@ -4,7 +4,7 @@ import WalletCore
 /// Jupiter Lend Earn: deposit a token, receive jl-shares that grow with interest, withdraw any time.
 /// First protocol of the DeFi module; a shared Vault type gets extracted when the second one arrives.
 public enum JupiterLend {
-    static let base = "https://lite-api.jup.ag/lend/v1/earn"
+    static let base = "https://api.jup.ag/lend/v1/earn"
 
     public struct Vault: Sendable {
         public let symbol: String          // jlUSDC

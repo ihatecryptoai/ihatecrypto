@@ -13,7 +13,7 @@ import TradeExecution
 /// the others follow by money, and those with $100 or less fold under «Other networks» (PortfolioSplit.networkCards).
 struct NetworkLine: Identifiable {
     enum Kind { case earning, idle, gas, held }
-    var id: String { title + detail + (coin ?? "") }
+    var id: String { title + detail + (coin ?? "") + (key ?? "") }
     let kind: Kind
     let logo: String
     let title: String
@@ -36,6 +36,8 @@ struct NetworkLine: Identifiable {
     var earned: Decimal? = nil
     /// A deposit's own numbers under its dollars, in place of the interest (a loan: collateral, borrowed, health).
     var facts: [(value: String, label: String)]? = nil
+    /// Tells apart lines that read the same: two YES bets on Jupiter, two Kamino vaults of one coin.
+    var key: String? = nil
 }
 
 /// A Jupiter Lend deposit: the coin put in, how much of it, its decimals and % a year; `address` is the vault's token.
@@ -140,6 +142,7 @@ extension Workspace {
                                    help: "\(p.name) · managed on \(p.site): a click opens it beside the chat")
                 if line.amount == nil, !Self.isDollar(coin) { line.amount = p.amount }
                 line.site = p.site
+                line.key = p.id
                 return line
             }
         case .base:

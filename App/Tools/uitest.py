@@ -15,6 +15,7 @@ canvas boards, and drops what waits for Confirm (/cancel). At the end the test c
 that was open is reopened (/restore). Nothing can sign through the debug API, so no money moves. It refuses to start
 while a move waits for Confirm or runs on the user's own canvas. Exit code 1 when any scenario fails.
 """
+import atexit
 import re
 import json
 import os
@@ -197,6 +198,8 @@ def main():
                     continue
             t0 = time.time()
             old = settings(s.get("defaults") or {})
+            # Put back even when a scenario raises: a «jupiterBusyTest» left on refuses every buy in Dev.
+            atexit.register(restore_settings, old)
             call("POST", "/reset")
             why = []
             for k, turn in enumerate(s.get("turns") or [{"send": s["send"], "expect": s["expect"]}]):

@@ -201,7 +201,7 @@ struct TokenBoard: View {
         .task(id: address) {
             market = try? await TokenMarket.info(address, chain: chain)
             if market == nil { error = "No pool trades this token on \(chainTitle)." }
-            if chain == "solana" { verified = await TokenResearch.solanaToken(address).map { ("Jupiter", $0.verified) } }
+            if chain == "solana" { verified = (try? await TokenResearch.solanaToken(address))?.map { ("Jupiter", $0.verified) } }
             else if chain == "robinhood", let registry = try? await RobinhoodStocks.registry() {
                 verified = RobinhoodStocks.listed(address, symbol: symbol, chain: chain, in: registry).map { ("Robinhood's registry", $0) }
             }

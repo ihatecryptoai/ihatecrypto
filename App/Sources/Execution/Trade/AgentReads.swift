@@ -30,7 +30,7 @@ public enum AgentReads {
                                            "getEpochInfo", "getRecentPrioritizationFees", "getInflationRate", "getVoteAccounts"]
     /// Public data APIs `fetch` reads (GET only), plus every Blockscout explorer.
     static let hosts: Set<String> = ["api.llama.fi", "yields.llama.fi", "coins.llama.fi", "stablecoins.llama.fi", "bridges.llama.fi",
-                                     "api.dexscreener.com", "api.geckoterminal.com", "api.coingecko.com", "lite-api.jup.ag",
+                                     "api.dexscreener.com", "api.geckoterminal.com", "api.coingecko.com", "lite-api.jup.ag", "api.jup.ag",
                                      "api.kamino.finance", "api-v2.pendle.finance", "explorer.optimism.io"]
 
     public static func answer(_ tool: String, _ arg: String, me: Me) async -> String {

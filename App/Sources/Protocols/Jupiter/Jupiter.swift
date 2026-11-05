@@ -4,7 +4,7 @@ import WalletCore
 /// Swaps inside Solana through Jupiter's free API. Jupiter builds the transaction; the wallet only checks
 /// that it is the fee payer and signs (`SolanaTransaction.sign`).
 public enum Jupiter {
-    static let base = "https://lite-api.jup.ag/swap/v1"
+    static let base = "https://api.jup.ag/swap/v1"
     public static let solMint = "So11111111111111111111111111111111111111112"
     public static let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
@@ -75,11 +75,11 @@ public enum Jupiter {
     }
 }
 
-/// Jupiter's gasless swap (Swap API v2, keyless on lite-api): for a wallet with under 0.01 SOL, Jupiter's own wallet pays
+/// Jupiter's gasless swap (Swap API v2, keyless on api.jup.ag): for a wallet with under 0.01 SOL, Jupiter's own wallet pays
 /// the fee and the rent and takes them out of the output (`feeBps` grows). Its transaction comes with Jupiter's wallet as
 /// the fee payer and ours as the second signer; it goes back through Jupiter's /execute, which adds its signature and sends.
 extension Jupiter {
-    static let v2 = "https://lite-api.jup.ag/swap/v2"
+    static let v2 = "https://api.jup.ag/swap/v2"
 
     public struct Order: Sendable {
         public let requestId: String

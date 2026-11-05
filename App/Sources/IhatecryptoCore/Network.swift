@@ -198,13 +198,14 @@ public enum Solana {
     }
 
     /// Names, icons and prices from Jupiter, 100 mints a request (its search's limit). Jupiter Lend's share tokens are
-    /// left out: the Jupiter Lend row counts them. Without Jupiter the tokens still show, by mint and unpriced.
-    static func holdings(_ amounts: [String: Decimal], lendShares: Bool = false) async -> (tokens: [Holding], priced: Bool) {
+    /// left out: the Jupiter Lend row counts them. Without Jupiter the tokens still show, by mint and unpriced. A throttled
+    /// Jupiter is waited out (TokenResearch.get): three tries in 2 s never outlasted its 10-second window.
+    public static func holdings(_ amounts: [String: Decimal], lendShares: Bool = false) async -> (tokens: [Holding], priced: Bool) {
         let mints = amounts.keys.sorted()
         var pages: [Data] = [], priced = true
         for start in stride(from: 0, to: mints.count, by: 100) {
             let chunk = mints[start..<min(start + 100, mints.count)]
-            if let data = await Holdings.retrying({ try await HTTP.get("https://lite-api.jup.ag/tokens/v2/search?query=" + chunk.joined(separator: ",")) }) {
+            if let data = try? await TokenResearch.get(TokenResearch.jupiterSearch + chunk.joined(separator: ",")) {
                 pages.append(data)
             } else {
                 priced = false

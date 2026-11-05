@@ -1460,7 +1460,7 @@ final class Workspace {
         if let command = PnLCommand.parse(text, markets: pnlNames) { await showPnL(command); return true }
         // «покажи чарт spx6900»: a Solana token by its ticker or name, Jupiter-verified only.
         if let word = text.lowercased().firstMatch(of: /(?:charts?|график\w*|чарт\w*|show|покажи)\s+(?:(?:the|token|токен\w*|чарт\w*|график\w*)\s+)*\$?([a-z][a-z0-9]{1,15})\b/)?.1,
-           let mint = await TokenResearch.solanaMint(symbol: String(word)) {
+           let mint = try? await TokenResearch.solanaMint(symbol: String(word)) {
             await tokenCommand(.show(address: mint, chain: "solana"))
             return true
         }

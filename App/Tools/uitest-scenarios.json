@@ -1350,5 +1350,48 @@
       "recipient": "open",
       "text_lacks": "opens"
     }
+  },
+  {
+    "name": "Jupiter busy → a buy by ticker says Jupiter didn't answer, never «no verified token»",
+    "send": [
+      "buy BONK on solana for 1 USDC"
+    ],
+    "defaults": {
+      "jupiterBusyTest": true
+    },
+    "expect": {
+      "reply_contains": "didn't answer",
+      "reply_lacks": "no verified token",
+      "no_pending": true
+    }
+  },
+  {
+    "name": "Jupiter busy, in Russian → «не ответил», не «нет проверенного токена»",
+    "send": [
+      "купи BONK на solana на 1 USDC"
+    ],
+    "defaults": {
+      "jupiterBusyTest": true,
+      "chatLanguage": "ru"
+    },
+    "expect": {
+      "reply_contains": "не ответил",
+      "reply_lacks": "нет проверенного",
+      "reply_cyrillic": true,
+      "no_pending": true
+    }
+  },
+  {
+    "name": "Jupiter busy → a swap into USDS on Solana still draws its card (its quote waits), the chat never says «knows no verified USDS»",
+    "send": [
+      "swap 1 USDC on base for USDS on solana"
+    ],
+    "defaults": {
+      "jupiterBusyTest": true
+    },
+    "expect": {
+      "pending_kind": "wallet",
+      "reply_lacks": "knows no verified"
+    }
   }
 ]

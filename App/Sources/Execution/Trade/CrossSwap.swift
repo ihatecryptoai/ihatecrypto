@@ -35,8 +35,9 @@ extension Executor {
             default:
                 // USDT, USDS and USDe by their mints (Stablecoins): a ticker search can land on a lookalike.
                 let stable = Stablecoins.find(token, on: "solana")?.address
-                let mint = token.count >= 32 ? token : stable != nil ? stable : await TokenResearch.solanaMint(symbol: token)
-                guard let mint, let info = await TokenResearch.solanaToken(mint) else { throw ExecutionError("Jupiter knows no verified \(token) on Solana. Nothing was signed.") }
+                // Jupiter not answering throws its own words (TokenResearch.get): «knows no verified» is only its «no».
+                let mint: String? = if token.count >= 32 { token } else if let stable { stable } else { try await TokenResearch.solanaMint(symbol: token) }
+                guard let mint, let info = try await TokenResearch.solanaToken(mint) else { throw ExecutionError("Jupiter knows no verified \(token) on Solana. Nothing was signed.") }
                 return CrossSide(chain: Relay.Chain.solana, currency: mint, decimals: info.decimals, symbol: info.symbol, coin: false, token2022: info.token2022)
             }
         }

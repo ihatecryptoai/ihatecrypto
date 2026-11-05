@@ -1,11 +1,13 @@
 import DeFiKamino
 import Foundation
 import IhatecryptoCore
+import SolanaChain
 import SwiftUI
+import WalletCore
 
 /// Money put in on a site, so a deposit made in the browser still shows: Kamino's vaults (Earn) from Kamino, and Jupiter's
-/// other platforms (staked JUP, perps, predictions…) from Jupiter's portfolio. Shown on the portfolio, counted in the
-/// total, told to the chat. Kamino's vaults come out with «withdraw [N] USDC from kamino» (Wallet.kaminoVault).
+/// staked JUP (from its escrow on chain) and prediction markets (from Jupiter's API). Shown on the portfolio, counted in
+/// the total, told to the chat. Kamino's vaults come out with «withdraw [N] USDC from kamino» (Wallet.kaminoVault).
 struct ProtocolPosition: Equatable, Identifiable {
     var id: String { "\(platform) · \(name)" }
     /// «Kamino», «Jupiter».
@@ -39,28 +41,67 @@ extension Workspace {
         protocolsReadAt = Date()
         let wallet = solanaAddress
         async let kamino = try? Kamino.vaultPositions(wallet: wallet)
-        async let jupiter = Self.jupiterPositions(wallet)
+        // Jupiter's own platforms without its Portfolio API (closed to the public on 2026-10-08). Earn is `lend`'s.
+        // ponytail: Jupiter perps aren't read (no API: 9 Position accounts a wallet, P/L and borrow fee by hand), add when asked.
+        async let staked = Self.stakedJUP(wallet)
+        async let bets = Self.predictions(wallet)
         let vaults = (await kamino)?.map { v in
             ProtocolPosition(platform: "Kamino", name: v.name, logo: "kamino", usd: v.valueUSD, amount: "\(Fmt.num(v.tokens)) \(v.symbol)",
                              apy: v.apy, site: "kamino.com", symbol: v.symbol, tokens: v.tokens)
         } ?? protocolPositions.filter { $0.platform == "Kamino" }
-        let jup = await jupiter ?? protocolPositions.filter { $0.platform != "Kamino" }
+        let jupiter = protocolPositions.filter { $0.platform == "Jupiter" }
+        let jup = (await staked ?? jupiter.filter { $0.name == Self.stakedName }) + (await bets ?? jupiter.filter { $0.name != Self.stakedName })
         let found = (vaults + jup).filter { $0.usd >= Decimal(string: "0.01")! }
         if found != protocolPositions { protocolPositions = found }
     }
 
-    /// Jupiter's portfolio API (its own platforms only): every element but Earn, which `lend` already reads. nil when it
-    /// doesn't answer.
-    static func jupiterPositions(_ wallet: String) async -> [ProtocolPosition]? {
-        guard let url = URL(string: "https://api.jup.ag/portfolio/v1/positions/\(wallet)"),
-              let (data, _) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 20)),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let elements = json["elements"] as? [[String: Any]] else { return nil }
-        return elements.compactMap { e in
-            guard e["fetcherId"] as? String != "jupiter-exchange-earn", let value = (e["value"] as? NSNumber)?.decimalValue else { return nil }
-            let name = [e["name"] as? String, e["label"] as? String].compactMap { $0 }.joined(separator: " · ")
-            let apy = (e["netApy"] as? NSNumber)?.decimalValue
-            return ProtocolPosition(platform: "Jupiter", name: name.isEmpty ? (e["platformId"] as? String ?? "position") : name, logo: "jup",
-                                    usd: value, amount: nil, apy: apy.flatMap { $0 > 0 ? $0 * 100 : nil }, site: "jup.ag")
+    static let jupMint = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", stakedName = "Staked JUP"
+
+    /// The wallet's Escrow in Jupiter's locked-voter program (vote.jup.ag): one getAccountInfo, priced through Jupiter's
+    /// search. [] when nothing is staked, nil when it can't be read (the last reading stays).
+    static func stakedJUP(_ wallet: String) async -> [ProtocolPosition]? {
+        let voter = "voTpe3tHQ7AjQHMapgSue2HJFAh2cGsdokqN3XqmVSj", locker = "CVMdMd79no569tjc5Sq7kzz8isbfCcFyBS5TLGsrZ5dN"
+        guard let owner = try? Base58.decode(wallet),
+              let escrow = try? SPL.programAddress(seeds: [Data("Escrow".utf8), Base58.decode(locker), owner], program: Base58.decode(voter)),
+              let reply = try? await SolanaRPC().call("getAccountInfo", [Base58.encode(escrow), ["encoding": "base64"]]) as? [String: Any] else { return nil }
+        guard let account = reply["value"] as? [String: Any] else { return reply["value"] is NSNull ? [] : nil }
+        guard let b64 = (account["data"] as? [Any])?.first as? String, let data = Data(base64Encoded: b64),
+              let jup = escrowJUP(data, owner: owner) else { return nil }
+        guard jup > 0 else { return [] }
+        guard let usd = await Solana.holdings([jupMint: jup]).tokens.first?.usd else { return nil }
+        return [ProtocolPosition(platform: "Jupiter", name: stakedName, logo: "jup", usd: usd, amount: "\(Fmt.num(jup)) JUP", apy: nil,
+                                 site: "vote.jup.ag", symbol: "JUP", tokens: jup)]
+    }
+
+    /// JUP an Escrow account holds: `amount` (u64 at 105) plus `partial_unstaking_amount` (u64 at 162), which a partial
+    /// unstake moves out of `amount` while it stays in the escrow; 6 decimals. nil: not this owner's escrow.
+    static func escrowJUP(_ data: Data, owner: Data) -> Decimal? {
+        guard data.count >= 170, data.subdata(in: 40..<72) == owner else { return nil }
+        func u64(_ at: Int) -> UInt64 { data.subdata(in: at..<at + 8).enumerated().reduce(0) { $0 | UInt64($1.element) << (8 * $1.offset) } }
+        return (Decimal(u64(105)) + Decimal(u64(162))) / 1_000_000
+    }
+
+    /// Jupiter's prediction markets for the wallet (keyless). nil when it doesn't answer: IPs in the US and Korea are refused.
+    static func predictions(_ wallet: String) async -> [ProtocolPosition]? {
+        guard let data = try? await TokenResearch.get("https://api.jup.ag/prediction/v1/positions?ownerPubkey=\(wallet)") else { return nil }
+        return predictions(data)
+    }
+
+    /// A position is worth its `valueUsd` (micro-USD) while its market trades, and $1 a contract once it won and waits
+    /// to be claimed. A lost or claimed one is worth nothing here. nil: not Jupiter's list.
+    /// ponytail: the first page only, as many as Jupiter returns by default.
+    static func predictions(_ data: Data) -> [ProtocolPosition]? {
+        guard let rows = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["data"] as? [[String: Any]] else { return nil }
+        return rows.compactMap { p in
+            let contracts = (p["contractsDecimal"] as? String).flatMap { Decimal(string: $0) }
+            let usd: Decimal
+            if let micro = (p["valueUsd"] as? String).flatMap({ Decimal(string: $0) }) { usd = micro / 1_000_000 }
+            else if p["claimable"] as? Bool == true, p["claimed"] as? Bool != true, let contracts { usd = contracts }
+            else { return nil }
+            let side = p["isYes"] as? Bool == false ? "NO" : "YES"
+            let title = (p["marketMetadata"] as? [String: Any])?["title"] as? String ?? (p["eventMetadata"] as? [String: Any])?["title"] as? String ?? "Prediction"
+            return ProtocolPosition(platform: "Jupiter", name: "\(title) · \(side)", logo: "jup", usd: usd,
+                                    amount: contracts.map { "\(Fmt.num($0)) \(side)" }, apy: nil, site: "jup.ag/prediction")
         }
     }
 }

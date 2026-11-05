@@ -396,7 +396,7 @@ public enum ChatRouter {
       hl <JSON> [find <WORDS>]   any Hyperliquid info request: {"type": "userFills", "user": "me"}, {"type": "userFunding", \
     "user": "me", "startTime": <ms>}, {"type": "fundingHistory", "coin": "ETH", "startTime": <ms>}, {"type": "spotMeta"}…
       fetch <URL> [find <WORDS>]   a GET from public data APIs only: DefiLlama (yields.llama.fi/pools, api.llama.fi/protocol/<slug>, \
-    coins.llama.fi/prices/current/<chain>:<address>), DexScreener, GeckoTerminal, CoinGecko, Jupiter (lite-api.jup.ag), Kamino \
+    coins.llama.fi/prices/current/<chain>:<address>), DexScreener, GeckoTerminal, CoinGecko, Jupiter (api.jup.ag), Kamino \
     (api.kamino.finance), Pendle (api-v2.pendle.finance) and the Blockscout explorers (<chain>.blockscout.com/api/v2/addresses/{evm}/…); \
     {evm} and {solana} in the URL are the user's own addresses. A long list comes back cut: «find morpho base usdc» keeps only the \
     items holding all those words.

@@ -256,8 +256,8 @@ func moveMoney(_ text: String) async throws {
 /// token program, so a Token-2022 coin (Ondo's stocks) reads from its own account.
 func lookedUp(_ asset: SpotAsset) async throws -> SpotAsset {
     guard !asset.resolved else { return asset }
-    let mint = asset.mint.isEmpty ? await TokenResearch.solanaMint(symbol: asset.symbol) : asset.mint
-    guard let mint, let t = await TokenResearch.solanaToken(mint) else { throw WalletError("Jupiter has no verified token \(asset.symbol) on Solana.") }
+    let mint: String? = if asset.mint.isEmpty { try await TokenResearch.solanaMint(symbol: asset.symbol) } else { asset.mint }
+    guard let mint, let t = try await TokenResearch.solanaToken(mint) else { throw WalletError("Jupiter has no verified token \(asset.symbol) on Solana.") }
     return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
 }
 
