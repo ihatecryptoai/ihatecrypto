@@ -29,7 +29,7 @@ public struct TradeIntent: Codable, Equatable, Sendable {
     /// «трейлинг 2%»: the stop follows the best price at this distance while the app is open.
     public var trailingPct: Decimal?
     /// «за 2 часа», «over 30 min»: the entry is one TWAP on Hyperliquid, parts at the market spread over this many minutes
-    /// (5 min to 7 days, $100 at least), instead of one order. Hyperliquid's TWAP takes no builder fee.
+    /// (5 min to 4 h here, $100 at least), instead of one order. Hyperliquid's TWAP takes no builder fee.
     public var twapMinutes: Int?
     /// «randomize»: each part of the TWAP up to ±20% of its size.
     public var twapRandomize: Bool?

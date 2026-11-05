@@ -152,6 +152,10 @@ public struct LedgerSigner: TradeSigner {
         let verdict = HLGuard.check(action, owner: wallet.evm, recipients: [])
         guard verdict.ok else { throw Self.refuse(verdict) }
         if let agent, HLSigner.isTrading(action) { return try await agent(action, nonce) }
+        // A TWAP buys on for hours: only the Ledger's trading key can stop it with no one at the device.
+        if HLAction.type(action) == "twapOrder" {
+            throw ExecutionError("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits for the device's buttons. Nothing was signed.")
+        }
         let what = HLAction.type(action) == "setReferrer" ? "ihatecrypto's referral code on Hyperliquid (4% off its fees)" : "a Hyperliquid order"
         return try await typed(try HLSigner.l1Typed(action, nonce: nonce, mainnet: true), what)
     }

@@ -350,7 +350,7 @@ extension Workspace {
         await planReviewTask?.value
         guard run == preparation else { return }
         // A stale confirmation redone under the sheet goes too: its old steps can't be signed.
-        if let stop = missingTradingKey ?? tradeRefusal { prepared = nil; executionError = stop; return }
+        if let stop = missingTradingKey ?? tradeRefusal ?? twapRefusal { prepared = nil; executionError = stop; return }
         if openVia1Click == nil, let q = quote, q.opening, fundingNet == nil, q.alternativeFee != nil { prepared = nil; askOpeningRoute(q); return }
         do {
             let p = try await executor(wallet).prepare(intent, policy: policy, openVia1Click: openVia1Click == true, spot: spotHoldings ?? [:])
@@ -409,7 +409,9 @@ extension Workspace {
                                       breakevenAfterPartial: partial, trailingPct: trailing)
                 rules.partialOrderPending = opened.pending && p.intent.partialTake == true
                 rules.twapId = opened.twapId
+                rules.twapRisk = opened.twapId.map { _ in p.sizing.lossAtStopUSD }
                 exitRules[opened.asset] = rules
+                keepAwakeForTwaps()
                 partialTries[opened.asset] = nil
                 stopTries[opened.asset] = nil
             } else {
@@ -1292,9 +1294,35 @@ extension Workspace {
         }
     }
 
+    /// While a TWAP of ours runs the Mac doesn't idle-sleep (the display may): asleep, nothing would stop a TWAP whose stop
+    /// fired. Ended once no TWAP is left to watch. A closed lid or a quit app still end the watch: the plan card says so.
+    func keepAwakeForTwaps() {
+        let running = exitRules.values.contains { $0.twapId != nil }
+        if running, twapAwake == nil {
+            twapAwake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled],
+                                                              reason: "A TWAP on Hyperliquid is running: ihatecrypto watches its stop.")
+        } else if !running, let token = twapAwake {
+            ProcessInfo.processInfo.endActivity(token)
+            twapAwake = nil
+        }
+    }
+
+    /// A TWAP keeps buying for hours: only a trading key that's on can stop it with no one at the Mac (its stop fired,
+    /// the loss grew). Without one it isn't started.
+    var twapRefusal: String? {
+        guard intent.twapMinutes != nil, !agentActive else { return nil }
+        return ledgerActive
+            ? say("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits for the device's buttons. Say «approve trading key», or buy in one order.",
+                  "Для TWAP нужен торговый ключ Ledger: без него остановка TWAP ждёт кнопок устройства. Скажи «approve trading key» или купи одним ордером.")
+            : say("A TWAP needs the Hyperliquid trading key on (Settings › Wallet › Hyperliquid): locked or off, nothing can stop the TWAP while you're away. Turn it on, or buy in one order.",
+                  "Для TWAP нужен включённый торговый ключ Hyperliquid (Settings › Wallet › Hyperliquid): когда он выключен или заблокирован, TWAP некому остановить без тебя. Включи его или купи одним ордером.")
+    }
+
     /// Runs after each refresh while the app is open: breakeven after the partial take, trailing stops.
     func guardPositions() async {
         guard signerWallet != nil, !executing else { return }
+        keepAwakeForTwaps()
+        defer { keepAwakeForTwaps() }
         // On a Ledger, stops move by themselves only through the trading key it approved: without it every move would
         // wait for the device's buttons. The stop and take on the exchange protect the position meanwhile.
         if ledgerActive, !agentActive {
@@ -1305,14 +1333,20 @@ extension Workspace {
             }
             return
         }
-        // A TWAP entry whose stop or take fired keeps buying: what the exchange shows now is checked afresh by the executor,
-        // which stops the TWAP and closes what it bought with no stop. Tried again next pass when it fails.
+        // A TWAP entry, each pass, read afresh by the executor: a stop or take that fired leaves it buying, and a loss at the
+        // stop past 1.5 × the plan's stops it too. It stays watched until Hyperliquid shows it ended or it's really
+        // stopped: a pass that fails is tried again on the next.
         for (coin, rules) in exitRules where rules.twapId != nil {
-            let open = positions.contains { $0.coin == coin }
-            let stopped = orders.contains { $0.coin == coin && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }
-            guard !open || !stopped, let wallet = signerWallet, let line = try? await executor(wallet).guardTwap(asset: coin) else { continue }
-            exitRules[coin]?.twapId = nil
-            if !line.isEmpty { notify(.positions, say("TWAP on \(coin) stopped", "TWAP по \(coin) остановлен"), line) }
+            guard let wallet = signerWallet,
+                  let watch = try? await executor(wallet).guardTwap(asset: coin, risk: rules.twapRisk) else { continue }
+            switch watch {
+            case .running: continue
+            case .ended: exitRules[coin]?.twapId = nil
+            case .stopped(let line):
+                exitRules[coin]?.twapId = nil
+                reply(line)
+                notify(.positions, say("TWAP on \(coin) stopped", "TWAP по \(coin) остановлен"), line)
+            }
         }
         // Rules live exactly as long as their position (or its waiting limit), however it was closed.
         // A TWAP not yet seen stopped keeps its rules.

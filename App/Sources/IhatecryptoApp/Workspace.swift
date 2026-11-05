@@ -542,6 +542,9 @@ final class Workspace {
     /// next try may go (Guardian.afterStopTry); `.distantFuture` while one is under way. Not saved: after a restart it
     /// tries again at once.
     @ObservationIgnored var stopTries: [String: [Bool: Guardian.Tries]] = [:]
+    /// Held while a TWAP of ours runs (an ExitRules with twapId): the Mac doesn't idle-sleep, so the guardian sees a stop
+    /// that fired. keepAwakeForTwaps begins and ends it.
+    @ObservationIgnored var twapAwake: (any NSObjectProtocol)?
     /// The position the plan card shows: the plan's asset if open, otherwise the first one.
     var position: HyperliquidAccount.Position? { positions.first { $0.coin == intent.asset } ?? positions.first }
 

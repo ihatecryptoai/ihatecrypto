@@ -86,7 +86,9 @@ extension Workspace {
             out.append("✓ Trailing: \(Fmt.pct(trail)) behind the best price, " + (r.entryPx == nil ? "a trailing stop Hyperliquid holds itself" : "moved by ihatecrypto once the limit fills"))
         }
         if let minutes = r.twapMinutes {
-            out.append("✓ Entry: TWAP over \(TradeIntent.duration(minutes)) on Hyperliquid, \(r.twapRandomize == true ? "randomized parts" : "equal parts"), no ihatecrypto fee on it")
+            out.append(agentActive
+                ? "✓ Entry: TWAP over \(TradeIntent.duration(minutes)) on Hyperliquid, \(r.twapRandomize == true ? "randomized parts" : "equal parts"), no ihatecrypto fee on it"
+                : "✗ Entry: TWAP over \(TradeIntent.duration(minutes)) on Hyperliquid needs the trading key on, so ihatecrypto can stop it while you're away")
         } else {
             out.append(r.entryPx.map { "✓ Entry: limit \(Fmt.price($0))" + (r.pullbackPct.map { " (\(Fmt.pct($0)) pullback)" } ?? "") } ?? "✓ Entry: at market")
         }

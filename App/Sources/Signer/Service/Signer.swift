@@ -611,6 +611,13 @@ enum Signer {
             } else {
                 let stale = agentOn && AgentStore.load() != nil
                 let type = HLAction.type(action)
+                // A TWAP buys on for hours: started only with a trading key on, the one thing that can stop it unattended
+                // (a stop that fired, a loss grown). The app's word that one is on isn't taken: the signer's own state says.
+                if type == "twapOrder", !stale {
+                    var v = Verdict()
+                    v.problems.append("A TWAP needs the Hyperliquid trading key on: locked or off, nothing could stop it unattended.")
+                    return refused(v)
+                }
                 let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
                     : type == "vaultTransfer" ? "move money between your Hyperliquid account and a vault"
                     : stale ? "sign a Hyperliquid order: the trading key's 7 days are over, and this renews them" : "sign a Hyperliquid order"

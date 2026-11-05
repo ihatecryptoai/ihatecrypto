@@ -438,7 +438,8 @@ public actor Executor {
                 + "parts at the market every 30 s or more, each within 3% of the price, \(intent.twapRandomize == true ? "sizes randomized ±20%" : "equal sizes"). "
                 + "ihatecrypto's \(HLBuilder.rate) isn't charged on it: Hyperliquid's TWAP takes no builder fee.")
             steps.append("Stop \(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit \(Fmt.pct($0))" } ?? "") from the first part's price, on the exchange for the whole position, once that part fills. «cancel the TWAP» stops the rest, "
-                + "and ihatecrypto stops it if the stop or take fires first (while it's open or in the menu bar).")
+                + "and ihatecrypto stops it if the stop or take fires first or the loss at the stop grows past 1.5 × the plan's, "
+                + "keeping the Mac awake while it runs. A closed lid, a quit app or a locked trading key leave it unwatched.")
         } else if let limit = intent.entryPx {
             steps.append("\(side) \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) as a limit at \(Fmt.price(HLAction.price(limit, szDecimals: market.szDecimals))) (now \(Fmt.price(market.markPx))), waiting on the exchange, with stop −\(Fmt.pct(intent.stopPct ?? 0))\(intent.takePct.map { " and take-profit +\(Fmt.pct($0))" } ?? ""), active once it fills.")
         } else {
@@ -559,8 +560,8 @@ public actor Executor {
     /// The entry as one TWAP: started, then the stop and take for the whole position once its first part fills (size 0:
     /// Hyperliquid's position TP/SL grows with it). A TWAP that fills nothing in 90 s, or whose stop doesn't go on, is
     /// stopped: it never builds a position without a stop.
-    // ponytail: the stop is N% from the first part's price; a TWAP that buys higher (lower, for a short) later loses more
-    // at it than the plan said, up to the price move during the TWAP. A max price on the TWAP would cap it.
+    // The stop is N% from the first part's price. Parts bought higher (lower, for a short) lose more at it: the plan's risk
+    // counts parts up to Plan.twapDrift worse, and guardTwap stops a TWAP whose loss at the stop passes 1.5 × that.
     private func runTwap(_ p: Prepared, market: Market, minutes: Int) async throws -> Opened {
         let long = p.intent.side == .long
         let action = try HLAction.twapOrder(asset: market.index, isBuy: long, size: p.sizing.size, minutes: minutes,
@@ -987,17 +988,53 @@ public actor Executor {
         return line
     }
 
-    /// The guardian's look at a TWAP entry, read afresh: a stop or take that fired leaves the TWAP buying. A position with
-    /// no stop on the exchange is closed (the close stops the TWAP first), a flat one only stops the TWAP. nil when the
-    /// stop is there: nothing to do. "" when there was nothing left to stop.
-    public func guardTwap(asset: String) async throws -> String? {
+    /// What the guardian's look at a TWAP entry came to.
+    public enum TwapWatch: Equatable, Sendable {
+        /// Running with its stop on the exchange, the loss at it within bounds: nothing to do.
+        case running
+        /// Hyperliquid runs it no more (finished, or stopped elsewhere): nothing left to watch.
+        case ended
+        /// Stopped now, and why, for the chat.
+        case stopped(String)
+    }
+
+    /// The guardian's look at a TWAP entry each pass, read afresh. A stop or take that fired leaves the TWAP buying: it is
+    /// stopped first, then what it bought with no stop is closed. A TWAP whose loss at its stop has grown past 1.5 × `risk`
+    /// (the plan's: prices moved while it bought) is stopped too. A TWAP that won't stop throws: the next pass tries again,
+    /// and the guardian keeps watching it until then.
+    public func guardTwap(asset: String, risk: Decimal?) async throws -> TwapWatch {
         let market = try await market(asset)
-        if try await HyperliquidAccount.positions(wallet.evm).contains(where: { $0.coin == asset && $0.size != 0 }) {
-            let orders = try await HyperliquidAccount.openOrders(wallet.evm)
-            if orders.contains(where: { $0.coin == asset && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") }) { return nil }
-            return "The \(asset) TWAP kept buying after its stop: " + (try await close(asset: asset))
+        let twap = try await HyperliquidAccount.runningTwaps(wallet.evm, coin: asset).first
+        let position = try await HyperliquidAccount.positions(wallet.evm).first { $0.coin == asset && $0.size != 0 }
+        let stops = try await HyperliquidAccount.openOrders(wallet.evm)
+            .filter { $0.coin == asset && $0.isTrigger && $0.reduceOnly && ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing") }
+            .compactMap(\.triggerPx)
+        if let position, stops.isEmpty {
+            _ = try await stopTwaps(market)
+            return .stopped("The \(asset) TWAP kept buying after its stop: it's stopped. " + (try await close(asset: asset)))
         }
-        return try await stopTwaps(market).isEmpty ? "" : "The \(asset) TWAP is stopped: its position's stop or take closed it."
+        guard let twap else { return .ended }
+        guard let position else {
+            _ = try await stopTwaps(market)
+            return .stopped("The \(asset) TWAP is stopped: its position's stop or take closed it.")
+        }
+        let long = position.size > 0
+        if let risk, let stop = long ? stops.max() : stops.min() {
+            let loss = Self.twapLossAtStop(held: abs(position.size), entry: position.entry, remaining: max(0, twap.size - abs(position.size)),
+                                           mark: market.markPx, stop: stop, long: long)
+            if loss > risk * Decimal(string: "1.5")! {
+                _ = try await stopTwaps(market)
+                return .stopped("The \(asset) TWAP is stopped: at its stop it would lose \(Fmt.usd(loss)), more than 1.5 × the plan's \(Fmt.usd(risk)). "
+                    + "What it bought keeps its stop and take.")
+            }
+        }
+        return .running
+    }
+
+    /// What a TWAP's position loses at `stop`: what it holds from its entry, and what it still buys from the price now.
+    public static func twapLossAtStop(held: Decimal, entry: Decimal, remaining: Decimal, mark: Decimal, stop: Decimal, long: Bool) -> Decimal {
+        let dir: Decimal = long ? 1 : -1
+        return held * max(0, dir * (entry - stop)) + remaining * max(0, dir * (mark - stop))
     }
 
     /// Every TWAP running on the market, stopped by its id (twapCancel). Returns their ids; one that won't stop throws.
@@ -1075,7 +1112,12 @@ public actor Executor {
             $0.coin == asset && $0.isTrigger && ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing")
         }
         let current = long ? old.compactMap(\.triggerPx).max() : old.compactMap(\.triggerPx).min()
-        if let loss = Self.stopBreaksRule(long: long, entry: position.entry, size: abs(position.size), stop: stop, current: current, equity: equity, policy: policy),
+        // A TWAP still buying puts the stop on the whole position it builds: the rule counts what it holds at its entry and
+        // what it still buys at the price now.
+        let held = abs(position.size)
+        let rest = max(0, ((try await HyperliquidAccount.runningTwaps(wallet.evm, coin: asset)).first?.size ?? 0) - held)
+        let entry = (held * position.entry + rest * market.markPx) / (held + rest)
+        if let loss = Self.stopBreaksRule(long: long, entry: entry, size: held + rest, stop: stop, current: current, equity: equity, policy: policy),
            let equity {
             throw ExecutionError("A stop at \(Fmt.price(stop)) means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
         }

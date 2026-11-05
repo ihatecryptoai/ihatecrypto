@@ -29,6 +29,8 @@ final class FakeHL: URLProtocol {
         var reported: [String] = []
         /// twapHistory's rows; a twapOrder is answered by `entry`, a twapCancel stops the row with its id.
         var twaps: [[String: Any]] = []
+        /// A twapCancel is answered with an error the TWAP isn't stopped by.
+        var twapCancelRefused = false
     }
     nonisolated(unsafe) static var state = State()
     static let lock = NSLock()
@@ -93,6 +95,7 @@ final class FakeHL: URLProtocol {
         if action["type"] as? String == "twapCancel" {
             let id = (action["t"] as? NSNumber)?.uint64Value ?? 0
             state.sent.append("twap cancel \(id)")
+            if state.twapCancelRefused { return #"{"status":"ok","response":{"type":"twapCancel","data":{"status":{"error":"Exchange busy."}}}}"# }
             state.twaps.removeAll { ($0["twapId"] as? NSNumber)?.uint64Value == id }
             return #"{"status":"ok","response":{"type":"twapCancel","data":{"status":"success"}}}"#
         }

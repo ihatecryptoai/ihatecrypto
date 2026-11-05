@@ -40,23 +40,41 @@ private func parse(_ text: String, to intent: TradeIntent = TradeIntent()) -> Tr
     for text in ["cancel the TWAP", "stop the twap", "отмени TWAP", "останови твап"] { #expect(PositionCommand.parse(text) == .cancelOrders, "\(text)") }
 }
 
-/// The same rules as one order, plus Hyperliquid's own: $100 at least, 5 minutes to 7 days, nothing but the entry.
+/// The same rules as one order, plus Hyperliquid's own ($100 at least, 5 minutes at least) and ours: 4 hours at most,
+/// nothing but the entry, and the risk counted from parts filling 3% worse (each part's slippage cap on Hyperliquid).
 @Test func aTwapKeepsTheRulesOfOneOrder() throws {
     var i = try #require(parse("long ETH 300 USDC over 2 h stop 2% risk $6 leverage 1x"))
     var e = Plan.evaluate(i, market: eth)
     #expect(e.problem == nil && e.sizing.map { $0.notional >= 100 } == true)
+    // $6 at a 2% stop is 0.0914 ETH as one order, 0.0385 as a TWAP: each coin may lose 2% + 3% of 3000 and the fees.
+    var one = i
+    one.twapMinutes = nil
+    let s = try #require(e.sizing), single = try #require(Plan.evaluate(one, market: eth).sizing)
+    #expect(s.size == Decimal(string: "0.0385") && single.size == Decimal(string: "0.0914") && s.stopPrice == single.stopPrice)
+    #expect(s.lossAtStopUSD <= 6 && s.lossAtStopUSD > Decimal(string: "5.9")!, "\(s.lossAtStopUSD)")
+    // «N USDC» buys what it says: the money's risk counts the 3% too, so the size comes back to it.
+    var money = try #require(parse("long ETH 300 USDC over 2 h stop 2% leverage 1x"))
+    money = Plan.resolve(money, market: eth, equity: 100_000, policy: RiskPolicy()).intent
+    #expect(Plan.evaluate(money, market: eth).sizing.map { $0.notional > 295 && $0.notional <= 300 } == true)
     var live = Live()
     live.market = eth
     let lines = Plan.position(i, e, live).lines
     #expect(lines.first.map { $0.hasPrefix("TWAP: 0.") && $0.contains(" ETH over 2 h, parts at the market every 30 s or more") && $0.hasSuffix("equal sizes.") } == true, "\(lines)")
     #expect(lines.contains { $0.contains("ihatecrypto's 0.05% isn't on a TWAP") })
 
-    i.riskUSD = 1   // $50 of ETH: under the TWAP's $100
+    i.riskUSD = 2   // $38 of ETH: under the TWAP's $100
     e = Plan.evaluate(i, market: eth)
     #expect(e.problem?.hasPrefix("A TWAP on Hyperliquid is from $100") == true)
 
     i.riskUSD = 6; i.twapMinutes = 3
-    #expect(Plan.evaluate(i, market: eth).problem == "A TWAP on Hyperliquid runs from 5 minutes to 7 days.")
+    #expect(Plan.evaluate(i, market: eth).problem == "A TWAP on Hyperliquid runs 5 minutes at least.")
+    // 4 hours at most: a longer one could buy on unwatched after its stop fires. Days are recurring buys.
+    i.twapMinutes = 240
+    #expect(Plan.evaluate(i, market: eth).problem == nil)
+    for minutes in [241, 1440] {
+        i.twapMinutes = minutes
+        #expect(Plan.evaluate(i, market: eth).problem.map { $0.hasPrefix("A TWAP here runs 4 hours at most") && $0.contains("recurring buys") } == true)
+    }
     i.twapMinutes = 120; i.trailingPct = 1
     #expect(Plan.evaluate(i, market: eth).problem?.hasPrefix("A TWAP is the whole entry") == true)
 }

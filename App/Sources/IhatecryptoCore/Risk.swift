@@ -160,8 +160,9 @@ extension Plan {
         // the stop, and the bridge brings what that margin and the fees need.
         if r.riskUSD == nil, let amount = i.amountUSDC, amount > 0, let stop = r.stopPct {
             var lev = r.leverage ?? 1
-            // What a dollar of position loses at the stop, fees on both legs included, so the margin is the money.
-            let perDollar = stop / 100 + 2 * RiskCalc.tradeFee
+            // What a dollar of position loses at the stop, fees on both legs included, so the margin is the money. A TWAP's
+            // parts may fill up to Plan.twapDrift worse: its risk counts that, as RiskCalc.size does.
+            let perDollar = stop / 100 + 2 * RiskCalc.tradeFee + (r.twapMinutes == nil ? 0 : Plan.twapDrift)
             // Leverage the rules chose is lowered until that money's risk fits the limit: «8 USDC» at 5× would break it.
             if i.leverage == nil, let equity, equity > 0 {
                 let fit = (equity * p.maxRiskPct / 100 / (amount * perDollar)).rounded(0, .down)
@@ -184,7 +185,7 @@ extension Plan {
         if i.riskUSD == nil, let risk = r.riskUSD, let stop = r.stopPct, let m = market, m.markPx > 0, let equity, equity > 0 {
             let entry = r.entryPx ?? m.markPx
             let stopPx = entry * (1 - (r.side == .long ? 1 : -1) * stop / 100)
-            let perCoin = entry * stop / 100 + (entry + stopPx) * RiskCalc.tradeFee
+            let perCoin = entry * (stop / 100 + (r.twapMinutes == nil ? 0 : Plan.twapDrift)) + (entry + stopPx) * RiskCalc.tradeFee
             let least = ((minNotional / entry).rounded(m.szDecimals, .up) * perCoin).rounded(2, .up)
             // Money the user named caps it: «4 USDC at 2×» is $8, and raising it to $10 would spend more than they said.
             let withinMoney = i.amountUSDC.map { minNotional / (r.leverage ?? 1) <= $0 } ?? true

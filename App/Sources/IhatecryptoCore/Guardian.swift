@@ -20,6 +20,8 @@ public struct ExitRules: Codable, Equatable, Sendable {
     /// The entry is this TWAP on the exchange. Its stop firing doesn't stop it: the guardian does, and closes what it
     /// bought after, so it never builds a position without a stop.
     public var twapId: UInt64?
+    /// The TWAP plan's loss at the stop: past 1.5 × it the guardian stops the TWAP (Executor.guardTwap).
+    public var twapRisk: Decimal?
 
     public init(openedSize: Decimal, entry: Decimal, long: Bool, breakevenAfterPartial: Bool, trailingPct: Decimal?) {
         self.openedSize = openedSize

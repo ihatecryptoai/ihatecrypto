@@ -596,8 +596,9 @@ public enum HLGuard {
         case "twapOrder":
             // Parts at the market inside the account, like an order; it takes no builder field, so no fee can ride on it.
             guard case .map(let t)? = pairs.first(where: { $0.0 == "twap" })?.1, t.count == 6,
-                  case .uint(let minutes)? = t.first(where: { $0.0 == "m" })?.1, (5...10_080).contains(minutes) else {
-                v.problems.append("A TWAP that isn't 5 minutes to 7 days of parts inside your account is not allowed.")
+                  // Up to 4 hours: a stop that fires leaves a TWAP buying, and only the app watching stops it (Plan.twapMaxMinutes).
+                  case .uint(let minutes)? = t.first(where: { $0.0 == "m" })?.1, (5...240).contains(minutes) else {
+                v.problems.append("A TWAP that isn't 5 minutes to 4 hours of parts inside your account is not allowed.")
                 return v
             }
             func field(_ k: String) -> MsgPack? { t.first(where: { $0.0 == k })?.1 }
