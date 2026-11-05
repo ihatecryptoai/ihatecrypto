@@ -13,6 +13,9 @@ public struct LLMUsage: Sendable, Equatable {
     public var window: Int?
     /// The service's own price for the answer in dollars, when it sends one (OpenRouter, Claude Code).
     public var cost: Double?
+    /// Claude Code said the answer went past the plan's limits and usage credits paid for it (its rate_limit_event's
+    /// isUsingOverage); nil when it didn't say.
+    public var overage: Bool?
 
     public init(input: Int, cached: Int = 0, written: Int = 0, output: Int, window: Int? = nil, cost: Double? = nil) {
         self.input = input
@@ -88,7 +91,7 @@ public struct ModelFacts: Sendable, Equatable {
     /// A prompt of more tokens than this is billed at these prices, every token of it: 0 for the base prices.
     public var over = 0
     /// The model's dearer prices for long prompts, by size (`pricing.overrides`): Haiku 5.5 costs 5× past 100k tokens,
-    /// GPT-6.1 Sol and Terra 2× past 272k.
+    /// GPT-6.1 Sol and Terra 2× the input and 1.5× the output past 272k (2026-11-05).
     public var longer: [ModelFacts] = []
 
     public init(window: Int, input: Double, cached: Double, output: Double, written: Double? = nil) {

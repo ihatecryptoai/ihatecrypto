@@ -18,7 +18,7 @@ nonisolated struct ContextMeter: Codable, Equatable {
     var spent = 0.0, last: Double?
     /// The dollars are the service's own bill (OpenRouter), not tokens at the list price.
     var billed = false
-    /// The dollars are Fable's on a Claude subscription: usage credits, at Claude Code's price (`credits`).
+    /// Some of the dollars are a Claude subscription's usage credits, at Claude Code's price (`credits`).
     var credits: Bool?
 
     /// The part of the window in use; nil when the window isn't known.
@@ -40,10 +40,13 @@ nonisolated struct ContextMeter: Codable, Equatable {
         return "\(tokens)"
     }
 
-    /// Fable on a Claude subscription: a Pro plan's limits don't cover it, Claude bills it as usage credits (a Max plan
-    /// spends up to half its weekly limit on it first). Its answers are counted in dollars, Claude Code's price for them.
-    /// support.claude.com/en/articles/15424964, 2026-11-05.
-    static func credits(provider: String, model: String) -> Bool { provider == "claude-code" && model.contains("fable") }
+    /// An answer on a Claude subscription that usage credits paid for, as Claude Code said (`overage`): counted in
+    /// dollars, Claude Code's price for it. Any model past the plan's limits with extra usage on, and Fable on a Pro plan,
+    /// whose limits don't cover it (a Max plan spends up to half its weekly limit on Fable first). An older Claude Code
+    /// says nothing: Fable is taken as credits then. support.claude.com/en/articles/15424964, 2026-11-05.
+    static func credits(provider: String, model: String, overage: Bool?) -> Bool {
+        provider == "claude-code" && (overage ?? model.contains("fable"))
+    }
 
     /// «$1.24», «$0.04», «$0.004»; under a tenth of a cent «<$0.001».
     static func dollars(_ value: Double) -> String {
@@ -72,11 +75,12 @@ extension Workspace {
             meter.sent = sent.count
             meter.lines = all.count
         }
-        let credits = ContextMeter.credits(provider: id, model: request.model)
+        let credits = ContextMeter.credits(provider: id, model: request.model, overage: usage.overage)
         if paid || credits, let cost = usage.cost ?? facts?.cost(usage) {
             meter.spent += cost
             meter.last = cost
             meter.billed = usage.cost != nil
+            // An answer within the plan's limits isn't counted, so credits stay said until a key pays for one.
             meter.credits = credits
         }
     }
@@ -108,9 +112,10 @@ struct ContextChip: View {
         let m = ws.meter
         if let used = m.used {
             // Under a fifth of the window left: the rim and the number light up; the chip itself stays still.
-            // Dollars while the chat's model is paid for (a key, or Fable on a subscription), said as what they were spent on.
+            // Dollars while a key pays for the chat's model, or once usage credits paid for a Claude Code answer while it still
+            // answers, said as what they were spent on. Another subscription or a model on this Mac shows its tokens.
             let tight = (m.share ?? 0) >= 0.8, credits = m.credits == true
-            let paid = (ws.provider.info.kind == .apiKey || ContextMeter.credits(provider: ws.providerID, model: ws.model)) && m.spent > 0
+            let paid = (ws.provider.info.kind == .apiKey || credits && ws.providerID == "claude-code") && m.spent > 0
             Button {
                 if open { open = false; return }
                 guard Date.now.timeIntervalSince(closedAt) > 0.3 else { return }
@@ -120,7 +125,7 @@ struct ContextChip: View {
                     if let share = m.share { ContextRing(share: share, ink: tight ? Brand.accent : Color.primary.opacity(0.82)) }
                     if paid {
                         Text(ContextMeter.dollars(m.spent)).foregroundStyle(tight ? Brand.accentInk : .primary)
-                        if credits { Text(ws.say("credits", "за кредиты", "con créditos")).font(.ui(12, .medium)).foregroundStyle(.secondary) }
+                        if credits { Text(ws.say("credits", "из кредитов", "con créditos")).font(.ui(12, .medium)).foregroundStyle(.secondary) }
                     } else {
                         Text(ContextMeter.short(used)).foregroundStyle(tight ? Brand.accentInk : .primary)
                         if let window = m.window { Text("/ " + ContextMeter.short(window)).font(.ui(12, .medium)).foregroundStyle(.secondary) }
@@ -135,7 +140,7 @@ struct ContextChip: View {
             .buttonStyle(.plain)
             .fixedSize()
             .accessibilityLabel(m.window.map { "Context: \(ContextMeter.short(used)) of \(ContextMeter.short($0)) tokens" } ?? "Context: \(ContextMeter.short(used)) tokens")
-            .help(paid ? (credits ? "Fable is paid for with usage credits. " : "") + "This chat's answers cost \(ContextMeter.dollars(m.spent)) so far. Click for the context they read."
+            .help(paid ? (credits ? "Usage credits paid for answers past your Claude plan's limits. " : "") + "This chat's answers cost \(ContextMeter.dollars(m.spent)) so far. Click for the context they read."
                        : "What the model read with your last message" + (m.window == nil ? "." : ", of what its window holds."))
             .popover(isPresented: $open, arrowEdge: .top) { details(m, used: used, credits: credits) }
             .onChange(of: open) { if !open { closedAt = .now } }
@@ -181,7 +186,7 @@ struct ContextChip: View {
                     row(nil, "This chat’s answers", ContextMeter.dollars(m.spent))
                     if let last = m.last { row(nil, "The last one", ContextMeter.dollars(last)) }
                 }
-                Text(credits ? "Claude Code’s price for these tokens. A Pro plan doesn’t cover Fable: Claude takes it from usage credits. A Max plan spends up to half its weekly limit on Fable first."
+                Text(credits ? "These answers went past your Claude plan’s limits: Claude takes them from usage credits, at Claude Code’s price."
                      : m.billed ? "As OpenRouter charged it." : "Tokens at the service’s list price. Its own invoice is the final word.")
                     .font(.ui(11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }

@@ -374,7 +374,40 @@ nonisolated final class AnthropicStub: URLProtocol {
     }
     #expect(answer == "one two")
     #expect(seen.texts == ["one ", "one two"])
-    #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: []), streaming: true).contains("--include-partial-messages"))
+    #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: [])).contains("--include-partial-messages"))
+}
+
+/// Claude Code says before its result whether the answer went past the plan's limits onto usage credits: the
+/// rate_limit_event of a real Fable 5.1 run on a Max plan (2026-11-05), which spends the plan's limit, not credits.
+/// A short request (`complete`) says it too; a run without the event (an older Claude Code) says nothing.
+@Test(.timeLimit(.minutes(1))) func claudeCodeSaysWhenAnAnswerIsPaidFromCredits() async throws {
+    let max = #"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"seven_day":{"utilization":0.15},"seven_day_overage_included":{"utilization":0.03}}}}"#
+    final class Heard: @unchecked Sendable { let lock = NSLock(); var usage: LLMUsage? }
+    func usage(_ event: String?, streaming: Bool = true) async throws -> LLMUsage? {
+        let script = FileManager.default.temporaryDirectory.appendingPathComponent("fake-claude-\(UUID().uuidString).sh")
+        defer { try? FileManager.default.removeItem(at: script) }
+        try """
+        #!/bin/sh
+        cat > /dev/null
+        echo '{"type":"system","subtype":"init"}'
+        \(event.map { "echo '\($0)'" } ?? "")
+        echo '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0.013,"usage":{"input_tokens":5,"output_tokens":4}}'
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let heard = Heard()
+        let client = MeteredClient(ClaudeCodeClient(path: script.path)) { usage, _ in heard.lock.withLock { heard.usage = usage } }
+        let r = LLMRequest(model: "claude-fable-5-1", messages: [LLMMessage(.user, "x")])
+        #expect(try await (streaming ? client.stream(r) { _ in } : client.complete(r)) == "ok")
+        return heard.lock.withLock { heard.usage }
+    }
+    #expect(try await usage(max)?.overage == false)
+    let credits = max.replacingOccurrences(of: #""isUsingOverage":false"#, with: #""isUsingOverage":true"#)
+    #expect(try await usage(credits)?.overage == true)
+    // Said twice in one run (a helper model's request): credits if either answer took them.
+    #expect(try await usage(credits + "'\necho '" + max)?.overage == true)
+    let older = try #require(try await usage(nil))
+    #expect(older.overage == nil && older.cost == 0.013)
+    #expect(try await usage(max, streaming: false)?.overage == false)
 }
 
 /// Ollama answers through its own API, with a window that holds ihatecrypto's instructions: its OpenAI-style endpoint

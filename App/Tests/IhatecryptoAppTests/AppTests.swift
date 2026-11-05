@@ -23,13 +23,15 @@ import Testing
     }
 }
 
-/// Fable on a Claude subscription is paid for with usage credits: its chip counts dollars. Other Claude models, and
-/// Fable on a key (counted as a key's anyway), aren't this.
-@Test func fableOnASubscriptionIsCountedAsCredits() {
-    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-fable-5-1"))
-    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-fable-5"))
-    #expect(!ContextMeter.credits(provider: "claude-code", model: "claude-opus-5-5"))
-    #expect(!ContextMeter.credits(provider: "anthropic", model: "claude-fable-5-1"))
+/// A subscription's answer is counted in dollars when Claude Code says usage credits paid for it, whatever the model:
+/// Fable within a Max plan's limit isn't, Opus past the limit with extra usage on is. An older Claude Code says
+/// nothing, and Fable is taken as credits then (a Pro plan's limits don't cover it). A key is never credits.
+@Test func creditsFollowClaudeCode() {
+    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-opus-5-5", overage: true))
+    #expect(!ContextMeter.credits(provider: "claude-code", model: "claude-fable-5-1", overage: false))
+    #expect(ContextMeter.credits(provider: "claude-code", model: "claude-fable-5-1", overage: nil))
+    #expect(!ContextMeter.credits(provider: "claude-code", model: "claude-opus-5-5", overage: nil))
+    #expect(!ContextMeter.credits(provider: "anthropic", model: "claude-fable-5-1", overage: true))
 }
 
 @Test func accountsSayTheirKind() {
