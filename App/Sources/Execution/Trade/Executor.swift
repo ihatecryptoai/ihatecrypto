@@ -681,7 +681,8 @@ public actor Executor {
         let market = try await market(asset)
         let orders = try await HyperliquidAccount.openOrders(wallet.evm).filter { $0.coin == asset }
         guard let p = try await HyperliquidAccount.positions(wallet.evm).first(where: { $0.coin == asset && $0.size != 0 }) else { return .waiting }
-        guard let stop = orders.first(where: { $0.isTrigger && ($0.orderType ?? "").contains("Stop") })?.triggerPx else {
+        // 1R from the fixed stop: a trailing stop's trigger follows the price.
+        guard let stop = orders.first(where: { $0.isTrigger && ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing") })?.triggerPx else {
             if HyperliquidAccount.Order.fillsInPart(orders) { return .waiting }
             throw ExecutionError("\(asset) has no stop on the exchange, so the half has no 1R to go at.")
         }

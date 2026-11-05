@@ -3894,7 +3894,9 @@ struct PositionBoard: View {
     var body: some View {
         let long = position.size > 0
         let triggers = ws.orders.filter { $0.coin == position.coin && $0.isTrigger }
-        let stop = triggers.first { ($0.orderType ?? "").contains("Stop") }?.triggerPx
+        // The fixed stop, else the exchange's trailing one.
+        let stop = (triggers.first { ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing") }
+            ?? triggers.first { ($0.orderType ?? "").contains("Stop") })?.triggerPx
         let takes = triggers.filter { ($0.orderType ?? "").contains("Take") }.compactMap(\.triggerPx)
         let mark = ws.markets[position.coin]?.markPx
         VStack(alignment: .leading, spacing: 12) {
