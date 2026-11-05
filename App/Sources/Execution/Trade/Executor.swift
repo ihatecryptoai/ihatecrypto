@@ -348,11 +348,11 @@ public actor Executor {
         let leverage = NSDecimalNumber(decimal: intent.leverage ?? 1).intValue
 
         // HIP-3 markets («xyz:CL») keep margin on their own exchange: what is free there counts, and the rest
-        // moves over from the main balance before the order.
+        // moves over from the main balance before the order. A unified account trades them all from its one balance.
         var dexFree: Decimal = 0
         if let dex = market.dex { dexFree = try await Hyperliquid.dexBalance(user: wallet.evm, dex: dex).withdrawable }
         var dexTransfer: (dex: String, usdc: Decimal)?
-        if let dex = market.dex {
+        if let dex = market.dex, !hl.unified {
             let needed = sizing.margin * (1 + Self.slippage) + sizing.feesUSD
             if needed > dexFree { dexTransfer = (dex, (needed - dexFree).rounded(2, .up)) }
         }

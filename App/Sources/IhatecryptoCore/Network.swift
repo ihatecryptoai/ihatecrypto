@@ -89,30 +89,55 @@ public enum Hyperliquid {
         public let accountValue: Decimal
         public let withdrawable: Decimal
         public let spotUSDC: Decimal
+        /// A unified account or portfolio margin: one USDC balance on spot carries perps, HIP-3 exchanges and spot.
+        /// accountValue and withdrawable are read from it, spotUSDC is 0 (the same money), nothing moves between them.
+        public var unified = false
     }
 
-    /// A HIP-3 exchange's own margin balance: account value and what is free.
+    /// The account's abstraction mode (userAbstraction): «unifiedAccount» and «portfolioMargin» keep every balance and
+    /// hold in the spot state, where the perp and HIP-3 exchange states mean nothing (account-abstraction-modes doc).
+    /// «disabled» (Manual) and «default» keep perp and spot apart. A reply that isn't a mode reads as apart, as before.
+    public static func unified(user: String) async throws -> Bool {
+        let mode = try JSONSerialization.jsonObject(with: try await HTTP.post(info, json: ["type": "userAbstraction", "user": user]),
+                                                    options: .fragmentsAllowed) as? String
+        return mode == "unifiedAccount" || mode == "portfolioMargin"
+    }
+
+    /// A HIP-3 exchange's own margin balance: account value and what is free. Nothing in a unified account, whose money
+    /// is all on the one balance `balance(user:)` reads.
     public static func dexBalance(user: String, dex: String) async throws -> (accountValue: Decimal, withdrawable: Decimal) {
         struct Summary: Decodable { let accountValue: String }
         struct Perp: Decodable { let marginSummary: Summary; let withdrawable: String }
+        async let one = unified(user: user)
         let perp = try JSONDecoder().decode(Perp.self, from: try await HTTP.post(info, json: ["type": "clearinghouseState", "user": user, "dex": dex]))
+        if try await one { return (0, 0) }
         return (try dec(perp.marginSummary.accountValue), try dec(perp.withdrawable))
     }
 
-    /// Perp and spot are separate balances on HyperCore; they are shown apart, never summed.
+    /// Perp and spot are separate balances on HyperCore; they are shown apart, never summed. In a unified account the
+    /// spot USDC is the whole account (positions' profit and loss included) and what open positions and orders hold
+    /// of it is its `hold`.
+    // ponytail: portfolio margin's other collateral (HYPE, BTC) isn't counted here, and a USDC loan reads as 0; the
+    // spot tokens show in the portfolio on their own.
     public static func balance(user: String) async throws -> Balance {
         struct Summary: Decodable { let accountValue: String }
         struct Perp: Decodable { let marginSummary: Summary; let withdrawable: String }
-        struct SpotRow: Decodable { let coin: String; let total: String }
+        struct SpotRow: Decodable { let coin: String; let total: String; let hold: String? }
         struct Spot: Decodable { let balances: [SpotRow] }
         async let perpData = HTTP.post(info, json: ["type": "clearinghouseState", "user": user])
         async let spotData = HTTP.post(info, json: ["type": "spotClearinghouseState", "user": user])
+        async let one = unified(user: user)
         let perp = try JSONDecoder().decode(Perp.self, from: try await perpData)
         let spot = try JSONDecoder().decode(Spot.self, from: try await spotData)
+        let usdc = spot.balances.first { $0.coin == "USDC" }
+        if try await one {
+            let total = max(0, try dec(usdc?.total ?? "0"))
+            return Balance(accountValue: total, withdrawable: max(0, total - (try dec(usdc?.hold ?? "0"))), spotUSDC: 0, unified: true)
+        }
         return Balance(
             accountValue: try dec(perp.marginSummary.accountValue),
             withdrawable: try dec(perp.withdrawable),
-            spotUSDC: try dec(spot.balances.first { $0.coin == "USDC" }?.total ?? "0")
+            spotUSDC: try dec(usdc?.total ?? "0")
         )
     }
 }

@@ -5,7 +5,8 @@ import IhatecryptoCore
 
 /// Hyperliquid's spot book: HYPE and the other spot tokens bought with, and sold for, USDC on HyperCore. A spot order is
 /// an order like a perp's, on asset 10000 + the pair's index (spotMeta), paid from the spot USDC balance — which the perp
-/// balance tops up first when short (usdClassTransfer, the user's own signature). IOC within 1% of the mid; the exchange
+/// balance tops up first when short (usdClassTransfer, the user's own signature; a unified account has one balance and
+/// moves nothing). IOC within 1% of the mid; the exchange
 /// takes no order under 10 USDC.
 extension Executor {
     struct SpotPair: Equatable {
@@ -134,7 +135,9 @@ extension Executor {
             let free = try await spotFree("USDC")
             if free < usdc {
                 let need = (usdc - free).rounded(2, .up)
-                let perp = try await Hyperliquid.balance(user: wallet.evm).withdrawable
+                let hl = try await Hyperliquid.balance(user: wallet.evm), perp = hl.withdrawable
+                // A unified account has one balance: its spot USDC is already everything there is to move.
+                guard !hl.unified else { throw ExecutionError("\(Fmt.num(free)) USDC free on Hyperliquid: \(Fmt.num(usdc)) is more. Nothing was signed.") }
                 guard perp >= need else {
                     throw ExecutionError("\(Fmt.num(free)) USDC on spot and \(Fmt.num(perp)) free on perp: \(Fmt.num(usdc)) is more. Nothing was signed.")
                 }

@@ -410,12 +410,14 @@ public enum Holdings {
     // MARK: Hyperliquid spot
 
     /// Everything on Hyperliquid's spot side, USDC included (the perp account doesn't count it), priced off its own book.
+    /// A unified account's USDC is the account itself (Hyperliquid.balance counts it), so it isn't listed again.
     /// nil when it couldn't be read.
     public static func hyperliquidSpot(user: String) async -> [Holding]? {
         async let state = retrying { try await HTTP.post("https://api.hyperliquid.xyz/info", json: ["type": "spotClearinghouseState", "user": user]) }
         async let meta = retrying { try await HTTP.post("https://api.hyperliquid.xyz/info", json: ["type": "spotMetaAndAssetCtxs"]) }
-        guard let s = await state, let m = await meta else { return nil }
-        return hyperliquidSpot(s, meta: m)
+        async let one = retrying { try await Hyperliquid.unified(user: user) }
+        guard let s = await state, let m = await meta, let unified = await one else { return nil }
+        return hyperliquidSpot(s, meta: m).filter { !(unified && $0.contract == "USDC") }
     }
 
     static func hyperliquidSpot(_ state: Data?, meta: Data?) -> [Holding] {
