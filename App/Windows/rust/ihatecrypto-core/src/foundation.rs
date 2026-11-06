@@ -426,3 +426,56 @@ pub fn iso8601(s: &str) -> Option<Date> {
     }
     ["%Y-%m-%dT%H:%M:%S%:z", "%Y-%m-%dT%H:%M:%S%z"].iter().find_map(|f| DateTime::parse_from_str(s, f).ok()).map(|d| d.with_timezone(&Utc))
 }
+
+// MARK: Round 5: ISO 8601 with fractions, token units, an optional Date in JSON
+
+/// `Date(_:strategy: .iso8601)`: `iso8601`'s forms, with fractional seconds too («…T12:34:56.000000Z», 1–9 digits
+/// after a «.»), as Blockscout writes its timestamps.
+pub fn iso8601_fraction(s: &str) -> Option<Date> {
+    let Some(dot) = s.get(19..20).filter(|c| *c == ".").map(|_| 19) else { return iso8601(s) };
+    let digits = s[dot + 1..].bytes().take_while(u8::is_ascii_digit).count();
+    if !(1..=9).contains(&digits) { return None }
+    let fraction: f64 = s[dot..dot + 1 + digits].parse().ok()?;
+    Some(adding(iso8601(&format!("{}{}", &s[..dot], &s[dot + 1 + digits..]))?, fraction))
+}
+
+/// `units / pow(10, decimals)` that can't panic: None for negative decimals (Foundation's NaN); a token claiming more
+/// places than Decimal holds comes out as 0.
+pub fn shifted(units: Decimal, decimals: i64) -> Option<Decimal> {
+    if decimals < 0 { return None }
+    if decimals > 60 { return Some(Decimal::ZERO) }
+    let (mut v, mut left) = (units, decimals as u32);
+    while left > 0 {
+        let step = left.min(28);
+        v = v.checked_div(pow10(step))?;
+        left -= step;
+    }
+    Some(v)
+}
+
+/// A whole number of base units as an API writes it («-1230000…», any length) over 10^decimals. Past Decimal's 28
+/// digits the lowest ones go first, so a wallet holding 10^29 base units (79 billion PEPE is past Decimal) still
+/// reads. None for a text that isn't a whole number, negative decimals or an amount past Decimal itself.
+pub fn units(raw: &str, decimals: i64) -> Option<Decimal> {
+    if decimals < 0 { return None }
+    let (negative, digits) = match raw.strip_prefix('-') { Some(d) => (true, d), None => (false, raw.strip_prefix('+').unwrap_or(raw)) };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) { return None }
+    let digits = digits.trim_start_matches('0');
+    let cut = digits.len().saturating_sub(28);
+    let kept = if digits.is_empty() { Decimal::ZERO } else { Decimal::from_str(&digits[..digits.len() - cut]).ok()? };
+    let left = decimals - cut as i64;
+    let v = if left >= 0 { shifted(kept, left)? } else { kept.checked_mul(pow10(u32::try_from(-left).ok().filter(|n| *n <= 28)?))? };
+    Some(if negative { -v } else { v })
+}
+
+/// An optional Date in `Codable` JSON, left out when nil (`#[serde(default, skip_serializing_if = "Option::is_none",
+/// with = "foundation::optional_date")]`).
+pub mod optional_date {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(d: &Option<Date>, s: S) -> Result<S::Ok, S::Error> {
+        match d { Some(d) => date::serialize(d, s), None => s.serialize_none() }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Date>, D::Error> { Ok(Option::<f64>::deserialize(d)?.map(|t| unix(t + REFERENCE))) }
+}
