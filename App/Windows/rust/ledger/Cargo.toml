@@ -1,0 +1,19 @@
+[package]
+name = "ledger"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "A Ledger over APDUs: the Rust port of App/Sources/Wallet/Ledger (the protocol, the Ethereum and Solana apps, Ledger's signed descriptors) with Windows' USB and Bluetooth transports through winsec and Speculos over TCP"
+
+[dependencies]
+wallet.workspace = true
+net.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winsec = { path = "../../native" }
+
+[dev-dependencies]
+hyperliquid.workspace = true
+evm.workspace = true

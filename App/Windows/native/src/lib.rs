@@ -5,8 +5,8 @@
 #![cfg(windows)]
 #![allow(clippy::missing_safety_doc)]
 
-mod ble;
-mod ledger;
+pub mod ble;
+pub mod ledger;
 
 use std::ffi::c_void;
 use std::sync::Once;
