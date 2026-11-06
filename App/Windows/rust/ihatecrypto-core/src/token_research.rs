@@ -14,18 +14,10 @@ use wallet::Result;
 use crate::charts::Range;
 use crate::foundation::{
     self, Date, chars, compact_usd, count, decimal, double, first, format_g, group, iso8601, json_decimal, replacing, seconds, trim_set,
-    trim_spaces, unix,
+    unix,
 };
+use crate::holdings::Holding;
 use crate::tokens::{MarketInfo, Point, TokenLookup, TokenMarket};
-
-/// `Holding.plain` (Holdings.swift): a token's name or ticker on one line, short, with nothing hidden in it — line
-/// breaks, control characters and invisible formatting dropped, at most `max` characters.
-// pending: it moves to Holdings with the rest of `Holding` (round 5).
-pub fn plain(text: &str, max: usize) -> String {
-    let kept: String = text.chars().filter(|&c| !wallet::address_check::hidden(c)).collect();
-    let s = trim_spaces(&kept);
-    if count(s) > max { format!("{}…", chars(s)[..max.saturating_sub(1)].concat()) } else { s.into() }
-}
 
 /// What buying a Solana token by its mint needs, and what to warn about.
 #[derive(Debug, Clone, PartialEq)]
@@ -216,8 +208,8 @@ pub fn parse_solana_token(data: &[u8], mint: &str) -> Option<SolanaToken> {
     let audit = t.get("audit");
     let tags = tags(t);
     Some(SolanaToken {
-        name: plain(t.get("name").and_then(Value::as_str).unwrap_or("?"), 32),
-        symbol: plain(t.get("symbol").and_then(Value::as_str).unwrap_or("?"), 16),
+        name: Holding::plain(t.get("name").and_then(Value::as_str).unwrap_or("?"), 32),
+        symbol: Holding::plain(t.get("symbol").and_then(Value::as_str).unwrap_or("?"), 16),
         decimals,
         token2022: t.get("tokenProgram").and_then(Value::as_str) == Some("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb") || tags.contains(&"token-2022"),
         verified: verified(t),
@@ -241,7 +233,7 @@ pub fn jupiter_facts(data: &[u8], mint: &str, now: Date) -> Option<String> {
     let text = |key: &str| t.get(key).and_then(Value::as_str);
     let mut lines = vec![format!(
         "Solana token {} ({}), mint {mint}, chain id solana. Jupiter: {}{}.",
-        plain(text("name").unwrap_or("?"), 32), plain(text("symbol").unwrap_or("?"), 16), if verified(t) { "verified" } else { "not verified" },
+        Holding::plain(text("name").unwrap_or("?"), 32), Holding::plain(text("symbol").unwrap_or("?"), 16), if verified(t) { "verified" } else { "not verified" },
         if tags.is_empty() { String::new() } else { format!(", tags {}", tags.join(", ")) }
     )];
     lines.push(format!(
@@ -321,7 +313,7 @@ pub fn dex_facts(data: &[u8], address: &str, now: Date) -> Option<String> {
     let top = chains.first()?;
     let m = TokenMarket::parse(data, address, &top.chain)?;
     let also = if chains.len() > 1 { format!("; also trades on {}", chains[1..].iter().map(|c| c.chain.as_str()).collect::<Vec<_>>().join(", ")) } else { String::new() };
-    let head = format!("DexScreener: {} ({}), contract {}, chain id {}{also}.", plain(&m.name, 32), plain(&m.symbol, 16), top.address, top.chain);
+    let head = format!("DexScreener: {} ({}), contract {}, chain id {}{also}.", Holding::plain(&m.name, 32), Holding::plain(&m.symbol, 16), top.address, top.chain);
     Some([vec![head], pool_facts(&m, now)].concat().join("\n"))
 }
 
@@ -387,7 +379,7 @@ pub fn search_facts(data: &[u8], query: &str, now: Date) -> Option<(String, Stri
         let change = dec(p.get("priceChange").and_then(|c| c.get("h24")));
         let line = format!(
             "{} ({}) on chain id {chain}, contract {address}: price {}, liquidity {}{}{}",
-            plain(base.get("symbol").and_then(Value::as_str).unwrap_or("?"), 16), plain(base.get("name").and_then(Value::as_str).unwrap_or("?"), 32),
+            Holding::plain(base.get("symbol").and_then(Value::as_str).unwrap_or("?"), 16), Holding::plain(base.get("name").and_then(Value::as_str).unwrap_or("?"), 32),
             price(dec(p.get("priceUsd"))), usd(Some(liquidity)), change.map_or(String::new(), |c| format!(", 24h {}", pct(c, true))),
             opened.map_or(String::new(), |o| format!(", pool opened {} ago", age(o, now)))
         );

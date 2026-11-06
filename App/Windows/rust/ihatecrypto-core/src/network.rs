@@ -14,6 +14,7 @@ use wallet::{Result, WalletError};
 
 use crate::foundation::{Num, Rounding, decimal, text};
 use crate::intent::Fmt;
+use crate::holdings::Holding;
 use crate::plan::{BridgeQuote, Market};
 
 fn fail<T>(m: impl Into<String>) -> Result<T> { Err(WalletError(m.into())) }
@@ -263,13 +264,124 @@ impl Hyperliquid {
 
 // MARK: - Solana (public RPC)
 
-/// Solana over its public nodes.
-// pending: `Solana.Balance`, `balance(owner:lendShares:)` and `holdings` (round 5): their tokens are Holdings.swift's
-// `Holding`.
+/// Solana over the person's own node when set in Settings, else the public one.
 pub struct Solana;
+
+/// SOL, USDC and every other token in the wallet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SolanaBalance {
+    pub sol: Decimal,
+    pub usdc: Decimal,
+    /// Every other token in the wallet, the most valuable first; scam airdrops included (see `Holding::looks_real`).
+    pub tokens: Vec<Holding>,
+    /// Jupiter didn't answer: the tokens came by mint, without names or prices, and their money isn't counted.
+    pub unpriced: bool,
+}
+
+impl SolanaBalance {
+    /// Unpriced, the tokens take the last read's names and prices at their new amounts: read as they came, the
+    /// automation wallet's 25 USDT dropped out of the balance until the next read. Still unpriced when one is new.
+    pub fn pricing(&self, last: &[Holding]) -> SolanaBalance {
+        if !self.unpriced { return self.clone() }
+        let tokens = self.tokens.iter().map(|t| last.iter().find(|l| l.contract == t.contract).map_or_else(|| t.clone(), |l| l.at(t.amount))).collect();
+        let unpriced = self.tokens.iter().any(|t| !last.iter().any(|l| l.contract == t.contract));
+        SolanaBalance { tokens, unpriced, ..self.clone() }
+    }
+}
 
 impl Solana {
     pub const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+    fn rpc() -> String { net::solana_rpc::SolanaRpc::new().nodes()[0].clone() }
+
+    /// `lend_shares`: Jupiter Lend's share tokens (jlUSDC…) among the tokens too, for a transfer of them as they are.
+    /// The public node throttles getTokenAccountsByOwner when a chain's step and its transfer read the wallet a moment
+    /// apart: asked again 1, 2, 4 and 8 s later.
+    pub async fn balance(owner: &str, lend_shares: bool) -> Result<SolanaBalance> {
+        for delay in net::DELAYS {
+            match Self::read(owner, lend_shares).await {
+                Err(e) if net::transient(&e.0) => tokio::time::sleep(delay).await,
+                other => return other,
+            }
+        }
+        Self::read(owner, lend_shares).await
+    }
+
+    async fn read(owner: &str, lend_shares: bool) -> Result<SolanaBalance> {
+        let rpc = Self::rpc();
+        // Explicitly «finalized»: since Alpenglow (2026-10-21) it is the same slot as «confirmed».
+        let accounts = |program: &str| json!({"jsonrpc": "2.0", "id": 2, "method": "getTokenAccountsByOwner",
+                                              "params": [owner, {"programId": program}, {"encoding": "jsonParsed", "commitment": "finalized"}]});
+        // Both token programs: meme coins are Token-2022 and don't show under the classic one.
+        let (lamports, classic, token2022) = tokio::join!(
+            post(&rpc, json!({"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [owner, {"commitment": "finalized"}]})),
+            post(&rpc, accounts("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")),
+            post(&rpc, accounts("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")));
+        let (lamports, classic, token2022): (Value, Value, Value) = (decode(&lamports?)?, decode(&classic?)?, decode(&token2022?)?);
+        let error = |v: &Value| v.pointer("/error/message").and_then(Value::as_str).map(str::to_string);
+        let (Some(l), Some(c), Some(t)) = (lamports.pointer("/result/value").and_then(Value::as_u64),
+                                           classic.pointer("/result/value").and_then(Value::as_array),
+                                           token2022.pointer("/result/value").and_then(Value::as_array)) else {
+            let why = error(&lamports).or_else(|| error(&classic)).or_else(|| error(&token2022)).unwrap_or_else(|| "empty response".into());
+            return fail(format!("Solana RPC: {why}"));
+        };
+        let mut usdc = Decimal::ZERO;
+        let mut others: HashMap<String, Decimal> = HashMap::new();
+        for item in c.iter().chain(t) {
+            let info = item.pointer("/account/data/parsed/info");
+            let (Some(mint), Some(amount)) = (info.and_then(|i| i.get("mint")).and_then(Value::as_str), info.and_then(|i| i.get("tokenAmount"))) else {
+                return Err(unreadable());
+            };
+            let decimals = amount.get("decimals").and_then(Value::as_i64).ok_or_else(unreadable)?;
+            let amount = crate::holdings::amount(amount.get("amount"), decimals).ok_or_else(unreadable)?;
+            if mint == Self::USDC_MINT { usdc = usdc.saturating_add(amount) }
+            else if amount > Decimal::ZERO { let e = others.entry(mint.to_string()).or_default(); *e = e.saturating_add(amount); }
+        }
+        let (tokens, priced) = Self::holdings(&others, lend_shares).await;
+        Ok(SolanaBalance { sol: Decimal::from(l) / Decimal::from(1_000_000_000u64), usdc, tokens, unpriced: !priced })
+    }
+
+    /// Names, icons and prices from Jupiter, 100 mints a request (its search's limit). Jupiter Lend's share tokens are
+    /// left out: the Jupiter Lend row counts them. Without Jupiter the tokens still show, by mint and unpriced.
+    pub async fn holdings(amounts: &HashMap<String, Decimal>, lend_shares: bool) -> (Vec<Holding>, bool) {
+        let mut mints: Vec<&String> = amounts.keys().collect();
+        mints.sort();
+        let (mut pages, mut priced) = (Vec::new(), true);
+        for chunk in mints.chunks(100) {
+            let query = chunk.iter().map(|m| m.as_str()).collect::<Vec<_>>().join(",");
+            match crate::token_research::get(&format!("{}{query}", crate::token_research::JUPITER_SEARCH)).await {
+                Ok(data) => pages.push(data),
+                Err(_) => priced = false,
+            }
+        }
+        (Self::holdings_from(amounts, &pages, lend_shares), priced)
+    }
+
+    /// The tokens as Jupiter's search pages name and price them; a mint it doesn't know shows by its first letters.
+    pub fn holdings_from(amounts: &HashMap<String, Decimal>, pages: &[Vec<u8>], lend_shares: bool) -> Vec<Holding> {
+        let mut by_mint: HashMap<String, Value> = HashMap::new();
+        for t in pages.iter().filter_map(|p| serde_json::from_slice::<Value>(p).ok()).filter_map(|v| v.as_array().cloned()).flatten() {
+            if let Some(id) = t.get("id").and_then(Value::as_str) { by_mint.entry(id.to_string()).or_insert(t); }
+        }
+        let empty = Value::Object(Default::default());
+        let mut out: Vec<Holding> = amounts.iter().filter_map(|(mint, &amount)| {
+            let t = by_mint.get(mint).unwrap_or(&empty);
+            let tags: Vec<&str> = t.get("tags").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+            if tags.contains(&"jup-lend-earn") && !lend_shares { return None }
+            let symbol = t.get("symbol").and_then(Value::as_str).map_or_else(|| format!("{}…", mint.chars().take(4).collect::<String>()), str::to_string);
+            Some(Holding {
+                icon: t.get("icon").and_then(Value::as_str).map(str::to_string),
+                price: crate::holdings::number(t.get("usdPrice")),
+                verified: t.get("isVerified") == Some(&Value::Bool(true)) || tags.contains(&"verified"),
+                liquidity: crate::holdings::number(t.get("liquidity")),
+                change24h: crate::holdings::number(t.pointer("/stats24h/priceChange")),
+                ..Holding::new("solana", mint, amount, &symbol)
+            })
+        }).collect();
+        // The most valuable first; equal ones by symbol, as Swift's tuple compare orders them.
+        out.sort_by(|a, b| (b.usd().unwrap_or_default(), &b.symbol).cmp(&(a.usd().unwrap_or_default(), &a.symbol)));
+        out
+    }
 }
 
 // MARK: - NEAR

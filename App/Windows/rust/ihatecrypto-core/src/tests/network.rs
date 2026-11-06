@@ -107,3 +107,54 @@ fn a_one_click_quote_keeps_its_slippage_reserve() {
     let b = Bridge::one_click_from(&q).unwrap();
     assert!(b.provider == "NEAR 1Click" && b.amount_in == d("10.05") && b.reserve == d("0.01") && b.amount_out == d("9.98") && b.time == "Usually 2–4 min.");
 }
+
+use std::collections::HashMap;
+
+use crate::holdings::Holding;
+use crate::network::{Solana, SolanaBalance};
+
+/// SolanaHoldingsTests: bought tokens show, Jupiter Lend's shares are its row's, airdrops are tucked away.
+#[test]
+fn solana_holdings_show_bought_tokens_and_tuck_away_airdrops() {
+    let json = r#"[{"id": "RAYmint", "symbol": "RAY", "icon": "https://cdn/ray.png", "usdPrice": 1.88, "liquidity": 18801373, "isVerified": true, "tags": ["verified"], "stats24h": {"priceChange": -2.5}},
+     {"id": "jlUSDCmint", "symbol": "jlUSDC", "usdPrice": 1.06, "isVerified": true, "tags": ["verified", "jup-lend-earn"]},
+     {"id": "MEMEmint", "symbol": "POKEMON", "usdPrice": 0.0004, "liquidity": 36500, "isVerified": false, "tags": ["token-2022"]},
+     {"id": "SPAMmint", "symbol": "USDC", "usdPrice": 0.000001, "liquidity": 12, "isVerified": false, "tags": []}]"#;
+    let amounts: HashMap<String, rust_decimal::Decimal> = [("RAYmint", "1.065743"), ("jlUSDCmint", "5"), ("MEMEmint", "2500"), ("SPAMmint", "1000"), ("Unknownmint", "3")]
+        .into_iter().map(|(m, a)| (m.to_string(), super::d(a))).collect();
+    let held = Solana::holdings_from(&amounts, &[json.as_bytes().to_vec()], false);
+    // Jupiter Lend's shares are the Jupiter Lend row, not a token.
+    assert!(!held.iter().any(|h| h.symbol == "jlUSDC"));
+    // The most valuable first.
+    assert_eq!(held[0].symbol, "RAY");
+    assert_eq!(held[0].usd(), Some(super::d("1.88") * super::d("1.065743")));
+    assert_eq!(held[0].change24h, Some(super::d("-2.5")));
+    let by: HashMap<&str, &Holding> = held.iter().map(|h| (h.contract.as_str(), h)).collect();
+    assert!(by["RAYmint"].looks_real());
+    // Bought with Safe search off: unverified, but a real pool and ≈ $1 in it.
+    assert!(by["MEMEmint"].looks_real());
+    // A fake «USDC» airdrop: no pool to speak of.
+    assert!(!by["SPAMmint"].looks_real());
+    // Jupiter doesn't know it: shown by mint, unpriced, tucked away.
+    assert_eq!(by["Unknownmint"].symbol, "Unkn…");
+    assert_eq!(by["Unknownmint"].usd(), None);
+    assert!(!by["Unknownmint"].looks_real());
+    // Shares asked for are kept (a transfer of them as they are).
+    assert!(Solana::holdings_from(&amounts, &[json.as_bytes().to_vec()], true).iter().any(|h| h.symbol == "jlUSDC"));
+}
+
+/// UnpricedBalanceTests: Jupiter didn't answer, so the tokens keep the last read's prices and their money stays in the balance.
+#[test]
+fn unpriced_tokens_keep_the_last_price() {
+    let usdt = Holding { price: Some(super::d("1")), verified: true, ..Holding::new("solana", "Es9v", super::d("25"), "USDT") };
+    let came = Holding::new("solana", "Es9v", super::d("24"), "Es9v…");
+    let read = SolanaBalance { sol: super::d("0"), usdc: super::d("0"), tokens: vec![came], unpriced: true };
+    let kept = read.pricing(std::slice::from_ref(&usdt));
+    assert!(kept.tokens[0].usd() == Some(super::d("24")) && kept.tokens[0].symbol == "USDT" && kept.tokens[0].verified);
+    assert!(!kept.unpriced);
+    // A token the last read didn't have: still unpriced, so the balance waits for the next read.
+    assert!(read.pricing(&[]).unpriced);
+    // A priced read is left as it came.
+    let priced = SolanaBalance { sol: super::d("0"), usdc: super::d("0"), tokens: vec![usdt.at(super::d("3"))], unpriced: false };
+    assert_eq!(priced.pricing(std::slice::from_ref(&usdt)), priced);
+}
