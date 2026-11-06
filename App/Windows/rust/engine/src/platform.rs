@@ -1,8 +1,9 @@
 //! The Windows calls the engine makes, through winsec linked as a Rust library: the signer started hardened from birth
 //! inside the engine's job object, Windows Hello for the app's own lock, how long the person has been away and whether
-//! the session is locked, letting the signer's window come forward, DPAPI for the engine's own secrets. Off Windows a
-//! stand-in takes winsec's place, as `winsec_stub.c` did: the signer is a plain child process, Windows Hello is faked
-//! only with WINSEC_FAKE_HELLO=1, «DPAPI» is a fixed XOR and the person is never away — no build of it ships.
+//! the session is locked, letting the signer's window come forward, DPAPI for the engine's own secrets, Windows' display
+//! language. Off Windows a stand-in takes winsec's place, as `winsec_stub.c` did: the signer is a plain child process,
+//! Windows Hello is faked only with WINSEC_FAKE_HELLO=1, «DPAPI» is a fixed XOR, the person is never away and the
+//! language is the locale's — no build of it ships.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -73,6 +74,16 @@ mod imp {
 
     pub fn protect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { transform(data, true) }
     pub fn unprotect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { transform(data, false) }
+
+    /// Windows' display language is Russian (the Mac's `Locale.preferredLanguages.first` starting with «ru»).
+    pub fn prefers_russian() -> bool {
+        unsafe extern "system" {
+            fn GetUserDefaultUILanguage() -> u16;
+        }
+        // LANG_RUSSIAN, the primary language of the LANGID.
+        let language = unsafe { GetUserDefaultUILanguage() };
+        language & 0x3ff == 0x19
+    }
 }
 
 #[cfg(not(windows))]
@@ -99,6 +110,11 @@ mod imp {
     /// «DPAPI» off Windows: a fixed XOR, as winsec_stub.c — it protects nothing, and no build of it ships.
     pub fn protect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { Some(Zeroizing::new(data.iter().map(|b| b ^ 0x5A).collect())) }
     pub fn unprotect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { protect(data) }
+
+    /// The locale the process was started with (LC_ALL, LC_MESSAGES, LANG) is Russian.
+    pub fn prefers_russian() -> bool {
+        ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|x| !x.is_empty())).is_some_and(|l| l.to_lowercase().starts_with("ru"))
+    }
 }
 
 pub use imp::*;

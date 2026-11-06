@@ -3,7 +3,7 @@ name = "engine"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-description = "ihatecrypto's engine for Windows: the Rust port of App/Sources/Desktop/Engine, built up from its leaves (the platform calls, the link to the signer)"
+description = "ihatecrypto's engine for Windows: the Rust port of App/Sources/Desktop/Engine, built up from its leaves (the platform calls, the link to the signer, the engine's data and state)"
 
 [dependencies]
 signer-api.workspace = true
@@ -11,10 +11,27 @@ execution.workspace = true
 evm.workspace = true
 hyperliquid.workspace = true
 wallet.workspace = true
-serde_json.workspace = true
+net.workspace = true
+serde.workspace = true
+# raw_value: a Decimal goes out as the JSON number Swift writes, every digit kept (ihatecrypto-core's foundation::number).
+serde_json = { workspace = true, features = ["raw_value"] }
 tokio.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
+rust_decimal.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+reqwest.workspace = true
+unicode-segmentation.workspace = true
+# Swift's Regex has lookahead; the regex crate doesn't (the version ihatecrypto-core uses).
+fancy-regex = "0.20"
+# Not in the workspace's list: the path, as trade names them.
+ihatecrypto-core = { path = "../ihatecrypto-core" }
+trade = { path = "../trade" }
+llm = { path = "../llm" }
+protocols = { path = "../protocols" }
+ledger = { path = "../ledger" }
 
 # Windows Hello, the session's state and the signer's hardened start: winsec as a Rust library.
 [target.'cfg(windows)'.dependencies]
