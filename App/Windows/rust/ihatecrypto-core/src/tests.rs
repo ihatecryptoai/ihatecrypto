@@ -30,6 +30,12 @@ mod network;
 mod plan;
 mod risk;
 mod token_research;
+// Round 4.
+mod blocks;
+mod chat_recall;
+mod model_exam;
+mod mpp;
+mod normalize;
 // Round 5 (the other session).
 mod holdings;
 mod pnl;

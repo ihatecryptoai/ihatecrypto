@@ -32,6 +32,13 @@ pub mod tokens;
 pub mod top_up;
 pub mod trading_study_skill;
 
+// Round 4.
+pub mod blocks;
+pub mod chat_recall;
+pub mod model_exam;
+pub mod mpp;
+pub mod normalize;
+
 // Round 5 (the other session).
 pub mod holdings;
 pub mod pnl;
