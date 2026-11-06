@@ -150,6 +150,16 @@ pub mod personal {
     pub fn is_blind_hash(message: &[u8]) -> bool {
         message.len() == 32 && std::str::from_utf8(message).map_or(true, |s| s.chars().any(|c| (c as u32) < 0x20))
     }
+
+    /// The prompt for text a site asks to sign (personal_sign, Solana's signMessage): the first `shown` characters. A
+    /// longer text says its whole length on the first line, before the site's text so nothing in it can move that
+    /// line, and ends in «…» where it was cut.
+    pub fn prompt(text: &str, shown: usize) -> String {
+        use unicode_segmentation::UnicodeSegmentation;
+        let count = text.graphemes(true).count();
+        if count <= shown { return format!("sign text for a site:\n{text}") }
+        format!("sign text for a site ({count} characters, the first {shown} shown):\n{}…", text.graphemes(true).take(shown).collect::<String>())
+    }
 }
 
 #[cfg(test)]
@@ -203,6 +213,8 @@ mod tests {
         assert!(personal::is_blind_hash(&[0x01; 32]));
         assert!(!personal::is_blind_hash(&[b'a'; 32]));
         assert!(!personal::is_blind_hash(&[0xff; 31]));
+        assert_eq!(personal::prompt("hi", 160), "sign text for a site:\nhi");
+        assert_eq!(personal::prompt("abcdef", 4), "sign text for a site (6 characters, the first 4 shown):\nabcd…");
         // eth_account's encode_defunct("hello") hash.
         assert_eq!(to_hex(&personal::digest(b"hello")), "50b2c43fd39106bafbba0da34fc430e1f91e3c96ea2acee2bc34119f92b37750");
     }

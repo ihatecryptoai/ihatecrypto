@@ -151,6 +151,14 @@ fn reduce_only_and_trading_kinds() {
     assert!(action::only_reduces(&action::cancel(&[(1, 2)])));
     assert!(!action::only_reduces(&action::order(&[], "na").unwrap()));
     assert!(!signer::is_trading(&signer::usd_send_action("0x00", "1", 1, true)));
+    let trail = action::trailing_stop(3, false, dec("0.5"), dec("2.5")).unwrap();
+    assert!(action::only_reduces(&trail) && signer::is_trading(&trail));
+    assert_eq!(trail.get("retracement").unwrap().text("pct"), Some("2.5%"));
+    assert_eq!(action::with_builder(&trail), trail);
+    assert!(!action::only_reduces(&action::twap_order(3, true, dec("1"), false, 30, true).unwrap()));
+    assert!(action::only_reduces(&action::twap_order(3, false, dec("1"), true, -5, false).unwrap()));
+    assert_eq!(action::twap_order(3, true, dec("1"), false, -5, false).unwrap().get("twap").unwrap().get("m"), Some(&MsgPack::Uint(0)));
+    assert!(action::only_reduces(&action::twap_cancel(3, 9)));
     let body = exchange_body(&close, 7, &EvmSignature { r: vec![0; 32], s: vec![1; 32], v: 27 }, None);
     assert_eq!(body["vaultAddress"], Json::Null);
     assert_eq!(body["action"]["orders"][0]["r"], Json::Bool(true));

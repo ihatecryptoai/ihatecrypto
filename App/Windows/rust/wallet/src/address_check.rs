@@ -170,6 +170,28 @@ pub fn x_address(classic: &str, tag: u32) -> Option<String> {
     Some(base58::encode(&payload).bytes().map(|c| base58::ALPHABET.iter().position(|&a| a == c).map_or(c as char, |i| XRP_ALPHABET[i] as char)).collect())
 }
 
+/// The known address `address` is a twin of: the same first 4 and last 4 characters (after 0x, any case), a different
+/// middle. That is address poisoning: a cent comes from a twin of an address the person pays, so it gets copied from
+/// the history later. MetaMask warns on the same 4 + 4. None when none is.
+pub fn lookalike<'a>(address: &str, known: &'a [(String, String)]) -> Option<&'a (String, String)> {
+    // What's the same in every address of its kind is no match: 0x, and bc1q / bc1p of a segwit Bitcoin address.
+    fn body(a: &str) -> Vec<char> {
+        let t = a.trim();
+        let lower = t.to_lowercase();
+        if let Some(rest) = t.strip_prefix("0x") { rest.to_lowercase().chars().collect() }
+        else if lower.starts_with("bc1") { lower.chars().skip(4).collect() }
+        else { t.chars().collect() }
+    }
+    let is_evm = |a: &str| a.trim_matches(' ').starts_with("0x");
+    let a = body(address);
+    // A NEAR name («alice.near») is read by its name, not compared by its ends.
+    if a.len() < 12 || address.contains('.') { return None }
+    known.iter().find(|(_, k)| {
+        let b = body(k);
+        is_evm(k) == is_evm(address) && b.len() == a.len() && b != a && b[..4] == a[..4] && b[b.len() - 4..] == a[a.len() - 4..]
+    })
+}
+
 /// Why a name or memo can't go on the signing prompt beside its address, or None: at most 64 characters, none that
 /// break the line, reorder the text (bidi marks) or don't show — else a name could draw a fake address line.
 pub fn label_problem(text: &str) -> Option<String> {
@@ -230,6 +252,17 @@ mod tests {
         assert_eq!(x_address("rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf", 4294967294).unwrap(), "XVLhHMPHU98es4dbozjVtdWzVrDjtV1kAsixQTdMjbWi39u");
         assert_eq!(x_address("rGWrZyQqhTp9Xu7G5Pkayo7bXjH4k4QYpf", 4294967295).unwrap(), "XVLhHMPHU98es4dbozjVtdWzVrDjtV18pX8yuPT7y4xaEHi");
         assert_eq!(problem("XVLhHMPHU98es4dbozjVtdWzVrDjtV1kAsixQTdMjbWi39u", Network::Xrp), None);
+    }
+
+    #[test]
+    fn lookalikes() {
+        let known = vec![("Mom".to_string(), "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string()),
+                         ("Shop".to_string(), "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk".to_string())];
+        assert_eq!(lookalike("0xF39F0000000000000000000000000000000b2266", &known).unwrap().0, "Mom");
+        assert_eq!(lookalike("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", &known), None);
+        assert_eq!(lookalike(&format!("HAgk{}Kpqk", "x".repeat(36)), &known).unwrap().0, "Shop");
+        assert_eq!(lookalike("HAgk.near", &known), None);
+        assert_eq!(lookalike("0xf39F2266", &known), None);
     }
 
     #[test]

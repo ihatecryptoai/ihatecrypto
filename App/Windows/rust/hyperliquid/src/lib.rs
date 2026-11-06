@@ -221,13 +221,43 @@ pub mod action {
         ]))
     }
 
+    /// A trailing stop on the exchange: a reduce-only market order that fires once the mark falls back `pct` % from
+    /// its best since placing (the low for a short). The keys in this order and activationPx as null are what the
+    /// exchange hashes (checked 2026-11-05 by the address a signature recovers to); it takes no builder field (422).
+    pub fn trailing_stop(asset: u32, is_buy: bool, size: Decimal, pct: Decimal) -> Result<MsgPack> {
+        Ok(MsgPack::map(vec![
+            ("type", MsgPack::str("trailingStop")), ("asset", MsgPack::Uint(asset as u64)), ("isBuy", MsgPack::Bool(is_buy)),
+            ("sz", MsgPack::String(number(size)?)), ("reduceOnly", MsgPack::Bool(true)),
+            ("retracement", MsgPack::map(vec![("pct", MsgPack::String(number(pct)? + "%"))])), ("activationPx", MsgPack::Null),
+        ]))
+    }
+
+    /// A TWAP: `size` bought (or sold) in parts at the market over `minutes`, each part up to ±20% when `randomize`.
+    /// {"type", "twap": {a, b, s, r, m, t}} as the exchange hashes it; no builder field.
+    pub fn twap_order(asset: u32, is_buy: bool, size: Decimal, reduce_only: bool, minutes: i64, randomize: bool) -> Result<MsgPack> {
+        Ok(MsgPack::map(vec![
+            ("type", MsgPack::str("twapOrder")),
+            ("twap", MsgPack::map(vec![
+                ("a", MsgPack::Uint(asset as u64)), ("b", MsgPack::Bool(is_buy)), ("s", MsgPack::String(number(size)?)),
+                ("r", MsgPack::Bool(reduce_only)), ("m", MsgPack::Uint(minutes.max(0) as u64)), ("t", MsgPack::Bool(randomize)),
+            ])),
+        ]))
+    }
+
+    /// Stops a running TWAP by its id; what it has bought stays.
+    pub fn twap_cancel(asset: u32, id: u64) -> MsgPack {
+        MsgPack::map(vec![("type", MsgPack::str("twapCancel")), ("a", MsgPack::Uint(asset as u64)), ("t", MsgPack::Uint(id))])
+    }
+
     /// The action's "type" field.
     pub fn kind(action: &MsgPack) -> Option<&str> { action.text("type") }
 
     /// A cancel, or orders that are all reduce-only (a stop, a take, a close): nothing that opens or adds to a position.
     pub fn only_reduces(action: &MsgPack) -> bool {
         match kind(action) {
-            Some("cancel" | "cancelByCloid") => matches!(action, MsgPack::Map(_)),
+            Some("cancel" | "cancelByCloid" | "twapCancel") => matches!(action, MsgPack::Map(_)),
+            Some("trailingStop") => action.get("reduceOnly") == Some(&MsgPack::Bool(true)),
+            Some("twapOrder") => action.get("twap").and_then(|t| t.get("r")) == Some(&MsgPack::Bool(true)),
             Some("order") => match action.get("orders") {
                 Some(MsgPack::Array(orders)) if !orders.is_empty() => orders.iter().all(|o| o.get("r") == Some(&MsgPack::Bool(true))),
                 _ => false,
@@ -309,9 +339,11 @@ pub mod signer {
     const ZERO: &str = "0x0000000000000000000000000000000000000000";
 
     /// Orders, cancels, leverage and the referral code: what a trading (agent) key may sign. Nothing here moves money
-    /// out of the account (the guard holds an order's fee and the code to ihatecrypto's own).
+    /// out of the account (the guard holds an order's fee and the code to ihatecrypto's own, a trailing stop to
+    /// reduce-only).
     pub fn is_trading(action: &MsgPack) -> bool {
-        action::kind(action).is_some_and(|k| ["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer"].contains(&k))
+        action::kind(action).is_some_and(|k| ["order", "cancel", "updateLeverage", "batchModify", "modify", "setReferrer", "trailingStop",
+                                              "twapOrder", "twapCancel"].contains(&k))
     }
 
     /// keccak256(msgpack(action) ‖ nonce ‖ vault flag [‖ vault] [‖ 0x00 ‖ expiresAfter]).

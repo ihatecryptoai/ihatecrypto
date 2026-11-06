@@ -3,6 +3,7 @@
 //! and their kin), Hyperliquid's own actions and payments by signature are recognised so they can be refused outright.
 
 use serde_json::{Map, Value as Json};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::address_check::hidden;
 use crate::evm::eip712::{self, Field, Value};
@@ -53,12 +54,19 @@ impl TypedData {
             return Some(format!("{p} has {} fields, more than the prompt can show. ihatecrypto doesn't sign it.", self.fields.len()));
         }
         let owner = owner?.to_lowercase();
-        let others = self.fields.iter().filter(|f| f.1 == "address" && ![&owner, &self.verifying_contract].contains(&&f.2.to_lowercase()));
+        let others: Vec<_> = self.fields.iter().filter(|f| f.1 == "address" && ![&owner, &self.verifying_contract].contains(&&f.2.to_lowercase())).collect();
+        // A right given by a yes, no amount at all (research E-2): Morpho's Authorization(authorizer, authorized,
+        // isAuthorized…) and Compound's (owner, manager, isAllowed…) let someone else manage the wallet's positions.
+        // A false is a revoke and signs.
+        if let (Some(other), Some(flag)) = (others.first(), self.fields.iter().find(|f| f.1 == "bool" && (f.2 == "1" || f.2 == "true"))) {
+            return Some(format!("{p} gives {} («{}») rights over your account («{}»): Morpho's and Compound's Authorization work like this. ihatecrypto doesn't sign it for a site.",
+                                other.2, other.0, flag.0));
+        }
         let not_amounts = ["nonce", "deadline", "expir", "valid", "time", "chainid", "salt", "version", "choice"];
         let amount = self.fields.iter().find(|f| {
             f.1.starts_with("uint") && f.2 != "0" && !not_amounts.iter().any(|w| f.0.to_lowercase().contains(w))
         });
-        let (other, amount) = (others.into_iter().next()?, amount?);
+        let (other, amount) = (others.first()?, amount?);
         Some(format!("{p} names {} («{}») beside a number («{}»): a signature like that can move money. ihatecrypto doesn't sign it for a site.",
                      other.2, other.0, amount.0))
     }
@@ -95,10 +103,12 @@ impl TypedData {
     }
 
     /// The prompt's text: the type, the site's name for itself and the fields with their values, as text that can't
-    /// draw a line of its own (breaks, controls and bidi marks dropped) and doesn't run on.
+    /// draw a line of its own (breaks, controls and bidi marks dropped) and doesn't run on: a cut one ends in «…».
     pub fn prompt(&self) -> String {
-        // ponytail: cuts by Unicode scalars where Swift cuts by grapheme; a combined character only shortens the line.
-        fn plain(s: &str, n: usize) -> String { s.chars().filter(|&c| !hidden(c)).take(n).collect() }
+        fn plain(s: &str, n: usize) -> String {
+            let t: String = s.chars().filter(|&c| !hidden(c)).collect();
+            if t.graphemes(true).count() > n { t.graphemes(true).take(n).collect::<String>() + "…" } else { t }
+        }
         let mut lines = vec![
             format!("sign {} for «{}»", plain(&self.primary_type, 60), plain(&self.domain_name, 60)),
             "ihatecrypto can't tell what this signature allows. Sign only if you trust this site.".to_string(),
@@ -251,7 +261,9 @@ mod tests {
         assert_eq!(to_hex(&t.digest), to_hex(&expected));
         assert_eq!(t.fields[2].2, "1");
         assert_eq!(t.chain_id, "1");
-        assert!(t.refusal_for(Some("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")).is_none());
+        assert!(t.refusal_for(Some("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")).is_none());
+        // Someone else's address beside a yes is a right given (Morpho's Authorization), refused.
+        assert!(t.refusal_for(Some("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")).unwrap().contains("rights over your account («ok»)"));
 
         let mail = br#"{"types":{"Person":[{"name":"name","type":"string"}],"Mail":[{"name":"from","type":"Person"}]},
             "primaryType":"Mail","domain":{"name":"Ether Mail"},"message":{"from":{"name":"Cow"}}}"#;
@@ -272,6 +284,14 @@ mod tests {
         assert!(t.refusal().is_none());
         assert!(t.refusal_for(Some("0x0000000000000000000000000000000000000009")).unwrap().contains("«taker»"));
         assert!(t.refusal_for(Some("0x0000000000000000000000000000000000000002")).is_none());
+        let authorization = br#"{"types":{"Authorization":[{"name":"authorizer","type":"address"},{"name":"authorized","type":"address"},
+            {"name":"isAuthorized","type":"bool"},{"name":"nonce","type":"uint256"}]},"primaryType":"Authorization","domain":{"name":"Morpho"},
+            "message":{"authorizer":"0x0000000000000000000000000000000000000009","authorized":"0x0000000000000000000000000000000000000002",
+            "isAuthorized":true,"nonce":0}}"#;
+        let t = TypedData::parse(authorization).unwrap();
+        assert!(t.refusal_for(Some("0x0000000000000000000000000000000000000009")).unwrap().contains("rights over your account («isAuthorized»)"));
+        let revoke = String::from_utf8(authorization.to_vec()).unwrap().replace("\"isAuthorized\":true", "\"isAuthorized\":false");
+        assert!(TypedData::parse(revoke.as_bytes()).unwrap().refusal_for(Some("0x0000000000000000000000000000000000000009")).is_none());
     }
 
     #[test]
@@ -288,5 +308,7 @@ mod tests {
         let t = TypedData { primary_type: "A\u{202e}B\nC".into(), domain_name: "s".into(), chain_id: "1".into(),
                             verifying_contract: String::new(), fields: vec![], digest: [0; 32] };
         assert!(t.prompt().starts_with("sign ABC for «s»"));
+        let long = TypedData { primary_type: "x".repeat(61), ..t };
+        assert!(long.prompt().starts_with(&format!("sign {}… for", "x".repeat(60))));
     }
 }

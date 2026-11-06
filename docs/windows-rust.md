@@ -30,4 +30,6 @@ from the leaves (pure parsing and math) to the chat.
 | 8 | — | `ihatecrypto-signer.exe` from Rust in `build.ps1`; the Swift engine talks to it unchanged | |
 | 9+ | engine crates | `IhatecryptoCore`, `Protocols`, `DeFi`, `Execution`, `LLM`, `Desktop/Engine`, leaves first | |
 
-The Mac app stays Swift. After a main merge, a change to a ported Swift module is ported here too, with its tests.
+Shared modules are ported from `main`, not from this branch's older copy: steps 1–2 and on match main at `bc90340`
+(trailing stops and TWAPs, Morpho's Authorization refused, address twins). The Mac app stays Swift; to catch up,
+`git diff bc90340 main -- <the module>` shows what to port, with its tests, and the baseline here moves with it.
