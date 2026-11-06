@@ -4,6 +4,7 @@
 //! addresses bound to a quote they approved. Same decisions and the same words as the Swift: the window shows them.
 
 pub mod injection;
+pub mod jev;
 pub mod sol;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

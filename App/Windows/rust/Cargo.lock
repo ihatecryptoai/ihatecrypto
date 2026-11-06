@@ -1228,6 +1228,7 @@ dependencies = [
  "fancy-regex",
  "hyperliquid",
  "rust_decimal",
+ "serde",
  "serde_json",
  "solana",
  "wallet",
