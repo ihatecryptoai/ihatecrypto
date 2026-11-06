@@ -117,9 +117,20 @@ pub static BATCHES_ON: AtomicBool = AtomicBool::new(false);
 
 static MODULES: LazyLock<RwLock<Modules>> = LazyLock::new(Default::default);
 
+thread_local! {
+    /// The switches as the engine on this thread set them. A program has one engine, on one thread, so this is the
+    /// same as MODULES; tests run an engine each on threads of their own, and one test's switches mustn't reach another's.
+    static HERE: std::cell::RefCell<Option<Modules>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Settings › Modules as the user left them, handed in by the engine whenever they change (Swift's `Modules.current`).
-pub fn set_modules(m: Modules) { *MODULES.write().unwrap_or_else(|e| e.into_inner()) = m }
-pub fn modules() -> Modules { MODULES.read().unwrap_or_else(|e| e.into_inner()).clone() }
+pub fn set_modules(m: Modules) {
+    HERE.with(|h| *h.borrow_mut() = Some(m.clone()));
+    *MODULES.write().unwrap_or_else(|e| e.into_inner()) = m
+}
+pub fn modules() -> Modules {
+    HERE.with(|h| h.borrow().clone()).unwrap_or_else(|| MODULES.read().unwrap_or_else(|e| e.into_inner()).clone())
+}
 
 // MARK: Hyperliquid's address
 
