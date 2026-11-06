@@ -5,6 +5,10 @@ edition.workspace = true
 publish.workspace = true
 description = "ihatecrypto's signing process for Windows: the Rust port of App/Sources/Signer (Core, Windows)"
 
+[[bin]]
+name = "ihatecrypto-signer"
+path = "src/main.rs"
+
 [dependencies]
 wallet.workspace = true
 hyperliquid.workspace = true
@@ -21,9 +25,13 @@ aes-gcm.workspace = true
 hkdf.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
+ed25519-dalek.workspace = true
 chrono.workspace = true
 base64.workspace = true
 
 # Windows Hello, DPAPI and the process's hardening: winsec as a Rust library here, not a DLL.
 [target.'cfg(windows)'.dependencies]
 winsec = { path = "../../native" }
+
+[dev-dependencies]
+base64.workspace = true
