@@ -24,6 +24,8 @@ fn spot_held_maps_to_its_market() {
     ];
     let want: HashMap<String, Decimal> = [("SOL", "1"), ("ETH", "3"), ("BTC", "0.1"), ("xyz:TSLA", "3"), ("xyz:NVDA", "2")].iter().map(|(k, v)| (k.to_string(), d(v))).collect();
     assert_eq!(spot(&held, &marks), want);
-    assert_eq!(guard_stop(d("2"), &sol()), d("37"));
-    assert_eq!(guard_stop(d("1"), &sol()), d("76"));   // 0.975 / 1.025 × 80
+    assert_eq!(guard_stop(d("2"), &sol()), Some(d("37")));
+    assert_eq!(guard_stop(d("1"), &sol()), Some(d("76")));
+    // Where Swift gets NaN, no stop rather than a panic.
+    assert_eq!(guard_stop(Decimal::ZERO, &sol()), None);   // 0.975 / 1.025 × 80
 }

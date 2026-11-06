@@ -27,6 +27,14 @@ impl Place {
 pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, evm: &[Place], hyperliquid: Decimal, near: Decimal,
             near_price: Option<Decimal>) -> Option<Vec<String>> {
     if short <= Decimal::ZERO { return Some(vec![]) }
+    // rust_decimal panics past 7.9·10²⁸ where Swift's Decimal goes on, and a panic stops the engine: amounts and the
+    // price are held to bounds no real balance comes near (a trillion dollars, a millionth of a dollar), so a garbage
+    // answer from a node or an API plans nothing odd instead.
+    let big = Decimal::from(1_000_000_000_000u64);
+    let cap = |x: Decimal| x.min(big);
+    let (short, solana, hyperliquid, near) = (cap(short), cap(solana), cap(hyperliquid), cap(near));
+    let evm: Vec<Place> = evm.iter().map(|p| Place { usdc: cap(p.usdc), ..p.clone() }).collect();
+    let near_price = near_price.filter(|p| *p >= dec("0.000001")).map(cap);
     let fee = Decimal::ONE;
     // Less than this isn't worth a leg: Relay's minimum and its fee would eat it.
     let floor = Decimal::TWO;
@@ -52,7 +60,7 @@ pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, ev
     if !to_solana && solana >= fee + half && need(own, landed, delivered) > Decimal::ZERO {
         own = take(solana, need(own, landed, delivered).max(half) + fee);
     }
-    for p in evm {
+    for p in &evm {
         if p.key == target || need(own, landed, delivered) <= Decimal::ZERO || p.usdc < floor { continue }
         let x = take(p.usdc, need(own, landed, delivered) + fee);
         if to_solana {

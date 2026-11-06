@@ -68,18 +68,22 @@ pub fn step(rules: &mut ExitRules, size: Decimal, stop: Option<Decimal>, mark: D
     }
     let (pct, stop) = (rules.trailing_pct?, stop?);
     let dir = if rules.long { Decimal::ONE } else { Decimal::NEGATIVE_ONE };
-    let trail = rules.peak * (Decimal::ONE - dir * pct / Decimal::ONE_HUNDRED);
+    // Checked: prices and percents come from the exchange and the chat, and rust_decimal panics on overflow.
+    let trail = rules.peak.checked_mul(Decimal::ONE.checked_sub(dir.checked_mul(pct)?.checked_div(Decimal::ONE_HUNDRED)?)?)?;
     // Only tighten, never loosen, and only by a meaningful step (a tenth of the distance) to spare signatures.
-    let step = rules.peak * pct / Decimal::ONE_THOUSAND;
-    let better = if rules.long { trail > stop + step } else { trail < stop - step };
+    let step = rules.peak.checked_mul(pct)?.checked_div(Decimal::ONE_THOUSAND)?;
+    let better = if rules.long { trail > stop.checked_add(step)? } else { trail < stop.checked_sub(step)? };
     // A trailing stop must also stay on the right side of the price, or it would fire at once.
     let valid = if rules.long { trail < mark } else { trail > mark };
     (better && valid).then_some(Action::StopTo(trail))
 }
 
 /// The stop that loses nothing: the entry plus both sides' fees (Executor.moveStop places exactly this).
+/// An entry past what the fees can be added to (never a real price) is its own breakeven.
 pub fn breakeven(entry: Decimal, long: bool) -> Decimal {
-    entry + if long { Decimal::ONE } else { Decimal::NEGATIVE_ONE } * entry * Decimal::TWO * RiskCalc::trade_fee()
+    let fees = entry.checked_mul(Decimal::TWO).and_then(|x| x.checked_mul(RiskCalc::trade_fee()));
+    let side = if long { Decimal::ONE } else { Decimal::NEGATIVE_ONE };
+    fees.and_then(|f| entry.checked_add(side * f)).unwrap_or(entry)
 }
 
 /// After `failures` failed stop moves in a row: 1, 2, 4, 8, then every 15 minutes, in seconds. Each try may ask for

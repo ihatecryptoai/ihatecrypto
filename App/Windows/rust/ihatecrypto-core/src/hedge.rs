@@ -43,15 +43,19 @@ pub fn spot(held: &[(&str, Decimal, Option<Decimal>)], marks: &HashMap<String, D
         let Some(&market) = by_ticker.get(ticker.as_str()) else { continue };
         let Some(&mark) = marks.get(market) else { continue };
         if amount <= Decimal::ZERO || mark <= Decimal::ZERO { continue }
-        if price.is_some_and(|p| (p - mark).abs() > mark * tolerance) { continue }
-        *out.entry(market.to_string()).or_default() += amount;
+        // Checked: a garbage mark or amount mustn't stop the engine (rust_decimal panics on overflow, Swift's Decimal doesn't).
+        let Some(band) = mark.checked_mul(tolerance) else { continue };
+        if price.is_some_and(|p| p.checked_sub(mark).is_none_or(|d| d.abs() > band)) { continue }
+        let held = out.entry(market.to_string()).or_default();
+        *held = held.saturating_add(amount);
     }
     out
 }
 
 /// The stop a hedge gets when none is named, in %: four fifths of the way to liquidation, so the exchange closes it
-/// before liquidation takes the margin and its fee.
-pub fn guard_stop(leverage: Decimal, market: &Market) -> Decimal {
-    let l = Decimal::ONE / (Decimal::TWO * Decimal::from(market.max_leverage));
-    rounded((Decimal::ONE / leverage - l) / (Decimal::ONE + l) * Decimal::from(80), 1, Rounding::Down)
+/// before liquidation takes the margin and its fee. None where Swift gets NaN: no leverage, or a market with none.
+pub fn guard_stop(leverage: Decimal, market: &Market) -> Option<Decimal> {
+    let l = Decimal::ONE.checked_div(Decimal::TWO.checked_mul(Decimal::from(market.max_leverage))?)?;
+    let pct = Decimal::ONE.checked_div(leverage)?.checked_sub(l)?.checked_div(Decimal::ONE + l)?.checked_mul(Decimal::from(80))?;
+    Some(rounded(pct, 1, Rounding::Down))
 }
