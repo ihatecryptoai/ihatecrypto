@@ -64,6 +64,7 @@ pub mod chat_turns;
 pub mod consent;
 pub mod contract_calls;
 pub mod costs;
+pub mod dispatch;
 pub mod earn;
 pub mod favorites;
 pub mod folders;

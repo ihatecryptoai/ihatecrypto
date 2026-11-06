@@ -802,3 +802,15 @@ fn every_exam_score_and_trading_style_reads_as_on_the_mac() {
     let tv = TradeIntent::default();
     assert_eq!(serde_json::to_value(&tv).unwrap(), json!({"asset": "ETH", "side": "long"}));
 }
+
+// Layer 2, the chat side: its tests, one file each in tests/.
+mod browser_sites;
+mod canvas_history;
+mod canvas_switching;
+mod chat_context;
+mod chat_send;
+mod chat_trading;
+mod chat_turns;
+mod commands_chat;
+mod commands_skills;
+mod models_accounts;

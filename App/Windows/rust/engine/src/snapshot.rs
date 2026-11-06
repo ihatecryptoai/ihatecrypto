@@ -4,24 +4,28 @@
 
 use std::collections::HashMap;
 
+use ihatecrypto_core::chat_language::SentHistory;
 use ihatecrypto_core::foundation::{Date, number};
+use ihatecrypto_core::intent::TradeIntent;
+use ihatecrypto_core::skills::Skill;
+use llm::catalog;
 use rust_decimal::Decimal;
 use serde::Serialize;
 use signer_api::{SignerAddress, SignerWallet};
 
-use crate::automation::RecurringView;
+use crate::automation::{RecurringView, TaskFacts};
 use crate::blocks::{AddressExtra, ClosedTrade};
 use crate::canvas::Board;
 use crate::chat_turns::{ModelsView, QuoteView};
 use crate::consent::SiteAskView;
-use crate::engine::{Card, Message};
+use crate::engine::{Card, Engine, Message};
 use crate::favorites::FavoriteToken;
 use crate::folders::{CanvasIcon, FolderView};
 use crate::hidden_tokens::TransitView;
 use crate::history_moves::{MoveRow, MovesDay};
 use crate::history_tabs::Activity;
 use crate::json;
-use crate::ledger::LedgerConnect;
+use crate::ledger::{LedgerAccount, LedgerConnect};
 use crate::local_models::LocalSetupView;
 use crate::lock::LockView;
 use crate::models::{ModelView, ProviderView};
@@ -34,7 +38,8 @@ use crate::place_facts::PlaceFacts;
 use crate::portfolio::PortfolioView;
 use crate::route_edit::Edit;
 use crate::schedule::{AutomationBudget, ScheduleRun};
-use crate::top_up::TopUpView;
+use crate::skills::journal_kept;
+use crate::top_up::{TopUpPage, TopUpView};
 use crate::trade_plan::PositionRuler;
 use crate::trading_agent::TradingView;
 use crate::wallet_ops::StuckView;
@@ -348,4 +353,96 @@ pub struct CanvasRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coin: Option<String>,
     pub note: bool,
+}
+
+// MARK: The state drawn (Engine.swift's `snapshot()`)
+
+impl Engine {
+    /// Everything the window draws, from every file's views. What's read straight from the state is read under one
+    /// borrow, dropped before the views are asked for: each takes its own.
+    pub fn snapshot(&self) -> Snapshot {
+        let st = self.st();
+        let mut addresses = HashMap::new();
+        if let Some(s) = st.solana_address() { addresses.insert("solana".to_string(), s); }
+        if let Some(e) = st.evm_address() {
+            addresses.insert("evm".to_string(), e.clone());
+            addresses.insert("hyperliquid".to_string(), e);
+        }
+        if let Some(n) = st.near_address() { addresses.insert("near".to_string(), n); }
+        let status = st.status.as_ref();
+        let signer = Signer {
+            ready: status.is_some(), error: st.signer_error.clone(), notes: status.map(|s| s.checks.clone()).unwrap_or_default(),
+            waiting: st.signing > 0 || st.ledger_prompt.is_some(), session_length: status.and_then(|s| s.session_length), ledger: st.ledger_prompt.clone(),
+        };
+        let mut wallets = status.and_then(|s| s.wallets.clone()).unwrap_or_default();
+        if let Some(l) = st.ledger.as_ref().filter(|l| l.evm.is_some()) { wallets.push(l.wallet()) }
+        let active = if st.ledger_active() { Some(LedgerAccount::ID.to_string()) } else { status.and_then(|s| s.active_wallet.clone()) };
+        let sent: Vec<String> = st.messages().iter().filter(|m| m.from_user).map(|m| m.text.clone()).collect();
+        let options = st.options.iter().map(|o| OptionView { title: o.title.clone(), comment: o.comment.clone(), recommended: o.recommended, command: o.command.clone() }).collect();
+        let watched = [("solana", &st.settings.watch_solana), ("evm", &st.settings.watch_evm)].into_iter()
+            .filter_map(|(k, v)| v.clone().map(|v| (k.to_string(), v))).collect();
+        // Hyperliquid's numbers: a sum past Decimal's range shows none instead of panicking (lib.rs).
+        let positions_pnl = if st.positions.is_empty() { None } else { st.positions.iter().try_fold(Decimal::ZERO, |sum, p| sum.checked_add(p.unrealized_pnl)) };
+        let skills = Skill::built_ins().into_iter().chain(st.added_skills.iter().cloned()).map(|s| SkillView {
+            on: !st.skills_off.contains(&s.id), journal: (s.id == Skill::trading_study().id).then(journal_kept),
+            id: s.id, name: s.name, about: s.about, text: s.text, built_in: s.built_in,
+        }).collect();
+        let mut tasks = st.tasks.clone();
+        tasks.sort_by_key(|t| t.next);
+        let (phrase, portfolio, chat, thinking, draft, card) = (st.phrase.clone(), st.portfolio.clone(), st.messages().clone(), st.thinking, st.draft.clone(), st.card.clone());
+        let (site, running) = (st.site_ask.as_ref().map(|a| a.view.clone()), st.running.clone());
+        let plan = (st.intent != TradeIntent::default()).then(|| st.intent.command());
+        let (jev_open_router, language) = (st.settings.jev_open_router == Some(true), st.settings.language.clone().unwrap_or_else(|| "auto".into()));
+        let (russian, book, jupiter_dca, memory, favorites) = (st.app_russian(), st.book.clone(), st.jupiter_dca.clone(), st.memory.clone(), st.favorites.clone());
+        let (canvas, running_board, multisigs, multisig_draft) = (st.canvas_id.clone(), st.running_board.clone(), st.multisigs.clone(), st.multisig_draft.clone());
+        let (ledger_connect, starred, watching, automation_usd) = (st.ledger_connect.clone(), st.starred.iter().cloned().collect(), st.watching(), st.automation_usd);
+        let (in_transit, context, model_running) = (st.in_transit.clone(), st.meters.get(&st.canvas_id).cloned(), st.model_running);
+        let agent_step = if st.thinking { st.agent_step.clone() } else { None };
+        let (options_message, retry_board) = (st.options_message.clone(), st.retry.as_ref().map(|r| r.board.clone()));
+        let (schedule_paused, multisig_held, places) = (st.settings.schedule_paused == Some(true), st.multisig_held.clone(), st.place_facts.clone());
+        let (open_at_login, app_language) = (st.settings.open_at_login == Some(true), st.settings.app_language.clone().unwrap_or_else(|| "system".into()));
+        let (recently_closed, update_ready, alerts) = (st.recently_closed.clone(), st.available_update.clone(), st.alerts.clone());
+        drop(st);
+
+        let marks = self.recurring_buys();
+        let automation = self.automation_wallet();
+        let tasks = tasks.iter().map(|t| {
+            let mark = marks.contains(&t.id);
+            TaskView {
+                id: t.id.to_string(), text: self.task_text(t), paused: t.paused == Some(true),
+                automatic: !mark && self.uses_automation(t) && t.moves_money(), next: Some(t.next),
+                steps: t.steps.iter().map(|step| self.shown_step(step)).collect(), every: t.every.map(|e| e.words()),
+                pick: !mark && self.can_pick_pays(t), moves: t.moves_money(), buys: t.buys_coins(), sells: t.sells(),
+                free: if t.spreads_usdc() { self.task_free_usdc(t) } else { None },
+                free_other: if t.spreads_usdc() && automation.is_some() && t.untrusted != Some(true) { self.task_free_usdc(&self.other_payer(t)) } else { None },
+                untrusted: t.untrusted == Some(true), recurring: mark,
+            }
+        }).collect();
+        let plan_alert = self.plan_alert().map(|a| a.id);
+        let alerts = alerts.iter().filter(|a| Some(a.id) != plan_alert).map(|a| self.alert_view(a)).collect();
+        // Swift's Dictionary(_:uniquingKeysWith:) keeping the first.
+        let mut model_choices = HashMap::new();
+        for p in catalog::all() {
+            let id = p.info().id;
+            if !model_choices.contains_key(&id) { model_choices.insert(id.clone(), self.model_of(&id)); }
+        }
+        Snapshot {
+            signer, wallets, active, addresses, phrase, portfolio, positions: self.position_views(),
+            chat, sent: SentHistory::list(&sent), thinking, draft, card: card.map(|mut c| { c.title = self.with_amounts(&c.title); c }), site, options, running, plan,
+            model: self.model_view(), providers: self.provider_views(), model_choices, second_check: self.second_check(), jev_open_router,
+            language, russian, book, history: self.history(), alerts, tasks, recurring: self.recurring_views(), jupiter_dca,
+            automation_usd: automation.as_ref().and(automation_usd), automation, skills, memory, favorites,
+            canvases: self.canvas_rows(), folders: self.folder_views(), canvas, boards: self.with_chart_extras(self.boards_shown()),
+            running_board, multisigs, multisig_draft, candidates: self.multisig_candidates(), ledger_connect, starred, watching, watched,
+            positions_pnl, limit_waiting: self.limit_waiting_line(), in_transit, context, model_running, agent_step, options_message, retry_board,
+            quote: self.quote_view(), models: self.models_view(), lock: self.lock_view(),
+            modules: self.modules_view(), trading: self.trading_view(), nodes: self.nodes_view(), step_edit: self.step_edit(),
+            schedule_paused, schedule_runs: self.recent_runs(), multisig_held,
+            schedule_key: self.schedule_key(), moves: self.history_moves(), moves_day: self.moves_day(), recent_requests: self.recent_requests(),
+            automation_budget: self.automation_budget_now(), stuck: self.stuck_view(), places, notices: self.notice_views(), open_at_login,
+            top_up: TopUpPage::view(), app_language, local_setup: self.local_setup_view(),
+            recently_closed, address_extras: self.address_extras(), plan_alert_example: self.plan_alert_example(), chips_position: self.chips_position(),
+            last_balance: self.last_full_balance(), build: crate::engine::build(), update_ready,
+        }
+    }
 }

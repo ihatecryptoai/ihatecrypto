@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::Serialize;
-use signer_api::SignerRequest;
+use signer_api::{SignerRequest, passcode};
+use wallet::WalletError;
 
 use crate::engine::Engine;
 use crate::platform::{self, Hello};
@@ -206,6 +207,21 @@ impl Engine {
         let mut st = self.st_mut();
         st.lock.locked = false;
         st.lock.problem = None;
+    }
+
+    /// Makes or changes the code; the signer asks Windows Hello first (signer_call reads its status again after).
+    pub async fn make_code(&self, code: &str) -> Result<(), WalletError> {
+        if let Some(problem) = passcode::problem(code) { return Err(WalletError(self.localized_code_error(&problem))) }
+        if let Err(e) = self.signer_call(SignerRequest::SetCode { code: code.into() }).await { return Err(WalletError(self.localized_code_error(&e.0))) }
+        self.st_mut().lock.offer_new_code = false;
+        self.changed();
+        Ok(())
+    }
+
+    pub async fn turn_code_off(&self) -> Result<(), WalletError> {
+        self.signer_call(SignerRequest::ClearCode {}).await?;
+        self.set_settings(|s| s.code_off = None);
+        Ok(())
     }
 
     pub fn set_lock_after(&self, minutes: i64) {

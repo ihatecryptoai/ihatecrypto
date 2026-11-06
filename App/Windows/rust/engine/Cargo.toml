@@ -5,8 +5,16 @@ edition.workspace = true
 publish.workspace = true
 description = "ihatecrypto's engine for Windows: the Rust port of App/Sources/Desktop/Engine, built up from its leaves (the platform calls, the link to the signer, the engine's data and state)"
 
+# The window starts it (main.swift's place): one JSON request a line in, one answer or event a line out.
+[[bin]]
+name = "ihatecrypto-engine"
+path = "src/main.rs"
+
 [dependencies]
 signer-api.workspace = true
+guard.workspace = true
+solana.workspace = true
+base64.workspace = true
 execution.workspace = true
 evm.workspace = true
 hyperliquid.workspace = true
@@ -32,6 +40,7 @@ trade = { path = "../trade" }
 llm = { path = "../llm" }
 protocols = { path = "../protocols" }
 ledger = { path = "../ledger" }
+defi = { path = "../defi" }
 
 # Windows Hello, the session's state and the signer's hardened start: winsec as a Rust library.
 [target.'cfg(windows)'.dependencies]

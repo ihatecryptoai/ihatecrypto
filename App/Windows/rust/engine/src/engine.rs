@@ -2,7 +2,8 @@
 //! JSON line at a time, and gets back the whole state to draw after every change. Here: the chat's messages, what waits
 //! for Confirm, every stored field (`State`), the computed properties that read them, the setters that save them, one
 //! state push per step (`changed`) and the window's `Request`.
-//! Layer 2 adds here: `handle(_:)`'s dispatch over every op (`run`), `watch(solana:evm:)`, and `Engine::snapshot()`.
+//! The window's requests go through dispatch.rs (`handle`, `run`, `watch`); what a state push draws is snapshot.rs's
+//! `Engine::snapshot`.
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -685,8 +686,8 @@ pub struct Engine {
 
 impl Engine {
     /// The engine with every stored file read, the settings handed to trade, the own nodes in use and the lock set as
-    /// the last run left it (its watch starts: call inside a `LocalSet`). Layer 2 adds `restore_canvas_state()` here, as
-    /// Swift's init calls it.
+    /// the last run left it, and the open canvas's plan, skills, model and cards back as they were (canvas.rs
+    /// `restore_canvas_state`, as Swift's init). Its watch starts: call inside a `LocalSet`.
     pub fn new(out: Outbox, signer: Arc<SignerLink>, draw: Draw) -> Rc<Self> {
         let state = State::load();
         state.settings.mirror();
@@ -696,6 +697,7 @@ impl Engine {
         signer.on_stopped(Arc::new(move |why| o.event("signerCrashed", &HashMap::from([("text", why)]))));
         let engine = Rc::new_cyclic(|me| Engine { me: me.clone(), out, signer, draw, state: RefCell::new(state), push_queued: Cell::new(false) });
         engine.lock_at_launch();
+        engine.restore_canvas_state();
         engine
     }
 
