@@ -57,7 +57,7 @@ async fn a_price_alert_is_kept_and_cleared() {
         // With steps: a move among them comes as a card when it fires.
         let steps = AlertCommand::parse("when ETH is below 1,900: send 1 USDC to Mom", &markets(&e)).unwrap();
         e.alert(steps, None).await;
-        assert_eq!(last(&e), "Set: ETH below 1,900: send 1 USDC to Mom (now 2,000). It's checked every 10 s while ihatecrypto is open; when it fires, its moves come as cards for Confirm.");
+        assert_eq!(last(&e), "Set: ETH below 1,900: send 1 USDC to Mom (now 2,000). It's checked every 10 s while ihatecrypto is open. When it fires, its moves come as cards for Confirm.");
         e.alert(AlertCommand::Clear, None).await;
         assert_eq!(last(&e), "Price alerts cleared (3).");
         assert!(e.st().alerts.is_empty() && store::load::<Vec<PriceAlert>>("alerts.json").unwrap().is_empty());
@@ -140,7 +140,7 @@ async fn a_crossed_alert_says_so_once_or_runs_its_steps_as_a_task() {
         e.check_alerts().await;
         assert_eq!(e.st().alerts.iter().map(|a| a.id).collect::<Vec<_>>(), [waits.id]);
         let said = e.st().messages().last().cloned().unwrap();
-        assert_eq!(said.text, "🔔 ETH above 2,500 — now 3,000 The alert is done; set another any time.");
+        assert_eq!(said.text, "🔔 ETH above 2,500 — now 3,000 The alert is done. Set another any time.");
         assert_eq!(said.note.as_deref(), Some("price alert"));
         let record = e.st().history.saved.automatic.last().cloned().unwrap();
         assert_eq!((record.title.as_deref(), record.lines.as_slice()), (Some("Price alert"), ["🔔 ETH above 2,500 — now 3,000".to_string()].as_slice()));

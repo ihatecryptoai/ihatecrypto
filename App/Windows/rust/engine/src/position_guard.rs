@@ -1,7 +1,8 @@
 //! ihatecrypto's guardian, as the Mac's (PositionGuard.swift; Execution.swift guardPositions, ExitRules.duties): the exit
 //! rules the exchange can't hold by itself — the stop to breakeven once the first half is taken, a trailing stop that
 //! only tightens — kept per position, run after each refresh while the app is open or in the tray, and said under the
-//! position.
+//! position. A TWAP entry is watched too (Execution.swift's guardTwap pass, main's c308a92): stopped when its stop or
+//! take fires first or its loss at the stop grows past 1.5 × the plan's, with Windows kept awake while it runs.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
@@ -11,11 +12,12 @@ use ihatecrypto_core::guardian::{self, Action, ExitRules};
 use ihatecrypto_core::intent::{Fmt, IntentParser, Side, TradeIntent};
 use ihatecrypto_core::position_command::PositionCommand;
 use rust_decimal::Decimal;
-use trade::executor::{Opened, Order};
+use trade::executor::{Opened, Order, Position, TwapWatch};
 use trade::HyperliquidAccount;
 
 use crate::engine::Engine;
 use crate::notices::Notice;
+use crate::platform;
 use crate::snapshot;
 use crate::store;
 
@@ -41,6 +43,17 @@ impl Engine {
         let mut all: AllRules = store::load("exit-rules.json").unwrap_or_default();
         if rules.is_empty() { all.remove(&key); } else { all.insert(key, rules); }
         store::save(&all, "exit-rules.json");
+        self.keep_awake_for_twaps();
+    }
+
+    /// While a TWAP of ours runs Windows doesn't idle-sleep (the display may): asleep, nothing would stop a TWAP whose
+    /// stop fired. Ended once no TWAP is left to watch (the Mac's keepAwakeForTwaps). Called on the engine's one thread,
+    /// which holds the state. A closed lid or a quit app still end the watch: the plan card says so.
+    pub fn keep_awake_for_twaps(&self) {
+        let running = self.exit_rules().values().any(|r| r.twap_id.is_some());
+        if running == self.st().twap_awake { return }
+        platform::stay_awake(running);
+        self.st_mut().twap_awake = running;
     }
 
     /// `exitRules[coin] = rules`: None takes the coin's rules away.
@@ -50,13 +63,19 @@ impl Engine {
         self.set_exit_rules(all);
     }
 
-    /// After a plan opened: its partial take and trailing stop become rules; rules left from an earlier position in the
-    /// same coin never steer this one. A trailing stop the exchange holds (the executor's native one) needs nothing from
-    /// the app, as the Mac's.
-    pub fn keep_exit_rules(&self, opened: &Opened, intent: &TradeIntent) {
+    /// After a plan opened: its partial take, trailing stop and TWAP become rules; rules left from an earlier position in
+    /// the same coin never steer this one. A trailing stop the exchange holds (the executor's native one) needs nothing
+    /// from the app, as the Mac's. `loss_at_stop`: the plan's, which a TWAP's loss may not pass by half (guard_twap).
+    pub fn keep_exit_rules(&self, opened: &Opened, intent: &TradeIntent, loss_at_stop: Decimal) {
         let mut intent = intent.clone();
         if opened.trailing_on_exchange { intent.trailing_pct = None }
-        self.set_coin_rules(&opened.asset, Self::exit_rules_for(opened.size, opened.entry, opened.pending, opened.partial_take, &intent));
+        let mut rules = Self::exit_rules_for(opened.size, opened.entry, opened.pending, opened.partial_take, &intent);
+        if let Some(id) = opened.twap_id {
+            let r = rules.get_or_insert_with(|| ExitRules::new(opened.size, opened.entry, intent.side == Side::Long, false, None));
+            r.twap_id = Some(id);
+            r.twap_risk = Some(loss_at_stop);
+        }
+        self.set_coin_rules(&opened.asset, rules);
     }
 
     /// The rules a plan's fill leaves for the guardian, or None when the exchange's stop and take are all there is
@@ -95,6 +114,7 @@ impl Engine {
             let Some(account) = st.evm_address().map(|a| a.to_lowercase()) else { return };
             if st.positions_for.as_deref() != Some(account.as_str()) { return }
         }
+        self.keep_awake_for_twaps();
         let rules = self.exit_rules();
         if rules.is_empty() { return }
         self.st_mut().guarding = true;
@@ -103,7 +123,7 @@ impl Engine {
     }
 
     /// guardPositions after its checks, while `guarding` holds.
-    async fn guard_pass(&self, mut rules: HashMap<String, ExitRules>) {
+    async fn guard_pass(&self, rules: HashMap<String, ExitRules>) {
         // On a Ledger, stops move by themselves only through the trading key it approved: without it every move would
         // wait for the device's buttons. The stop and take on the exchange protect the position meanwhile.
         if self.ledger_active() && !self.agent_active() {
@@ -116,10 +136,20 @@ impl Engine {
             }
             return;
         }
-        {
-            let st = self.st();
-            rules.retain(|coin, _| st.positions.iter().any(|p| &p.coin == coin) || st.hl_orders.iter().any(|o| &o.coin == coin && !o.is_trigger));
+        // A TWAP entry, each pass, read afresh by the executor: a stop or take that fired leaves it buying, and a loss at
+        // the stop past 1.5 × the plan's stops it too. It stays watched until Hyperliquid shows it ended or it's really
+        // stopped: a pass that fails is tried again on the next.
+        let account = self.st().evm_address();
+        for (coin, r) in &rules {
+            if r.twap_id.is_none() { continue }
+            let Ok(x) = self.executor() else { continue };
+            let Ok(watch) = x.guard_twap(coin, r.twap_risk).await else { continue };
+            // Another wallet meanwhile has its own rules.
+            if self.st().evm_address() != account { return }
+            self.twap_watched(coin, watch);
         }
+        let all = self.exit_rules();
+        let rules = { let st = self.st(); Self::live_rules(all, &st.positions, &st.hl_orders) };
         self.set_exit_rules(rules.clone());
         for (coin, mut r) in rules {
             let found = {
@@ -181,6 +211,27 @@ impl Engine {
         }
     }
 
+    /// What the guardian's look at a TWAP came to: running, nothing to do. Ended or stopped, it's watched no more, and a
+    /// stop is said in the chat and as a notification.
+    pub fn twap_watched(&self, coin: &str, watch: TwapWatch) {
+        if watch == TwapWatch::Running { return }
+        let mut all = self.exit_rules();
+        let Some(r) = all.get_mut(coin) else { return };
+        r.twap_id = None;
+        self.set_exit_rules(all);
+        if let TwapWatch::Stopped(line) = watch {
+            self.reply(&line, Some("guardian".into()));
+            self.notify(Notice::Positions, &self.say(&format!("TWAP on {coin} stopped"), &format!("TWAP по {coin} остановлен")), &line, false, false, None, None);
+        }
+    }
+
+    /// Rules live exactly as long as their position (or its waiting limit), however it was closed. A TWAP not yet seen
+    /// stopped keeps its rules: it may still be buying after its stop or take closed the position.
+    pub fn live_rules(mut rules: HashMap<String, ExitRules>, positions: &[Position], orders: &[Order]) -> HashMap<String, ExitRules> {
+        rules.retain(|coin, r| r.twap_id.is_some() || positions.iter().any(|p| &p.coin == coin) || orders.iter().any(|o| &o.coin == coin && !o.is_trigger));
+        rules
+    }
+
     /// «… ask again from 10:42 AM, …» and «… from 10:52 AM, …» are one reason: the words without the times and amounts.
     /// The time it asks again goes, «AM»/«PM» with it: 11:58 AM and 12:08 PM are the same reason.
     pub fn reason_only(why: &str) -> String { NUMBERS.replace_all(why, "").into_owned() }
@@ -195,7 +246,9 @@ impl Engine {
         for coin in gone {
             // Another wallet since: its rules aren't this coin's, and the old wallet's close isn't its news.
             if self.st().evm_address().as_deref() != Some(user.as_str()) { return }
-            self.set_coin_rules(coin, None);
+            // A TWAP may still be buying after its stop or take closed the position: its rules stay for the guardian, which
+            // stops it and closes what it bought after. Dropped here, it bought 0.035 ETH on with no stop (main's live run).
+            if self.exit_rules().get(coin.as_str()).is_none_or(|r| r.twap_id.is_none()) { self.set_coin_rules(coin, None) }
             let Ok(Some((price, pnl, time))) = HyperliquidAccount::last_close(&user, coin).await else { continue };
             if (chrono::Utc::now() - time).num_milliseconds() >= 600_000 { continue }
             if self.st().evm_address().as_deref() != Some(user.as_str()) { return }
@@ -253,7 +306,7 @@ impl Engine {
             out.push(say(&format!("Trailing {}: the stop follows the best price, now {}.", Fmt::pct(t), Fmt::price(r.peak)),
                          &format!("Трейлинг {}: стоп идёт за лучшей ценой, сейчас {}.", Fmt::pct(t), Fmt::price(r.peak))));
         }
-        if out.is_empty() { vec![say("Stop and take-profit sit on the exchange; ihatecrypto doesn't move anything.", "Стоп и тейк стоят на бирже; ihatecrypto ничего не двигает.")] } else { out }
+        if out.is_empty() { vec![say("Stop and take-profit sit on the exchange, and ihatecrypto doesn't move anything.", "Стоп и тейк стоят на бирже, а ihatecrypto ничего не двигает.")] } else { out }
     }
 }
 

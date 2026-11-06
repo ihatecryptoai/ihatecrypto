@@ -541,7 +541,7 @@ pub mod agents {
         if let Some(s) = read_sealed(id) {
             if !prompt || !asks_now() { return None }
             let master = current_key().map(Ok).unwrap_or_else(|| super::key(
-                "open your Hyperliquid trading key until ihatecrypto restarts: orders then go without Windows Hello; it can't withdraw money", false, Some(60)));
+                "open your Hyperliquid trading key until ihatecrypto restarts: orders then go without Windows Hello, and it can't withdraw money", false, Some(60)));
             let Some(key) = master.ok().and_then(|m| open_with(&s, &m, &n)) else { return unanswered() };
             OPENED.lock().expect("agents").insert(n, key.clone());
             return Some(key);

@@ -136,7 +136,7 @@ fn write(loaded: &mut Option<(State, State)>, state: &State, key: Option<&Key>) 
 pub fn state() -> State { load(&mut LOADED.lock().expect("trusted")).1 }
 
 pub fn tampered() -> WalletError {
-    WalletError("The signer's protected settings — the wallets, the address book, the approved addresses — were changed outside it, by a program on this computer or a damaged file. Nothing was signed. Check this computer for malware; the recovery phrases restore your wallets on a clean one.".into())
+    WalletError("The signer's protected settings — the wallets, the address book, the approved addresses — were changed outside it, by a program on this computer or a damaged file. Nothing was signed. Check this computer for malware. The recovery phrases restore your wallets on a clean one.".into())
 }
 
 /// Checks the sealed state with the key Windows Hello just gave. `fresh`: that key was made just now, so nothing was

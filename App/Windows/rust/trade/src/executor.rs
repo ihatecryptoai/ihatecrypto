@@ -390,7 +390,7 @@ impl Executor {
         if let Some((units, arriving)) = opening {
             let send = millionths(units);
             steps.push(format!("NEAR Intents opens your Hyperliquid account: {} USDC from Solana → ≈ {} USDC on Hyperliquid, fee {}, no opening fee. \
-                                Usually 2–4 min; the trade waits for it and re-checks the price.", Fmt::num(send, 2), Fmt::num(arriving, 2),
+                                Usually 2–4 min. The trade waits for it and re-checks the price.", Fmt::num(send, 2), Fmt::num(arriving, 2),
                                usd(num(Num::of(send) - arriving)?)));
             changes.push(format!("Solana USDC: {} → {} (−{}).", Fmt::num(solana_usdc, 2), Fmt::num(solana_usdc - send, 2), Fmt::num(send, 2)));
         }
@@ -418,7 +418,7 @@ impl Executor {
                                if intent.twap_randomize == Some(true) { "sizes randomized ±20%" } else { "equal sizes" }, builder::RATE));
             steps.push(format!("Stop {}{} from the first part's price, on the exchange for the whole position, once that part fills. «cancel the TWAP» stops \
                                 the rest, and ihatecrypto stops it if the stop or take fires first or the loss at the stop grows past 1.5 × the plan's, \
-                                keeping the Mac awake while it runs. A closed lid, a quit app or a locked trading key leave it unwatched.",
+                                keeping this PC awake while it runs. A closed lid, a quit app or a locked trading key leave it unwatched.",
                                Fmt::pct(stop_pct), take_words("")));
         } else if let Some(limit) = intent.entry_px {
             steps.push(format!("{side} {} {} as a limit at {} (now {}), waiting on the exchange, with stop −{}{}, active once it fills.",
@@ -435,7 +435,7 @@ impl Executor {
             });
         }
         if intent.partial_take == Some(true) && intent.entry_px.is_none() {
-            steps.push("Partial take-profit: half the position at 1R, as a separate order on the exchange; then the stop moves to breakeven.".into());
+            steps.push("Partial take-profit: half the position at 1R, as a separate order on the exchange, then the stop moves to breakeven.".into());
         }
         if let Some(trail) = intent.trailing_pct {
             steps.push(if intent.entry_px.is_none() {
@@ -448,7 +448,7 @@ impl Executor {
         let free_after = num(Num::of(hl.withdrawable) + arriving - sizing.margin - sizing.fees_usd / Decimal::TWO)?;
         changes.push(format!("Hyperliquid, free: {} → ≈ {} (margin {} goes into the position).", usd(hl.withdrawable), usd(free_after), usd(sizing.margin)));
         changes.push(if intent.is_hedge() {
-            format!("Position: short {} {}, a hedge of the {} the wallet holds; net of them it costs ≈ {} in fees.", Fmt::num(sizing.size, sz as u32),
+            format!("Position: short {} {}, a hedge of the {} the wallet holds. Net of them it costs ≈ {} in fees.", Fmt::num(sizing.size, sz as u32),
                     market.name, market.name, usd(sizing.fees_usd))
         } else {
             format!("Position: {} {} {}, at the stop ≈ −{}{}.", side.to_lowercase(), Fmt::num(sizing.size, sz as u32), market.name, usd(sizing.loss_at_stop_usd),
@@ -469,12 +469,12 @@ impl Executor {
             Amount::Arrive(_) => Bridge::one_click_quote(amount, Bridge::PLACEHOLDER_RECIPIENT).await?.amount_in,
         };
         if send > solana_usdc {
-            return fail(format!("Solana has {} USDC; opening through NEAR Intents needs {}. Nothing was signed.", Fmt::num(solana_usdc, 2), Fmt::num(send, 2)));
+            return fail(format!("Solana has {} USDC, but opening through NEAR Intents needs {}. Nothing was signed.", Fmt::num(solana_usdc, 2), Fmt::num(send, 2)));
         }
         let units = uint64(num((Num::of(send) * 1_000_000).rounded(0, Rounding::Up))?);
         match self.one_click_quote(None, Some("hyperliquid"), units).await.and_then(|q| decimal(&q.amount_out_formatted)) {
             Some(out) if out > Decimal::ZERO => Ok((units, out)),
-            _ => fail("NEAR Intents didn't quote Solana → Hyperliquid just now. Nothing was signed; Relay can open it instead."),
+            _ => fail("NEAR Intents didn't quote Solana → Hyperliquid just now. Nothing was signed. Relay can open it instead."),
         }
     }
 
@@ -496,7 +496,7 @@ impl Executor {
             // Minutes have passed: the entry goes in only at the price confirmed.
             market = hl_markets().await?.remove(&p.market.name).unwrap_or(market);
             if moved(&market).0.is_none_or(|x| x > SLIPPAGE) {
-                return fail(format!("{} moved more than 1% while the USDC travelled. No trade; the money is on your Hyperliquid balance.", market.name));
+                return fail(format!("{} moved more than 1% while the USDC travelled. No trade. The money is on your Hyperliquid balance.", market.name));
             }
         }
         if let Some((net, usdc)) = &p.fund_from {
@@ -530,7 +530,7 @@ impl Executor {
                                          opened, it has no stop yet.", market.name));
                 };
                 let Some(open) = positions.into_iter().find(|o| o.coin == market.name && !o.size.is_zero()) else {
-                    return fail(format!("The entry's reply didn't come ({lost}); no {} position is open, the money is on your Hyperliquid balance.", market.name));
+                    return fail(format!("The entry's reply didn't come ({lost}). No {} position is open, the money is on your Hyperliquid balance.", market.name));
                 };
                 self.report(&format!("The entry's reply didn't come, but the {} position is open: placing its stop.", market.name));
                 HlReply::Filled { size: open.size.abs(), avg_px: open.entry }
@@ -538,7 +538,7 @@ impl Executor {
             Err(e) => return Err(e),
         };
         let HlReply::Filled { size, avg_px } = entry else {
-            return fail(format!("The entry didn't fill ({entry}). No position; the money is on your Hyperliquid balance."));
+            return fail(format!("The entry didn't fill ({entry}). No position. The money is on your Hyperliquid balance."));
         };
         self.report(&format!("{} {} {} at {}.", if long { "Long" } else { "Short" }, Fmt::num(size, sz as u32), market.name, Fmt::price(avg_px)));
 
@@ -751,8 +751,8 @@ impl Executor {
         match self.place_partial_take(market, long, size, entry, stop, &[]).await {
             Ok(r) => return r,
             Err(Error::NoReply(_)) => self.report("Partial take-profit: the exchange's reply didn't come, so it may or may not be on. The stop and full \
-                                                   take-profit are in place; look for a take at 1R among Hyperliquid's open orders."),
-            Err(e) => self.report(&format!("Partial take-profit didn't go through ({e}); the stop and full take-profit are still in place.")),
+                                                   take-profit are in place. Look for a take at 1R among Hyperliquid's open orders."),
+            Err(e) => self.report(&format!("Partial take-profit didn't go through ({e}). The stop and full take-profit are still in place.")),
         }
         None
     }
@@ -843,7 +843,7 @@ impl Executor {
         let Some((filled_size, avg_px)) = filled else {
             let Some(refused) = refused else { return fail(format!("The limit isn't among open orders: {reply}.")) };
             return fail(format!("Limit rejected: {refused}. {}", if cancelled {
-                "Its entry, waiting on the book without it, was cancelled; no position.".to_string()
+                "Its entry, waiting on the book without it, was cancelled. No position.".to_string()
             } else if read {
                 "No position.".into()
             } else {
@@ -861,7 +861,7 @@ impl Executor {
         let mut opened = match unconfirmed {
             Some(why) => self.protect_filled_limit(market, long, stop, take, &why).await?,
             None => {
-                self.report(&format!("The limit filled at once: {} {} at {}; stop and take-profit are on the exchange.", Fmt::num(filled_size, sz as u32),
+                self.report(&format!("The limit filled at once: {} {} at {}. Stop and take-profit are on the exchange.", Fmt::num(filled_size, sz as u32),
                                      market.name, Fmt::price(avg_px)));
                 Opened::new(&market.name, filled_size, avg_px, stop, take)
             }
@@ -915,7 +915,7 @@ impl Executor {
         let Some(position) = HyperliquidAccount::positions(evm).await?.into_iter().find(|p| p.coin == asset && !p.size.is_zero()) else {
             let rest: Vec<Order> = orders.iter().filter(|o| !entries.contains(o)).cloned().collect();
             if !rest.is_empty() { self.post(&action::cancel(&cancels(&market, &rest)), "cancel orders").await?; }
-            let line = if orders.is_empty() { format!("No open {asset} position.") } else { format!("{asset} orders cancelled ({}); there was no position.", orders.len()) };
+            let line = if orders.is_empty() { format!("No open {asset} position.") } else { format!("{asset} orders cancelled ({}). There was no position.", orders.len()) };
             self.report(&line);
             return Ok(line);
         };
@@ -942,7 +942,7 @@ impl Executor {
                 None => "It has no stop on the exchange.".into(),
             };
             let what = match &open {
-                Some(open) if open.size.abs() < position.size.abs() => format!("{} of {} {asset} closed; {} is still open.",
+                Some(open) if open.size.abs() < position.size.abs() => format!("{} of {} {asset} closed, {} is still open.",
                     Fmt::num(position.size.abs() - open.size.abs(), sz), Fmt::num(position.size.abs(), sz), Fmt::num(open.size.abs(), sz)),
                 Some(_) => format!("The {asset} position is still open."),
                 None => format!("The positions can't be read now: check on Hyperliquid whether {asset} closed."),
@@ -950,7 +950,7 @@ impl Executor {
             return fail(format!("The close didn't finish ({result}). {what} {kept}"));
         }
         let mut line = match result {
-            HlReply::Filled { size, avg_px } => format!("{asset} position closed: {} at {}; PnL before the close {}.", Fmt::num(size, sz), Fmt::price(avg_px),
+            HlReply::Filled { size, avg_px } => format!("{asset} position closed: {} at {}, PnL before the close {}.", Fmt::num(size, sz), Fmt::price(avg_px),
                                                         usd(position.unrealized_pnl)),
             _ => format!("{asset} position is closed (the close order: {result}): its stop or take-profit may have filled first."),
         };
@@ -1037,7 +1037,7 @@ impl Executor {
         }
         if let Some(problem) = &twap_problem { self.report(problem) }
         if entries.is_empty() {
-            let line = format!("No {asset} limit is waiting on the book; nothing was cancelled.");
+            let line = format!("No {asset} limit is waiting on the book, so nothing was cancelled.");
             self.report(&line);
             return Ok(line);
         }
@@ -1160,7 +1160,7 @@ impl Executor {
         let result = self.post(&action::order(&[order], "na")?, "partial close").await?;
         let HlReply::Filled { size: filled, avg_px } = result else { return fail(format!("The partial close didn't fill: {result}.")) };
         let left = num(Num::of(position.size.abs()) - filled)?;
-        let line = format!("Closed {} {asset} at {}; {} left, stop and take-profit in place.", Fmt::num(filled, sz as u32), Fmt::price(avg_px),
+        let line = format!("Closed {} {asset} at {} — {} left, stop and take-profit in place.", Fmt::num(filled, sz as u32), Fmt::price(avg_px),
                            Fmt::num(left, sz as u32));
         self.report(&line);
         Ok(line)
@@ -1244,7 +1244,7 @@ impl Executor {
         if size <= Decimal::ZERO {
             let places = sz_decimals as u32;
             let step = Decimal::ONE / Decimal::from_i128_with_scale(10i128.pow(places), 0);
-            return fail(format!("Closing {} of {} {asset} is {} {asset}, less than the smallest step, {} {asset}. Nothing was closed; the stop and \
+            return fail(format!("Closing {} of {} {asset} is {} {asset}, less than the smallest step, {} {asset}. Nothing was closed. The stop and \
                                  take-profit stay. Close a bigger share, or type «close» for the whole position.",
                                 (Num::of(fraction) * 100).0.map_or("NaN%".into(), Fmt::pct), Fmt::num(position.abs(), places),
                                 Fmt::num(wanted, 6.max(places + 3)), Fmt::num(step, places)));
@@ -1458,7 +1458,7 @@ impl Executor {
         Self::check_loss(lost, spend, num(Num::of(worth) * d("0.03"))?.max(d("0.15")).min(Decimal::ONE), if swap { "Relay's swap" } else { "Relay" })?;
         let have = self.rpc.token_balance(&sol, usdc_mint).await?;
         if have < spend_units {
-            return fail(format!("{} USDC on Solana; the bridge needs {}.", Fmt::num(millionths(have), 2), Fmt::num(spend, 2)));
+            return fail(format!("{} USDC on Solana, but the bridge needs {}.", Fmt::num(millionths(have), 2), Fmt::num(spend, 2)));
         }
 
         let (blockhash, last_valid) = self.rpc.latest_blockhash().await?;
@@ -1522,7 +1522,7 @@ impl Executor {
             Outcome::Expired => {
                 self.record("solana", &signature, Kind::Expired, "")?;
                 self.record("relay", &b.request_id, Kind::Expired, "")?;
-                return fail("The bridge transaction didn't make it into a block. The money stayed on Solana; you can retry.");
+                return fail("The bridge transaction didn't make it into a block. The money stayed on Solana. You can retry.");
             }
         }
         while started.elapsed() < Duration::from_secs(180) {
@@ -1549,7 +1549,7 @@ impl Executor {
             }
             sleep(1000).await;
         }
-        fail(format!("Relay didn't credit the USDC within 4 minutes. Order {} is in the journal; the trade wasn't opened.", b.request_id))
+        fail(format!("Relay didn't credit the USDC within 4 minutes. Order {} is in the journal. The trade wasn't opened.", b.request_id))
     }
 }
 

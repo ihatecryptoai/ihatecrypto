@@ -72,7 +72,7 @@ pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
         let offered = all.iter().map(|p| format!("{} {}", p.get("method").map_or("?", String::as_str), p.get("intent").map_or("?", String::as_str)))
             .collect::<Vec<_>>().join(", ");
         return Err(Refusal::new(if offered.is_empty() { "The service asked for payment without an MPP challenge.".into() } else {
-            format!("The service takes {offered}; ihatecrypto pays only a one-time charge in USDC on Tempo.")
+            format!("The service takes {offered}, but ihatecrypto pays only a one-time charge in USDC on Tempo.")
         }));
     };
     let request = p.get("id").filter(|id| !id.is_empty()).and(p.get("realm")).and(p.get("request")).and_then(|r| base64url(r))
@@ -81,11 +81,11 @@ pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
     let empty = Map::new();
     let details = request.get("methodDetails").and_then(Value::as_object).unwrap_or(&empty);
     let Some(amount) = request.get("amount").and_then(Value::as_str).and_then(|a| a.parse::<u64>().ok()).filter(|a| *a > 0) else {
-        return Err(Refusal::new("The service asks for a zero-amount proof or an amount that can't be read; ihatecrypto only pays real charges."));
+        return Err(Refusal::new("The service asks for a zero-amount proof or an amount that can't be read, and ihatecrypto only pays real charges."));
     };
     let currency = request.get("currency").and_then(Value::as_str);
     if currency.map(str::to_lowercase).as_deref() != Some(USDC) {
-        return Err(Refusal::new(format!("The service charges in {}; ihatecrypto pays in USDC on Tempo.", currency.unwrap_or("an unknown token"))));
+        return Err(Refusal::new(format!("The service charges in {}, but ihatecrypto pays in USDC on Tempo.", currency.unwrap_or("an unknown token"))));
     }
     if let Some(chain) = details.get("chainId").and_then(uint64) && chain != CHAIN_ID {
         return Err(Refusal::new(format!("The service wants payment on network {chain}, not Tempo mainnet.")));
@@ -94,13 +94,13 @@ pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
         return Err(Refusal::new("The service's payee isn't an address."));
     };
     if details.get("splits").and_then(Value::as_array).is_some_and(|s| !s.is_empty()) {
-        return Err(Refusal::new("The service splits the payment between several payees; ihatecrypto pays one."));
+        return Err(Refusal::new("The service splits the payment between several payees, but ihatecrypto pays one."));
     }
     if let Some(modes) = strings(details.get("supportedModes")) && !modes.contains(&"push") {
-        return Err(Refusal::new("The service takes only a transaction it sends itself (pull mode); ihatecrypto sends its own and proves it with the hash."));
+        return Err(Refusal::new("The service takes only a transaction it sends itself (pull mode), but ihatecrypto sends its own and proves it with the hash."));
     }
     if details.get("feePayer").is_some_and(is_true) {
-        return Err(Refusal::new("The service pays the fee itself (sponsored mode), which needs a transaction it sends; ihatecrypto sends its own."));
+        return Err(Refusal::new("The service pays the fee itself (sponsored mode), which needs a transaction it sends, but ihatecrypto sends its own."));
     }
     let mut memo = None;
     if let Some(m) = details.get("memo").and_then(Value::as_str) {
@@ -110,7 +110,7 @@ pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
         memo = Some(bytes);
     }
     let expires = p.get("expires").and_then(|e| date(e));
-    if expires.is_some_and(|e| e <= now) { return Err(Refusal::new("The service's price quote has expired; ask again.")) }
+    if expires.is_some_and(|e| e <= now) { return Err(Refusal::new("The service's price quote has expired. Ask again.")) }
     Ok(Challenge { params: p.clone(), amount, payee: payee.to_string(), memo, expires })
 }
 

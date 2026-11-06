@@ -1,9 +1,10 @@
 //! The Windows calls the engine makes, through winsec linked as a Rust library: the signer started hardened from birth
 //! inside the engine's job object, Windows Hello for the app's own lock, how long the person has been away and whether
 //! the session is locked, letting the signer's window come forward, DPAPI for the engine's own secrets, Windows' display
-//! language. Off Windows a stand-in takes winsec's place, as `winsec_stub.c` did: the signer is a plain child process,
-//! Windows Hello is faked only with WINSEC_FAKE_HELLO=1, «DPAPI» is a fixed XOR, the person is never away and the
-//! language is the locale's — no build of it ships.
+//! language, keeping Windows awake while a TWAP of ours runs. Off Windows a stand-in takes winsec's place, as
+//! `winsec_stub.c` did: the signer is a plain child process, Windows Hello is faked only with WINSEC_FAKE_HELLO=1,
+//! «DPAPI» is a fixed XOR, the person is never away, the language is the locale's and staying awake is only written
+//! down — no build of it ships.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -84,6 +85,9 @@ mod imp {
         let language = unsafe { GetUserDefaultUILanguage() };
         language & 0x3ff == 0x19
     }
+
+    /// SetThreadExecutionState from the engine's own thread: on, Windows doesn't idle-sleep (the display may) until off.
+    pub fn stay_awake(on: bool) { w::power::stay_awake(on); }
 }
 
 #[cfg(not(windows))]
@@ -115,6 +119,14 @@ mod imp {
     pub fn prefers_russian() -> bool {
         ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|x| !x.is_empty())).is_some_and(|l| l.to_lowercase().starts_with("ru"))
     }
+
+    thread_local! {
+        /// Each `stay_awake` this thread made, for the tests: nothing here sleeps on the engine's word.
+        static AWAKE: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    pub fn stay_awake(on: bool) { AWAKE.with(|a| a.borrow_mut().push(on)) }
+    pub fn stay_awake_calls() -> Vec<bool> { AWAKE.with(|a| a.borrow().clone()) }
 }
 
 pub use imp::*;

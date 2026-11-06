@@ -271,7 +271,7 @@ impl Executor {
         let started = Instant::now();
         while there < want || gas < floor {
             if started.elapsed() >= Duration::from_secs(240) {
-                return fail(format!("The USDC didn't reach {} within 4 minutes. Relay order {} is in the journal; nothing else was signed.", net.name,
+                return fail(format!("The USDC didn't reach {} within 4 minutes. Relay order {} is in the journal. Nothing else was signed.", net.name,
                                     step.request_id));
             }
             sleep(2).await;
@@ -511,7 +511,7 @@ impl Executor {
         // Only v3.2: v3's single EIP-3009 item names no order, so whom Relay pays would be its quote's word alone.
         let Some(v32) = v32 else {
             return fail(format!("There's no {} on {} for gas, and Relay's payment by signature that ihatecrypto can check (v3.2) isn't offered here yet. \
-                                 Add a little {} to {}; nothing was signed.", net.gas_coin, net.name, net.gas_coin, net.name));
+                                 Add a little {} to {}. Nothing was signed.", net.gas_coin, net.name, net.gas_coin, net.name));
         };
         let (arriving, spend) = (decimal(&quote.amount_out_formatted).unwrap_or_default(), millionths(amount));
         let worth = if sol { decimal(&quote.amount_out_usd).unwrap_or_default() } else { arriving };
@@ -525,7 +525,7 @@ impl Executor {
             relay::post_signature(&m.endpoint, &m.body, &hex(authorization)).await?;
             relay::post_permit(&m.permit, &hex(permit)).await?;
         }
-        self.report(&format!("Signed: Relay takes {} USDC on {} by signature and pays the gas there; ≈ {} {stable} to {there}.", show(amount), net.name,
+        self.report(&format!("Signed: Relay takes {} USDC on {} by signature and pays the gas there — ≈ {} {stable} to {there}.", show(amount), net.name,
                              Fmt::num(arriving, 6)));
         self.relay_arrival(&quote.request_id, &format!("https://relay.link/transaction/{}", quote.request_id), net, dest, hyperliquid, before, arriving,
                            &show(amount), stable, there, topup.is_some(), sol).await
@@ -581,7 +581,7 @@ impl Executor {
             amount: net.raw(amount).to_string(),
         };
         if !mega_fuel::sponsors(&transfer, me).await? {
-            return fail(format!("There's no {} on {} for gas, and BNB Chain won't pay the gas for this transfer now. Add a little {}; nothing was signed.",
+            return fail(format!("There's no {} on {} for gas, and BNB Chain won't pay the gas for this transfer now. Add a little {}. Nothing was signed.",
                                 net.gas_coin, net.name, net.gas_coin));
         }
         let before = if sol { self.rpc.balance(&self.wallet.solana).await? } else { self.relay_landed(dest, hyperliquid).await? };
@@ -596,7 +596,7 @@ impl Executor {
         }
         self.record(net.key, &hash, Kind::Confirmed, "")?;
         self.record("relay", &quote.request_id, Kind::Signed, &format!("{note}, tx {hash}"))?;
-        self.report(&format!("Sent {} USDC on {} to Relay's deposit address, BNB Chain paying the gas; ≈ {} {stable} to {there}.", show(amount), net.name,
+        self.report(&format!("Sent {} USDC on {} to Relay's deposit address, BNB Chain paying the gas — ≈ {} {stable} to {there}.", show(amount), net.name,
                              Fmt::num(arriving, 6)));
         self.relay_arrival(&quote.request_id, &format!("{}/tx/{hash}", net.explorer), net, dest, hyperliquid, before, arriving, &show(amount), stable, there,
                            topup.is_some(), sol).await
@@ -653,7 +653,7 @@ impl Executor {
             if allowance().await? >= units { return Ok(()) }
             sleep(1).await;
         }
-        fail("The approve went through but the network doesn't show it yet. Try again in a minute; nothing else was signed.")
+        fail("The approve went through but the network doesn't show it yet. Try again in a minute. Nothing else was signed.")
     }
 
     /// Settings › Wallet › «One transaction for approve and swap»'s key on the Mac; here the engine sets `BATCHES_ON`.

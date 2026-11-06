@@ -52,7 +52,7 @@ impl Engine {
                 network: "Solana".into(), key: "solana".into(), coin: "SOL".into(), usd: Decimal::ONE, usdc: usd,
                 ways: if usd >= GASLESS_SWAP_USD { vec![RouterOption::new(
                     &say(&format!("Swap {swap} USDC for SOL"), &format!("Обменять {swap} USDC на SOL")),
-                    &say("Jupiter pays this swap's fee; then SOL pays the rest", "Комиссию этого обмена платит Jupiter, дальше платит SOL"),
+                    &say("Jupiter pays this swap's fee, then SOL pays the rest", "Комиссию этого обмена платит Jupiter, дальше платит SOL"),
                     &format!("buy SOL for {swap} USDC"), true)] } else { vec![] },
             });
         }

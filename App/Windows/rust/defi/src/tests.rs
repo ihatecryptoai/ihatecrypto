@@ -523,9 +523,9 @@ fn yields_list_every_source_best_first_and_narrow_to_one_asset() {
     ]);
     assert_eq!(all[2], yields::YieldOption { asset: "SOL".into(), place: "Kamino Lend".into(), apy: d("4.425244393610317"), tvl_usd: Some(d("217192453.66509102819")),
                                             how: Some("deposit 50 SOL to Kamino".into()),
-                                            note: "lending; the first deposit opens Kamino accounts for ≈ 0.03 SOL rent, worth it from ≈ $35".into() });
+                                            note: "lending. The first deposit opens Kamino accounts for ≈ 0.03 SOL rent, worth it from ≈ $35".into() });
     assert_eq!((all[4].how.as_deref(), all[4].tvl_usd), (Some("deposit 10 SOL to the vault"), None));
-    assert_eq!(all[6].note, "the exchange's market making: some weeks lose money; from $5; withdraw 4 days after a deposit");
+    assert_eq!(all[6].note, "the exchange's market making: some weeks lose money. From $5, withdraw 4 days after a deposit");
     let sol = yields::gather(Some(vaults), Some(reserves), None, None, Some("sol"));
     assert_eq!(sol.iter().map(|o| o.place.as_str()).collect::<Vec<_>>(), ["Kamino Lend", "Jupiter Lend"]);
     assert!(yields::gather(None, None, None, None, None).is_empty());

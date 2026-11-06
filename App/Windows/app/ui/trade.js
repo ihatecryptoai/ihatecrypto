@@ -105,8 +105,8 @@ function takeChoices(b, takes) {
         h("span", { class: "trade-take-line" }, c.detail),
         h("span", { class: "trade-take-line" }, c.note)),
       h("span", { class: "trade-payoff" }, c.payoff))),
-    h("div", { class: "trade-hint" }, t("The stop is the same in all three; only how the profit is taken changes.",
-      "Стоп во всех трёх один и тот же; меняется только то, как берётся прибыль.")));
+    h("div", { class: "trade-hint" }, t("The stop is the same in all three. Only how the profit is taken changes.",
+      "Стоп во всех трёх один и тот же. Меняется только то, как берётся прибыль.")));
 }
 
 /** A tiny price path with the take lines of a way (the Mac's TakeSketch): the stop under it, the takes over it. */

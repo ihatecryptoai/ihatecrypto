@@ -103,7 +103,7 @@ impl RiskRules {
             if share > p.max_risk_pct {
                 let allowed = (Num::of(equity) * p.max_risk_pct / 100).rounded(2, Rounding::Down).0?;
                 out.push(Advice::new(Level::Block, format!(
-                    "At the stop −{}: {} of {} capital. Rule: at most {} per trade, i.e. up to {}. Lower the risk or top up; the limit is in Settings.",
+                    "At the stop −{}: {} of {} capital. Rule: at most {} per trade, i.e. up to {}. Lower the risk or top up. The limit is in Settings.",
                     Fmt::usd(s.loss_at_stop_usd), Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::usd(equity), Fmt::pct(p.max_risk_pct), Fmt::usd(allowed)
                 )));
             } else {
@@ -120,7 +120,7 @@ impl RiskRules {
         // Reward to risk. A hedge has no take and no bet on direction: the stop, the trend and the entry are beside the point.
         let rr = Fmt::num(p.default_reward_risk, 2);
         if i.is_hedge() {
-            out.push(Advice::new(Level::Ok, "Hedge: no take-profit, the stop only guards the margin; net of the coins it covers, the trade costs its fees."));
+            out.push(Advice::new(Level::Ok, "Hedge: no take-profit, the stop only guards the margin. Net of the coins it covers, the trade costs its fees."));
         } else if let Some(profit) = s.profit_at_take_usd.filter(|_| s.loss_at_stop_usd > zero) {
             let r = (Num::of(profit) / loss).rounded(1, Rounding::Plain).0?;
             out.push(if r < p.min_reward_risk {
@@ -229,7 +229,7 @@ impl Plan {
             // Risk comes from the stop, not the leverage: the rules' ceiling just keeps margin small.
             let lev = p.max_leverage.min(Decimal::from(m.max_leverage));
             r.leverage = Some(lev);
-            notes.push(format!("Leverage {}×, the rules' cap; the stop sets the loss, leverage only shrinks the margin.", Fmt::num(lev, 2)));
+            notes.push(format!("Leverage {}×, the rules' cap. The stop sets the loss, leverage only shrinks the margin.", Fmt::num(lev, 2)));
         }
         // A TWAP is the whole entry (Plan::evaluate): no half at 1R beside it.
         if r.partial_take.is_none() && auto && r.twap_minutes.is_none() {

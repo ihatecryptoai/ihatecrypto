@@ -118,7 +118,7 @@ function loaded(p) {
     networkCards(p),
     alertsCard(),
     recurringBox(),
-    p.errors.length ? h("div", { class: "pf-errors" }, t("Didn't answer: ", "Не ответили: ") + p.errors.join("; ")) : null);
+    p.errors.length ? h("div", { class: "pf-errors" }, t("Didn't answer: ", "Не ответили: ") + p.errors.join(" · ")) : null);
 }
 
 /** The week's value as a line, green when it grew, red when it fell, over a fading area (EquitySparkline). */
@@ -512,7 +512,7 @@ function automationCard() {
     // Money on Solana and no SOL: every task there fails on its fee. The fix is one chat message away.
     b && sol < 0.005 && coins.length ? h("div", { class: "pf-auto-gas" },
       h("span", {}, icon("exclamationmark.triangle", 12), t("No SOL for fees: it can't send yet", "Нет SOL на комиссии: отправлять пока не может")),
-      h("button", { class: "btn small", title: t(`Puts the send to «${s.automation.label}» in the chat; nothing goes until you send it`, `Вставит в чат перевод на «${s.automation.label}»; ничего не уйдёт, пока не отправишь`),
+      h("button", { class: "btn small", title: t(`Puts the send to «${s.automation.label}» in the chat. Nothing goes until you send it`, `Вставит в чат перевод на «${s.automation.label}». Ничего не уйдёт, пока не отправишь`),
         onclick: () => suggestGas(s.automation, b) }, icon("fuelpump", 12), t("Top up gas", "Пополнить газ"))) : null);
 }
 
@@ -581,8 +581,8 @@ function transitCard() {
       };
       return h("div", { class: "pf-transit-item" },
         h("button", { class: "pf-transit-row", onclick: toggle,
-          title: t(`Signed ${when(e.at)}; it shows here until the bridge says it landed or went back. Click for details.`,
-            `Подписано ${when(e.at)}; видно здесь, пока мост не скажет, что дошло или вернулось. Нажми, чтобы увидеть подробности.`) },
+          title: t(`Signed ${when(e.at)}. It shows here until the bridge says it landed or went back. Click for details.`,
+            `Подписано ${when(e.at)}. Видно здесь, пока мост не скажет, что дошло или вернулось. Нажми, чтобы увидеть подробности.`) },
           logoDisc(e.logo, 18),
           h("div", { class: "pf-transit-text" },
             h("div", { class: open ? "" : "one-line" }, e.what),
@@ -637,14 +637,14 @@ export function toggleDetail(place) { detail = detail === place ? null : place; 
 export function openDetail(place = "hyperliquid") { detail = place; render(); }
 
 const places = {
-  solana: { logo: "sol", title: () => t("Solana wallet", "Кошелёк Solana"), about: () => t("everything you hold on Solana; every move starts here", "всё, что лежит в Solana; каждый перевод начинается отсюда"),
+  solana: { logo: "sol", title: () => t("Solana wallet", "Кошелёк Solana"), about: () => t("everything you hold on Solana — every move starts here", "всё, что лежит в Solana — каждый перевод начинается отсюда"),
     actions: () => [[t("Top up", "Пополнить"), "topup", "arrow.down.circle"], [t("Stake SOL", "Застейкать SOL"), "stake 0.01 SOL", "lock"], [t("Send to a saved address", "Отправить на сохранённый адрес"), "send 1 USDC to ", "arrow.up"]] },
   hyperliquid: { logo: "hype", title: () => t("Hyperliquid account", "Счёт Hyperliquid"), about: () => t("margin for perps, stocks and commodities", "маржа для фьючерсов, акций и сырья"),
     actions: () => [[t("Withdraw to Solana", "Вывести в Solana"), "withdraw 1 USDC to Solana", "arrow.up"], [t("Trade by the book", "Сделка по правилам"), "long ETH by the book", "chart.pie"], [t("What’s moving", "Что движется"), "what's moving?", "bolt"]] },
   robinhood: { logo: "robinhood", title: () => "Robinhood Chain", about: () => t("Robinhood Stock Tokens · economic exposure, not shares", "токены акций Robinhood · доля в цене, а не сами акции"),
     actions: () => [[t("Buy SpaceX", "Купить SpaceX"), "buy SpaceX stock for 2 USDC", "plus"], [t("Sell", "Продать"), "sell my SpaceX shares", "arrow.right"], [t("USDG to Solana", "USDG в Solana"), "move USDG from Robinhood to Solana", "arrow.up"]],
-    note: () => t("Stock Tokens aren’t offered to US persons, or in Canada, the UK and Switzerland; they give economic exposure, not the shares.",
-      "Токены акций не продаются жителям США, Канады, Великобритании и Швейцарии; они повторяют цену акции, но акцией не являются.") },
+    note: () => t("Stock Tokens aren’t offered to US persons, or in Canada, the UK and Switzerland. They give economic exposure, not the shares.",
+      "Токены акций не продаются жителям США, Канады, Великобритании и Швейцарии. Они повторяют цену акции, но акцией не являются.") },
   near: { logo: "near", title: () => t("NEAR account", "Аккаунт NEAR"), about: () => t("native NEAR on the NEAR chain · bought through NEAR Intents", "NEAR в сети NEAR · куплен через NEAR Intents"),
     actions: () => [[t("Buy more", "Купить ещё"), "buy NEAR for 3 USDC", "plus"]],
     note: () => t("The account is yours from the same phrase (m/44'/397'/0').", "Аккаунт твой, из той же фразы (m/44'/397'/0').") },
@@ -660,8 +660,8 @@ const places = {
     actions: () => [[t("Lend more", "Дать ещё"), "lend 1 USDC on Aave", "plus"], [t("Withdraw to Solana", "Вывести в Solana"), "withdraw USDC from Aave", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
   // Gauntlet USDC Prime, the vault the app deposits into (the Mac's MorphoVault.base).
   morpho: { logo: "morpho", deposit: ["Morpho"], title: () => "Morpho · Base", about: () => t("Gauntlet USDC Prime vault · lending on Base · withdraw any time", "хранилище Gauntlet USDC Prime · займы в Base · вывести можно в любой момент"),
-    note: () => t("Your USDC is lent by Gauntlet’s curated Morpho markets; the vault shares are only ever credited to this wallet.",
-      "Твои USDC выдаются в займы на рынках Morpho, которые отбирает Gauntlet; доли хранилища зачисляются только на этот кошелёк."),
+    note: () => t("Your USDC is lent by Gauntlet’s curated Morpho markets. The vault shares are only ever credited to this wallet.",
+      "Твои USDC выдаются в займы на рынках Morpho, которые отбирает Gauntlet. Доли хранилища зачисляются только на этот кошелёк."),
     actions: () => [[t("Deposit more", "Добавить"), "deposit 1 USDC into Morpho", "plus"], [t("Withdraw to Solana", "Вывести в Solana"), "withdraw USDC from Morpho", "arrow.up"], [t("Best rates", "Лучшие ставки"), "where to keep USDC", "chart.pie"]] },
 };
 

@@ -123,7 +123,7 @@ impl AgentReads {
         let (types, returns) = (Self::list(types), Self::list(returns.unwrap_or("")));
         let mine = me.evm.as_deref().unwrap_or("");
         let args: Vec<&str> = parts[3..].iter().map(|a| if *a == "me" { mine } else { a }).collect();
-        if types.len() != args.len() { return fail(format!("{name} takes {} arguments; {} given.", types.len(), args.len())) }
+        if types.len() != args.len() { return fail(format!("{name} takes {} arguments, {} given.", types.len(), args.len())) }
         let result = net.rpc.read(if parts[1] == "me" { mine } else { parts[1] }, &Self::encode(name, &types, &args)?).await?;
         if returns.is_empty() {
             return Ok(format!("{name} on {} returned 0x{} (give the return types, e.g. (uint256), to read it)", net.name, to_hex(&result)));
@@ -137,7 +137,7 @@ impl AgentReads {
             return fail(format!("«{function}» isn't a function like deposit(uint256,address)."));
         };
         let types = Self::list(types);
-        if types.len() != args.len() { return fail(format!("{name} takes {} arguments; {} given.", types.len(), args.len())) }
+        if types.len() != args.len() { return fail(format!("{name} takes {} arguments, {} given.", types.len(), args.len())) }
         Self::encode(name, &types, &args.iter().map(|a| if a == "me" { me } else { a.as_str() }).collect::<Vec<_>>())
     }
 

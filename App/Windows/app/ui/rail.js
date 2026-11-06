@@ -268,7 +268,7 @@ function walletMenu(anchor, compact, start) {
           h("span", { class: "secondary one-line" }, t(`${m.threshold} of ${m.keys.length} keys · `, `${m.threshold} из ${m.keys.length} ключей · `) + m.networks.map(netName).join(", "))))),
       h("div", { class: "spacer" }),
       h("div", { class: "menu-divider" }),
-      s.wallets.some((w) => w.kind === "ledger") ? null : h("button", { class: "rail-wm-action", title: t("Keys stay on the device; you approve each move on it", "Ключи остаются на устройстве; каждое действие подтверждаешь на нём"), onclick: () => { closePopover(); act("addBoard", { name: "ledger" }); } }, icon("bolt", 14), t("Connect Ledger…", "Подключить Ledger…")),
+      s.wallets.some((w) => w.kind === "ledger") ? null : h("button", { class: "rail-wm-action", title: t("Keys stay on the device — you approve each move on it", "Ключи остаются на устройстве — каждое действие подтверждаешь на нём"), onclick: () => { closePopover(); act("addBoard", { name: "ledger" }); } }, icon("bolt", 14), t("Connect Ledger…", "Подключить Ledger…")),
       h("button", { class: "rail-wm-action", title: t("Create or import a wallet in Settings", "Создать или импортировать кошелёк в настройках"), onclick: () => { closePopover(); store("settingsTab", "wallet"); ui.view = "settings"; render(); } }, icon("plus", 14), t("New wallet…", "Новый кошелёк…")),
       h("button", { class: "rail-wm-action" + (picked === "new-ms" ? " on" : ""), title: t("What a multisig is, and how to make one", "Что такое мультисиг и как его сделать"),
         onclick: () => { picked = "new-ms"; renaming = false; draw(); } }, icon("rail.shield", 14), t("New multisig…", "Новый мультисиг…")));
@@ -347,7 +347,7 @@ function newMultisig() {
       step(3, t("Networks", "Сети"), t("Base, Arbitrum or another EVM network. The address is the same on each.", "Base, Arbitrum или другая EVM-сеть. Адрес в каждой один и тот же."))),
     h("div", { class: "rail-ms-make" },
       h("button", { class: "btn primary", onclick: () => { closePopover(); ui.view = "canvas"; suggest("make a multisig"); } }, icon("plus", 13), t("Make a multisig", "Сделать мультисиг")),
-      h("span", { class: "secondary small" }, t("It goes to the chat; nothing is made until you confirm.", "Это уйдёт в чат; ничего не создаётся, пока ты не подтвердишь."))));
+      h("span", { class: "secondary small" }, t("It goes to the chat. Nothing is made until you confirm.", "Это уйдёт в чат. Ничего не создаётся, пока ты не подтвердишь."))));
 }
 
 /** The dApp browser at the last site it showed, jup.ag the first time (the Mac's ws.browser.address): Rust keeps it. */

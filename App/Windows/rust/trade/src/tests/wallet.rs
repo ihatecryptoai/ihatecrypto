@@ -254,7 +254,7 @@ async fn a_dry_run_is_guarded_and_simulated_and_signs_nothing() {
     assert_eq!(changes, ["SOL: 0.002034 (rent back from closed accounts)"]);
     // Less back than the rule asks: the guard stops it, in its words, before any signer.
     let stopped = e.sign_and_send(&wire, 9, &owners, &[], "close it", 3_000_000, &none, true, None).await.unwrap_err();
-    assert_eq!(stopped, crate::Error::Guard("The guard stopped close it: Simulation: lamports changes by 2034280; the minimum allowed is 3000000.".into()));
+    assert_eq!(stopped, crate::Error::Guard("The guard stopped close it: Simulation: lamports changes by 2034280, under the minimum allowed, 3000000.".into()));
     // Money to someone not approved: the guard stops it before the simulation.
     let thief = wallet::keys::base58::encode(&[7; 32]);
     let steal = solana::Instruction {

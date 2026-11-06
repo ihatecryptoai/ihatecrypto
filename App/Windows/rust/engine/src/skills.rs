@@ -80,8 +80,8 @@ impl Engine {
                     m.retain(|x| x.to_lowercase() != lower);
                     m.push(kept.clone());
                 });
-                self.say(&format!("I'll keep in mind: «{kept}». «What do you remember» lists it; «forget …» drops it."),
-                         &format!("Запомнил: «{kept}». «Что ты помнишь» — весь список; «забудь …» — убрать."))
+                self.say(&format!("I'll keep in mind: «{kept}». «What do you remember» lists it, «forget …» drops it."),
+                         &format!("Запомнил: «{kept}». «Что ты помнишь» — весь список, «забудь …» — убрать."))
             }
             MemoryCommand::Forget(words) => {
                 let w = words.to_lowercase();
@@ -169,7 +169,7 @@ impl Engine {
                 };
                 let (fills, funding) = tokio::join!(trade_history::all_fills(&address), trade_history::all_funding(&address));
                 let Ok(all) = fills else {
-                    return format!("Hyperliquid didn't answer for {}; try again in a minute.", if me { "this wallet" } else { address.as_str() });
+                    return format!("Hyperliquid didn't answer for {}. Try again in a minute.", if me { "this wallet" } else { address.as_str() });
                 };
                 let stories = trade_history::stories(&all);
                 let trades = trade_study::trades(&stories, &funding.unwrap_or_default());

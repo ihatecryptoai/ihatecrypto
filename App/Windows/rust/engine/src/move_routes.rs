@@ -1117,9 +1117,9 @@ impl Engine {
             }
             WalletCommand::SwapOn { place, .. } if place == "tempo" => {
                 let relay = self.quotes(c).and_then(|q| q.into_iter().next()).is_some_and(|w| w.way == "Relay's swap");
-                Some(say(&format!("An exact approve to {}, then the swap at no less than {}, paying only this wallet; Tempo's fees come out of the USDC, a tenth of a cent each.",
+                Some(say(&format!("An exact approve to {}, then the swap at no less than {}, paying only this wallet. Tempo's fees come out of the USDC, a tenth of a cent each.",
                                   if relay { "Relay's swap on Tempo" } else { "Tempo's own exchange" }, if relay { "Relay's checked quote" } else { "0.1% under its quote" }),
-                         &format!("Точное разрешение для {}, потом обмен не хуже {}, платит только этому кошельку; комиссии Tempo — из USDC, по десятой цента.",
+                         &format!("Точное разрешение для {}, потом обмен не хуже {}, платит только этому кошельку. Комиссии Tempo — из USDC, по десятой цента.",
                                   if relay { "обмена Relay в Tempo" } else { "собственной биржи Tempo" }, if relay { "проверенной котировки Relay" } else { "котировки на 0,1%" })) + &confirm)
             }
             WalletCommand::SwapOn { place, from: a, to: b, .. } if !["solana", "near", "hyperliquid"].contains(&place.as_str()) => {
@@ -1137,8 +1137,8 @@ impl Engine {
             WalletCommand::CrossSwap { from: a, on: src, to: b, at: dst, .. } => {
                 let (from, to, label) = (name(src), name(dst), self.token_name(b, dst));
                 if src == "near" || dst == "near" || self.quotes(c).and_then(|q| q.into_iter().next()).is_some_and(|w| w.way.starts_with("NEAR Intents")) {
-                    return Some(say(&format!("One deposit on {from} to the 1Click address NEAR Intents binds to this quote — checked with 1Click before signing; that address needs Windows Hello the first time — and {label} comes to your own address on {to}; a refund comes back to {from}."),
-                                    &format!("Один депозит в {from} на адрес 1Click, который NEAR Intents привязывает к этой котировке, — сверяется с 1Click перед подписью; этому адресу в первый раз нужен Windows Hello, — и {label} придёт на твой же адрес в {to}; возврат — обратно в {from}.")) + &confirm);
+                    return Some(say(&format!("One deposit on {from} to the 1Click address NEAR Intents binds to this quote — checked with 1Click before signing, and that address needs Windows Hello the first time — and {label} comes to your own address on {to}. A refund comes back to {from}."),
+                                    &format!("Один депозит в {from} на адрес 1Click, который NEAR Intents привязывает к этой котировке, — сверяется с 1Click перед подписью, а в первый раз этому адресу нужен Windows Hello, — и {label} придёт на твой же адрес в {to}. Возврат — обратно в {from}.")) + &confirm);
                 }
                 let coin = if src == "solana" { "SOL".into() } else { EvmNetwork::named(src).map_or_else(|| "ETH".into(), |n| n.gas_coin.to_uppercase()) };
                 let (coin_in, upper) = (a.to_uppercase() == coin, a.to_uppercase());
@@ -1151,8 +1151,8 @@ impl Engine {
             WalletCommand::SendToken { name: who, token, amount: Some(x), network } => {
                 let (entry, symbol, _) = self.across_recipient(who, token, network.as_deref()).ok().flatten()?;
                 let (place, what) = (net_title(&entry.network), format!("{} {symbol}", Fmt::num(*x, 8)));
-                Some(say(&format!("NEAR Intents' 1Click turns USDC into {symbol} on {place} and pays this saved address exactly {what}; what's left of the USDC comes back. Its deposit address is fresh: it needs Windows Hello before anything is sent."),
-                         &format!("1Click от NEAR Intents превращает USDC в {symbol} в {place} и платит этому сохранённому адресу ровно {what}; остаток USDC возвращается. Его адрес депозита новый: перед отправкой нужен Windows Hello.")) + &confirm)
+                Some(say(&format!("NEAR Intents' 1Click turns USDC into {symbol} on {place} and pays this saved address exactly {what}. What's left of the USDC comes back. Its deposit address is fresh: it needs Windows Hello before anything is sent."),
+                         &format!("1Click от NEAR Intents превращает USDC в {symbol} в {place} и платит этому сохранённому адресу ровно {what}, а остаток USDC возвращается. Его адрес депозита новый: перед отправкой нужен Windows Hello.")) + &confirm)
             }
             WalletCommand::Pay { url, .. } => {
                 let q = self.st().payment.clone().filter(|q| &q.command == c)?;
@@ -1160,16 +1160,16 @@ impl Engine {
                 let host = reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| ch.realm().into());
                 let (price, (start, end), need) = (Fmt::num(ch.usdc(), 6), address_check::ends(&ch.payee), self.tempo_need(ch.usdc()));
                 let src = need.and_then(|n| self.tempo_source(n)).map_or("Solana", |(n, _)| n.name);
-                Some(say(&format!("One Tempo transfer of {price} USDC to the address {host} named ({start} … {end}); "), &format!("Один перевод в Tempo на {price} USDC по адресу, который назвал {host} ({start} … {end}); "))
-                    + &if need.is_some() { say(&format!("what's short comes from {src} over Relay first; "), &format!("недостающее сначала придёт из {src} через Relay; ")) } else { String::new() }
-                    + &say("the fee, ≈ $0.001, comes out of the USDC. Then the request goes again with the payment's hash.", "комиссия ≈ $0,001 — из этих USDC. Потом запрос уходит снова с хешем платежа.") + &confirm)
+                Some(say(&format!("One Tempo transfer of {price} USDC to the address {host} named ({start} … {end}). "), &format!("Один перевод в Tempo на {price} USDC по адресу, который назвал {host} ({start} … {end}). "))
+                    + &if need.is_some() { say(&format!("What's short comes from {src} over Relay first. "), &format!("Недостающее сначала придёт из {src} через Relay. ")) } else { String::new() }
+                    + &say("The fee, ≈ $0.001, comes out of the USDC. Then the request goes again with the payment's hash.", "Комиссия ≈ $0,001 — из этих USDC. Потом запрос уходит снова с хешем платежа.") + &confirm)
             }
             WalletCommand::Aave { deposit: true, amount: Some(x), network: net } | WalletCommand::Morpho { deposit: true, amount: Some(x), network: net } => {
                 // The Mac's lendingRoute footer: Solana's part when the USDC or the gas there is short, and Ethereum's gas said.
                 let morpho = matches!(c, WalletCommand::Morpho { .. });
                 let (n, coin) = (name(net), EvmNetwork::named(net).map_or("ETH", |n| n.gas_coin));
                 let short = self.usdc_free(net).unwrap_or_default() < *x || self.gas_low(net);
-                let (x, what, read) = (Fmt::num(*x, 2), if morpho { "deposit; the shares come to this wallet only" } else { "supply" },
+                let (x, what, read) = (Fmt::num(*x, 2), if morpho { "deposit — the shares come to this wallet only" } else { "supply" },
                                        if morpho { "депозит — доли приходят только на этот кошелёк" } else { "вклад" });
                 if net == "base" {
                     return Some(if short { say("One Solana signature for the bridge, then two", "Одна подпись в Solana для моста, потом две") } else { say("Two", "Две") }
@@ -1178,24 +1178,24 @@ impl Engine {
                         + &confirm);
                 }
                 Some(if short {
-                    say(&format!("What's missing on {n} comes from Solana over Relay, with {coin} for gas when there's none; then two"),
-                        &format!("Недостающее на {n} придёт с Solana через Relay, с {coin} на газ, если его нет; потом две"))
+                    say(&format!("What's missing on {n} comes from Solana over Relay, with {coin} for gas when there's none. Then two"),
+                        &format!("Недостающее на {n} придёт с Solana через Relay, с {coin} на газ, если его нет. Потом две"))
                 } else { say("Two", "Две") }
                     + &say(&format!(" {n} transactions: approve exactly {x} USDC, then {what}. {} re-read from {n} first", if morpho { "The vault's asset is" } else { "Pool and aToken are" }),
                            &format!(" транзакции в {n}: разрешение ровно на {x} USDC, потом {read}. {} сначала перечитываются из {n}", if morpho { "Актив хранилища" } else { "Пул и aToken" }))
                     + &if net == "ethereum" {
-                        say("; Ethereum's gas changes by the hour (cents to dollars): ask the chat «how much is gas?» for today's",
-                            "; газ в Ethereum меняется каждый час (от центов до долларов): спроси в чате «сколько стоит газ?», чтобы узнать сегодняшний")
+                        say(". Ethereum's gas changes by the hour (cents to dollars): ask the chat «how much is gas?» for today's",
+                            ". Газ в Ethereum меняется каждый час (от центов до долларов): спроси в чате «сколько стоит газ?», чтобы узнать сегодняшний")
                     } else { String::new() }
                     + "." + &confirm)
             }
-            WalletCommand::MultisigCreate { .. } => Some(say("One transaction per network from this computer to Safe's factory (Safe 1.4.1, the same contracts and the same address on each). The keys and how many must sign are set in it; ihatecrypto never changes them.",
-                                                             "Одна транзакция на сеть с этого компьютера на фабрику Safe (Safe 1.4.1, те же контракты и тот же адрес в каждой). Ключи и сколько их нужно для подписи задаются в ней; ihatecrypto их никогда не меняет.") + &confirm),
+            WalletCommand::MultisigCreate { .. } => Some(say("One transaction per network from this computer to Safe's factory (Safe 1.4.1, the same contracts and the same address on each). The keys and how many must sign are set in it, and ihatecrypto never changes them.",
+                                                             "Одна транзакция на сеть с этого компьютера на фабрику Safe (Safe 1.4.1, те же контракты и тот же адрес в каждой). Ключи и сколько их нужно для подписи задаются в ней, и ihatecrypto их никогда не меняет.") + &confirm),
             WalletCommand::MultisigSend { .. } => {
                 let p = self.st().multisig_payment.clone().filter(|p| &p.command == c)?;
                 let net = EvmNetwork::named(&p.net)?;
-                Some(say(&format!("Each key signs the same move: a plain payment, money only to {}. Then this computer sends it with the signatures and pays the gas; the multisig needs no {}.", p.to.name, net.gas_coin),
-                         &format!("Каждый ключ подписывает одно и то же: обычный платёж, деньги только {}. Потом этот компьютер отправляет его с подписями и платит газ; мультисигу {} не нужен.", p.to.name, net.gas_coin)) + &confirm)
+                Some(say(&format!("Each key signs the same move: a plain payment, money only to {}. Then this computer sends it with the signatures and pays the gas, so the multisig needs no {}.", p.to.name, net.gas_coin),
+                         &format!("Каждый ключ подписывает одно и то же: обычный платёж, деньги только {}. Потом этот компьютер отправляет его с подписями и платит газ, так что мультисигу {} не нужен.", p.to.name, net.gas_coin)) + &confirm)
             }
             WalletCommand::ContractCall(_) => {
                 let (function, net, approve) = {
@@ -1205,7 +1205,7 @@ impl Engine {
                 };
                 Some(say(&format!("Encoded by ihatecrypto from {function}, simulated on {net}"), &format!("Закодировано ihatecrypto из {function}, симуляция в {net}"))
                     + &if approve { say(" with its exact approve", " с точным разрешением") } else { String::new() }
-                    + &say("; the signer reads it again and asks for a new spender in person.", "; подписант читает его снова и о новом получателе разрешения спрашивает лично.") + &confirm)
+                    + &say(". The signer reads it again and asks for a new spender in person.", ". Подписант читает его снова и о новом получателе разрешения спрашивает лично.") + &confirm)
             }
             _ => None,
         }
@@ -1225,7 +1225,7 @@ impl Engine {
         })
             + &say(&format!(" {n} transactions: an exact approve and the Uniswap swap, which may only pay this wallet"),
                    &format!(" транзакции в {n}: точное разрешение и обмен в Uniswap, который может платить только этому кошельку"))
-            + &if usdc.is_none() { say(&format!("; the USDC stays on {n}."), &format!("; USDC остаются в {n}.")) } else { ".".into() }
+            + &if usdc.is_none() { say(&format!(". The USDC stays on {n}."), &format!(". USDC остаются в {n}.")) } else { ".".into() }
             + &say(" Press Confirm.", " Нажми «Подтвердить»."))
     }
 
@@ -1239,11 +1239,11 @@ impl Engine {
         self.say(&format!("One {names} transaction a chain: Merkl's distributor pays each reward to this wallet — the signer refuses a claim that pays anyone else. "),
                  &format!("Одна транзакция на сеть ({names}): распределитель Merkl платит каждую награду этому кошельку — подписант откажет в получении, которое платит кому-то ещё. "))
             + &if sweep {
-                self.say("Then each reward worth $1 or more is sold for USDC on Solana (Relay's swap or Uniswap and the bridge, whichever leaves more), paying only this wallet; dust stays. ",
-                         "Потом каждая награда от $1 продаётся за USDC на Solana (обмен Relay или Uniswap и мост — что оставит больше), только на этот кошелёк; мелочь остаётся. ")
+                self.say("Then each reward worth $1 or more is sold for USDC on Solana (Relay's swap or Uniswap and the bridge, whichever leaves more), paying only this wallet. Dust stays. ",
+                         "Потом каждая награда от $1 продаётся за USDC на Solana (обмен Relay или Uniswap и мост — что оставит больше), только на этот кошелёк. Мелочь остаётся. ")
             } else { String::new() }
-            + &self.say("The proofs are asked for again right before signing; gas missing there comes from Solana over Relay. Press Confirm.",
-                        "Доказательства запрашиваются снова прямо перед подписью; недостающий газ придёт с Solana через Relay. Нажми «Подтвердить».")
+            + &self.say("The proofs are asked for again right before signing. Gas missing there comes from Solana over Relay. Press Confirm.",
+                        "Доказательства запрашиваются снова прямо перед подписью. Недостающий газ придёт с Solana через Relay. Нажми «Подтвердить».")
     }
 
     /// The save card's line (the Mac's PendingAddressBoard): taken from the message, or resolved from a domain just now.
@@ -1270,8 +1270,8 @@ impl Engine {
             self.say(&format!("Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly {amount} USDC leaving."),
                      &format!("Получить деньги может только этот сохранённый адрес: это проверяют защита и подписант, а симуляция должна показать, что уходит ровно {amount} USDC."))
         }) + &if e.network == "ethereum" {
-            self.say(" Ethereum mainnet: the fee is in ETH and can be dollars; it's bought for you if the wallet has none there.",
-                     " Основная сеть Ethereum: комиссия — в ETH и может быть в долларах; если его на кошельке нет, его купят за тебя.")
+            self.say(" Ethereum mainnet: the fee is in ETH and can be dollars. It's bought for you if the wallet has none there.",
+                     " Основная сеть Ethereum: комиссия — в ETH и может быть в долларах. Если его на кошельке нет, его купят за тебя.")
         } else { String::new() }
             + &self.say(" Press Confirm.", " Нажми «Подтвердить».")
     }

@@ -7,6 +7,7 @@
 
 pub mod ble;
 pub mod ledger;
+pub mod power;
 
 use std::ffi::c_void;
 use std::sync::Once;

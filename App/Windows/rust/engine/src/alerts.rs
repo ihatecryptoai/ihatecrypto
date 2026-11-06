@@ -52,7 +52,7 @@ impl Engine {
                     let pretty = IntentParser::pretty(&coin);
                     // No markets at all: Hyperliquid didn't answer, which isn't «no market» (the Mac: «No price … right now»).
                     self.reply(&if none {
-                        self.say(&format!("No price for {pretty} right now — Hyperliquid didn't answer. Nothing was set; try again in a moment."),
+                        self.say(&format!("No price for {pretty} right now — Hyperliquid didn't answer. Nothing was set. Try again in a moment."),
                                  &format!("Цены {pretty} сейчас нет — Hyperliquid не ответил. Оповещение не поставлено, попробуй через минуту."))
                     } else {
                         self.say(&format!("Hyperliquid has no market for {coin}, so there's no price to watch."), &format!("На Hyperliquid нет рынка {coin} — нечего отслеживать."))
@@ -107,7 +107,7 @@ impl Engine {
                 let m = Fmt::price(mark);
                 self.reply(&(self.say(&format!("Set: {text} (now {m}). It's checked every 10 s while ihatecrypto is open"),
                                       &format!("Поставил: {text} (сейчас {m}). Проверяю каждые 10 с, пока ihatecrypto открыт"))
-                             + &if steps_none { ".".into() } else { self.say("; when it fires, its moves come as cards for Confirm.", "; когда сработает, действия придут карточками на подтверждение.") }), note);
+                             + &if steps_none { ".".into() } else { self.say(". When it fires, its moves come as cards for Confirm.", ". Когда сработает, действия придут карточками на подтверждение.") }), note);
             }
         }
     }
@@ -147,7 +147,7 @@ impl Engine {
             let mark = self.st().markets.get(&a.coin).map_or(a.price, |m| m.mark_px);
             let text = format!("🔔 {}{}{}", self.alert_text(a), self.say(" — now ", " — сейчас "), Fmt::price(mark));
             self.notify(Notice::Alerts, &self.say("Price alert", "Ценовое оповещение"), &text, false, false, None, None);
-            self.reply(&(text + &self.say(" The alert is done; set another any time.", " Оповещение сработало; поставь новое, когда захочешь.")), Some("price alert".into()));
+            self.reply(&(text + &self.say(" The alert is done. Set another any time.", " Оповещение сработало. Поставь новое, когда захочешь.")), Some("price alert".into()));
         }
         // Its steps run as a task due now, in the scheduled run beside the loops (never twice at once).
         self.start_scheduled_run();

@@ -401,8 +401,8 @@ impl Engine {
             out.push(say(&format!("✗ Stop: not set — by the book {b}, {x} × 4h volatility"), &format!("✗ Стоп: не задан — по правилам {b}, {x} × волатильность за 4 часа")));
         } else {
             out.push(if atr_read { say("✗ Stop: not set", "✗ Стоп: не задан") } else {
-                say("✗ Stop: not set — Hyperliquid’s 4h candles didn’t load, so the book can’t size it; say your own, e.g. “stop 3%”",
-                    "✗ Стоп: не задан — свечи Hyperliquid за 4 часа не загрузились, поэтому правила его не посчитают; скажи свой, например «стоп 3%»")
+                say("✗ Stop: not set — Hyperliquid’s 4h candles didn’t load, so the book can’t size it. Say your own, e.g. “stop 3%”",
+                    "✗ Стоп: не задан — свечи Hyperliquid за 4 часа не загрузились, поэтому правила его не посчитают. Скажи свой, например «стоп 3%»")
             });
         }
         if let Some(take) = r.take_pct {
@@ -413,10 +413,21 @@ impl Engine {
             let rr = Fmt::num(policy.default_reward_risk, 2);
             out.push(say(&format!("· Take: none — by the book {rr}R"), &format!("· Тейк: нет — по правилам {rr}R")));
         }
-        out.push(match r.entry_px {
-            Some(px) => say(&format!("✓ Entry: limit {}", Fmt::price(px)), &format!("✓ Вход: лимит {}", Fmt::price(px)))
+        out.push(match (r.twap_minutes, r.entry_px) {
+            (Some(minutes), _) => {
+                let (time, ru) = (TradeIntent::duration(minutes), Self::time_ru(&TradeIntent::duration(minutes)));
+                if self.agent_active() {
+                    let (parts, parts_ru) = if r.twap_randomize == Some(true) { ("randomized parts", "части случайного размера") } else { ("equal parts", "равные части") };
+                    say(&format!("✓ Entry: TWAP over {time} on Hyperliquid, {parts}, no ihatecrypto fee on it"),
+                        &format!("✓ Вход: TWAP за {ru} на Hyperliquid, {parts_ru}, без комиссии ihatecrypto"))
+                } else {
+                    say(&format!("✗ Entry: TWAP over {time} on Hyperliquid needs the trading key on, so ihatecrypto can stop it while you're away"),
+                        &format!("✗ Вход: TWAP за {ru} на Hyperliquid требует включённого торгового ключа, чтобы ihatecrypto мог остановить его без тебя"))
+                }
+            }
+            (None, Some(px)) => say(&format!("✓ Entry: limit {}", Fmt::price(px)), &format!("✓ Вход: лимит {}", Fmt::price(px)))
                 + &r.pullback_pct.map(|p| say(&format!(" ({} pullback)", Fmt::pct(p)), &format!(" (откат {})", Fmt::pct(p)))).unwrap_or_default(),
-            None => say("✓ Entry: at market", "✓ Вход: по рынку"),
+            (None, None) => say("✓ Entry: at market", "✓ Вход: по рынку"),
         });
         if let Some(s) = sizing {
             out.push(format!("{} ", if e.problem.is_none() { "✓" } else { "✗" }) + &say("Size: ", "Размер: ")
@@ -446,8 +457,8 @@ impl Engine {
             } else if let Some(bridge) = bridge && bridge.status == BlockStatus::Blocked && let Some(why) = bridge.lines.first() {
                 out.push(say("✗ Money: ", "✗ Деньги: ") + why);
             } else {
-                out.push(say(&format!("· Money: {free} free on Hyperliquid; the rest comes from Solana over Relay, quoted on the card"),
-                             &format!("· Деньги: {free} свободно на Hyperliquid; остальное придёт с Solana через Relay, цена — на карточке")));
+                out.push(say(&format!("· Money: {free} free on Hyperliquid, the rest comes from Solana over Relay, quoted on the card"),
+                             &format!("· Деньги: {free} свободно на Hyperliquid, остальное придёт с Solana через Relay, цена — на карточке")));
             }
             let advice = RiskRules::check(r, s, m, equity, &policy, self.open_risk());
             let problems: Vec<_> = advice.iter().filter(|a| a.level != Level::Ok).collect();
@@ -471,7 +482,7 @@ impl Engine {
             say("Fix the ✗ above — for example a smaller risk or a wider stop — and I'll check again.", "Исправь ✗ выше — например, риск поменьше или стоп пошире, — и я проверю снова.")
         } else if let Some(failed) = failed {
             let why = if failed.ends_with('.') { failed.to_string() } else { format!("{failed}.") };
-            say(&format!("Can't open it: {why} Nothing was signed; ask again in a moment."), &format!("Не получится открыть: {why} Ничего не подписано; попробуй ещё раз чуть позже."))
+            say(&format!("Can't open it: {why} Nothing was signed. Ask again in a moment."), &format!("Не получится открыть: {why} Ничего не подписано, попробуй ещё раз чуть позже."))
         } else if ready {
             say("Ready: the card is on the canvas with its simulation — press Confirm, or change it in words.", "Готово: карточка на холсте вместе с симуляцией — нажми «Подтвердить» или измени словами.")
         } else {
@@ -585,8 +596,8 @@ impl Engine {
             let mut lines = vec![review.map_or_else(|| say("Matches your request.", "Совпадает с твоей просьбой."), String::from)];
             if p.is_some_and(|p| p.bridge.is_some()) {
                 lines.push(say("USDC: Circle's token on Solana, EPjF…Dt1v.", "USDC: токен Circle на Solana, EPjF…Dt1v."));
-                lines.push(say("Bridge: Relay, its program on the allowed list; each signature is checked again at Confirm.",
-                               "Мост: Relay, его программа в списке разрешённых; каждая подпись проверяется снова при «Подтвердить»."));
+                lines.push(say("Bridge: Relay, its program on the allowed list. Each signature is checked again at Confirm.",
+                               "Мост: Relay, его программа в списке разрешённых. Каждая подпись проверяется снова при «Подтвердить»."));
             }
             if let Some(evm) = &evm {
                 let (a, b) = (head(evm, 6), tail(evm, 4));
@@ -605,8 +616,9 @@ impl Engine {
                              row(&say("margin", "маржа"), &Fmt::usd(s.margin)),
                              row(&say("liquidation", "ликвидация"), &format!("≈ {}", Fmt::price(s.liquidation_price)))];
             }
-            // What stops it goes first, in red.
-            if position.status == BlockStatus::Blocked && let Some(problem) = e.problem.clone().or_else(|| position.lines.last().cloned()) { lines.insert(0, problem) }
+            // What stops it goes first, in red. Unsized, the block's lines are already the problem: once is enough (c308a92).
+            if position.status == BlockStatus::Blocked && let Some(problem) = e.problem.clone().or_else(|| position.lines.last().cloned())
+                && !lines.contains(&problem) { lines.insert(0, problem) }
             steps.push(step(&format!("OPEN {} · {}", if r.side == Side::Long { "LONG" } else { "SHORT" }, name.to_uppercase()),
                             &sizing.map_or_else(|| format!("{name} {leverage}"), |s| format!("{} · {leverage}", Fmt::usd(s.notional))), lines, None, &state(position.status, false)));
         }
@@ -648,10 +660,10 @@ impl Engine {
         }
         let (signer, signer_ru) = if ledger { ("your Ledger", "Ledger") } else { ("Windows Hello", "Windows Hello") };
         let footer = if watching {
-            say("Watching only: the simulation shows what would happen; nothing can sign here.", "Только просмотр: симуляция показывает, что было бы; подписать здесь нечем.")
+            say("Watching only: the simulation shows what would happen. Nothing can sign here.", "Только просмотр: симуляция показывает, что было бы. Подписать здесь нечем.")
         } else if p.is_some() {
-            say(&format!("Confirm signs {signing} signature{} after {signer}; the simulation above ran first.", if signing == 1 { "" } else { "s" }),
-                &format!("«Подтвердить» подпишет {signing} — после {signer_ru}; симуляция выше уже прошла."))
+            say(&format!("Confirm signs {signing} signature{} after {signer}. The simulation above ran first.", if signing == 1 { "" } else { "s" }),
+                &format!("«Подтвердить» подпишет {signing} — после {signer_ru}. Симуляция выше уже прошла."))
         } else {
             say(&format!("Nothing is signed until the plan passes its checks: the simulation runs first, then {signer}."),
                 &format!("Ничего не подписывается, пока план не пройдёт проверки: сначала симуляция, потом {signer_ru}."))
@@ -667,13 +679,6 @@ impl Engine {
         let (before, traded) = { let st = self.st(); (st.intent.clone(), st.traded_plan.clone()) };
         // After a trade «stop 2%» or «take closer» move that position's orders instead of starting a new plan.
         if let Some(traded) = traded && self.edit_traded(&traded, &next, note).await { return }
-        // A TWAP keeps buying for hours and needs a guardian that stops it when its stop fires (the Mac's guardTwap, main's
-        // c308a92). The Windows engine has no such watch yet, so no TWAP plan is drawn or started here: nothing would stop it.
-        if next.twap_minutes.is_some() {
-            self.reply(&self.say("A TWAP isn't on Windows yet: nothing here would stop it if its stop fired while it still buys. Buy in one order instead.",
-                                 "TWAP на Windows пока нет: здесь некому остановить его, если стоп сработает, пока он ещё покупает. Купи одним ордером."), note.map(String::from));
-            return;
-        }
         self.st_mut().intent = next.clone();
         self.plan_markets_loaded().await;
         let mut market = self.st().markets.get(&next.asset).cloned();
@@ -709,6 +714,10 @@ impl Engine {
         let off = trade::modules().refusal_trade(market.is_some_and(|m| m.dex.is_some()), next.amount_usdc.is_some() || quoted.is_some(), russian);
         let from = quoted.as_ref().and_then(|q| q.from.as_ref()).map_or("Solana", |n| n.name);
         let blocker = match &off { Some(o) => Some((self.say("off in Modules", "выключено в модулях"), o.clone())), None => self.plan_blocker(&e, &blocks, equity, from) };
+        // Ready by the rules, a TWAP still needs the trading key on (the Mac's twapRefusal at Execute): no card without it.
+        let twap = if blocker.is_none() && e.missing.is_empty() && market.is_some() { self.twap_refusal(&next) } else { None };
+        let fixable = off.is_none() && twap.is_none();
+        let blocker = blocker.or_else(|| twap.map(|t| (self.say("needs the trading key", "нужен торговый ключ"), t)));
         if blocker.is_some() || !e.missing.is_empty() || market.is_none() {
             let (steps, footer) = self.trade_route(&r, &e, &blocks, market, None, None, false, None, quoted.as_ref());
             view.footer = footer;
@@ -716,7 +725,7 @@ impl Engine {
                 view.stopped = Some(sentence);
                 view.short = Some(short);
                 view.blocked = true;
-                if off.is_none() && let Some(m) = market && let Some((title, detail, command)) = self.plan_fix(&next, m, e.sizing.as_ref()) {
+                if fixable && let Some(m) = market && let Some((title, detail, command)) = self.plan_fix(&next, m, e.sizing.as_ref()) {
                     view.fix = Some(Action { title, command });
                     view.fix_detail = Some(detail);
                 }
@@ -1012,8 +1021,8 @@ impl Engine {
         let takes = self.take_choices(risk);
         self.update_board(board.as_deref(), |b| if let Some(plan) = b.plan.as_mut() { plan.takes = Some(takes) });
         self.st_mut().takes_at = Some(Utc::now());
-        self.reply(&self.say("Three ways to take profit are on the canvas. The stop stays the same; pick one or say your own, e.g. “take 3R”.",
-                             "На холсте три способа взять прибыль. Стоп остаётся прежним; выбери один или скажи свой, например «тейк 3R»."), note.map(String::from));
+        self.reply(&self.say("Three ways to take profit are on the canvas. The stop stays the same. Pick one or say your own, e.g. “take 3R”.",
+                             "На холсте три способа взять прибыль. Стоп остаётся прежним. Выбери один или скажи свой, например «тейк 3R»."), note.map(String::from));
         true
     }
 
@@ -1075,10 +1084,32 @@ impl Engine {
             ("trailing ", "трейлинг "), ("limit entry at ", "лимитный вход на "), ("entry on a ", "вход на откате "),
         ];
         if let Some((_, ru)) = WHOLE.iter().find(|(en, _)| *en == change) { return ru.to_string() }
+        // «TWAP over 2 h, randomized», «one market order»: a TWAP's entry or its end.
+        if change == "one market order" { return "вход одним рыночным ордером".into() }
+        if let Some(rest) = change.strip_prefix("TWAP over ") {
+            let (time, random) = rest.strip_suffix(", randomized").map_or((rest, ""), |t| (t, ", части случайного размера"));
+            return format!("TWAP за {}{random}", Self::time_ru(time));
+        }
         for (en, ru) in STARTS {
             if let Some(rest) = change.strip_prefix(en) { return format!("{ru}{}", rest.replace(" pullback", "")) }
         }
         change.into()
+    }
+
+    /// TradeIntent::duration in Russian: «2 ч», «90 мин», «3 дн».
+    pub fn time_ru(time: &str) -> String { time.replace(" min", " мин").replace(" h", " ч").replace(" d", " дн") }
+
+    /// A TWAP keeps buying for hours: only a trading key that's on can stop it with no one at the PC (its stop fired, the
+    /// loss grew). Without one it isn't started (the Mac's twapRefusal): the plan says so, and Confirm refuses it too.
+    pub fn twap_refusal(&self, intent: &TradeIntent) -> Option<String> {
+        if intent.twap_minutes.is_none() || self.agent_active() { return None }
+        Some(if self.ledger_active() {
+            self.say("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits for the device's buttons. Say «approve trading key», or buy in one order.",
+                     "Для TWAP нужен торговый ключ Ledger: без него остановка TWAP ждёт кнопок устройства. Скажи «approve trading key» или купи одним ордером.")
+        } else {
+            self.say("A TWAP needs the Hyperliquid trading key on (Settings › Wallet › Hyperliquid): locked or off, nothing can stop the TWAP while you're away. Turn it on, or buy in one order.",
+                     "Для TWAP нужен включённый торговый ключ Hyperliquid (Settings › Wallet › Hyperliquid): когда он выключен или заблокирован, TWAP некому остановить без тебя. Включи его или купи одним ордером.")
+        })
     }
 
     /// The window's requests about the plan: the picker's markets (read only), a market or a take-profit way picked, Cancel.

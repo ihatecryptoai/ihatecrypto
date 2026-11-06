@@ -53,7 +53,7 @@ fn hmac512(key: &[u8], data: &[u8]) -> (Secret, Secret) {
 pub fn secp256k1(seed: &[u8], path: &str) -> Result<Secret> {
     let steps = parse_path(path)?;
     let (mut key, mut chain) = hmac512(b"Bitcoin seed", seed);
-    let invalid = || fail("The key this path leads to is invalid; BIP-32 skips it, and so does ihatecrypto.");
+    let invalid = || fail("The key this path leads to is invalid. BIP-32 skips it, and so does ihatecrypto.");
     let Ok(mut secret) = SecretKey::from_slice(&*key) else { return invalid() };
     for index in steps {
         let mut data = Zeroizing::new(Vec::with_capacity(37));
@@ -192,7 +192,7 @@ impl ImportedKey {
         match bytes.len() {
             64 => Self::solana_keypair(&bytes),
             32 => Ok(Self::Solana(secret(&bytes))),
-            n => fail(format!("A Solana private key is 64 bytes (32 for the secret alone); this one decodes to {n}.")),
+            n => fail(format!("A Solana private key is 64 bytes (32 for the secret alone). This one decodes to {n}.")),
         }
     }
 

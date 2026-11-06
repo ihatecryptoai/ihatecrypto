@@ -143,7 +143,7 @@ pub mod hl {
                     v.problems.push(format!("The order pays a fee to someone other than ihatecrypto, or more than {}.", builder::RATE));
                     return v;
                 }
-                v.checks.push(format!("Trading action inside your account; ihatecrypto's fee {}.", builder::RATE));
+                v.checks.push(format!("Trading action inside your account, with ihatecrypto's fee {}.", builder::RATE));
             }
             Some("cancel") => v.checks.push("Trading action inside your account.".into()),
             Some("trailingStop") => {

@@ -123,7 +123,7 @@ impl Executor {
         // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.
         let tx = if from == "near" {
             let (true, Some(account)) = (live.origin.symbol == "NEAR", near) else {
-                return fail("From NEAR, ihatecrypto sends NEAR itself; its other tokens there can't be signed yet. Nothing was signed.");
+                return fail("From NEAR, ihatecrypto sends NEAR itself. Its other tokens there can't be signed yet. Nothing was signed.");
             };
             let context = Near::tx_context(account).await?;
             let yocto: u128 = live.units.parse().unwrap_or(0);

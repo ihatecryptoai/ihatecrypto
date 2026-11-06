@@ -297,7 +297,7 @@ impl Engine {
         let user_text = said.unwrap_or(text);
         // The second reader still disagrees after the model tried again: nothing runs, the user picks.
         if let Route::Command(c) = &reading.route && let Some(doubt) = &reading.doubt {
-            self.reply(&self.say(&format!("I read that as “{c}”, but a second reading doesn't confirm it: {doubt} Nothing ran. If that’s what you meant, pick the card; otherwise say it another way."),
+            self.reply(&self.say(&format!("I read that as “{c}”, but a second reading doesn't confirm it: {doubt} Nothing ran. If that’s what you meant, pick the card. Otherwise say it another way."),
                                  &format!("Я понял это как «{c}», но вторая проверка этого не подтверждает: {doubt} Я ничего не запускал. Если ты это и имел в виду — выбери карточку, иначе скажи по-другому.")), Some(model));
             self.offer(vec![RouterOption::new(c, doubt, c, true)], user_text, reading.found);
             return;
@@ -314,8 +314,8 @@ impl Engine {
                 Route::Confirm => {
                     // A number or a change in the message («add another 300», once read as a yes) is said to be one (the Mac's).
                     let words = if ChatWords::may_change(user_text) {
-                        self.say("That reads like a yes, but it has a number or a change in it, so nothing was signed and the card keeps waiting. If it's a change, say it as one («make it 800»); if not, press Confirm on the card.",
-                                 "Похоже на «да», но в сообщении есть число или изменение — я ничего не подписывал, карточка ждёт. Если это изменение, скажи его так («сделай 800»); если нет — нажми «Подтвердить» на карточке.")
+                        self.say("That reads like a yes, but it has a number or a change in it, so nothing was signed and the card keeps waiting. If it's a change, say it as one («make it 800»). If not, press Confirm on the card.",
+                                 "Похоже на «да», но в сообщении есть число или изменение — я ничего не подписывал, карточка ждёт. Если это изменение, скажи его так («сделай 800»). Если нет — нажми «Подтвердить» на карточке.")
                     } else if self.st().pending.is_some() {
                         self.say("Press Confirm on the card to go ahead — a typed «yes» never moves money. The card keeps waiting.", "Нажми Confirm на карточке — напечатанное «да» деньги не двигает. Карточка ждёт.")
                     } else {

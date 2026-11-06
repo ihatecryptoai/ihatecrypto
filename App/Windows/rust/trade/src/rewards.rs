@@ -54,7 +54,7 @@ impl Executor {
             // Merkl moves its root every few hours: proofs for another one would revert.
             let root = merkl_root(&net.rpc).await?;
             if !here.iter().all(|r| r.root.to_lowercase() == root.to_lowercase()) {
-                lines.push(format!("{}: Merkl is updating its rewards right now; ask again in a few hours. Nothing was signed there.", net.name));
+                lines.push(format!("{}: Merkl is updating its rewards right now. Ask again in a few hours. Nothing was signed there.", net.name));
                 continue;
             }
             // A claim is ≈ 265k gas for two tokens (Base, simulated 2026-09-30): Morpho's heavier floor covers it.

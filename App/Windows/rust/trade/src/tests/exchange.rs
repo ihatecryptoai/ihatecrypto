@@ -147,7 +147,7 @@ async fn close_keeps_the_stop_until_the_close_fills() {
     // Only a limit entry waiting: it is cancelled, nothing to close.
     let limit = json!({"coin": "ETH", "oid": 4, "isTrigger": false, "limitPx": "2900", "orderType": "Limit", "reduceOnly": false, "side": "B", "sz": "0.01"});
     let r = run_close("0", vec![limit.clone()], false, |_| None).await;
-    assert!(r.0 == sent(&["cancel 4"]) && !r.2 && r.1.contains("there was no position"), "{r:?}");
+    assert!(r.0 == sent(&["cancel 4"]) && !r.2 && r.1.contains("There was no position"), "{r:?}");
 
     // A position and a limit entry waiting: the entry goes first (it could open it again), the stop and take after the fill.
     let r = run_close("0.01", [vec![limit], guarded()].concat(), false, |s| { s.position = Decimal::ZERO; Some(filled("0.01")) }).await;
@@ -155,7 +155,7 @@ async fn close_keeps_the_stop_until_the_close_fills() {
 
     // No position, its stop and take left over: they go in one cancel.
     let r = run_close("0", guarded(), false, |_| None).await;
-    assert!(r.0 == sent(&["cancel 2,3"]) && !r.2 && r.1 == "ETH orders cancelled (2); there was no position.", "{r:?}");
+    assert!(r.0 == sent(&["cancel 2,3"]) && !r.2 && r.1 == "ETH orders cancelled (2). There was no position.", "{r:?}");
 
     // The emergency close: no stop on the exchange, the close doesn't fill, restore_stop puts the stop back — once.
     let fake = Fake::start(|s| { s.position = d("0.01"); s.close = Box::new(|_| Some(NO_MATCH.into())) }).await;
@@ -296,7 +296,7 @@ async fn resting_entry_with_a_refused_stop_is_cancelled() {
     let order = book(&p);
     let r = execute(&p, ZeroSigner::default(), move |s| s.entry = Box::new(move |s| { s.orders = vec![order.clone()]; Some(mixed.into()) })).await;
     assert!(r.opened.is_none() && r.sent == sent(&["leverage", "limit sl+tp", "cancel 9"]) && r.orders.is_empty(), "{:?}", r.sent);
-    assert!(r.text.contains("Trigger order has invalid price") && r.text.contains("was cancelled; no position"), "{}", r.text);
+    assert!(r.text.contains("Trigger order has invalid price") && r.text.contains("was cancelled. No position"), "{}", r.text);
 }
 
 /// Rested, then gone from the book a moment later because it filled: a position like one that filled at once. One that
@@ -353,7 +353,7 @@ async fn a_stop_before_the_entry_is_sent_is_not_a_lost_reply() {
     // Sent, the reply lost, nothing opened: said as a lost reply, the money on the balance.
     let r = execute(&p, ZeroSigner::default(), |_| {}).await;
     assert!(r.opened.is_none() && r.sent == sent(&["leverage", "entry"]));
-    assert!(r.text.starts_with("The entry's reply didn't come") && r.text.contains("no ETH position is open"), "{}", r.text);
+    assert!(r.text.starts_with("The entry's reply didn't come") && r.text.contains("No ETH position is open"), "{}", r.text);
 
     // Sent, the reply lost, the position open: it gets its stop.
     let size = p.sizing.size;

@@ -189,8 +189,8 @@ impl Engine {
         Some(SiteTick {
             id: "programs".into(),
             title: say(&format!("{names} {} on ihatecrypto's list", if one { "isn't" } else { "aren't" }), &format!("{names}: нет в списке ihatecrypto")),
-            detail: say(&format!("Signing calls {} the way the site built the transaction; the balances above are the simulated result.", if one { "it" } else { "them" }),
-                        &format!("Подпись вызовет {} так, как сайт собрал транзакцию; балансы выше — результат симуляции.", if one { "её" } else { "их" })),
+            detail: say(&format!("Signing calls {} the way the site built the transaction. The balances above are the simulated result.", if one { "it" } else { "them" }),
+                        &format!("Подпись вызовет {} так, как сайт собрал транзакцию. Балансы выше — результат симуляции.", if one { "её" } else { "их" })),
             toggle: say(&format!("Allow {} for this one transaction", if one { "it" } else { "them" }), "Разрешить для этой транзакции"),
         })
     }
@@ -304,12 +304,13 @@ impl Engine {
 
     // MARK: Modules at Confirm (A9)
 
-    /// What Settings › Modules switched off since the card was drawn: refused at Confirm too (the Mac's prepareExecution
-    /// and transfer). None when it may go.
+    /// What Settings › Modules switched off since the card was drawn, or a TWAP's trading key locked since: refused at
+    /// Confirm too (the Mac's prepareExecution and transfer). None when it may go.
     pub fn confirm_refusal(&self, waiting: &Pending) -> Option<String> {
         let ru = self.st().russian();
         match waiting {
-            Pending::Trade(p) => trade::modules().refusal_trade(p.market.dex.is_some(), p.bridge.is_some() || p.fund_from.is_some() || p.open_via_1click.is_some(), ru),
+            Pending::Trade(p) => trade::modules().refusal_trade(p.market.dex.is_some(), p.bridge.is_some() || p.fund_from.is_some() || p.open_via_1click.is_some(), ru)
+                .or_else(|| self.twap_refusal(&p.intent)),
             Pending::Transfer(entry, _) => ModuleNetwork::from_place(&entry.network).and_then(|n| trade::modules().refusal_network(n, ru)),
             _ => None,
         }

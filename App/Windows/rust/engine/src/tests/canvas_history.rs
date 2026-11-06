@@ -125,7 +125,7 @@ async fn each_kind_has_its_switch_and_only_those_on_go_out() {
         // A move's end, and a card right after another notice is left alone.
         e.notice_move("Send 5 USDC", Some("failed"));
         let failed = events(&lines, "notify").last().cloned().unwrap();
-        assert!(failed["failed"] == "1" && failed["sound"] == "knock" && failed["body"] == "It didn’t go through; the chat says why.");
+        assert!(failed["failed"] == "1" && failed["sound"] == "knock" && failed["body"] == "It didn’t go through — the chat says why.");
         e.notice_card("Buy SOL");
         assert_eq!(events(&lines, "notify").len(), 4);
         e.st_mut().notice_last = distant_past();

@@ -164,11 +164,11 @@ impl Engine {
         if quote.probed || c.expires.is_some_and(|x| (x - chrono::Utc::now()).num_milliseconds() < 30_000) {
             let (status, headers, _) = mpp::call(method, url, body.as_deref(), None).await?;
             let fresh = (status == 402).then(|| mpp::challenge(headers.get("www-authenticate").map_or("", String::as_str), chrono::Utc::now()).ok()).flatten();
-            let Some(fresh) = fresh else { return said!(format!("The service didn't quote again ({status}); nothing was paid.")) };
+            let Some(fresh) = fresh else { return said!(format!("The service didn't quote again ({status}). Nothing was paid.")) };
             if fresh.amount != c.amount || fresh.payee.to_lowercase() != c.payee.to_lowercase() {
                 // Its price depends on the request: from now on it's asked with the content, so the next card shows it.
                 if quote.probed { self.st_mut().priced_with_content.insert(url.clone()); }
-                return said!(format!("The price changed to {} USDC; nothing was paid. Ask again to see the new card.", Fmt::num(fresh.usdc(), 6)));
+                return said!(format!("The price changed to {} USDC. Nothing was paid. Ask again to see the new card.", Fmt::num(fresh.usdc(), 6)));
             }
             c = fresh;
         }

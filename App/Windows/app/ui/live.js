@@ -856,7 +856,7 @@ function drawFavAdd() {
               closeFavAdd(); toast(t("Saved.", "Сохранено.")); render();
             } }, icon("shield.check", 13), t(`Save with ${presence()}`, `Сохранить через ${presence()}`))))
           : h("div", { class: "live-fav-actions" }, h("span", { class: "spacer" }),
-            h("button", { class: "btn primary small", disabled: own || !!same, title: t(`A name, its network; the ${presence()} prompt shows the whole address before it's saved`, `Имя и сеть; окно ${presence()} покажет весь адрес перед сохранением`),
+            h("button", { class: "btn primary small", disabled: own || !!same, title: t(`A name, its network. The ${presence()} prompt shows the whole address before it's saved`, `Имя и сеть. Окно ${presence()} покажет весь адрес перед сохранением`),
               onclick: () => { favAdd.naming = true; drawFavAdd(); document.getElementById("fav-add-name")?.focus(); } },
               icon("shield.check", 13), t("Name it and save…", "Назвать и сохранить…")))];
     }
@@ -905,7 +905,7 @@ function alertsBody() {
           h("span", { class: "live-alert-badge plain" }, icon("bell", 15)),
           h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("YOU · NOTIFICATION", "ТЫ · УВЕДОМЛЕНИЕ")),
             h("b", {}, steps.length ? t("A Windows notification, then your Confirm", "Уведомление Windows, потом твоё «Подтвердить»") : t("A Windows notification", "Уведомление Windows")),
-            steps.length ? h("span", { class: "secondary small" }, t(`Prepared when it fires; nothing moves without ${presence()}.`, `Готовится, когда сработает; без ${presence()} ничего не двигается.`)) : null)));
+            steps.length ? h("span", { class: "secondary small" }, t(`Prepared when it fires. Nothing moves without ${presence()}.`, `Готовится, когда сработает. Без ${presence()} ничего не двигается.`)) : null)));
     }),
     h("div", { class: "live-hint tertiary" }, t("Checked every 10 s while ihatecrypto is open or in the tray. Nothing moves until you confirm it.",
       "Проверяется каждые 10 с, пока ihatecrypto открыт или в трее. Ничего не двигается, пока ты не подтвердишь.")),
@@ -958,7 +958,7 @@ function nothingFree(x, a, wallet) {
       h("div", { class: "secondary small" }, t(`«${here}» has no free USDC, so each run finds nothing and does nothing. What's already deposited keeps earning.`,
         `На «${here}» нет свободных USDC: каждый запуск ничего не найдёт и ничего не сделает. Что уже в депозитах, продолжает приносить.`)),
       h("div", { class: "btns" },
-        x.automatic && a ? h("button", { class: "btn primary small", title: t("Puts it in the chat with the amount to change; nothing goes until you send it", "Вставит в чат с суммой, которую можно поменять; ничего не уйдёт, пока не отправишь"),
+        x.automatic && a ? h("button", { class: "btn primary small", title: t("Puts it in the chat with the amount to change. Nothing goes until you send it", "Вставит в чат с суммой, которую можно поменять. Ничего не уйдёт, пока не отправишь"),
           onclick: () => suggestTopUp(a, ui.state.automationBudget, 10) }, icon("plus", 12), t(`Top up «${here}»`, `Пополнить «${here}»`)) : null,
         there > 0 && other ? h("button", { class: "btn small", title: x.automatic ? t(`Each run waits for your Confirm and ${presence()}`, `Каждый запуск ждёт «Подтвердить» и ${presence()}`) : t(`Runs by itself, no ${presence()}`, `Идёт сама, без ${presence()}`),
           onclick: () => act("taskPays", { wallet: x.id, test: !!x.automatic }) }, icon("arrow.left.arrow.right", 12), t(`Pay from «${other}» · ${there} USDC free`, `Платить с «${other}» · ${there} USDC свободно`)) : null)));
@@ -968,9 +968,9 @@ function nothingFree(x, a, wallet) {
 function automationOffer() {
   return h("div", { class: "live-offer" }, h("span", { class: "live-offer-icon" }, icon("clock.arrow.circlepath", 16)),
     h("div", {}, h("b", {}, t(`Run it by itself, without ${presence()}?`, `Пусть идёт сама, без ${presence()}?`)),
-      h("div", { class: "secondary small" }, t(`Right now its moves wait for your Confirm and ${presence()}. An automation wallet holds the budget for scheduled tasks and signs them on its own; your main wallet still asks for ${presence()}.`,
-        `Сейчас её движения ждут «Подтвердить» и ${presence()}. Кошелёк автоматизации держит бюджет задач по расписанию и подписывает их сам; основной кошелёк по-прежнему спрашивает ${presence()}.`)),
-      h("button", { class: "btn primary small", title: t(`${presence()} once; then put the tasks' budget on it`, `${presence()} один раз; потом положи на него бюджет задач`), onclick: () => act("createAutomationWallet") },
+      h("div", { class: "secondary small" }, t(`Right now its moves wait for your Confirm and ${presence()}. An automation wallet holds the budget for scheduled tasks and signs them on its own. Your main wallet still asks for ${presence()}.`,
+        `Сейчас её движения ждут «Подтвердить» и ${presence()}. Кошелёк автоматизации держит бюджет задач по расписанию и подписывает их сам, а основной кошелёк по-прежнему спрашивает ${presence()}.`)),
+      h("button", { class: "btn primary small", title: t(`${presence()} once, then put the tasks' budget on it`, `${presence()} один раз, потом положи на него бюджет задач`), onclick: () => act("createAutomationWallet") },
         icon("plus", 12), t("Create an automation wallet", "Создать кошелёк автоматизации"))));
 }
 
@@ -1086,7 +1086,7 @@ function scheduleBody() {
         ? h("div", { class: "live-budget-sol" }, h("span", { class: "loss small" }, t(`${num(bud.sol)} SOL for Solana's fees: too little, its tasks there fail.`, `${num(bud.sol)} SOL на комиссии Solana: мало, задачи там не пройдут.`)),
           h("button", { class: "btn small", onclick: () => suggestGas(a, bud) }, icon("fuelpump", 12), t("Top up gas", "Пополнить газ"))) : null,
       // Short for the week, or nothing on it: the top-up goes into the chat, the user sends it.
-      bud && (bud.shortForWeek || Number(bud.total) === 0) ? h("button", { class: "live-wide-btn accent", title: t("Puts it in the chat with the amount to change; nothing goes until you send it", "Кладёт в чат, сумму можно поменять; ничего не уходит, пока не отправишь"),
+      bud && (bud.shortForWeek || Number(bud.total) === 0) ? h("button", { class: "live-wide-btn accent", title: t("Puts it in the chat with the amount to change. Nothing goes until you send it", "Кладёт в чат, сумму можно поменять. Ничего не уходит, пока не отправишь"),
         onclick: () => suggestTopUp(a, bud, bud.shortForWeek || 20) }, icon("plus", 13), bud.shortForWeek ? t(`Top up ${num(bud.shortForWeek)} USDC for the week`, `Пополнить на ${num(bud.shortForWeek)} USDC на неделю`) : t("Top up 20 USDC", "Пополнить на 20 USDC")) : null,
       h("div", { class: "secondary small" }, t(`${a.label} · tasks you switch on spend from it without ${presence()}, only to your own wallets and saved addresses.`,
         `${a.label} · включённые задачи тратят с него без ${presence()}, только на твои кошельки и сохранённые адреса.`)))
@@ -1100,7 +1100,7 @@ function scheduleBody() {
   const any = running.length || ui.state.positions.length;
   const tasksTab = [
     any ? h("button", { class: "live-wide-btn" + (held ? " live-held" : ""), onclick: () => act("schedulePause", { test: !held }),
-      title: held ? t("Everything scheduled runs again", "Всё запланированное снова пойдёт") : t("Nothing scheduled runs until you resume; stops and takes stay on the exchange", "Ничего запланированного не запустится, пока не возобновишь; стопы и тейки остаются на бирже") },
+      title: held ? t("Everything scheduled runs again", "Всё запланированное снова пойдёт") : t("Nothing scheduled runs until you resume. Stops and takes stay on the exchange", "Ничего запланированного не запустится, пока не возобновишь. Стопы и тейки остаются на бирже") },
       icon(held ? "play" : "pause", 13), held ? t("Resume schedule", "Возобновить расписание") : t("Pause schedule", "Приостановить расписание")) : null,
     running.map((x) => taskRow(x, a)),
     ui.state.positions.map(positionRow),
@@ -1172,8 +1172,8 @@ function gasButton(a, bud) {
   if (!a) return null;
   const short = bud?.gas || [];
   return h("button", { class: "live-gas-btn" + (short.length ? " short" : ""), onclick: () => suggestGas(a, bud),
-    title: t("Puts the send from your wallet in the chat, the amount worked out for the next 4 weeks of tasks; nothing goes until you send it",
-      "Кладёт перевод с твоего кошелька в чат, сумма посчитана на 4 недели задач; ничего не уходит, пока не отправишь") },
+    title: t("Puts the send from your wallet in the chat, the amount worked out for the next 4 weeks of tasks. Nothing goes until you send it",
+      "Кладёт перевод с твоего кошелька в чат, сумма посчитана на 4 недели задач. Ничего не уходит, пока не отправишь") },
     h("span", { class: "live-gas-icon" }, icon("fuelpump", 14)),
     h("span", { class: "live-gas-text" }, h("b", {}, t("Top up gas", "Пополнить газ")),
       h("span", { class: "secondary small" }, !bud ? "…" : short.length ? short.map((g) => `${g.amount} ${g.coin} ${t("on", "в")} ${netName(g.network)}`).join("\n")
@@ -1212,8 +1212,8 @@ function automationTab(a) {
     gasButton(a, ui.state.automationBudget),
     // Its key is kept with Windows' data protection only (DPAPI, docs/windows.md «Test and automation wallets»), so
     // runs need no Windows Hello: said as it is, as the Mac's «stays in this Mac's keychain».
-    h("div", { class: "live-hint" }, t("It signs scheduled tasks only, with the same checks; its key stays on this PC, under Windows' data protection for your account — not behind Windows Hello. Sent to another network? Ask the chat to move it.",
-      "Он подписывает только задачи по расписанию, с теми же проверками; его ключ остаётся на этом ПК, под защитой данных Windows для твоей учётной записи — не за Windows Hello. Отправил в другую сеть? Попроси чат перевести.")),
+    h("div", { class: "live-hint" }, t("It signs scheduled tasks only, with the same checks. Its key stays on this PC, under Windows' data protection for your account — not behind Windows Hello. Sent to another network? Ask the chat to move it.",
+      "Он подписывает только задачи по расписанию, с теми же проверками. Его ключ остаётся на этом ПК, под защитой данных Windows для твоей учётной записи — не за Windows Hello. Отправил в другую сеть? Попроси чат перевести.")),
   ];
 }
 
@@ -1347,7 +1347,7 @@ function recurringBody(b) {
     h("div", { class: "live-item-foot" },
       h("span", { class: "secondary small" }, t("Runs while ihatecrypto is open or in the tray.", "Идёт, пока ihatecrypto открыт или в трее.")),
       h("span", { class: "spacer" }),
-      h("button", { class: "link-btn loss", title: t("Takes it off the schedule; what it bought stays", "Убирает её из расписания; купленное остаётся"),
+      h("button", { class: "link-btn loss", title: t("Takes it off the schedule — what it bought stays", "Убирает её из расписания — купленное остаётся"),
         onclick: () => act("removeTask", { wallet: r.id }) }, t("Stop", "Остановить"))),
   ];
 }
@@ -1380,7 +1380,7 @@ export function positionCard(x) {
     const long = x.side === "long";
     const lost = negative(x.pnl);
     const r = x.ruler;
-    const chip = (label, ic, phrase, cls = "") => h("button", { class: "live-pos-chip " + cls, title: t("Puts it in the chat; the chat's card waits for Confirm", "Кладёт в чат; карточка ждёт «Подтвердить»"),
+    const chip = (label, ic, phrase, cls = "") => h("button", { class: "live-pos-chip " + cls, title: t("Puts it in the chat — the chat's card waits for Confirm", "Кладёт в чат — карточка ждёт «Подтвердить»"),
       onclick: () => suggest(phrase) }, icon(ic, 12), label);
     // A close is asked here first, as the Mac's dialog; then it goes in the chat, and its card waits for Confirm.
     const ask = (half) => h("button", { class: "live-pos-chip" + (half ? "" : " close"), onclick: () => { closeAsk = { coin: x.coin, half }; render(); } },
@@ -1390,7 +1390,7 @@ export function positionCard(x) {
       ? h("div", { class: "live-pos-actions plan-close-ask" },
           h("span", { class: "plan-close-q" }, asking.half ? t(`Close half of ${name} at market?`, `Закрыть половину ${name} по рынку?`) : t(`Close ${name} at market?`, `Закрыть ${name} по рынку?`)),
           h("button", { class: "live-pos-chip", onclick: () => { closeAsk = null; render(); } }, t("Cancel", "Отмена")),
-          h("button", { class: "live-pos-chip plan-close-yes", title: t("Puts it in the chat; the chat's card waits for Confirm", "Кладёт в чат; карточка ждёт «Подтвердить»"),
+          h("button", { class: "live-pos-chip plan-close-yes", title: t("Puts it in the chat — the chat's card waits for Confirm", "Кладёт в чат — карточка ждёт «Подтвердить»"),
             onclick: () => { closeAsk = null; suggest(asking.half ? `close half ${name}` : `close ${name}`); } },
             asking.half ? t("Close half", "Закрыть половину") : t("Close position", "Закрыть позицию")))
       : h("div", { class: "live-pos-actions" },
@@ -1548,8 +1548,8 @@ function ledgerBody() {
   if (!c && !w) {
     return [
       h("div", { class: "live-ledger-title" }, ledgerGlyph(34)),
-      h("p", { class: "live-lead" }, t("Plug it in over USB or turn on Bluetooth, and unlock it. ihatecrypto reads one address from its Ethereum app and one from its Solana app; every move is then shown on its screen and approved with its buttons.",
-        "Подключи его по USB или включи Bluetooth и разблокируй. ihatecrypto прочитает по адресу из приложений Ethereum и Solana; дальше каждое движение показывается на его экране и подтверждается его кнопками.")),
+      h("p", { class: "live-lead" }, t("Plug it in over USB or turn on Bluetooth, and unlock it. ihatecrypto reads one address from its Ethereum app and one from its Solana app. Every move is then shown on its screen and approved with its buttons.",
+        "Подключи его по USB или включи Bluetooth и разблокируй. ihatecrypto прочитает по адресу из приложений Ethereum и Solana. Дальше каждое движение показывается на его экране и подтверждается его кнопками.")),
       h("button", { class: "btn primary", onclick: () => act("connectLedger") }, t("Connect a Ledger", "Подключить Ledger")),
       ledgerFoot(),
     ];
@@ -1583,8 +1583,8 @@ function ledgerKeyRow(busy) {
       h("span", {}, k.active ? t("on · orders, stops and trailing without the buttons", "включён · ордера, стопы и трейлинг без кнопок")
         : t("off · every order asks the Ledger", "выключен · каждый ордер спрашивает Ledger")),
       !k.active && !busy ? h("div", { class: "btns" }, h("button", { class: "btn small",
-        title: t("The Ledger signs one approval of a key that can trade but not withdraw; withdrawals stay on the device",
-          "Ledger подписывает одно разрешение для ключа, который торгует, но не выводит; вывод остаётся на устройстве"),
+        title: t("The Ledger signs one approval of a key that can trade but not withdraw. Withdrawals stay on the device",
+          "Ledger подписывает одно разрешение для ключа, который торгует, но не выводит. Вывод остаётся на устройстве"),
         onclick: () => act("tradingKey") }, t("Approve on Ledger", "Одобрить на Ledger"))) : null));
 }
 

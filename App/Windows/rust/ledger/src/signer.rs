@@ -107,7 +107,7 @@ impl LedgerSigner {
     /// the person compares with the one on the canvas. The key can trade but not withdraw.
     pub async fn approve_agent(&self, agent: &str, name: &str, nonce: u64) -> Result<(MsgPack, EvmSignature), TradeError> {
         let (action, typed) = hls::approve_agent_typed(agent, name, nonce, true);
-        let what = format!("let the trading key {} place orders for you on Hyperliquid; it can't withdraw", ends(agent, 6, 4));
+        let what = format!("let the trading key {} place orders for you on Hyperliquid, and it can't withdraw", ends(agent, 6, 4));
         Ok((action, self.typed(&typed, &what).await?))
     }
 }

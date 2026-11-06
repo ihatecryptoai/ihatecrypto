@@ -183,7 +183,7 @@ pub fn facts(r: &Report, pretty: &dyn Fn(&str) -> String) -> Vec<String> {
     let s = |d: Decimal| if d < ZERO { format!("−${}", Fmt::num(-d, 2)) } else { format!("+${}", Fmt::num(d, 2)) };
     let on = r.coin.as_deref().map_or(String::new(), |c| format!(" on {}", pretty(c)));
     let mut out = vec![format!(
-        "P/L {}{on}: trading {} (realized after fees {}, funding {}), {} closed trades, {} in profit; open positions now {}.",
+        "P/L {}{on}: trading {} (realized after fees {}, funding {}), {} closed trades, {} in profit. Open positions now {}.",
         r.period.title(), s(r.trading()), s(r.realized), s(r.funding), r.closed_trades, r.wins, s(r.unrealized)
     )];
     if let (Some(c), Some(since)) = (r.change, r.change_since) {

@@ -205,11 +205,11 @@ impl Executor {
                                 if p.stock.is_none() { "" } else { " at a health factor of 2" }));
         }
         if usdc > p.available_usd {
-            return fail(format!("{place} lets this wallet borrow {} more against {} of collateral; {} USDC is past it. Borrow less, or put more up. \
+            return fail(format!("{place} lets this wallet borrow {} more against {} of collateral, and {} USDC is past it. Borrow less, or put more up. \
                                  Nothing was signed.", usd(p.available_usd), usd(p.collateral_usd), Fmt::num(usdc, 2)));
         }
         let Some(health) = p.health_after.filter(|h| *h >= Self::MINIMUM_HEALTH) else {
-            return fail(format!("That would leave a health factor of {}; ihatecrypto borrows only down to {} (Kamino liquidates at 1.0). Borrow less, \
+            return fail(format!("That would leave a health factor of {}, while ihatecrypto borrows only down to {} (Kamino liquidates at 1.0). Borrow less, \
                                  or put more up. Nothing was signed.", Fmt::num(p.health_after.unwrap_or_default(), 2), text(Self::MINIMUM_HEALTH)));
         };
         let k = Kamino::default();
@@ -240,7 +240,7 @@ impl Executor {
             let last_valid = self.rpc.latest_blockhash().await?.1;
             self.report(&format!("{place}: {} of collateral, health factor {} → {}{}.", usd(p.collateral_usd),
                                  p.health_now.map_or_else(|| "∞".to_string(), |h| Fmt::num(h, 2)), Fmt::num(health, 2),
-                                 p.liquidation_price.map_or(String::new(), |l| format!("; liquidation if {} ≤ {}", p.stock.as_deref().unwrap_or("the collateral"), usd(l)))));
+                                 p.liquidation_price.map_or(String::new(), |l| format!(", liquidation if {} ≤ {}", p.stock.as_deref().unwrap_or("the collateral"), usd(l)))));
             // The first borrow also opens the position's account in Kamino's farm for the debt: ≈ 0.0053 SOL of rent on top
             // of the fee, so the floor is 0.012 SOL, not the usual 0.005. What arrives is what the card said, give or take 1%.
             self.sign_and_send(&wire, last_valid, &owners(&[(&my_usdc, sol)]), &[(my_usdc.clone(), "USDC".into(), true, pct(i(units), 99))],
@@ -266,7 +266,7 @@ impl Executor {
                            Fmt::num(now.as_ref().and_then(Loan::health).unwrap_or(health), 2),
                            p.liquidation_price.map_or(String::new(), |l| format!(", liquidation if {} ≤ {}", p.stock.as_deref().unwrap_or("the collateral"), usd(l))),
                            Fmt::num(Self::usdc_owed(now.as_ref()).max(usdc), 6),
-                           if p.market == kamino::BACKPACK_MARKET { "Stock prices stand still while US markets are closed; a gap at the open can reach that line at once. " }
+                           if p.market == kamino::BACKPACK_MARKET { "Stock prices stand still while US markets are closed. A gap at the open can reach that line at once. " }
                            else { "" },
                            if p.market == kamino::MAIN_MARKET { " against SOL" } else { "" });
         self.report(&line);
@@ -301,7 +301,7 @@ impl Executor {
         if usdc.is_none() && held < asked && held >= owed { asked = held } // exactly the debt is enough
         let units = crate::wallet::times_pow10(asked, 6).map_or(0, |x| crate::executor::uint64(rounded(x, 0, Rounding::Up)));
         if held < asked {
-            return fail(format!("Paying back {} USDC needs it on Solana; the wallet has {} USDC there. Nothing was signed.", Fmt::num(asked, 6), Fmt::num(held, 2)));
+            return fail(format!("Paying back {} USDC needs it on Solana. The wallet has {} USDC there. Nothing was signed.", Fmt::num(asked, 6), Fmt::num(held, 2)));
         }
         let wire = k.repay_transaction(sol, &usdc_reserve.address, asked, market).await?;
         let my_usdc = ata(sol, &usdc_reserve.mint)?;

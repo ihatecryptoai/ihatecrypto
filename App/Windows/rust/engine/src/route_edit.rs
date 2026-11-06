@@ -389,15 +389,15 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
     use WalletCommand as W;
     let name = WalletCommand::place_name;
     let confirm = say(" Press Confirm.", " Нажми «Подтвердить».");
-    let drops = say(" Press Confirm; Cancel or “cancel” drops it.", " Нажми «Подтвердить»; «Отмена» или «отмена» в чате её снимет.");
+    let drops = say(" Press Confirm. Cancel or “cancel” drops it.", " Нажми «Подтвердить». «Отмена» или «отмена» в чате её снимет.");
     let out = match c {
         W::WithdrawToSolana(_) => say("Signed with the main key — the trading key can’t withdraw.", "Подписывает основной ключ — торговый ключ выводить не может.") + &drops,
         W::Aave { deposit: true, amount: Some(x), network: n } | W::Morpho { deposit: true, amount: Some(x), network: n } => {
             let morpho = matches!(c, W::Morpho { .. });
             let (n, x) = (name(n), Fmt::num(*x, 2));
-            say(&format!("What's missing on {n} comes from Solana over Relay first; then two {n} transactions: approve exactly {x} USDC, then {}. {} re-read from {n} first.",
-                         if morpho { "deposit; the shares come to this wallet only" } else { "supply" }, if morpho { "The vault's asset is" } else { "Pool and rate are" }),
-                &format!("Если на {n} не хватает, недостающее сначала придёт с Solana через Relay; потом две транзакции на {n}: разрешение ровно на {x} USDC и {}. {} перечитываются с {n} перед этим.",
+            say(&format!("What's missing on {n} comes from Solana over Relay first. Then two {n} transactions: approve exactly {x} USDC, then {}. {} re-read from {n} first.",
+                         if morpho { "deposit — the shares come to this wallet only" } else { "supply" }, if morpho { "The vault's asset is" } else { "Pool and rate are" }),
+                &format!("Если на {n} не хватает, недостающее сначала придёт с Solana через Relay. Потом две транзакции на {n}: разрешение ровно на {x} USDC и {}. {} перечитываются с {n} перед этим.",
                          if morpho { "депозит — доли приходят только на этот кошелёк" } else { "вклад" }, if morpho { "Актив хранилища" } else { "Пул и ставка" })) + &confirm
         }
         W::Aave { deposit: false, network: n, .. } | W::Morpho { deposit: false, network: n, .. } => {
@@ -417,14 +417,14 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
         }
         W::SolanaTo(n, _) => {
             let n = name(n);
-            say(&format!("One Solana signature for the Relay bridge, checked and simulated before it’s signed; it pays only your own address on {n}."),
-                &format!("Одна подпись в Solana для моста Relay, с проверкой и симуляцией перед подписью; платит только на твой же адрес в {n}.")) + &confirm
+            say(&format!("One Solana signature for the Relay bridge, checked and simulated before it’s signed. It pays only your own address on {n}."),
+                &format!("Одна подпись в Solana для моста Relay, с проверкой и симуляцией перед подписью. Мост платит только на твой же адрес в {n}.")) + &confirm
         }
         W::Bridge { to, .. } | W::Cctp { to, .. } => {
             let to = name(to);
             (if matches!(c, W::Cctp { .. }) {
-                say(&format!("Circle's CCTP: an exact approve and the burn (one transaction where it batches); Circle mints on {to} itself, fast-transfer fee plus its gas, a minute or so. "),
-                    &format!("CCTP от Circle: точное разрешение и сжигание (одной транзакцией, где сеть это умеет); Circle сам выпускает на {to}, комиссия быстрого перевода плюс газ, около минуты. "))
+                say(&format!("Circle's CCTP: an exact approve and the burn (one transaction where it batches). Circle mints on {to} itself, fast-transfer fee plus its gas, a minute or so. "),
+                    &format!("CCTP от Circle: точное разрешение и сжигание (одной транзакцией, где сеть это умеет). Circle сам выпускает на {to}, комиссия быстрого перевода плюс газ, около минуты. "))
             } else {
                 say("An exact approve and the bridge's deposit, checked field by field before signing: Relay, unless NEAR Intents' 1Click or Circle's CCTP lands more right then. ",
                     "Точное разрешение и депозит моста, каждое поле проверяется перед подписью: Relay, если только 1Click от NEAR Intents или CCTP от Circle не доставят больше прямо сейчас. ")
@@ -462,11 +462,11 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
         W::BuyOn { place, token, .. } | W::SellOn { place, token, .. } => {
             let n = name(place);
             (if matches!(c, W::BuyOn { .. }) {
-                say("Relay’s swap is one Solana signature; the other way bridges USDC over Relay and swaps on Uniswap with an exact approve, the swap paying only this wallet. ",
-                    "Обмен Relay — одна подпись в Solana; другой путь везёт USDC по мосту Relay и меняет в Uniswap с точным разрешением, обмен платит только этому кошельку. ")
+                say("Relay’s swap is one Solana signature. The other way bridges USDC over Relay and swaps on Uniswap with an exact approve, the swap paying only this wallet. ",
+                    "Обмен Relay — одна подпись в Solana, а другой путь везёт USDC по мосту Relay и меняет в Uniswap с точным разрешением, обмен платит только этому кошельку. ")
             } else {
-                say(&format!("Relay’s swap is an exact approve and its deposit on {n}; the other way swaps on Uniswap with an exact approve, then bridges the USDC over Relay, paying only this wallet. "),
-                    &format!("Обмен Relay — точное разрешение и депозит на {n}; другой путь меняет в Uniswap с точным разрешением, потом везёт USDC по мосту Relay, платя только этому кошельку. "))
+                say(&format!("Relay’s swap is an exact approve and its deposit on {n}. The other way swaps on Uniswap with an exact approve, then bridges the USDC over Relay, paying only this wallet. "),
+                    &format!("Обмен Relay — точное разрешение и депозит на {n}, а другой путь меняет в Uniswap с точным разрешением, потом везёт USDC по мосту Relay, платя только этому кошельку. "))
             }) + &if token.starts_with("0x") {
                 say(&format!("A token by its contract must trade on {n} with $50k+ of liquidity."), &format!("Токен по контракту должен торговаться на {n} с ликвидностью от $50 тыс."))
             } else {
@@ -479,8 +479,8 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
         }
         W::SwapOn { place, to, .. } if place == "near" => {
             let to = to.to_uppercase();
-            say(&format!("One deposit to the 1Click address NEAR Intents binds to this quote — checked with 1Click before signing — and {to} comes back to your own NEAR account; a refund goes there too."),
-                &format!("Один депозит на адрес 1Click, который NEAR Intents привязывает к этой котировке, — сверяется с 1Click перед подписью, — и {to} возвращается на твой аккаунт NEAR; туда же и возврат.")) + &confirm
+            say(&format!("One deposit to the 1Click address NEAR Intents binds to this quote — checked with 1Click before signing — and {to} comes back to your own NEAR account. A refund goes there too."),
+                &format!("Один депозит на адрес 1Click, который NEAR Intents привязывает к этой котировке, — сверяется с 1Click перед подписью, — и {to} возвращается на твой аккаунт NEAR, туда же и возврат.")) + &confirm
         }
         W::SwapOn { place, from, to, .. } if place == "hyperliquid" => {
             let (from, to) = (from.to_uppercase(), to.to_uppercase());
@@ -497,14 +497,14 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
             say(&format!("One signature on {from}: Relay's solver swaps on the way and pays {b} to your own address on {to}, usually within seconds. If more than 3% (or 15 cents) of the value would be lost, nothing is signed."),
                 &format!("Одна подпись на {from}: решатель Relay обменивает по пути и платит {b} на твой же адрес в {to}, обычно за секунды. Если потерялось бы больше 3% (или 15 центов) стоимости, ничего не подписывается.")) + &confirm
         }
-        W::HlSpotBuy { .. } => say("One spot order on Hyperliquid's book, IOC within 1% of the mid; the spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC.",
-                                   "Один спотовый ордер в стакане Hyperliquid, IOC в пределах 1% от середины; если спотовых USDC не хватает, они сначала придут с баланса фьючерсов (ещё одна твоя подпись). Биржа берёт ордера от 10 USDC.") + &confirm,
-        W::HlSpotSell { .. } => say("One spot order on Hyperliquid's book, IOC within 1% of the mid; the USDC lands on your spot balance. The exchange takes orders from 10 USDC.",
-                                    "Один спотовый ордер в стакане Hyperliquid, IOC в пределах 1% от середины; USDC придут на спотовый баланс. Биржа берёт ордера от 10 USDC.") + &confirm,
+        W::HlSpotBuy { .. } => say("One spot order on Hyperliquid's book, IOC within 1% of the mid. The spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC.",
+                                   "Один спотовый ордер в стакане Hyperliquid, IOC в пределах 1% от середины. Если спотовых USDC не хватает, они сначала придут с баланса фьючерсов (ещё одна твоя подпись). Биржа берёт ордера от 10 USDC.") + &confirm,
+        W::HlSpotSell { .. } => say("One spot order on Hyperliquid's book, IOC within 1% of the mid. The USDC lands on your spot balance. The exchange takes orders from 10 USDC.",
+                                    "Один спотовый ордер в стакане Hyperliquid, IOC в пределах 1% от середины. USDC придут на спотовый баланс. Биржа берёт ордера от 10 USDC.") + &confirm,
         W::RevokeApproval { place, spender, permit2, .. } => {
             let n = name(place);
-            say(&format!("One {n} transaction: {} set to zero for {spender}. Nothing is spent and nobody gains a right; only the gas is paid.", if *permit2 { "Permit2's own approve" } else { "the token's approve" }),
-                &format!("Одна транзакция на {n}: {} для {spender} обнуляется. Ничего не тратится, и никто не получает прав; платится только газ.", if *permit2 { "разрешение Permit2" } else { "разрешение токена" })) + &confirm
+            say(&format!("One {n} transaction: {} set to zero for {spender}. Nothing is spent and nobody gains a right. Only the gas is paid.", if *permit2 { "Permit2's own approve" } else { "the token's approve" }),
+                &format!("Одна транзакция на {n}: {} для {spender} обнуляется. Ничего не тратится, и никто не получает прав. Платится только газ.", if *permit2 { "разрешение Permit2" } else { "разрешение токена" })) + &confirm
         }
         W::SweepDust { under } => {
             let under = Fmt::usd(under.unwrap_or(Decimal::from(5)));
@@ -518,10 +518,10 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
             say(&format!("One NEAR transaction: exactly this NEAR, wrapped and sent to the 1Click deposit address the quote names, checked before signing. USDC arrives at your own address on {to} in ≈ 30–40 s."),
                 &format!("Одна транзакция NEAR: ровно этот NEAR, обёрнутый и отправленный на адрес депозита 1Click из котировки, с проверкой перед подписью. USDC придут на твой же адрес в {to} за ≈ 30–40 с.")) + &confirm
         }
-        W::SendNear { .. } => say("One NEAR transfer, built and signed by the signer; only this saved address may receive it.",
-                                  "Один перевод NEAR, его собирает и подписывает подписант; получить его может только этот сохранённый адрес.") + &confirm,
-        W::CloseNear { name: n } => say(&format!("One NEAR transaction: your NEAR account is deleted and NEAR sends everything on it to {n}; buying NEAR later opens the account again."),
-                                        &format!("Одна транзакция NEAR: твой аккаунт NEAR удаляется, и всё, что на нём, уходит на {n}; если потом купить NEAR, аккаунт откроется снова.")) + &confirm,
+        W::SendNear { .. } => say("One NEAR transfer, built and signed by the signer. Only this saved address may receive it.",
+                                  "Один перевод NEAR, его собирает и подписывает подписант. Получить его может только этот сохранённый адрес.") + &confirm,
+        W::CloseNear { name: n } => say(&format!("One NEAR transaction: your NEAR account is deleted and NEAR sends everything on it to {n}. Buying NEAR later opens the account again."),
+                                        &format!("Одна транзакция NEAR: твой аккаунт NEAR удаляется, и всё, что на нём, уходит на {n}. Если потом купить NEAR, аккаунт откроется снова.")) + &confirm,
         W::SendSol { .. } => say("One Solana transfer: only this saved address may receive it, and the simulation must show exactly this SOL leaving plus the fee.",
                                  "Один перевод в Solana: получить его может только этот сохранённый адрес, а симуляция должна показать, что уходит ровно этот SOL плюс комиссия.") + &confirm,
         W::SendToken { network, .. } => {
@@ -532,8 +532,8 @@ fn note_by(c: &WalletCommand, say: &dyn Fn(&str, &str) -> String) -> Option<Stri
                                    "Разрешение на сумму долга (на десятую процента больше, на проценты следующих блоков), потом погашение — только собственного долга этого кошелька.") + &confirm,
         W::AaveCollateral { .. } => say("ETH wrapped into WETH, an exact approve, the supply to this wallet: it earns a little and can be borrowed against.",
                                         "ETH оборачивается в WETH, точное разрешение, вклад на этот кошелёк: приносит немного и может быть залогом.") + &confirm,
-        W::AaveBorrow { .. } => say("One transaction: Aave lends USDC to this wallet against what it supplied there. If the health factor reaches 1, Aave sells the collateral at a penalty; ihatecrypto won't borrow below 1.5. Pay it back with “repay all USDC on Aave”.",
-                                    "Одна транзакция: Aave даёт этому кошельку USDC в долг под то, что на нём лежит. Если показатель здоровья дойдёт до 1, Aave продаст залог со штрафом; ihatecrypto не берёт в долг ниже 1,5. Вернуть: «верни весь USDC на Aave».") + &confirm,
+        W::AaveBorrow { .. } => say("One transaction: Aave lends USDC to this wallet against what it supplied there. If the health factor reaches 1, Aave sells the collateral at a penalty. ihatecrypto won't borrow below 1.5. Pay it back with “repay all USDC on Aave”.",
+                                    "Одна транзакция: Aave даёт этому кошельку USDC в долг под то, что на нём лежит. Если показатель здоровья дойдёт до 1, Aave продаст залог со штрафом. ihatecrypto не берёт в долг ниже 1,5. Вернуть: «верни весь USDC на Aave».") + &confirm,
         W::LendDeposit(..) | W::LendWithdraw(..) | W::Kamino { .. } | W::Stake(_) | W::Unstake(_) | W::Hlp { .. } | W::Buy { .. } | W::Sell { .. }
         | W::JupiterDca { .. } | W::JupiterDcaCancel(_) => say("One Solana signature, checked and simulated before it’s signed.", "Одна подпись в Solana, с проверкой и симуляцией перед подписью.") + &drops,
         _ => return None,

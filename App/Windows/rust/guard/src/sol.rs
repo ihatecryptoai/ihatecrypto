@@ -208,7 +208,7 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
             v.problems.push(format!("Only {}… may pay the fee, and your wallet must be the only other signer.", prefix(sponsor, 6)));
             return v;
         }
-        v.checks.push(format!("{}… pays the network fee; your wallet is the only other signer.", prefix(sponsor, 6)));
+        v.checks.push(format!("{}… pays the network fee, and your wallet is the only other signer.", prefix(sponsor, 6)));
     } else {
         if !(m.required_signatures == 1 && accounts.first().is_some_and(|a| a == owner)) {
             v.problems.push("Only your wallet may sign and pay for the transaction.".into());
@@ -290,7 +290,7 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                     // ponytail: saturating where Swift's += would trap on two amounts past 2⁶⁴; either way it's refused.
                     refunded = refunded.saturating_add(lamports);
                     if refunded <= SPONSOR_REFUND {
-                        v.checks.push(format!("{} SOL back to the fee payer for the account it opened; the simulation checks what you get.", sol_text(lamports)));
+                        v.checks.push(format!("{} SOL back to the fee payer for the account it opened. The simulation checks what you get.", sol_text(lamports)));
                     } else {
                         v.problems.push(format!("{} SOL back to the fee payer is more than the rent it fronted.", sol_text(refunded)));
                     }
@@ -404,7 +404,7 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                     _ => lend.is_none(),
                 };
                 if refused {
-                    v.problems.push(format!("Instruction {n}: a {program_name} instruction ihatecrypto doesn't use ({k}); it could pay someone else."));
+                    v.problems.push(format!("Instruction {n}: a {program_name} instruction ihatecrypto doesn't use ({k}). It could pay someone else."));
                     continue;
                 }
                 if program == KAMINO_LEND {
@@ -528,7 +528,7 @@ pub fn balances(rules: &[BalanceRule]) -> Verdict {
         // ponytail: i128, where Swift's Int64 subtraction would trap on balances near ±2⁶³; a real balance never is.
         let delta = r.after as i128 - r.before as i128;
         if delta < r.at_least as i128 {
-            v.problems.push(format!("Simulation: {} changes by {delta}; the minimum allowed is {}.", r.label, r.at_least));
+            v.problems.push(format!("Simulation: {} changes by {delta}, under the minimum allowed, {}.", r.label, r.at_least));
         } else if let Some(most) = r.at_most.filter(|m| delta > *m as i128) {
             v.problems.push(format!("Simulation: {} changes by {delta}, over the most allowed, {most}.", r.label));
         } else {

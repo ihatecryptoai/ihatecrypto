@@ -180,7 +180,7 @@ impl Engine {
         }
         say(&format!("{model} understood only {passed} of {total} — it will misread requests. A bigger model or a subscription reads better. Missed: "),
             &format!("{model} понял только {passed} из {total} — он будет путать запросы. Модель побольше или подписка читают лучше. Не понял: "))
-            + &r.misses.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+            + &r.misses.iter().take(3).cloned().collect::<Vec<_>>().join(" · ")
     }
 
     // MARK: Claude Code

@@ -306,6 +306,9 @@ pub struct State {
     pub rates_at: Option<Date>,
     pub guarding: bool,
     pub ledger_guard_said: bool,
+    /// Held while a TWAP of ours runs (an exit rule with its id): Windows doesn't idle-sleep, so the guardian sees a stop
+    /// that fired (the Mac's twapAwake). keep_awake_for_twaps begins and ends it.
+    pub twap_awake: bool,
     /// What the automation wallet holds, in dollars, read with the balances; None without it.
     pub automation_usd: Option<Decimal>,
     /// What each canvas's chat filled of its model's window with its last message (the Mac's ContextMeter), this run.
@@ -524,7 +527,7 @@ impl State {
             settings,
             status: None, signer_error: None, book: vec![], signing: 0, phrase: None,
             markets: HashMap::new(), portfolio: PortfolioView::default(), positions: vec![], hl_orders: vec![], place_facts: PlaceFacts::default(),
-            rates_at: None, guarding: false, ledger_guard_said: false, automation_usd: None, meters: HashMap::new(), refreshing: false,
+            rates_at: None, guarding: false, ledger_guard_said: false, twap_awake: false, automation_usd: None, meters: HashMap::new(), refreshing: false,
             refresh_again: false, reads_started: 0, read_waiters: vec![], positions_for: None, solana_holdings: vec![], seen_solana_priced: None,
             seen_hl: false, refreshing_every_minute: false, scheduled_run: None, last_own_move: distant_past(), portfolio_owner: None,
             chain_cost: HashMap::new(),

@@ -134,7 +134,7 @@ impl Executor {
         if arrives > units || units - arrives > units / 200 {
             return fail(format!("The USDT0 bridge would land {} of {} USDT. Nothing was signed.", show(arrives), show(units)));
         }
-        self.report(&format!("USDT0 on LayerZero: {} USDT from {} → {} on {}, its message fee {} in {}; it lands in {}.", show(units), from.name, show(arrives),
+        self.report(&format!("USDT0 on LayerZero: {} USDT from {} → {} on {}, its message fee {} in {}. It lands in {}.", show(units), from.name, show(arrives),
                              to.name, Self::cost(fee_usd), from.gas_coin, usdt0::wait(a.minutes)));
         // The fee is coins sent with the call, which a send never tops up by itself: gas comes over first when it's short.
         if rpc.balance(me).await? < fee as u128 + from.gas_floor as u128 {

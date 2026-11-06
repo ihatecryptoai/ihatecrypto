@@ -70,8 +70,8 @@ function draw() {
     h("div", { class: "tray-row" },
       h("button", { class: "btn primary capsule", onclick: open }, t("Open ihatecrypto", "Открыть ihatecrypto")), h("span", { class: "spacer" }),
       h("button", { class: "link-btn", onclick: () => invoke("tray_quit").catch(() => {}) }, t("Quit Completely", "Выйти совсем"))),
-    h("div", { class: "secondary tray-note" }, t("Ctrl+Q keeps ihatecrypto here: the schedule, alerts and the guardian go on. Quit Completely stops them until you open it again; the stop and take-profit on the exchange stay.",
-      "Ctrl+Q оставляет ihatecrypto здесь: расписание, оповещения и защита позиций продолжают работать. «Выйти совсем» останавливает их до следующего запуска; стоп и тейк на бирже остаются.")),
+    h("div", { class: "secondary tray-note" }, t("Ctrl+Q keeps ihatecrypto here: the schedule, alerts and the guardian go on. Quit Completely stops them until you open it again, but the stop and take-profit on the exchange stay.",
+      "Ctrl+Q оставляет ihatecrypto здесь: расписание, оповещения и защита позиций продолжают работать. «Выйти совсем» останавливает их до следующего запуска, но стоп и тейк на бирже остаются.")),
   ].flat(Infinity).filter(Boolean));
   measure();
 }

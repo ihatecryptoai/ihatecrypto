@@ -266,8 +266,8 @@ impl Engine {
         let Some(d) = self.st().multisig_draft.clone() else { return };
         let mut lines: Vec<String> = d.keys.iter().map(|k| format!("{} · {}", k.name, k.address)).collect();
         lines.push(self.say("Address: ", "Адрес: ") + d.address.as_deref().unwrap_or("—"));
-        lines.push(self.say("One transaction per network from this computer to Safe's factory (Safe 1.4.1); ihatecrypto never changes its keys.",
-                            "По одной транзакции на сеть с этого компьютера в фабрику Safe (Safe 1.4.1); ihatecrypto никогда не меняет его ключи."));
+        lines.push(self.say("One transaction per network from this computer to Safe's factory (Safe 1.4.1), and ihatecrypto never changes its keys.",
+                            "По одной транзакции на сеть с этого компьютера в фабрику Safe (Safe 1.4.1), и ihatecrypto никогда не меняет его ключи."));
         let words = self.keys_word(d.keys.len() as i64);
         let title = self.say(&format!("Multisig · any {} of {words} on ", d.threshold), &format!("Мультисиг · любые {} из {words} · ", d.threshold)) + &place_names(&d.networks);
         let waiting = {
@@ -322,7 +322,7 @@ impl Engine {
 
     /// After Confirm: the multisig on each network the card named, kept here, and saved in Addresses so money can go to it.
     pub async fn run_multisig_create(&self) -> trade::Result<String> {
-        let Some(d) = self.st().multisig_draft.clone() else { return Err(trade::Error::Execution("The multisig's card is gone; ask for it again.".into())) };
+        let Some(d) = self.st().multisig_draft.clone() else { return Err(trade::Error::Execution("The multisig's card is gone. Ask for it again.".into())) };
         let owners: Vec<String> = d.keys.iter().map(|k| k.address.clone()).collect();
         let threshold = usize::try_from(d.threshold).unwrap_or(0);
         if let Some(problem) = safe::owners_problem(&owners, threshold) { return Err(trade::Error::Execution(problem + " Nothing was signed.")) }
@@ -354,8 +354,8 @@ impl Engine {
         // Not saved in the book, as on the Mac: «Multisig» answers through multisigEntry, only on a network it's made on, and
         // the signer asks Windows Hello with the whole address the first time money goes there.
         let (nets, first, (m, n)) = (place_names(&made), made.first().map_or("base", String::as_str), (d.threshold, d.keys.len()));
-        Ok(self.say(&format!("The multisig {address} is made on {nets}: any {m} of its {n} keys move its money. Put money in with «send 10 USDC on {first} to Multisig»; it's on the canvas."),
-                    &format!("Мультисиг {address} создан в {nets}: деньги двигают любые {m} из {n} ключей. Положить деньги: «отправь 10 USDC на {first} на Multisig»; он на холсте.")))
+        Ok(self.say(&format!("The multisig {address} is made on {nets}: any {m} of its {n} keys move its money. Put money in with «send 10 USDC on {first} to Multisig». It's on the canvas."),
+                    &format!("Мультисиг {address} создан в {nets}: деньги двигают любые {m} из {n} ключей. Положить деньги: «отправь 10 USDC на {first} на Multisig». Он на холсте.")))
     }
 
     /// «send 200 USDC from the multisig to Alex on base»: read from the chain for its card.
@@ -390,7 +390,7 @@ impl Engine {
             Some(_) => match erc20::balance_of(&m.address) { Ok(call) => net.rpc.read(&contract, &call).await.ok().and_then(|d| word_decimal(&d)), Err(_) => None },
         };
         let (Some(owners), Some(threshold), Some(raw)) = (owners, threshold, raw) else {
-            return self.reply(&self.say(&format!("{}'s node didn't answer for the multisig; try again in a moment.", net.name), &format!("Нода {} не ответила по мультисигу; попробуй через минуту.", net.name)), note);
+            return self.reply(&self.say(&format!("{}'s node didn't answer for the multisig. Try again in a moment.", net.name), &format!("Нода {} не ответила по мультисигу, попробуй через минуту.", net.name)), note);
         };
         // A token's decimals are its own answer: an amount past the arithmetic is more than the multisig holds.
         let decimals = i64::try_from(decimals).unwrap_or(i64::MAX);
@@ -424,7 +424,7 @@ impl Engine {
         });
         self.show(Pending::Wallet(command.clone()), &self.say(&format!("{shown} from the multisig to {} on {}", to.name, net.name), &format!("{shown} из мультисига на {} в {}", to.name, net.name)), vec![
             self.say(&format!("The multisig holds {} {symbol} → {} after", Fmt::num(held, 6), Fmt::num(after, 6)), &format!("В мультисиге {} {symbol} → {} после", Fmt::num(held, 6), Fmt::num(after, 6))),
-            self.say(&format!("Signed here by {}; this computer pays the gas", names.0), &format!("Подписывает здесь {}; газ платит этот компьютер", names.1)),
+            self.say(&format!("Signed here by {}, this computer pays the gas", names.0), &format!("Подписывает здесь {}, газ платит этот компьютер", names.1)),
             to.address.clone(),
         ], vec![], vec![]);
         self.reply(&self.say("The card is on the canvas — press Confirm.", "Карточка на холсте — нажми «Подтвердить»."), Some(note.unwrap_or_else(|| "Safe · multisig".into())));
@@ -433,7 +433,7 @@ impl Engine {
     pub async fn run_multisig_send(&self, command: &WalletCommand) -> trade::Result<String> {
         let payment = self.st().multisig_payment.clone().filter(|p| &p.command == command);
         let Some((p, net)) = payment.and_then(|p| EvmNetwork::named(&p.net).map(|n| (p, n))) else {
-            return Err(trade::Error::Execution("The multisig payment's check is gone; ask for it again.".into()));
+            return Err(trade::Error::Execution("The multisig payment's check is gone. Ask for it again.".into()));
         };
         self.st_mut().multisig_payment = None;
         let e = self.executor()?;

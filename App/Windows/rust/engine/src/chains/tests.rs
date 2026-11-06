@@ -142,7 +142,7 @@ async fn any_card_a_chain_stops_at_holds_the_steps_after_it() {
         let then = "Then, on this Confirm, once it’s through: chart SOL → send 1 USDC to Mom";
         assert_eq!(e.st().card.as_ref().unwrap().lines.last().unwrap(), then);
         assert_eq!(e.st().boards().iter().find(|b| b.id == id).unwrap().lines.last().unwrap(), then);
-        assert_eq!(last_reply(&e), "It waits on its card; its Confirm covers the steps after it too — they run once it’s through.");
+        assert_eq!(last_reply(&e), "It waits on its card. Its Confirm covers the steps after it too — they run once it’s through.");
         // No steps after it: nothing held.
         e.st_mut().chain_state.after_call = None;
         e.hold_after_call(&[]);
@@ -162,7 +162,7 @@ async fn a_contract_call_holds_the_steps_after_it_on_its_card() {
         let held = e.st().chain_state.after_call.clone().unwrap();
         assert_eq!((held.board, held.rest), (id.clone(), vec!["send 0.01 SOL to Mom".to_string()]));
         assert!(e.st().card.as_ref().unwrap().lines.last().unwrap().contains("Then, on this Confirm"));
-        assert_eq!(last_reply(&e), "The call waits on its card; its Confirm covers the steps after it too — they run once it’s through.");
+        assert_eq!(last_reply(&e), "The call waits on its card. Its Confirm covers the steps after it too — they run once it’s through.");
         // Another board's Confirm: held as it was, and nothing runs.
         e.continue_after_call(Some("another")).await;
         assert!(e.st().chain_state.after_call.is_some() && !e.st().chain_state.running_held && !e.st().thinking);

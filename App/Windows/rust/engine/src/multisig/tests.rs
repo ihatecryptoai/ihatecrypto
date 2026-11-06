@@ -82,11 +82,11 @@ async fn nothing_is_made_or_paid_without_its_card() {
         assert_eq!(last(&e), "There's no multisig yet: say «make a multisig».");
         e.prepare_multisig_send(&WalletCommand::MultisigSend { token: "USDC".into(), amount: None, to: "Alex".into(), network: None }, None).await;
         assert_eq!(last(&e), "There's no multisig yet: say «make a multisig».");
-        assert_eq!(e.run_multisig_create().await.unwrap_err().to_string(), "The multisig's card is gone; ask for it again.");
+        assert_eq!(e.run_multisig_create().await.unwrap_err().to_string(), "The multisig's card is gone. Ask for it again.");
         // The same key twice: refused before anything is read or signed.
         e.st_mut().multisig_draft = Some(MultisigDraft { keys: vec![key("This PC", PC, "pc"), key("Phone", PC, "address")], threshold: 2, networks: vec!["base".into()], salt: 1, address: None });
         assert_eq!(e.run_multisig_create().await.unwrap_err().to_string(), "The same key is in the list twice. Nothing was signed.");
         let send = WalletCommand::MultisigSend { token: "USDC".into(), amount: None, to: "Alex".into(), network: Some("base".into()) };
-        assert_eq!(e.run_multisig_send(&send).await.unwrap_err().to_string(), "The multisig payment's check is gone; ask for it again.");
+        assert_eq!(e.run_multisig_send(&send).await.unwrap_err().to_string(), "The multisig payment's check is gone. Ask for it again.");
     }).await;
 }

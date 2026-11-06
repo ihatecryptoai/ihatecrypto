@@ -79,7 +79,7 @@ async fn the_same_task_asked_twice_is_found_and_resumed() {
         let first = at_nine();
         e.schedule(first.clone(), Some("note"));
         let text = e.task_text(&first);
-        assert_eq!(last(&e), format!("Scheduled: {text}. It runs while ihatecrypto is open or in the tray. A money move comes as a card for Confirm; to run them by themselves, say «create an automation wallet»."));
+        assert_eq!(last(&e), format!("Scheduled: {text}. It runs while ihatecrypto is open or in the tray. A money move comes as a card for Confirm. To run them by themselves, say «create an automation wallet»."));
         assert!(text.starts_with("buy SOL for 5 USDC · every day · next "));
         assert_eq!(kinds(&e), ["schedule"]);
         e.schedule(at_nine(), None);

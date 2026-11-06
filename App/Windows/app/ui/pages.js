@@ -122,8 +122,8 @@ export function settingsPage() {
     general: [t("General", "Основные"), t("How the app talks to you and keeps running.", "Как приложение говорит с тобой и работает в фоне."), general],
     agent: [t("Trading agent", "Торговый агент"), t("How the assistant trades for you. Code checks every plan against these rules.", "Как ассистент торгует за тебя. Код проверяет каждый план по этим правилам."), agentTab],
     modules: [t("Modules", "Модули"), t("What the assistant may use. Off means it never plans a move there. Money already there still shows on the canvas.", "Чем ассистенту можно пользоваться. Выключено — он никогда не планирует там движений. Деньги, которые там уже есть, по-прежнему видны на холсте."), modulesTab],
-    model: [t("AI model", "Модель ИИ"), t("What reads your chat: a subscription, an API key, or a free model on this PC. It reads your messages with your balances, positions and address book names, never your keys; a model on this PC keeps all of it here.",
-      "Что читает твой чат: подписка, API-ключ или бесплатная модель на этом компьютере. Модель читает твои сообщения вместе с балансами, позициями и именами из адресной книги, но никогда — ключи; модель на этом компьютере держит всё это здесь."), modelTab],
+    model: [t("AI model", "Модель ИИ"), t("What reads your chat: a subscription, an API key, or a free model on this PC. It reads your messages with your balances, positions and address book names, never your keys. A model on this PC keeps all of it here.",
+      "Что читает твой чат: подписка, API-ключ или бесплатная модель на этом компьютере. Модель читает твои сообщения вместе с балансами, позициями и именами из адресной книги, но никогда — ключи. Модель на этом компьютере держит всё это здесь."), modelTab],
     wallet: [t("Wallet", "Кошелёк"), t(`Your wallets, the key that signs and ${presence()}.`, `Твои кошельки, ключ, который подписывает, и ${presence()}.`), walletTab],
     skills: [t("Skills", "Навыки"), t("Instructions the assistant follows for one kind of work. Switch them on and off, or add your own from a file.", "Инструкции, которым ассистент следует в одном виде работы. Включай и выключай их или добавь свой из файла."), skillsTab],
   }[tab];
@@ -150,8 +150,8 @@ function general(s) {
         theme, (v) => { store("theme", v); applyTheme(); render(); }, "pg-set-seg")))),
     section("globe", t("Language", "Язык"), t("The app's own texts, and the chat's replies.", "Тексты приложения и ответы чата."),
       group(
-        row({ label: t("App language", "Язык приложения"), ico: "character.book", about: t("Menus, buttons and the app's texts. System follows Windows' language. Many texts are still English only; more are translated with updates.",
-          "Меню, кнопки и тексты приложения. «Системный» — как язык Windows. Часть текстов пока только на английском; переводы добавляются с обновлениями.") },
+        row({ label: t("App language", "Язык приложения"), ico: "character.book", about: t("Menus, buttons and the app's texts. System follows Windows' language. Many texts are still English only. More are translated with updates.",
+          "Меню, кнопки и тексты приложения. «Системный» — как язык Windows. Часть текстов пока только на английском. Переводы добавляются с обновлениями.") },
           h("select", { id: "set-app-language", onchange: (e) => act("appLanguage", { language: e.target.value }) },
             [["system", t("System", "Системный")], ["en", "English"], ["ru", "Русский"]].map(([v, l]) => h("option", { value: v, selected: (s.appLanguage || "system") === v }, l)))),
         row({ label: t("Reply language", "Язык ответов"), ico: "text.bubble", about: t("Auto answers in the language you write in. Tickers, amounts and addresses stay as they are.", "«Авто» отвечает на языке твоего сообщения. Тикеры, суммы и адреса остаются как есть.") },
@@ -204,8 +204,8 @@ function noticeSection(s) {
   const allowed = toasts.setting === "on" || toasts.setting === "unknown";
   return section("bell", t("Notifications", "Уведомления"), t("When the assistant taps you, even with the window closed.", "Когда ассистент зовёт тебя, даже при закрытом окне."),
     group(
-      row({ label: t("Notifications", "Уведомления"), ico: "bell", about: (toastLabel() ? toastLabel() + ". " : "") + t("They show while the window is in the tray or behind others; click one to come back to it. Windows decides whether they can appear at all.",
-          "Они появляются, когда окно в трее или за другими; нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows.") },
+      row({ label: t("Notifications", "Уведомления"), ico: "bell", about: (toastLabel() ? toastLabel() + ". " : "") + t("They show while the window is in the tray or behind others. Click one to come back to it. Windows decides whether they can appear at all.",
+          "Они появляются, когда окно в трее или за другими. Нажми на уведомление, чтобы вернуться в окно. Показывать ли их вообще, решает Windows.") },
         toasts.setting === "unknown" ? null : pill(toasts.setting === null ? t("Checking…", "Проверяю…") : allowed ? t("On", "Включены") : t("Off", "Выключены"), allowed),
         // «Sent» for a moment once it went, as the Mac's button says; only while Windows lets them show.
         allowed ? h("button", { class: "btn small", onclick: async (e) => { const b = e.currentTarget; if (await act("noticeTest") !== null) { b.textContent = t("Sent", "Отправлено"); setTimeout(() => { b.textContent = t("Send a test", "Отправить тест"); }, 2000); } } },
@@ -221,8 +221,8 @@ function noticeSection(s) {
 function keepRow(s) {
   const on = s.localSetup?.keepRunning;
   return row({ label: t("Keep always running", "Всегда работать"), ico: "power",
-      about: t("Starts within a minute after you sign in, and comes back within a minute after Quit or a crash — in the tray, its window closed. Turn this off to quit for good. Nothing runs while the PC sleeps; due tasks run when it wakes.",
-        "Запускается в течение минуты после входа в Windows и возвращается в течение минуты после «Выйти» или сбоя — в трее, с закрытым окном. Выключи, чтобы выйти совсем. Пока компьютер спит, ничего не работает; задачи, чей срок прошёл, выполнятся после пробуждения.") },
+      about: t("Starts within a minute after you sign in, and comes back within a minute after Quit or a crash — in the tray, its window closed. Turn this off to quit for good. Nothing runs while the PC sleeps. Due tasks run when it wakes.",
+        "Запускается в течение минуты после входа в Windows и возвращается в течение минуты после «Выйти» или сбоя — в трее, с закрытым окном. Выключи, чтобы выйти совсем. Пока компьютер спит, ничего не работает. Задачи, чей срок прошёл, выполнятся после пробуждения.") },
     toggle("keep-running", on === true, (v) => act("keepRunning", { test: v }), on === undefined));
 }
 
@@ -262,8 +262,8 @@ function nodesSection(v) {
       const sol = n.id === "solana";
       const label = n.host ? `${n.title}: ${n.host}` : `${n.title}: ${sol ? t("Solana's public node", "публичная нода Solana") : t("built-in free nodes", "встроенные бесплатные ноды")}`;
       const about = n.host
-        ? t(`Your node is asked first; the ${sol ? "public node takes" : "built-in nodes take"} over when yours doesn't answer, refuses its key or lacks a call.`,
-          `Сначала спрашивается твоя нода; ${sol ? "публичная подхватывает" : "встроенные подхватывают"}, если твоя не отвечает, отказывает по ключу или не умеет нужный вызов.`)
+        ? t(`Your node is asked first. The ${sol ? "public node takes" : "built-in nodes take"} over when yours doesn't answer, refuses its key or lacks a call.`,
+          `Сначала спрашивается твоя нода, а ${sol ? "публичная подхватывает" : "встроенные подхватывают"}, если твоя не отвечает, отказывает по ключу или не умеет нужный вызов.`)
         : t(`Free public nodes are shared by everyone: they limit how often anyone may ask, so at a busy moment a balance or a move can fail${sol ? ", and Solana's has no free backup" : ""}. A node of your own (free at ${n.provider}) takes that away.`,
           `Бесплатные публичные ноды общие для всех: они ограничивают, как часто можно спрашивать, поэтому в час пик баланс или перевод могут не пройти${sol ? ", а у Solana нет бесплатной запасной" : ""}. Своя нода (бесплатно у ${n.provider}) это убирает.`);
       const save = () => saveSecret("node", { network: n.id, address: secretForm.text });
@@ -271,9 +271,9 @@ function nodesSection(v) {
         n.host ? h("button", { class: "btn small", onclick: () => saveSecret("node", { network: n.id, address: "" }) }, t("Remove", "Убрать")) : null,
         h("button", { class: "btn small", onclick: () => openSecret("node-" + n.id) }, n.host ? t("Change…", "Изменить…") : t("Add your own…", "Добавить свою…"))),
         secretForm.open === "node-" + n.id ? secretPanel("node-" + n.id,
-          [sol ? t("Why: every balance and every move on Solana goes through a node. Solana's public node is free but shared by everyone: it limits how often you may ask and has no backup, so at a busy moment a balance doesn't load or a move fails half-way. A node of your own gives you your own limit; the public one stays behind it as a backup.",
+          [sol ? t("Why: every balance and every move on Solana goes through a node. Solana's public node is free but shared by everyone: it limits how often you may ask and has no backup, so at a busy moment a balance doesn't load or a move fails half-way. A node of your own gives you your own limit, and the public one stays behind it as a backup.",
               "Зачем: каждый баланс и каждый перевод в Solana идут через ноду. Публичная нода Solana бесплатна, но общая для всех: она ограничивает, как часто можно спрашивать, и запасной у неё нет — в час пик баланс не загрузится или перевод сорвётся на полпути. Своя нода даёт тебе свой лимит, а публичная остаётся за ней запасной.")
-            : t(`Why: every balance and every move on ${n.title} goes through a node. The app's built-in nodes are free and shared by everyone: each limits how often you may ask, so at a busy moment a quote, a balance or a move can stall. A node of your own gives you your own limit; the built-in ones stay behind it as backups.`,
+            : t(`Why: every balance and every move on ${n.title} goes through a node. The app's built-in nodes are free and shared by everyone: each limits how often you may ask, so at a busy moment a quote, a balance or a move can stall. A node of your own gives you your own limit, and the built-in ones stay behind it as backups.`,
               `Зачем: каждый баланс и каждый перевод в ${n.title} идут через ноду. Встроенные ноды приложения бесплатны и общие для всех: каждая ограничивает, как часто можно спрашивать, поэтому в час пик котировка, баланс или перевод могут застрять. Своя нода даёт тебе свой лимит, а встроенные остаются за ней запасными.`),
            t(`A node only reads the chain and passes on transactions already signed on this PC: it never sees your keys and can't move money. It does see your addresses. Its address carries your key, so it's kept encrypted for your Windows user and shown only by its host.${n.id === "ethereum" ? " Ethereum's transactions still go out through MEV Blocker, out of the public mempool." : ""}`,
             `Нода только читает сеть и передаёт транзакции, уже подписанные на этом компьютере: ключей она не видит и двигать деньги не может. Твои адреса она видит. В её адресе лежит твой ключ, поэтому он хранится зашифрованным для твоего пользователя Windows и показывается только хостом.${n.id === "ethereum" ? " Транзакции Ethereum по-прежнему уходят через MEV Blocker, мимо публичного мемпула." : ""}`)],
@@ -341,10 +341,10 @@ function aboutRow() {
     try { await invoke("update_install"); } catch (e) { update.installing = false; toast(t("Couldn't install the update: ", "Не удалось поставить обновление: ") + e); render(); }
   };
   return row({ label: update.version ? `ihatecrypto ${update.version}` : t("ihatecrypto for Windows", "ihatecrypto для Windows"), ico: "arrow.down.circle",
-      about: (ui.state.build ? t(`Build ${ui.state.build}. `, `Сборка ${ui.state.build}. `) : "") + (update.found ? t(`${update.found} is ready. Install restarts ihatecrypto and What's New shows what changed; the wallet, settings and canvases stay.`,
-        `Готова ${update.found}. «Установить» перезапустит ihatecrypto, а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.`)
-        : t("A new version waits for you to press Install, and What's New shows what changed; the wallet, settings and canvases stay.",
-          "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось; кошелёк, настройки и холсты останутся.")) },
+      about: (ui.state.build ? t(`Build ${ui.state.build}. `, `Сборка ${ui.state.build}. `) : "") + (update.found ? t(`${update.found} is ready. Install restarts ihatecrypto and What's New shows what changed. The wallet, settings and canvases stay.`,
+        `Готова ${update.found}. «Установить» перезапустит ihatecrypto, а «Что нового» покажет, что изменилось. Кошелёк, настройки и холсты останутся.`)
+        : t("A new version waits for you to press Install, and What's New shows what changed. The wallet, settings and canvases stay.",
+          "Новая версия ждёт, пока ты нажмёшь «Установить», а «Что нового» покажет, что изменилось. Кошелёк, настройки и холсты останутся.")) },
     update.found ? h("div", { class: "btns" },
       h("button", { class: "btn small", disabled: update.installing, onclick: () => { update.later = update.found; update.found = null; render(); } }, t("Later", "Позже")),
       h("button", { class: "btn small primary", disabled: update.installing, onclick: install }, update.installing ? t("Installing…", "Ставлю…") : t(`Install ${update.found}`, `Установить ${update.found}`)))
@@ -404,7 +404,7 @@ function modelTab(s) {
   const score = examKey ? local.scores?.[examKey] : null;
   askLocal();
   return [
-    section("sparkles", t("Chat model", "Модель чата"), t("Lets you write freely, in any language. Connect one or more; the chat uses one at a time.", "Позволяет писать свободно, на любом языке. Подключи одну или несколько; чат пользуется одной."),
+    section("sparkles", t("Chat model", "Модель чата"), t("Lets you write freely, in any language. Connect one or more. The chat uses one at a time.", "Позволяет писать свободно, на любом языке. Подключи одну или несколько. Чат пользуется одной."),
       group(known.map(([p, title, line]) => wayRow(p, title(), line())), others.length ? other : null),
       group(
         row({ label: shown.name, ico: "info.circle", about: shown.note || null },
@@ -434,11 +434,11 @@ function modelTab(s) {
             ? listed.map((m) => [m, () => { modelForm.model = m; render(); }])
             : [[t("Load models", "Загрузить модели"), () => act("refreshModels")]]) }, t("List", "Список"), icon("chevron.down", 9)),
           isChat ? h("button", { class: "btn small", onclick: () => act("setModel", { model: modelForm.model || undefined }) }, t("Use", "Выбрать"))
-            : shown.connected ? h("button", { class: "btn small", title: t("Kept for this account; the chat stays on its model", "Запоминается для этого аккаунта; чат остаётся на своей модели"), onclick: () => act("modelFor", { provider: shown.id, model: modelForm.model || undefined }) }, t("Keep", "Запомнить"))
+            : shown.connected ? h("button", { class: "btn small", title: t("Kept for this account — the chat stays on its model", "Запоминается для этого аккаунта — чат остаётся на своей модели"), onclick: () => act("modelFor", { provider: shown.id, model: modelForm.model || undefined }) }, t("Keep", "Запомнить"))
             : shown.kind === "local" ? h("button", { class: "btn small", onclick: () => connect() }, t("Connect", "Подключить")) : null),
         row({ label: t("Connection", "Подключение"), ico: "dial",
-          about: t(`Check asks the model ${local.examTotal || 10} requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat; fewer, and it will misread.`,
-            `«Проверить» задаёт модели ${local.examTotal || 10} обычных запросов — купить, перевести, положить под процент, график, лонг, вопрос, DCA — и считает, сколько она поняла верно. 8 и больше — для чата хорошо; меньше — она будет путать.`) },
+          about: t(`Check asks the model ${local.examTotal || 10} requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat. Fewer, and it will misread.`,
+            `«Проверить» задаёт модели ${local.examTotal || 10} обычных запросов — купить, перевести, положить под процент, график, лонг, вопрос, DCA — и считает, сколько она поняла верно. 8 и больше — для чата хорошо, меньше — она будет путать.`) },
           examKey && local.examFor === examKey ? h("span", { class: "secondary num" }, `${local.examProgress || 0}/${local.examTotal || 10}`)
             : score ? pill(score.short, score.good) : null,
           h("button", { class: "btn small", disabled: local.examProgress != null || !shown.connected, onclick: () => act("checkModel", { provider: shown.id, model: checkModel || undefined }) }, t("Check", "Проверить")),
@@ -454,15 +454,15 @@ function modelTab(s) {
           about: jevReady && (s.model?.provider === "openrouter" || s.jevOpenRouter)
             ? t("The chat's model and a separate model on OpenRouter check your commands and plans against your words. OpenRouter receives your messages, pasted text, lookup results and each plan with its balance changes before you sign, and a site's transaction. This check can stop a move, never approve a signature.",
               "Модель чата и отдельная модель на OpenRouter сверяют твои команды и планы с твоими словами. OpenRouter получает твои сообщения, вставленный текст, результаты поиска и каждый план с изменениями балансов до подписи, а также транзакцию сайта. Эта проверка может остановить движение, но не одобрить подпись.")
-            : t("The chat's model reads each command and plan a second time. Local rules also check incoming text. OpenRouter can add a separate model; the chat keeps its own. This check can stop a move, never approve a signature.",
-              "Модель чата перечитывает каждую команду и план. Входящий текст проверяют и локальные правила. OpenRouter может добавить отдельную модель; чат остаётся на своей. Эта проверка может остановить движение, но не одобрить подпись.") },
+            : t("The chat's model reads each command and plan a second time. Local rules also check incoming text. OpenRouter can add a separate model, and the chat keeps its own. This check can stop a move, never approve a signature.",
+              "Модель чата перечитывает каждую команду и план. Входящий текст проверяют и локальные правила. OpenRouter может добавить отдельную модель, а чат остаётся на своей. Эта проверка может остановить движение, но не одобрить подпись.") },
           toggle("second-check", s.secondCheck, (on) => act("secondCheck", { test: on }))),
         row({ label: "OpenRouter", mark: companyLogo("openrouter", 26), about: t("Also asks TypeSafe Jev through OpenRouter with your OpenRouter key. OpenRouter then receives your messages, pasted text, lookup results, each plan with its balance changes before you sign, and a site's transaction.",
           "Также спрашивает TypeSafe Jev через OpenRouter твоим ключом OpenRouter. Тогда OpenRouter получает твои сообщения, вставленный текст, результаты поиска, каждый план с изменениями балансов до подписи и транзакцию сайта.") },
           // The chat on OpenRouter: Jev reads there anyway, so no switch that could read Off (SettingsView.swift:840).
           jevReady && s.model?.provider === "openrouter" ? pill(t("Your chat runs here", "Здесь работает твой чат"), true)
           : jevReady ? toggle("jev-openrouter", s.jevOpenRouter, (on) => act("jevOpenRouter", { test: on }), !s.secondCheck)
-            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", disabled: jevStatus === "waiting", title: t("Signs OpenRouter in for the second check only; the chat keeps its model", "Входит в OpenRouter только для второй проверки; чат остаётся на своей модели"), onclick: signInJev }, t("Connect", "Подключить"))]),
+            : [pill(t("Not connected", "Не подключено"), false), h("button", { class: "btn small", disabled: jevStatus === "waiting", title: t("Signs OpenRouter in for the second check only — the chat keeps its model", "Входит в OpenRouter только для второй проверки — чат остаётся на своей модели"), onclick: signInJev }, t("Connect", "Подключить"))]),
         jevStatus ? row({ label: jevStatus === "waiting" ? t("Waiting for the sign-in in the browser…", "Жду входа в браузере…")
           : jevStatus === "done" ? t("Connected: a separate model now checks every command and plan too.", "Подключено: теперь каждую команду и план проверяет ещё и отдельная модель.") : jevStatus,
           ico: "info.circle", cls: "wrap note" + (jevStatus !== "waiting" && jevStatus !== "done" ? " loss" : "") }) : null)),
@@ -471,8 +471,8 @@ function modelTab(s) {
     section("lock", t("Safety", "Безопасность"), t("A model reads your words. It cannot approve a move.", "Модель читает твои слова. Одобрить движение она не может."),
       group(
         row({ label: t(`Money moves only after Confirm + ${presence()}`, `Деньги двигаются только после «Подтвердить» и ${presence()}`), ico: "person",
-          about: t(`You approve money moves in the app. One ${presence()} can cover one move or a few minutes, as set in Wallet. A separately approved Hyperliquid trading key can place orders without a new ${presence()}; it cannot withdraw money.`,
-            `Движения денег одобряешь ты в приложении. Одно подтверждение ${presence()} действует на одно движение или несколько минут — как задано во вкладке «Кошелёк». Отдельно одобренный торговый ключ Hyperliquid может ставить ордера без нового ${presence()}; вывести деньги он не может.`) }),
+          about: t(`You approve money moves in the app. One ${presence()} can cover one move or a few minutes, as set in Wallet. A separately approved Hyperliquid trading key can place orders without a new ${presence()}. It cannot withdraw money.`,
+            `Движения денег одобряешь ты в приложении. Одно подтверждение ${presence()} действует на одно движение или несколько минут — как задано во вкладке «Кошелёк». Отдельно одобренный торговый ключ Hyperliquid может ставить ордера без нового ${presence()}. Вывести деньги он не может.`) }),
         row({ label: t("Keys stay on this PC", "Ключи остаются на этом компьютере"), ico: "eye.slash",
           about: t("The chat model receives your messages, your balances and open positions, the plan and what it looks up. It never receives keys or the recovery phrase, and your own addresses reach it as «me».",
             "Модель чата получает твои сообщения, балансы и открытые позиции, план и то, что она ищет. Ключи и фразу восстановления она не получает никогда, а твои собственные адреса доходят до неё как «я».") }))),
@@ -591,7 +591,7 @@ function walletTab(s) {
         w ? h("div", { class: "pg-set-signer" }, letterTile(w.label, 44, true), h("div", {}, h("b", {}, w.label), h("div", { class: "secondary" }, kindName(w)))) : null,
         w ? [["Solana", "sol", w.solana], ["EVM", "eth", w.evm], ["NEAR", "near", w.near]].filter((x) => x[2]).map(([name, l, a]) =>
           row({ label: name, mark: logo(l, 26) }, copyShort(a, name))) : null,
-        row({ label: t("Signing key", "Ключ подписи"), ico: "lock", about: t("A separate process without network access keeps the key, sealed by Windows Hello and this PC's TPM, and signs approved moves.", "Ключ хранит отдельный процесс без доступа к сети, запечатанный Windows Hello и TPM этого компьютера; он подписывает одобренные движения.") },
+        row({ label: t("Signing key", "Ключ подписи"), ico: "lock", about: t("A separate process without network access keeps the key, sealed by Windows Hello and this PC's TPM, and signs approved moves.", "Ключ хранит отдельный процесс без доступа к сети, запечатанный Windows Hello и TPM этого компьютера, и он подписывает одобренные движения.") },
           pill(w ? t("Windows Hello + TPM", "Windows Hello + TPM") : t("No key on this PC", "Ключа нет"), !!w && s.signer.ready)),
         w?.kind === "phrase" ? row({ label: t("Recovery phrase", "Фраза восстановления"), ico: "doc", about: t("ihatecrypto keeps only the key made from your words, sealed in a separate process — never the words themselves, so they can't be shown again. Lost them? Create a new wallet below, write its words down and move the money there.", "ihatecrypto хранит только ключ, сделанный из твоих слов, запечатанный в отдельном процессе, — но не сами слова, поэтому показать их снова нельзя. Потерял? Создай новый кошелёк ниже, запиши его слова и переведи деньги туда.") },
           h("span", { class: "secondary" }, t("Not kept on this PC", "На этом компьютере не хранится"))) : null)),
@@ -622,14 +622,14 @@ function walletTab(s) {
         way("link", t("Connect a Ledger", "Подключить Ledger"), t("USB or Bluetooth: every move shows on its screen", "USB или Bluetooth: каждое движение — на его экране"), () => { ui.view = "canvas"; act("addBoard", { name: "ledger" }); }))),
     section("person", presence(), t("One Windows Hello covers one move, or a few minutes.", "Одно подтверждение Windows Hello действует на одно движение или несколько минут."),
       group(
-        row({ label: t("Stays valid for", "Действует"), ico: "clock", about: t("One move covers that move's signatures for at most a minute. With 5–30 minutes, signatures need no new Windows Hello during that time; each still passes the guard and the second check. Locking the PC ends it.", "Один перевод покрывает подписи этого перевода не дольше минуты. С 5–30 минутами новые подписи в это время не спрашивают Windows Hello; каждая всё равно проходит проверки. Блокировка компьютера заканчивает сессию.") },
+        row({ label: t("Stays valid for", "Действует"), ico: "clock", about: t("One move covers that move's signatures for at most a minute. With 5–30 minutes, signatures need no new Windows Hello during that time, but each still passes the guard and the second check. Locking the PC ends it.", "Один перевод покрывает подписи этого перевода не дольше минуты. С 5–30 минутами новые подписи в это время не спрашивают Windows Hello, но каждая всё равно проходит проверки. Блокировка компьютера заканчивает сессию.") },
           segmented(sessions, s.signer.sessionLength, (v) => act("sessionLength", { seconds: v }), "pg-set-seg")),
         s.trading ? row({ label: t("One transaction for approve and swap", "Одна транзакция для approve и обмена"), ico: "square.stack",
-          about: t("On Base, Arbitrum, Ethereum, Polygon and Robinhood, an approve and the swap, deposit or bridge that spends it go out as one transaction under one Windows Hello (EIP-7702). For that, from the first such move on a network your wallet there runs the code of an audited account contract (eth-infinitism's Simple7702Account): it takes coins and tokens as before, only you can make it act, and every call in it is checked like a single one. Off: two transactions, two confirmations, as before; a network already switched stays so.",
-            "В Base, Arbitrum, Ethereum, Polygon и Robinhood approve и обмен, депозит или мост, который его тратит, уходят одной транзакцией под одним Windows Hello (EIP-7702). Для этого с первого такого движения в сети твой кошелёк там исполняет код проверенного аудитом контракта-аккаунта (Simple7702Account от eth-infinitism): он принимает монеты и токены как раньше, заставить его действовать можешь только ты, и каждый вызов в нём проверяется как отдельный. Выключено — две транзакции и два подтверждения, как раньше; сеть, где уже включено, такой и остаётся.") },
+          about: t("On Base, Arbitrum, Ethereum, Polygon and Robinhood, an approve and the swap, deposit or bridge that spends it go out as one transaction under one Windows Hello (EIP-7702). For that, from the first such move on a network your wallet there runs the code of an audited account contract (eth-infinitism's Simple7702Account): it takes coins and tokens as before, only you can make it act, and every call in it is checked like a single one. Off: two transactions, two confirmations, as before. A network already switched stays so.",
+            "В Base, Arbitrum, Ethereum, Polygon и Robinhood approve и обмен, депозит или мост, который его тратит, уходят одной транзакцией под одним Windows Hello (EIP-7702). Для этого с первого такого движения в сети твой кошелёк там исполняет код проверенного аудитом контракта-аккаунта (Simple7702Account от eth-infinitism): он принимает монеты и токены как раньше, заставить его действовать можешь только ты, и каждый вызов в нём проверяется как отдельный. Выключено — две транзакции и два подтверждения, как раньше. Сеть, где уже включено, такой и остаётся.") },
           toggle("pg-batches", s.trading.batches, (on) => act("batches", { test: on }))) : null,
         s.trading ? row({ label: t("Cap for unknown protocols", "Лимит для незнакомых протоколов"), ico: "shield",
-          about: t("A contract the chat calls outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) may put at most this much at risk in one call — what leaves the wallet, its approve and the coins sent with it. It must also have verified code, be a month old, hold $1M or more by DefiLlama and be on no scam list. Every check can be fooled; this caps what that costs.",
+          about: t("A contract the chat calls outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) may put at most this much at risk in one call — what leaves the wallet, its approve and the coins sent with it. It must also have verified code, be a month old, hold $1M or more by DefiLlama and be on no scam list. Every check can be fooled, and this caps what that costs.",
             "Контракт, который чат вызывает вне собственного списка ihatecrypto (Aave, Morpho, Uniswap, Relay…), может рисковать за один вызов не больше этой суммы — что уходит из кошелька, его approve и монеты, отправленные с ним. Ещё у него должен быть проверенный код, возраст от месяца, от $1M по DefiLlama и ни одного списка мошенников. Любую проверку можно обмануть — лимит ограничивает, во что это обойдётся.") },
           h("select", { id: "pg-contract-cap", onchange: (e) => act("contractCap", { value: Number(e.target.value) }) },
             [10, 25, 50, 100, 250, 500, 1000].map((v) => h("option", { value: v, selected: s.trading.contractCap === v }, "$" + v.toLocaleString("en-US"))))) : null,
@@ -656,8 +656,8 @@ function passcodeSection(l) {
   const blocked = !l.codeSet && noHello();
   return section("lock", t("Passcode", "Код"), t("Opens ihatecrypto: balances, chat and history stay hidden until then.", "Открывает ihatecrypto: балансы, чат и история скрыты до этого."),
     group(
-      row({ label: t("Passcode", "Код"), ico: "lock", about: t("6 digits, checked by the separate signer: five wrong in a row turn it off, and then only Windows Hello opens the app. Windows Hello opens it too; moves still sign with Windows Hello.",
-        "6 цифр, их проверяет отдельный подписант: после пяти неверных подряд код выключается, и тогда приложение открывает только Windows Hello. Windows Hello открывает и так; движения по-прежнему подписываются Windows Hello.") },
+      row({ label: t("Passcode", "Код"), ico: "lock", about: t("6 digits, checked by the separate signer: five wrong in a row turn it off, and then only Windows Hello opens the app. Windows Hello opens it too, and moves still sign with Windows Hello.",
+        "6 цифр, их проверяет отдельный подписант: после пяти неверных подряд код выключается, и тогда приложение открывает только Windows Hello. Windows Hello открывает и так, а движения по-прежнему подписываются Windows Hello.") },
         l.codeSet ? h("span", { class: "secondary" }, t("On", "Включён")) : null,
         blocked ? null : h("button", { class: "btn small", onclick: () => { passcode.making = !passcode.making; render(); } },
           passcode.making ? t("Cancel", "Отмена") : l.codeSet ? t("Change…", "Изменить…") : t("Make a code…", "Задать код…")),
@@ -713,8 +713,8 @@ function hyperliquidSection(s) {
   return section("bolt", "Hyperliquid", t("A trading key places orders. It cannot withdraw money.", "Торговый ключ ставит ордера. Вывести деньги он не может."),
     group(
       row({ label: t("Trading key", "Торговый ключ"), mark: logo("hype", 26),
-        about: k.active ? t("Opens positions without Windows Hello for 7 days after your last confirmation for it; stops and closes go on after that. It cannot withdraw money.",
-          "Открывает позиции без Windows Hello 7 дней после последнего подтверждения для него; стопы и закрытия работают и после. Вывести деньги он не может.")
+        about: k.active ? t("Opens positions without Windows Hello for 7 days after your last confirmation for it. Stops and closes go on after that. It cannot withdraw money.",
+          "Открывает позиции без Windows Hello 7 дней после последнего подтверждения для него. Стопы и закрытия работают и после. Вывести деньги он не может.")
           : t(`Without a trading key, every order asks for ${k.ledger ? "the Ledger's buttons" : "Windows Hello"}. Hyperliquid accepts the key after the account has had a deposit.`,
             `Без торгового ключа каждый ордер спрашивает ${k.ledger ? "кнопки Ledger" : "Windows Hello"}. Hyperliquid принимает ключ, когда на аккаунт уже был депозит.`) },
         pill(k.active ? t("On", "Включён") : t("Off", "Выключен"), k.active),
@@ -1003,8 +1003,8 @@ export function historyPage() {
         "Пока ничего. Каждый запрос с этого момента сохраняется здесь вместе с карточками, которые были на холсте.")) : null,
       d.agent.map((a, i) => activityCard(a, "a" + i + a.at)),
       d.earlier.length ? h("div", { class: "page-act-earlier secondary small" }, icon("clock.arrow", 12),
-        t("Earlier — from the signature journal. The chat of that time wasn’t kept; from now on every request is.",
-          "Раньше — из журнала подписей. Чат того времени не сохранился; теперь сохраняется каждый запрос.")) : null,
+        t("Earlier — from the signature journal. The chat of that time wasn’t kept, but from now on every request is.",
+          "Раньше — из журнала подписей. Чат того времени не сохранился, а теперь сохраняется каждый запрос.")) : null,
       d.earlier.map((a, i) => activityCard(a, "e" + i + a.at)),
     ];
   }
@@ -1177,7 +1177,7 @@ export function topUpPanel({ embedded = false, landed } = {}) {
             : o.units ? t(`${o.amount} ${o.symbol} to this wallet on ${net.title} is filled in, you only approve.`, `${o.amount} ${o.symbol} на этот кошелёк в ${net.title} уже подставлено, остаётся подтвердить.`)
             : t(`${o.symbol} to this wallet on ${net.title} is filled in, the wallet asks how much.`, `${o.symbol} на этот кошелёк в ${net.title} уже подставлен, сколько — спросит кошелёк.`))]
       : [t(`Withdraw to this address on ${net.title}`, `Выведи на этот адрес в сети ${net.title}`),
-        solana ? t("USDC, SOL or any Solana token (SPL). USDC is what ihatecrypto trades with; keep ≈ 0.02 SOL for fees.", "USDC, SOL или любой токен Solana (SPL). ihatecrypto торгует на USDC; держи ≈ 0,02 SOL на комиссии.")
+        solana ? t("USDC, SOL or any Solana token (SPL). USDC is what ihatecrypto trades with. Keep ≈ 0.02 SOL for fees.", "USDC, SOL или любой токен Solana (SPL). ihatecrypto торгует на USDC. Держи ≈ 0,02 SOL на комиссии.")
           : t(`${net.usdcSymbol}${net.coin ? ", " + net.coin : ""} or any token on ${net.title}. The same 0x address is this wallet on every EVM network ihatecrypto uses.`,
             `${net.usdcSymbol}${net.coin ? ", " + net.coin : ""} или любой токен в ${net.title}. Тот же 0x-адрес — этот кошелёк во всех EVM-сетях ihatecrypto.`)];
   const openPage = async () => {

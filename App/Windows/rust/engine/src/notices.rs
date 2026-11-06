@@ -123,7 +123,7 @@ impl Engine {
         } else if state == Some("unknown") {
             self.say("Sent, status unknown — check the links in the chat before doing it again.", "Отправлено, статус неизвестен — проверь ссылки в чате, прежде чем повторять.")
         } else {
-            self.say("It didn’t go through; the chat says why.", "Не прошло — причина в чате.")
+            self.say("It didn’t go through — the chat says why.", "Не прошло — причина в чате.")
         };
         self.notify(Notice::Moves, title, &body, !ok, false, None, None);
     }
@@ -180,8 +180,8 @@ impl Engine {
                 let long = p.size > Decimal::ZERO;
                 let (size, entry) = (Fmt::num(p.size.abs(), 6), Fmt::price(p.entry));
                 self.notify(Notice::Orders, &self.say(&format!("Limit filled: {coin}"), &format!("Лимитка исполнилась: {coin}")),
-                            &self.say(&format!("{} {size} at {entry}; its stop and take are on the exchange.", if long { "Long" } else { "Short" }),
-                                      &format!("{} {size} по {entry}; стоп и тейк стоят на бирже.", if long { "Лонг" } else { "Шорт" })),
+                            &self.say(&format!("{} {size} at {entry}. Its stop and take are on the exchange.", if long { "Long" } else { "Short" }),
+                                      &format!("{} {size} по {entry}. Стоп и тейк стоят на бирже.", if long { "Лонг" } else { "Шорт" })),
                             false, false, None, Some(format!("perp:{}", p.coin)));
             }
         }

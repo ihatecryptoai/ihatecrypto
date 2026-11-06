@@ -411,7 +411,7 @@ pub mod safe {
         match Call::decode(&data) {
             Call::Plain if data.is_empty() => None,
             Call::Transfer { .. } if value.iter().all(|&b| b == 0) => None,
-            _ => Some(format!("A multisig move ihatecrypto signs is a plain payment of a coin or a token; this one calls the contract {to}.")),
+            _ => Some(format!("A multisig move ihatecrypto signs is a plain payment of a coin or a token. This one calls the contract {to}.")),
         }
     }
 
@@ -433,7 +433,7 @@ pub mod safe {
         match call {
             Call::Plain if m.data.is_empty() => {}
             Call::Transfer { .. } if m.value == 0 => {}
-            _ => return Some(format!("A multisig move ihatecrypto signs is a plain payment of a coin or a token; this one calls the contract {}.", m.to)),
+            _ => return Some(format!("A multisig move ihatecrypto signs is a plain payment of a coin or a token. This one calls the contract {}.", m.to)),
         }
         call.payees(&m.to, m.value, m.chain_id).into_iter().find(|p| !approved.contains(&p.to_lowercase()))
             .map(|p| format!("Money from the multisig goes to an unapproved address {p}."))

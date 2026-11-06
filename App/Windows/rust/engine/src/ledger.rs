@@ -352,8 +352,8 @@ impl Engine {
         self.use_ledger(false);
         self.set_ledger(|l| *l = None);
         self.st_mut().ledger_connect = None;
-        self.reply(&self.say("Ledger removed from the wallet list. The money on it stays on it; connect it again any time.",
-                             "Ledger убран из списка кошельков. Деньги на нём остаются на нём; подключить снова можно в любой момент."), None);
+        self.reply(&self.say("Ledger removed from the wallet list. The money on it stays on it. Connect it again any time.",
+                             "Ledger убран из списка кошельков. Деньги на нём остаются на нём. Подключить снова можно в любой момент."), None);
     }
 
     /// «connect ledger», «подключи леджер», «use my Ledger», «forget my Ledger»: true when the message was about it.

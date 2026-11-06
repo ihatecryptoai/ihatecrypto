@@ -69,6 +69,9 @@ fn the_plans_changes_in_russian() {
     let ru: Vec<String> = next.changes(&TradeIntent::default()).iter().map(|c| Engine::change_ru(c)).collect();
     assert_eq!(ru, ["шорт", "риск $5.00", "стоп 3%", "тейк 6%", "остальное по правилам риска", "вход на откате 2%"]);
     assert_eq!(Engine::change_ru("limit entry at 2,650"), "лимитный вход на 2,650");
+    assert_eq!(Engine::change_ru("TWAP over 2 h, randomized"), "TWAP за 2 ч, части случайного размера");
+    assert_eq!(Engine::change_ru("TWAP over 90 min"), "TWAP за 90 мин");
+    assert_eq!(Engine::change_ru("one market order"), "вход одним рыночным ордером");
     assert_eq!(Engine::change_ru("something new"), "something new");
 }
 
@@ -192,15 +195,100 @@ async fn the_position_ruler() {
     }).await;
 }
 
-/// A TWAP is turned down before any plan is drawn: the Windows engine has no guardian to stop one whose stop fired.
+/// The test phrase's first EVM address: public test data, never a real wallet.
+const ME: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+
+/// An engine with a wallet, ETH's market and its volatility read, and $1,000 free on Hyperliquid: a plan that needs no
+/// bridge, drawn offline.
+fn trading_engine(agent: bool) -> Rc<Engine> {
+    let e = engine();
+    let w = signer_api::SignerWallet { id: "1".into(), label: "Main".into(), kind: "phrase".into(), solana: None, evm: Some(ME.into()), near: None, test: None, automation: None };
+    let mut m = Market::new("ETH", d("2000"), 4, 25);
+    m.atr_pct = Some(d("2"));
+    {
+        let mut st = e.st_mut();
+        st.status = Some(signer_api::SignerReply { ok: true, has_wallet: Some(true), evm_address: Some(ME.into()), wallets: Some(vec![w]),
+                                                   active_wallet: Some("1".into()), agent_active: agent.then_some(true), ..Default::default() });
+        st.markets.insert("ETH".into(), m);
+        st.place_facts.hyperliquid = Some(crate::place_facts::HlFacts {
+            account_value: d("1000"), withdrawable: d("1000"), spot_usdc: Decimal::ZERO, dexes: vec![], hlp_equity: Decimal::ZERO, hlp_locked_until: None,
+        });
+    }
+    e
+}
+
+fn twap(risk: &str) -> TradeIntent { plan(|i| { i.asset = "ETH".into(); i.twap_minutes = Some(30); i.risk_usd = Some(d(risk)) }) }
+
+const KEY_OFF: &str = "A TWAP needs the Hyperliquid trading key on (Settings › Wallet › Hyperliquid): locked or off, nothing can stop the TWAP while you're away. Turn it on, or buy in one order.";
+
+/// A TWAP the rules pass is stopped before any card while the trading key is off (the Mac's twapRefusal), on the plan and
+/// in the checklist; a Ledger is told to approve its own key.
 #[tokio::test]
-async fn a_twap_is_turned_down_before_any_plan() {
+async fn a_twap_needs_the_trading_key_before_any_card() {
     let _dir = store::test_folder();
     tokio::task::LocalSet::new().run_until(async {
-        let e = engine();
-        e.plan_trade(plan(|i| { i.asset = "ETH".into(); i.twap_minutes = Some(30) }), None, "long ETH 100 USDC over 30 min").await;
+        let e = trading_engine(false);
+        e.plan_trade(twap("10"), None, "long ETH risk $10 stop 3% take 6% over 30 min").await;
         let st = e.st();
-        assert!(st.pending.is_none() && st.card.is_none() && st.intent == TradeIntent::default());
-        assert!(st.messages().last().is_some_and(|m| m.text.starts_with("A TWAP isn't on Windows yet")));
+        assert!(st.pending.is_none() && st.card.is_none());
+        let board = st.boards().iter().find(|b| Some(&b.id) == st.plan_board.as_ref()).cloned().expect("the plan's board");
+        let view = board.plan.expect("its plan");
+        assert_eq!((view.stopped.as_deref(), view.short.as_deref(), view.blocked, view.fix.is_none()), (Some(KEY_OFF), Some("needs the trading key"), true, true));
+        let said = &st.messages().last().expect("the checklist").text;
+        assert!(said.contains("\n✗ Entry: TWAP over 30 min on Hyperliquid needs the trading key on, so ihatecrypto can stop it while you're away\n"), "{said}");
+        drop(st);
+        assert_eq!(e.twap_refusal(&TradeIntent::default()), None);
+        e.st_mut().ledger = Some(crate::ledger::LedgerAccount { evm: Some(ME.into()), active: Some(true), ..Default::default() });
+        assert!(e.twap_refusal(&twap("10")).is_some_and(|r| r.starts_with("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits")));
     }).await;
+}
+
+/// With the trading key on a TWAP is no longer turned down: it reaches the rules' own checks (here Hyperliquid's $100
+/// minimum for a TWAP), and the checklist says how it enters. Past them, its card is prepared as any plan's.
+#[tokio::test]
+async fn with_the_trading_key_a_twap_is_planned_as_any_trade() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = trading_engine(true);
+        assert_eq!(e.twap_refusal(&twap("10")), None);
+        e.plan_trade(twap("5"), None, "long ETH risk $5 stop 3% take 6% over 30 min").await;
+        let st = e.st();
+        let view = st.boards().iter().find(|b| Some(&b.id) == st.plan_board.as_ref()).and_then(|b| b.plan.clone()).expect("the plan");
+        assert!(view.stopped.as_deref().is_some_and(|s| s != KEY_OFF && s.contains("$100")), "{view:?}");
+        let said = &st.messages().last().expect("the checklist").text;
+        assert!(said.contains("\n✓ Entry: TWAP over 30 min on Hyperliquid, equal parts, no ihatecrypto fee on it\n"), "{said}");
+    }).await;
+}
+
+/// A TWAP's card whose trading key was locked since it was drawn: Confirm refuses it, nothing is carried out.
+#[tokio::test]
+async fn confirm_refuses_a_twap_once_the_key_is_off() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = trading_engine(false);
+        let market = Market::new("ETH", d("2000"), 4, 25);
+        let sizing = RiskCalc::size(d("10"), d("3"), Some(d("6")), Decimal::ONE, Side::Long, &market, None, None, Plan::twap_drift()).expect("a sizing");
+        let p = Prepared::new(twap("10"), market, sizing, 1, None, vec![], vec!["TWAP on Hyperliquid".into()], Utc::now());
+        {
+            let mut st = e.st_mut();
+            st.pending = Some(Pending::Trade(Box::new(p)));
+            st.card = Some(crate::engine::Card { id: "card".into(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+        }
+        e.confirm(None, &[]).await;
+        let st = e.st();
+        assert!(st.pending.is_none() && st.card.is_none() && st.running.is_none());
+        assert_eq!(st.messages().last().map(|m| m.text.as_str()), Some(KEY_OFF));
+    }).await;
+}
+
+/// The second check reads a TWAP's entry and its fees as main's planLines say them, word for word.
+#[test]
+fn the_second_check_reads_a_twaps_entry_and_fees() {
+    assert_eq!(Engine::plan_fee_facts(&twap("10")), [
+        "Entry: a TWAP over 30 min on Hyperliquid, parts at the market every 30 s or more, each within 3% of the price. The risk and the size count every \
+         part filling 3% worse than now, so from today's price the stop loses less than the risk.",
+        "Fees: the TWAP's parts pay Hyperliquid's 0.045% only, no ihatecrypto fee on them. The exit pays Hyperliquid's 0.045% and ihatecrypto's 0.05%.",
+    ]);
+    assert_eq!(Engine::plan_fee_facts(&plan(|_| {})),
+               ["Fees on each side: Hyperliquid's 0.045% and ihatecrypto's 0.05% (the user approves it once, on the first trade)."]);
 }

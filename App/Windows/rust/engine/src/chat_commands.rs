@@ -92,7 +92,7 @@ impl Engine {
         // «what's new»: the versions by date and their stories, over the window (whatsnew.js).
         if found(&lower, &WHATS_NEW) {
             self.out.event("whatsNew", &HashMap::<String, String>::new());
-            self.reply(&self.say("What's new is on screen; it's also in the Profile menu.", "Что нового — на экране; оно же в меню профиля."), None);
+            self.reply(&self.say("What's new is on screen. It's also in the Profile menu.", "Что нового — на экране, а ещё в меню профиля."), None);
             return true;
         }
         // «check for updates»: the window asks the signed update feed (main.rs update_check) and says what it finds.

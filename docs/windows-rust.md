@@ -28,9 +28,10 @@ cd App/Windows/rust && cargo test
   main's rules (`ContractCallGuard::at_risk`, decimals read or refused).
 - The Swift Windows engine took a Bluetooth Ledger as reachable whatever the search answered (a tuple compared with nil).
   The Rust engine asks for a real answer.
-- The engine has no TWAP guardian yet (main's Mac stops a TWAP whose stop fired, c308a92): a TWAP is turned down before
-  any plan is drawn, rather than started with nothing to stop it.
-- About 120 of the engine's words still carry a «;» from the Swift Windows engine; main dropped them from its own UI.
+- TWAPs run on Windows with the Mac's guard (main's c308a92, ported 2026-11-07): one starts only with the trading key
+  on, its rules stay while it may still buy, each guard pass asks `guard_twap` and stops one whose stop or take fired,
+  and the engine keeps Windows awake while one runs (`SetThreadExecutionState`, winsec's `power`).
+- No «;» in what people read (the owner's rule): 469 strings across the engine, trade, core, signer, guard, ledger, wallet, evm, defi, llm and the window's JS were rewritten, main's wording where it had the sentence. Model prompts keep theirs.
 - A review of the Confirm rule over the Rust engine found two gaps it had taken from the Swift Windows engine. A paid
   request in a task (on the automation wallet, as a chain's later step, or held behind a card confirmed at once) paid the
   price the service asked at run time: as main since dee2739, a pay step now waits for its own card, and a run on the

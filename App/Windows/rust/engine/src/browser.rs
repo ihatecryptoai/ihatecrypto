@@ -307,8 +307,8 @@ impl Engine {
                 let Some(owner) = wallet.solana.clone() else { return refused(wallet.missing("solana").unwrap_or_else(|| "No Solana address.".into())) };
                 if !connected {
                     if params.get("silent").and_then(Value::as_bool) == Some(true) { return Ok("null".into()) }
-                    let lines = [self.say("It sees your address and can ask you to sign; nothing is signed without your Confirm.",
-                                          "Сайт увидит адрес и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."), owner.clone()];
+                    let lines = [self.say("It sees your address and can ask you to sign. Nothing is signed without your Confirm.",
+                                          "Сайт увидит адрес и сможет просить подпись. Без твоего «Подтвердить» ничего не подписывается."), owner.clone()];
                     let asked = self.say(&format!("{host} asks to connect to your Solana wallet"), &format!("{host} просит подключить твой кошелёк Solana"));
                     if !self.ask(host, origin, site, true, &asked, &lines, vec![], vec![], None, None).await { return refused("The user declined.") }
                     self.st_mut().sites.solana.insert(origin.into());
@@ -451,8 +451,8 @@ impl Engine {
             "eth_accounts" => Ok(json!(if connected { vec![address] } else { vec![] }).to_string()),
             "eth_requestAccounts" => {
                 if !connected {
-                    let lines = [self.say("It sees your EVM address, which is also your Hyperliquid address, and can ask you to sign; nothing is signed without your Confirm.",
-                                          "Сайт увидит EVM-адрес — он же твой адрес на Hyperliquid — и сможет просить подпись; без твоего «Подтвердить» ничего не подписывается."),
+                    let lines = [self.say("It sees your EVM address, which is also your Hyperliquid address, and can ask you to sign. Nothing is signed without your Confirm.",
+                                          "Сайт увидит EVM-адрес — он же твой адрес на Hyperliquid — и сможет просить подпись. Без твоего «Подтвердить» ничего не подписывается."),
                                  self.say("ihatecrypto never signs token spending permissions (Permit).", "ihatecrypto никогда не подписывает разрешения на трату токенов (Permit)."),
                                  address.clone()];
                     let asked = self.say(&format!("{host} asks to connect to your EVM wallet"), &format!("{host} просит подключить твой EVM-кошелёк"));

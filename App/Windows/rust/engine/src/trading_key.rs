@@ -156,8 +156,8 @@ impl Engine {
         };
         match turned.await {
             Ok(agent) => self.reply(&self.say(
-                &format!("Trading key on: {}…. Orders, stops and closes now skip Windows Hello — new positions for 7 days, then one confirmation renews them; this key can't withdraw money, withdrawals still go through the main key.", head(&agent, 10)),
-                &format!("Торговый ключ включён: {}…. Ордера, стопы и закрытия теперь идут без Windows Hello — новые позиции 7 дней, потом одно подтверждение продлевает; вывести деньги этот ключ не может, вывод по-прежнему идёт основным ключом.", head(&agent, 10)),
+                &format!("Trading key on: {}…. Orders, stops and closes now skip Windows Hello — new positions for 7 days, then one confirmation renews them. This key can't withdraw money, withdrawals still go through the main key.", head(&agent, 10)),
+                &format!("Торговый ключ включён: {}…. Ордера, стопы и закрытия теперь идут без Windows Hello — новые позиции 7 дней, потом одно подтверждение продлевает. Вывести деньги этот ключ не может, вывод по-прежнему идёт основным ключом.", head(&agent, 10)),
             ), Some("Hyperliquid".into())),
             Err(why) => self.reply(&(self.say("Trading key not turned on: ", "Торговый ключ не включён: ") + &why), Some("Hyperliquid".into())),
         }
@@ -202,8 +202,8 @@ impl Engine {
             self.read_ledger_agent().await;
             let on = self.say("Trading key on: orders go without the Ledger's buttons.", "Торговый ключ включён: ордера идут без кнопок Ledger.");
             self.connect_card(|c| c.status = on);
-            self.reply(&self.say(&format!("Trading key on for your Ledger: {}…. Orders, stops, trailing and closes now go without the device; withdrawals and transfers are still signed on the Ledger. “lock” pauses it.", head(&agent, 10)),
-                                 &format!("Торговый ключ для Ledger включён: {}…. Ордера, стопы, трейлинг и закрытия теперь идут без устройства; выводы и переводы по-прежнему подписываются на Ledger. «Заблокируй» ставит его на паузу.", head(&agent, 10))), None);
+            self.reply(&self.say(&format!("Trading key on for your Ledger: {}…. Orders, stops, trailing and closes now go without the device. Withdrawals and transfers are still signed on the Ledger. “lock” pauses it.", head(&agent, 10)),
+                                 &format!("Торговый ключ для Ledger включён: {}…. Ордера, стопы, трейлинг и закрытия теперь идут без устройства. Выводы и переводы по-прежнему подписываются на Ledger. «Заблокируй» ставит его на паузу.", head(&agent, 10))), None);
             Ok(())
         };
         if let Err(why) = turned.await {
@@ -245,7 +245,7 @@ impl Engine {
         let mut options = Vec::new();
         if can_move {
             options.push(RouterOption::new(&self.say("Move 11 USDC to Hyperliquid", "Перевести 11 USDC на Hyperliquid"),
-                                           &self.say("From Solana; the card waits for your Confirm", "С Solana; карточка ждёт «Подтвердить»"),
+                                           &self.say("From Solana, the card waits for your Confirm", "С Solana, карточка ждёт «Подтвердить»"),
                                            "move 11 USDC from Solana to Hyperliquid", true));
         }
         options.push(RouterOption::new(&self.say("Top up ihatecrypto", "Пополнить ihatecrypto"),
@@ -271,12 +271,12 @@ impl Engine {
         let ledger = self.ledger_active();
         let (without, one) = if ledger { ("the Ledger's buttons", "approval on the Ledger") } else { ("Windows Hello", "Windows Hello") };
         let (without_ru, one_ru) = if ledger { ("кнопок Ledger", "на Ledger") } else { ("Windows Hello", "Windows Hello") };
-        self.reply(&self.say(&format!("Hyperliquid is open on this wallet. Turn on its trading key? Orders, stops and closes then go without {without} — new positions for 7 days, then one confirmation renews them; the key can't withdraw."),
-                             &format!("Hyperliquid на этом кошельке открыт. Включить торговый ключ? Тогда ордера, стопы и закрытия идут без {without_ru} — новые позиции 7 дней, потом одно подтверждение продлевает; вывести деньги ключ не может.")),
+        self.reply(&self.say(&format!("Hyperliquid is open on this wallet. Turn on its trading key? Orders, stops and closes then go without {without} — new positions for 7 days, then one confirmation renews them. The key can't withdraw."),
+                             &format!("Hyperliquid на этом кошельке открыт. Включить торговый ключ? Тогда ордера, стопы и закрытия идут без {without_ru} — новые позиции 7 дней, потом одно подтверждение продлевает. Вывести деньги ключ не может.")),
                    Some("Hyperliquid".into()));
         self.set_options(vec![
             RouterOption::new(&self.say("Turn on the trading key", "Включить торговый ключ"),
-                              &self.say(&format!("One {one}; it can't withdraw"), &format!("Одно подтверждение {one_ru}; вывести не может")), TRADING_KEY_ON, true),
+                              &self.say(&format!("One {one} · it can't withdraw"), &format!("Одно подтверждение {one_ru} · вывести не может")), TRADING_KEY_ON, true),
             RouterOption::new(&self.say("Not now", "Не сейчас"), &self.say("Settings › Wallet › Hyperliquid", "Настройки › Кошелёк › Hyperliquid"), TRADING_KEY_LATER, false),
         ]);
     }
@@ -307,8 +307,8 @@ impl Engine {
             Err(e) => Err(e.0),
         };
         match revoked {
-            Ok(()) => self.reply(&self.say("ihatecrypto's fee approval is taken back. New orders go without it; stops and take-profits already on the exchange keep it until they fill or move. The next Hyperliquid trade you confirm asks for it again.",
-                                           "Одобрение комиссии ihatecrypto отозвано. Новые ордера идут без неё; стопы и тейки, уже стоящие на бирже, сохраняют её, пока не исполнятся или не сдвинутся. Следующая сделка на Hyperliquid, которую ты подтвердишь, спросит снова."),
+            Ok(()) => self.reply(&self.say("ihatecrypto's fee approval is taken back. New orders go without it, but stops and take-profits already on the exchange keep it until they fill or move. The next Hyperliquid trade you confirm asks for it again.",
+                                           "Одобрение комиссии ihatecrypto отозвано. Новые ордера идут без неё, а стопы и тейки, уже стоящие на бирже, сохраняют её, пока не исполнятся или не сдвинутся. Следующая сделка на Hyperliquid, которую ты подтвердишь, спросит снова."),
                                  Some("Hyperliquid".into())),
             Err(why) => self.reply(&(self.say("The fee approval stayed: ", "Одобрение комиссии осталось: ") + &why), Some("Hyperliquid".into())),
         }

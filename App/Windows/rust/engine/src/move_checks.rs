@@ -211,7 +211,7 @@ impl Engine {
                     });
                 }
                 if let Some(sol) = self.held_there("SOL", "solana") && sol < d("0.007") {
-                    return Some(self.say(&format!("The DCA's order account takes ≈ 0.006 SOL of rent, back when it ends; Solana has {} SOL.", Fmt::num(sol, 4)),
+                    return Some(self.say(&format!("The DCA's order account takes ≈ 0.006 SOL of rent, back when it ends. Solana has {} SOL.", Fmt::num(sol, 4)),
                                          &format!("Аккаунт ордера DCA берёт ≈ 0.006 SOL залога (вернётся в конце), а на Solana {} SOL.", Fmt::num(sol, 4))));
                 }
                 None
@@ -390,7 +390,7 @@ impl Engine {
 
     fn top_up_first(&self, place: &str) -> RouterOption {
         RouterOption::new(&self.say("Top up first", "Сначала пополнить"),
-                          &self.say(&format!("Your addresses on the canvas; send the rest to {place} and ask again."),
+                          &self.say(&format!("Your addresses on the canvas: send the rest to {place} and ask again."),
                                     &format!("Адреса на холсте: пришли недостающее на {place} и попроси снова.")),
                           "top up", false)
     }
@@ -607,7 +607,7 @@ impl Engine {
     pub fn other_network_warning(&self, saved: &str, sent: &str) -> Option<String> {
         if saved == sent { return None }
         let (a, b) = (network_title(saved), network_title(sent));
-        Some(self.say(&format!("Saved for {a}, sent on {b} to the same address. Your own wallet has it there too; an exchange's deposit address may not — check that it takes {b}."),
+        Some(self.say(&format!("Saved for {a}, sent on {b} to the same address. Your own wallet has it there too, but an exchange's deposit address may not — check that it takes {b}."),
                       &format!("Сохранён для {a}, отправка в {b} на тот же адрес. Твой кошелёк там тоже есть, а адрес биржи может не принимать {b} — проверь.")))
     }
 
@@ -696,12 +696,12 @@ impl Engine {
         let (total, usdc_text) = (Fmt::num(total, 2), Fmt::num(*usdc, 2));
         self.set_options(vec![
             RouterOption::new(&format!("Jupiter DCA: {rounds} × {each} USDC → {}", asset.symbol),
-                              &self.say(&format!("On-chain: {total} USDC goes in now and Jupiter buys every {period}, even with the app closed. From 100 USDC, 50 a round; 0.1% fee; cancel returns the rest."),
-                                        &format!("На блокчейне: {total} USDC вносятся сразу, Jupiter покупает раз в {period}, даже при закрытом приложении. От 100 USDC, по 50 за раз; комиссия 0.1%; отмена вернёт остаток.")),
+                              &self.say(&format!("On-chain: {total} USDC goes in now and Jupiter buys every {period}, even with the app closed. From 100 USDC, 50 a round, 0.1% fee. Cancel returns the rest."),
+                                        &format!("На блокчейне: {total} USDC вносятся сразу, Jupiter покупает раз в {period}, даже при закрытом приложении. От 100 USDC, по 50 за раз, комиссия 0.1%. Отмена вернёт остаток.")),
                               &jupiter.summary(), *usdc >= half),
             RouterOption::new(&self.say(&format!("In the app: {usdc_text} USDC → {} every {period}", asset.symbol), &format!("В приложении: {usdc_text} USDC → {} раз в {period}", asset.symbol)),
-                              &self.say("The money stays in your wallet until each buy; no minimum. Buys while ihatecrypto runs, each signed with Windows Hello or by the automation wallet.",
-                                        "Деньги лежат у тебя до каждой покупки; минимума нет. Покупает, пока ihatecrypto работает; каждая покупка — с Windows Hello или с кошелька автоматизации."),
+                              &self.say("The money stays in your wallet until each buy, no minimum. Buys while ihatecrypto runs, each signed with Windows Hello or by the automation wallet.",
+                                        "Деньги лежат у тебя до каждой покупки, минимума нет. Покупает, пока ihatecrypto работает. Каждая покупка — с Windows Hello или с кошелька автоматизации."),
                               &command.summary(), *usdc < half),
         ]);
         true
@@ -743,7 +743,7 @@ impl Engine {
                               &self.say(&format!("seconds · ≈ {relay}, incl. Hyperliquid's one-time opening fee"), &format!("секунды · ≈ {relay}, включая разовую плату Hyperliquid за открытие")),
                               &format!("{}relay", Self::OPEN_VIA), false),
             RouterOption::new(&self.say("Open via NEAR Intents", "Открыть через NEAR Intents"),
-                              &self.say(&format!("2–4 min · ≈ {near}, no opening fee; the entry waits for the price to hold"), &format!("2–4 мин · ≈ {near}, без платы за открытие; вход — если цена устоит")),
+                              &self.say(&format!("2–4 min · ≈ {near}, no opening fee · the entry waits for the price to hold"), &format!("2–4 мин · ≈ {near}, без платы за открытие · вход — если цена устоит")),
                               &format!("{}oneclick", Self::OPEN_VIA), false),
         ]);
         true

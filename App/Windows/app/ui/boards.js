@@ -357,8 +357,8 @@ function outcome(b) {
     || [t("Not signed", "Не подписано"), "secondary", null];
   const retry = b.state === "failed" && ui.state.retryBoard === b.id
     ? h("button", { class: "btn small route-retry", disabled: ui.state.thinking || !!ui.state.runningBoard, onclick: () => act("retry"),
-      title: t("Lays the same move out again with fresh quotes; nothing moves until you Confirm. What the failed run already did stays done.",
-        "Выложит то же действие заново со свежими котировками; ничего не двинется, пока не нажмёшь «Подтвердить». Что неудачный запуск уже сделал, так и останется.") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
+      title: t("Lays the same move out again with fresh quotes. Nothing moves until you Confirm. What the failed run already did stays done.",
+        "Выложит то же действие заново со свежими котировками. Ничего не двинется, пока не нажмёшь «Подтвердить». Что неудачный запуск уже сделал, так и останется.") }, icon("arrow.clockwise", 12), t("Try again", "Ещё раз"))
     : null;
   return h("div", { class: "route-outcome " + cls }, statusMark(mark), text + " · " + fmtDate(b.at), retry);
 }
@@ -846,7 +846,7 @@ function stockWays(quotes) {
         h("span", { class: "route-way-text" }, h("b", {}, name(q.way)), h("span", { class: "one-line" }, `≈ ${q.gets}` + (q.less ? t(` · ${q.less} less`, ` · на ${q.less} меньше`) : ""))),
         h("span", { class: "spacer" }),
         i === 0 ? h("span", { class: "route-way-badge" }, t("Best", "Лучший")) : null)),
-      h("div", { class: "route-edit-foot" }, t("Quoted again right before signing; the price must sit within 5% of the market.", "Котировка повторится перед подписью; цена должна быть не дальше 5% от рынка.")),
+      h("div", { class: "route-edit-foot" }, t("Quoted again right before signing. The price must sit within 5% of the market.", "Котировка повторится перед подписью. Цена должна быть не дальше 5% от рынка.")),
     ] : h("div", { class: "route-edit-foot" }, quotes ? t("No way quotes it right now.", "Сейчас ни один путь не даёт котировку.") : t("Comparing Uniswap v4, v3 and Relay’s swap…", "Сравниваю Uniswap v4, v3 и обмен Relay…")));
 }
 
@@ -1121,8 +1121,8 @@ function multisigSetup(d) {
       d.address ? h("div", { class: "route-msig-address" }, h("span", { class: "secondary" }, t("Address", "Адрес")), h("span", { class: "address one-line" }, d.address),
         h("button", { class: "btn route-bordered small", onclick: () => copy(d.address) }, icon("copy", 12), t("Copy", "Копировать"))) : null,
       h("div", { class: "route-msig-foot route-info" }, icon("info.circle", 13),
-        t(`Every send: ${names(d.keys.slice(0, m))}.` + (spare.length ? ` Spare: ${names(spare)}.` : "") + " Making it costs only the network fee; Safe takes nothing.",
-          `Каждая отправка: ${names(d.keys.slice(0, m))}.` + (spare.length ? ` Запасные: ${names(spare)}.` : "") + " Создание стоит только комиссию сети; Safe ничего не берёт."))));
+        t(`Every send: ${names(d.keys.slice(0, m))}.` + (spare.length ? ` Spare: ${names(spare)}.` : "") + " Making it costs only the network fee. Safe takes nothing.",
+          `Каждая отправка: ${names(d.keys.slice(0, m))}.` + (spare.length ? ` Запасные: ${names(spare)}.` : "") + " Создание стоит только комиссию сети. Safe ничего не берёт."))));
 }
 
 /** The multisig's picture: its body with one keyhole per key, the ones a move needs lit, and its state. */
@@ -1333,7 +1333,7 @@ function planChart(b, chart, head) {
     head,
     h("div", { class: "route-asset-price" }, h("div", {}, priceEl, changeEl), h("span", { class: "spacer" }), pick,
       h("button", { class: "icon-btn", title: t("Load fresh candles from Hyperliquid", "Загрузить свежие свечи с Hyperliquid"), onclick: () => reload(chart.chart, coin, range) }, icon("arrow.clockwise")),
-      h("button", { class: "icon-btn", title: t("Hide the chart; the plan stays", "Скрыть график; план останется"), onclick: () => act("closeBoard", { board: chart.id }) }, icon("xmark"))),
+      h("button", { class: "icon-btn", title: t("Hide the chart — the plan stays", "Скрыть график — план останется"), onclick: () => act("closeBoard", { board: chart.id }) }, icon("xmark"))),
     area,
     h("div", { class: "route-tiles route-five" },
       tile(`${side} · ${p.leverage}×`, `${p.notional} · ${p.size}`),

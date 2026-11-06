@@ -626,7 +626,7 @@ function answers(m) {
     }),
     shown.length < options.length || !folded ? h("div", { class: "chat-answers-foot" },
       h("button", { class: "link-btn chat-fold", onclick: () => { folds.set(key, !folded); render(); },
-        title: live ? t("Fold the cards; they stay pickable when opened", "Свернуть варианты; раскрытые снова можно выбрать")
+        title: live ? t("Fold the cards — they stay pickable when opened", "Свернуть варианты — раскрытые снова можно выбрать")
           : t("Offered earlier: a newer message or 30 minutes have passed, so their numbers may be old", "Предлагались раньше: был новый вопрос или прошло 30 минут, цифры в них могли устареть") },
         !folded ? t("Fold", "Свернуть") : picked === null ? t(`Options: ${options.length}`, `Варианты: ${options.length}`) : t(`Other options: ${options.length - 1}`, `Другие варианты: ${options.length - 1}`),
         icon(folded ? "chevron.down" : "chevron.up", 10)),
@@ -841,7 +841,7 @@ function waitingBar(card) {
   }
   const busy = s.thinking || !!s.runningBoard;
   const confirm = stateNow === "stale"
-    ? h("button", { class: "chat-pill-accent", disabled: busy, title: t("Ask for the price again; Confirm comes back for 15 s", "Спросить цену заново; «Подтвердить» вернётся на 15 с"), onclick: () => act("requote") },
+    ? h("button", { class: "chat-pill-accent", disabled: busy, title: t("Ask for the price again — Confirm comes back for 15 s", "Спросить цену заново — «Подтвердить» вернётся на 15 с"), onclick: () => act("requote") },
       icon("arrow.clockwise", 13), t("Refresh", "Обновить"))
     : stateNow === "quoting" ? h("span", { class: "chat-pill-quiet" }, icon("hourglass", 13), t("Quoting…", "Котирую…"))
     // A trade the second check doubts has its tick on its block (the Mac's Execute sheet); the engine refuses Confirm without it.
@@ -929,7 +929,7 @@ function connectBar(s) {
     actions.push(chip(t("Check again", "Проверить снова"), "arrow.clockwise", () => act("refreshModels")));
   } else if (local) {
     head = t(`${name} isn't on this PC yet`, `${name} пока нет на этом ПК`);
-    line = size ? t(`≈ ${size.toFixed(1)} GB to download; it runs in ≈ ${Math.round(size * 1.2)} GB of this PC's ${m.memoryGB} GB`, `≈ ${size.toFixed(1)} ГБ скачать; работает в ≈ ${Math.round(size * 1.2)} ГБ из ${m.memoryGB} ГБ этого ПК`)
+    line = size ? t(`≈ ${size.toFixed(1)} GB to download, it runs in ≈ ${Math.round(size * 1.2)} GB of this PC's ${m.memoryGB} GB`, `≈ ${size.toFixed(1)} ГБ скачать, работает в ≈ ${Math.round(size * 1.2)} ГБ из ${m.memoryGB} ГБ этого ПК`)
       + (fits(size) ? "." : t(" — too big for it: pick a smaller one or a subscription.", " — слишком большая: выбери поменьше или подписку."))
       : t("Download it, or use one this PC already has.", "Скачай её или выбери ту, что уже есть на этом ПК.");
     // Only Ollama downloads from here; LM Studio's models are fetched in LM Studio itself.
@@ -1330,8 +1330,8 @@ function companyTile(c, size = 28) {
 function modelChip(s) {
   const c = companyOf(s.model.provider);
   const name = s.model.model ? modelName(s.model.model) : s.model.name || t("No model", "Нет модели");
-  const chip = h("button", { class: "chat-chip-btn chat-model", "data-pop": "model", title: t(`${s.model.name || ""} · ${s.model.model || ""}. The model for this canvas; it never sees your wallet key.`,
-      `${s.model.name || ""} · ${s.model.model || ""}. Модель этого холста; ключ кошелька она никогда не видит.`), onclick: () => modelMenu(chip) },
+  const chip = h("button", { class: "chat-chip-btn chat-model", "data-pop": "model", title: t(`${s.model.name || ""} · ${s.model.model || ""}. The model for this canvas. It never sees your wallet key.`,
+      `${s.model.name || ""} · ${s.model.model || ""}. Модель этого холста. Ключ кошелька она никогда не видит.`), onclick: () => modelMenu(chip) },
     c ? companyTile(c, 20) : null, h("span", { class: "one-line" }, name), icon("chevron.down", 9));
   return chip;
 }
@@ -1417,8 +1417,8 @@ function modelMenu(anchor) {
       const chosen = p.id === s.model.provider && id === s.model.model;
       const disabled = !!off || (absent && (!pullable || tooBig || loading !== undefined));
       rows.push(h("button", { class: "chat-model-row chat-sub-row" + (absent ? " chat-absent" : "") + (disabled ? " chat-faded" : ""), disabled,
-        title: tooBig ? t(`Needs about ${Math.round(size * 1.2)} GB of memory; this PC has ${m.memoryGB} GB.`, `Нужно около ${Math.round(size * 1.2)} ГБ памяти; у этого ПК ${m.memoryGB} ГБ.`)
-          : pullable ? t(`Downloads ${id} into Ollama on this PC; then pick it here.`, `Скачает ${id} в Ollama на этом ПК; потом выбери её здесь.`) : off || id,
+        title: tooBig ? t(`Needs about ${Math.round(size * 1.2)} GB of memory, but this PC has ${m.memoryGB} GB.`, `Нужно около ${Math.round(size * 1.2)} ГБ памяти, а у этого ПК ${m.memoryGB} ГБ.`)
+          : pullable ? t(`Downloads ${id} into Ollama on this PC, then pick it here.`, `Скачает ${id} в Ollama на этом ПК, потом выбери её здесь.`) : off || id,
         onclick: () => { if (pullable) { act("downloadModel", { model: id }); return; } close(); act(p.id === s.model.provider ? "setModel" : "useAccount", p.id === s.model.provider ? { model: id } : { provider: p.id, model: id }); } },
       pullable && loading === undefined && !tooBig ? icon("arrow.down.circle", 12) : null,
       h("span", { class: "chat-way-text" }, h("span", { class: "one-line" }, modelName(id)), detail ? h("span", { class: "small secondary" }, detail) : null),
@@ -1496,7 +1496,7 @@ function contextPop() {
         line("chat-part-rest", t("Canvas, balances, your message", "Холст, балансы, твоё сообщение"), short(rest))),
       c.spent > 0 ? [h("div", { class: "menu-divider" }),
         h("div", { class: "chat-context-lines" }, line(null, t("This chat’s answers", "Ответы этого чата"), dollars(c.spent)), c.last !== null && c.last !== undefined ? line(null, t("The last one", "Последний"), dollars(c.last)) : null),
-        h("div", { class: "small secondary" }, c.billed ? t("As OpenRouter charged it.", "Как списал OpenRouter.") : t("Tokens at the service’s list price; its own invoice is the final word.", "Токены по прейскуранту сервиса; окончательная сумма — в его счёте."))] : null,
+        h("div", { class: "small secondary" }, c.billed ? t("As OpenRouter charged it.", "Как списал OpenRouter.") : t("Tokens at the service’s list price. Its own invoice is the final word.", "Токены по прейскуранту сервиса. Окончательная сумма — в его счёте."))] : null,
       h("div", { class: "menu-divider" }),
       h("div", { class: "small secondary" }, c.sent < c.lines
         ? t("This chat is long: only its newest messages go with each request, so it never runs out of room.", "Чат длинный: с каждым запросом уходят только его новые сообщения, поэтому место не кончается.")
@@ -1632,8 +1632,8 @@ document.addEventListener("keydown", (e) => {
 /** «Listening · Russian · recognized online by Microsoft»: the language, and where the sound goes — Windows' dictation needs
  *  Online speech recognition, so it leaves the PC (the Mac says «on this Mac» or «by Apple»). */
 function listeningRow() {
-  return h("div", { class: "chat-listening-row", title: t("It listens in the keyboard's language: switch the layout before the microphone to speak another one. Windows sends the sound to Microsoft's online speech recognition, so Settings › Privacy & security › Speech › Online speech recognition has to be on; ihatecrypto keeps nothing of it.",
-      "Слушает на языке раскладки: переключи раскладку до микрофона, чтобы говорить на другом. Windows отправляет звук в онлайн-распознавание Microsoft, поэтому в Параметрах › Конфиденциальность и защита › Речь должно быть включено «Распознавание голоса в сети»; ihatecrypto ничего из него не хранит.") },
+  return h("div", { class: "chat-listening-row", title: t("It listens in the keyboard's language: switch the layout before the microphone to speak another one. Windows sends the sound to Microsoft's online speech recognition, so Settings › Privacy & security › Speech › Online speech recognition has to be on. ihatecrypto keeps nothing of it.",
+      "Слушает на языке раскладки: переключи раскладку до микрофона, чтобы говорить на другом. Windows отправляет звук в онлайн-распознавание Microsoft, поэтому в Параметрах › Конфиденциальность и защита › Речь должно быть включено «Распознавание голоса в сети». ihatecrypto ничего из него не хранит.") },
     h("span", { class: "chat-rec-dot" }), h("b", {}, t("Listening", "Слушаю")),
     h("span", { class: "small secondary" }, "· ", h("span", { id: "voice-lang" }, voice.language || t("the keyboard's language", "язык раскладки")),
       t(" · recognized online by Microsoft", " · распознаёт Microsoft онлайн")));

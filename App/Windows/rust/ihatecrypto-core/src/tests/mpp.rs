@@ -32,7 +32,7 @@ fn mpp_challenge_reads_what_the_payee_asks() {
     assert!(c.realm() == "coingecko.mpp.paywithlocus.com" && c.purpose() == Some("Locus MPP: coingecko/simple-price") && c.field() == "Authorization");
     assert_eq!(c.expires.map(|e| e.timestamp_millis()), Some(1_790_710_378_380));
     // An expired quote is never paid.
-    assert_eq!(challenge(LOCUS, adding(before(), 600.0)).unwrap_err().reason, "The service's price quote has expired; ask again.");
+    assert_eq!(challenge(LOCUS, adding(before(), 600.0)).unwrap_err().reason, "The service's price quote has expired. Ask again.");
 
     // The credential echoes the challenge as sent, with the hash and the payer.
     let header = credential(&c, "0xabc", "0x90f79bf6eb2c4f870365e785982e1f101e93b906");
@@ -59,23 +59,23 @@ fn mpp_refuses_what_it_cant_pay() {
     let said = |s: &str| Some(s.to_string());
     assert_eq!(refused(&with("")), None);   // the Bearer scheme beside it is skipped
     assert_eq!(refused(&format!(r#"{{"amount":"0",{usdc}}}"#)),
-               said("The service asks for a zero-amount proof or an amount that can't be read; ihatecrypto only pays real charges."));
+               said("The service asks for a zero-amount proof or an amount that can't be read, and ihatecrypto only pays real charges."));
     assert_eq!(refused(r#"{"amount":"1000","currency":"0x20c0000000000000000000000000000000000000","recipient":"0x060b0fB0Be9d90557577B3AEE480711067149Ff0"}"#),
-               said("The service charges in 0x20c0000000000000000000000000000000000000; ihatecrypto pays in USDC on Tempo."));
+               said("The service charges in 0x20c0000000000000000000000000000000000000, but ihatecrypto pays in USDC on Tempo."));
     assert_eq!(refused(&with(r#","methodDetails":{"chainId":42431}"#)), said("The service wants payment on network 42431, not Tempo mainnet."));
     assert_eq!(refused(&with(r#","methodDetails":{"supportedModes":["pull"]}"#)),
-               said("The service takes only a transaction it sends itself (pull mode); ihatecrypto sends its own and proves it with the hash."));
+               said("The service takes only a transaction it sends itself (pull mode), but ihatecrypto sends its own and proves it with the hash."));
     assert_eq!(refused(&with(r#","methodDetails":{"supportedModes":["pull","push"]}"#)), None);
     assert_eq!(refused(&with(r#","methodDetails":{"feePayer":true}"#)),
-               said("The service pays the fee itself (sponsored mode), which needs a transaction it sends; ihatecrypto sends its own."));
+               said("The service pays the fee itself (sponsored mode), which needs a transaction it sends, but ihatecrypto sends its own."));
     assert_eq!(refused(&with(r#","methodDetails":{"splits":[{"recipient":"0x060b0fB0Be9d90557577B3AEE480711067149Ff0","amount":"10"}]}"#)),
-               said("The service splits the payment between several payees; ihatecrypto pays one."));
+               said("The service splits the payment between several payees, but ihatecrypto pays one."));
     assert_eq!(refused(&with(r#","methodDetails":{"memo":"0x1234"}"#)), said("The service's memo isn't 32 bytes."));
     let memo = challenge(&challenge_of(&with(&format!(r#","methodDetails":{{"memo":"0x{}"}}"#, "ab".repeat(32))), r#", header="Payment-Authorization""#),
                          Utc::now()).unwrap();
     assert!(memo.memo.as_ref().is_some_and(|m| m.len() == 32) && memo.field() == "Payment-Authorization");
     assert_eq!(challenge(r#"Payment id="a", realm="r", method="stripe", intent="charge", request="e30""#, Utc::now()).unwrap_err().reason,
-               "The service takes stripe charge; ihatecrypto pays only a one-time charge in USDC on Tempo.");
+               "The service takes stripe charge, but ihatecrypto pays only a one-time charge in USDC on Tempo.");
     // And the words for what Swift's test leaves unsaid: no challenge, a request that isn't JSON, a payee that isn't one.
     assert_eq!(challenge(r#"Bearer realm="x""#, Utc::now()).unwrap_err().reason, "The service asked for payment without an MPP challenge.");
     assert_eq!(challenge(r#"Payment id="a", realm="r", method="tempo", intent="charge", request="!!""#, Utc::now()).unwrap_err().reason,

@@ -102,7 +102,7 @@ fn a_way_other_than_the_cards_stops_before_signing() {
     Executor::holds_shown_way("bridge:Uniswap v4", Some("bridge:Uniswap v3")).unwrap();
     Executor::holds_shown_way("here:KyberSwap", None).unwrap(); // no card: a scheduled buy
     assert_eq!(Executor::holds_shown_way("bridge:Uniswap v3", Some("bridge:KyberSwap")).unwrap_err(),
-               Error::Execution("The card showed Relay's bridge + KyberSwap, but Relay's bridge + Uniswap leaves more now. Nothing was signed; Refresh the card \
+               Error::Execution("The card showed Relay's bridge + KyberSwap, but Relay's bridge + Uniswap leaves more now. Nothing was signed. Refresh the card \
                                  (or ask again) to see it.".into()));
     assert!(matches!(Executor::holds_shown_way("relay", Some("bridge:KyberSwap")), Err(Error::Execution(_))));
     assert!(matches!(Executor::holds_shown_way("bridge:KyberSwap", Some("here:KyberSwap")), Err(Error::Execution(_))));

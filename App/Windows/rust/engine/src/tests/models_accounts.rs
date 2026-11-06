@@ -168,7 +168,7 @@ fn the_checks_line_says_what_it_means() {
     let en = |a: &str, _: &str| a.to_string();
     assert_eq!(Engine::exam_line(&good, "Qwen", en), "Qwen understood 9 of 10 requests, 2.5 s a reply — good for the chat.");
     let line = Engine::exam_line(&bad, "Qwen", en);
-    assert!(line.contains("only 5 of 10") && line.ends_with("send 5 USDC to Mom; b; c"), "{line}");
+    assert!(line.contains("only 5 of 10") && line.ends_with("send 5 USDC to Mom · b · c"), "{line}");
     assert_eq!(Engine::exam_line(&good, "Qwen", |_, b| b.to_string()), "Qwen понял 9 из 10 запросов, 2.5 с на ответ — для чата подходит.");
 }
 

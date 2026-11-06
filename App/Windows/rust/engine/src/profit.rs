@@ -144,7 +144,7 @@ impl Engine {
         let period = self.period_title(r.period);
         let mut lines = if russian {
             let mut lines = vec![format!(
-                "P/L за {period}{}: торговля {} (реализовано после комиссий {}, фандинг {}), закрыто сделок {}, в плюсе {}; открытые позиции сейчас {}.",
+                "P/L за {period}{}: торговля {} (реализовано после комиссий {}, фандинг {}), закрыто сделок {}, в плюсе {}. Открытые позиции сейчас {}.",
                 r.coin.as_ref().map_or(String::new(), |c| format!(" по {}", IntentParser::pretty(c))), self.signed_usd(r.trading()), self.signed_usd(r.realized),
                 self.signed_usd(r.funding), r.closed_trades, r.wins, self.signed_usd(r.unrealized))];
             if let (Some(c), Some(since)) = (r.change, r.change_since) {

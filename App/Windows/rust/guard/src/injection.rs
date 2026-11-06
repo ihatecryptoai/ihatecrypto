@@ -130,8 +130,8 @@ pub async fn screen(text: &str, source: &str, classifier: Option<&dyn TextClassi
                 s.verdict.problems.push(format!("The text asks to send funds to {to}. Addresses from text never become recipients."));
                 s.stops.push(Stop::SendsTo((*to).clone()));
             }
-            _ if f.transfer_verb => s.verdict.checks.push("The address names the token to send; only a saved name receives it.".into()),
-            _ => s.verdict.checks.push("The text has an address; it will not become a payment recipient.".into()),
+            _ if f.transfer_verb => s.verdict.checks.push("The address names the token to send. Only a saved name receives it.".into()),
+            _ => s.verdict.checks.push("The text has an address, but it will not become a payment recipient.".into()),
         }
     }
     let Some(classifier) = classifier else {
@@ -155,7 +155,7 @@ pub async fn screen(text: &str, source: &str, classifier: Option<&dyn TextClassi
                 _ => s.verdict.checks.push(format!("{name} is unsure: {label} ({p}%). Local rules decide.")),
             }
         }
-        Err(error) => s.verdict.checks.push(format!("{name} is unavailable ({error}); local rules apply.")),
+        Err(error) => s.verdict.checks.push(format!("{name} is unavailable ({error}), so local rules apply.")),
     }
     s
 }

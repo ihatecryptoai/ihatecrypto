@@ -51,19 +51,19 @@ pub fn gather(jup: Option<Vec<Vault>>, kam: Option<Vec<Reserve>>, staking: Optio
     for v in jup.unwrap_or_default() {
         let symbol = if v.asset_symbol == "WSOL" { "SOL" } else { &v.asset_symbol };
         out.push(option(symbol, "Jupiter Lend", v.apy, None, format!("deposit 10 {symbol} to the vault"),
-                        "lending, withdraw any time; the first deposit opens a share account for ≈ 0.002 SOL, refunded on full withdrawal"));
+                        "lending, withdraw any time. The first deposit opens a share account for ≈ 0.002 SOL, refunded on full withdrawal"));
     }
     for r in kam.unwrap_or_default().into_iter().filter(|r| r.supply_apy > Decimal::ZERO) {
         out.push(option(&r.symbol, "Kamino Lend", r.supply_apy, Some(r.tvl_usd), format!("deposit 50 {} to Kamino", r.symbol),
-                        "lending; the first deposit opens Kamino accounts for ≈ 0.03 SOL rent, worth it from ≈ $35"));
+                        "lending. The first deposit opens Kamino accounts for ≈ 0.03 SOL rent, worth it from ≈ $35"));
     }
     if let Some(apy) = staking.and_then(|s| s.get(JITO_SOL).copied()) {
         out.push(option("SOL", "JitoSOL staking", apy, None, "stake 0.1 SOL".into(),
-                        "liquid staking: SOL becomes JitoSOL, which earns by rising in price against SOL; swap back in seconds"));
+                        "liquid staking: SOL becomes JitoSOL, which earns by rising in price against SOL, swap back in seconds"));
     }
     if let Some(apr) = hlp_apr {
         out.push(option("USDC", "HLP (Hyperliquid)", apr, None, "deposit 5 USDC to HLP".into(),
-                        "the exchange's market making: some weeks lose money; from $5; withdraw 4 days after a deposit"));
+                        "the exchange's market making: some weeks lose money. From $5, withdraw 4 days after a deposit"));
     }
     let wanted = asset.map(str::to_uppercase);
     out.retain(|o| wanted.as_ref().is_none_or(|w| o.asset.to_uppercase() == *w));

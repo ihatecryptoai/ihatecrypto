@@ -272,7 +272,7 @@ impl Executor {
                 seen = a.0 >= units && a.1 >= now + 120;
                 if !seen { sleep(1).await }
             }
-            if !seen { return fail("Permit2's approval went through but the network doesn't show it yet. Try again in a minute; nothing was swapped.") }
+            if !seen { return fail("Permit2's approval went through but the network doesn't show it yet. Try again in a minute. Nothing was swapped.") }
         }
         self.send_evm(rpc, router, &swap, note, &[], None, 0).await
     }

@@ -35,7 +35,7 @@ pub fn handle(body: &[u8]) -> Vec<u8> {
 fn presence() -> Vec<String> {
     if !platform::hello_available() { return vec!["Windows Hello isn't set up: only a test wallet can be made.".into()] }
     if vault::master().is_none() { return vec!["Windows Hello is ready.".into()] }
-    vec![if platform::hello_in_tpm(&vault::hello_key()) { "Windows Hello is ready; its key is in the TPM." }
+    vec![if platform::hello_in_tpm(&vault::hello_key()) { "Windows Hello is ready. Its key is in the TPM." }
          else { "Windows Hello is ready, but Windows can't show its key is in a TPM: it may be kept in software." }.into()]
 }
 

@@ -503,7 +503,7 @@ fn a_chains_footer_is_its_first_moves_then_its_own_words() {
         wallet(e, vec![("solana", vec![usdc("50")]), ("base", vec![usdc("0")])]);
         let first = WalletCommand::SolanaTo("base".into(), Some(Decimal::TEN));
         let pending = Pending::Chain(vec![ChainStep::Wallet(first), ChainStep::Wallet(buy_on("base", "AERO", "5"))]);
-        let order = "They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.";
+        let order = "They run in order. The first that fails stops the rest. Windows Hello asks for each move that signs.";
         let id = waiting(e, pending.clone(), "2 steps, one Confirm", &["1. move 10 USDC to Base", "2. buy AERO on Base for 5 USDC", order]);
         e.note_route(&id, &pending);
         let note = board(e, &id).note.unwrap();
@@ -572,7 +572,7 @@ fn a_paid_request_names_the_network_its_dollars_come_from() {
         let first = e.card_route(&pay).unwrap().remove(0);
         assert_eq!((first.label.as_str(), first.lines.last().unwrap().as_str()), ("FROM · BASE → TEMPO", "20 USDC on Base"));
         assert_eq!(first.money.unwrap().place, "Base");
-        assert!(e.route_note(&pay).unwrap().contains("what's short comes from Base over Relay first"));
+        assert!(e.route_note(&pay).unwrap().contains("What's short comes from Base over Relay first"));
         // Solana holds enough: it pays, as before.
         wallet(e, vec![("solana", vec![usdc("50")]), ("base", vec![usdc("20")]), ("tempo", vec![usdc("0")])]);
         assert_eq!(e.card_route(&pay).unwrap()[0].label, "FROM · SOLANA → TEMPO");

@@ -21,6 +21,7 @@ use ihatecrypto_core::foundation::{Date, Num};
 use ihatecrypto_core::intent::{Fmt, IntentParser, TradeIntent};
 use ihatecrypto_core::modules::{ModuleNetwork, ModuleProtocol};
 use ihatecrypto_core::normalize::ChatRouter;
+use ihatecrypto_core::plan::RiskCalc;
 use ihatecrypto_core::pnl::CostBasis;
 use ihatecrypto_core::position_command::{PositionCommand, SpotAsset, WalletCommand};
 use ihatecrypto_core::scheduled_task::{Every, ScheduledTask};
@@ -335,7 +336,7 @@ impl Engine {
                     format!("Solana {start} … {end}")
                 });
                 let text = self.say(
-                    &format!("Top up is open{}, plus Base for USDC and ETH. ihatecrypto can’t pull money in; send it there from an exchange or another wallet, on that network. It shows up within about a minute and I’ll tell you when it arrives. To put money you already have into a vault, say “deposit 1 USDC into Jupiter”.",
+                    &format!("Top up is open{}, plus Base for USDC and ETH. ihatecrypto can’t pull money in: send it there from an exchange or another wallet, on that network. It shows up within about a minute and I’ll tell you when it arrives. To put money you already have into a vault, say “deposit 1 USDC into Jupiter”.",
                              sol.as_ref().map_or(String::new(), |s| format!(" — {s} for USDC and SOL (recommended)"))),
                     &format!("Открыл «Пополнить»{}, и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через минуту, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter».",
                              sol.as_ref().map_or(String::new(), |s| format!(" — {s} для USDC и SOL (рекомендую)"))));
@@ -375,8 +376,8 @@ impl Engine {
                                         &format!("Эта покупка сейчас. Следующие — раз в {every}, пока ihatecrypto открыт, каждая с Windows Hello."))],
                           vec![], vec![]);
                 self.said(&self.say(
-                    &format!("Scheduled purchases: {summary} every {every} — ≈ {monthly} a month. The first one is on the canvas: its Confirm buys now and turns the schedule on, Cancel leaves none. The next ones run while ihatecrypto is open; each goes through the same checks and Windows Hello."),
-                    &format!("Регулярные покупки: {summary} раз в {every} — ≈ {monthly} в месяц. Первая — карточкой на холсте: «Подтвердить» купит сейчас и включит расписание, «Отмена» не оставит его. Следующие пойдут, пока ihatecrypto открыт; каждая проходит те же проверки и Windows Hello.")), note);
+                    &format!("Scheduled purchases: {summary} every {every} — ≈ {monthly} a month. The first one is on the canvas: its Confirm buys now and turns the schedule on, Cancel leaves none. The next ones run while ihatecrypto is open, and each goes through the same checks and Windows Hello."),
+                    &format!("Регулярные покупки: {summary} раз в {every} — ≈ {monthly} в месяц. Первая — карточкой на холсте: «Подтвердить» купит сейчас и включит расписание, «Отмена» не оставит его. Следующие пойдут, пока ihatecrypto открыт, и каждая проходит те же проверки и Windows Hello.")), note);
                 return;
             }
             W::StopSchedules => {
@@ -461,7 +462,7 @@ impl Engine {
         }
         let ru = self.st().russian();
         let warnings = t.warnings(ru);
-        if !warnings.is_empty() { self.said(&format!("⚠ {} ({}): {}.", t.name, t.symbol, warnings.join("; ")), note) }
+        if !warnings.is_empty() { self.said(&format!("⚠ {} ({}): {}.", t.name, t.symbol, warnings.join(", ")), note) }
         Some(SpotAsset { symbol: t.symbol, mint, decimals: t.decimals, token2022: t.token2022, ondo: false })
     }
 
@@ -714,12 +715,12 @@ impl Engine {
                 let title = kind.title();
                 if let Some(domain) = domain {
                     self.reply(&self.say(
-                        &format!("{domain} points at {start}…{end} on {title}, read on-chain just now. Check it on the canvas; Confirm asks for Windows Hello with the whole address."),
-                        &format!("{domain} ведёт на {start}…{end} в {title} — прочитано в сети только что. Сверь на холсте; «Подтвердить» спросит Windows Hello с полным адресом.")), None);
+                        &format!("{domain} points at {start}…{end} on {title}, read on-chain just now. Check it on the canvas. Confirm asks for Windows Hello with the whole address."),
+                        &format!("{domain} ведёт на {start}…{end} в {title} — прочитано в сети только что. Сверь на холсте. «Подтвердить» спросит Windows Hello с полным адресом.")), None);
                 } else {
                     self.reply(&self.say(
-                        &format!("Check it on the canvas: {title}, starts {start}, ends {end} — exactly as in your message. Confirm to save; Windows Hello shows the whole address."),
-                        &format!("Сверь на холсте: {title}, начало {start}, конец {end} — как в твоём сообщении. Подтверди, чтобы сохранить; Windows Hello покажет весь адрес.")), None);
+                        &format!("Check it on the canvas: {title}, starts {start}, ends {end} — exactly as in your message. Confirm to save. Windows Hello shows the whole address."),
+                        &format!("Сверь на холсте: {title}, начало {start}, конец {end} — как в твоём сообщении. Подтверди, чтобы сохранить. Windows Hello покажет весь адрес.")), None);
                     // A known exchange's logo, from its own site; the entry works without it.
                     let site = name.split(' ').find(|s| !s.is_empty()).map(str::to_lowercase);
                     if let Some(known) = site.and_then(|s| EXCHANGES.iter().find(|(k, _)| *k == s).map(|(_, d)| d.to_string())) {
@@ -760,8 +761,10 @@ impl Engine {
     /// plan's asset if it has a position, else the only one when no plan is on screen. A limit waiting counts as open.
     pub fn target_coin(&self, text: &str) -> Option<String> {
         let entry = self.pending_entry();
+        // A TWAP the app started is one too, with its position flat («cancel the TWAP» after its stop fired).
+        let twaps: Vec<String> = self.exit_rules().into_iter().filter(|(_, r)| r.twap_id.is_some()).map(|(coin, _)| coin).collect();
         let st = self.st();
-        let open: BTreeSet<String> = st.positions.iter().map(|p| p.coin.clone()).chain(entry.map(|o| o.coin)).collect();
+        let open: BTreeSet<String> = st.positions.iter().map(|p| p.coin.clone()).chain(entry.map(|o| o.coin)).chain(twaps).collect();
         let markets = st.markets.keys().cloned().collect();
         if let Some(named) = IntentParser::named_asset(text, &markets) { return open.contains(&named).then_some(named) }
         let blank = st.intent == TradeIntent::default();
@@ -813,7 +816,8 @@ impl Engine {
             let mine: Vec<String> = st.messages().iter().filter(|m| m.from_user).map(|m| m.text.clone()).collect();
             (mine[mine.len().saturating_sub(6)..].to_vec(), st.reply_language())
         };
-        let lines: Vec<String> = std::iter::once(intent.command()).chain(self.plan_alert_facts()).chain(p.steps.iter().cloned()).collect();
+        let lines: Vec<String> = std::iter::once(intent.command()).chain(self.plan_alert_facts()).chain(Self::plan_fee_facts(intent))
+            .chain(p.steps.iter().cloned()).collect();
         let (mut model_read, mut failed) = (false, None);
         if let Some(client) = self.llm_client(None) {
             match ChatRouter::verify_plan(&requests, &lines, &language, &client, &self.model()).await {
@@ -837,6 +841,22 @@ impl Engine {
         if model_read || jev_read { return PlanReview::Matches }
         let ru = self.st().russian();
         PlanReview::NotChecked(Self::not_checking(failed.as_deref(), ru))
+    }
+
+    /// For the second check, as main's planLines (c308a92): a TWAP's entry, and the fees, which differ for one. Without the
+    /// TWAP line the check read its risk (parts may fill 3% worse) against a single fill at today's price and doubted it.
+    pub fn plan_fee_facts(intent: &TradeIntent) -> Vec<String> {
+        let hl_fee = format!("Hyperliquid's {}%", Fmt::num(RiskCalc::taker_fee() * Decimal::ONE_HUNDRED, 3));
+        let rate = hyperliquid::builder::RATE;
+        match intent.twap_minutes {
+            None => vec![format!("Fees on each side: {hl_fee} and ihatecrypto's {rate} (the user approves it once, on the first trade).")],
+            Some(minutes) => vec![
+                format!("Entry: a TWAP over {} on Hyperliquid, parts at the market every 30 s or more, each within 3% of the price. \
+                         The risk and the size count every part filling 3% worse than now, so from today's price the stop loses less than the risk.",
+                        TradeIntent::duration(minutes)),
+                format!("Fees: the TWAP's parts pay {hl_fee} only, no ihatecrypto fee on them. The exit pays {hl_fee} and ihatecrypto's {rate}."),
+            ],
+        }
     }
 
     /// The route's line when the second check couldn't read the plan (the Mac's jevNote).
@@ -940,7 +960,7 @@ impl Engine {
                     return Ok(false);
                 }
                 let opened = self.executor()?.execute(p).await?;
-                self.keep_exit_rules(&opened, &p.intent);
+                self.keep_exit_rules(&opened, &p.intent, p.sizing.loss_at_stop_usd);
                 {
                     let mut st = self.st_mut();
                     st.intent = TradeIntent::default();
@@ -948,9 +968,19 @@ impl Engine {
                     st.plan_board = None;
                 }
                 let (size, asset, entry, stop) = (Fmt::num(opened.size, 6), IntentParser::pretty(&opened.asset), Fmt::price(opened.entry), Fmt::price(opened.stop));
-                let take = opened.take.map_or_else(|| ".".into(), |t| self.say(&format!(", take {}.", Fmt::price(t)), &format!(", тейк {}.", Fmt::price(t))));
-                self.reply(&(self.say(&format!("Opened: {size} {asset} at {entry}, stop {stop}"), &format!("Открыто: {size} {asset} по {entry}, стоп {stop}")) + &take),
-                           Some("Hyperliquid".into()));
+                if let (Some(id), Some(minutes)) = (opened.twap_id, p.intent.twap_minutes) {
+                    let (time, time_ru) = (TradeIntent::duration(minutes), Self::time_ru(&TradeIntent::duration(minutes)));
+                    let (take, take_ru) = opened.take.map_or_else(Default::default, |t| (format!(", take-profit {}", Fmt::price(t)), format!(", тейк {}", Fmt::price(t))));
+                    self.reply(&self.say(&format!("TWAP {id} runs on Hyperliquid: {size} {asset} over {time}, the first part at {entry}, stop {stop}{take} for the whole \
+                                                   position. «cancel the TWAP» stops the rest."),
+                                         &format!("TWAP {id} идёт на Hyperliquid: {size} {asset} за {time_ru}, первая часть по {entry}, стоп {stop}{take_ru} на всю \
+                                                   позицию. «отмени TWAP» остановит остаток.")),
+                               Some("Hyperliquid".into()));
+                } else {
+                    let take = opened.take.map_or_else(|| ".".into(), |t| self.say(&format!(", take {}.", Fmt::price(t)), &format!(", тейк {}.", Fmt::price(t))));
+                    self.reply(&(self.say(&format!("Opened: {size} {asset} at {entry}, stop {stop}"), &format!("Открыто: {size} {asset} по {entry}, стоп {stop}")) + &take),
+                               Some("Hyperliquid".into()));
+                }
             }
             Pending::Recurring { command, days } => self.start_recurring(command, *days).await?,
             Pending::Chain(steps) => self.run_chain(steps.clone()).await?,

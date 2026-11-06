@@ -603,7 +603,7 @@ impl Executor {
 
     /// What the refusal says when the picked way has no quote: the other one is still there to choose.
     fn unquoted(prefer: Option<&str>, what: &str) -> Option<String> {
-        prefer.map(|p| format!("{} doesn't quote {what} right now. Nothing was signed; pick «The best one» on the route's step to take the other way.",
+        prefer.map(|p| format!("{} doesn't quote {what} right now. Nothing was signed. Pick «The best one» on the route's step to take the other way.",
                                if p == "relay" { "Relay's swap" } else { "Relay's bridge + an exchange" }))
     }
 
@@ -666,7 +666,7 @@ impl Executor {
         }
         let Some(shown) = shown else { return Ok(()) };
         if plain(shown) == plain(taken) { return Ok(()) }
-        fail(format!("The card showed {}, but {} leaves more now. Nothing was signed; Refresh the card (or ask again) to see it.", name(shown), name(taken)))
+        fail(format!("The card showed {}, but {} leaves more now. Nothing was signed. Refresh the card (or ask again) to see it.", name(shown), name(taken)))
     }
 
     /// Buys a token on an EVM network for `usdc`: with the USDC already there when it holds enough (or `from` names it),
@@ -713,7 +713,7 @@ impl Executor {
         let plan = if way.name == "bridge" { bridged } else { None };
         if let Some(plan) = &plan { self.holds_pair_impact(net, &plan.pair, None).await? }
         self.report(&format!("{} USDC → {} on {}. {}. Taking {}{}.", Fmt::num(usdc, 2), token.symbol, net.name,
-                             ways.iter().map(|w| w.line.as_str()).collect::<Vec<_>>().join("; "),
+                             ways.iter().map(|w| w.line.as_str()).collect::<Vec<_>>().join(", "),
                              plan.as_ref().map_or_else(|| "Relay's swap".to_string(), |p| format!("the bridge and {}", p.pair.title())),
                              if prefer.is_none() { "" } else { ", as picked" }));
         if let Some(plan) = plan {
@@ -761,9 +761,9 @@ impl Executor {
         if let Some(best) = best { return Ok(Some((best, src))) }
         if from.is_none() { return Ok(None) }
         fail(if there < units {
-            format!("{} USDC on {}; the buy needs {want}. Nothing was signed.", Fmt::num(dollars(there), 2), payer.name)
+            format!("{} USDC on {}, but the buy needs {want}. Nothing was signed.", Fmt::num(dollars(there), 2), payer.name)
         } else {
-            format!("No exchange on {} quotes {} for USDC now; “buy {} on {} for {want} USDC from solana” takes Relay's swap. Nothing was signed.",
+            format!("No exchange on {} quotes {} for USDC now: “buy {} on {} for {want} USDC from solana” takes Relay's swap. Nothing was signed.",
                     net.name, token.symbol, token.symbol, net.key)
         })
     }
@@ -781,13 +781,13 @@ impl Executor {
         let pair = if units > 0 {
             match self.best_pair(net, uni, &Self::usdc_token(net), token, false, false, raw(net, units), self.allowed_ways(net).uniswap, only, false).await {
                 Err(Error::Costly(stop)) => {
-                    return fail(format!("{} The USDC stays on {}; nothing was swapped.", stop.description().replace(" Nothing was signed.", ""), net.name));
+                    return fail(format!("{} The USDC stays on {}. Nothing was swapped.", stop.description().replace(" Nothing was signed.", ""), net.name));
                 }
                 other => other?,
             }
         } else { None };
-        let Some(best) = pair else { return fail(format!("No exchange on {} quotes {} now; the USDC stays there. Nothing was swapped.", net.name, token.symbol)) };
-        self.holds_pair_impact(net, &best, Some(&format!("The USDC stays on {}; nothing was swapped.", net.name))).await?;
+        let Some(best) = pair else { return fail(format!("No exchange on {} quotes {} now, so the USDC stays there. Nothing was swapped.", net.name, token.symbol)) };
+        self.holds_pair_impact(net, &best, Some(&format!("The USDC stays on {}. Nothing was swapped.", net.name))).await?;
         self.report(&format!("{usdc} USDC on {} → {} on {}: ≈ {}{}.", net.name, token.symbol, best.title(), amount(best.out()), best.impact_text()));
         // Gas only: the USDC is there.
         self.ensure_evm(net, units, None).await?;
@@ -870,7 +870,7 @@ impl Executor {
         if keep {
             let best = self.best_pair(net, uni, &token, &Self::usdc_token(net), false, false, units, self.allowed_ways(net).uniswap, None, false).await?;
             let Some(best) = best else {
-                return fail(format!("No exchange on {} quotes {} for USDC now; without «keep», Relay's swap sells it for USDC on Solana. Nothing was signed.",
+                return fail(format!("No exchange on {} quotes {} for USDC now. Without «keep», Relay's swap sells it for USDC on Solana. Nothing was signed.",
                                     net.name, token.symbol));
             };
             Self::holds_shown_way(&format!("here:{}", best.title()), shown)?;
@@ -896,7 +896,7 @@ impl Executor {
             Self::holds_relay_sale(Decimal::ZERO, way.out / Decimal::from(1_000_000), &token.symbol, net.name)?;
         }
         self.report(&format!("{} on {} → USDC on Solana. {}. Taking {}{}.", amount_text(units), net.name,
-                             ways.iter().map(|w| w.line.as_str()).collect::<Vec<_>>().join("; "),
+                             ways.iter().map(|w| w.line.as_str()).collect::<Vec<_>>().join(", "),
                              plan.as_ref().map_or_else(|| "Relay's swap".to_string(), |p| format!("{} and the bridge", p.title())),
                              if prefer.is_none() { "" } else { ", as picked" }));
         // Both ways sign on the chain: ETH for gas first (a top-up from Solana when there's none).
@@ -907,7 +907,7 @@ impl Executor {
             let title = plan.title();
             let fresh = self.best_pair(net, uni, &token, &Self::usdc_token(net), false, false, units, self.allowed_ways(net).uniswap, Some(&[Self::family(&title)]),
                                        false).await?.unwrap_or(plan);
-            self.holds_pair_impact(net, &fresh, Some(&format!("{} stays on {}; nothing was swapped.", token.symbol, net.name))).await?;
+            self.holds_pair_impact(net, &fresh, Some(&format!("{} stays on {}. Nothing was swapped.", token.symbol, net.name))).await?;
             let (got, text) = self.sell_there(net, &fresh, uni).await?;
             self.report(&text);
             if let Some(traded) = &self.traded { traded(&key, -tokens(units, token.decimals), got) }
@@ -1132,7 +1132,7 @@ impl Executor {
     pub fn holds_relay_sale(worth_in: Decimal, arriving: Decimal, symbol: &str, network: &str) -> Result<()> {
         if worth_in <= Decimal::ZERO {
             return fail(format!("Neither Relay nor DefiLlama prices {symbol} on {network} now, so what Relay's swap keeps can't be checked. \
-                                 {symbol} stays on {network}; nothing was swapped. Pick «Relay bridge + the best exchange» on the route's step."));
+                                 {symbol} stays on {network}. Nothing was swapped. Pick «Relay bridge + the best exchange» on the route's step."));
         }
         Self::check_loss(num(Num::of(worth_in) - arriving)?, worth_in, num(Num::of(worth_in) * d("0.03"))?.max(d("0.15")), "Relay's swap")
     }

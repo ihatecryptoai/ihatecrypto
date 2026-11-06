@@ -107,16 +107,16 @@ impl Executor {
                                 m.chain_name, m.chain_name));
         }
         if usdc > now.available {
-            return fail(format!("Aave lets this wallet borrow {} more on {} now; {} USDC is past it. Nothing was signed.", Fmt::usd(now.available), m.chain_name,
+            return fail(format!("Aave lets this wallet borrow {} more on {} now, and {} USDC is past it. Nothing was signed.", Fmt::usd(now.available), m.chain_name,
                                 Fmt::num(usdc, 2)));
         }
         let Some(after) = after.filter(|a| *a >= Self::MINIMUM_HEALTH) else {
-            return fail(format!("That would leave a health factor of {}; ihatecrypto borrows only down to {} (Aave sells the collateral at 1.0). \
+            return fail(format!("That would leave a health factor of {}, while ihatecrypto borrows only down to {} (Aave sells the collateral at 1.0). \
                                  Borrow less, or add collateral. Nothing was signed.", Fmt::num(after.unwrap_or_default(), 2), text(Self::MINIMUM_HEALTH)));
         };
         let liquidation_words = |sep: &str| liquidation.map(|l| format!("{sep} liquidation if ETH ≤ {}", Fmt::usd(l))).unwrap_or_default();
         self.report(&format!("Aave on {}: {} of collateral, health factor {} → {}{}.", m.chain_name, Fmt::usd(now.collateral), health(&now),
-                             Fmt::num(after, 2), liquidation_words(";")));
+                             Fmt::num(after, 2), liquidation_words(",")));
         let rpc = rpc_of(m.chain_id)?;
         let before = token_balance(&rpc, m.usdc, &self.wallet.evm).await?;
         let hash = self.send_evm(&rpc, m.pool, &aave::borrow(m.usdc, units, &self.wallet.evm)?,
@@ -142,7 +142,7 @@ impl Executor {
         let held = Decimal::from(token_balance(&rpc, m.usdc, &self.wallet.evm).await?);
         let was = self.aave_account(m).await?;
         if held < approve {
-            return fail(format!("{} USDC on {}; paying back {} needs it there first. Nothing was signed.", Fmt::num(millionths(held), 2), m.chain_name,
+            return fail(format!("{} USDC on {}. Paying back {} needs it there first. Nothing was signed.", Fmt::num(millionths(held), 2), m.chain_name,
                                 Fmt::num(millionths(approve), 2)));
         }
         let repay = aave::repay(m.usdc, if usdc.is_none() { None } else { Some(uint64(units)) }, &self.wallet.evm)?;

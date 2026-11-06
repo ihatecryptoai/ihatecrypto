@@ -312,13 +312,13 @@ impl Engine {
                     parsed.push(ChainStep::Wallet(c));
                 }
             }
-            let later = asks.map(|a| self.say(&format!("“{a}” asks how much when it's reached, then comes on a card of its own; the steps after it wait for that."),
-                                              &format!("«{a}» спросит сумму, когда до него дойдёт, и придёт своей карточкой; шаги после него ждут этого.")));
+            let later = asks.map(|a| self.say(&format!("“{a}” asks how much when it's reached, then comes on a card of its own, and the steps after it wait for that."),
+                                              &format!("«{a}» спросит сумму, когда до него дойдёт, и придёт своей карточкой. Шаги после него ждут этого.")));
             let count = parsed.len();
             let lines: Vec<String> = parsed.iter().enumerate().map(|(i, s)| format!("{}. {}", i + 1, self.chain_line(s)))
                 .chain(later)
-                .chain([self.say("They run in order; the first that fails stops the rest. Windows Hello asks for each move that signs.",
-                                 "Идут по порядку; первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
+                .chain([self.say("They run in order. The first that fails stops the rest. Windows Hello asks for each move that signs.",
+                                 "Идут по порядку. Первый неудачный останавливает остальные. Windows Hello спросит на каждом подписываемом шаге.")])
                 .collect();
             let title = self.say3(&format!("{count} steps, one Confirm"), &format!("Шагов: {count}, одно подтверждение"), &format!("{count} pasos, un Confirm"));
             self.show(Pending::Chain(parsed.clone()), &title, lines, vec![], cautions);
@@ -379,11 +379,11 @@ impl Engine {
             st.chain_state.after_call = Some(AfterCall { board: id, canvas, rest: rest.to_vec(), since: chrono::Utc::now() });
         }
         let line = if call {
-            self.say("The call waits on its card; its Confirm covers the steps after it too — they run once it’s through.",
-                     "Вызов ждёт на своей карточке; его «Подтвердить» распространяется и на следующие шаги — они пойдут, когда он пройдёт.")
+            self.say("The call waits on its card. Its Confirm covers the steps after it too — they run once it’s through.",
+                     "Вызов ждёт на своей карточке. Его «Подтвердить» распространяется и на следующие шаги — они пойдут, когда он пройдёт.")
         } else {
-            self.say("It waits on its card; its Confirm covers the steps after it too — they run once it’s through.",
-                     "Ждёт на своей карточке; её «Подтвердить» распространяется и на следующие шаги — они пойдут, когда он пройдёт.")
+            self.say("It waits on its card. Its Confirm covers the steps after it too — they run once it’s through.",
+                     "Ждёт на своей карточке. Её «Подтвердить» распространяется и на следующие шаги — они пойдут, когда он пройдёт.")
         };
         self.reply(&line, None);
     }

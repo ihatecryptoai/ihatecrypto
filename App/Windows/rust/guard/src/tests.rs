@@ -136,7 +136,7 @@ fn address_book_names_cant_fake_a_prompt_line() {
 #[test]
 fn simulated_balances_catch_a_route_that_pays_someone_else() {
     let rule = |before, after, at_least, at_most| sol::BalanceRule { label: "USDC".into(), before, after, at_least, at_most };
-    assert_eq!(sol::balances(&[rule(1_000_000, 1_000_000, 2_300_000, None)]).problems, ["Simulation: USDC changes by 0; the minimum allowed is 2300000."]);
+    assert_eq!(sol::balances(&[rule(1_000_000, 1_000_000, 2_300_000, None)]).problems, ["Simulation: USDC changes by 0, under the minimum allowed, 2300000."]);
     assert_eq!(sol::balances(&[rule(0, 2_335_542, 2_323_865, None)]).checks, ["Simulation: USDC +2335542."]);
     assert_eq!(sol::balances(&[rule(0, 5, 0, Some(4))]).problems, ["Simulation: USDC changes by 5, over the most allowed, 4."]);
 }
@@ -180,7 +180,7 @@ fn hyperliquid_guard_holds_fees_and_code_to_ihatecrypto() {
     let with = |b: MsgPack| { let MsgPack::Map(mut p) = plain.clone() else { unreachable!() }; p.push(("builder".into(), b)); MsgPack::Map(p) };
     let paid = hl::check(&action::with_builder(&plain), owner, &set(&[]), None);
     assert!(paid.ok());
-    assert_eq!(paid.checks, ["buy 1 on market #0 at 100 → your account", "Trading action inside your account; ihatecrypto's fee 0.05%."]);
+    assert_eq!(paid.checks, ["buy 1 on market #0 at 100 → your account", "Trading action inside your account, with ihatecrypto's fee 0.05%."]);
     assert!(check(&with(MsgPack::map(vec![("b", MsgPack::str(builder::ADDRESS)), ("f", MsgPack::Uint(10))]))));
     assert!(!check(&with(MsgPack::map(vec![("b", MsgPack::str(builder::ADDRESS)), ("f", MsgPack::Uint(builder::FEE + 1))]))));
     assert!(!check(&with(MsgPack::map(vec![("b", MsgPack::str("0x000000000000000000000000000000000000dead")), ("f", MsgPack::Uint(10))]))));
@@ -693,7 +693,7 @@ fn jev_can_add_a_problem_but_never_clear_one() {
     let unsure = screen(subtle, Some(&says("instructions", 0.4)));
     assert!(unsure.ok() && unsure.verdict.checks.iter().any(|c| c.contains("is unsure")));
     let off = screen("лонг ETH", Some(&offline()));
-    assert!(off.ok() && off.verdict.checks.contains(&"Jev is unavailable (offline); local rules apply.".to_string()));
+    assert!(off.ok() && off.verdict.checks.contains(&"Jev is unavailable (offline), so local rules apply.".to_string()));
 }
 
 /// «send all 0x… on base to Bybit»: the contract is the token, a saved name receives it; an address after «to» is

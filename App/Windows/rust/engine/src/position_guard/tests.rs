@@ -71,7 +71,7 @@ fn the_position_says_its_stop_takes_and_guardian() {
     assert!(said.len() == 2 && said[0].starts_with("After the first half, moves the stop to breakeven") && said[1].starts_with("Trailing 2%"), "{said:?}");
     rules.moved_to_breakeven = true;
     assert!(Engine::duties(&rules, en)[0].starts_with("Stop is already at breakeven"));
-    assert_eq!(Engine::duties(&ExitRules::new(d("1"), d("1"), true, false, None), en), ["Stop and take-profit sit on the exchange; ihatecrypto doesn't move anything."]);
+    assert_eq!(Engine::duties(&ExitRules::new(d("1"), d("1"), true, false, None), en), ["Stop and take-profit sit on the exchange, and ihatecrypto doesn't move anything."]);
 }
 
 /// 11:58 AM and 12:08 PM are one reason: the time it asks again goes with its AM/PM.
@@ -97,18 +97,18 @@ async fn the_rules_are_kept_per_account() {
         let intent = TradeIntent { asset: "ETH".into(), trailing_pct: Some(d("2")), ..TradeIntent::default() };
         let opened = Opened::new("ETH", d("1"), d("100"), d("97"), None);
         // No account: nothing to keep them under.
-        e.keep_exit_rules(&opened, &intent);
+        e.keep_exit_rules(&opened, &intent, Decimal::ZERO);
         assert!(store::load::<AllRules>("exit-rules.json").is_none());
         signed_in(&e, ME);
-        e.keep_exit_rules(&opened, &intent);
+        e.keep_exit_rules(&opened, &intent, Decimal::ZERO);
         assert_eq!(e.exit_rules()["ETH"].trailing_pct, Some(d("2")));
         assert!(store::load::<AllRules>("exit-rules.json").expect("the file").contains_key(&ME.to_lowercase()));
         // On the exchange already: the app moves nothing, and the coin's old rules go.
-        e.keep_exit_rules(&Opened { trailing_on_exchange: true, ..opened.clone() }, &intent);
+        e.keep_exit_rules(&Opened { trailing_on_exchange: true, ..opened.clone() }, &intent, Decimal::ZERO);
         assert!(e.exit_rules().is_empty());
         assert!(store::load::<AllRules>("exit-rules.json").expect("the file").is_empty());
         // Another account sees none of them.
-        e.keep_exit_rules(&opened, &intent);
+        e.keep_exit_rules(&opened, &intent, Decimal::ZERO);
         signed_in(&e, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
         assert!(e.exit_rules().is_empty());
     }).await;
@@ -151,5 +151,74 @@ async fn the_positions_as_the_window_draws_them() {
         assert_eq!(views[0].guardian.as_deref(), Some("Trailing 2%: the stop follows the best price, now 2,412.5."));
         assert_eq!(views[0].ruler.as_ref().and_then(|r| r.guard_line.as_deref()), Some("Guardian is watching"));
         assert_eq!((views[1].side.as_str(), views[1].pnl.as_str(), views[1].guardian.as_deref(), views[1].market.as_deref()), ("short", "−$0.50", None, Some("SOL")));
+    }).await;
+}
+
+/// What a test's Outbox wrote, one JSON a line.
+#[derive(Clone, Default)]
+struct Out(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Out {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> { self.0.lock().unwrap().extend_from_slice(b); Ok(b.len()) }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
+impl Out {
+    fn notices(&self) -> Vec<Value> {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .filter(|l| l["event"] == "notify").map(|l| l["data"].clone()).collect()
+    }
+}
+
+/// A TWAP's fill leaves rules with its id and the plan's loss at the stop; they stay while its position is flat (it may
+/// still buy), «cancel the TWAP» finds its coin, and the guardian's look at it — running, ended, stopped — keeps, drops
+/// quietly, or drops and says so. Windows stays awake exactly while one runs.
+#[tokio::test]
+async fn a_twap_is_watched_until_it_ends_or_stops() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let out = Out::default();
+        fn draw(_: &Engine) -> Snapshot { unreachable!("the test window is locked") }
+        let e = Engine::new(Outbox::writer(out.clone()), Arc::new(SignerLink::new(store::url("no-signer-here"))), draw);
+        e.st_mut().lock.locked = true;
+        e.st_mut().settings.language = Some("en".into());
+        signed_in(&e, ME);
+        let intent = TradeIntent { asset: "ETH".into(), side: Side::Long, twap_minutes: Some(30), ..TradeIntent::default() };
+        let opened = Opened { twap_id: Some(77), ..Opened::new("ETH", d("0.05"), d("2000"), d("1900"), None) };
+        e.keep_exit_rules(&opened, &intent, d("5.2"));
+        let r = e.exit_rules()["ETH"].clone();
+        assert_eq!((r.twap_id, r.twap_risk, r.long, r.breakeven_after_partial, r.trailing_pct, r.opened_size), (Some(77), Some(d("5.2")), true, false, None, d("0.05")));
+        assert!(e.st().twap_awake);
+        // A one-order fill leaves the TWAP's coin to the exchange alone, and nothing more is kept awake for it.
+        e.keep_exit_rules(&Opened::new("BTC", d("1"), d("1"), d("1"), None), &TradeIntent::default(), d("1"));
+        assert!(!e.exit_rules().contains_key("BTC"));
+
+        // Its position flat or closed: the TWAP's rules stay, a trailing stop's without a position go.
+        let mut all = e.exit_rules();
+        all.insert("BTC".into(), ExitRules::new(d("1"), d("1"), true, false, Some(d("2"))));
+        assert_eq!(Engine::live_rules(all, &[], &[]).into_keys().collect::<Vec<_>>(), ["ETH"]);
+        // «cancel the TWAP» with no position open: the running TWAP's coin.
+        assert_eq!(e.target_coin("cancel the twap").as_deref(), Some("ETH"));
+
+        e.twap_watched("ETH", TwapWatch::Running);
+        assert_eq!(e.exit_rules()["ETH"].twap_id, Some(77));
+        let line = "The ETH TWAP kept buying after its stop: it's stopped. ETH closed.";
+        e.twap_watched("ETH", TwapWatch::Stopped(line.into()));
+        assert!(e.exit_rules()["ETH"].twap_id.is_none() && !e.st().twap_awake);
+        assert!(e.st().messages().last().is_some_and(|m| m.text == line));
+        let notices = out.notices();
+        assert_eq!((notices.len(), notices[0]["title"].as_str(), notices[0]["body"].as_str()), (1, Some("TWAP on ETH stopped"), Some(line)));
+        assert!(e.target_coin("cancel the twap").is_none());
+
+        // Ended: its id goes, nothing said.
+        let said = e.st().messages().len();
+        e.keep_exit_rules(&opened, &intent, d("5.2"));
+        assert!(e.st().twap_awake);
+        e.twap_watched("ETH", TwapWatch::Ended);
+        assert!(e.exit_rules()["ETH"].twap_id.is_none() && !e.st().twap_awake);
+        assert_eq!((e.st().messages().len(), out.notices().len()), (said, 1));
+        // Off Windows the stand-in wrote down each change, never a repeat.
+        #[cfg(not(windows))]
+        assert_eq!(platform::stay_awake_calls(), [true, false, true, false]);
     }).await;
 }

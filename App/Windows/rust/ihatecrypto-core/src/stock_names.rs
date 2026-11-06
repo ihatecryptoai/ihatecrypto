@@ -47,9 +47,9 @@ impl Ondo {
     /// Ondo's terms, said before Confirm. Its freeze and mint authorities are an issuer's, not a scam's sign.
     pub fn terms(russian: bool) -> &'static str {
         if russian {
-            "Ondo не продаёт свои токены жителям США, Канады, России и Беларуси, а в ЕЭЗ, Британии, Сингапуре, Гонконге, Швейцарии, Бразилии и Малайзии — только квалифицированным инвесторам; погашение у самого Ondo — после KYC."
+            "Ondo не продаёт свои токены жителям США, Канады, России и Беларуси, а в ЕЭЗ, Британии, Сингапуре, Гонконге, Швейцарии, Бразилии и Малайзии — только квалифицированным инвесторам. Погашение у самого Ondo — после KYC."
         } else {
-            "Ondo doesn't offer its tokens to residents of the US, Canada, Russia or Belarus, and in the EEA, the UK, Singapore, Hong Kong, Switzerland, Brazil and Malaysia only to qualified investors; redeeming at Ondo itself needs KYC."
+            "Ondo doesn't offer its tokens to residents of the US, Canada, Russia or Belarus, and in the EEA, the UK, Singapore, Hong Kong, Switzerland, Brazil and Malaysia only to qualified investors. Redeeming at Ondo itself needs KYC."
         }
     }
 }

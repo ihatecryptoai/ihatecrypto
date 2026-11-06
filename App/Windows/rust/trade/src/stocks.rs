@@ -199,14 +199,14 @@ impl Executor {
         let check_again = |fresh: Decimal| -> Result<()> {
             let now = if fresh > Decimal::ZERO { (Num::of(spent) / tokens(fresh, token.decimals)).0.unwrap_or_default() } else { Decimal::ZERO };
             if !Self::off_band(now, q) { return Ok(()) }
-            fail(format!("Asked again with the USDG on Robinhood Chain, Uniswap's price {} is more than 5% off {band}. The USDG waits there; nothing was swapped.",
+            fail(format!("Asked again with the USDG on Robinhood Chain, Uniswap's price {} is more than 5% off {band}. The USDG waits there. Nothing was swapped.",
                          Fmt::usd(now)))
         };
         let usdg_text = format!("{} USDG", Fmt::num(spent, 2));
         let hash = match (use_v4, &ways.v4) {
             (true, Some(route)) => {
                 let Some(fresh) = self.v4_quote(&route.key, route.zero_for_one, spend, rpc).await else {
-                    return fail(format!("Uniswap v4 no longer quotes {symbol}; the USDG waits on Robinhood Chain. Nothing was swapped."));
+                    return fail(format!("Uniswap v4 no longer quotes {symbol}. The USDG waits on Robinhood Chain. Nothing was swapped."));
                 };
                 check_again(fresh)?;
                 self.v4_swap(route, usdg, spend, rounded(num(Num::of(fresh) * 99 / 100)?, 0, Rounding::Down), &usdg_text,
@@ -302,7 +302,7 @@ impl Executor {
             if let Some(drop) = Self::worse_by_more_than_ten_percent(first.out, q.out) {
                 return fail(format!("⚠️ Asked again, Relay gives {} {} for {} {} instead of {} (−{}%): more than 10% worse, so nothing was swapped. \
                                      {}say «do it» again to {} at the new price.", Fmt::num(q.out, 2), to.symbol, Fmt::num(amount_in, 6), from.symbol,
-                                    Fmt::num(first.out, 2), Fmt::num(drop, 2), if batched { "" } else { "The exact approve stays; " }, if buy { "buy" } else { "sell" }));
+                                    Fmt::num(first.out, 2), Fmt::num(drop, 2), if batched { "" } else { "The exact approve stays: " }, if buy { "buy" } else { "sell" }));
             }
             let note = format!("Relay: {} {} for {}", if buy { "buy" } else { "sell" }, token.symbol,
                                if buy { format!("{} USDG", Fmt::num(amount_in, 2)) } else { "USDG".into() });
@@ -311,7 +311,7 @@ impl Executor {
                 Err(error) if error.to_string().contains("eth_estimateGas") => {
                     if attempt >= 2 {
                         return fail(format!("Relay couldn't route {} {} into {} just now ({error}). Nothing was swapped{}. Try again in a minute, or with less.",
-                                            Fmt::num(amount_in, 6), from.symbol, to.symbol, if batched { "" } else { "; the exact approve stays for the next try" }));
+                                            Fmt::num(amount_in, 6), from.symbol, to.symbol, if batched { "" } else { ", and the exact approve stays for the next try" }));
                     }
                     self.report(&format!("Relay's route for {} moved before the swap: asking it again.", token.symbol));
                     sleep(2).await;

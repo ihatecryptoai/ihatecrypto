@@ -128,8 +128,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             if agent.to_lowercase() == owner.to_lowercase() { return fail("The agent key matches the main key.") }
             let nonce = (SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())) as u64;
             // In person every time: an open session from another move doesn't turn the key on.
-            confirm_afresh(&format!("approve a Hyperliquid trading key: orders without {PRESENCE} for 7 days; it can't withdraw money"))?;
-            let (act, signature) = with_key("evm", &format!("approve a trading key: orders without {PRESENCE}; it can't withdraw money"),
+            confirm_afresh(&format!("approve a Hyperliquid trading key: orders without {PRESENCE} for 7 days, and it can't withdraw money"))?;
+            let (act, signature) = with_key("evm", &format!("approve a trading key: orders without {PRESENCE}, and it can't withdraw money"),
                                             |k| hls::approve_agent(&agent, "ihatecrypto", nonce, k, true))?;
             // Kept only once its approval is signed.
             if let Some(k) = &made { agents::save(k, &id, None)? }
@@ -142,7 +142,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::SetAgentActive { active: on } => {
             // Resuming a paused trading key, or one whose week is over, is the person's decision: Windows Hello afresh.
             if on && (!prefs::bool(&agent_active_key()) || !agent_fresh(&agent_renewed_key())) && agents::has(&wallets::active_id()) {
-                confirm_afresh(&format!("turn the Hyperliquid trading key on for 7 days: orders without {PRESENCE}; it can't withdraw money"))?;
+                confirm_afresh(&format!("turn the Hyperliquid trading key on for 7 days: orders without {PRESENCE}, and it can't withdraw money"))?;
                 vault::end_session();
                 renew_agent(&agent_renewed_key());
             }
@@ -236,7 +236,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
 
         R::SetActiveWallet { id } => {
             let Some(wallet) = wallets::all().into_iter().find(|w| w.id == id) else { return fail("No such wallet.") };
-            if wallet.is_automation() { return fail("The automation wallet signs only scheduled tasks' moves; it can't be the wallet that's on.") }
+            if wallet.is_automation() { return fail("The automation wallet signs only scheduled tasks' moves, so it can't be the wallet that's on.") }
             if Some(&wallet.id) != wallets::active().as_ref().map(|w| &w.id) {
                 confirm_in_person(&format!("sign with the wallet «{}» from now on:\n{}", wallet.label, addresses(&wallet)))?;
                 vault::end_session();
@@ -305,7 +305,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::SignLedgerAgentL1 { owner, action: act, nonce } => {
             let id = ledger_agent_id(&owner)?;
             if !hls::is_trading(&act) {
-                return Ok(refused(problem("The Ledger's trading key signs orders, cancels and leverage only; anything else is signed on the Ledger.")));
+                return Ok(refused(problem("The Ledger's trading key signs orders, cancels and leverage only. Anything else is signed on the Ledger.")));
             }
             if !action::only_reduces(&act) { agents::ask_again() }
             let on = prefs::string(&format!("agentActive-{id}")).as_deref() == Some("on");
@@ -314,7 +314,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
                 return fail("The Ledger's trading key is off: approve it on the Ledger, or turn it back on.");
             };
             if !agent_fresh(&format!("agentRenewed-{id}")) && !action::only_reduces(&act) {
-                return fail(format!("The Ledger's trading key opens positions for 7 days after {PRESENCE} and those are over; stops and closes still go. \
+                return fail(format!("The Ledger's trading key opens positions for 7 days after {PRESENCE} and those are over. Stops and closes still go. \
                                      Turn it off and on in Settings › Wallet › Hyperliquid to go on."));
             }
             let verdict = hl::check(&act, &owner, &HashSet::new(), None);
@@ -329,7 +329,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             for (key, value) in crate::trusted::state().prefs {
                 if key.starts_with("agentActive-ledger-") && value == Pref::String("on".into()) { prefs::set(&key, Some(Pref::String("paused".into()))) }
             }
-            Ok(SignerReply { agent_active: Some(false), checks: vec![format!("The {PRESENCE} session ended; the trading key is paused.")], ..reply() })
+            Ok(SignerReply { agent_active: Some(false), checks: vec![format!("The {PRESENCE} session ended, so the trading key is paused.")], ..reply() })
         }
 
         R::SetSessionLength { seconds } => {
@@ -416,7 +416,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             if let Some(r) = typed.refusal_for(address("evm").ok().as_deref()) { return Ok(refused(problem(&r))) }
             let signature = with_key("evm", &typed.prompt(), |k| sign(&typed.digest, k))?;
             Ok(SignerReply { signature: Some(signature),
-                             checks: vec![format!("Signed {} data for «{}»; the hash was computed by the signer.", typed.primary_type, typed.domain_name)], ..reply() })
+                             checks: vec![format!("Signed {} data for «{}». The hash was computed by the signer.", typed.primary_type, typed.domain_name)], ..reply() })
         }
 
         R::SignEvmTransaction { chain_id, nonce, max_priority_fee, max_fee, gas_limit, to, value, data, recipients } => {
@@ -496,7 +496,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             if !targets.is_empty() { approve(&targets, true, &doing)? }
             let raw = with_key("evm", &doing, |k| Ok(batch7702::signed(chain_id, nonce, max_priority_fee, max_fee, gas_limit, &owner, &calls, k)?.0))?;
             Ok(SignerReply { signed_raw: Some(raw),
-                             checks: vec!["Each call parsed by the signer and held to the one-call rules; the wallet runs only the audited batch account's code.".into()], ..reply() })
+                             checks: vec!["Each call parsed by the signer and held to the one-call rules. The wallet runs only the audited batch account's code.".into()], ..reply() })
         }
 
         R::SignSolana { wire, accounts, recipients, token_owners, extra_programs, sponsor } => {
@@ -615,7 +615,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             let order = RelayOrder::read(&json, address("evm").ok().as_deref(), address("solana").ok().as_deref(), now())
                 .map_err(|r| WalletError(r.reason))?;
             // Held, not yet approved: its payee is asked about with the deposit that names it, after Confirm.
-            let check = format!("Relay order checked by the signer: it pays {} on {}; refunds come back to this wallet.", order.recipient, order.output_chain);
+            let check = format!("Relay order checked by the signer: it pays {} on {}, and refunds come back to this wallet.", order.recipient, order.output_chain);
             relay_orders::add(order);
             Ok(SignerReply { checks: vec![check], ..reply() })
         }

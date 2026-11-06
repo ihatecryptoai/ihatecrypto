@@ -94,7 +94,7 @@ pub fn problem(address: &str, network: Network) -> Option<String> {
         },
         Network::Zcash => match base58_check(a, base58::ALPHABET) {
             Some(p) if p.len() == 22 && p[0] == 0x1c && [0xb8, 0xbd].contains(&p[1]) => None,
-            _ => no("Not a transparent Zcash address (t1… or t3…). NEAR Intents pays out to those; a shielded or unified one isn't taken here."),
+            _ => no("Not a transparent Zcash address (t1… or t3…). NEAR Intents pays out to those, a shielded or unified one isn't taken here."),
         },
         // A classic r… account, or an X-address, which carries the destination tag an exchange needs.
         Network::Xrp => match base58_check(a, XRP_ALPHABET) {

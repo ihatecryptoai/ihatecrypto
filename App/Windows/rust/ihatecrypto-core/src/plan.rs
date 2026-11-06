@@ -493,7 +493,7 @@ impl Plan {
                     if i.twap_randomize == Some(true) { ", sizes randomized ±20%." } else { ", equal sizes." }
                 ),
                 None if i.entry_px.is_none() => format!("{size} {} at ≈ {} (mark).", m.name, Fmt::price(s.entry)),
-                None => format!("Limit: {size} {} at {}, now {}. Waiting; stop and take-profit start after entry.", m.name, Fmt::price(s.entry),
+                None => format!("Limit: {size} {} at {}, now {}. Waiting. Stop and take-profit start after entry.", m.name, Fmt::price(s.entry),
                                 Fmt::price(m.mark_px)),
             },
             format!("Notional {}, margin {} at {}× leverage{}.", Fmt::usd(s.notional), Fmt::usd(s.margin), Fmt::num(i.leverage.unwrap_or(Decimal::ONE), 2),
@@ -565,7 +565,7 @@ impl Plan {
             lines.push("If the stop or take fires while the TWAP still buys, ihatecrypto stops it and closes what it bought after. \
                         The Mac stays awake for that while the TWAP runs. A closed lid, a quit app or a locked trading key leave it buying unwatched.".into());
         }
-        lines.push("Triggers on mark price; a market exit may fill worse.".into());
+        lines.push("Triggers on mark price. A market exit may fill worse.".into());
         Block::new("protection", label, "Stop & take-profit", lines, status)
     }
 }

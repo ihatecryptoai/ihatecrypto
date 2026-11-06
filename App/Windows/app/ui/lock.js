@@ -34,8 +34,8 @@ export function lockScreen() {
       h("div", { class: "lk-words" },
         h("h1", {}, l.codeOff ? t("The code is off", "Код выключен") : t("ihatecrypto is locked", "ihatecrypto заблокирован")),
         h("p", { class: "secondary" }, l.codeOff
-          ? t("5 wrong tries. Only Windows Hello opens ihatecrypto now; then make a new code in Settings › Wallet.",
-              "5 неверных попыток. Теперь ihatecrypto открывает только Windows Hello; потом задай новый код в «Настройки › Кошелёк».")
+          ? t("5 wrong tries. Only Windows Hello opens ihatecrypto now. Then make a new code in Settings › Wallet.",
+              "5 неверных попыток. Теперь ihatecrypto открывает только Windows Hello. Потом задай новый код в «Настройки › Кошелёк».")
           : t("Balances, chat and history stay hidden until you unlock.", "Балансы, чат и история скрыты, пока не откроешь."))),
       l.codeOff
         ? h("div", { class: "lk-off" }, hello,

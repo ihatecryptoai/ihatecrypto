@@ -19,7 +19,7 @@ use rust_decimal::Decimal;
 use crate::executor::hl_markets;
 use crate::{Executor, HyperliquidAccount, Result, fail, modules, num};
 
-fn moved(done: &[String]) -> String { if done.is_empty() { String::new() } else { format!(" Already moved: {}.", done.join("; ")) } }
+fn moved(done: &[String]) -> String { if done.is_empty() { String::new() } else { format!(" Already moved: {}.", done.join(", ")) } }
 
 impl Executor {
     /// The plan, as its card reads, and whether there's a move to make; with `execute` the moves made. `max_share`: % of
@@ -27,7 +27,7 @@ impl Executor {
     pub async fn rebalance(&self, max_share: Decimal, execute: bool) -> Result<(String, bool, Plan)> {
         let places = self.rebalance_places().await?;
         let plan = rebalance::plan(&places, max_share);
-        let mut lines = vec![format!("USDC in {} places, at most {} per protocol; a move is made only if it pays back within 30 days:",
+        let mut lines = vec![format!("USDC in {} places, at most {} per protocol. A move is made only if it pays back within 30 days:",
                                      places.iter().filter(|p| p.amount > Decimal::ZERO).count(), Fmt::pct(max_share))];
         lines.extend(plan.moves.iter().map(|m| format!("· {} → {}: {} USDC, {}% → {}%, +{} a year for ≈ {}", m.from, m.to, Fmt::num(m.amount, 2),
                                                        Fmt::num(rounded(m.from_apy, 2, Rounding::Plain), 2), Fmt::num(rounded(m.to_apy, 2, Rounding::Plain), 2),
@@ -57,7 +57,7 @@ impl Executor {
             done.push(format!("{} USDC {} → {}", Fmt::num(piece, 2), step.from, step.to));
             self.report(&format!("{name}: done."));
         }
-        let line = format!("Rebalanced: {}. About +{} a year for ≈ {} of costs.", done.join("; "), Fmt::usd(plan.yearly_gain()), Fmt::usd(plan.cost()));
+        let line = format!("Rebalanced: {}. About +{} a year for ≈ {} of costs.", done.join(", "), Fmt::usd(plan.yearly_gain()), Fmt::usd(plan.cost()));
         self.report(&line);
         Ok((line, false, plan))
     }
@@ -126,7 +126,7 @@ impl Executor {
                 }
                 let usdc = rounded(out.min(num(Num::of(now) - before)?), 2, Rounding::Down);
                 if usdc <= Decimal::ZERO {
-                    return fail("HLP's withdrawal isn't on the Hyperliquid balance yet, so nothing was bridged; «withdraw to Solana» brings it once it shows.");
+                    return fail("HLP's withdrawal isn't on the Hyperliquid balance yet, so nothing was bridged. «withdraw to Solana» brings it once it shows.");
                 }
                 self.withdraw_to_solana(Some(usdc)).await?;
             }

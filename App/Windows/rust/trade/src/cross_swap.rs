@@ -103,7 +103,7 @@ impl Executor {
         // A coin goes as one transaction's value, under 2⁶⁴ wei (the signer's u64): 18.44 coins.
         if origin.coin && units > Decimal::from(u64::MAX) { return fail(format!("At most 18 {} at once. Nothing was signed.", origin.symbol)) }
         if units > held && capped {
-            return fail(format!("{} {} on {}; {} is more. Nothing was signed.", Fmt::num(tokens(held, origin.decimals), 8), origin.symbol, place_name(from),
+            return fail(format!("{} {} on {}, and {} is more. Nothing was signed.", Fmt::num(tokens(held, origin.decimals), 8), origin.symbol, place_name(from),
                                 Fmt::num(amount, 8)));
         }
         let me = if from == "solana" { sol } else { evm };
@@ -205,7 +205,7 @@ impl Executor {
         Ok(if landed {
             format!("Swapped {sent} on {from_name} for ≈ {gets} on {to_name} through Relay, in {} s. {link}", started.elapsed().as_secs())
         } else {
-            format!("{sent} left {from_name}; ≈ {gets} is on its way to {to_name} (Relay order {}, in transit on the portfolio). {link}", quote.request_id)
+            format!("{sent} left {from_name}, and ≈ {gets} is on its way to {to_name} (Relay order {}, in transit on the portfolio). {link}", quote.request_id)
         })
     }
 

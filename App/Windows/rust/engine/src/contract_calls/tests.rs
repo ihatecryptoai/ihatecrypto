@@ -53,7 +53,7 @@ async fn a_call_that_can_t_be_encoded_is_refused_before_any_check() {
         e.prepare_contract_call(&call("deposit"), None).await;
         assert_eq!(last(&e), "I won't make this call: «deposit» isn't a function like deposit(uint256,address). Nothing was signed.");
         e.prepare_contract_call(&call("deposit(uint256,address)"), None).await;
-        assert_eq!(last(&e), "I won't make this call: deposit takes 2 arguments; 1 given. Nothing was signed.");
+        assert_eq!(last(&e), "I won't make this call: deposit takes 2 arguments, 1 given. Nothing was signed.");
         // A network ihatecrypto doesn't move money on: nothing at all.
         let before = e.st().messages().len();
         e.prepare_contract_call(&WalletCommand::ContractCall(ContractCall { network: "fantom".into(), ..match call("x()") { WalletCommand::ContractCall(c) => c, _ => unreachable!() } }), None).await;

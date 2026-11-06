@@ -123,7 +123,7 @@ impl Executor {
         }
         let usdc = rounded(requested.unwrap_or(free), 2, Rounding::Down);
         if !(usdc > Decimal::ZERO && usdc <= free) {
-            return fail(format!("{} free on Hyperliquid; can't withdraw {}.", usd(free), Fmt::num(usdc, 2)));
+            return fail(format!("{} free on Hyperliquid — can't withdraw {}.", usd(free), Fmt::num(usdc, 2)));
         }
         let units = units_of(usdc, 8); // Hyperliquid perp USDC: 8 decimals in Relay
         let quote = self.relay_quote(&relay::Ask {
@@ -195,7 +195,7 @@ impl Executor {
         let usdc = rounded(usd_amount, 2, Rounding::Up);
         let units = units_of(usdc, 8);
         let free = Hyperliquid::balance(evm).await?.withdrawable;
-        if usdc > free { return fail(format!("{} free on Hyperliquid; gas for {} needs {}.", usd(free), net.name, usd(usdc))) }
+        if usdc > free { return fail(format!("{} free on Hyperliquid, but gas for {} needs {}.", usd(free), net.name, usd(usdc))) }
         let quote = self.relay_quote(&relay::Ask {
             user: evm.into(), recipient: evm.into(), origin_chain: relay::chain::HYPERLIQUID, destination_chain: net.relay_chain,
             origin_currency: relay::currency::HYPERLIQUID_USDC.into(), destination_currency: "0x0000000000000000000000000000000000000000".into(),
@@ -277,7 +277,7 @@ impl Executor {
             let have = if native { self.rpc.balance(sol).await? } else { self.rpc.token_balance(sol, &vault.asset_mint).await? };
             let spendable = if native { have.saturating_sub(12_000_000) } else { have }; // SOL: keep fees and account rent
             if !(units > 0 && units <= spendable) {
-                return fail(format!("You have {} {name}{}; can't deposit {}.", Fmt::num(shown(spendable), 6),
+                return fail(format!("You have {} {name}{}, and the deposit needs {}.", Fmt::num(shown(spendable), 6),
                                     if native { " (0.012 SOL is kept for fees and the account)" } else { "" }, Fmt::num(shown(units), 6)));
             }
             // The API's deposit expects our share account to exist; Jupiter's own site creates it first.
@@ -369,7 +369,7 @@ impl Executor {
         let have = self.rpc.token_balance(sol, &usdc_mint).await?;
         // A dry run still shows what the guard says of Jupiter's transaction when the wallet is short.
         if !(units <= have || dry_run) {
-            return fail(format!("You have {} USDC on Solana; the DCA puts in {} at once.", Fmt::num(millionths(have), 2), Fmt::num(usdc, 2)));
+            return fail(format!("You have {} USDC on Solana, but the DCA puts in {} at once.", Fmt::num(millionths(have), 2), Fmt::num(usdc, 2)));
         }
         let wire = recurring::create_order(sol, &usdc_mint, &asset.mint, units, orders, every).await?.1;
         let last_valid = self.rpc.latest_blockhash().await?.1;
@@ -379,7 +379,7 @@ impl Executor {
         let changes = self.sign_and_send(&wire, last_valid, &owners(&[(&my_usdc, sol), (&my_coin, sol)]), &[(my_usdc.clone(), "USDC".into(), true, -i(units))],
                                          &format!("Jupiter DCA {} USDC into {}", Fmt::num(usdc, 2), asset.symbol), -12_000_000, &HashMap::new(), dry_run, None).await?;
         if dry_run { return Ok(format!("Dry run, nothing signed: {}", changes.join("; "))) }
-        let line = format!("Jupiter DCA set: {} USDC into {}, {orders} swaps of {} USDC every {}; the first runs now, and {} comes to the wallet after each.",
+        let line = format!("Jupiter DCA set: {} USDC into {}, {orders} swaps of {} USDC every {}. The first runs now, and {} comes to the wallet after each.",
                            Fmt::num(usdc, 2), asset.symbol, Fmt::num(num(Num::of(usdc) / orders)?, 2), WalletCommand::every_text(every), asset.symbol);
         self.report(&line);
         Ok(line)
@@ -744,7 +744,7 @@ impl Executor {
             }
             Outcome::Expired => {
                 self.record("solana", &signature, Kind::Expired, "")?;
-                return fail("The transaction didn't make it into a block; you can retry.");
+                return fail("The transaction didn't make it into a block. You can retry.");
             }
         }
         Ok(changes)
@@ -870,7 +870,7 @@ impl Executor {
             }
             sleep(3).await;
         }
-        fail(format!("1Click hasn't finished within 10 minutes. The deposit {deposit} is in the journal; it settles or refunds on its own."))
+        fail(format!("1Click hasn't finished within 10 minutes. The deposit {deposit} is in the journal. It settles or refunds on its own."))
     }
 
     /// Native NEAR from the wallet's NEAR account → USDC through NEAR Intents 1Click (the reverse of `buy_near`), on our
@@ -972,7 +972,7 @@ impl Executor {
                 self.move_margin(dex, "", pull).await?;
                 free = Hyperliquid::balance(evm).await?.withdrawable;
             }
-            if requested > free { return fail(format!("{} free on Hyperliquid; can't deposit {}.", usd(free), usd(requested))) }
+            if requested > free { return fail(format!("{} free on Hyperliquid — can't deposit {}.", usd(free), usd(requested))) }
             amount = requested;
         } else {
             if withdrawable <= Decimal::ZERO {
@@ -991,7 +991,7 @@ impl Executor {
         if reply.is_error() { return fail(format!("Hyperliquid rejected it: {reply}.")) }
         let line = if deposit {
             let apr = yields::hyperliquid_vault_apr(guard::hl::HLP_VAULT).await.unwrap_or_default();
-            format!("Deposited {} into HLP ({}% APY historically). You can withdraw after 4 days; there are losing periods.", usd(amount),
+            format!("Deposited {} into HLP ({}% APY historically). You can withdraw after 4 days, and there are losing periods.", usd(amount),
                     Fmt::num(rounded(apr, 2, Rounding::Plain), 2))
         } else {
             format!("Withdrew {} from HLP to the main Hyperliquid balance.", usd(amount))
@@ -1261,7 +1261,7 @@ impl Executor {
         let worth_from = (Num::of(rent) * 10).rounded(0, Rounding::Up).0.unwrap_or(Decimal::MAX);
         Some(CostlyMove {
             words: Some(format!("The first Kamino deposit creates your accounts: rent ≈ {} SOL (≈ {}) on a {} deposit — over 10% of the amount. \
-                                 Jupiter Lend has no rent; Kamino makes sense from ≈ {}. Nothing was signed.", Fmt::num(sol, 4), usd(rent), usd(deposit_usd),
+                                 Jupiter Lend has no rent, and Kamino makes sense from ≈ {}. Nothing was signed.", Fmt::num(sol, 4), usd(rent), usd(deposit_usd),
                                 usd(worth_from))),
             ..CostlyMove::new(rent, deposit_usd, "Kamino")
         })
@@ -1316,7 +1316,7 @@ impl Executor {
         // Everything: ask for 1% over the value — Kamino caps a withdrawal at what is there, so no dust stays.
         let all = !deposit && requested.is_none();
         if all && position_usd.is_some() && reserve.price_usd <= Decimal::ZERO {
-            return fail(format!("Kamino gave no {symbol} price just now; say how much to withdraw."));
+            return fail(format!("Kamino gave no {symbol} price just now. Say how much to withdraw."));
         }
         let amount = requested.or_else(|| if deposit { None } else { position_usd.map(|p| Self::kamino_all(p, reserve.price_usd)) });
         let Some(amount) = amount.filter(|a| *a > Decimal::ZERO) else {
@@ -1343,7 +1343,7 @@ impl Executor {
         let short = |have: u64, rent: Decimal| (Num::of(amount) + rent + kept).0.is_none_or(|need| shown(have) < need);
         let have = if deposit { if native { self.rpc.balance(sol).await? } else { self.rpc.token_balance(sol, &reserve.mint).await? } } else { 0 };
         if deposit && have < units {
-            return fail(format!("You have {} {symbol}; need {}.", Fmt::num(shown(have), 6), Fmt::num(amount, 6)));
+            return fail(format!("You have {} {symbol}, and the deposit needs {}.", Fmt::num(shown(have), 6), Fmt::num(amount, 6)));
         }
         let wire = if deposit {
             k.deposit_transaction(sol, &reserve.address, amount, market).await?
@@ -1421,7 +1421,7 @@ impl Executor {
         } else {
             format!("Kamino {symbol} {}% APY: {did}. ", Fmt::num(rounded(reserve.supply_apy, 2, Rounding::Plain), 2))
         };
-        let line = format!("{head}{}.", changes.join("; "));
+        let line = format!("{head}{}.", changes.join(", "));
         self.report(&line);
         Ok(line)
     }
@@ -1434,7 +1434,7 @@ impl Executor {
         // A cent short of the whole is the whole: «выведи 5» from 4.999 takes every share instead of failing.
         let all = requested.is_none_or(|r| (Num::of(v.tokens) - cent).0.is_none_or(|whole| r >= whole));
         if let Some(r) = requested && (Num::of(v.tokens) + cent).0.is_some_and(|most| r > most) {
-            return fail(format!("Only {} {} in {} on Kamino; can't withdraw {}.", Fmt::num(v.tokens, 6), v.symbol, v.name, Fmt::num(r, 6)));
+            return fail(format!("Only {} {} in {} on Kamino — can't withdraw {}.", Fmt::num(v.tokens, 6), v.symbol, v.name, Fmt::num(r, 6)));
         }
         let amount = if all { v.tokens } else { requested.unwrap_or(v.tokens) };
         if amount <= Decimal::ZERO { return fail(format!("Say how much to withdraw from {}.", v.name)) }
@@ -1451,7 +1451,7 @@ impl Executor {
         } else {
             format!("Kamino {}: withdrew {}{} {}. ", v.name, if all { "everything, " } else { "" }, Fmt::num(amount, 6), v.symbol)
         };
-        let line = format!("{head}{}.", changes.join("; "));
+        let line = format!("{head}{}.", changes.join(", "));
         self.report(&line);
         Ok(line)
     }

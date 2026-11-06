@@ -25,7 +25,7 @@ pub const MODELS: &str = "https://chatgpt.com/backend-api/codex/models";
 
 pub fn info() -> Info {
     let mut info = Info::new("chatgpt", "ChatGPT (subscription)", Kind::Subscription, "gpt-6.1-sol",
-                             "Plus or Pro. Signs in through OpenAI's Codex CLI sign-in, as OpenClaw and OpenCode do; OpenAI doesn't officially allow other apps to use it — a gray area. Usage counts against the subscription limits.")
+                             "Plus or Pro. Signs in through OpenAI's Codex CLI sign-in, as OpenClaw and OpenCode do. OpenAI doesn't officially allow other apps to use it — a gray area. Usage counts against the subscription limits.")
         // The live list replaces these once signed in.
         .models(&["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
     info.sign_in_label = Some("Sign in with ChatGPT".into());
@@ -202,7 +202,7 @@ impl ChatGptClient {
                     *tokens = self::tokens(&data, Some(tokens))?;
                     (self.save)(Credential::OAuth(tokens.clone()));
                 }
-                let Some(account) = tokens.account_id.clone() else { return fail("No chatgpt_account_id; sign in again.") };
+                let Some(account) = tokens.account_id.clone() else { return fail("No chatgpt_account_id. Sign in again.") };
                 Ok((tokens.access.clone(), account))
             }
         }

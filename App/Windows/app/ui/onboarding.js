@@ -257,8 +257,8 @@ function modelStep() {
     h("span", { class: "spacer" }), h("span", { class: "secondary small" }, t("Change it any time in the chat's menu.", "Её можно сменить в меню чата."))) : null;
   return stepCard({
     mood: "tuning", title: t("What does the chat think with?", "Чем думает чат?"),
-    subtitle: t("The chat needs a model to understand you: one you already pay for, an API key, or a free one on this PC. It reads your words, the plan and your balances, never your keys; a model on this PC keeps them all here.",
-      "Чату нужна модель, чтобы понимать тебя: подписка, за которую ты уже платишь, API-ключ или бесплатная модель на этом компьютере. Она читает твои слова, план и балансы, но никогда не ключи; модель на этом компьютере оставляет всё здесь."),
+    subtitle: t("The chat needs a model to understand you: one you already pay for, an API key, or a free one on this PC. It reads your words, the plan and your balances, never your keys. A model on this PC keeps them all here.",
+      "Чату нужна модель, чтобы понимать тебя: подписка, за которую ты уже платишь, API-ключ или бесплатная модель на этом компьютере. Она читает твои слова, план и балансы, но никогда не ключи. Модель на этом компьютере оставляет всё здесь."),
     content: h("div", { class: "ob-content" },
       h("div", { class: "ob-tiles" },
         way("chatgpt", t("ChatGPT subscription", "Подписка ChatGPT"), t("Plus or Pro: sign in once in the browser", "Plus или Pro: войти один раз в браузере"), "llm-openai"),
@@ -287,14 +287,14 @@ function newWalletStep() {
     mood: "idle", title: t("A new wallet", "Новый кошелёк"),
     subtitle: t("Made inside the separate signer on this PC, which has no network access.", "Создаётся внутри отдельного подписанта на этом компьютере, у которого нет доступа к сети."),
     content: h("div", { class: "ob-content" },
-      factRow("doc", t("12 recovery words", "12 слов восстановления"), t("Made from this PC's random number generator. They are the only way back if the PC is lost; you see them once, next.",
-        "Из генератора случайных чисел этого компьютера. Это единственный путь обратно, если компьютер потеряется; ты увидишь их один раз, дальше.")),
+      factRow("doc", t("12 recovery words", "12 слов восстановления"), t("Made from this PC's random number generator. They are the only way back if the PC is lost. You see them once, next.",
+        "Из генератора случайных чисел этого компьютера. Это единственный путь обратно, если компьютер потеряется. Ты увидишь их один раз, дальше.")),
       test ? factRow("lock", t("Encrypted for your Windows user", "Зашифрован для твоего пользователя Windows"), t("A test wallet's key never leaves the signer, but Windows Hello doesn't seal it, so it can sign with no one there.",
         "Ключ тестового кошелька не покидает подписанта, но Windows Hello его не запечатывает — поэтому он подписывает, даже когда никого нет."))
-        : factRow("lock", t("Sealed by Windows Hello and the TPM", "Запечатан Windows Hello и TPM"), t("The key never leaves the signer; nothing can read it back, ihatecrypto included.", "Ключ не покидает подписанта; прочитать его не может никто, даже ihatecrypto.")),
+        : factRow("lock", t("Sealed by Windows Hello and the TPM", "Запечатан Windows Hello и TPM"), t("The key never leaves the signer. Nothing can read it back, ihatecrypto included.", "Ключ не покидает подписанта. Прочитать его не может никто, даже ihatecrypto.")),
       factRow("person", test ? t("Signs without asking", "Подписывает без вопросов") : t("Windows Hello for every move", "Windows Hello на каждое движение"),
         test ? t("A test wallet: keep only a few dollars on it.", "Тестовый кошелёк: держи на нём только несколько долларов.")
-          : t("Every signature asks first; one face, fingerprint or PIN covers one move.", "Каждая подпись сначала спрашивает; одно лицо, отпечаток или PIN — на одно движение.")),
+          : t("Every signature asks first: one face, fingerprint or PIN covers one move.", "Каждая подпись сначала спрашивает: одно лицо, отпечаток или PIN — на одно движение.")),
       hello ? tile(false, tileText(t("Test wallet: signs without asking", "Тестовый кошелёк: подписывает без вопросов"), t("For trying things out with a few dollars.", "Чтобы попробовать с парой долларов.")),
         h("span", { class: "spacer" }), toggle("ob-test", test, (on) => { flow.test = on; render(); }))
         : helloMissing(),
@@ -330,8 +330,8 @@ export function phraseScreen() {
 function wordsCard(words) {
   return stepCard({
     mood: "waiting", title: t(`Your ${words.length} recovery words`, `Твои ${words.length} слов восстановления`),
-    subtitle: t("Write them on paper, in order. They are the only way back to this wallet if this PC is lost or wiped; ihatecrypto won't show them again.",
-      "Запиши их на бумагу по порядку. Это единственный путь обратно к кошельку, если компьютер потеряется или будет стёрт; ihatecrypto больше их не покажет."),
+    subtitle: t("Write them on paper, in order. They are the only way back to this wallet if this PC is lost or wiped. ihatecrypto won't show them again.",
+      "Запиши их на бумагу по порядку. Это единственный путь обратно к кошельку, если компьютер потеряется или будет стёрт. ihatecrypto больше их не покажет."),
     content: h("div", { class: "ob-content" },
       h("div", { class: "ob-words" }, words.map((w, i) => h("div", { class: "ob-word" }, h("span", { class: "ob-n" }, String(i + 1)), h("b", {}, w)))),
       statusLine(t("Never type them into a website, a chat or a photo. Anyone with these words owns the money.",
@@ -340,7 +340,7 @@ function wordsCard(words) {
         h("button", { class: "btn", disabled: copied, onclick: async (e) => {
           copied = true;
           e.currentTarget.disabled = true;
-          try { await invoke("copy_secret", { text: words.join(" ") }); toast(t("Copied once; the clipboard clears in 60 s.", "Скопировано один раз; буфер очистится через 60 с.")); }
+          try { await invoke("copy_secret", { text: words.join(" ") }); toast(t("Copied once. The clipboard clears in 60 s.", "Скопировано один раз. Буфер очистится через 60 с.")); }
           catch { toast(t("Couldn't copy.", "Не скопировалось.")); }
           render();
         } }, icon(copied ? "check" : "copy", 14), copied ? t("Copied", "Скопировано") : t(`Copy all ${words.length} words`, `Скопировать все ${words.length} слов`)),
@@ -445,7 +445,7 @@ function passcodeStep() {
         t("Turn on a face, fingerprint or PIN in Windows Settings › Accounts › Sign-in options, then make the code in Settings › Wallet. Skip it for now.",
           "Включи лицо, отпечаток или PIN в «Параметры Windows › Учетные записи › Варианты входа», потом задай код в «Настройки › Кошелёк». Пока пропусти.")))
       : h("div", { class: "ob-content" }, lock?.codeMaker && l ? lock.codeMaker(l, () => render())
-      : statusLine(t("The code is made in Settings › Wallet once the lock screen is there; skip it for now.", "Код задаётся в «Настройки › Кошелёк», когда появится экран блокировки; пока пропусти."))),
+      : statusLine(t("The code is made in Settings › Wallet once the lock screen is there. Skip it for now.", "Код задаётся в «Настройки › Кошелёк», когда появится экран блокировки, а пока пропусти."))),
     primary: t("Continue", "Дальше"), enabled: made, onPrimary: () => go("networks"),
     quiet: [quietButton(t("Back", "Назад"), back), made ? null : quietButton(t("Skip for now", "Пропустить"), () => go("networks"))],
   });
@@ -485,7 +485,7 @@ function bringStep() {
         : bring.keyError ? statusLine(bring.keyError, false)
         : h("div", { class: "secondary small" }, t("Phantom: Settings › Manage accounts › Show private key. MetaMask: Account details › Show private key. A key opens one network only.",
           "Phantom: Настройки › Управление аккаунтами › Показать приватный ключ. MetaMask: Детали аккаунта › Показать приватный ключ. Ключ открывает только одну сеть."))],
-    ledger: [factRow("link", t("USB or Bluetooth", "USB или Bluetooth"), t("Nano X, Stax and Flex work over Bluetooth; any Ledger over USB.", "Nano X, Stax и Flex работают по Bluetooth; любой Ledger — по USB.")),
+    ledger: [factRow("link", t("USB or Bluetooth", "USB или Bluetooth"), t("Nano X, Stax and Flex work over Bluetooth, any Ledger over USB.", "Nano X, Stax и Flex работают по Bluetooth, любой Ledger — по USB.")),
       factRow("lock", t("The keys stay on the device", "Ключи остаются на устройстве"), t("Every move shows on its screen and waits for its buttons.", "Каждое движение показывается на его экране и ждёт его кнопок."))],
     address: [field("bring-solana", "solana", t("Solana address", "Адрес Solana")),
       field("bring-evm", "evm", t("EVM address (0x…): Base, Arbitrum, Hyperliquid and the rest", "EVM-адрес (0x…): Base, Arbitrum, Hyperliquid и остальные")),
@@ -560,7 +560,7 @@ function foundStep() {
         row("near", "NEAR", "NEAR Intents, 1Click", a.near)),
       keyChain ? [
         h("b", { class: "ob-sub-title" }, t("What about the other networks?", "А остальные сети?")),
-        choice("only", t(`Only ${keyChain} for now`, `Пока только ${keyChain}`), t("The other networks stay off; add a wallet for them any time from the wallet menu.", "Остальные сети выключены; кошелёк для них можно добавить в любой момент из меню кошельков.")),
+        choice("only", t(`Only ${keyChain} for now`, `Пока только ${keyChain}`), t("The other networks stay off. Add a wallet for them any time from the wallet menu.", "Остальные сети выключены, а кошелёк для них можно добавить в любой момент из меню кошельков.")),
         choice("phrase", t("Use a recovery phrase instead", "Лучше фраза восстановления"), t("A phrase opens every network at once. This key stays as a wallet you can remove.", "Фраза открывает сразу все сети. Этот ключ останется кошельком, который можно удалить.")),
         h("div", { class: "ob-soon" }, icon("ob.sparkles", 15), tileText(t("Make them for me · soon", "Сделать их за меня · скоро"), t("New addresses for the missing networks, in the same wallet.", "Новые адреса для недостающих сетей, в том же кошельке.")))]
         : flow.accounts?.length ? compareTable(flow.accounts)
@@ -597,9 +597,9 @@ function ledgerStep() {
     mood: connected ? "done" : lc?.busy ? "thinking" : "waiting", title: t("Connect a Ledger", "Подключи Ledger"),
     subtitle: t("The keys stay on the device: every move shows on its screen and waits for its buttons.", "Ключи остаются на устройстве: каждое движение показывается на его экране и ждёт его кнопок."),
     content: h("div", { class: "ob-content" },
-      factRow("link", t("Plug it in, or turn its Bluetooth on", "Подключи его или включи на нём Bluetooth"), t("USB for any Ledger; Bluetooth for Nano X, Stax and Flex.", "USB — для любого Ledger; Bluetooth — для Nano X, Stax и Flex.")),
+      factRow("link", t("Plug it in, or turn its Bluetooth on", "Подключи его или включи на нём Bluetooth"), t("USB for any Ledger. Bluetooth for Nano X, Stax and Flex.", "USB — для любого Ledger. Bluetooth — для Nano X, Stax и Flex.")),
       factRow("lock", t("Unlock it with its PIN", "Разблокируй его PIN-кодом"), t("On the device itself: the PIN never touches this PC.", "На самом устройстве: PIN никогда не попадает на этот компьютер.")),
-      factRow("check", t("Allow the Ethereum and Solana apps", "Разреши приложения Ethereum и Solana"), t("The Ledger asks for each; ihatecrypto reads the addresses from them.", "Ledger спросит про каждое; ihatecrypto прочитает из них адреса.")),
+      factRow("check", t("Allow the Ethereum and Solana apps", "Разреши приложения Ethereum и Solana"), t("The Ledger asks for each, then ihatecrypto reads the addresses from them.", "Ledger спросит про каждое, потом ihatecrypto прочитает из них адреса.")),
       lc ? [lc.model ? statusLine(lc.model, true) : null, statusLine(lc.problem || lc.status, lc.problem ? false : connected ? true : null),
         lc.notes.map((n) => h("div", { class: "ob-note" }, n))] : null),
     primary: connected ? t("Use this Ledger", "Работать с этим Ledger") : !lc ? t("Look for it", "Найти его") : t("Try again", "Ещё раз"), busy: !!lc?.busy,
@@ -760,11 +760,11 @@ function tradingKeyStep() {
     mood: key.active ? "done" : flow.busy ? "thinking" : "idle", title: t("A trading key for Hyperliquid", "Торговый ключ для Hyperliquid"),
     subtitle: noDeposit && !key.active
       ? t(`Hyperliquid takes it once the account has had a deposit, so it waits until then. Until then every order asks for ${ask}.`, `Hyperliquid примет его, когда на аккаунт придёт первый депозит, поэтому он ждёт. До тех пор каждый ордер спрашивает ${key.ledger ? "кнопки Ledger" : "Windows Hello"}.`)
-      : t(`Because Hyperliquid is on. Without it every order asks for ${ask}; with it, orders go straight through the rules.`, `Потому что Hyperliquid включён. Без него каждый ордер спрашивает ${key.ledger ? "кнопки Ledger" : "Windows Hello"}; с ним ордера идут сразу по правилам.`),
+      : t(`Because Hyperliquid is on. Without it every order asks for ${ask}. With it, orders go straight through the rules.`, `Потому что Hyperliquid включён. Без него каждый ордер спрашивает ${key.ledger ? "кнопки Ledger" : "Windows Hello"}. С ним ордера идут сразу по правилам.`),
     content: h("div", { class: "ob-content" },
-      factRow("arrow.right", t("It opens and closes positions", "Он открывает и закрывает позиции"), t("Orders, stops and takes, within the trade rules — new positions for 7 days, then one confirmation renews them.", "Ордера, стопы и тейки — по правилам сделок; новые позиции 7 дней, потом одно подтверждение продлевает.")),
+      factRow("arrow.right", t("It opens and closes positions", "Он открывает и закрывает позиции"), t("Orders, stops and takes, within the trade rules — new positions for 7 days, then one confirmation renews them.", "Ордера, стопы и тейки — по правилам сделок. Новые позиции 7 дней, потом одно подтверждение продлевает.")),
       factRow("eye.slash", t("It can't withdraw", "Он не может выводить"), t("Hyperliquid itself refuses a withdrawal signed by it.", "Hyperliquid сам отклоняет вывод, подписанный им.")),
-      factRow("lock", t("Pause it any time", "Можно поставить на паузу"), t("Say «lock» in the chat; Settings › Wallet › Hyperliquid turns it back on.", "Скажи в чате «заблокируй»; «Настройки › Кошелёк › Hyperliquid» включает его снова.")),
+      factRow("lock", t("Pause it any time", "Можно поставить на паузу"), t("Say «lock» in the chat. Settings › Wallet › Hyperliquid turns it back on.", "Скажи в чате «заблокируй». «Настройки › Кошелёк › Hyperliquid» включает его снова.")),
       key.active ? statusLine(t("The trading key is on.", "Торговый ключ включён."), true)
         : noDeposit ? statusLine(t("After the first deposit to Hyperliquid: Settings › Wallet › Hyperliquid has the button.", "После первого депозита на Hyperliquid: кнопка есть в «Настройки › Кошелёк › Hyperliquid»."))
         : said ? statusLine(said, false) : null),
@@ -802,7 +802,7 @@ function rulesStep() {
       rule(t(`By the book: ${n(p.defaultRiskPct)}% risk, take at ${n(p.defaultRewardRisk)}R`, `По правилам: риск ${n(p.defaultRiskPct)}%, тейк на ${n(p.defaultRewardRisk)}R`), t("When you say «by the book» and name no amount", "Когда говоришь «по правилам» и не называешь сумму")),
       rule(t(`Reward at least ${n(p.minRewardRisk)}× the risk`, `Прибыль не меньше ${n(p.minRewardRisk)}× риска`), t("A plan that pays less is stopped", "План, который платит меньше, остановится")),
       rule(t(`Stop by volatility: ${n(p.atrStopMultiple)}× the 4-hour ATR`, `Стоп по волатильности: ${n(p.atrStopMultiple)}× 4-часового ATR`),
-        t(`Leverage up to ${n(p.maxLeverage)}×; all open positions together at most ${n(p.maxOpenRiskPct)}%`, `Плечо до ${n(p.maxLeverage)}×; все открытые позиции вместе — не больше ${n(p.maxOpenRiskPct)}%`)),
+        t(`Leverage up to ${n(p.maxLeverage)}×, all open positions together at most ${n(p.maxOpenRiskPct)}%`, `Плечо до ${n(p.maxLeverage)}×, все открытые позиции вместе — не больше ${n(p.maxOpenRiskPct)}%`)),
       rule(t("Second check", "Вторая проверка"), t("Another model reads every plan before you confirm it", "Другая модель перечитывает каждый план, прежде чем ты его подтвердишь"),
         toggle("ob-second", !!s.secondCheck, (v) => act("secondCheck", { test: v }))))),
     primary: t("Continue", "Дальше"), onPrimary: finish,
@@ -1031,9 +1031,9 @@ export function showImport() {
   const shown = (accounts, saved) => setOverlay(sheet(stepCard({
     mood: "done", title: saved ? t("Key saved", "Ключ сохранён") : t("Its addresses", "Её адреса"),
     subtitle: saved ? t("The wallet is next to your other wallets. Check its addresses against the wallet you came from.", "Кошелёк добавлен к остальным. Сверь его адреса с кошельком, из которого ты пришёл.")
-      : t("Nothing was saved. Watch address #0 to see its balances here; nothing goes to the signer.", "Ничего не сохранено. Следи за адресом #0, чтобы видеть его балансы здесь; подписанту ничего не уходит."),
+      : t("Nothing was saved. Watch address #0 to see its balances here. Nothing goes to the signer.", "Ничего не сохранено. Следи за адресом #0, чтобы видеть его балансы здесь. Подписанту ничего не уходит."),
     content: h("div", { class: "ob-content" }, compareTable(accounts),
-      saved ? null : h("button", { class: "btn small", title: t("Puts address #0 into «Addresses for balances»; nothing goes to the signer", "Добавит адрес #0 в «Адреса для балансов»; подписанту ничего не уходит"),
+      saved ? null : h("button", { class: "btn small", title: t("Puts address #0 into «Addresses for balances» — nothing goes to the signer", "Добавит адрес #0 в «Адреса для балансов» — подписанту ничего не уходит"),
         onclick: async () => { if (await act("watch", { solana: accounts[0].solana, evm: accounts[0].evm }) !== null) { toast(t("Watching the balances of address #0.", "Слежу за балансами адреса #0.")); closeOverlay(); } } },
         icon("eye", 13), t("Watch #0", "Следить за #0"))),
     primary: t("Done", "Готово"), onPrimary: closeOverlay,
@@ -1089,8 +1089,8 @@ export function showImportKey() {
       const other = r.chain === "Solana" ? "Phantom" : "MetaMask";
       found.replaceChildren(
         h("div", { class: "ob-key-address" }, h("span", { class: "secondary small" }, r.chain), h("span", { class: "address selectable" }, r.address)),
-        h("div", { class: "secondary small" }, t(`Compare it with ${other} before saving. This wallet signs only on ${r.chain}; for the other chains, switch wallets.`,
-          `Сверь его с ${other}, прежде чем сохранять. Этот кошелёк подписывает только в ${r.chain}; для других сетей переключай кошельки.`)));
+        h("div", { class: "secondary small" }, t(`Compare it with ${other} before saving. This wallet signs only on ${r.chain}. For the other chains, switch wallets.`,
+          `Сверь его с ${other}, прежде чем сохранять. Этот кошелёк подписывает только в ${r.chain}. Для других сетей переключай кошельки.`)));
       save.disabled = false;
     } catch (e) {
       if (n !== asked) return;

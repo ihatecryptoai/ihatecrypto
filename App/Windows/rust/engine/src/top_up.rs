@@ -269,7 +269,7 @@ impl TopUpPage {
             let digits = |s: &str| if s == o.network.usdc_symbol { 2 } else { 6 };
             let lines = up.iter().map(|(s, was, after)| {
                 format!("+{} {s}, {} → {}", Fmt::num(after.saturating_sub(*was), digits(s)), Fmt::num(*was, digits(s)), Fmt::num(*after, digits(s)))
-            }).collect::<Vec<_>>().join("; ");
+            }).collect::<Vec<_>>().join(" · ");
             let Some(engine) = Self::engine() else { return };
             let said = engine.say(&format!("Landed on {}: ", o.network.title), &format!("Пришло в {}: ", o.network.title)) + &lines;
             Self::with(|p| if let Some(v) = p.view.as_mut() { (v.held, v.arrived) = (now, Some(said)) });

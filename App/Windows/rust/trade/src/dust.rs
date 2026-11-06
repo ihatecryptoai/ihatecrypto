@@ -65,11 +65,11 @@ impl Executor {
             return fail(if tokens.is_empty() {
                 "No dust to sweep: no verified token under the limit on Base, Arbitrum or Polygon.".to_string()
             } else {
-                format!("Nothing swept: {}.", left.join("; "))
+                format!("Nothing swept: {}.", left.join(" · "))
             });
         }
         Ok(format!("Swept {} token{} into ≈ {} USDC: {}.{}", swept.len(), if swept.len() == 1 { "" } else { "s" },
                    got.0.map_or_else(|| "NaN".to_string(), |g| Fmt::num(g, 2)), swept.join(", "),
-                   if left.is_empty() { String::new() } else { format!(" Left: {}.", left.join("; ")) }))
+                   if left.is_empty() { String::new() } else { format!(" Left: {}.", left.join(" · ")) }))
     }
 }

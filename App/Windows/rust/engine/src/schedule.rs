@@ -179,8 +179,8 @@ impl Engine {
         } else if task.sells() && automation.is_some() {
             self.say(" A sale waits for your Confirm and Windows Hello.", " Продажа будет ждать «Подтвердить» и Windows Hello.")
         } else if task.moves_money() {
-            self.say(" A money move comes as a card for Confirm; to run them by themselves, say «create an automation wallet».",
-                     " Перевод придёт карточкой на подтверждение; чтобы шли сами, скажи «создай кошелёк автоматизации».")
+            self.say(" A money move comes as a card for Confirm. To run them by themselves, say «create an automation wallet».",
+                     " Перевод придёт карточкой на подтверждение. Чтобы шли сами, скажи «создай кошелёк автоматизации».")
         } else {
             String::new()
         };
@@ -531,7 +531,7 @@ impl Engine {
         let main = self.st().active_wallet().map_or_else(|| "Main".into(), |a| a.label);
         let (label, need, has, short) = (&w.label, Fmt::num(need, 2), Fmt::num(b.total, 2), Fmt::num(short, 2));
         self.notify(Notice::Confirm, &self.say(&format!("«{label}» is short for the next buys"), &format!("На «{label}» не хватит на ближайшие покупки")),
-                    &self.say(&format!("The buys in the next 24 hours need {need} USDC; it has {has}. Top it up with {short} USDC for the week from «{main}»: Confirm and Windows Hello once, then they run by themselves."),
+                    &self.say(&format!("The buys in the next 24 hours need {need} USDC, but it has {has}. Top it up with {short} USDC for the week from «{main}»: Confirm and Windows Hello once, then they run by themselves."),
                               &format!("Покупкам в ближайшие сутки нужно {need} USDC, на нём {has}. Пополни его на {short} USDC на неделю с «{main}»: один раз «Подтвердить» и Windows Hello, дальше покупки пойдут сами.")),
                     false, false, None, None);
         let away = self.st().user_away();

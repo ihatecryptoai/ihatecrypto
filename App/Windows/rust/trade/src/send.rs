@@ -126,7 +126,7 @@ impl Executor {
         self.ensure_hyperliquid(total).await?;
         let free = Hyperliquid::balance(evm).await?.withdrawable;
         if !(usdc > Decimal::ZERO && total <= free) {
-            return fail(format!("{} free on Hyperliquid; can't send {}{}", usd(free), Fmt::num(usdc, 2),
+            return fail(format!("{} free on Hyperliquid — can't send {}{}", usd(free), Fmt::num(usdc, 2),
                                 if opening > Decimal::ZERO { " plus the 1 USDC Hyperliquid keeps once for a new account." } else { "." }));
         }
         let time = Utc::now().timestamp_millis().max(0) as u64;
@@ -201,7 +201,7 @@ impl Executor {
         // Fmt::num shows at most 28 places: past them its scale is past Decimal.
         let f = |u: u64| Fmt::num(shift(u, decimals as i64), (decimals as u32).min(28));
         let have = self.rpc.token_balance(sol, mint).await?;
-        if have < units { return fail(format!("{} {symbol} on Solana; the transfer needs {}.", f(have), f(units))) }
+        if have < units { return fail(format!("{} {symbol} on Solana, but the transfer needs {}.", f(have), f(units))) }
         let (blockhash, last_valid) = self.rpc.latest_blockhash().await?;
         let unsigned = solana::unsigned_transaction(&spl::transfer_message(sol, owner, mint, units, decimals, &blockhash, 20_000, program, close && units == have)?);
         let message = Message::parse_transaction(&unsigned)?;
@@ -397,7 +397,7 @@ impl Executor {
             units = rounded(num(Num::of(have) - Num::of(fee) * d("1.1"))?.max(Decimal::ZERO), 0, Rounding::Down);
         }
         if units <= Decimal::ZERO { return fail(format!("No {symbol} on {} to send.", net.name)) }
-        if units > have { return fail(format!("{} {symbol} on {}; can't send {}.", f(have), net.name, f(units))) }
+        if units > have { return fail(format!("{} {symbol} on {} — can't send {}.", f(have), net.name, f(units))) }
         let hash = self.send_evm(&net.rpc, &contract, &erc20::transfer(recipient, crate::u256(units)?)?, &format!("Send {} {symbol} to {label}", f(units)),
                                  &[recipient.to_string()], None, 0).await?;
         Ok(format!("Sent {} {symbol} to {label} on {}. {}/tx/{hash}", f(units), net.name, net.explorer))

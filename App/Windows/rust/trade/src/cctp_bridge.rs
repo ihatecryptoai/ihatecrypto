@@ -74,7 +74,7 @@ impl Executor {
             if mint.is_none() { tokio::time::sleep(Duration::from_secs(3)).await }
         }
         let Some(mint) = mint else {
-            return fail(format!("Circle hasn't minted on {} within 15 minutes; the burn is {}/tx/{burn}, in transit on the portfolio.", to.name, from.explorer));
+            return fail(format!("Circle hasn't minted on {} within 15 minutes. The burn is {}/tx/{burn}, in transit on the portfolio.", to.name, from.explorer));
         };
         self.report(&format!("CCTP · Circle minted on {} in {} s. {}/tx/{mint}", to.name, started.elapsed().as_secs(), to.explorer));
         let mut after = to.usdc_balance(me).await?;

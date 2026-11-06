@@ -145,7 +145,7 @@ impl Executor {
         let source = Self::near_source(cost, on_solana, |k| idle.get(k).copied());
         let Some((src, origin)) = source.and_then(|s| Some((s, asset::usdc_on_evm(s.key)?))) else {
             if on_solana < cost {
-                return fail(format!("{} {ticker} costs ≈ {} USDC; Solana has {} and no network 1Click takes USDC from has that much. Nothing was signed.",
+                return fail(format!("{} {ticker} costs ≈ {} USDC, but Solana has {} and no network 1Click takes USDC from has that much. Nothing was signed.",
                                     Fmt::num(amount, 2), Fmt::num(cost, 2), Fmt::num(on_solana, 2)));
             }
             return Ok((solana_quote, id, units, None));
@@ -176,7 +176,7 @@ impl Executor {
         if !binding.ok() { return stop(format!("The guard stopped the deposit: {}", binding.problems.join(" "))) }
         let from = src.map_or("Solana", |s| s.name);
         let what = format!("{} {}", Fmt::num(amount, 9), symbol.to_uppercase());
-        self.report(&format!("NEAR Intents: {} USDC from {from} → {what} to «{label}»; what isn't used comes back.", Fmt::num(cost, 2)));
+        self.report(&format!("NEAR Intents: {} USDC from {from} → {what} to «{label}». What isn't used comes back.", Fmt::num(cost, 2)));
         let tx = match src {
             Some(src) => {
                 self.ensure_evm(src, send_units, None).await?;

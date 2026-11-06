@@ -47,7 +47,7 @@ fn notes_say_what_is_signed_in_both_languages() {
     assert!(has(WalletCommand::Bridge { from: "base".into(), to: "arbitrum".into(), amount: Some(Decimal::TWO) }, ru, "Платит только на твой же адрес в Arbitrum"));
     assert!(note(&WalletCommand::Stake(Some(Decimal::ONE)), ru).unwrap().starts_with("Одна подпись в Solana"));
     assert_eq!(note(&WalletCommand::Stake(Some(Decimal::ONE)), en).unwrap(),
-               "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it.");
+               "One Solana signature, checked and simulated before it’s signed. Press Confirm. Cancel or “cancel” drops it.");
     // Base's way back is the EVM network's, by its name.
     assert_eq!(note(&WalletCommand::BaseToSolana(None), en).unwrap(),
                "Two Base transactions: an exact approve and Relay’s deposit — checked field by field before signing. Press Confirm.");
@@ -125,7 +125,7 @@ fn an_evm_trades_step_offers_its_ways_and_takes_the_picked_one_once() {
 #[test]
 fn why_this_way_answers_from_the_step_and_the_route_s_note() {
     with_engine(async |e| {
-        let note = "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it.";
+        let note = "One Solana signature, checked and simulated before it’s signed. Press Confirm. Cancel or “cancel” drops it.";
         let board = Board {
             steps: Some(vec![Step { label: "STAKE · JITOSOL".into(), title: "1 SOL".into(), lines: vec!["your SOL becomes JitoSOL".into(), String::new()],
                                     money: Some(Money { place: "Solana".into(), symbol: "SOL".into(), was: "2".into(), after: "1".into() }), status: None }]),
