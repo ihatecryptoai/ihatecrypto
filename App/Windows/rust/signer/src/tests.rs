@@ -8,7 +8,6 @@ use signer_api::{SignerAddress, SignerWallet};
 use crate::trusted::{self, Pref, State, takes_trust_away};
 use crate::vault::{self, agents, code, recipients, seeds};
 
-#[cfg(not(windows))] // the stand-in for Windows Hello: on Windows it would ask the real one
 fn setup() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -22,13 +21,11 @@ fn setup() {
     });
 }
 
-#[cfg(not(windows))]
 fn wallet(id: &str, label: &str) -> SignerWallet {
     SignerWallet { id: id.into(), label: label.into(), kind: "phrase".into(), solana: None, evm: Some("0xabc".into()), near: None, test: None, automation: None }
 }
 
 #[test]
-#[cfg(not(windows))]
 fn the_vault_seals_opens_and_keeps_its_settings() {
     setup();
     // A seed under Windows Hello: a master key is made, the box doesn't hold the seed, and it opens again.
