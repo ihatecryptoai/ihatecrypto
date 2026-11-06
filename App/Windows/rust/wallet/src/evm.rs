@@ -129,11 +129,14 @@ pub fn sign(digest: &[u8], private_key: &[u8]) -> Result<EvmSignature> {
 pub fn recover(digest: &[u8], signature: &EvmSignature) -> Result<String> {
     let bad = || fail("Not a signature over a 32-byte hash.");
     if digest.len() != 32 || signature.r.len() != 32 || signature.s.len() != 32 || !(27..=28).contains(&signature.v) { return bad() }
-    let Ok(sig) = Signature::from_slice(&[signature.r.as_slice(), &signature.s].concat()) else { return bad() };
+    // A signature that recovers no key (r or s of 0 or ≥ n, an r that is no point's x, a key at infinity) is refused,
+    // never a crash: these bytes come from a device or a co-signer.
+    let unverified = || fail("The signature didn't verify.");
+    let Ok(sig) = Signature::from_slice(&[signature.r.as_slice(), &signature.s].concat()) else { return unverified() };
     // libsecp256k1 recovers from a high-s signature too; normalising keeps that and flips the parity to match.
     let (sig, flip) = match sig.normalize_s() { Some(low) => (low, 1), None => (sig, 0) };
-    let Some(id) = RecoveryId::from_byte((signature.v - 27) as u8 ^ flip) else { return bad() };
-    let Ok(key) = VerifyingKey::recover_from_prehash(digest, &sig, id) else { return bad() };
+    let Some(id) = RecoveryId::from_byte((signature.v - 27) as u8 ^ flip) else { return unverified() };
+    let Ok(key) = VerifyingKey::recover_from_prehash(digest, &sig, id) else { return unverified() };
     let point = key.to_encoded_point(false);
     Ok(checksum(&to_hex(&keccak(&point.as_bytes()[1..])[12..])))
 }
@@ -197,6 +200,21 @@ mod tests {
         let flipped = EvmSignature { r: sig.r.clone(), s: high.to_vec(), v: 55 - sig.v };
         assert_eq!(recover(&digest, &flipped).unwrap(), recover(&digest, &sig).unwrap());
         assert!(sign(&digest[..31], &key).is_err());
+    }
+
+    /// LedgerTests' cases: a signature that recovers no key is refused with main's words, not a crash.
+    #[test]
+    fn a_signature_that_recovers_no_key_is_refused_not_a_crash() {
+        let digest = [0x11u8; 32];
+        let n = from_hex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141").unwrap();
+        let gx = from_hex("79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").unwrap();
+        let one = [vec![0u8; 31], vec![1]].concat();
+        let bad = [(vec![0u8; 32], one.clone()), (one.clone(), n), (one.clone(), vec![0xff; 32]),
+                   ([vec![0u8; 31], vec![5]].concat(), one.clone()), (gx, digest.to_vec())];
+        for (r, s) in bad {
+            assert_eq!(recover(&digest, &EvmSignature { r, s, v: 27 }).unwrap_err().0, "The signature didn't verify.");
+        }
+        assert_eq!(recover(&digest[..31], &EvmSignature { r: one.clone(), s: one, v: 27 }).unwrap_err().0, "Not a signature over a 32-byte hash.");
     }
 
     #[test]
