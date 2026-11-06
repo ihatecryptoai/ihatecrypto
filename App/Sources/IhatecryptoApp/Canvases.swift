@@ -1338,6 +1338,7 @@ extension Workspace {
         case .sellOn(let place, let token, let amount, let keep): swapRoute(place, token, usdc: nil, sell: amount, keep: keep)
         case .swapOn(let place, let from, let to, let amount): pairRoute(place, from, to, amount)
         case .crossSwap(let a, let from, let b, let to, let amount): crossRoute(a, from, b, to, amount)
+        case .swapPrivately(let a, let from, let b, let to, let amount): privateSwapRoute(command, a, from, b, to, amount)
         case .sweepDust(let under): dustRoute(under)
         case .revokeApproval(let place, let token, let spender, let permit2): revokeRoute(place, token, spender, permit2)
         case .hlSpotBuy(let symbol, let usdc?): hlSpotRoute(symbol, usdc: usdc, sell: nil)
@@ -2315,6 +2316,26 @@ extension Workspace {
         return MoveRoute(title: "Swap \(moving) on \(fromName) → \(label(b)) on \(toName)", footer: footer, steps: steps)
     }
 
+    /// A private swap: one deposit to the 1Click address bound to the quote, refused unless 1Click holds it as
+    /// confidential, and what arrives at this wallet's own address on the other side. On chain the two can't be matched.
+    private func privateSwapRoute(_ command: WalletCommand, _ a: String, _ from: String, _ b: String, _ to: String, _ amount: Decimal) -> MoveRoute {
+        let fromName = WalletCommand.placeName(from), toName = WalletCommand.placeName(to)
+        func fill(_ p: String) -> RouteFill { RouteFill(rawValue: p) ?? .check }
+        func logo(_ p: String) -> String { ModuleNetwork(place: p)?.logo ?? p }
+        func label(_ t: String) -> String { t.hasPrefix("0x") ? tokenSymbol(t) ?? "\(t.prefix(6))…\(t.suffix(4))" : t.uppercased() }
+        let quote = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
+        let moving = "\(Fmt.num(amount, maxFraction: 8)) \(label(a))"
+        let out = from == "near" && a.uppercased() == "NEAR" ? nearMove(by: -amount) : moneyMove(label(a), on: from, by: -amount)
+        let lands = Self.quotedAmount(quote?.first?.gets)
+        let into = lands.map { x in to == "near" && b.uppercased() == "NEAR" ? nearMove(by: x, approx: true) : tokenMove(label(b), on: to, by: x) } ?? []
+        return MoveRoute(title: "Swap \(moving) privately → \(label(b))\(from == to ? "" : " on \(toName)")",
+                         footer: "Through NEAR Intents' Confidential Intents: one deposit on \(fromName) to the 1Click address bound to this quote, checked with 1Click before signing and refused unless 1Click holds it as private. That address needs \(Presence.name) the first time. \(label(b)) comes to your own address on \(toName), and on chain the deposit and the payout can't be matched. A refund comes back to \(fromName). Press Confirm.",
+                         steps: [step(logo(from), "FROM · \(fromName.uppercased())", moving, "your own address there", fill(from), money: out),
+                                 step("near", "PRIVATE SWAP · CONFIDENTIAL INTENTS", label(b),
+                                      quote.map { $0.first.map { "≈ \($0.gets)" } ?? "no quote now · asked again every 30 s" } ?? "quoting…", .near),
+                                 step(logo(to), "TO · \(toName.uppercased())", label(b), "your own address there", fill(to), money: into)])
+    }
+
     /// A coin to a saved address on a network only NEAR Intents reaches: the USDC it costs and where from (once quoted),
     /// 1Click's swap for exactly that much, and the saved address.
     /// The agent wallet on NEAR Intents: the rules the owner's NEAR key signs, money into it, or money out by its rules.
@@ -2495,6 +2516,7 @@ extension Workspace {
             return
         case .swapOn(let p, let a, let b, let x): await quotePair(command, p, a, b, x); return
         case .crossSwap(let a, let from, let b, let to, let x): await quoteCross(command, a, from, b, to, x); return
+        case .swapPrivately(let a, let from, let b, let to, let x): await quotePrivateSwap(command, a, from, b, to, x); return
         // A move between networks: what each bridge lands, costs and takes, the one it goes by first. Not a priced swap:
         // Confirm doesn't wait for it, and the executor asks them all again before signing.
         case .usdt(let from, let to, let x, let layerZero):
@@ -2659,7 +2681,7 @@ extension Workspace {
         case .sell(let a, let x?): (x, a.symbol)
         case .sellOn(_, let t, let x?, _): (x, tokenSymbol(t) ?? (t.hasPrefix("0x") ? "\(t.prefix(6))…" : t))
         case .sellStock(let s, let x?): (x, s)
-        case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?): (x, a)
+        case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?), .swapPrivately(let a, _, _, _, let x): (x, a)
         default: nil
         }
         var line = "You get ≈ \(Fmt.num(out, maxFraction: 6)) \(got)"
@@ -2707,6 +2729,19 @@ extension Workspace {
                 swapQuote = (command, [(q.source?.name ?? "Solana", "≈ \(Fmt.num(cost)) USDC for \(worth.map(Fmt.usd) ?? "?") of it\(fees)\(time)", 0)])
                 return
             }
+            if swapQuote?.command != command { swapQuote = (command, []) }
+            try? await Task.sleep(for: .seconds(15))
+        }
+    }
+
+    /// A private swap: Confidential Intents' quote, asked again until it answers.
+    private func quotePrivateSwap(_ command: WalletCommand, _ a: String, _ from: String, _ b: String, _ to: String, _ amount: Decimal) async {
+        guard let wallet = previewWallet else { return }
+        pricedCommand = command
+        while !Task.isCancelled {
+            let q = try? await executor(wallet).intentQuoteText(a, on: from, for: b, on: to, amount: amount, near: nearAddress, confidential: true)
+            guard !Task.isCancelled else { return }
+            if let q { swapQuote = (command, [(q.way, q.gets, 0)]); return }
             if swapQuote?.command != command { swapQuote = (command, []) }
             try? await Task.sleep(for: .seconds(15))
         }
@@ -3237,6 +3272,8 @@ struct WithdrawBoard: View {
             board(ws.route(command) ?? ws.fallbackRoute(command), command)
                 // Again on Refresh (quoteRound).
                 .task(id: QuoteRun(command: command, round: ws.quoteRound)) { await ws.quoteSwap(command) }
+                // P3: what a swap through NEAR Intents would get privately, for the switch over Confirm.
+                .task(id: command.summary) { await ws.quotePrivateTwin() }
         case .transfer(let entry, let amount)?:
             board(ws.transferRoute(entry, amount), nil)
                 // P3: what the same send would cost privately, for the switch over Confirm.
@@ -3324,6 +3361,7 @@ extension Workspace {
         if case .sendPrivately(let name, let token, _, let network) = command {
             do { _ = try privateRecipient(name, token: token, network: network) } catch { reply(error.localizedDescription, note: note); return }
         }
+        if let why = privateSwapRefusal(command) { reply(why, note: note); return }
         if case .sendToken(let name, let token, let amount, let network) = command {
             do {
                 if try acrossRecipient(name, token: token, network: network) != nil {

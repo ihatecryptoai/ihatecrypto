@@ -210,6 +210,10 @@ public enum WalletCommand: Equatable, Sendable {
     /// A token on one network for a token on another through Relay, one signature: «swap 0.1 SOL on Solana for ETH on
     /// Arbitrum». Places are «solana» or an EVM network's key; nil amount = all of a token.
     case crossSwap(from: String, on: String, to: String, at: String, amount: Decimal?)
+    /// A swap through NEAR Intents' Confidential Intents (asked for privately): the deposit and what arrives can't be
+    /// matched on chain. Places as in `crossSwap`, «near» for the NEAR account; always an amount, always this wallet's own
+    /// addresses on both sides. «buy NEAR for 5 USDC privately» = USDC on Solana → NEAR on NEAR.
+    case swapPrivately(from: String, on: String, to: String, at: String, amount: Decimal)
     /// Money coming in from a network ihatecrypto has no wallet on — «receive 50 USDC from Sui», «получи 0.01 BTC с
     /// биткоина»: 1Click's deposit address there, what arrives swapped into USDC on Solana. `network` is the address
     /// book's («sui», «bitcoin», «tron», «xrp», «dogecoin», «zcash»); nil amount = ask.
@@ -334,14 +338,28 @@ public enum WalletCommand: Equatable, Sendable {
         }
     }
 
-    /// This send made private (`sendPrivately`), when it is a send with an amount; nil for anything else.
+    /// This send or NEAR Intents swap made private (`sendPrivately`, `swapPrivately`), when it has an amount; nil for
+    /// anything else.
     public var madePrivate: WalletCommand? {
         switch self {
         case .sendToken(let name, let token, let amount?, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
         case .sendTo(let name, let amount, let net): .sendPrivately(name: name, token: "USDC", amount: amount, network: net)
-        case .sendPrivately: self
+        case .sendPrivately, .swapPrivately: self
+        case .buyNear(let x?): .swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: x)
+        case .sellNear(let x?, let to): .swapPrivately(from: "NEAR", on: "near", to: "USDC", at: to ?? "solana", amount: x)
+        case .swapOn("near", let a, let b, let x?): .swapPrivately(from: a, on: "near", to: b, at: "near", amount: x)
+        case .crossSwap(let a, let from, let b, let to, let x?): .swapPrivately(from: a, on: from, to: b, at: to, amount: x)
         default: nil
         }
+    }
+
+    /// A private swap as the same swap in the open: what the switch over Confirm offers beside it.
+    public var madePublic: WalletCommand? {
+        guard case .swapPrivately(let a, let from, let b, let to, let x) = self else { return nil }
+        if a.uppercased() == "USDC", from == "solana", b.uppercased() == "NEAR", to == "near" { return .buyNear(usdc: x) }
+        if a.uppercased() == "NEAR", from == "near", b.uppercased() == "USDC" { return .sellNear(amount: x, to: to == "solana" ? nil : to) }
+        if from == "near", to == "near" { return .swapOn("near", from: a, to: b, amount: x) }
+        return .crossSwap(from: a, on: from, to: b, at: to, amount: x)
     }
 
     private static func read(_ text: String) -> WalletCommand? {
@@ -964,6 +982,7 @@ extension WalletCommand {
         case .sendToken(let name, let token, _, let net): .sendToken(name: name, token: token, amount: amount, network: net)
         case .sendPrivately(let name, let token, _, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
         case .crossSwap(let from, let on, let to, let at, _): .crossSwap(from: from, on: on, to: to, at: at, amount: amount)
+        case .swapPrivately(let from, let on, let to, let at, _): .swapPrivately(from: from, on: on, to: to, at: at, amount: amount)
         default: self
         }
     }
@@ -1144,6 +1163,12 @@ extension WalletCommand {
         case .crossSwap(let a, let from, let b, let to, let x):
             func name(_ t: String) -> String { t.hasPrefix("0x") || t.count >= 32 ? t : t.uppercased() }   // a mint keeps its case
             return "swap \(x.map { NSDecimalNumber(decimal: $0).stringValue } ?? "all") \(name(a)) on \(Self.placeName(from)) for \(name(b)) on \(Self.placeName(to))"
+        // Both places on NEAR read back as a swap there; across networks, as a swap across.
+        case .swapPrivately(let a, let from, let b, let to, let x):
+            func name(_ t: String) -> String { t.hasPrefix("0x") || t.count >= 32 ? t : t.uppercased() }
+            let amount = NSDecimalNumber(decimal: x).stringValue
+            return from == to ? "swap \(amount) \(name(a)) privately for \(name(b)) on \(Self.placeName(to))"
+                : "swap \(amount) \(name(a)) on \(Self.placeName(from)) privately for \(name(b)) on \(Self.placeName(to))"
         case .solanaTo(let place, let x): return "move \(n(x)) USDC from Solana to \(Self.placeName(place))"
         case .pay(let method, let url, _): return "pay for \(method) \(url) in USDC on Tempo"
         case .contractCall(let c): return "call \(c.name) on \(c.contract.prefix(6))…\(c.contract.suffix(4)) on \(Self.placeName(c.network))"

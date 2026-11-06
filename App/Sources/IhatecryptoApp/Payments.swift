@@ -2,6 +2,7 @@ import EVMChain
 import ExecutionCore
 import Foundation
 import IhatecryptoCore
+import OneClickKit
 import TradeExecution
 import SwiftUI
 import WalletCore
@@ -17,6 +18,9 @@ struct PaymentQuote {
     let service: String
     /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
     var probed = false
+    /// A NEAR Intents charge: what the service receives, as 1Click lists the asset («1 USDC»), and that asset's 1Click
+    /// id for the guard; nil when 1Click doesn't list it.
+    var receives: (text: String, asset: String)? = nil
 }
 
 /// What a service sent back, on the canvas: its results as rows (or its values), who answered, what it cost. A paid
@@ -72,7 +76,7 @@ extension Workspace {
                 }
                 return
             }
-            let mpp = MPP.challenge(headers["www-authenticate"] ?? "")
+            let mpp = MPP.challenge(headers["www-authenticate"] ?? "", pays: { self.nearOrigin($0) != nil })
             // No payable MPP challenge: x402 in USDC on Base, by a signature its facilitator settles.
             if case .failure = mpp, let offer = X402.offer(header: headers["payment-required"]) {
                 payment = PaymentQuote(command: command, challenge: nil, x402: offer, ask: ask, service: service, probed: probed)
@@ -88,6 +92,16 @@ extension Workspace {
             switch mpp {
             case .failure(let refusal):
                 reply(say("Can't pay \(service): ", "Не могу оплатить \(service): ") + refusal.reason, note: note)
+            case .success(let c) where c.near != nil:
+                let n = c.near!, origin = nearOrigin(n) ?? "solana", net = WalletCommand.placeName(origin)
+                let receives = await nearReceives(n)
+                payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed, receives: receives)
+                pendingAction = .wallet(command)
+                pendingText = "pay \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(service) through NEAR Intents"
+                let refund = nearRefundIsOurs(n, origin: origin) ? say("a refund comes back to you", "возврат придёт тебе")
+                    : say("a refund goes to the service's address, not yours", "возврат уйдёт на адрес сервиса, а не тебе")
+                reply(say("\(service) asks \(Fmt.num(c.usdc, maxFraction: 6)) USDC on \(net) through NEAR Intents and gets \(receives?.text ?? "what it asked for") at \(n.destinationRecipient). The card is on the canvas. If the payment doesn't settle, \(refund).",
+                          "\(service) просит \(Fmt.num(c.usdc, maxFraction: 6)) USDC в \(net) через NEAR Intents и получит \(receives?.text ?? "то, что просит") на \(n.destinationRecipient). Карточка на холсте. Если оплата не пройдёт, \(refund).") , note: note)
             case .success(let c):
                 payment = PaymentQuote(command: command, challenge: c, ask: ask, service: service, probed: probed)
                 pendingAction = .wallet(command)
@@ -189,6 +203,7 @@ extension Workspace {
         }
         if let offer = quote.x402 { return try await payX402(method, url, body, quote: quote, offer: offer, e) }
         guard var c = quote.challenge else { throw ExecutionError("The service's price is gone; ask for it again.") }
+        if c.near != nil { return try await payNear(method, url, body, quote: quote, c, e) }
         if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 30 }) == true {
             let (status, headers, _) = try await MPP.call(method, url, body)
             guard status == 402, case .success(let fresh) = MPP.challenge(headers["www-authenticate"] ?? "") else {
@@ -213,7 +228,7 @@ extension Workspace {
 
     /// The service's data on the canvas, and in the chat the answer to what was asked: the model reads the data
     /// (1–3 sentences, the best results as links), then one line on what it cost. Without a model: where to look.
-    private func answered(_ ask: String, service: String, data: Data, usdc: Decimal?, proof: String?) async -> String {
+    private func answered(_ ask: String, service: String, data: Data, usdc: Decimal?, proof: String?, on place: String = "Tempo") async -> String {
         let answer = MPP.Answer(data)
         let kept = ServiceAnswer(service: service, usdc: usdc, proof: proof, answer: answer, raw: MPP.shown(data, limit: 20_000))
         // A paid one goes with its move (drawn under its route, now and once it's an earlier move); a free one on its own.
@@ -229,7 +244,7 @@ extension Workspace {
         if let client = llmClient(), let said = try? await MPP.reply(to: ask, service: service, data: data, language: replyLanguage, client: client, model: model), !said.isEmpty {
             text = said
         }
-        let cost = usdc.map { say("Paid \(Fmt.num($0, maxFraction: 6)) USDC to \(service) on Tempo", "Оплачено \(Fmt.num($0, maxFraction: 6)) USDC · \(service) · Tempo") }
+        let cost = usdc.map { say("Paid \(Fmt.num($0, maxFraction: 6)) USDC to \(service) on \(place)", "Оплачено \(Fmt.num($0, maxFraction: 6)) USDC · \(service) · \(place)") }
         return text + (cost.map { "\n\n\($0) \(proof ?? "")" } ?? "")
     }
 
@@ -252,6 +267,7 @@ extension Workspace {
         guard case .pay(_, let url, _) = command, let quote = payment, quote.command == command else { return nil }
         if let offer = quote.x402 { return x402Route(url, quote: quote, offer: offer) }
         guard let c = quote.challenge else { return nil }
+        if let n = c.near { return nearChargeRoute(url, quote: quote, c, n) }
         let host = URL(string: url)?.host() ?? c.realm, price = Fmt.num(c.usdc, maxFraction: 6)
         let there = tempoUSDC ?? 0, short = there < c.usdc + Decimal(string: "0.01")!
         let floatUSD = Decimal(Executor.tempoFloat) / 1_000_000, requests = NSDecimalNumber(decimal: (max(c.usdc, floatUSD) / c.usdc).rounded(0, .down)).intValue
@@ -290,12 +306,13 @@ struct ServiceAnswerBoard: View {
                 TokenLogo(name: "tempo", size: 28, round: true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(answer.service).font(.ui(15, .bold)).lineLimit(1)
-                    Text(answer.usdc.map { "paid \(Fmt.num($0, maxFraction: 6)) USDC on \(answer.proof?.contains("basescan") == true ? "Base" : "Tempo")" } ?? "free answer").font(.ui(10.5)).foregroundStyle(.secondary)
+                    Text(answer.usdc.map { "paid \(Fmt.num($0, maxFraction: 6)) USDC \(answer.proof?.contains("near-intents") == true ? "through NEAR Intents" : answer.proof?.contains("basescan") == true ? "on Base" : "on Tempo")" } ?? "free answer").font(.ui(10.5)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 if let proof = answer.proof.flatMap(URL.init(string:)) {
-                    Link(destination: proof) { Label("Tempo", systemImage: "arrow.up.right").font(.ui(11, .semibold)) }
-                        .help("The payment on Tempo's explorer")
+                    let place = proof.host()?.contains("near-intents") == true ? "NEAR Intents" : proof.host()?.contains("basescan") == true ? "Base" : "Tempo"
+                    Link(destination: proof) { Label(place, systemImage: "arrow.up.right").font(.ui(11, .semibold)) }
+                        .help("The payment on \(place)'s explorer")
                 }
                 CopyButton(text: answer.raw, help: "Copy the whole answer")
                 if closable {
@@ -356,5 +373,112 @@ struct ServiceAnswerBoard: View {
         } else {
             content
         }
+    }
+}
+
+/// MPP's NEAR Intents charge (paymentauth.org draft-nearintents-charge-01): the service's 402 names a 1Click deposit
+/// address on the network it wants paid on and what it receives; ihatecrypto pays it in USDC on Solana, Base, Arbitrum or
+/// Ethereum, checks the address with 1Click before signing (DepositGuard.charge), and proves it with the hash.
+extension Workspace {
+    /// The place a charge is paid from when its token is USDC there and 1Click takes it: «solana» or an EVM network's key.
+    func nearOrigin(_ n: MPP.NearCharge) -> String? {
+        if n.onSolana { return n.token == SpotAsset.usdc.mint ? "solana" : nil }
+        guard let id = n.evmChain, let net = EVMNetwork.all.first(where: { $0.rpc.chainId == id }), net.usdc.lowercased() == n.token.lowercased(),
+              OneClick.Asset.usdc(onEVM: net.key) != nil else { return nil }
+        return net.key
+    }
+
+    /// Whether a refund would come back to this wallet: the service names the refund address.
+    func nearRefundIsOurs(_ n: MPP.NearCharge, origin: String) -> Bool {
+        let ours = origin == "solana" ? signerWallet?.solana : signerWallet?.evm
+        return ours?.lowercased() == n.refundTo.lowercased()
+    }
+
+    /// What the service receives as 1Click lists it: «1 USDC», and the asset's 1Click id. nil when 1Click doesn't list it.
+    func nearReceives(_ n: MPP.NearCharge) async -> (text: String, asset: String)? {
+        guard let tokens = try? await OneClick.tokens() else { return nil }
+        let a = n.destinationAsset, contract = a.split(separator: ":").last.map(String.init)?.lowercased() ?? ""
+        let token: OneClick.Token? = if a.hasPrefix("near:mainnet/nep141:") {
+            tokens.first { $0.assetId == "nep141:" + a.dropFirst("near:mainnet/nep141:".count) }
+        } else if a.hasPrefix(MPP.NearCharge.solanaMainnet + "/") {
+            tokens.first { $0.blockchain == "sol" && $0.contract?.lowercased() == contract }
+        } else if a.hasPrefix("eip155:"), let id = UInt64(a.dropFirst(7).prefix { $0 != "/" }),
+                  let net = EVMNetwork.all.first(where: { $0.rpc.chainId == id }), let chain = Executor.intentChains[net.key] {
+            tokens.first { $0.blockchain == chain && $0.contract?.lowercased() == contract }
+        } else { nil }
+        guard let token, let units = Decimal(string: n.amountOut) else { return nil }
+        return ("\(Fmt.num(units / pow(10, token.decimals), maxFraction: token.decimals)) \(token.symbol)", token.assetId)
+    }
+
+    /// The card: USDC from the network the service wants (brought there through NEAR Intents first when short) → the
+    /// 1Click deposit → what the service receives, and where a refund would go.
+    func nearChargeRoute(_ url: String, quote: PaymentQuote, _ c: MPP.Challenge, _ n: MPP.NearCharge) -> MoveRoute {
+        let origin = nearOrigin(n) ?? "solana", net = WalletCommand.placeName(origin), price = Fmt.num(c.usdc, maxFraction: 6)
+        let host = URL(string: url)?.host() ?? quote.service, there = usdc(on: origin) ?? 0
+        let bring = origin == "solana" ? nil : Self.x402TopUp(price: c.usdc, onBase: there), ends = AddressCheck.ends(c.payee)
+        let logo = ModuleNetwork(place: origin)?.logo ?? "sol", fill = RouteFill(rawValue: origin) ?? .check
+        let refund = nearRefundIsOurs(n, origin: origin) ? "your own address" : "the service's address \(AddressCheck.ends(n.refundTo).start) … \(AddressCheck.ends(n.refundTo).end), not yours"
+        // A transfer there pays gas in its coin: none, and ≈ half a dollar of USDC brings some over Relay first (ensureEVM).
+        // The coin as the portfolio holds it (Base's ETH is read on its own); not read yet, nothing is claimed.
+        let coin = EVMNetwork.named(origin)?.gasCoin ?? "ETH", floor = EVMNetwork.named(origin).map { Decimal($0.gasFloor) / 1_000_000_000_000_000_000 } ?? 0
+        let needGas = origin != "solana" && (held(coin, on: origin).map { $0 < floor } ?? false)
+        return MoveRoute(title: "Pay \(price) USDC · \(quote.service) · NEAR Intents",
+                         footer: "MPP through NEAR Intents: exactly \(price) USDC on \(net) to the 1Click deposit address \(host) named (\(ends.start) … \(ends.end)). "
+                            + "Before signing, 1Click itself must hold that address for \(n.destinationRecipient), \(quote.receives?.text ?? "the amount it asked") and the refund address, at no more than 1Click's own price. "
+                            + (bring.map { "\(net) has \(Fmt.num(there)) USDC, so \(Fmt.num($0)) USDC come from Solana through NEAR Intents first. " } ?? "")
+                            + (needGas ? "\(net) has no \(coin) for the transfer's gas, so ≈ 0.5 USDC from Solana brings some over Relay first. " : "")
+                            + "If it doesn't settle, 1Click refunds the USDC to \(refund). Then the request goes again with the deposit's hash. Press Confirm.",
+                         steps: [
+            bring.map { b in ActivityBubble(kind: "step", label: "FROM · SOLANA → \(net.uppercased())", title: "\(Fmt.num(b)) USDC", lines: ["through NEAR Intents · 1Click"],
+                                            logo: "sol", fill: .near, money: moneyMove("USDC", on: "solana", by: -b)) }
+                ?? ActivityBubble(kind: "step", label: "FROM · \(net.uppercased())", title: "\(price) USDC", lines: ["your USDC on \(net)"], logo: logo, fill: fill,
+                                  money: [MoneyMove(place: net, symbol: "USDC", was: there, after: max(0, there - c.usdc))]),
+        ] + (needGas ? [ActivityBubble(kind: "step", label: "GAS · RELAY", title: "+ \(coin) on \(net)", lines: ["≈ 0.5 USDC from Solana · for the transfer's gas"],
+                                       logo: "relay", fill: .relay, money: moneyMove("USDC", on: "solana", by: -Decimal(string: "0.5")!, approx: true))] : []) + [
+            ActivityBubble(kind: "step", label: "PAY · NEAR INTENTS", title: "\(price) USDC", lines: ["1Click deposit, checked before signing"], logo: "near", fill: .near),
+            ActivityBubble(kind: "step", label: "TO · \(quote.service.uppercased())", title: quote.receives?.text ?? "the answer comes here",
+                           lines: [n.destinationRecipient], logo: "near", fill: .check),
+        ])
+    }
+
+    /// After Confirm: asked again when the quote is about to run out (its deposit address is single-use, so a fresh one
+    /// comes with it; only the same receiver, refund address and output, for at most 1% more), USDC brought to the network
+    /// first when it's short, the deposit checked and sent, then the request again with its hash. The service answers
+    /// once 1Click has settled it.
+    func payNear(_ method: String, _ url: String, _ body: String?, quote: PaymentQuote, _ shown: MPP.Challenge, _ e: Executor) async throws -> String {
+        var c = shown
+        if quote.probed || c.expires.map({ $0.timeIntervalSinceNow < 60 }) == true {
+            let (status, headers, _) = try await MPP.call(method, url, body)
+            guard status == 402, case .success(let fresh) = MPP.challenge(headers["www-authenticate"] ?? "", pays: { self.nearOrigin($0) != nil }),
+                  let n = fresh.near, let old = c.near, n.currency == old.currency, n.destinationRecipient == old.destinationRecipient,
+                  n.destinationAsset == old.destinationAsset, n.amountOut == old.amountOut, n.refundTo == old.refundTo,
+                  fresh.amount <= c.amount else {
+                throw ExecutionError("\(quote.service)'s price or receiver changed when asked again (\(status)). Nothing was paid. Ask again to see the new card.")
+            }
+            c = fresh
+        }
+        guard let n = c.near, let origin = nearOrigin(n) else { throw ExecutionError("ihatecrypto doesn't pay this token. Nothing was paid.") }
+        guard let payer = origin == "solana" ? signerWallet?.solana : signerWallet?.evm else { throw ExecutionError("No address on \(WalletCommand.placeName(origin)) in this wallet.") }
+        if origin != "solana", let bring = Self.x402TopUp(price: c.usdc, onBase: usdc(on: origin) ?? 0) {
+            runningAction?.lines.append(say("Bringing USDC to \(WalletCommand.placeName(origin)) through NEAR Intents", "Перевожу USDC в \(WalletCommand.placeName(origin)) через NEAR Intents"))
+            let arrived = try await e.usdcByIntents(to: origin, usdc: bring)
+            guard (usdc(on: origin) ?? 0) + arrived >= c.usdc else {
+                throw ExecutionError("Only \(Fmt.num(arrived)) USDC reached \(WalletCommand.placeName(origin)). Nothing was paid. Ask again.")
+            }
+            // The top-up took its minutes: a price that ran out meanwhile isn't paid (the USDC stays where it came).
+            if let expires = c.expires, expires.timeIntervalSinceNow < 60 {
+                throw ExecutionError("\(quote.service)'s price ran out while the USDC came to \(WalletCommand.placeName(origin)). Nothing was paid. Ask again.")
+            }
+        }
+        let hash = try await e.payIntentsCharge(from: origin == "solana" ? nil : origin, units: c.amount, deposit: c.payee, recipient: n.destinationRecipient,
+                                                refundTo: n.refundTo, amountOut: n.amountOut, destination: quote.receives?.asset, service: quote.service)
+        payment = nil
+        let proof = "https://explorer.near-intents.org/transactions/\(c.payee)"
+        answerStep(say("loading the answer…", "загружаю ответ…"), say("\(quote.service) waits for NEAR Intents · a minute or two", "\(quote.service) ждёт NEAR Intents · минуту-две"))
+        runningAction?.lines.append(say("Waiting for \(quote.service)'s answer", "Жду ответ \(quote.service)"))
+        let data = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: payer)), usdc: c.usdc,
+                                      service: quote.service, proof: proof, on: "NEAR Intents", timeout: 300)
+        try? Journal(url: journalURL).append(.init(chain: "1click", id: c.payee, kind: .settled, note: "MPP \(quote.service)"))
+        return await answered(quote.ask, service: quote.service, data: data, usdc: c.usdc, proof: proof, on: "NEAR Intents")
     }
 }

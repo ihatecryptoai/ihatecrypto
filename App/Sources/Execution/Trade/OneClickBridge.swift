@@ -146,8 +146,8 @@ extension Executor {
         let binding = DepositGuard.check(bound: bound, recipient: recipient, refundTo: refundTo, origin: origin, destination: asset, amount: "\(units)")
         guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         // A private send only when 1Click itself holds this deposit as confidential: else it would go in the open.
-        if confidential, bound["confidentiality"]?.lowercased() != "basic" {
-            throw GuardStop("The guard stopped the deposit: 1Click didn't take it as a private (Confidential Intents) send — it says «\(bound["confidentiality"] ?? "nothing")». Nothing was sent.")
+        if confidential, case let v = DepositGuard.confidential(bound: bound), !v.ok {
+            throw GuardStop("The guard stopped the deposit: " + v.problems.joined(separator: " ") + " Nothing was sent.")
         }
         let from = src?.name ?? "Solana", what = "\(Fmt.num(amount, maxFraction: 9)) \(symbol.uppercased())"
         report("NEAR Intents\(confidential ? " (private)" : ""): \(Fmt.num(cost)) USDC from \(from) → \(what) to «\(label)»; what isn't used comes back.")
@@ -228,6 +228,33 @@ extension Executor {
                                  note: "Receive: \(AddressCheck.Network(rawValue: network)?.title ?? network) \(asset.symbol)→Solana USDC \(Fmt.num(amount))"))
         let minimum = (Decimal(string: quote.minAmountIn ?? "") ?? units) / Decimal(sign: .plus, exponent: asset.decimals, significand: 1)
         return (deposit, quote, minimum)
+    }
+
+    /// An MPP charge through NEAR Intents (paymentauth.org draft-nearintents-charge-01): `units` of USDC on `from` (nil =
+    /// Solana) to the 1Click deposit address the service's 402 named. 1Click itself must hold that address for the
+    /// service's recipient, its refund address, exactly `amountOut` and, when known, the asset it receives, at no more
+    /// than 1Click's own price (DepositGuard.charge) before anything is sent. The signer asks to allow the deposit address
+    /// in person. Returns the deposit's transaction hash: the payment's proof.
+    public func payIntentsCharge(from: String?, units: UInt64, deposit: String, recipient: String, refundTo: String, amountOut: String,
+                                 destination: String?, service: String) async throws -> String {
+        guard let origin = Self.oneClickUSDC(from) else { throw ExecutionError("NEAR Intents doesn't take USDC on \(from ?? "solana"). Nothing was paid.") }
+        // Gas and USDC there first: the card says so. The binding is read after, right before the signature.
+        if let from, let net = EVMNetwork.named(from) { try await ensureEVM(net, usdc: units) }
+        let verdict = DepositGuard.charge(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: recipient, refundTo: refundTo,
+                                          origin: origin, destination: destination, amountOut: amountOut, deposit: units)
+        guard verdict.ok else { throw GuardStop("The guard stopped the payment: " + verdict.problems.joined(separator: " ") + " Nothing was paid.") }
+        let name = from.map(WalletCommand.placeName) ?? "Solana", usdc = Self.usdc(units)
+        report("NEAR Intents: \(usdc) USDC from \(name) to the 1Click deposit \(service)'s payment names.")
+        let tx: String
+        if let from, let net = EVMNetwork.named(from) {
+            tx = try await sendEVM(net.rpc, to: net.usdc, data: try ERC20.transfer(to: deposit, amount: units),
+                                   note: "Pay \(usdc) USDC to \(service) through NEAR Intents", recipients: [deposit])
+        } else {
+            tx = String(try await sendSolanaUSDC(units, to: deposit, label: "\(service)'s 1Click deposit").split(separator: "/").last ?? "")
+        }
+        try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "MPP \(service) · \(usdc) USDC from \(name)"))
+        if !tx.isEmpty { try? await OneClick.submitDeposit(txHash: tx, depositAddress: deposit) }
+        return tx
     }
 
     /// What 1Click must land beyond Relay to be taken: 10 cents, or 0.05% of a bigger move.

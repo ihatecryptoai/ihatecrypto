@@ -1,6 +1,7 @@
 import ExecutionCore
 import Foundation
 import IhatecryptoCore
+import OneClickKit
 import SwiftUI
 import TradeExecution
 import WalletCore
@@ -53,6 +54,10 @@ struct IntentsJourney {
             if case .sendPrivately = c { isPrivate = true }
             self.init(title: "\(Fmt.num(x, maxFraction: 9)) \(r.symbol) → \(name)", from: EVMNetwork.all.first { $0.name == r.from }?.key ?? "solana",
                       to: r.network, privately: isPrivate, estimate: r.seconds)
+        case .swapPrivately(let a, let from, let b, let to, let x):
+            let way = ws.swapQuote.flatMap { $0.command == c ? $0.ways.first?.way : nil }
+            self.init(title: "\(Fmt.num(x, maxFraction: 8)) \(a.uppercased()) → \(b.uppercased())", from: from, to: to, privately: true,
+                      estimate: way.flatMap { $0.firstMatch(of: /≈ (\d+) s/) }.flatMap { Int($0.1) })
         case .intents(let a, let b, let x):
             let quoted = ws.swapQuote.flatMap { $0.command == c ? $0.ways.first?.gets : nil }
             // All of it reads as its number: «all · 3.8 USDC».
@@ -290,15 +295,29 @@ extension Workspace {
             guard token.uppercased() == "USDC", let r = try? privateRecipient(name, token: token, network: net),
                   Self.privateUSDCNetworks.contains(r.network) else { return nil }
             return (true, .sendTo(name: name, amount: x, network: r.network))
+        // A swap through NEAR Intents and its private twin through Confidential Intents (the partner key's).
+        case .wallet(let c)?:
+            if case .swapPrivately = c { return c.madePublic.map { (true, $0) } }
+            guard OneClick.key != nil, let p = c.madePrivate, case .swapPrivately = p else { return nil }
+            return (false, p)
         default:
             return nil
         }
     }
 
+    /// Why a private swap can't be drawn: Confidential Intents needs the NEAR Intents partner key.
+    func privateSwapRefusal(_ c: WalletCommand) -> String? {
+        guard case .swapPrivately = c, OneClick.key == nil else { return nil }
+        return say("A private swap needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.",
+                   "Для приватного обмена нужен партнёрский ключ NEAR Intents: добавь его в Settings › General › NEAR Intents key.")
+    }
+
     /// The private card's violet: the field and its head while a private send waits.
     var pendingIsPrivate: Bool {
-        if case .wallet(.sendPrivately)? = pendingAction { return true }
-        return false
+        switch pendingAction {
+        case .wallet(.sendPrivately)?, .wallet(.swapPrivately)?: return true
+        default: return false
+        }
     }
 
     /// The other way picked over Confirm: its card takes this one's place, with a line in the chat. Nothing is signed.
@@ -312,13 +331,21 @@ extension Workspace {
     /// address there, never the payee's: a plain transfer tells 1Click nobody it pays.
     func quotePrivateTwin() async {
         privateTwin = nil
+        // A swap's twin: what Confidential Intents gives for the same amount, to this wallet's own addresses.
+        if let twin = privacyTwin(), !twin.isPrivate, case .swapPrivately(let a, let from, let b, let to, let x) = twin.other {
+            guard let wallet = previewWallet,
+                  let q = try? await executor(wallet).intentQuoteText(a, on: from, for: b, on: to, amount: x, near: nearAddress, confidential: true),
+                  !Task.isCancelled else { return }
+            privateTwin = (twin.other, nil, q.way.firstMatch(of: /≈ (\d+) s/).flatMap { Int($0.1) }, q.gets)
+            return
+        }
         guard let twin = privacyTwin(), !twin.isPrivate, case .sendPrivately(let name, let token, let x, let net) = twin.other,
               let wallet = previewWallet, let r = try? privateRecipient(name, token: token, network: net),
               let q = try? await executor(wallet).acrossQuote(r.symbol, amount: x, network: r.network,
                                                               to: r.network == "solana" ? wallet.solana : wallet.evm, confidential: true),
               !Task.isCancelled else { return }
         let cost = Decimal(string: q.quote.amountInFormatted) ?? 0
-        privateTwin = (twin.other, q.quote.amountOutUSD.map { max(0, cost - $0) }, q.quote.timeEstimate)
+        privateTwin = (twin.other, q.quote.amountOutUSD.map { max(0, cost - $0) }, q.quote.timeEstimate, nil)
     }
 
     /// P3's rows for the send waiting for Confirm: what it pays from where, the fees, when it arrives and what it goes
@@ -336,6 +363,27 @@ extension Workspace {
                 ("Blockchain fees", "network gas", twinQuote?.fee.map { "private ≈ \(Fmt.usd($0))" } ?? "none to us", nil),
                 ("Arrives", quick ? "in seconds" : "after a bridge", twinQuote?.seconds.map { "private \(seconds($0))" } ?? "", nil),
                 ("Goes through", "\(name) directly", "anyone can see it's from you", entry.network.logo),
+            ])
+        case .wallet(let c)? where (twin.isPrivate ? c : twin.other).isPrivateSwap:
+            guard case .swapPrivately(let a, let from, _, _, let x) = twin.isPrivate ? c : twin.other else { return nil }
+            let own = swapQuote.flatMap { $0.command == c ? $0.ways.first : nil }
+            let failed = swapQuote.map { $0.command == c && $0.ways.isEmpty } ?? false
+            // What this card gets: its quote, else what its last step says it lands.
+            let gets = own.map { "≈ \($0.gets)" } ?? route(c)?.steps.last.map { readable($0.title) } ?? "…"
+            let pays = ("You pay", "\(Fmt.num(x, maxFraction: 8)) \(a.uppercased())", "on \(WalletCommand.placeName(from))", nil as String?)
+            if twin.isPrivate {
+                return PrivacyChoice(isPrivate: true, rows: [
+                    pays,
+                    ("You get", gets, failed ? "no quote now" : "", nil),
+                    ("Arrives", own.flatMap { $0.way.firstMatch(of: /≈ (\d+) s/) }.flatMap { Int($0.1) }.map { "in \(seconds($0))" } ?? "…", "", nil),
+                    ("Goes through", "Confidential Intents", "nobody can match the two ends", "near"),
+                ])
+            }
+            let twinQuote = privateTwin.flatMap { $0.command == twin.other ? $0 : nil }
+            return PrivacyChoice(isPrivate: false, rows: [
+                pays,
+                ("You get", gets, twinQuote?.gets.map { "private ≈ \($0)" } ?? "", nil),
+                ("Goes through", own?.way ?? "…", "anyone can see the swap", nil),
             ])
         case .wallet(let c)?:
             let r = acrossReceipt.flatMap { $0.command == c ? $0 : nil }
@@ -411,4 +459,8 @@ struct PrivacyChoiceRows: View {
         .help(on ? "" : isPrivate ? "Send it through NEAR Intents' Confidential Intents instead: the card changes, it still waits for Confirm"
                                   : "Send it as a plain transfer instead: the card changes, it still waits for Confirm")
     }
+}
+
+extension WalletCommand {
+    var isPrivateSwap: Bool { if case .swapPrivately = self { true } else { false } }
 }

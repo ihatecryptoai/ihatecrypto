@@ -431,7 +431,7 @@ final class Workspace {
     /// (Studio's receiptRow) — what it pays and from where, what 1Click and the network keep, how long it takes.
     var acrossReceipt: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?)?
     /// P3: the private twin of the regular send waiting for Confirm, quoted dry: what NEAR Intents keeps, how long it takes.
-    var privateTwin: (command: WalletCommand, fee: Decimal?, seconds: Int?)?
+    var privateTwin: (command: WalletCommand, fee: Decimal?, seconds: Int?, gets: String?)?
     /// N5: a move through NEAR Intents after Confirm, as 1Click reports it (IntentsJourney), until the next message.
     var journey: IntentsJourney?
     /// The swap whose card shows a price (Workspace.quoteSwap): the one Confirm waits on a fresh quote for.

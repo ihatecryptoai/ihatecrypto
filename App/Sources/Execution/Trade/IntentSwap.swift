@@ -13,7 +13,7 @@ import WalletCore
 /// signer's wrap.near deposit; the live quote stays within 1% of the one shown (Envelope).
 extension Executor {
     /// 1Click's name for each place ihatecrypto has a wallet on (its `blockchain`).
-    static let intentChains = ["solana": "sol", "base": "base", "arbitrum": "arb", "optimism": "op", "ethereum": "eth",
+    public static let intentChains = ["solana": "sol", "base": "base", "arbitrum": "arb", "optimism": "op", "ethereum": "eth",
                                "polygon": "pol", "bnb": "bsc", "near": "near"]
 
     struct IntentSide {
@@ -45,8 +45,9 @@ extension Executor {
         return place == "solana" ? wallet.solana : wallet.evm
     }
 
-    /// 1Click's quote for the swap: `dry` for the card, else with a deposit address bound to it.
-    func intentQuote(_ a: String, on from: String, for b: String, on to: String, amount: Decimal, near: String?, dry: Bool)
+    /// 1Click's quote for the swap: `dry` for the card, else with a deposit address bound to it. `confidential`: through
+    /// Confidential Intents, where the deposit and the payout can't be matched on chain (the partner key's).
+    func intentQuote(_ a: String, on from: String, for b: String, on to: String, amount: Decimal, near: String?, dry: Bool, confidential: Bool = false)
         async throws -> (quote: OneClick.Quote, origin: IntentSide, destination: IntentSide, units: String, recipient: String, refund: String) {
         async let o = intentSide(a, on: from)
         async let d = intentSide(b, on: to)
@@ -58,24 +59,28 @@ extension Executor {
         let recipient = try intentAddress(to, near: dry ? near ?? String(repeating: "0", count: 64) : near)
         let refund = try intentAddress(from, near: dry ? near ?? String(repeating: "0", count: 64) : near)
         let quote = try await OneClick.quote(dry: dry, origin: origin.asset, destination: destination.asset, amount: units,
-                                             refundTo: refund, recipient: recipient)
+                                             refundTo: refund, recipient: recipient, confidential: confidential)
         return (quote, origin, destination, units, recipient, refund)
     }
 
     /// What the swap gets, for the card: «≈ 12.4 AURORA ≈ $1.98», and the way.
-    public func intentQuoteText(_ a: String, on from: String, for b: String, on to: String, amount: Decimal, near: String?) async throws -> (gets: String, way: String) {
-        let q = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true)
+    public func intentQuoteText(_ a: String, on from: String, for b: String, on to: String, amount: Decimal, near: String?,
+                                confidential: Bool = false) async throws -> (gets: String, way: String) {
+        let q = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true, confidential: confidential)
         let out = Decimal(string: q.quote.amountOutFormatted) ?? 0
         return ("\(Fmt.num(out, maxFraction: 6)) \(q.destination.symbol)\(q.quote.amountOutUSD.map { " ≈ \(Fmt.usd($0))" } ?? "")",
-                "NEAR Intents" + (q.quote.timeEstimate.map { " · ≈ \($0) s" } ?? ""))
+                (confidential ? "Confidential Intents" : "NEAR Intents") + (q.quote.timeEstimate.map { " · ≈ \($0) s" } ?? ""))
     }
 
     /// The swap itself: quoted again with a deposit address, checked, the deposit sent, 1Click followed until it pays.
-    public func intentSwap(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String?) async throws -> String {
+    /// `confidential`: a private swap — refused before anything is sent unless 1Click itself holds the deposit as
+    /// confidential, so it never goes in the open.
+    public func intentSwap(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String?,
+                           confidential: Bool = false) async throws -> String {
         guard let amount else { throw ExecutionError("Say how much \(a.uppercased()): NEAR Intents swaps the amount said. Nothing was signed.") }
-        let shown = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true)
+        let shown = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true, confidential: confidential)
         var envelope = Envelope.approve(input: amount, quotedOutput: Decimal(string: shown.quote.amountOutFormatted) ?? 0)
-        let live = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: false)
+        let live = try await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: false, confidential: confidential)
         guard let deposit = live.quote.depositAddress else { throw ExecutionError("1Click gave no deposit address. Nothing was signed.") }
         envelope.destination = deposit
         let problems = envelope.violations(input: Decimal(string: live.quote.amountInFormatted) ?? .greatestFiniteMagnitude,
@@ -84,11 +89,15 @@ extension Executor {
         if let paid = live.quote.amountInUSD, let worth = live.quote.amountOutUSD {
             try Self.checkLoss(paid - worth, paid: paid, cap: max(paid * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "NEAR Intents")
         }
-        let binding = DepositGuard.check(bound: try await OneClick.boundRequest(depositAddress: deposit), recipient: live.recipient, refundTo: live.refund,
+        let bound = try await OneClick.boundRequest(depositAddress: deposit)
+        let binding = DepositGuard.check(bound: bound, recipient: live.recipient, refundTo: live.refund,
                                          origin: live.origin.asset, destination: live.destination.asset, amount: live.units)
         guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
+        if confidential, case let v = DepositGuard.confidential(bound: bound), !v.ok {
+            throw GuardStop("The guard stopped the deposit: " + v.problems.joined(separator: " ") + " Nothing was sent.")
+        }
         let gets = Decimal(string: live.quote.amountOutFormatted) ?? 0
-        report("NEAR Intents: \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) → ≈ \(Fmt.num(gets, maxFraction: 6)) \(live.destination.symbol) on \(WalletCommand.placeName(to)).")
+        report("NEAR Intents\(confidential ? " (private)" : ""): \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) → ≈ \(Fmt.num(gets, maxFraction: 6)) \(live.destination.symbol) on \(WalletCommand.placeName(to)).")
         // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.
         var tx = ""
         if from == "near" {
@@ -115,7 +124,7 @@ extension Executor {
         let s = try await oneClickSettled(deposit, refund: "\(live.origin.symbol) went back to \(WalletCommand.placeName(from))", estimate: live.quote.timeEstimate)
         let line = "Swapped \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) for "
             + "\(Fmt.num(Decimal(string: s.amountOutFormatted ?? "") ?? gets, maxFraction: 6)) \(live.destination.symbol) on \(WalletCommand.placeName(to)) "
-            + "through NEAR Intents in \(Int(Date().timeIntervalSince(started))) s — at your own address there."
+            + "through NEAR Intents\(confidential ? "' Confidential Intents: the deposit and the payout can't be matched on chain," : "") in \(Int(Date().timeIntervalSince(started))) s — at your own address there."
         report(line)
         return line
     }

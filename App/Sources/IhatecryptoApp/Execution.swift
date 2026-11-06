@@ -660,6 +660,14 @@ extension Workspace {
                 }
                 reply(try await e.crossSwap(a, on: from, for: b, on: to, amount: amount, near: near),
                       note: "Relay · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
+            case .swapPrivately(let a, let from, let b, let to, let amount):
+                var near = nearAddress
+                if from == "near" || to == "near" {
+                    near = try await SignerClient().send(.nearAddress).nearAddress
+                    nearAddress = near
+                }
+                reply(try await e.intentSwap(a, on: from, for: b, on: to, amount: amount, near: near, confidential: true),
+                      note: "NEAR Intents · private · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
             case .solanaTo("hyperliquid", let amount):
                 reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
@@ -668,7 +676,9 @@ extension Workspace {
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't move money to \(place).") }
                 reply(try await e.solanaToEVM(net, usdc: amount ?? 0), note: "Relay · Solana → \(net.name)")
             case .sendTo(let name, let amount, let net): prepareTransfer(amount, to: name, network: net)
-            case .pay: reply(try await pay(command, e), note: "MPP · Tempo")
+            case .pay:
+                let via = payment?.x402 != nil ? "x402 · Base" : payment?.challenge?.near != nil ? "MPP · NEAR Intents" : "MPP · Tempo"
+                reply(try await pay(command, e), note: via)
             case .contractCall(let c): reply(try await runContractCall(command, e), note: "\(WalletCommand.placeName(c.network)) · contract call")
             case .multisigCreate: reply(try await runMultisigCreate(e), note: "Safe · multisig")
             case .multisigSend: reply(try await runMultisigSend(command, e), note: "Safe · multisig")
@@ -883,6 +893,11 @@ extension Workspace {
             return lacks(usdc(on: net), asked, WalletCommand.placeName(net), net == "robinhood" ? "USDG" : "USDC")
         case .intents(let from, _, let asked) where !inChain:
             return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        // A private swap pays its USDC from the network named, its NEAR from the NEAR account: said before the card.
+        case .swapPrivately(let a, let from, _, _, let asked) where !inChain && a.uppercased() == "USDC":
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        case .swapPrivately("NEAR", "near", _, _, let asked) where !inChain:
+            return lacks(near, asked, "NEAR", "NEAR")
         case .usdt(let net, _, let asked, _) where !inChain:
             return lacks(heldUSDT(net), asked, WalletCommand.placeName(net), "USDT")
         // A buy that names where its money comes from («с арбитрума») pays from there or not at all: said before the card.

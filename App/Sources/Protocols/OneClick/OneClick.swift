@@ -166,8 +166,13 @@ public enum OneClick {
         guard let quote = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["quoteResponse"] as? [String: Any],
               let request = quote["quoteRequest"] as? [String: Any] else { throw OneClickError(data) }
         var out: [String: String] = [:]
-        for key in ["recipient", "refundTo", "originAsset", "destinationAsset", "amount", "confidentiality"] { out[key] = request[key] as? String }
+        for key in ["recipient", "refundTo", "originAsset", "destinationAsset", "amount", "confidentiality", "swapType"] { out[key] = request[key] as? String }
         out["depositAddress"] = (quote["quote"] as? [String: Any])?["depositAddress"] as? String
+        // What 1Click's own quote takes for this deposit: an MPP service's challenge may not ask more (DepositGuard.charge).
+        let q = quote["quote"] as? [String: Any]
+        out["quoteAmountIn"] = q?["amountIn"] as? String
+        out["quoteMinAmountIn"] = q?["minAmountIn"] as? String
+        out["deadline"] = q?["deadline"] as? String
         return out
     }
 

@@ -45,3 +45,31 @@ import Testing
     #expect(!WalletCommand.hasPublicSend("send 20 USDC to Mom"))   // alone: made private where it's run
     #expect(!WalletCommand.hasPublicSend("buy SOL for 5 USDC then deposit 5 USDC to kamino"))
 }
+
+/// A swap through NEAR Intents asked for privately goes through Confidential Intents: the same pair and amount, never
+/// the public swap. Without an amount, or on a route NEAR Intents doesn't take, it reads as nothing.
+@Test func privateSwapReadsInBothLanguages() {
+    let buy = WalletCommand.swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: 5)
+    #expect(WalletCommand.parse("buy NEAR for 5 USDC privately") == buy)
+    #expect(WalletCommand.parse("купи приватно NEAR на 5 USDC") == buy)
+    #expect(WalletCommand.parse("swap 5 USDC on solana privately for NEAR on near") == buy)
+    #expect(WalletCommand.parse("sell 0.5 NEAR privately") == .swapPrivately(from: "NEAR", on: "near", to: "USDC", at: "solana", amount: Decimal(string: "0.5")!))
+    #expect(WalletCommand.parse("swap 1 NEAR privately for AURORA on near") == .swapPrivately(from: "NEAR", on: "near", to: "AURORA", at: "near", amount: 1))
+    #expect(WalletCommand.parse("обменяй анонимно 0,1 SOL с соланы на ETH в арбитруме")
+            == .swapPrivately(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!))
+    #expect(WalletCommand.parse("buy NEAR privately") == nil)
+    #expect(WalletCommand.parse("sell all NEAR privately") == nil)
+}
+
+@Test func privateSwapWritesBackToItselfAndToItsPublicTwin() {
+    for c: WalletCommand in [.swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: 5),
+                             .swapPrivately(from: "NEAR", on: "near", to: "AURORA", at: "near", amount: 1),
+                             .swapPrivately(from: "NEAR", on: "near", to: "USDC", at: "base", amount: 2),
+                             .swapPrivately(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!)] {
+        #expect(WalletCommand.parse(c.summary) == c)
+        // The same swap in the open, and back: the switch over Confirm flips between them.
+        #expect(c.madePublic?.madePrivate == c)
+    }
+    #expect(WalletCommand.swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: 5).madePublic == .buyNear(usdc: 5))
+    #expect(WalletCommand.swapPrivately(from: "NEAR", on: "near", to: "USDC", at: "solana", amount: 1).madePublic == .sellNear(amount: 1))
+}

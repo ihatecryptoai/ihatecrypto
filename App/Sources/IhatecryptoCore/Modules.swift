@@ -308,6 +308,9 @@ public struct Modules: Equatable, Sendable {
             let via = ModuleNetwork(place: place).map { [$0] } ?? [], ways = [r(.uniswap, via: via), r(.kyberswap, via: via), r(.relay, via: via)]
             return isOn(.swaps) ? (ways.contains { $0 == nil } ? nil : ways[0])
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        case .swapPrivately(_, let from, _, let to, _):
+            return isOn(.swaps) ? r(.oneClick, via: [from, to].compactMap(ModuleNetwork.init(place:)))
+                : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
         case .crossSwap(_, let from, _, let to, _):
             return isOn(.swaps) ? r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
