@@ -13,6 +13,12 @@ engine ↔ signer framed `SignerRequest`/`SignerReply` stay as they are, so eith
 cd App/Windows/rust && cargo test
 ```
 
+## Found while porting
+
+- The Swift Windows signer kept the Hyperliquid trading key's week as a Double, which its trusted settings can't hold:
+  the week never started, so every order that opens or adds went to the main key with a prompt. The Rust signer keeps
+  whole seconds.
+
 ## Order
 
 The signer first: it is small, it holds the keys, and everything it does is checkable offline. The engine after it,
@@ -27,7 +33,7 @@ from the leaves (pure parsing and math) to the chat.
 | 5 | `signer-api` | `Signer/API`: the 42 requests and the replies, the 4-byte frame; shapes checked against JSON a Swift program wrote (tests/golden.json) | done, 7 tests |
 | 6 | `guard` | `Guard/Core`: the Solana guard (balance rules, account rights, known programs, sponsor refunds), Hyperliquid actions, quote bindings, injection screening | done, 39 tests (GuardTests' real transactions) |
 | 7 | `signer` | `Signer/Core` + `Signer/Windows`: every request's decisions (main's Signer.swift with the Windows lines), the vault under Windows Hello, the trusted settings, the door over pipes, the binary `ihatecrypto-signer`; winsec as a Rust library, not a DLL | done, 23 tests (VaultTests, AgentKeyTests, AgentFallbackTests, CodeTests, LedgerAgentKeyTests, the binary over its pipes); checks for `x86_64-pc-windows-msvc` |
-| 8 | — | `ihatecrypto-signer.exe` from Rust in `build.ps1`; the Swift engine talks to it unchanged | |
+| 8 | — | `ihatecrypto-signer.exe` from Rust in `build.ps1` and CI; the Swift engine talks to it unchanged | done: on this Mac the Swift engine imported a phrase, renamed the wallet and saved an address through the Rust signer; the real Windows build (the VM) is next |
 | 9+ | engine crates | `IhatecryptoCore`, `Protocols`, `DeFi`, `Execution`, `LLM`, `Desktop/Engine`, leaves first | |
 
 Shared modules are ported from `main`, not from this branch's older copy: steps 1–2 and on match main at `bc90340`

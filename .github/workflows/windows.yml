@@ -40,6 +40,10 @@ jobs:
         run: swift build --build-tests
       - name: Test
         run: swift test --skip-build
+      # The Rust port (docs/windows-rust.md): every crate's tests; the signer's that need the stand-in for Windows Hello
+      # run off Windows only, as the Swift ones did.
+      - name: Rust
+        run: cargo test --locked --manifest-path Windows/rust/Cargo.toml
 
   # The installer, from the same commit: winsec.dll, the engine and the signer in release, the window, NSIS.
   # Unsigned until the repository has a code-signing certificate (Windows/build.ps1 signs when WINDOWS_PFX is set).

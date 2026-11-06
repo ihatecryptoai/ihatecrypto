@@ -1,6 +1,8 @@
 //! VaultTests.swift and AgentFallbackTests.swift: the Windows signer's storage with the stand-in for Windows Hello — a
 //! wallet sealed under it, one prompt per move, and settings changed outside the signer stopping every signature. One
-//! process, one folder, so the cases take turns.
+//! process, one folder, so the cases take turns. Off Windows only: a Windows runner has the real winsec and no
+//! Windows Hello set up (the Swift tests' `.enabled(if: fakeHello)`).
+#![cfg(not(windows))]
 
 use std::sync::{Mutex, MutexGuard};
 

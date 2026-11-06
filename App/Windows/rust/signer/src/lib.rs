@@ -8,5 +8,5 @@ pub mod trusted;
 pub mod vault;
 pub mod wallets;
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests;
