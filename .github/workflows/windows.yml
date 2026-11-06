@@ -1,8 +1,8 @@
-# The Windows app's core on Windows: winsec.dll (Rust: Windows Hello, DPAPI, the signer's hardening), then the Swift
-# core, the signer and the engine, and their tests. Windows Hello itself can't be tried here (a runner has no PIN or
-# TPM for it); the vault's tests use the stand-in, and the real prompt is checked on a Windows machine.
+# The Windows app on Windows: the Rust workspace (docs/windows-rust.md) — the engine, the signer, winsec linked into
+# both — and its tests, then the installer. Windows Hello itself can't be tried here (a runner has no PIN or TPM for
+# it); the tests that need its stand-in run off Windows only, and the real prompt is checked on a Windows machine.
 # Runs on pushes to the `windows` branch only: the Mac app is built and released from a Mac (release.sh).
-name: Windows core
+name: Windows
 
 on:
   push:
@@ -23,29 +23,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The same compiler as Xcode on the Mac.
-      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
-        with:
-          swift-version: swift-6.4.1-release
-          swift-build: 6.4.1-RELEASE
-          cache: true
-      - name: winsec.dll
-        shell: pwsh
-        run: |
-          cargo build --release --locked --manifest-path Windows/native/Cargo.toml
-          # Rust names a DLL's import library winsec.dll.lib; Swift links -lwinsec.
-          Copy-Item Windows/native/target/release/winsec.dll.lib Windows/native/target/release/winsec.lib
-          "$PWD\Windows\native\target\release" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-      - name: Build
-        run: swift build --build-tests
       - name: Test
-        run: swift test --skip-build
-      # The Rust port (docs/windows-rust.md): every crate's tests; the signer's that need the stand-in for Windows Hello
-      # run off Windows only, as the Swift ones did.
-      - name: Rust
         run: cargo test --locked --manifest-path Windows/rust/Cargo.toml
 
-  # The installer, from the same commit: winsec.dll, the engine and the signer in release, the window, NSIS.
+  # The installer, from the same commit: the engine and the signer in release, the window, NSIS.
   # Unsigned until the repository has a code-signing certificate (Windows/build.ps1 signs when WINDOWS_PFX is set).
   installer:
     needs: core
@@ -58,11 +39,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
-        with:
-          swift-version: swift-6.4.1-release
-          swift-build: 6.4.1-RELEASE
-          cache: true
       - name: Build
         shell: pwsh
         run: ./Windows/build.ps1

@@ -37,7 +37,7 @@ TEAM=<team id> ./build-app.sh        # «ihatecrypto Dev.app»; add Debug for a 
 ./verify-release.sh <version>        # rebuild a release from its tag and compare it with the DMG (~5 min)
 swift run WalletCheck <command>      # live checks on ~/.ihatecrypto/test-wallet.txt; nothing sent without --yes
 swift run LLMCheck <provider> "text" # one model provider; on a subscription it spends the user's limits
-IHATECRYPTO_DESKTOP=1 swift build --scratch-path .build/desktop   # the Windows engine and signer on a Mac (stand-in Windows Hello)
+cargo build --manifest-path Windows/rust/Cargo.toml -p engine -p signer   # the Windows engine and signer, Rust (stand-in Windows Hello off Windows)
 pwsh Windows/build.ps1               # on Windows: the installer (docs/windows.md)
 open -W --stdout /dev/stdout ".build/xcode/Build/Products/Debug/ihatecrypto Dev.app" --args -signerSelfTest YES
 ```

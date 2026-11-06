@@ -1,15 +1,15 @@
 # ihatecrypto for Windows
 
-The Windows app shares the Mac's core: the wallet, the chains, the protocols, the Guard, the plans and the execution
-(everything under `App/Sources` except `IhatecryptoApp` and `Signer/Service`). What differs is the window, the engine
-that runs the chat in place of the Mac's `Workspace`, and where the signer keeps its keys.
+The Windows app is the Mac's core ported to Rust (docs/windows-rust.md): the wallet, the chains, the protocols, the
+Guard, the plans and the execution, each crate checked against the Swift it came from. What differs from the Mac is the
+window, the engine that runs the chat in place of the Mac's `Workspace`, and where the signer keeps its keys.
 
 ```
 ihatecrypto.exe (Tauri)          App/Windows/app        the window: the page in ui/, no key, no money logic
-  └─ ihatecrypto-engine.exe      Sources/Desktop/Engine the chat, the cards, Confirm, balances (Swift, the Mac's core)
-       └─ ihatecrypto-signer.exe Sources/Signer/Core    what the signer decides, the same code as the Mac's
-                                 Sources/Signer/Windows keys under Windows Hello, the trusted settings, the pipe
-            └─ winsec.dll        App/Windows/native     Windows Hello, DPAPI, hardening (Rust, windows-rs)
+  └─ ihatecrypto-engine.exe      Windows/rust/engine    the chat, the cards, Confirm, balances
+       └─ ihatecrypto-signer.exe Windows/rust/signer    what the signer decides, as the Mac's; keys under Windows
+                                                        Hello, the trusted settings, the pipe
+     (both link winsec)          App/Windows/native     Windows Hello, DPAPI, hardening (windows-rs)
 ```
 
 The window starts the engine with pipes; the engine starts the signer with pipes. Each line between the window and the
@@ -89,15 +89,14 @@ counters can tell an older copy from the newest, so these stay:
 
 ## Building
 
-On a Mac, to work on the window (the stand-in `Sources/Native/WinSec/winsec_stub.c` takes winsec.dll's place; it
-guards nothing and fakes Windows Hello only with `WINSEC_FAKE_HELLO=1`):
+On a Mac, to work on the window (the engine and the signer are Rust, docs/windows-rust.md; off Windows winsec's
+stand-in guards nothing and fakes Windows Hello only with `WINSEC_FAKE_HELLO=1`):
 
 ```sh
 cd App
-IHATECRYPTO_DESKTOP=1 swift build --scratch-path .build/desktop --product ihatecrypto-engine
-IHATECRYPTO_DESKTOP=1 swift build --scratch-path .build/desktop --product ihatecrypto-signer
-IHATECRYPTO_DESKTOP=1 swift test --scratch-path .build/desktop --filter VaultTests
-mkdir -p Windows/app/src-tauri/bin && cp .build/desktop/debug/ihatecrypto-{engine,signer} Windows/app/src-tauri/bin/
+cargo build --manifest-path Windows/rust/Cargo.toml -p engine -p signer
+cargo test --manifest-path Windows/rust/Cargo.toml -p signer --test vault
+mkdir -p Windows/app/src-tauri/bin && cp Windows/rust/target/debug/ihatecrypto-{engine,signer} Windows/app/src-tauri/bin/
 cd Windows/app/src-tauri && cargo build
 WINSEC_FAKE_HELLO=1 IHATECRYPTO_SIGNER_DIR=/tmp/s IHATECRYPTO_ENGINE_DIR=/tmp/e \
   IHATECRYPTO_ENGINE=$PWD/bin/ihatecrypto-engine target/debug/ihatecrypto
@@ -108,11 +107,10 @@ a state from `preview/fixtures` (demo balances on the public test addresses; `ma
 headless Chrome, which is what WebView2 is; `&view=settings` opens a page, `&store={"railCollapsed":true}` folds the rail.
 
 A debug build also runs lines of JS appended to `IHATECRYPTO_UI_EVAL` in the page, so a test can press buttons with
-the window in the background. On Linux the core, the signer and the engine build in the `swift:6.2` container.
+the window in the background.
 
-On Windows, from `App/`: `pwsh Windows/build.ps1` builds winsec.dll, the engine and the signer in release, copies the
-Swift runtime beside them and makes the installer
-(`Windows/app/src-tauri/target/release/bundle/nsis/ihatecrypto_<version>_<x64|arm64>-setup.exe`). It needs Rust, Swift 6.4.1,
+On Windows, from `App/`: `pwsh Windows/build.ps1` builds the engine and the signer in release and makes the installer
+(`Windows/app/src-tauri/target/release/bundle/nsis/ihatecrypto_<version>_<x64|arm64>-setup.exe`). It needs Rust,
 Node (for the Tauri CLI) and Visual Studio's C++ tools. The GitHub workflow `windows.yml` does the same on every push
 to `windows` and keeps the installer as an artifact for two weeks.
 
