@@ -1,0 +1,18 @@
+[package]
+name = "guard"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "The transaction guard and injection screening: the Rust port of App/Sources/Guard/Core"
+
+[dependencies]
+wallet.workspace = true
+hyperliquid.workspace = true
+solana.workspace = true
+rust_decimal.workspace = true
+# Swift's Regex has lookahead; the regex crate doesn't.
+fancy-regex = "0.20"
+
+[dev-dependencies]
+serde_json.workspace = true
+base64.workspace = true

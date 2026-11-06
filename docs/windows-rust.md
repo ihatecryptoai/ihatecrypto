@@ -25,7 +25,7 @@ from the leaves (pure parsing and math) to the chat.
 | 3 | `solana` | `Chains/Solana` offline: messages (v1 refused), transactions, SPL, program addresses, .sol names, account answers | done, 12 tests (mainnet accounts, a fuzz) |
 | 4 | `evm` | `Chains/EVM` offline: RLP, EIP-1559/7702 transactions, ABI, the signable networks, calldata read back with its payees and refusals, Safe, CCTP, USDT0, Merkl, KyberSwap, Uniswap v2/v3/v4 with the vetted hooks, Permit3009, Relay's multicall permit, 7702 batches, eth_simulateV1 answers | done, 8 tests; EVMTests being ported |
 | 5 | `signer-api` | `Signer/API`: the 42 requests and the replies, the 4-byte frame; shapes checked against JSON a Swift program wrote (tests/golden.json) | done, 7 tests |
-| 6 | `guard` | `Guard/Core`: the transaction guard, injection screening | |
+| 6 | `guard` | `Guard/Core`: the Solana guard (balance rules, account rights, known programs, sponsor refunds), Hyperliquid actions, quote bindings, injection screening | done, 39 tests (GuardTests' real transactions) |
 | 7 | `signer` | `Signer/Core` + `Signer/Windows`: the signer's decisions, the vault under Windows Hello, the trusted settings; winsec as a Rust library, not a DLL | |
 | 8 | — | `ihatecrypto-signer.exe` from Rust in `build.ps1`; the Swift engine talks to it unchanged | |
 | 9+ | engine crates | `IhatecryptoCore`, `Protocols`, `DeFi`, `Execution`, `LLM`, `Desktop/Engine`, leaves first | |
