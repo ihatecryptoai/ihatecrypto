@@ -93,24 +93,30 @@ const tabs = [
 
 // Settings' open panels go with their tab and with Settings itself, as the Mac's tab content is made anew each time
 // (SettingsView's `switch tab`; ImportWalletView turns the Test switch off as it goes): the node / 1Click sheet with
-// what was pasted, «Remove?», a rename, «Create a new wallet» and its Test switch, a half-made code, the ⓘ texts.
+// what was pasted, «Remove?», a rename, «Create a new wallet» and its Test switch, a half-made code, the ⓘ texts, the AI
+// model's picked way and its unsaved key, Skills' «Read the text», Notifications' «Which events».
 let shownTab = null;
 function closePanels() {
   Object.assign(secretForm, { open: null, text: "", problem: null, checking: false });
   removing = null;
   renaming = null;
   renameDraft = "";
-  if (!creating.busy) creating = { open: false, test: false };
+  closeCreate();
   passcode.making = false;
   resetMaker();
   openInfo.clear();
+  Object.assign(modelForm, { shown: null, key: "", modelFor: null });
+  reading = null;
+  noticeList.open = false;
 }
 
 export function settingsPage() {
   let tab = store("settingsTab");
   if (!tabs.some(([id]) => id === tab)) tab = "general";
-  // Opened anew (the last draw had no Settings) or on another tab: nothing is left open from before.
-  if (shownTab !== tab || !document.querySelector(".pg-settings")) { closePanels(); shownTab = tab; }
+  // Opened anew or on another tab: nothing is left open from before. «Anew» is by what the window last showed in its own
+  // place (app.js `ui.settingsShown`): the lock, an Import sheet or the recovery words over Settings leave its panels as
+  // they were, as the Mac's Settings stays under its lock and its import is inline.
+  if (shownTab !== tab || !ui.settingsShown) { closePanels(); shownTab = tab; }
   const s = ui.state;
   const [title, line, body] = {
     general: [t("General", "Основные"), t("How the app talks to you and keeps running.", "Как приложение говорит с тобой и работает в фоне."), general],
@@ -569,6 +575,7 @@ document.addEventListener("keydown", (e) => {
   else { removing = null; render(); }
 }, true);
 let creating = { open: false, test: false };
+const closeCreate = () => { if (!creating.busy) creating = { open: false, test: false }; };
 
 function walletTab(s) {
   const w = s.wallets.find((x) => x.id === s.active);
@@ -608,8 +615,9 @@ function walletTab(s) {
             render();
           } },
             creating.busy ? t("Creating…", "Создаю…") : creating.test ? t("Create a test wallet", "Создать тестовый") : t("Create a new wallet", "Создать новый кошелёк")))) : null,
-        way("doc", t("Import a recovery phrase", "Импортировать фразу восстановления"), t("12 or 24 words from MetaMask, Phantom or another wallet", "12 или 24 слова из MetaMask, Phantom или другого кошелька"), showImport),
-        way("lock", t("Import a private key", "Импортировать приватный ключ"), t("One key from Phantom (Solana) or MetaMask (EVM)", "Один ключ из Phantom (Solana) или MetaMask (EVM)"), showImportKey),
+        // An import closes «Create a new wallet» and its Test switch, as the Mac's ways open one at a time.
+        way("doc", t("Import a recovery phrase", "Импортировать фразу восстановления"), t("12 or 24 words from MetaMask, Phantom or another wallet", "12 или 24 слова из MetaMask, Phantom или другого кошелька"), () => { closeCreate(); showImport(); }),
+        way("lock", t("Import a private key", "Импортировать приватный ключ"), t("One key from Phantom (Solana) or MetaMask (EVM)", "Один ключ из Phantom (Solana) или MetaMask (EVM)"), () => { closeCreate(); showImportKey(); }),
         s.automation ? null : way("calendar", t("Automation wallet", "Кошелёк автоматизации"), t("A small budget scheduled tasks spend without Windows Hello", "Небольшой бюджет, который задачи тратят без Windows Hello"), () => act("createAutomationWallet")),
         way("link", t("Connect a Ledger", "Подключить Ledger"), t("USB or Bluetooth: every move shows on its screen", "USB или Bluetooth: каждое движение — на его экране"), () => { ui.view = "canvas"; act("addBoard", { name: "ledger" }); }))),
     section("person", presence(), t("One Windows Hello covers one move, or a few minutes.", "Одно подтверждение Windows Hello действует на одно движение или несколько минут."),

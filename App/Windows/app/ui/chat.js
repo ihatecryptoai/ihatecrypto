@@ -97,6 +97,9 @@ function apply(panel, f) {
 
 // A window made smaller keeps the chat inside it, without drawing everything again.
 window.addEventListener("resize", () => { const p = document.querySelector(".chat-panel"); if (p) apply(p, frame()); });
+// The window losing focus (the tray, another app) ends a sent chip's popover, as the Mac's transient popover goes on any
+// interaction outside it.
+window.addEventListener("blur", () => { for (const m of document.querySelectorAll(".chat-pop")) if (m._message) m.remove(); });
 
 function save() { store("chatWidth", place.width); store("chatX", place.x); store("chatY", place.y); store("chatFull", place.full); }
 
@@ -159,6 +162,8 @@ export function chatPanel() {
   // The context popover exists only with its chip (the Mac's ContextMeter): a canvas with nothing read yet takes it away.
   if (live?._live === contextPop && !s.context?.used) live.remove();
   else if (live?._live) { const top = live.scrollTop; live.replaceChildren(live._live()); live.scrollTop = top; }
+  // A sent chip's popover goes with its message: another canvas (a task's row in the tray), a cleared chat.
+  else if (live?._message && !s.chat.some((m) => m.id === live._message)) live.remove();
   // Cards come under a reply already shown: when they don't all fit, the reply they answer stays in view from its top
   // (the Mac's onChange(of: nextSteps?.message)) — after app.js has put a following chat at its end; not at launch.
   const cardsFor = liveMessage()?.id || null;
@@ -241,18 +246,19 @@ function conversation(s) {
 function userMessage(m) {
   const chips = m.contexts?.length ? m.contexts : m.context ? [{ title: m.context.split(":")[0].replace(/[«»]/g, ""), about: m.context, bare: false }] : [];
   return h("div", { class: "chat-msg-user" },
-    chips.length ? h("div", { class: "chat-context-row" }, h("span", { class: "chat-context-label" }, icon("paperclip", 11), t("Context", "Контекст")), chips.map(sentContext)) : null,
+    chips.length ? h("div", { class: "chat-context-row" }, h("span", { class: "chat-context-label" }, icon("paperclip", 11), t("Context", "Контекст")), chips.map((c) => sentContext(c, m.id))) : null,
     h("div", { class: "chat-msg-user-row" },
       m.at ? h("span", { class: "chat-msg-time num" }, stamp(m.at)) : null,
       h("div", { class: "chat-bubble selectable" }, mentions(m.text))));
 }
 
-/** One block a message went with: a chip; a click shows the words it went as, and says so when only its name went. */
-function sentContext(c) {
+/** One block a message went with: a chip; a click shows the words it went as, and says so when only its name went. Its
+ * popover belongs to the message (`_message`): it goes when the message isn't in the chat (chatPanel) and on blur. */
+function sentContext(c, message) {
   const chip = h("button", { class: "chat-context-chip", title: t("What the model got with this message", "Что модель получила с этим сообщением"),
-    onclick: (e) => { e.stopPropagation(); popover(chip, h("div", { class: "chat-pop-context" },
+    onclick: (e) => { e.stopPropagation(); const pop = popover(chip, h("div", { class: "chat-pop-context" },
       h("div", { class: "eyebrow" }, t("Sent to the model", "Ушло модели")), h("div", { class: "selectable" }, c.about),
-      c.bare ? h("div", { class: "chat-bare" }, t("Only the block's name went: its numbers don't reach the model yet.", "Ушло только название блока: его цифры модели пока не передаются.")) : null)); } },
+      c.bare ? h("div", { class: "chat-bare" }, t("Only the block's name went: its numbers don't reach the model yet.", "Ушло только название блока: его цифры модели пока не передаются.")) : null)); if (pop) pop._message = message; } },
   icon("square.on.square", 11), h("span", { class: "one-line" }, c.title), icon(c.bare ? "exclamationmark.circle" : "chevron.down", 9));
   if (c.bare) chip.classList.add("chat-bare-chip");
   return chip;
@@ -1243,7 +1249,8 @@ function refreshSuggestions(el) { pick = 0; listTop = 0; caretAt = el.selectionS
 function drawSuggestions(rows, keyed = false) {
   const slot = document.getElementById("chat-suggest");
   if (!slot) return;
-  if (!rows.length) { slot.replaceChildren(); return; }
+  // No list over the listening panel while dictating (the Mac's `if !voice.listening`): the field isn't in the page then.
+  if (!rows.length || voice.on) { slot.replaceChildren(); return; }
   const field = document.getElementById("composer");
   const list = h("div", { class: "chat-suggest-rows", onscroll: (e) => { if (e.target.isConnected) listTop = e.target.scrollTop; } }, rows.map((r, i) => h("button", { class: "chat-suggest-row" + (i === pick ? " chat-lit" : ""), onmousedown: (e) => { e.preventDefault(); choose(r, field); },
       // The pointer moving over a row picks it, as ↑↓ do (the Mac's onHover, once the pointer has moved).

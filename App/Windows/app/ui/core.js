@@ -16,6 +16,8 @@ export const ui = {
   view: "canvas",
   /** A screen over everything else (importing a phrase or a key), kept while new states arrive. */
   overlay: null,
+  /** Settings was what the last uncovered draw showed (app.js): the lock, a sheet or the words over it don't count. */
+  settingsShown: false,
   /** The chat field's text: the field is drawn again with every state. */
   composerText: "",
   /** A block pointed at for the next message (right-click › Ask in chat). */

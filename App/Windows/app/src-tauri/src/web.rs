@@ -106,7 +106,7 @@ pub fn go(webview: &tauri::Webview, back: bool) -> tauri::Result<()> {
 /// error gets WebView2's own page; fields get no autofill suggestions. A page that asks to close (a frame's `top.close()`)
 /// closes the panel as its × does, never leaving the header over an empty area.
 #[cfg(windows)]
-pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
+pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle, first: &tauri::Url) {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{BasicAuthenticationRequestedEventHandler, ClientCertificateRequestedEventHandler, HistoryChangedEventHandler,
                        LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
@@ -116,9 +116,10 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
     let (label, app) = (webview.label().to_string(), app.clone());
     // The page's own load, and whether a certificate error stopped it: so the toolbar says «certificate» for it (and not
     // for a picture inside), whatever status WebView2 ends that load with. Seeded with the address the webview was made
-    // with, as its first NavigationStarting can come before these handlers are in.
+    // with (`first`, not its `url()`: WebView2's Source can still read about:blank then), as its first NavigationStarting
+    // can come before these handlers are in.
     // ponytail: the handlers go in a hop after the webview is made; its first page's TLS answer takes far longer.
-    let first = webview.url().map(|u| u.to_string()).unwrap_or_default();
+    let first = first.to_string();
     let _ = webview.with_webview(move |w| {
         let Ok(core) = (unsafe { w.controller().CoreWebView2() }) else { return };
         let (a, l) = (app.clone(), label.clone());
@@ -232,7 +233,7 @@ pub fn watch(webview: &tauri::Webview, app: &tauri::AppHandle) {
 }
 
 #[cfg(not(windows))]
-pub fn watch(_webview: &tauri::Webview, _app: &tauri::AppHandle) {}
+pub fn watch(_webview: &tauri::Webview, _app: &tauri::AppHandle, _first: &tauri::Url) {}
 
 /// A site or a page beside the chat whose webview WebView2 took away (a page asked to close): closed the way its × and
 /// the browser's window close it, so nothing is left over an empty area.
@@ -305,7 +306,7 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
     let header = tauri::webview::WebviewBuilder::new(PANEL_BAR, tauri::WebviewUrl::App("browser-panel.html".into()));
     window.add_child(header, tauri::LogicalPosition::new(bar[0], bar[1]), tauri::LogicalSize::new(bar[2], bar[3])).map_err(|e| e.to_string())?;
     let (loads, titles, opens) = (app.clone(), app.clone(), app.clone());
-    let page = tauri::webview::WebviewBuilder::new(PANEL, tauri::WebviewUrl::External(url))
+    let page = tauri::webview::WebviewBuilder::new(PANEL, tauri::WebviewUrl::External(url.clone()))
         // No file picker, alerts, print preview, close() or Notification, as the Mac's panel (keys.rs).
         .initialization_script_for_all_frames(crate::keys::SITE_GUARD)
         .on_navigation(|u| matches!(u.scheme(), "http" | "https" | "about" | "blob" | "data"))
@@ -324,7 +325,7 @@ pub async fn open_page(app: tauri::AppHandle, webview: tauri::Webview, url: Stri
         })
         .on_document_title_changed(move |_, title| set(&titles, PANEL, |p| p.title = title));
     let page = window.add_child(page, tauri::LogicalPosition::new(rest[0], rest[1]), tauri::LogicalSize::new(rest[2], rest[3])).map_err(|e| e.to_string())?;
-    watch(&page, &app);
+    watch(&page, &app, &url);
     layout_panel(&app);
     Ok(())
 }

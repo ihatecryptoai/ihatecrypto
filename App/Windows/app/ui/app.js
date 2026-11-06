@@ -103,6 +103,12 @@ function draw() {
     parts.push(h("div", { class: "ground" }), page || canvasView(), rail(), windowControls());
   }
   app.replaceChildren(...parts);
+  // What the window last showed in its own place, for Settings' «opened anew» (pages.js): the lock, a sheet and the
+  // recovery words only cover it, as the Mac's lock is an overlay over Settings and its import is inline.
+  if (!locked && !ui.overlay && !s.phrase) ui.settingsShown = !!app.querySelector(".pg-settings");
+  // What's New (on the body) is out of sight while Settings fills the window and back after, as the Mac's is an overlay
+  // of the Studio that Settings replaces (whatsnew.css, whatsnew.js's keys).
+  document.body.classList.toggle("in-settings", ui.view === "settings");
   // A chat popover goes with the chat: Settings (Ctrl+, too) replaces it, as the Mac's Settings replaces the Studio.
   if (!app.querySelector(".chat-panel")) for (const m of document.querySelectorAll(".chat-pop")) m.remove();
   // The page panel's webviews sit over this page: hidden while Settings, a sheet, the lock or the first run fills it, as

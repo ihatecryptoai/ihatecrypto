@@ -112,9 +112,21 @@ function tellEngine() {
   const on = onboardingRunning();
   if (on !== toldRunning) { toldRunning = on; act("onboarding", { test: on }); }
 }
-// Leaving the Top up step, its state goes (the Mac's MoneyStep is made anew each time it's drawn): coming back starts afresh.
-function go(next) { if (step() === "money") flow.money = null; flow.history.push(step()); store("onboardingStep", next); tellEngine(); render(); }
-function back() { if (step() === "money") flow.money = null; store("onboardingStep", flow.history.pop() || ""); tellEngine(); render(); }
+// Each step starts afresh when it comes again, as the Mac's step views are made anew (`switch step`): what the one being
+// left had typed, picked or shown goes with it — Bring's phrase, passphrase, key and addresses out of the page, the model's
+// unsaved key, the Test switch, a half-made code, a failed approve's line, Top up's balances.
+function leave() {
+  switch (step()) {
+    case "model": flow.key = ""; flow.keyProvider = null; break;
+    case "newWallet": flow.test = false; break;
+    case "bring": Object.assign(bring, { way: "phrase", phrase: "", passphrase: "", key: "", keyFound: null, keyError: null, solana: "", evm: "" }); keyAsked++; break;
+    case "passcode": lock?.resetMaker(); break;
+    case "money": flow.money = null; break;
+    case "tradingKey": flow.tried = false; flow.keyReply = null; break;
+  }
+}
+function go(next) { leave(); flow.history.push(step()); store("onboardingStep", next); tellEngine(); render(); }
+function back() { leave(); store("onboardingStep", flow.history.pop() || ""); tellEngine(); render(); }
 function finish() {
   Object.assign(flow, { history: [], accounts: null, money: null, tried: false });
   store("onboardingStep", "");
@@ -262,7 +274,7 @@ function modelStep() {
 
 // A new wallet, its words and their check.
 
-/** The signer's own note when Windows Hello isn't set up (Signer/Windows/Host.swift presence()): then only a test
+/** The signer's own note when Windows Hello isn't set up (the signer's presence note, signer/src/host.rs): then only a test
  * wallet can be made, as nothing could ask before a move. The Mac adapts its texts to a Mac without Touch ID. */
 export const noHello = () => (ui.state.signer?.notes || []).some((n) => n.startsWith("Windows Hello isn't set up"));
 const helloMissing = () => factRow("person", t("Windows Hello isn't set up on this PC", "Windows Hello на этом компьютере не настроен"),

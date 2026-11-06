@@ -719,9 +719,10 @@ function hyperliquidRows() {
   const fact = (title, value, sub) => h("div", { class: "pf-d-row" }, logoDisc("HYPE", 24),
     h("div", { class: "pf-d-name" }, h("b", { class: "one-line" }, title), sub ? h("span", { class: "secondary one-line" }, sub) : null),
     h("span", { class: "spacer" }), h("b", { class: "num" }, value));
-  const out = [];
+  // The account's value is always there: «—» until its facts are read (launch, a switch), as the Mac's row.
+  const value = hl ? usd(hl.accountValue) : "—", free = hl ? usd(hl.withdrawable) : "—";
+  const out = [fact(t("Account value", "Стоимость счёта"), amount(value), amount(t(`free to withdraw ${free}`, `можно вывести ${free}`)))];
   if (hl) {
-    out.push(fact(t("Account value", "Стоимость счёта"), amount(usd(hl.accountValue)), amount(t(`free to withdraw ${usd(hl.withdrawable)}`, `можно вывести ${usd(hl.withdrawable)}`))));
     for (const d of hl.dexes || []) out.push(fact(t(`${d.dex} exchange (stocks, commodities)`, `биржа ${d.dex} (акции, сырьё)`), amount(usd(d.accountValue)), amount(t(`free ${usd(d.withdrawable)}`, `свободно ${usd(d.withdrawable)}`))));
     if (Number(hl.spotUSDC) > 0) out.push(h("div", { class: "pf-d-row" }, logo("usdc", 24),
       h("div", { class: "pf-d-name" }, h("b", {}, t("Spot USDC", "USDC на споте")), h("span", { class: "secondary" }, t("separate from the perp margin", "отдельно от маржи фьючерсов"))),

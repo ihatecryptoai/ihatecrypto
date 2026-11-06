@@ -984,12 +984,19 @@ function narrow() {
       // The live list, as the Mac's popover holds CanvasList: a folder folds, a drag moves a row, a reply's row breathes.
       const body = h("div", { class: "rail-canvases-panel" }, canvasList(closePopover));
       const panel = popover(anchor, "right", body, "rail-canvases-pop menu-host");
-      canvasesRedraw = () => {
+      const redraw = () => {
         if (!panel.isConnected) return false;
-        // Not under a row's own menu: the row it was opened for stays the one Rename sits beside.
-        if (document.querySelectorAll(".menu").length === 1) { const top = panel.scrollTop; body.replaceChildren(canvasList(closePopover)); panel.scrollTop = top; }
+        // Not under a row's own menu (core.js popup): the row it was opened for stays the one Rename sits beside. Under the
+        // rename box or the icon picker it is, as the Mac's live list under them: a picked icon shows in its row at once.
+        if (!document.querySelector(".menu:not(.rail-popover)")) { const top = panel.scrollTop; body.replaceChildren(canvasList(closePopover)); panel.scrollTop = top; }
         return true;
       };
+      canvasesRedraw = redraw;
+      // A row's menu or the picker over it closing: the list catches up then too, not at the next state.
+      new MutationObserver((records, o) => {
+        if (!panel.isConnected) o.disconnect();
+        else if (records.some((r) => [...r.removedNodes].some((n) => n.classList?.contains("menu")))) redraw();
+      }).observe(document.body, { childList: true });
     } }),
     roundButton("plus", t("New", "Новый"), { dashed: true, help: t("New canvas", "Новый холст"), run: () => { if (!canSwitch()) { toast(busyTip()); return; } ui.view = "canvas"; act("newCanvas"); } }),
     h("div", { class: "spacer" }),

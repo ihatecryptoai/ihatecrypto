@@ -69,11 +69,16 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 // `Function.prototype.call` can't switch the guard off. An input is told by the platform's own getters, not
 // `instanceof` or its own properties: one made in another frame's realm and moved here, or with `type` redefined on it,
 // is still a file input. One never put in the page (or a label of one) has a click path that never reaches the window,
-// so `click()` and `dispatchEvent` refuse it themselves.
-// ponytail: a page script, so a page that calls a fresh about:blank frame's own `showPicker`, `click`, `print` or
-// `close` (a realm without this script) or uses a closed shadow root it declares in HTML could still ask; WebView2 has
-// no file-chooser or print event to refuse it at the host. Dropping a file onto the page stays, as it needs the
-// person's drag. A video's own fullscreen button is Chromium's, not the page's, and still works.
+// so `click()` and `dispatchEvent` refuse it themselves. An input in a closed shadow root is seen from the window as its
+// host, and the page's nodes between can end the click before the root's own listener: so the window's listener looks
+// into the roots it recorded, and the page ending a click on its way into one that holds a file input drops the
+// click's default action.
+// ponytail: a page script, so a page that calls a fresh about:blank frame's own `showPicker`, `click`,
+// `stopPropagation`, `print` or `close` (a realm without this script) or uses a closed shadow root it declares in HTML
+// could still ask; WebView2 has no file-chooser or print event to refuse it at the host. In a closed root that holds a
+// file input, a checkbox or link gets no default action from a click the page ends on its way down. Dropping a file onto
+// the page stays, as it needs the person's drag. A video's own fullscreen button is Chromium's, not the page's, and still
+// works.
 pub const SITE_GUARD: &str = r#"(() => {
   const apply = Reflect.apply, define = Object.defineProperty, descriptor = Object.getOwnPropertyDescriptor;
   const getter = (proto, name) => descriptor(proto, name).get;
@@ -89,15 +94,66 @@ pub const SITE_GUARD: &str = r#"(() => {
     if (file(el)) return true;
     try { const label = apply(closest, el, ["label"]); return !!label && file(apply(controlOf, label, [])); } catch { return false; }
   };
+  // Each shadow root the page makes, by its host: a closed one hides its input from the window, which sees the host.
+  const roots = new WeakMap(), keep = WeakMap.prototype.set, rootOf = WeakMap.prototype.get;
+  // Each click, by the first node on its path the last of the guard's listeners saw.
+  const pending = new WeakMap();
+  const under = ShadowRoot.prototype.elementFromPoint, focused = getter(ShadowRoot.prototype, "activeElement");
+  const xOf = getter(MouseEvent.prototype, "clientX"), yOf = getter(MouseEvent.prototype, "clientY");
+  // What a click is on inside a root: the element under it, or the focused one for a key's click, which has no point.
+  const inside = (root, e) => {
+    let x = 0, y = 0;
+    try { x = apply(xOf, e, []); y = apply(yOf, e, []); } catch {}
+    try { return x || y ? apply(under, root, [x, y]) : apply(focused, root, []); } catch { return null; }
+  };
+  // The window's listener is the first on every click's path, so the page's own nodes can't stop the click before it:
+  // into each root the click's host has, nested ones too, it finds the input itself.
   const stop = (e) => {
-    let first = null;
-    try { first = apply(path, e, [])[0]; } catch {}
-    if (file(first)) { apply(prevent, e, []); apply(halt, e, []); }
+    let el = null;
+    try { el = apply(path, e, [])[0]; } catch {}
+    apply(keep, pending, [e, el]);
+    let hit = file(el);
+    for (let root; !hit && (root = apply(rootOf, roots, [el])); ) {
+      const inner = inside(root, e);
+      if (inner === el) break;
+      el = inner;
+      hit = picks(el);
+    }
+    if (hit) { apply(prevent, e, []); apply(halt, e, []); }
   };
   apply(listen, window, ["click", stop, true]);
-  // Inside a closed shadow root the window never sees the input itself: each root gets the same guard.
+  // The point can lie (a pointer the input captured, the input moved after the press), so a click the page ends on its
+  // way into a root, before that root's own listener has seen what it's on, does nothing if the root holds a file input.
+  // A click is ended only by these three; one ended on its way back up has passed the root already.
+  const phaseOf = getter(Event.prototype, "eventPhase"), all = DocumentFragment.prototype.querySelectorAll;
+  const holds = (root) => {
+    const list = apply(all, root, ["*"]);
+    for (let i = 0, el; (el = list[i]); i++) {
+      const inner = apply(rootOf, roots, [el]);
+      if (file(el) || (inner && holds(inner))) return true;
+    }
+    return false;
+  };
+  const ends = (e) => {
+    try {
+      const root = apply(rootOf, roots, [apply(rootOf, pending, [e])]);
+      if (root && apply(phaseOf, e, []) !== 3 && holds(root)) apply(prevent, e, []);
+    } catch {}
+  };
+  for (const name of ["stopPropagation", "stopImmediatePropagation"]) {
+    const real = Event.prototype[name];
+    Event.prototype[name] = function () { ends(this); return apply(real, this, []); };
+  }
+  const bubble = descriptor(Event.prototype, "cancelBubble");
+  define(Event.prototype, "cancelBubble", { ...bubble, set(on) { if (on) ends(this); apply(bubble.set, this, [on]); } });
+  // And each root gets the same guard, which sees the input whatever the click's point.
   const attach = Element.prototype.attachShadow;
-  Element.prototype.attachShadow = function (init) { const root = apply(attach, this, [init]); apply(listen, root, ["click", stop, true]); return root; };
+  Element.prototype.attachShadow = function (init) {
+    const root = apply(attach, this, [init]);
+    apply(keep, roots, [this, root]);
+    apply(listen, root, ["click", stop, true]);
+    return root;
+  };
   const click = HTMLElement.prototype.click;
   HTMLElement.prototype.click = function () { if (!picks(this)) apply(click, this, []); };
   const dispatch = EventTarget.prototype.dispatchEvent;

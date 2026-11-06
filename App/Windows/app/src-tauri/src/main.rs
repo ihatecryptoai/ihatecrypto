@@ -425,9 +425,9 @@ async fn open_browser(app: tauri::AppHandle, url: String) -> Result<(), String> 
     }
     main.add_child(tauri::webview::WebviewBuilder::new(BAR, tauri::WebviewUrl::App("browser-bar.html".into())),
                    tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0)).map_err(|e| e.to_string())?;
-    let site = main.add_child(site_view(&app, url), tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0))
+    let site = main.add_child(site_view(&app, url.clone()), tauri::LogicalPosition::new(0.0, 0.0), tauri::LogicalSize::new(1.0, 1.0))
         .map_err(|e| e.to_string())?;
-    web::watch(&site, &app);
+    web::watch(&site, &app, &url);
     web::shown(&app, SITE, true);
     web::ensure_edge(&app)?;
     web::layout_panel(&app);

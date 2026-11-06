@@ -3,7 +3,7 @@
 // one card at a time — ← → switch, Space pauses, the bars fill in 6 s and move on, Esc goes back to the list. Nothing
 // opens by itself: the newest version not seen yet is `whatsNewUnseen()`, for the logo's ring and the menu's dot.
 
-import { ui, t, h, icon, addIcons, suggest, store } from "./core.js";
+import { ui, t, h, icon, addIcons, suggest, store, render } from "./core.js";
 import { releases } from "./whatsnew-data.js";
 
 addIcons({
@@ -41,6 +41,9 @@ export function whatsNewUnseen() {
 let panel = null;
 
 export function openWhatsNew() {
+  // It belongs over the canvas (the Mac's is an overlay of the Studio): opened from the rail beside Settings, it leaves
+  // Settings, and one already open there comes back into sight.
+  if (ui.view === "settings") { ui.view = "canvas"; render(); }
   if (panel) return;
   if (releases[0]) store("whatsNewSeen", releases[0].version);
   let chosen = releases[0]?.version;
@@ -117,8 +120,9 @@ export function openWhatsNew() {
   }
 
   function keys(e) {
-    // Under the lock its keys are the lock screen's (the Mac's What's New is disabled under it).
-    if (ui.state?.lock?.locked) return;
+    // Under the lock its keys are the lock screen's (the Mac's What's New is disabled under it), and while Settings fills
+    // the window they are Settings' (Esc leaves Settings, and What's New is there again).
+    if (ui.state?.lock?.locked || ui.view === "settings") return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); playing ? back() : close(); }
     else if (playing && e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
     else if (playing && e.key === "ArrowRight") { e.preventDefault(); go(1); }
