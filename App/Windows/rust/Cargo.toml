@@ -33,6 +33,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 evm = { path = "evm" }
 signer-api = { path = "signer-api" }
 guard = { path = "guard" }
+execution = { path = "execution" }
 net = { path = "net" }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "charset", "http2", "system-proxy", "gzip"] }

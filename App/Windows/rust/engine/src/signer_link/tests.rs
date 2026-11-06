@@ -2,24 +2,36 @@
 
 use super::*;
 
+/// The signer's folder is the process's environment, which every signer started inherits: one test at a time holds it,
+/// each with a fresh folder of its own.
+#[cfg(not(windows))]
+static SIGNER_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(not(windows))]
+pub(crate) fn fresh_signer_dir(name: &str) -> std::sync::MutexGuard<'static, ()> {
+    let held = SIGNER_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("ihc-engine-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    // SAFETY: changed only while the lock is held, before the signer starts; the child inherits it.
+    unsafe { std::env::set_var("IHATECRYPTO_SIGNER_DIR", &dir) }
+    held
+}
+
 /// The signer cargo built next to this test's binary (target/<profile>/), if it did.
-fn built_signer() -> Option<PathBuf> {
+pub(crate) fn built_signer() -> Option<PathBuf> {
     let dir = std::env::current_exe().ok()?.parent()?.parent()?.to_path_buf();
     let exe = dir.join(if cfg!(windows) { "ihatecrypto-signer.exe" } else { "ihatecrypto-signer" });
     exe.exists().then_some(exe)
 }
 
-fn runtime() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap() }
+pub(crate) fn runtime() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap() }
 
 /// Off Windows the stand-in parent check lets a test process talk to the signer; on Windows only ihatecrypto-engine.exe may.
 #[cfg(not(windows))]
 #[test]
 fn the_real_signer_answers_one_request_at_a_time() {
     let Some(exe) = built_signer() else { eprintln!("ihatecrypto-signer isn't built beside the tests: `cargo build -p signer` first"); return };
-    let dir = std::env::temp_dir().join(format!("ihc-engine-link-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    // SAFETY: set before the signer starts; the child inherits it. The Debug signer keeps its files there.
-    unsafe { std::env::set_var("IHATECRYPTO_SIGNER_DIR", &dir) }
+    let _held = fresh_signer_dir("link");
     let link = Arc::new(SignerLink::new(exe));
     runtime().block_on(async {
         let reply = link.send(&SignerRequest::Status {}).await.unwrap();
@@ -30,7 +42,6 @@ fn the_real_signer_answers_one_request_at_a_time() {
         assert!(a.unwrap().ok && b.unwrap().ok);
         assert_eq!(link.pid(), Some(pid)); // the same process served them
     });
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[cfg(unix)]

@@ -87,4 +87,4 @@ fn name(request: &SignerRequest) -> String {
 
 #[cfg(test)]
 #[path = "signer_link/tests.rs"]
-mod tests;
+pub(crate) mod tests;

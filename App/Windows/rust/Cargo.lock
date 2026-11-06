@@ -941,7 +941,10 @@ dependencies = [
 name = "engine"
 version = "0.1.0"
 dependencies = [
+ "evm",
+ "execution",
  "getrandom 0.3.4",
+ "hyperliquid",
  "serde_json",
  "signer-api",
  "tokio",
@@ -1002,9 +1005,12 @@ name = "execution"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "evm",
+ "hyperliquid",
  "rust_decimal",
  "serde",
  "serde_json",
+ "wallet",
 ]
 
 [[package]]

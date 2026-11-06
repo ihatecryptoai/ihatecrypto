@@ -1,6 +1,8 @@
 //! The envelope a person approves and the write-before-send journal (`App/Sources/Execution`: Envelope.swift,
 //! Journal.swift). The executor that runs an approved plan (`Execution/Trade`) comes after the core it needs.
 
+pub mod trade_signer;
+
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;

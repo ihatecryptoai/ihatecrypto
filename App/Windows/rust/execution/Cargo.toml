@@ -6,6 +6,9 @@ publish.workspace = true
 description = "The envelope a person approves and the write-before-send journal: the Rust port of App/Sources/Execution (Envelope, Journal; Trade is the executor's, later)"
 
 [dependencies]
+wallet.workspace = true
+hyperliquid.workspace = true
+evm.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true

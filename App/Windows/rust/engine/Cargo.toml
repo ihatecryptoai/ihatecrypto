@@ -7,6 +7,9 @@ description = "ihatecrypto's engine for Windows: the Rust port of App/Sources/De
 
 [dependencies]
 signer-api.workspace = true
+execution.workspace = true
+evm.workspace = true
+hyperliquid.workspace = true
 wallet.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
