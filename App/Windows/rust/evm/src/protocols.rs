@@ -7,6 +7,9 @@ use wallet::{Result, from_hex, to_hex};
 
 use crate::abi::{self, address_in, bytes_array, padded, u256_in, uint_in};
 use crate::call::Call;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+
 use crate::{Rlp, Transaction, U256, Authorization, fail, network_name, SIGNABLE};
 
 fn selector(signature: &str) -> [u8; 4] { keccak(signature.as_bytes())[..4].try_into().expect("4 bytes") }
@@ -151,15 +154,68 @@ pub mod merkl {
     /// Base, Arbitrum, Ethereum, Polygon.
     pub const CHAINS: [u64; 4] = [8453, 42161, 1, 137];
 
-    /// claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs): (token, cumulative amount,
-    /// proofs) per reward, all paid to `user`.
-    pub fn claim(user: &str, rewards: &[(String, U256, Vec<String>)]) -> Result<Vec<u8>> {
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Reward {
+        pub chain_id: u64,
+        pub token: String,
+        pub symbol: String,
+        pub decimals: u32,
+        /// Everything ever earned, in the token's smallest units: the amount `claim` takes.
+        pub amount: Decimal,
+        /// Already claimed, in the same units.
+        pub claimed: Decimal,
+        pub proofs: Vec<String>,
+        /// The root the proofs are for.
+        pub root: String,
+        pub price: Option<Decimal>,
+    }
+
+    impl Reward {
+        /// What claiming pays now, in tokens.
+        pub fn claimable(&self) -> Decimal { (0..self.decimals).fold(self.amount - self.claimed, |x, _| x / Decimal::TEN) }
+        pub fn worth_usd(&self) -> Option<Decimal> { self.price.map(|p| self.claimable() * p) }
+    }
+
+    /// A sweep's floor: what the person said, never under $5 — below it the claim and the sale cost most of it in gas.
+    pub fn sweep_floor(asked: Option<Decimal>) -> Decimal { asked.unwrap_or(Decimal::from(5)).max(Decimal::from(5)) }
+
+    /// What a sweep sells: each reward worth a dollar or more that isn't already the coin it ends in. Dust stays.
+    pub fn to_sell(owed: &[Reward], into: Option<&str>) -> Vec<Reward> {
+        owed.iter().filter(|r| {
+            let s = r.symbol.to_uppercase();
+            r.worth_usd().unwrap_or_default() >= Decimal::ONE && s != "USDC" && s != "USDG" && Some(s) != into.map(str::to_uppercase)
+        }).cloned().collect()
+    }
+
+    /// The API's answer: `[{chain, rewards: [{root, recipient, amount, claimed, proofs, token: {chainId, address,
+    /// decimals, symbol, price}}]}]`. Only rewards paid to `user` with something left to claim.
+    pub fn parse(data: &[u8], user: &str) -> Result<Vec<Reward>> {
+        #[derive(serde::Deserialize)]
+        struct Chain { rewards: Vec<Entry> }
+        #[derive(serde::Deserialize)]
+        struct Entry { root: String, recipient: String, amount: String, claimed: String, proofs: Vec<String>, token: Token }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Token { chain_id: u64, address: String, decimals: u32, symbol: String, price: Option<f64> }
+        let chains: Vec<Chain> = serde_json::from_slice(data).map_err(|e| wallet::WalletError(format!("Merkl's answer can't be read: {e}")))?;
+        Ok(chains.into_iter().flat_map(|c| c.rewards).filter_map(|e| {
+            let (amount, claimed) = (e.amount.parse::<Decimal>().ok()?, e.claimed.parse::<Decimal>().ok()?);
+            (e.recipient.to_lowercase() == user.to_lowercase() && amount > claimed).then(|| Reward {
+                chain_id: e.token.chain_id, token: e.token.address, symbol: e.token.symbol, decimals: e.token.decimals, amount, claimed,
+                proofs: e.proofs, root: e.root, price: e.token.price.and_then(Decimal::from_f64),
+            })
+        }).collect())
+    }
+
+    /// claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs): every reward in `rewards` paid
+    /// to `user`.
+    pub fn claim(user: &str, rewards: &[Reward]) -> Result<Vec<u8>> {
         let array = |words: Vec<[u8; 32]>| -> Vec<u8> { [abi::uint(words.len() as u64).to_vec(), words.concat()].concat() };
         let users = array(rewards.iter().map(|_| abi::address(user)).collect::<Result<_>>()?);
-        let tokens = array(rewards.iter().map(|r| abi::address(&r.0)).collect::<Result<_>>()?);
-        let amounts = array(rewards.iter().map(|r| abi::word(r.1)).collect());
+        let tokens = array(rewards.iter().map(|r| abi::address(&r.token)).collect::<Result<_>>()?);
+        let amounts = array(rewards.iter().map(|r| abi::word_decimal(r.amount)).collect::<Result<_>>()?);
         let inner: Vec<Vec<u8>> = rewards.iter().map(|r| {
-            Ok(array(r.2.iter().map(|p| match from_hex(p) {
+            Ok(array(r.proofs.iter().map(|p| match from_hex(p) {
                 Some(b) if b.len() == 32 => Ok(b.try_into().expect("32")),
                 _ => fail(format!("A Merkl proof isn't 32 bytes: {p}")),
             }).collect::<Result<_>>()?))
@@ -441,6 +497,75 @@ pub mod kyber {
 
 /// Uniswap v2 Router02 and v3 SwapRouter02 per network (`UniswapV2.swift`, `UniswapV3.swift`).
 pub mod uniswap {
+    use super::*;
+
+    /// getPool(address,address,uint24)
+    pub fn get_pool(a: &str, b: &str, fee: u64) -> Result<Vec<u8>> {
+        Ok([&[0x16, 0x98, 0xee, 0x82][..], &abi::address(a)?, &abi::address(b)?, &abi::uint(fee)].concat())
+    }
+
+    /// QuoterV2.quoteExactInputSingle((tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)).
+    pub fn quote_exact_input_single(token_in: &str, token_out: &str, amount_in: U256, fee: u64) -> Result<Vec<u8>> {
+        Ok([&[0xc6, 0xa5, 0x02, 0x6a][..], &abi::address(token_in)?, &abi::address(token_out)?, &abi::word(amount_in), &abi::uint(fee), &abi::uint(0)].concat())
+    }
+
+    /// SwapRouter02.exactInputSingle((tokenIn, tokenOut, fee, recipient, amountIn, amountOutMinimum, sqrtPriceLimitX96)).
+    pub fn exact_input_single(token_in: &str, token_out: &str, fee: u64, recipient: &str, amount_in: U256, amount_out_minimum: U256) -> Result<Vec<u8>> {
+        Ok([&[0x04, 0xe4, 0x5a, 0xaf][..], &abi::address(token_in)?, &abi::address(token_out)?, &abi::uint(fee), &abi::address(recipient)?,
+            &abi::word(amount_in), &abi::word(amount_out_minimum), &abi::uint(0)].concat())
+    }
+
+    /// A route through pools: token, fee (3 bytes), token, fee, token… One pool is a path of two tokens.
+    pub fn path(tokens: &[&str], fees: &[u64]) -> Result<Vec<u8>> {
+        if tokens.len() != fees.len() + 1 { return fail("A Uniswap path needs one fee between each two tokens.") }
+        let mut out = Vec::new();
+        for (i, token) in tokens.iter().enumerate() {
+            let Some(bytes) = from_hex(token).filter(|b| b.len() == 20) else { return fail(format!("Invalid address: {token}")) };
+            out.extend(bytes);
+            if let Some(fee) = fees.get(i) { out.extend(&(*fee as u32).to_be_bytes()[1..]) }
+        }
+        Ok(out)
+    }
+
+    fn bytes(d: &[u8]) -> Vec<u8> { [abi::uint(d.len() as u64).to_vec(), padded(d)].concat() }
+
+    /// QuoterV2.quoteExactInput(bytes path, uint256 amountIn).
+    pub fn quote_exact_input(path: &[u8], amount_in: U256) -> Vec<u8> {
+        [&[0xcd, 0xca, 0x17, 0x53][..], &abi::uint(0x40), &abi::word(amount_in), &bytes(path)].concat()
+    }
+
+    /// SwapRouter02.exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum)).
+    pub fn exact_input(path: &[u8], recipient: &str, amount_in: U256, amount_out_minimum: U256) -> Result<Vec<u8>> {
+        Ok([&[0xb8, 0x58, 0x18, 0x3f][..], &abi::uint(0x20), &abi::uint(0x80), &abi::address(recipient)?, &abi::word(amount_in),
+            &abi::word(amount_out_minimum), &bytes(path)].concat())
+    }
+
+    /// address[]: its length, then each address.
+    fn addresses(path: &[&str]) -> Result<Vec<u8>> {
+        let mut out = abi::uint(path.len() as u64).to_vec();
+        for a in path { out.extend(abi::address(a)?) }
+        Ok(out)
+    }
+
+    /// Router02.getAmountsOut(amountIn, path).
+    pub fn get_amounts_out(amount_in: U256, path: &[&str]) -> Result<Vec<u8>> {
+        Ok([&[0xd0, 0x6c, 0xa6, 0x1f][..], &abi::word(amount_in), &abi::uint(0x40), &addresses(path)?].concat())
+    }
+
+    /// The last of getAmountsOut's amounts (uint256[]: offset, length, amounts): what comes out, before any transfer tax.
+    pub fn amount_out(answer: &[u8]) -> Option<U256> {
+        let n = uint_in(answer, 1).filter(|n| (2..=4).contains(n))?;
+        u256_in(answer, 1 + n as usize)
+    }
+
+    /// swapExactTokensForTokensSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline); `to_eth`:
+    /// swapExactTokensForETHSupportingFeeOnTransferTokens, the path ending in WETH, which the router unwraps for `to`.
+    pub fn swap_exact_tokens(amount_in: U256, amount_out_min: U256, path: &[&str], to: &str, deadline: u64, to_eth: bool) -> Result<Vec<u8>> {
+        let selector: [u8; 4] = if to_eth { [0x79, 0x1a, 0xc9, 0x47] } else { [0x5c, 0x11, 0xd7, 0x95] };
+        Ok([&selector[..], &abi::word(amount_in), &abi::word(amount_out_min), &abi::uint(0xa0), &abi::address(to)?, &abi::uint(deadline),
+            &addresses(path)?].concat())
+    }
+
     /// (router, WETH the router wraps the coin into).
     pub fn v2(chain_id: u64) -> Option<(&'static str, &'static str)> {
         Some(match chain_id {
@@ -663,7 +788,7 @@ pub mod v4 {
     const DYNAMIC_FEE: u32 = 0x800000;
 
     /// BEFORE_SWAP_RETURNS_DELTA or AFTER_SWAP_RETURNS_DELTA in the hook address's low bits.
-    fn takes_swap_delta(hooks: &str) -> bool {
+    pub(crate) fn takes_swap_delta(hooks: &str) -> bool {
         u16::from_str_radix(&hooks[hooks.len().saturating_sub(4)..], 16).map_or(true, |low| low & 0b1100 != 0)
     }
 
@@ -686,22 +811,204 @@ pub mod v4 {
     }
 }
 
-/// Aave v3's pools and Morpho's vaults on each network: the spenders ihatecrypto approves (`AaveV3.swift`, `MorphoVault.swift`).
-pub fn aave_pools(chain_id: u64) -> &'static [&'static str] {
-    match chain_id {
-        8453 => &["0xa238dd80c259a72e81d7e4664a9801593f98d1c5"],
-        42161 | 137 => &["0x794a61358d6845594f94dc1db02a252b5b4814ad"],
-        1 => &["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"],
-        _ => &[],
+/// Aave v3's USDC markets (`AaveV3.swift`): the calls and where they go. Reading the pool and the rate is the engine's.
+pub mod aave {
+    use super::*;
+
+    /// One network's USDC market. Arbitrum and Polygon share the pool's address but not the aToken.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Market {
+        /// The network's key («base», «arbitrum», «polygon», «ethereum») and name.
+        pub chain: &'static str,
+        pub chain_name: &'static str,
+        pub chain_id: u64,
+        pub usdc: &'static str,
+        pub provider: &'static str,
+        pub pool: &'static str,
+        pub a_usdc: &'static str,
+    }
+
+    impl Market {
+        /// How the app names it: «Aave · Arbitrum».
+        pub fn place(&self) -> String { format!("Aave · {}", self.chain_name) }
+    }
+
+    pub const MARKETS: [Market; 4] = [
+        Market { chain: "base", chain_name: "Base", chain_id: 8453, usdc: crate::BASE_USDC, provider: "0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d",
+                 pool: "0xa238dd80c259a72e81d7e4664a9801593f98d1c5", a_usdc: "0x4e65fe4dba92790696d040ac24aa414708f5c0ab" },
+        Market { chain: "arbitrum", chain_name: "Arbitrum", chain_id: 42161, usdc: crate::ARBITRUM_USDC, provider: "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+                 pool: "0x794a61358d6845594f94dc1db02a252b5b4814ad", a_usdc: "0x724dc807b04555b71ed48a6896b6f41593b8c637" },
+        Market { chain: "polygon", chain_name: "Polygon", chain_id: 137, usdc: crate::POLYGON_USDC, provider: "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+                 pool: "0x794a61358d6845594f94dc1db02a252b5b4814ad", a_usdc: "0xa4d94019934d8333ef880abffbf2fdd611c762bd" },
+        Market { chain: "ethereum", chain_name: "Ethereum", chain_id: 1, usdc: crate::ETHEREUM_USDC, provider: "0x2f39d218133afab8f2b819b1066c7e434ad94e9e",
+                 pool: "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2", a_usdc: "0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c" },
+    ];
+
+    pub fn market(place: &str) -> Option<&'static Market> { MARKETS.iter().find(|m| m.place() == place) }
+
+    /// supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+    pub fn supply(asset: &str, amount: u64, on_behalf_of: &str) -> Result<Vec<u8>> {
+        Ok([&[0x61, 0x7b, 0xa0, 0x37][..], &abi::address(asset)?, &abi::uint(amount), &abi::address(on_behalf_of)?, &abi::uint(0)].concat())
+    }
+
+    /// withdraw(address asset, uint256 amount, address to); None = everything (type(uint256).max).
+    pub fn withdraw(asset: &str, amount: Option<u64>, to: &str) -> Result<Vec<u8>> {
+        Ok([&[0x69, 0x32, 0x8d, 0xec][..], &abi::address(asset)?, &amount.map_or([0xff; 32], abi::uint), &abi::address(to)?].concat())
+    }
+
+    /// borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf): variable
+    /// rate (2), sent to the caller, the debt on `on_behalf_of`.
+    pub fn borrow(asset: &str, amount: u64, on_behalf_of: &str) -> Result<Vec<u8>> {
+        Ok([&[0xa4, 0x15, 0xbc, 0xad][..], &abi::address(asset)?, &abi::uint(amount), &abi::uint(2), &abi::uint(0), &abi::address(on_behalf_of)?].concat())
+    }
+
+    /// repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf); None = the whole debt.
+    pub fn repay(asset: &str, amount: Option<u64>, on_behalf_of: &str) -> Result<Vec<u8>> {
+        Ok([&[0x57, 0x3a, 0xde, 0x81][..], &abi::address(asset)?, &amount.map_or([0xff; 32], abi::uint), &abi::uint(2), &abi::address(on_behalf_of)?].concat())
+    }
+
+    /// getUserAccountData(address).
+    pub fn account_data(user: &str) -> Result<Vec<u8>> { Ok([&[0xbf, 0x92, 0x85, 0x7c][..], &abi::address(user)?].concat()) }
+    /// getPriceOracle() on the addresses provider.
+    pub const GET_PRICE_ORACLE: [u8; 4] = [0xfc, 0xa5, 0x13, 0xa8];
+    /// getAssetPrice(asset) on the oracle, USD with 8 decimals.
+    pub fn asset_price(asset: &str) -> Result<Vec<u8>> { Ok([&[0xb3, 0x59, 0x6f, 0x07][..], &abi::address(asset)?].concat()) }
+    /// getPool()
+    pub const GET_POOL: [u8; 4] = [0x02, 0x6b, 0x1d, 0x5f];
+    /// getReserveData(address): word 2 is the supply rate in ray (1e27), word 8 the aToken, word 10 the variable debt token.
+    pub fn get_reserve_data(asset: &str) -> Result<Vec<u8>> { Ok([&[0x35, 0xea, 0x6a, 0x75][..], &abi::address(asset)?].concat()) }
+
+    /// Supply APY in %: the ray rate compounded every second over a year.
+    pub fn apy(rate_ray: Decimal) -> Decimal {
+        let r = (rate_ray / Decimal::from_i128_with_scale(10i128.pow(27), 0)).to_f64().unwrap_or(0.0);
+        Decimal::from_f64(r.exp_m1() * 100.0).unwrap_or_default()
     }
 }
 
-pub fn morpho_vaults(chain_id: u64) -> &'static [&'static str] {
-    match chain_id {
-        8453 => &["0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61"],
-        1 => &["0xdd0f28e19c1780eb6396170735d45153d261490d"],
-        42161 => &["0x7e97fa6893871a2751b5fe961978dccb2c201e65"],
-        _ => &[],
+/// Morpho vaults, ERC-4626 (`MorphoVault.swift`).
+pub mod morpho {
+    use super::*;
+
+    pub const GAUNTLET_USDC_PRIME: &str = "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61";
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Vault {
+        pub chain: &'static str,
+        pub chain_name: &'static str,
+        pub chain_id: u64,
+        pub usdc: &'static str,
+        pub address: &'static str,
+        pub name: &'static str,
+    }
+
+    impl Vault {
+        /// How the app names it: «Morpho · Ethereum».
+        pub fn place(&self) -> String { format!("Morpho · {}", self.chain_name) }
+    }
+
+    pub const VAULTS: [Vault; 3] = [
+        Vault { chain: "base", chain_name: "Base", chain_id: 8453, usdc: crate::BASE_USDC, address: GAUNTLET_USDC_PRIME, name: "Gauntlet USDC Prime" },
+        Vault { chain: "ethereum", chain_name: "Ethereum", chain_id: 1, usdc: crate::ETHEREUM_USDC, address: "0xdd0f28e19c1780eb6396170735d45153d261490d",
+                name: "Gauntlet USDC Prime" },
+        Vault { chain: "arbitrum", chain_name: "Arbitrum", chain_id: 42161, usdc: crate::ARBITRUM_USDC, address: "0x7e97fa6893871a2751b5fe961978dccb2c201e65",
+                name: "Gauntlet USDC Core" },
+    ];
+
+    pub fn vault(place: &str) -> Option<&'static Vault> { VAULTS.iter().find(|v| v.place() == place) }
+
+    /// deposit(uint256 assets, address receiver)
+    pub fn deposit(assets: u64, receiver: &str) -> Result<Vec<u8>> { Ok([&[0x6e, 0x55, 0x3f, 0x65][..], &abi::uint(assets), &abi::address(receiver)?].concat()) }
+
+    /// withdraw(uint256 assets, address receiver, address owner): an exact amount of USDC out.
+    pub fn withdraw(assets: u64, receiver: &str, owner: &str) -> Result<Vec<u8>> {
+        Ok([&[0xb4, 0x60, 0xaf, 0x94][..], &abi::uint(assets), &abi::address(receiver)?, &abi::address(owner)?].concat())
+    }
+
+    /// redeem(uint256 shares, address receiver, address owner): every share out; `shares` is balanceOf's word.
+    pub fn redeem(shares: &[u8; 32], receiver: &str, owner: &str) -> Result<Vec<u8>> {
+        Ok([&[0xba, 0x08, 0x76, 0x52][..], shares, &abi::address(receiver)?, &abi::address(owner)?].concat())
+    }
+
+    /// maxWithdraw(address owner): the owner's USDC in the vault, interest included (6 decimals).
+    pub fn max_withdraw(owner: &str) -> Result<Vec<u8>> { Ok([&[0xce, 0x96, 0xcb, 0x77][..], &abi::address(owner)?].concat()) }
+
+    /// asset()
+    pub const ASSET: [u8; 4] = [0x38, 0xd5, 0x2e, 0x0f];
+}
+
+/// The spenders ihatecrypto approves on each network: Aave's pools and Morpho's vaults there.
+pub fn aave_pools(chain_id: u64) -> Vec<&'static str> { aave::MARKETS.iter().filter(|m| m.chain_id == chain_id).map(|m| m.pool).collect() }
+
+pub fn morpho_vaults(chain_id: u64) -> Vec<&'static str> { morpho::VAULTS.iter().filter(|v| v.chain_id == chain_id).map(|v| v.address).collect() }
+
+/// A dollar transfer on BNB Chain at gas price 0, which MegaFuel (BEP-414) pays the gas for (`MegaFuel.swift`): only a
+/// dollar it knows, only `transfer`, the fee zero. Asking MegaFuel and sending are the engine's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SponsoredTransfer {
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub gas_limit: u64,
+    pub token: String,
+    pub to: String,
+    /// In the token's own units (18 decimals on BNB Chain), as a decimal string.
+    pub amount: String,
+}
+
+impl SponsoredTransfer {
+    /// The dollars MegaFuel sponsors a transfer of, by chain and token, with their symbol and decimals.
+    pub const TOKENS: [(u64, &'static str, &'static str, usize); 1] = [(56, crate::BNB_USDC, "USDC", 18)];
+
+    pub fn supports(chain_id: u64, token: &str) -> bool { Self::TOKENS.iter().any(|t| t.0 == chain_id && t.1 == token.to_lowercase()) }
+
+    fn known(&self) -> Option<(&'static str, usize)> {
+        Self::TOKENS.iter().find(|t| t.0 == self.chain_id && t.1 == self.token.to_lowercase()).map(|t| (t.2, t.3))
+    }
+
+    /// A whole, positive number of units; None otherwise.
+    fn units(&self) -> Option<U256> { self.amount.parse::<U256>().ok().filter(|u| !u.is_zero()) }
+
+    /// Why the signer won't sign it, or None.
+    pub fn refusal(&self) -> Option<String> {
+        if self.known().is_none() { return Some(format!("{} on network {} isn't a dollar BNB Chain pays the gas for.", self.token, self.chain_id)) }
+        if self.units().is_none() { return Some("The transfer's amount isn't a whole number of units.".into()) }
+        if abi::address(&self.to).is_err() || self.to.to_lowercase() == ZERO { return Some("The transfer has no recipient.".into()) }
+        if self.gas_limit == 0 || self.gas_limit > 100_000 { return Some("A token transfer takes under 100,000 gas.".into()) }
+        None
+    }
+
+    pub fn calldata(&self) -> Result<Vec<u8>> {
+        let Some(units) = self.amount.parse::<U256>().ok() else { return fail(format!("Invalid amount {}.", self.amount)) };
+        crate::erc20::transfer(&self.to, units)
+    }
+
+    /// rlp([nonce, gasPrice 0, gasLimit, token, value 0, data]): the legacy fields.
+    fn fields(&self) -> Result<Vec<Rlp>> {
+        let Some(token) = from_hex(&self.token).filter(|t| t.len() == 20) else { return fail(format!("Invalid token address: {}", self.token)) };
+        Ok(vec![Rlp::uint(self.nonce), Rlp::uint(0), Rlp::uint(self.gas_limit), Rlp::Bytes(token), Rlp::uint(0), Rlp::Bytes(self.calldata()?)])
+    }
+
+    /// EIP-155's signing payload: the fields, then chainId, 0, 0.
+    pub fn signing_hash(&self) -> Result<[u8; 32]> {
+        let mut f = self.fields()?;
+        f.extend([Rlp::uint(self.chain_id), Rlp::uint(0), Rlp::uint(0)]);
+        Ok(keccak(&Rlp::List(f).encoded()))
+    }
+
+    /// The raw legacy transaction, v = recovery id + chainId·2 + 35.
+    pub fn signed(&self, private_key: &[u8]) -> Result<(Vec<u8>, String)> {
+        let s = sign(&self.signing_hash()?, private_key)?;
+        let mut f = self.fields()?;
+        f.extend([Rlp::uint((s.v - 27) as u64 + self.chain_id * 2 + 35), Rlp::uint_be(&s.r), Rlp::uint_be(&s.s)]);
+        let raw = Rlp::List(f).encoded();
+        let hash = format!("0x{}", to_hex(&keccak(&raw)));
+        Ok((raw, hash))
+    }
+
+    /// What the prompt says.
+    pub fn summary(&self) -> String {
+        let (symbol, decimals) = self.known().unwrap_or(("tokens", 0));
+        format!("send {} {symbol} on {} to {} (BNB Chain pays the gas)",
+                crate::units(&self.amount.parse::<U256>().unwrap_or_default(), decimals), network_name(self.chain_id), self.to)
     }
 }
 
@@ -723,14 +1030,18 @@ pub struct Permit3009 {
 pub const RELAY_PROXIES: [&str; 2] = ["0xccc88a9d1b4ed6b0eaba998850414b24f1c315be", "0x5567954cd026cebfe486062cb75848e0f1c12e58"];
 
 impl Permit3009 {
-    /// The dollars it's signed for: their EIP-712 domain name and version, and symbol.
+    /// The dollars it's signed for: chain, token, their EIP-712 domain name and version (each checked against the
+    /// contract's DOMAIN_SEPARATOR, 2026-10-23), and symbol. Not on BNB Chain or HyperEVM.
+    pub const TOKENS: [(u64, &'static str, &'static str, &'static str, &'static str); 6] = [
+        (8453, crate::BASE_USDC, "USD Coin", "2", "USDC"), (42161, crate::ARBITRUM_USDC, "USD Coin", "2", "USDC"),
+        (10, crate::OPTIMISM_USDC, "USD Coin", "2", "USDC"), (137, crate::POLYGON_USDC, "USD Coin", "2", "USDC"),
+        (1, crate::ETHEREUM_USDC, "USD Coin", "2", "USDC"), (4663, crate::ROBINHOOD_USDG, "Global Dollar", "1", "USDG"),
+    ];
+
+    /// Its domain name and version, and symbol.
     pub fn token_info(chain_id: u64, token: &str) -> Option<(&'static str, &'static str, &'static str)> {
-        Some(match (chain_id, token.to_lowercase().as_str()) {
-            (8453, crate::BASE_USDC) | (42161, crate::ARBITRUM_USDC) | (10, crate::OPTIMISM_USDC) | (137, crate::POLYGON_USDC)
-            | (1, crate::ETHEREUM_USDC) => ("USD Coin", "2", "USDC"),
-            (4663, crate::ROBINHOOD_USDG) => ("Global Dollar", "1", "USDG"),
-            _ => return None,
-        })
+        let token = token.to_lowercase();
+        Self::TOKENS.iter().find(|t| t.0 == chain_id && t.1 == token).map(|t| (t.2, t.3, t.4))
     }
 
     pub fn supports(chain_id: u64, token: &str) -> bool { Self::token_info(chain_id, token).is_some() }

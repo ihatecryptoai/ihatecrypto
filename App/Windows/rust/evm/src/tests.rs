@@ -128,3 +128,7 @@ fn nodes_and_gas_words() {
     assert_eq!(units(&U256::from(5u64), 18), "0.000000000000000005");
     assert_eq!(units(&U256::ZERO, 6), "0");
 }
+
+/// The rest of main's WalletTests, case by case.
+mod calls;
+mod orders;

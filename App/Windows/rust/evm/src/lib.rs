@@ -5,6 +5,7 @@
 pub mod call;
 mod hooks;
 pub mod protocols;
+pub mod relay_order;
 pub mod simulation;
 
 pub use ruint::aliases::U256;
@@ -326,6 +327,14 @@ pub fn dollar(token: &str) -> Option<&'static str> {
 
 /// Their decimals: 6, but BNB Chain's Binance-Peg USDC has 18.
 pub fn dollar_decimals(token: &str) -> usize { if token.to_lowercase() == BNB_USDC { 18 } else { 6 } }
+
+/// eth_getBalance's answer as wei: "0x" and hex digits, up to 128 bits; None for anything else (past 64 bits is
+/// common: 20 ETH is 2·10¹⁹ wei).
+pub fn wei(answer: &serde_json::Value) -> Option<u128> {
+    let hex = answer.as_str()?.strip_prefix("0x")?;
+    if hex.is_empty() { return None }
+    u128::from_str_radix(hex, 16).ok()
+}
 
 /// A node that can't answer this call at all — no such method, a key it turns away — while another node may. A revert
 /// is never that.
