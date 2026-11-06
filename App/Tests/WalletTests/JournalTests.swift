@@ -13,11 +13,8 @@ import Testing
 
     #expect(try journal.entries().count == 4)
     #expect(try journal.unresolved().map(\.id) == ["sigB", "depositX"])
-    // Windows has no POSIX modes: there the user profile's ACL keeps the journal the user's.
-    #if !os(Windows)
     let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
     #expect((attributes[.posixPermissions] as? Int) == 0o600)
-    #endif
 }
 
 @Test func aSendWrittenNowIsFoundFromTheSecondItStarted() throws {

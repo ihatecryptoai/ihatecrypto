@@ -3,11 +3,7 @@ name = "winsec"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "The Windows calls ihatecrypto's Swift signer and engine make: Windows Hello, DPAPI, process hardening, the signer's spawn"
-
-[lib]
-# A DLL with a C ABI: the Swift signer and engine link its import library.
-crate-type = ["cdylib", "rlib"]
+description = "The Windows calls ihatecrypto's signer and engine make: Windows Hello, DPAPI, process hardening, the signer's spawn"
 
 [target.'cfg(windows)'.dependencies]
 zeroize = "1.9.1"

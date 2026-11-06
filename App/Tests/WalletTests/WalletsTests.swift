@@ -1,8 +1,4 @@
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
 import SignerAPI
 import Testing
@@ -85,8 +81,6 @@ private let rfcPublic = Data(hex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62
     guard case .asWallet("a1", .signEVMTransaction(8453, 1, _, _, _, _, _, _, _)) = try JSONDecoder().decode(SignerRequest.self, from: JSONEncoder().encode(wrapped)) else {
         Issue.record("asWallet didn't round-trip"); return
     }
-    // The gate lives in the XPC client; a Windows signer client has to bring the same gate and this check.
-    #if os(macOS)
     // What came through the debug API can neither make the automation wallet nor sign with it: refused before the signer is asked.
     for request in [SignerRequest.createAutomationWallet, wrapped] {
         do {
@@ -96,7 +90,6 @@ private let rfcPublic = Data(hex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62
             #expect(e.message.contains("debug API"), "refused by the gate, not by a missing signer: \(e.message)")
         }
     }
-    #endif
 }
 
 /// A saved name sends only to the address confirmed for it: the name in any case, a 0x address in any case, a

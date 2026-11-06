@@ -116,8 +116,8 @@ to `windows` and keeps the installer as an artifact for two weeks.
 
 ## Signing and updates
 
-- **Authenticode**: with `WINDOWS_PFX` (a code-signing certificate) and `WINDOWS_PFX_PASSWORD`, `build.ps1` signs every
-  program and DLL, and Tauri signs the window and the installer. Unsigned, Windows SmartScreen warns on install. The
+- **Authenticode**: with `WINDOWS_PFX` (a code-signing certificate) and `WINDOWS_PFX_PASSWORD`, `build.ps1` signs both
+  programs, and Tauri signs the window and the installer. Unsigned, Windows SmartScreen warns on install. The
   certificate is bought (an OV/EV certificate, or Azure Trusted Signing), then given to the workflow as secrets.
 - **Updates**: the Tauri updater checks
   `https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/latest.json` and installs only an
@@ -141,7 +141,7 @@ cards with the balance it spends now → after, results the chat makes — a cha
 service's answer — and blocks added by hand, the newest on top; nothing leaves a canvas unless the person closes it;
 right-click a block to ask about it in the chat), the chat floating over the canvas with Confirm in its field and a mic (Windows' own speech recognizer in the
 keyboard layout's language; the words go into the field, never sent by themselves), a Ledger over USB or Bluetooth
-(winsec.dll's HID and WinRT GATT calls under the Mac's Ledger module: «connect my Ledger» reads one address from its Ethereum app and one from its Solana
+(winsec's HID and WinRT GATT calls under the `ledger` crate: «connect my Ledger» reads one address from its Ethereum app and one from its Solana
 app, «use my Ledger» makes it sign every move on its screen with the same guard first, «show on the Ledger» to compare
 an address, and it can be a key of a multisig), the dApp browser
 (https sites beside the chat in the page panel, as the Mac's WebPanel — the panel moves by its header, widens by its
@@ -348,3 +348,8 @@ At 6ba6913 (wave 15): 59 test runs pass. In a site: `typeof Notification` is "un
 put in the page, and a label of one, open no picker on a real click; a frame sent to `ms-settings:` starts nothing and
 asks nothing; `print()` and `close()` do nothing; client.badssl.com gets no certificate picker; expired.badssl.com is
 refused with no way past.
+
+With the engine and the signer in Rust (docs/windows-rust.md), 7684108c and 58eb7f17, 2026-11-06: the development
+window started both, the public test phrase went in through the real Windows Hello PIN prompt, the portfolio loaded and
+«chart SOL» drew its card; `build.ps1` made the arm64 installer with only the two programs in `bin\` (11.7 MB). The
+Swift Windows code is gone since: App/Sources, App/Tests and the package are the Mac's as of the last merge of main.

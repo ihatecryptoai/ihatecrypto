@@ -459,14 +459,9 @@ extension Executor {
         let simulation = try await rpc.simulate(unsigned, watch: watch, sigVerify: false)
         // A failed simulation says nothing about balances: stop here rather than quote made-up changes.
         if let error = simulation.error { throw ExecutionError("The simulation failed, so nothing was signed: \(error)") }
-        // In parts: as one expression it ran out of the type checker's time off Apple.
-        var checks: [SolanaGuard.BalanceRule] = rules.map { account, label, token, least in
-            let after = Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0)
-            return .init(label: label, before: before[account] ?? 0, after: after, atLeast: least)
-        }
-        checks.append(.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0),
-                            atLeast: lamportsAtLeast))
-        verdict.merge(SolanaGuard.balances(checks))
+        verdict.merge(SolanaGuard.balances(rules.map { account, label, token, least in
+            .init(label: label, before: before[account] ?? 0, after: Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0), atLeast: least)
+        } + [.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: lamportsAtLeast)]))
         guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         var changes = rules.map { account, label, token, _ in
             let after = Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0)

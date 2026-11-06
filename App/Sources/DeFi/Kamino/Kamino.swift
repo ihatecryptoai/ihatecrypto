@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 
 /// Kamino Lend, the main market: rates, deposit and withdraw transactions built by Kamino's own API, positions.
 /// The first deposit also creates the user's Kamino accounts and a lookup table: rent in SOL, shown by simulation.

@@ -19,8 +19,10 @@ dependencies point inward: chains and protocols know nothing about the window or
 | `Chains/*`, `Protocols/*`, `DeFi/*` | Solana and EVM; Hyperliquid, Jupiter, Relay, 1Click; Jupiter Lend, Kamino, yields |
 | `Execution`, `Execution/Trade` | The write-before-send journal; running an approved plan |
 | `Guard/Core`, `Guard/Jev` | The transaction guard and injection screening; the optional Jev classifier |
-| `Signer/API`, `Signer/Core`, `Signer/Service` | The signer's protocol, what it decides, and the Mac's signing process |
-| `Signer/Windows`, `Desktop/Engine`, `Native/WinSec` | The Windows signer, the Windows app's engine, winsec.dll's interface ([docs/windows.md](docs/windows.md)) |
+| `Signer/API`, `Signer/Service` | The XPC protocol and the signing process |
+
+The Windows app is `App/Windows` (not part of the Swift package): the window in `app` (Tauri) and the engine and signer
+in `rust`, a Cargo workspace that ports the core above ([docs/windows.md](docs/windows.md)).
 
 Tests are in `App/Tests/<Target>Tests`. Tools are in `App/Tools`. `App/Xcode/project.yml` (XcodeGen) packages the app
 and `Signer.xpc`; the SwiftPM package stays the source of the modules.

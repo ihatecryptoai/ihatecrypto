@@ -1,5 +1,3 @@
-// Apple Intelligence exists only on Apple systems; elsewhere this module is empty and the catalog leaves it out.
-#if canImport(FoundationModels)
 import Foundation
 import FoundationModels
 import LLMCore
@@ -100,4 +98,3 @@ struct AppleIntelligenceClient: LLMClient {
         }
     }
 }
-#endif

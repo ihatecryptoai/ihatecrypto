@@ -1,9 +1,6 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
-let secp256k1 = Package.Dependency.package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.23.2")
-
 let package = Package(
     name: "ihatecrypto",
     // en.lproj/InfoPlist.strings (the app's display name) makes SwiftPM ask for a default language.
@@ -18,7 +15,8 @@ let package = Package(
         .library(name: "IhatecryptoSignerKit", targets: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"]),
     ],
     dependencies: [
-        secp256k1,
+        // libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.23.2"),
         // Updates for the copy from the site (Updater.swift). Declared here too, so `swift build` and the Xcode
         // project resolve the same packages and stop rewriting Package.resolved over each other.
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
@@ -63,9 +61,8 @@ let package = Package(
         // Signing process: the XPC protocol shared by the app and Signer, and the service itself
         // (built as an .xpc by project.yml; the SwiftPM target only compile-checks it).
         .target(name: "SignerAPI", dependencies: ["WalletCore", "HyperliquidSigning"], path: "Sources/Signer/API"),
-        // Core: what the signer decides, the same on every system; Service: the Mac's Keychain, Secure Enclave and XPC.
         .executableTarget(name: "IhatecryptoSigner", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"],
-                          path: "Sources/Signer", sources: ["Core", "Service"]),
+                          path: "Sources/Signer/Service"),
         // A Ledger over USB (or its emulator over TCP): the Ethereum and Solana apps sign what the guard let through.
         .target(name: "Ledger", dependencies: ["WalletCore", "EVMChain", "SolanaChain", "HyperliquidSigning", "TxGuard", "TradeExecution"],
                 path: "Sources/Wallet/Ledger"),
@@ -102,59 +99,3 @@ let package = Package(
         ),
     ]
 )
-
-// Windows and Linux: the core without the Mac — no SwiftUI window, XPC signer or Sparkle there, and swift-crypto (the
-// same API) takes CryptoKit's place. A Mac build never reads this.
-// ponytail: decided by the machine that builds, so cross-compiling from a Mac would take the Mac branch.
-#if !os(macOS)
-// swift-secp256k1 0.24 dropped the build plugin that copied P256K's Swift sources in, and did nothing on Windows.
-// ponytail: the Mac stays on 0.23.2 (shipped, checked); move it to 0.24 too once 0.24 has been out a while.
-package.dependencies = [
-    .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.24.0"),
-    .package(url: "https://github.com/apple/swift-crypto", exact: "5.0.3"),
-]
-package.targets.removeAll { ["IhatecryptoApp", "IhatecryptoSigner", "IhatecryptoAppTests"].contains($0.name) }
-for target in package.targets {
-    if ["WalletCore", "SolanaChain", "LLMCore", "Ledger", "WalletTests", "IhatecryptoCore", "IhatecryptoCoreTests"].contains(target.name) {
-        target.dependencies.append(.product(name: "Crypto", package: "swift-crypto"))
-    }
-    // PBKDF2 for the BIP-39 seed; CommonCrypto's on a Mac.
-    if target.name == "WalletCore" { target.dependencies.append(.product(name: "CryptoExtras", package: "swift-crypto")) }
-}
-#endif
-
-// The desktop app — Windows, or a Mac with IHATECRYPTO_DESKTOP=1 to work on it there: a signer that keeps keys under
-// Windows Hello (`Signer/Windows`), started by the engine the window talks to. Off Windows, `CWinSec` is a stand-in that
-// guards nothing; on Windows it is winsec.dll (App/Windows/native), built first with cargo. It replaces the Mac's
-// window and XPC signer, which share `Signer/Core` with it.
-#if os(macOS)
-let desktop = Context.environment["IHATECRYPTO_DESKTOP"] == "1"
-let desktopCrypto: [Target.Dependency] = []
-#else
-let desktop = true
-let desktopCrypto: [Target.Dependency] = [.product(name: "Crypto", package: "swift-crypto")]
-#endif
-#if os(Windows)
-let winsec: [LinkerSetting] = [.linkedLibrary("winsec"), .unsafeFlags(["-L", Context.packageDirectory + "/Windows/native/target/release"])]
-#else
-let winsec: [LinkerSetting] = []
-#endif
-if desktop {
-    package.targets.removeAll { ["IhatecryptoApp", "IhatecryptoSigner", "IhatecryptoAppTests"].contains($0.name) }
-    package.products += [.executable(name: "ihatecrypto-signer", targets: ["WinSigner"]),
-                         .executable(name: "ihatecrypto-engine", targets: ["DesktopEngine"])]
-    package.targets += [
-        .target(name: "CWinSec", path: "Sources/Native/WinSec", linkerSettings: winsec),
-        .target(name: "SignerCore", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain", "CWinSec"] + desktopCrypto,
-                path: "Sources/Signer", exclude: ["Windows/Main"], sources: ["Core", "Windows"]),
-        .executableTarget(name: "WinSigner", dependencies: ["SignerCore", "CWinSec"], path: "Sources/Signer/Windows/Main"),
-        .testTarget(name: "SignerTests", dependencies: ["SignerCore", "SignerAPI", "WalletCore", "CWinSec"] + desktopCrypto),
-        // The engine and the signer as programs, driven over their pipes as the window drives them.
-        .testTarget(name: "EngineTests", dependencies: ["DesktopEngine", "WinSigner", "CWinSec"] + desktopCrypto),
-        // What the window talks to: the chat, the cards and the balances over the same core as the Mac's window.
-        .executableTarget(name: "DesktopEngine",
-                          dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning",
-                                         "SolanaChain", "EVMChain", "TradeExecution", "ExecutionCore", "OneClickKit", "DeFiYields", "DeFiJupiterLend", "DeFiKamino", "JupiterSwap", "Ledger", "CWinSec"],
-                          path: "Sources/Desktop/Engine", swiftSettings: [.defaultIsolation(MainActor.self)]),
-    ]
-}

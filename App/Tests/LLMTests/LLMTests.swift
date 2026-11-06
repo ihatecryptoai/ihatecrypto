@@ -1,11 +1,6 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 @testable import LLMAPIKey
-#if canImport(FoundationModels)
 @testable import LLMApple
-#endif
 @testable import LLMCatalog
 @testable import LLMChatGPT
 @testable import LLMClaudeCode
@@ -29,8 +24,6 @@ import Testing
     #expect(JSONText.object(in: "нет json") == nil)
 }
 
-// The listener is Network.framework's; off Apple the stub says browser sign-in isn't there yet.
-#if canImport(Network)
 @Test func loopbackServerReturnsCallbackQuery() async throws {
     let server = try await LoopbackServer.start(path: "/callback")
     #expect(server.port > 0)
@@ -40,7 +33,6 @@ import Testing
     #expect(String(decoding: data, as: UTF8.self).contains("Signed in"))
     #expect(try await query == ["code": "abc", "state": "xyz"])
 }
-#endif
 
 // MARK: ChatGPT subscription
 
@@ -107,9 +99,6 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: [LLMMessage(.user, "x")])).contains("--system-prompt"))
 }
 
-// They drive /bin tools, so a Mac's for now: on Linux the hung-process one waited out `sleep 30` (2026-10-21, not looked
-// into); Windows gets its own with `claude.exe`.
-#if canImport(Darwin)
 /// A hung `claude -p` is stopped after its timeout, or when the chat's task is cancelled; it never keeps the chat busy.
 @Test func claudeCodeRunStopsAHungProcess() async throws {
     let start = ContinuousClock.now
@@ -134,7 +123,6 @@ private func jwt(_ claims: [String: Any]) -> String {
         #expect(outputs == 40)
     }
 }
-#endif
 
 @Test func jsonModeOnlyWhereTheAPISupportsIt() {
     let request = LLMRequest(model: "m", messages: [LLMMessage(.user, "x")], wantsJSON: true)
@@ -174,7 +162,6 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(ChatGPTSubscription.listed(Data(json.utf8)) == ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol"])
 }
 
-#if canImport(FoundationModels)
 @Test func appleOffersPrivateCloudOnlyWithItsEntitlementAndSaysWhenABriefIsTooLong() async throws {
     let info = AppleIntelligence().info
     // The test runner has no com.apple.developer.private-cloud-compute.
@@ -189,10 +176,7 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(error?.message.contains("4,096 tokens") == true)
     #expect(AppleIntelligence.chatRefusal(model: AppleIntelligence.onDevice) != nil && AppleIntelligence.chatRefusal(model: "gpt-6.1-sol") == nil)
 }
-#endif
 
-// The stand-in is a shell script; Windows gets its own with `claude.exe`.
-#if !os(Windows)
 /// Claude Code's stream-json, from a stand-in that writes it the way `claude -p` does (2026-10-06): the words reach
 /// `partial` as they come, and the answer is the result event's.
 @Test(.timeLimit(.minutes(1))) func claudeCodeStreamTellsTheWordsAsTheyCome() async throws {
@@ -217,7 +201,6 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(seen.texts == ["one ", "one two"])
     #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: []), streaming: true).contains("--include-partial-messages"))
 }
-#endif
 
 /// Ollama answers through its own API, with a window that holds ihatecrypto's instructions: its OpenAI-style endpoint
 /// stays at 4096 tokens and cut them.

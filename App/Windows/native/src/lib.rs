@@ -1,6 +1,6 @@
-//! The Windows calls the Swift signer and engine can't make from Swift: Windows Hello (WinRT), DPAPI, hardening the
-//! signer's process against other programs of the same user, and starting the signer so it starts hardened.
-//! A C ABI only (winsec.h); every function returns 0 for success. Buffers this library hands out are freed with
+//! The Windows calls the signer and the engine make: Windows Hello (WinRT), DPAPI, hardening the signer's process
+//! against other programs of the same user, and starting the signer so it starts hardened. Linked into both as a Rust
+//! library; the functions keep the C ABI they had when Swift called them, and every one returns 0 for success. Buffers this library hands out are freed with
 //! `winsec_free`, which overwrites them first.
 #![cfg(windows)]
 #![allow(clippy::missing_safety_doc)]

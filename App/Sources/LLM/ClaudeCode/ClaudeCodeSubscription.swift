@@ -1,8 +1,5 @@
 import Foundation
 import LLMCore
-#if os(Windows)
-import WinSDK
-#endif
 
 /// Claude Pro/Max through the Claude Code the user already installed and signed in to, the way OpenClaw does it.
 /// Anthropic's published terms do not allow third-party Claude.ai login, so this stays an opt-in gray-zone option.
@@ -22,18 +19,9 @@ public struct ClaudeCodeSubscription: LLMProvider {
     }
 
     public func existingLogin() -> Credential? {
-        #if os(Windows)
-        // Anthropic's Windows installer puts claude.exe in %USERPROFILE%\.local\bin; PATH is split by «;» there.
-        // ponytail: npm's claude.cmd isn't taken — a .cmd needs cmd.exe to run, and the native installer is Anthropic's way.
-        let env = ProcessInfo.processInfo.environment
-        let home = env["USERPROFILE"] ?? NSHomeDirectory()
-        let fromPATH = (env["Path"] ?? env["PATH"] ?? "").split(separator: ";").map { "\($0)\\claude.exe" }
-        let found = ([home + "\\.local\\bin\\claude.exe"] + fromPATH).first { FileManager.default.fileExists(atPath: $0) }
-        #else
         let fromPATH = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { "\($0)/claude" }
         let found = (Self.candidates.map { NSString(string: $0).expandingTildeInPath } + fromPATH)
             .first { FileManager.default.isExecutableFile(atPath: $0) }
-        #endif
         return found.map { .external(path: $0) }
     }
 
@@ -135,21 +123,19 @@ struct ClaudeCodeClient: LLMClient {
         // (the tests) had their blocking reads hold every one of those threads, and a watchdog Task never got one to stop
         // the process.
         let timedOut = Flag()
-        let watchdog = DispatchWorkItem { timedOut.set(); Self.stop(pid) }
+        let watchdog = DispatchWorkItem { timedOut.set(); kill(pid, SIGTERM) }
         let (seconds, attoseconds) = timeout.components
         DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(Int(seconds * 1000 + attoseconds / 1_000_000_000_000_000)), execute: watchdog)
         defer { watchdog.cancel() }
         // The prompt and stderr on their own, so a run that stops reading or fills stderr can't block the wait; a stopped
         // run gives the write EPIPE, not the app a SIGPIPE.
         let writer = stdin.fileHandleForWriting
-        #if canImport(Darwin)
         _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
-        #endif
         DispatchQueue.global().async { try? writer.write(contentsOf: Data(input.utf8)); try? writer.close() }
         async let errors = Self.readAll(stderr.fileHandleForReading)
         let data = await withTaskCancellationHandler {
             await Self.readAll(stdout.fileHandleForReading, lines: lines)
-        } onCancel: { Self.stop(pid) }
+        } onCancel: { kill(pid, SIGTERM) }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async { exited.wait(); done.resume() }
         }
@@ -163,15 +149,6 @@ struct ClaudeCodeClient: LLMClient {
             throw LLMError("Claude Code stopped with code \(process.terminationStatus)" + (said.isEmpty ? "." : ": \(said)"))
         }
         return data
-    }
-
-    /// SIGTERM where there are signals; Windows has none, so there the process is ended outright.
-    static func stop(_ pid: Int32) {
-        #if os(Windows)
-        if let process = OpenProcess(DWORD(PROCESS_TERMINATE), false, DWORD(pid)) { TerminateProcess(process, 1); CloseHandle(process) }
-        #else
-        kill(pid, SIGTERM)
-        #endif
     }
 
     /// A pipe read to its end on a Dispatch thread; with `lines`, each line is told as it arrives.

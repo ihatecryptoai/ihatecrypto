@@ -255,14 +255,13 @@ import WalletCore
                    reward(EVMRPC.baseUSDC, "1500000", [c])]
     let data = try Merkl.claim(user: me, rewards)
     // cast calldata "claim(address[],address[],uint256[],bytes32[][])" "[me,me]" "[MORPHO,USDC]" "[4920135994870910511487,1500000]" "[[a,b],[c]]"
-    let words: [String] = [
+    let cast = "71ee95c0" + [
         "80", "e0", "140", "1a0",
         "2", String(me.dropFirst(2)), String(me.dropFirst(2)),
         "2", "baa5cc21fd487b8fcc2f632f3f4e8d37262a0842", String(EVMRPC.baseUSDC.dropFirst(2)),
         "2", "10ab89a73565dc5697f", "16e360",
         "2", "40", "a0", "2", String(a.dropFirst(2)), String(b.dropFirst(2)), "1", String(c.dropFirst(2)),
-    ]
-    let cast = "71ee95c0" + words.map { String(repeating: "0", count: 64 - $0.count) + $0 }.joined()
+    ].map { String(repeating: "0", count: 64 - $0.count) + $0 }.joined()
     #expect(data.hex == cast)
     #expect(data.prefix(4).hex == Keccak.hash256(Data("claim(address[],address[],uint256[],bytes32[][])".utf8)).prefix(4).hex)
     #expect(EVMCall.decode(data) == .claim(recipients: [me, me]))

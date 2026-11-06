@@ -246,12 +246,7 @@ public enum MPP {
         /// A number, a short string or a yes/no; nil for objects, lists and long text.
         static func scalar(_ x: Any?) -> String? {
             switch x {
-            #if canImport(Darwin)
             case let n as NSNumber: CFGetTypeID(n) == CFBooleanGetTypeID() ? (n.boolValue ? "yes" : "no") : n.stringValue
-            #else
-            // No CFBoolean off Apple: corelibs Foundation types a JSON true/false as a char ("c"), which JSON numbers never are.
-            case let n as NSNumber: String(cString: n.objCType) == "c" ? (n.boolValue ? "yes" : "no") : n.stringValue
-            #endif
             case let s as String where !s.isEmpty && s.count <= 120: plain(s)
             default: nil
             }

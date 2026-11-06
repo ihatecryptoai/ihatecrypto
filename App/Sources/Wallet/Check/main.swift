@@ -42,9 +42,7 @@ import WalletCore
 //   stables [network]             the big five stablecoins on every network, quoted live both ways against USDC
 //   ledger [sign] [--speculos|--ble] a Ledger's app and address (USB, the emulator or Bluetooth); `sign`: the moves' requests signed on it (see LedgerCheck.swift)
 
-#if canImport(Darwin)
 setvbuf(stdout, nil, _IONBF, 0) // show every line even if the process dies
-#endif
 let args = Array(CommandLine.arguments.dropFirst())
 let command = args.first ?? "hl-sig"
 let amount = args.dropFirst().first.flatMap { Decimal(string: $0) }
@@ -102,14 +100,12 @@ do {
     case "close-near": try await closeNear(to: args.dropFirst().first { !$0.hasPrefix("--") } ?? "")
     case "sweep-evm": try await sweepEVM(to: args.dropFirst().first { !$0.hasPrefix("--") } ?? "")
     case "sweep-hyperliquid": try await sweepHyperliquid(to: args.dropFirst().first { !$0.hasPrefix("--") } ?? "")
-    #if canImport(Darwin)
     case "ledger": try await ledgerCheck(Array(args.dropFirst()))
-    #endif
     case "browser-test-page": try await writeBrowserTestPage(args.dropFirst().first ?? "/tmp/ihatecrypto-test.html")
     default: print("Unknown command: \(command)"); exit(2)
     }
 } catch {
-    FileHandle.standardError.write(Data("Error: \(error.localizedDescription)\n".utf8))
+    fputs("Error: \(error.localizedDescription)\n", stderr)
     exit(1)
 }
 

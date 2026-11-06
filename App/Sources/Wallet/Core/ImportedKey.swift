@@ -1,8 +1,4 @@
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
 
 /// A private key pasted from another wallet: which chain it belongs to and its 32 secret bytes. Phantom exports a

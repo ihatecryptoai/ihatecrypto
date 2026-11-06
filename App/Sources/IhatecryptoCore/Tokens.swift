@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 
 /// Any token by its contract: name, symbol, price, 24 h move, liquidity and its icon, from DexScreener's public API
 /// (api.dexscreener.com, no key). The chain is the one with the most liquidity for it.

@@ -1,7 +1,5 @@
 import LLMAPIKey
-#if canImport(FoundationModels)
 import LLMApple
-#endif
 import LLMChatGPT
 import LLMClaudeCode
 import LLMCore
@@ -21,13 +19,7 @@ public enum LLMCatalog {
             note: "", unavailable: "A Google AI subscription doesn't cover the API. Connect Gemini with a key from Google AI Studio."
         )),
         OpenRouter(),
-    ] + OpenAICompatible.presets + apple
-
-    #if canImport(FoundationModels)
-    static let apple: [any LLMProvider] = [AppleIntelligence()]
-    #else
-    static let apple: [any LLMProvider] = []
-    #endif
+    ] + OpenAICompatible.presets + [AppleIntelligence()]
 
     public static func provider(id: String) -> (any LLMProvider)? {
         all.first { $0.info.id == id }
@@ -39,11 +31,7 @@ public enum LLMCatalog {
     /// A model id as people write it: «gpt-6-sol» → «GPT 6 SOL», «claude-haiku-4-5» → «Claude Haiku 4.5»,
     /// «deepseek/deepseek-v4.1-flash» → «DeepSeek V4.1 Flash», «qwen3.5:9b» → «Qwen3.5 9B».
     /// Why a model can't run the chat (too small for its brief); nil when it can.
-    #if canImport(FoundationModels)
     public static func chatRefusal(model: String) -> String? { AppleIntelligence.chatRefusal(model: model) }
-    #else
-    public static func chatRefusal(model: String) -> String? { nil }
-    #endif
 
     public static func displayName(model: String) -> String {
         let id = model.split(separator: "/").last.map(String.init) ?? model

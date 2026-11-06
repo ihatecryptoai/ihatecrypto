@@ -33,16 +33,12 @@ Execution                the approval envelope and the write-before-send journal
 Execution/Trade          running an approved plan: bridges, swaps, transfers, lending, trades
 Guard/Core               the last check before signing, and injection screening of untrusted text
 Guard/Jev                an optional classifier for untrusted text and plans (TypeSafe Jev through OpenRouter)
-Signer/API               the requests and replies between the app and the signing process; the Mac's XPC client
-Signer/Core              what the signing process decides: parsing, the Guard, signatures (Mac and Windows)
-Signer/Service           the Mac's signing process: Secure Enclave and Keychain storage, XPC; sandboxed, no network
-Signer/Windows           the Windows signing process: keys under Windows Hello, sealed trusted settings, pipes
-Desktop/Engine           the Windows app's engine: the chat, the cards and Confirm over this core (docs/windows.md)
-Native/WinSec            winsec.dll's C interface (App/Windows/native, Rust); a stand-in for it off Windows
+Signer/API               the XPC protocol between the app and the signing process
+Signer/Service           the signing process: seed storage, parsing, the Guard, signatures; sandboxed, no network
 ```
 
-The Windows app (the window in `App/Windows/app`, the engine and the Windows signer) is described in
-[windows.md](windows.md).
+The Windows app lives in `App/Windows`: the window (Tauri) and this core ported to Rust, the engine and a signer that
+keeps keys under Windows Hello ([windows.md](windows.md), [windows-rust.md](windows-rust.md)).
 
 Networks: Solana, Hyperliquid, NEAR and the EVM networks in `EVMNetwork.all` (`Execution/Trade/Aave.swift`): Base,
 Arbitrum, Robinhood Chain, Polygon, Ethereum, Tempo, HyperEVM, Optimism and BNB Chain. Coins on networks without a

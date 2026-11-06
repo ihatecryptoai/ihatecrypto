@@ -1,9 +1,6 @@
 @testable import EVMChain
 import ExecutionCore
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 import HyperliquidSigning
 import Testing
 @testable import TradeExecution

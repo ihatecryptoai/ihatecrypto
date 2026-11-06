@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 import HyperliquidSigning
 import IhatecryptoCore
 @testable import TradeExecution

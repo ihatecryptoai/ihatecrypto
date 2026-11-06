@@ -82,7 +82,7 @@ targets:
   IhatecryptoSigner:
     type: xpc-service
     platform: macOS
-    sources: [../Sources/Signer/Core, ../Sources/Signer/Service, ../Sources/IhatecryptoApp/Assets.xcassets]
+    sources: [../Sources/Signer/Service, ../Sources/IhatecryptoApp/Assets.xcassets]
     info:
       path: Signer-Info.plist
       properties:

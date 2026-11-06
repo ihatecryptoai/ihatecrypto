@@ -23,7 +23,7 @@ guard let id = args.first else {
     exit(0)
 }
 guard let provider = LLMCatalog.provider(id: id) else {
-    FileHandle.standardError.write(Data("No provider \(id)\n".utf8))
+    fputs("No provider \(id)\n", stderr)
     exit(2)
 }
 
@@ -52,7 +52,7 @@ if prompt == "--verify", args.count >= 4 {
 // `--exam`: the app's ModelExam (Settings › AI model › Check) from the terminal: `swift run LLMCheck ollama --exam`.
 if prompt == "--exam" {
     let client = try provider.client(credential, save: { _ in })
-    let r = await ModelExam.run(client: client, model: model) { done in FileHandle.standardError.write(Data("\r\(done)/\(ModelExam.questions.count)".utf8)) }
+    let r = await ModelExam.run(client: client, model: model) { done in fputs("\r\(done)/\(ModelExam.questions.count)", stderr) }
     print("\n\(model): \(r.short)" + (r.misses.isEmpty ? "" : " · missed: " + r.misses.joined(separator: " | ")))
     exit(0)
 }
@@ -176,7 +176,7 @@ do {
     print("\(provider.info.name) · \(model) · \(String(format: "%.1f", Date().timeIntervalSince(started))) s\(counter.context)")
     print(reply)
 } catch {
-    FileHandle.standardError.write(Data("\(provider.info.name) · \(model): \(error.localizedDescription)\n".utf8))
+    fputs("\(provider.info.name) · \(model): \(error.localizedDescription)\n", stderr)
     exit(1)
 }
 

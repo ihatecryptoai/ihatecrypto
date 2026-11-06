@@ -1,9 +1,5 @@
-#if canImport(CryptoKit)
-import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
+import CryptoKit
 import WalletCore
 
 public enum Side: String, Codable, Sendable {

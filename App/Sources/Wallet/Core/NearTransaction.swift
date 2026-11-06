@@ -1,8 +1,4 @@
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
 
 /// A NEAR transaction in borsh (nearcore's Transaction V0), built from plain fields so that what is signed is what

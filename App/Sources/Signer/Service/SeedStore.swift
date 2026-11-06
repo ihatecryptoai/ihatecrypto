@@ -304,11 +304,7 @@ enum CodeStore {
 
     static var isSet: Bool { stored(checkAccount) != nil }
     /// With Touch ID the sensor stays the way to sign; the code signs only on a Mac without it.
-    static var signs: Bool { canSign && isSet }
-    /// Whether a code set here would sign moves: on a Mac without Touch ID.
-    static var canSign: Bool { !Presence.touchID }
-    /// What opens the app without the code (five wrong ones, or a forgotten code).
-    static let fallback = "your Mac password"
+    static var signs: Bool { !Presence.touchID && isSet }
     static func sealed(_ id: String) -> (data: Data, tag: Data)? { stored(sealAccount(id)) }
 
     /// A context that carries the code and never shows a prompt of its own: a wrong code fails, it doesn't ask.
@@ -613,10 +609,6 @@ enum AgentStore {
         var out: CFTypeRef?
         return SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess ? out as? Data : nil
     }
-
-    /// Whether `id` has a trading key, and its address: what the status shows (on Windows, without opening the key).
-    static func has(id: String = Wallets.activeID) -> Bool { load(id: id) != nil }
-    static func address(id: String = Wallets.activeID) -> String? { load(id: id).flatMap { try? EVMAccount.address(privateKey: $0) } }
 
     /// 32 random bytes that make a valid secp256k1 key; retried in the vanishing case they don't.
     static func make() throws -> Data {

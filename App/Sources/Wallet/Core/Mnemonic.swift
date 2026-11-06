@@ -1,13 +1,5 @@
-#if canImport(CommonCrypto)
 import CommonCrypto
-#else
-import CryptoExtras
-#endif
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
 
 public struct WalletError: LocalizedError, Equatable {
@@ -67,11 +59,6 @@ public enum Mnemonic {
     public static func seed(_ phrase: String, passphrase: String = "") throws -> Data {
         let password = Array(try validate(phrase).decomposedStringWithCompatibilityMapping.utf8)
         let salt = Array(("mnemonic" + passphrase).decomposedStringWithCompatibilityMapping.utf8)
-        #if !canImport(CommonCrypto)
-        // Off a Mac: swift-crypto's PBKDF2 (BoringSSL). BIP-39 fixes 2048 rounds, below its 210 000 default floor.
-        return try KDF.Insecure.PBKDF2.deriveKey(from: password, salt: salt, using: .sha512, outputByteCount: 64, unsafeUncheckedRounds: 2048)
-            .withUnsafeBytes { Data($0) }
-        #else
         var seed = [UInt8](repeating: 0, count: 64)
         let status = password.withUnsafeBufferPointer { p in
             CCKeyDerivationPBKDF(
@@ -81,6 +68,5 @@ public enum Mnemonic {
         }
         guard status == kCCSuccess else { throw WalletError("PBKDF2 failed with error \(status).") }
         return Data(seed)
-        #endif
     }
 }

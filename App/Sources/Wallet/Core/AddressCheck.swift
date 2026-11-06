@@ -1,8 +1,4 @@
-#if canImport(CryptoKit)
 import CryptoKit
-#else
-import Crypto
-#endif
 import Foundation
 
 /// Checks an address the user saves: the right shape for its network, the checksum when there is one, and known traps.

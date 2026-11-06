@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 
 /// What happened on Hyperliquid, from the exchange itself: every fill, grouped into position stories
 /// (open → changes → close), and the money that came in or went out.

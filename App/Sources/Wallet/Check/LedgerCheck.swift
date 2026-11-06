@@ -6,8 +6,6 @@ import SolanaChain
 import TradeExecution
 import WalletCore
 
-// The Ledger checks need USB, Bluetooth or the emulator's BSD socket: a Mac's for now.
-#if canImport(Darwin)
 /// `ledger [--speculos|--ble]`: the app open on the Ledger, its address, blind signing (USB unless told otherwise).
 /// `ledger sign [--speculos] [--shots=<dir>]`: the same requests a move makes, signed on the device through
 /// `LedgerSigner` (guard first, the signature checked against the device's address after). With --speculos the
@@ -198,4 +196,3 @@ actor SpeculosHand {
         }
     }
 }
-#endif

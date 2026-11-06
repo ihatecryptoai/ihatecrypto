@@ -983,10 +983,8 @@ extension WalletCommand {
         case .sweepDust(let under): return "sweep dust\(under.map { " under $\(Fmt.num($0))" } ?? "") into USDC on Base, Arbitrum and Polygon"
         case .sweepRewards(let min, let into): return "sweep Merkl rewards once worth \(Fmt.usd(max(min ?? 5, 5))) or more into \(into ?? "USDC")"
         case .multisigCreate(let t, let of, let keys, let nets):
-            // In parts: as one expression it ran out of the type checker's time off Apple.
-            let threshold = t.map { m in " \(m) of \(of ?? m)" } ?? ""
-            let signers = keys.isEmpty ? "" : " with " + keys.joined(separator: ", ")
-            return "make a multisig" + threshold + signers + (nets.isEmpty ? "" : " on " + nets.joined(separator: ", "))
+            return "make a multisig" + (t.map { m in " \(m) of \(of ?? m)" } ?? "") + (keys.isEmpty ? "" : " with " + keys.joined(separator: ", "))
+                + (nets.isEmpty ? "" : " on " + nets.joined(separator: ", "))
         case .multisigSend(let token, let x, let to, let net):
             return "send \(x.map { NSDecimalNumber(decimal: $0).stringValue } ?? "all") \(token) from the multisig to \(to)" + (net.map { " on \($0)" } ?? "")
         case .multisigShow: return "show the multisig"
