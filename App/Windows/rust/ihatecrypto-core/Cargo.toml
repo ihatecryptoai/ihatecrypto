@@ -1,0 +1,20 @@
+[package]
+name = "ihatecrypto-core"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Commands, their parsers, plans, risk, holdings and the chat router's forms: the Rust port of App/Sources/IhatecryptoCore"
+
+[dependencies]
+wallet.workspace = true
+hyperliquid.workspace = true
+net.workspace = true
+serde.workspace = true
+# raw_value: a Decimal goes out as the JSON number Swift writes («2003.8»), every digit kept.
+serde_json = { workspace = true, features = ["raw_value"] }
+rust_decimal.workspace = true
+chrono.workspace = true
+unicode-segmentation.workspace = true
+getrandom.workspace = true
+# Swift's Regex has lookahead; the regex crate doesn't.
+fancy-regex = "0.20"

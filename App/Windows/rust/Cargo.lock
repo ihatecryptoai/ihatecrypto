@@ -1531,6 +1531,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ihatecrypto-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "fancy-regex",
+ "getrandom 0.3.4",
+ "hyperliquid",
+ "net",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "unicode-segmentation",
+ "wallet",
+]
+
+[[package]]
 name = "impl-codec"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
