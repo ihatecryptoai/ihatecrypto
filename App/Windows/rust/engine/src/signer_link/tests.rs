@@ -11,6 +11,8 @@ fn built_signer() -> Option<PathBuf> {
 
 fn runtime() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap() }
 
+/// Off Windows the stand-in parent check lets a test process talk to the signer; on Windows only ihatecrypto-engine.exe may.
+#[cfg(not(windows))]
 #[test]
 fn the_real_signer_answers_one_request_at_a_time() {
     let Some(exe) = built_signer() else { eprintln!("ihatecrypto-signer isn't built beside the tests: `cargo build -p signer` first"); return };
@@ -58,4 +60,15 @@ fn a_missing_signer_says_where_it_looked() {
     assert!(!link.is_available());
     let e = runtime().block_on(link.send(&SignerRequest::Status {})).unwrap_err();
     assert_eq!(e.0, "The signer didn't start: /nonexistent/ihatecrypto-signer is missing or Windows refused it.");
+}
+
+/// On Windows the signer serves only ihatecrypto's engine: a test process that starts it gets no answer, and the link
+/// says so without signing anything.
+#[cfg(windows)]
+#[test]
+fn the_real_signer_refuses_a_parent_that_isnt_the_engine() {
+    let Some(exe) = built_signer() else { eprintln!("ihatecrypto-signer isn't built beside the tests: `cargo build -p signer` first"); return };
+    let link = SignerLink::new(exe);
+    let e = runtime().block_on(link.send(&SignerRequest::Status {})).unwrap_err();
+    assert_eq!(e.0, "The signer stopped answering: nothing was signed.");
 }
