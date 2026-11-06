@@ -1,0 +1,15 @@
+[package]
+name = "solana"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Solana messages, transactions, SPL tokens and names, read and built offline: the Rust port of App/Sources/Chains/Solana (no network here)"
+
+[dependencies]
+wallet.workspace = true
+ed25519-dalek.workspace = true
+curve25519-dalek.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+zeroize.workspace = true

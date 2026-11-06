@@ -654,6 +654,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "curve25519-dalek",
+ "ed25519-dalek",
+ "serde_json",
+ "sha2",
+ "wallet",
+ "zeroize",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
