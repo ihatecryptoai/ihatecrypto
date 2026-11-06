@@ -12,14 +12,14 @@ use std::sync::LazyLock;
 use chrono::TimeDelta;
 use execution::{Entry, Journal, Kind};
 use fancy_regex::Regex;
-use ihatecrypto_core::foundation::{Date, number};
+use ihatecrypto_core::foundation::{self, Date, number};
 use ihatecrypto_core::intent::{Fmt, IntentParser, TradeIntent};
 use ihatecrypto_core::trade_history::{self, Fill, Transfer};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::canvas::{Board, CanvasDoc, LIVE_BOARDS};
-use crate::engine::{Engine, Message};
+use crate::engine::{Engine, Message, Pending};
 use crate::folders::{board_title, shown_title};
 use crate::{json, store};
 
@@ -235,9 +235,13 @@ impl HistoryStore {
         }
     }
 
-    /// A request's canvas frozen as it was handled.
+    /// A request's canvas frozen as it was handled. Frozen again as it goes on (after a Confirm), it keeps its first title
+    /// and takes the new cards; a canvas with nothing to freeze leaves its cards as they were (the Mac's snapshotCanvas).
     pub fn freeze(&mut self, snapshot: Snapshot, message: &str) {
-        self.saved.shown.get_or_insert_with(HashMap::new).insert(message.into(), snapshot);
+        let shown = self.saved.shown.get_or_insert_with(HashMap::new);
+        let old = shown.remove(message).unwrap_or_default();
+        let bubbles = if snapshot.bubbles.is_empty() { old.bubbles } else { snapshot.bubbles };
+        shown.insert(message.into(), Snapshot { title: old.title.or(snapshot.title), bubbles });
         store::save(&self.saved, "history.json");
     }
 }
@@ -271,41 +275,81 @@ impl Engine {
         if let Some(rates) = b.data.as_ref().and_then(|d| d.rates.as_ref()).filter(|r| !r.is_empty()) {
             return rates.iter().take(8).map(|r| bubble("yield", &r.asset, &r.place, vec![format!("{}%", Fmt::num(r.apy, 2))], status)).collect();
         }
-        vec![bubble(&b.kind, if b.kind == "chart" { "Chart" } else { "Result" }, &b.title, b.lines.iter().take(2).cloned().collect(), status)]
+        if b.kind == "chart" {
+            // The Mac's chart bubble: «Chart · 1D», the coin, its last price.
+            let title = b.chart.as_ref().map_or(b.title.as_str(), |c| c.title.as_str());
+            let parts: Vec<&str> = title.split(" · ").collect();
+            let label = match parts.as_slice() { [_, .., last] => format!("Chart · {last}"), _ => "Chart".into() };
+            let coin = b.chart.as_ref().and_then(|c| c.coin.as_deref()).map_or_else(|| parts[0].to_string(), IntentParser::pretty);
+            let last = b.chart.as_ref().and_then(|c| c.closes.last()).filter(|x| x.is_finite()).and_then(|x| foundation::decimal(&format!("{x}")));
+            return vec![bubble("chart", &label, &coin, last.map(Fmt::price).into_iter().collect(), status)];
+        }
+        vec![bubble(&b.kind, "Result", &b.title, b.lines.iter().take(2).cloned().collect(), status)]
     }
 
-    /// The canvas as it is once a message is handled, frozen into that request's History card (the Mac's snapshotCanvas
-    /// → canvasBubbles), in the Mac's order: the card waiting for Confirm; else the chart while no plan is under way and
-    /// this message showed no rates; else the rates it showed; else the take-profit ways it offered; else the plan under
-    /// way. Rates and take-profit ways count only for the message that showed them, as the Mac clears both at the next.
+    /// The canvas as it is once a message is handled, frozen into that request's History card (the Mac's snapshotCanvas).
     pub fn snapshot_canvas(&self, message: &Message) {
-        let since = message.at;
         let snap = {
             let st = self.st();
-            let boards = st.boards();
+            // A trade plan's card isn't a waiting action: the Mac never holds a plan as one, so its order reaches the rates
+            // and the take-profit ways asked while the plan waits.
+            let waiting = st.card.as_ref().filter(|_| !matches!(st.pending, Some(Pending::Trade(_)))).map(|c| (c.id.as_str(), c.title.as_str()));
             let plan_under_way = st.intent != TradeIntent::default() && !st.positions.iter().any(|p| p.coin == st.intent.asset);
-            let plan = st.plan_board.as_ref().and_then(|id| boards.iter().find(|b| &b.id == id));
-            let rates = boards.iter().rev().find(|b| b.kind == "result" && b.data.as_ref().is_some_and(|d| d.rates.is_some()) && b.at >= since);
-            let waiting = st.card.as_ref().and_then(|c| boards.iter().find(|b| b.id == c.id).map(|b| (c, b)));
-            let chart = boards.iter().rev().find(|b| b.kind == "chart");
-            let takes = plan.and_then(|p| p.plan.as_ref()?.takes.as_ref()).filter(|t| !t.is_empty());
-            if let Some((c, b)) = waiting {
-                Snapshot { title: Some(c.title.clone()), bubbles: Self::bubbles(b) }
-            } else if let (false, None, Some(chart)) = (plan_under_way, rates, chart) {
-                Snapshot { title: board_title(std::slice::from_ref(chart)), bubbles: Self::bubbles(chart) }
-            } else if let Some(rates) = rates {
-                Snapshot { title: Some("Rates".into()), bubbles: Self::bubbles(rates) }
-            } else if let (true, Some(takes)) = (plan_under_way, takes) && st.takes_at.is_some_and(|t| t >= since) {
-                Snapshot { title: Some("Take-profit choices".into()), bubbles: takes.iter().map(|t| {
-                    bubble("choice", &t.title, if t.payoff.is_empty() { &t.title } else { &t.payoff }, vec![t.detail.clone()], "info")
-                }).collect() }
-            } else if let (true, Some(plan)) = (plan_under_way, plan) {
-                Snapshot { title: Some(plan.title.clone()), bubbles: Self::bubbles(plan) }
-            } else {
-                Snapshot::default()
-            }
+            let question = st.messages().iter().any(|m| !m.from_user && m.at >= message.at && Self::answers_question(m.note.as_deref()));
+            Self::canvas_snapshot(st.boards(), message.at, waiting, st.running_board.as_deref(), plan_under_way, st.plan_board.as_deref(), st.takes_at, question)
         };
         self.st_mut().history.freeze(snap, &message.id);
+    }
+
+    /// The request being carried on is frozen again (the Mac's snapshotCanvas into the current activity): the model went
+    /// on with it after a Confirm or explained a failure, or a confirmed chain ended.
+    pub fn refreeze_request(&self) {
+        let asked = self.st().messages().iter().rfind(|m| m.from_user).cloned();
+        if let Some(asked) = asked { self.snapshot_canvas(&asked) }
+    }
+
+    /// A reply of answer() or answer_without_model(): its note says it was read from the portfolio and the history.
+    /// ponytail: the note is the mark; a flag set in answer() if that note ever changes.
+    pub fn answers_question(note: Option<&str>) -> bool {
+        note.is_some_and(|n| n.ends_with("from your portfolio and history") || n == "по портфелю и истории")
+    }
+
+    /// The Mac's canvasBubbles, in its order: the card waiting for Confirm; else the move carried out since the request
+    /// (its finishedAction: running, done, failed or unknown); else the chart while no plan is under way and this message
+    /// showed no rates; else the rates it showed; else the take-profit ways it offered; else the plan under way. Rates,
+    /// ways and moves count only from `since`, as the Mac clears them at the next message. A question is «Question» (the
+    /// Mac's answer()), with the canvas's cards. `boards` newest first, as pin draws them. `waiting`: the card's id and
+    /// title. Swift's static `snapshot(_:since:…)`, named apart from the window's `Engine::snapshot`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn canvas_snapshot(boards: &[Board], since: Date, waiting: Option<(&str, &str)>, running: Option<&str>, plan_under_way: bool, plan_board: Option<&str>,
+                    takes_at: Option<Date>, question: bool) -> Snapshot {
+        let plan = plan_board.and_then(|id| boards.iter().find(|b| b.id == id));
+        let rates = boards.iter().find(|b| b.kind == "result" && b.data.as_ref().is_some_and(|d| d.rates.is_some()) && b.at >= since);
+        let moved = boards.iter().find(|b| {
+            b.kind == "move" && b.at >= since && (Some(b.id.as_str()) == running || matches!(b.state.as_deref(), Some("done" | "failed" | "unknown")))
+        });
+        let waiting = waiting.and_then(|(id, title)| boards.iter().find(|b| b.id == id).map(|b| (title, b)));
+        let chart = boards.iter().find(|b| b.kind == "chart");
+        let takes = plan.and_then(|p| p.plan.as_ref()?.takes.as_ref()).filter(|t| !t.is_empty());
+        let mut snap = if let Some((title, b)) = waiting {
+            Snapshot { title: Some(title.into()), bubbles: Self::bubbles(b) }
+        } else if let Some(moved) = moved {
+            Snapshot { title: Some(moved.title.clone()), bubbles: Self::bubbles(moved) }
+        } else if let (false, None, Some(chart)) = (plan_under_way, rates, chart) {
+            Snapshot { title: board_title(std::slice::from_ref(chart)), bubbles: Self::bubbles(chart) }
+        } else if let Some(rates) = rates {
+            Snapshot { title: Some("Rates".into()), bubbles: Self::bubbles(rates) }
+        } else if let (true, Some(takes)) = (plan_under_way, takes) && takes_at.is_some_and(|t| t >= since) {
+            Snapshot { title: Some("Take-profit choices".into()), bubbles: takes.iter().map(|t| {
+                bubble("choice", &t.title, if t.payoff.is_empty() { &t.title } else { &t.payoff }, vec![t.detail.clone()], "info")
+            }).collect() }
+        } else if let (true, Some(plan)) = (plan_under_way, plan) {
+            Snapshot { title: Some(plan.title.clone()), bubbles: Self::bubbles(plan) }
+        } else {
+            Snapshot::default()
+        };
+        if question { snap.title = Some("Question".into()) }
+        snap
     }
 
     /// What a canvas shows between requests, as the Mac's canvasBubbles picks it once the moves are done: its chart while

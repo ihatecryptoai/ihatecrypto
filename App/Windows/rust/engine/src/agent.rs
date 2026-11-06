@@ -72,6 +72,8 @@ impl Engine {
         );
         Box::pin(self.route_with_model(&text, &client, Some(&goal.request), goal.round + 1)).await;
         self.st_mut().thinking = false;
+        // The request's History card takes what the canvas shows once the model has gone on (the Mac's continueAgent).
+        self.refreeze_request();
         self.changed();
     }
 

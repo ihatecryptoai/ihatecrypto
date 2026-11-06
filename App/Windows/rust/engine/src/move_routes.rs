@@ -221,19 +221,16 @@ impl Engine {
         if let Some(card) = self.st_mut().card.as_mut().filter(|c| c.id == board && ours(&c.title)) { card.title = named }
     }
 
-    /// The waiting card's id is `board`.
-    fn card_is(&self, board: &str) -> bool { self.st().card.as_ref().is_some_and(|c| c.id == board) }
-
     /// The waiting move's quote for its route (the Mac's quoteSwap, all but Jupiter's): asked once and again every 15 s
     /// while it fails; Aave's health factor every 30 s while the card waits, as it moves with the price. Nothing is
     /// signed. False for a move this doesn't quote.
-    pub async fn quote_route(&self, c: &WalletCommand, board: &str) -> bool {
+    pub async fn quote_route(&self, c: &WalletCommand, board: &str, round: i64) -> bool {
         if matches!(c, WalletCommand::ClaimRewards | WalletCommand::SweepRewards { .. }) {
             // What Merkl owes, by network, is the route itself.
             let me = self.st().evm_address();
             let Some(me) = me else { return true };
             let Some(owed) = merkl_rewards(&me).await.filter(|o| !o.is_empty()) else { return true };
-            if !self.card_is(board) { return true }
+            if !self.quote_live(c, board, round) { return true }
             self.st_mut().claim_owed = Some(ClaimOwed { board: board.into(), command: c.clone(), owed: owed.clone() });
             // Leading a chain, the claim is its first move's route and the later steps, title and footer stay (the Mac's
             // route.steps + chainSteps()): Confirm still runs the whole chain.
@@ -253,9 +250,10 @@ impl Engine {
             return true;
         }
         if !self.route_quoted(c) { return false }
-        while self.card_is(board) {
-            if let Some(ways) = self.route_quote(c).await {
-                if !self.card_is(board) { return true }
+        while self.quote_live(c, board, round) {
+            let ways = self.route_quote(c).await;
+            if !self.quote_live(c, board, round) { return true }
+            if let Some(ways) = ways {
                 self.set_way_quotes(Some(WayQuotes { command: c.clone(), ways: ways.clone() }));
                 self.redraw_route(board, c);
                 if !matches!(c, WalletCommand::AaveBorrow { .. }) { return true }

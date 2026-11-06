@@ -402,24 +402,16 @@ impl Engine {
         }).into_owned()
     }
 
-    /// Refresh on a stale price: quoted again, and Confirm back for 15 s once it is.
+    /// Refresh on a stale price: quoted again, and Confirm back for 15 s once it is. Only the time goes (the Mac's
+    /// requoteSwap): the last good quote stays on the step and the card says «Quoting…» until a new one lands — a failure
+    /// meanwhile keeps it (quote_failed). The loops still asking stop (quote_card's round).
     pub fn requote(&self) {
         let Some(c) = self.quoted_move() else { return };
         let Some(id) = self.st().card.as_ref().map(|c| c.id.clone()) else { return };
-        {
-            let mut st = self.st_mut();
-            st.quoted_at = None;
-            st.jupiter_shown = None;
-            st.way_quotes = None;
-        }
+        self.st_mut().quoted_at = None;
         self.changed();
-        let ways = route_edit::quoted(&c);
-        let (me, command) = (self.rc(), c.clone());
-        tokio::task::spawn_local(async move { me.quote_card(&command, &id).await });
-        if ways {
-            let me = self.rc();
-            tokio::task::spawn_local(async move { me.quote_ways(&c).await });
-        }
+        let me = self.rc();
+        tokio::task::spawn_local(async move { me.quote_card(&c, &id).await });
     }
 
     // MARK: Lookups the field asks for

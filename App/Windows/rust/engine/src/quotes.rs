@@ -18,8 +18,20 @@ fn ten_to(places: i64) -> Option<Decimal> { Decimal::from_scientific(&format!("1
 
 impl Engine {
     pub async fn quote_card(&self, command: &WalletCommand, board: &str) {
+        // One loop per card, as the Mac's .task(id: QuoteRun(command, round)): asked anew (a new card, Refresh, back on its
+        // canvas), every loop of an earlier round stops at its next turn.
+        let round = {
+            let mut st = self.st_mut();
+            st.quote_round += 1;
+            st.quote_round
+        };
+        // A Base or Arbitrum trade's two ways, a Robinhood Chain trade's (route_edit.rs).
+        if crate::route_edit::quoted(command) {
+            self.quote_ways(command, board, round).await;
+            return;
+        }
         // Everything but Jupiter's: the bridge, the swap off Solana, Aave's health factor, a coin's cost (move_routes.rs).
-        if self.quote_route(command, board).await { return }
+        if self.quote_route(command, board, round).await { return }
         let pair: Option<(SpotAsset, SpotAsset, Decimal)> = match command {
             WalletCommand::Buy { asset, usdc: Some(usdc) } => Some((SpotAsset::usdc(), asset.clone(), *usdc)),
             WalletCommand::Sell { asset, amount: Some(amount) } => Some((asset.clone(), SpotAsset::usdc(), *amount)),
@@ -34,17 +46,16 @@ impl Engine {
         let units = pair.as_ref().and_then(|(from, _, x)| (Num::of(*x) * Num(ten_to(from.decimals))).rounded(0, Rounding::Down).0).and_then(|u| u.to_u64()).unwrap_or(0);
         let Some((from, to, _)) = pair.filter(|_| units > 0) else {
             // A token Jupiter can't name, or under one unit: Confirm shows, the run says why if it fails (the Mac).
-            let mine = self.quoted_move().as_ref() == Some(command) && self.st().card.as_ref().is_some_and(|c| c.id == board);
-            if jupiter && mine {
+            if jupiter && self.quote_live(command, board, round) {
                 self.st_mut().unpriced = Some(command.clone());
                 self.changed();
             }
             return;
         };
-        while self.st().card.as_ref().is_some_and(|c| c.id == board) {
-            if let Ok(q) = protocols::jupiter::quote(&from.mint, &to.mint, units, 50, &[]).await {
-                let mine = self.st().card.as_ref().is_some_and(|c| c.id == board) && self.quoted_move().as_ref() == Some(command);
-                if !mine { return }
+        while self.quote_live(command, board, round) {
+            let q = protocols::jupiter::quote(&from.mint, &to.mint, units, 50, &[]).await;
+            if !self.quote_live(command, board, round) { return }
+            if let Ok(q) = q {
                 let out = (Num::of(Decimal::from(q.out_amount)) / Num(ten_to(to.decimals))).0.unwrap_or_default();
                 self.set_jupiter_shown(Some(JupiterShown {
                     command: command.clone(), out: q.out_amount, title: format!("≈ {} {}", Fmt::num(out, 6), to.symbol),
@@ -59,8 +70,18 @@ impl Engine {
         }
     }
 
+    /// Whether a quote loop of `round` still asks for the waiting card's move: not after Refresh or a new card asked anew.
+    pub fn quote_live(&self, c: &WalletCommand, board: &str, round: i64) -> bool {
+        {
+            let st = self.st();
+            if round != st.quote_round || st.card.as_ref().is_none_or(|card| card.id != board) { return false }
+        }
+        self.quoted_move().as_ref() == Some(c)
+    }
+
     /// A priced swap's quote asked and not given: the card shows Refresh and «the price is over 15 s old» while it keeps
-    /// asking, as the Mac's empty swapQuote — never «Quoting…» for as long as the place doesn't answer.
+    /// asking, as the Mac's empty swapQuote — never «Quoting…» for as long as the place doesn't answer. Its step says so
+    /// at once, as the Mac's route drawn from that swapQuote: «no quote now · asked again every 30 s».
     pub fn quote_failed(&self, c: &WalletCommand) {
         if self.quoted_move().as_ref() != Some(c) || !self.priced(c) { return }
         {
@@ -68,7 +89,8 @@ impl Engine {
             if st.way_quotes.as_ref().map(|w| &w.command) == Some(c) || st.jupiter_shown.as_ref().map(|j| &j.command) == Some(c) { return }
         }
         self.set_way_quotes(Some(WayQuotes { command: c.clone(), ways: vec![] }));
-        self.changed();
+        let id = self.st().card.as_ref().map(|card| card.id.clone());
+        match id { Some(id) => self.redraw_route(&id, c), None => self.changed() }
     }
 
     /// The move a waiting card prices: a single move, or a chain's first, as the Mac's chain card is its first move's

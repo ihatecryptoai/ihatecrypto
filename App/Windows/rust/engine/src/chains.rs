@@ -448,6 +448,7 @@ impl Engine {
         let canvas = self.st().canvas_id.clone();
         if held.canvas != canvas || chrono::Utc::now() - held.since >= chrono::TimeDelta::seconds(1800) { return }
         self.chain(&held.rest, None, None, true).await;
+        self.refreeze_request();
     }
 
     /// A step as the chain's card names it: a paid request with its price («pay 0.01 USDC to StableEnrich»).
@@ -542,7 +543,10 @@ impl Engine {
     pub fn run_chain(&self, steps: Vec<ChainStep>) -> Local<'_, Result<(), trade::Error>> {
         Box::pin(async move {
             let landings = Arc::new(Landings::new());
-            trade::LANDINGS.scope(Some(landings.clone()), self.run_chain_steps(&steps, &landings)).await
+            let ran = trade::LANDINGS.scope(Some(landings.clone()), self.run_chain_steps(&steps, &landings)).await;
+            // The chain's end, through or stopped: its request's History card takes its board (the Mac's runSteps).
+            self.refreeze_request();
+            ran
         })
     }
 

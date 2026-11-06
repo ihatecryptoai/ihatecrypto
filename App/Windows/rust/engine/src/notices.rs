@@ -164,7 +164,9 @@ impl Engine {
     pub async fn notice_hyperliquid(&self) {
         let (user, positions, before, own_quiet) = {
             let mut st = self.st_mut();
-            let Some(user) = st.evm_address().filter(|_| !st.watching()) else { return };
+            // Only once this wallet's own positions are read (the Mac's guard user == hlAddress): a switch during the last
+            // wallet's read leaves nothing for the new one to remember, so its first read can't find a «filled» limit.
+            let Some(user) = st.evm_address().filter(|u| !st.watching() && st.positions_for.as_deref() == Some(u.to_lowercase().as_str())) else { return };
             let now: HashSet<String> = st.positions.iter().map(|p| p.coin.clone()).collect();
             let before = st.notice_positions.replace(now);
             // Not while one of ours runs: opening it is the move itself.

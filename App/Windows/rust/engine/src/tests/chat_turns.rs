@@ -154,8 +154,10 @@ async fn confirm_is_held_only_where_the_mac_holds_it() {
         let buy = WalletCommand::BuyOn { place: "base".into(), token: "AERO".into(), usdc: Some(Decimal::from(5)), from: None };
         waiting(&e, Pending::Wallet(buy.clone()));
         assert_eq!(e.quote_view().unwrap().state, "quoting");
-        e.set_way_quotes(Some(WayQuotes { command: buy.clone(), ways: vec![] }));
+        e.quote_failed(&buy);
         assert_eq!(e.quote_view().unwrap().state, "stale");
+        // The step's details say no way quotes it now (an empty list), as the Mac's empty swapQuote (Cards18Tests).
+        assert_eq!(e.step_edit().unwrap().quotes, Some(vec![]));
         // A swap Jupiter can't price: Confirm as always.
         e.st_mut().unpriced = Some(buy);
         assert!(e.quote_view().is_none());
@@ -183,9 +185,10 @@ async fn a_chain_led_by_a_priced_swap_is_quoted_and_held_to_its_price() {
         e.set_way_quotes(Some(WayQuotes { command: aero, ways: vec![way("relay", "2.41 AERO"), way("uniswap", "2.38 AERO")] }));
         let q = e.quote_view().unwrap();
         assert!(q.state == "fresh" && q.line.as_deref().is_some_and(|l| l.contains("2.41 AERO")), "{q:?}");
+        // Refresh: «Quoting…» until the new price lands, the last good one kept on its step (the Mac's requoteSwap).
         e.requote();
         assert_eq!(e.quote_view().unwrap().state, "quoting");
-        assert!(e.st().way_quotes.is_none() && e.st().quoted_at.is_none());
+        assert!(e.st().way_quotes.as_ref().is_some_and(|w| w.ways.len() == 2) && e.st().quoted_at.is_none());
         // A chain led by an unpriced move has no quote bar.
         waiting(&e, Pending::Chain(vec![ChainStep::Wallet(WalletCommand::SolanaTo("base".into(), Some(Decimal::from(5))))]));
         assert!(e.quote_view().is_none());

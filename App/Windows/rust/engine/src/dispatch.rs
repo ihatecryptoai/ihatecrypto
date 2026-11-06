@@ -311,6 +311,8 @@ impl Engine {
         tokio::task::spawn_local(async move {
             loop {
                 me.refresh().await;
+                // After the read, as the Mac's watch(): a stop's Windows Hello never holds a refresh.
+                me.guard_positions().await;
                 me.offer_trading_key();
                 me.refresh_live().await;
                 me.read_closed().await;

@@ -1,4 +1,4 @@
-//! Balance15/16/17Tests, Portfolio3Tests' note, Rail13Tests' and Plan5Tests' Jupiter rows and stock day, Ui7Tests'
+//! Balance15/16/17/18Tests, Portfolio3Tests' note, Rail13Tests' and Plan5Tests' Jupiter rows and stock day, Ui7Tests'
 //! lending readings and stock rows, Cards6Tests' rows and Plan5Tests' held P/L, offline: the reads are handed in.
 
 use std::cell::Cell;
@@ -317,4 +317,36 @@ fn money_that_came_in_is_said_once_and_counted_as_moved_in() {
         e.announce_incoming(&old, &new);
         assert_eq!(e.st().messages().len(), before);
     });
+}
+
+// Balance18Tests (wave 17, audit16 A16-C1-1, A16-C1-3): the new wallet's «Closed · 7 days» comes with its first
+// Hyperliquid read, and the guardian runs after the read, never inside it, so a stop waiting for Windows Hello holds no
+// refresh. Public test addresses only.
+
+#[test]
+fn the_weeks_closes_are_read_with_an_accounts_first_read_and_when_its_positions_change() {
+    let (account, other) = ("0x90f79bf6eb2c4f870365e785982e1f101e93b906", "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65");
+    let coins = |c: &[&str]| c.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+    // After a switch (or at launch) no positions were read for the account yet: its closes come with this read.
+    assert!(Engine::reads_closed(None, account, &[], &[]));
+    assert!(Engine::reads_closed(Some(other), account, &[], &coins(&["ETH"])));
+    // The same account, the same positions: the 30 s loop reads them, not every read.
+    assert!(!Engine::reads_closed(Some(account), account, &coins(&["ETH", "BTC"]), &coins(&["BTC", "ETH"])));
+    // A position closed (its stop) or opened: read again, as the Mac's readFills.
+    assert!(Engine::reads_closed(Some(account), account, &coins(&["ETH", "BTC"]), &coins(&["BTC"])));
+    assert!(Engine::reads_closed(Some(account), account, &[], &coins(&["SOL"])));
+}
+
+#[test]
+fn the_guardian_runs_after_the_read_not_inside_it() {
+    let portfolio = include_str!("../portfolio.rs");
+    let start = portfolio.find("async fn read_once(&self)").expect("read_once");
+    let end = start + portfolio[start..].find("pub fn announce_incoming").expect("announce_incoming");
+    let read_once = &portfolio[start..end];
+    // Inside the pass a stop's Windows Hello would hold every caller waiting for it (the rail's spinner, a chain).
+    assert!(!read_once.contains("guard_positions("));
+    assert!(read_once.contains("self.read_closed().await"));
+    // The loop runs it once its read has landed, as the Mac's watch() (Execution.swift:1076-1078).
+    let looped = fancy_regex::Regex::new(r"me\.refresh\(\)\.await;\n(\s*//[^\n]*\n)*\s*me\.guard_positions\(\)\.await;").unwrap();
+    assert!(looped.is_match(include_str!("../dispatch.rs")).unwrap());
 }

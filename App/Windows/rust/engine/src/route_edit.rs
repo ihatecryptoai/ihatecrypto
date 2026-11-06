@@ -34,7 +34,8 @@ pub struct Edit {
     pub stock: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub way: Option<String>,
-    /// Both ways as quoted now, the better first; None while they're still being asked.
+    /// Both ways as quoted now, the better first; None while they're still being asked, empty when no way quotes it now
+    /// (the Mac's empty swapQuote).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quotes: Option<Vec<Way>>,
 }
@@ -183,6 +184,7 @@ impl Engine {
     /// request, or the command has no amount and no way).
     pub fn step_edit(&self) -> Option<Edit> {
         let command = self.quoted_move()?;
+        let quotes = self.quotes(&command);
         let st = self.st();
         let id = st.card.as_ref()?.id.clone();
         let key = way_key(&command);
@@ -190,16 +192,16 @@ impl Engine {
         if command.editable_amount().is_none() && key.is_none() && !stock { return None }
         Some(Edit {
             board: id, amount: command.editable_amount().map(foundation::text), unit: unit(&command), ways: key.is_some(), stock,
-            way: key.and_then(|k| st.route_way.as_ref().filter(|r| r.key == k).map(|r| r.way.clone())),
-            quotes: st.way_quotes.as_ref().filter(|q| q.command == command && !q.ways.is_empty()).map(|q| q.ways.clone()),
+            way: key.and_then(|k| st.route_way.as_ref().filter(|r| r.key == k).map(|r| r.way.clone())), quotes,
         })
     }
 
     /// Both ways of a Base or Arbitrum trade quoted while its card waits (the Mac's quoteSwap): once, asked again every
-    /// 15 s while it fails, until the card goes. Nothing is signed; the executor quotes again right before signing.
-    pub async fn quote_ways(&self, command: &WalletCommand) {
+    /// 15 s while it fails, until the card goes or is asked anew (quote_card's round). Nothing is signed; the executor
+    /// quotes again right before signing.
+    pub async fn quote_ways(&self, command: &WalletCommand, board: &str, round: i64) {
         if is_stock_trade(command) {
-            self.quote_stock(command).await;
+            self.quote_stock(command, board, round).await;
             return;
         }
         let (place, token, usdc, sell, from, keep) = match command {
@@ -209,14 +211,14 @@ impl Engine {
         };
         let Some(net) = EvmNetwork::named(place) else { return };
         let Ok(e) = self.executor() else { return };
-        while self.quoted_move().as_ref() == Some(command) {
-            if let Ok(ways) = e.swap_quotes(net, token, usdc, sell, from, keep).await && !ways.is_empty() {
-                if self.quoted_move().as_ref() != Some(command) { return }
+        while self.quote_live(command, board, round) {
+            let ways = e.swap_quotes(net, token, usdc, sell, from, keep).await;
+            if !self.quote_live(command, board, round) { return }
+            if let Ok(ways) = ways && !ways.is_empty() {
                 let ways = ways.into_iter().map(|(way, gets, worth)| Way { way: window_way(&way), gets, worth: Fmt::usd(worth), less: None, usd: Some(worth) }).collect();
                 self.set_way_quotes(Some(WayQuotes { command: command.clone(), ways }));
                 // The best way and what it gets, on the step it names (move_routes.rs).
-                let id = self.st().card.as_ref().map(|c| c.id.clone());
-                match id { Some(id) => self.redraw_route(&id, command), None => self.changed() }
+                self.redraw_route(board, command);
                 return;
             }
             self.quote_failed(command);
@@ -226,23 +228,23 @@ impl Engine {
 
     /// A Robinhood Chain trade's ways while its card waits (the Mac's quoteStock): Uniswap v4, v3 and Relay's swap, the
     /// best first, which Confirm takes; its step says the best and what the others give (stockBuyStep).
-    pub async fn quote_stock(&self, command: &WalletCommand) {
+    pub async fn quote_stock(&self, command: &WalletCommand, board: &str, round: i64) {
         let (symbol, usdc, sell) = match command {
             WalletCommand::BuyStock { symbol, usdc: Some(u) } => (symbol, Some(*u), None),
             WalletCommand::SellStock { symbol, amount } => (symbol, None, *amount),
             _ => return,
         };
         let Ok(e) = self.executor() else { return };
-        while self.quoted_move().as_ref() == Some(command) {
-            if let Ok(ways) = e.stock_quotes(symbol, usdc, sell).await && let Some(best) = ways.first().map(|w| w.2) {
-                let id = self.st().card.as_ref().map(|c| c.id.clone());
-                let Some(id) = id.filter(|_| self.quoted_move().as_ref() == Some(command)) else { return };
+        while self.quote_live(command, board, round) {
+            let ways = e.stock_quotes(symbol, usdc, sell).await;
+            if !self.quote_live(command, board, round) { return }
+            if let Ok(ways) = ways && let Some(best) = ways.first().map(|w| w.2) {
                 let ways = ways.into_iter().enumerate().map(|(i, (way, gets, worth))| Way {
                     way, gets, worth: Fmt::usd(worth), less: if i == 0 { None } else { best.checked_sub(worth).map(Fmt::usd) }, usd: Some(worth),
                 }).collect();
                 self.set_way_quotes(Some(WayQuotes { command: command.clone(), ways }));
                 // The best names the BUY (or SELL) step, the others are its line (move_routes.rs, the Mac's stockBuyStep).
-                self.redraw_route(&id, command);
+                self.redraw_route(board, command);
                 return;
             }
             self.quote_failed(command);
@@ -266,12 +268,11 @@ impl Engine {
         if let Some(key) = way_key(&command) {
             self.st_mut().route_way = way.filter(|w| *w == "relay" || *w == "uniswap").map(|w| RouteWay { key, way: w.into() });
         }
-        // The way alone: the route shows it at once (its swap step, the approve Uniswap needs), as the Mac's observed
-        // routeWays redraws — Confirm takes the picked way (take_way), so the card must say it.
-        let Some(edited) = edited else {
-            self.redraw_route(&id, &command);
-            return Ok(());
-        };
+        // The route shows the way at once (its swap step, the approve Uniswap needs), as the Mac's observed routeWays
+        // redraws — whatever the amount then does: a new amount refused before its card leaves this card waiting, and
+        // its Confirm takes the picked way (take_way), so the card must say it.
+        self.redraw_route(&id, &command);
+        let Some(edited) = edited else { return Ok(()) };
         let chain = match self.st().pending.as_ref() { Some(Pending::Chain(list)) => Some(list.clone()), _ => None };
         let Some(list) = chain else {
             self.handle_wallet(&edited, None).await;

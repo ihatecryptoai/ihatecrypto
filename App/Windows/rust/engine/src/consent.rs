@@ -280,12 +280,13 @@ impl Engine {
         }
         if self.st().card.is_some() { self.cancel_pending(None) }
         // Like any new message, it drops what waited: steps held behind a card, a «How much?» (the Mac's pick).
+        let said = Message::new(true, &o.title, None);
         {
             let mut st = self.st_mut();
             st.chain_state.after_call = None;
             st.chain_state.held = None;
             st.awaiting_amount = None;
-            st.messages_mut().push(Message::new(true, &o.title, None));
+            st.messages_mut().push(said.clone());
             st.agent_goal = None;
         }
         self.name_canvas(&o.title);
@@ -295,7 +296,8 @@ impl Engine {
         if !self.opening_route_command(&o.command).await && !self.run_canonical(&o.command, &user_text).await {
             self.reply(&self.say(&format!("ihatecrypto can't do “{}” yet — nothing moved.", o.command), &format!("ihatecrypto пока не умеет «{}» — ничего не ушло.", o.command)), None);
         }
-        // Swift's defer.
+        // Swift's defers: frozen into this request's History card once it's handled, as a typed one is (the Mac's pick).
+        self.snapshot_canvas(&said);
         self.st_mut().thinking = false;
         self.changed();
     }

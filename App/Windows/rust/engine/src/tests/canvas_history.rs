@@ -1,7 +1,8 @@
 //! HistoryTabs.swift, Notices.swift and SiteOpen.swift (MoneyTests' tabs, Chat6Tests' History, Cards15–17Tests' cards and
-//! frozen canvases, Blocks14Tests' runs, NoticesTests, BrowserTests): the History kept apart from the canvases, what the
-//! app did by itself recorded, a request's canvas frozen as it was handled, the three tabs from plain inputs,
-//! notifications by kind, and a site named in the chat opened in the browser. No network.
+//! frozen canvases, History18Tests' wave 17, Blocks14Tests' runs, NoticesTests, BrowserTests): the History kept apart
+//! from the canvases, what the app did by itself recorded, a request's canvas frozen as it was handled (and again as it
+//! goes on), the three tabs from plain inputs, notifications by kind, and a site named in the chat opened in the browser.
+//! No network, no model; public test data only.
 
 use std::rc::Rc;
 
@@ -16,7 +17,7 @@ use super::{Lines, engine};
 use crate::blocks::{BlockData, RateRow};
 use crate::canvas::{Board, Step};
 use crate::engine::{Card, Engine, Message};
-use crate::history_tabs::{Activity, Snapshot};
+use crate::history_tabs::{Activity, Bubble, Snapshot};
 use crate::notices::Notice;
 use crate::store;
 
@@ -278,4 +279,176 @@ fn signatures_group_into_sessions_with_what_came_of_them() {
     assert_eq!(Engine::english("исполнено 0.5 по 3000"), "filled 0.5 at 3000");
     assert_eq!(Engine::english("закрыть пустой счёт; действует до блока 5"), "close the empty account · valid until block 5");
     assert_eq!(Engine::english("плечо"), "leverage");
+}
+
+// History18Tests (wave 17, audit16 D15-1, D15-2, D16-2, D16-3, D16-5, A16-C2-1): a request's History card is the canvas
+// frozen in the Mac's order — a plan waiting for Confirm isn't a waiting card —, frozen for a picked card too, frozen
+// again as the request goes on after a Confirm with its first title kept, «Question» for a question, a chart as
+// «Chart · 1D», the coin and its last price; the notices remember nothing before the wallet's own positions are read.
+
+/// Hardhat's account #3.
+const MOM: &str = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
+
+fn shown(e: &Engine, m: &Message) -> Option<Snapshot> { e.st().history.saved.shown.as_ref().and_then(|s| s.get(&m.id)).cloned() }
+
+/// A request said `ago` seconds back.
+fn asked(e: &Engine, text: &str, ago: f64) -> Message {
+    let m = Message { at: chrono::Utc::now() - TimeDelta::milliseconds((ago * 1000.0) as i64), ..Message::new(true, text, None) };
+    e.st_mut().messages_mut().push(m.clone());
+    m
+}
+
+fn move_step(label: &str, title: &str) -> Step { Step { label: label.into(), title: title.into(), lines: vec![], money: None, status: None } }
+
+#[tokio::test]
+async fn a_plan_waiting_for_confirm_falls_to_the_rates_and_the_ways_asked_over_it() {
+    use ihatecrypto_core::intent::{Side, TradeIntent};
+    use ihatecrypto_core::plan::{Market, RiskCalc};
+    use trade::executor::Prepared;
+
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = en(&Lines::default());
+        let market = Market::new("ETH", Decimal::from(2000), 4, 25);
+        // TradeIntent::default() is a long ETH with nothing else set.
+        let intent = TradeIntent { asset: "ETH".into(), side: Side::Long, risk_usd: Some(Decimal::ONE), ..TradeIntent::default() };
+        let sizing = RiskCalc::size(Decimal::ONE, Decimal::TWO, Some(Decimal::from(4)), Decimal::from(3), Side::Long, &market, None, None, Decimal::ZERO).unwrap();
+        let p = Prepared::new(intent.clone(), market, sizing, 3, None, vec![], vec!["Long 0.01 ETH".into()], chrono::Utc::now());
+        let plan = asked(&e, "long ETH", 30.0);
+        let view = crate::trade_plan::PlanView { market: "ETH".into(), group: "crypto".into(), stopped: None, short: None, blocked: false, fix: None,
+                                                 fix_detail: None, over_limit: false, takes: None, footer: String::new(), preview: false };
+        let board = Board { steps: Some(vec![move_step("LONG · HYPERLIQUID", "0.01 ETH")]), state: Some("waiting".into()), plan: Some(view),
+                            ..Board::new("move", "Plan · long ETH") };
+        let id = e.pin(board.clone());
+        {
+            let mut st = e.st_mut();
+            st.intent = intent;
+            st.positions = vec![];
+            st.pending = Some(crate::engine::Pending::Trade(Box::new(p)));
+            st.card = Some(Card { id: id.clone(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+            st.plan_board = Some(id.clone());
+        }
+        // The plan's own request: its title and route, as before.
+        e.snapshot_canvas(&plan);
+        let pinned = e.st().boards().iter().find(|b| b.id == id).cloned().unwrap();
+        assert_eq!(shown(&e, &plan), Some(Snapshot { title: Some("Plan · long ETH".into()), bubbles: Engine::bubbles(&pinned) }));
+        assert_eq!(Engine::bubbles(&pinned), Engine::bubbles(&board));
+        // The ways to take profit asked while it waits: «Take-profit choices», not the plan again.
+        let takes = asked(&e, "take profit like the pros", 1.0);
+        let ways = e.take_choices(Some(Decimal::ONE));
+        e.update_board(Some(&id), |b| if let Some(p) = b.plan.as_mut() { p.takes = Some(ways) });
+        e.st_mut().takes_at = Some(chrono::Utc::now());
+        e.snapshot_canvas(&takes);
+        let snap = shown(&e, &takes).unwrap();
+        assert!(snap.title.as_deref() == Some("Take-profit choices") && snap.bubbles.iter().map(|b| b.kind.as_str()).collect::<Vec<_>>() == ["choice"; 3], "{snap:?}");
+        // The rates asked while it waits: «Rates».
+        let rates_asked = asked(&e, "best rates for USDC", 0.5);
+        e.pin(Board { data: rates(&[("Kamino", 5)]), ..Board::new("result", "Rates · USDC") });
+        e.snapshot_canvas(&rates_asked);
+        let snap = shown(&e, &rates_asked).unwrap();
+        assert!(snap.title.as_deref() == Some("Rates") && snap.bubbles[0].kind == "yield", "{snap:?}");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_picked_card_is_frozen_as_a_typed_message_is() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = en(&Lines::default());
+        let save = format!("save {MOM} as Mom on base");
+        e.offer(vec![crate::from_core::RouterOption::new("Save Mom", "", &save, false)], &format!("keep {MOM} as Mom"), vec![]);
+        e.pick(Some(0)).await;
+        let picked = e.st().messages().iter().rfind(|m| m.from_user).cloned().unwrap();
+        assert_eq!(picked.text, "Save Mom");
+        let snap = shown(&e, &picked);
+        let card = e.st().card.as_ref().map(|c| c.title.clone());
+        assert!(card.is_some() && snap.as_ref().is_some_and(|s| s.title == card && !s.bubbles.is_empty()), "{snap:?} · {card:?}");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_request_frozen_again_keeps_its_first_title_and_takes_the_new_cards() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = en(&Lines::default());
+        let id = foundation::Uuid::new().to_string();
+        let bubble = |label: &str, title: &str| Bubble { kind: "step".into(), label: label.into(), title: title.into(), lines: vec![], status: "info".into() };
+        let (a, b) = (bubble("BRIDGE · RELAY", "5 USDC"), bubble("BUY · BASE", "AERO"));
+        let freeze = |title: Option<&str>, bubbles: Vec<Bubble>| e.st_mut().history.freeze(Snapshot { title: title.map(str::to_string), bubbles }, &id);
+        let kept = |e: &Engine| e.st().history.saved.shown.as_ref().and_then(|s| s.get(&id)).cloned();
+        freeze(Some("Bridge 5 USDC"), vec![a]);
+        freeze(Some("Buy AERO"), vec![b.clone()]);
+        let both = Snapshot { title: Some("Bridge 5 USDC".into()), bubbles: vec![b] };
+        assert_eq!(kept(&e), Some(both.clone()));
+        // Nothing to freeze, or a title only: the cards stay.
+        freeze(None, vec![]);
+        freeze(Some("Question"), vec![]);
+        assert_eq!(kept(&e), Some(both));
+
+        // The canvas after a Confirm: the move carried out since the request comes before a chart standing there.
+        let since = chrono::Utc::now() - TimeDelta::seconds(10);
+        let chart = Board { at: since - TimeDelta::seconds(60), ..Board::new("chart", "SOL") };
+        let old = Board { steps: Some(vec![move_step("SEND", "1 USDC")]), state: Some("done".into()), at: since - TimeDelta::seconds(5), ..Board::new("move", "Earlier send") };
+        let mut moved = Board { steps: Some(vec![move_step("BRIDGE · RELAY", "5 USDC")]), state: Some("running".into()), at: since, ..Board::new("move", "Bridge 5 USDC") };
+        let snap = |boards: &[Board], running: Option<&str>| Engine::canvas_snapshot(boards, since, None, running, false, None, None, false);
+        assert_eq!(snap(&[old.clone(), chart.clone()], None).title.as_deref(), Some("Chart · SOL"), "a move from before the request isn't its own");
+        assert_eq!(snap(&[moved.clone(), old.clone(), chart.clone()], Some(&moved.id)).title.as_deref(), Some("Bridge 5 USDC"));
+        moved.state = Some("done".into());
+        assert_eq!(snap(&[moved.clone(), old.clone(), chart.clone()], None).bubbles.iter().map(|b| b.status.as_str()).collect::<Vec<_>>(), ["done"]);
+        assert_eq!(snap(&[moved, old, chart], None).title.as_deref(), Some("Bridge 5 USDC"));
+        // Through the engine: the request is frozen again from the canvas as it is now.
+        let request = asked(&e, "bridge 5 USDC to base, then buy AERO", 20.0);
+        e.snapshot_canvas(&request);
+        let first = shown(&e, &request).and_then(|s| s.title);
+        e.pin(Board { steps: Some(vec![move_step("BRIDGE · RELAY", "5 USDC")]), state: Some("done".into()), ..Board::new("move", "Bridge 5 USDC") });
+        e.refreeze_request();
+        let now = shown(&e, &request).unwrap();
+        assert!(now.title == Some(first.unwrap_or_else(|| "Bridge 5 USDC".into())) && now.bubbles.iter().map(|b| b.label.as_str()).collect::<Vec<_>>() == ["BRIDGE · RELAY"],
+                "{now:?}");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_questions_card_is_titled_question() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = en(&Lines::default());
+        for language in ["en", "ru"] {
+            e.set_settings(|s| s.language = Some(language.into()));
+            let q = asked(&e, "what's open?", 1.0);
+            e.answer_without_model(&q.text).await;
+            e.snapshot_canvas(&q);
+            let note = e.st().messages().last().and_then(|m| m.note.clone());
+            assert_eq!(shown(&e, &q).and_then(|s| s.title).as_deref(), Some("Question"), "{language}: {note:?}");
+        }
+        // With the canvas's cards, as the Mac's answer() keeps them.
+        let snap = Engine::canvas_snapshot(&[Board::new("chart", "BTC · 1D")], distant_past(), None, None, false, None, None, true);
+        assert!(snap.title.as_deref() == Some("Question") && snap.bubbles.iter().map(|b| b.kind.as_str()).collect::<Vec<_>>() == ["chart"]);
+        assert!(!Engine::answers_question(Some("Hyperliquid")) && !Engine::answers_question(None));
+        assert!(Engine::answers_question(Some("claude-opus-5-5 · from your portfolio and history")));
+    }).await;
+}
+
+#[test]
+fn a_charts_bubble_reads_its_range_the_coin_and_its_last_price() {
+    let line = crate::engine::ChartLine { title: "BTC · 1D".into(), closes: vec![64000.0, 65000.5], times: None, low: String::new(), high: String::new(),
+                                          change: String::new(), coin: Some("BTC".into()), network: None, extras: None };
+    let bubble = Engine::bubbles(&Board { chart: Some(line), ..Board::new("chart", "BTC · 1D") });
+    let price = ihatecrypto_core::intent::Fmt::price(foundation::decimal("65000.5").unwrap());
+    assert_eq!(bubble.iter().map(|b| [vec![b.label.clone(), b.title.clone()], b.lines.clone()].concat()).collect::<Vec<_>>(), [vec!["Chart · 1D".to_string(), "BTC".into(), price]]);
+}
+
+#[tokio::test]
+async fn the_notices_remember_nothing_before_this_wallets_positions_are_read() {
+    let _dir = store::test_folder();
+    tokio::task::LocalSet::new().run_until(async {
+        let e = en(&Lines::default());
+        e.st_mut().status = Some(signer_api::SignerReply { ok: true, has_wallet: Some(true), evm_address: Some(MOM.into()), ..Default::default() });
+        // Read for no one yet (just switched), or still for the last wallet: nothing is seeded (and nothing is asked).
+        for read_for in [None, Some("0x70997970c51812dc3a010c7d01b50e0d17dc79c8")] {
+            e.st_mut().positions_for = read_for.map(str::to_string);
+            e.notice_hyperliquid().await;
+            assert!(e.st().notice_positions.is_none() && e.st().notice_entries.is_empty());
+        }
+    }).await;
 }

@@ -238,12 +238,8 @@ impl Engine {
         // a cross swap, Tempo or NEAR, 1Click; a Base or Arbitrum trade's two ways for its step's way picker, a Robinhood
         // Chain trade's to take the best; the route's note for «Why this way?» (route_edit.rs).
         if let Some(c) = self.quoted_move() {
-            let (me, board, command) = (self.rc(), id.clone(), c.clone());
-            tokio::task::spawn_local(async move { me.quote_card(&command, &board).await });
-            if crate::route_edit::quoted(&c) {
-                let me = self.rc();
-                tokio::task::spawn_local(async move { me.quote_ways(&c).await });
-            }
+            let (me, board) = (self.rc(), id.clone());
+            tokio::task::spawn_local(async move { me.quote_card(&c, &board).await });
         }
         self.note_route(&id, &pending);
     }

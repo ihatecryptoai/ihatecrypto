@@ -385,6 +385,8 @@ pub struct State {
     pub options_message: Option<String>,
     pub retry: Option<Retry>,
     pub quoted_at: Option<Date>,
+    /// Bumped each time the waiting move's quotes are asked anew (quotes.rs quote_card, the Mac's quoteRound).
+    pub quote_round: i64,
     pub also_attached: Vec<Board>,
     /// The model menu's lists (live-models.json, `set_live_models`): a subscription's and the local servers' models,
     /// whether those answer, sizes, downloads.
@@ -538,7 +540,7 @@ impl State {
             canvases, folder_store: store::load("folders.json").unwrap_or_default(), canvas_id,
             thinking: false, onboarding: false, draft: None, pending: None, card: None, site_ask: None, offered_for: None, recently_closed: vec![],
             jupiter_shown: None, options: vec![], model_running: false, stop_requested: false, cancel_model: None, agent_step: None,
-            options_message: None, retry: None, quoted_at: None, also_attached: vec![],
+            options_message: None, retry: None, quoted_at: None, quote_round: 0, also_attached: vec![],
             live_models: store::load("live-models.json").unwrap_or_default(),
             local_servers: HashMap::new(), local_setup: LocalSetup::default(), model_sizes: HashMap::new(), model_downloads: HashMap::new(),
             model_facts: HashMap::new(), model_facts_asked: distant_past(), running: None, running_board: None, attached: None,

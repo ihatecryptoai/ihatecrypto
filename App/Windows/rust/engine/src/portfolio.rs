@@ -221,6 +221,12 @@ impl Engine {
         }
     }
 
+    /// The week's closes are read with the read that first brings an account's positions (the new wallet's after a
+    /// switch) or sees them change, after the positions and their notices (the Mac's readFills, Workspace.swift:2119).
+    pub fn reads_closed(read_for: Option<&str>, account: &str, before: &[String], now: &[String]) -> bool {
+        read_for != Some(account) || before.iter().collect::<HashSet<_>>() != now.iter().collect::<HashSet<_>>()
+    }
+
     /// A read landed: the callers waiting for it, or for an earlier one, go on.
     pub fn land_reads(&self) {
         let landed: Vec<ReadWaiter> = {
@@ -358,17 +364,21 @@ impl Engine {
             let before: Vec<String> = self.st().positions.iter().map(|p| p.coin.clone()).collect();
             let (read, orders) = tokio::join!(HyperliquidAccount::positions(&me.evm), HyperliquidAccount::open_orders(&me.evm));
             if !same() { return }
-            {
+            let (read_for, now) = {
                 let mut st = self.st_mut();
+                let read_for = st.positions_for.clone();
                 if let Ok(read) = read {
                     st.positions = read.into_iter().filter(|p| !p.size.is_zero()).collect();
                     st.positions_for = Some(me.evm.to_lowercase());
                 }
                 if let Ok(orders) = orders { st.hl_orders = orders }
-            }
+                (read_for, st.positions.iter().map(|p| p.coin.clone()).collect::<Vec<_>>())
+            };
             // Another wallet since the last read: its positions aren't this one's, closed.
             if same_wallet { self.note_closed_positions(&before).await }
-            self.guard_positions().await;
+            if Self::reads_closed(read_for.as_deref(), &me.evm.to_lowercase(), &before, &now) { self.read_closed().await }
+            // The guardian runs after the read, in the 30 s loop (dispatch.rs), as the Mac's watch(): a stop waiting for
+            // Windows Hello never holds a refresh, the rail's spinner or a chain's «reads balances after this one».
         }
         self.refresh_rates().await;
         self.refresh_favorites().await;

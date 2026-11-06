@@ -96,9 +96,10 @@ fn an_evm_trades_step_offers_its_ways_and_takes_the_picked_one_once() {
         let edit = e.step_edit().unwrap();
         assert!(edit.ways && edit.amount.as_deref() == Some("5") && edit.quotes.is_none() && edit.way.is_none() && edit.board == id);
         let way = |w: &str| Way { way: w.into(), gets: "2.41 AERO".into(), worth: "$4.90".into(), less: None, usd: None };
-        // Quoted ways show once there are some; an empty answer (a failed quote) shows none.
+        // Quoted ways show once there are some; an empty answer (a failed quote) says no way quotes it now, as the Mac's
+        // empty swapQuote (Cards18Tests).
         e.set_way_quotes(Some(WayQuotes { command: buy.clone(), ways: vec![] }));
-        assert_eq!(e.step_edit().unwrap().quotes, None);
+        assert_eq!(e.step_edit().unwrap().quotes, Some(vec![]));
         e.set_way_quotes(Some(WayQuotes { command: buy.clone(), ways: vec![way("relay"), way("uniswap")] }));
         assert_eq!(e.step_edit().unwrap().quotes.map(|q| q.len()), Some(2));
         e.st_mut().route_way = Some(RouteWay { key: "base:aero".into(), way: "uniswap".into() });
@@ -141,5 +142,34 @@ fn why_this_way_answers_from_the_step_and_the_route_s_note() {
         for (board, index) in [(Some(id.as_str()), Some(1)), (Some(id.as_str()), Some(-1)), (Some("gone"), Some(0)), (None, Some(0)), (Some(id.as_str()), None)] {
             assert_eq!(e.why_step(board, index).unwrap_err().0, "That step isn't on the canvas any more.");
         }
+    });
+}
+
+#[test]
+fn a_way_picked_with_a_refused_amount_still_shows_on_the_waiting_card() {
+    // Cards18Tests (wave 17): the route shows the picked way at once, whatever the amount then does.
+    with_engine(async |e| {
+        let usdc = |k: &str, x: i64| crate::portfolio::Network {
+            key: k.into(), name: WalletCommand::place_name(k), usd: Decimal::ZERO, note: None, hidden: vec![], hidden_more: 0,
+            rows: vec![crate::portfolio::Row { usd: Some(Decimal::from(x)), ..crate::portfolio::Row::new("USDC", &x.to_string(), Decimal::from(x)) }],
+        };
+        e.st_mut().portfolio = crate::portfolio::PortfolioView { networks: vec![usdc("base", 1), usdc("solana", 20)], updated_at: Some(chrono::Utc::now()), ..Default::default() };
+        let buy = WalletCommand::BuyOn { place: "base".into(), token: "AERO".into(), usdc: Some(Decimal::from(5)), from: None };
+        let id = waiting(e, buy.clone());
+        let steps = e.steps(&Pending::Wallet(buy.clone()), "", &[]);
+        e.update_board(Some(&id), |b| b.steps = Some(steps));
+        let labels = |e: &Engine| -> Vec<String> {
+            e.st().boards().iter().find(|b| b.id == id).and_then(|b| b.steps.clone()).unwrap_or_default().into_iter().map(|s| s.label).collect()
+        };
+        assert!(!labels(e).iter().any(|l| l == "RELAY + UNISWAP"));
+        // Uniswap picked with 50 USDC, more than the wallet can bring: refused before a card (the ways on as cards), the
+        // old one keeps waiting — and its Confirm takes Uniswap, so its route says so, with the exact approve.
+        e.edit_step(Some(&id), Some("50"), Some("uniswap")).await.unwrap();
+        let last = e.st().messages().last().map(|m| m.text.clone()).unwrap_or_default();
+        assert!(last.contains("Pick a way below"), "{last}");
+        assert!(e.card_id().as_deref() == Some(id.as_str()) && e.quoted_move() == Some(buy));
+        let l = labels(e);
+        assert!(l.iter().any(|l| l == "RELAY + UNISWAP") && l.iter().any(|l| l == "APPROVE · EXACT"), "{l:?}");
+        assert_eq!(e.st().route_way.as_ref().map(|r| r.way.as_str()), Some("uniswap"));
     });
 }
