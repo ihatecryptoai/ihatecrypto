@@ -1,0 +1,16 @@
+[package]
+name = "llm"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Model access for the engine: the Rust port of App/Sources/LLM (Core, APIKey, Anthropic, OpenRouter, ChatGPT, ClaudeCode, Catalog)"
+
+[dependencies]
+net.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+base64.workspace = true
+getrandom.workspace = true
