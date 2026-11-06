@@ -1,0 +1,23 @@
+[package]
+name = "wallet"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Keys, addresses and signatures: the Rust port of App/Sources/Wallet/Core"
+
+[dependencies]
+k256.workspace = true
+ed25519-dalek.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+hmac.workspace = true
+pbkdf2.workspace = true
+unicode-normalization.workspace = true
+unicode-segmentation.workspace = true
+unicode-properties.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+getrandom.workspace = true
