@@ -2,7 +2,7 @@
 # Swift module under App/Sources and passes the same test vectors before anything uses it.
 [workspace]
 resolver = "3"
-members = ["wallet"]
+members = ["wallet", "hyperliquid"]
 
 [workspace.package]
 edition = "2024"
@@ -24,6 +24,8 @@ serde_json = "1"
 base64 = "0.22"
 zeroize = "1.8"
 getrandom = "0.3"
+rust_decimal = "1.39"
+wallet = { path = "wallet" }
 
 [profile.release]
 panic = "abort"

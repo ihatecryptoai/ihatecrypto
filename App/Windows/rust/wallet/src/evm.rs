@@ -5,7 +5,7 @@ use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 
-use crate::{Result, fail, from_hex, to_hex};
+use crate::{Result, fail, to_hex};
 
 /// Keccak-256 as Ethereum uses it (original Keccak padding, not SHA3-256's).
 pub fn keccak(data: &[u8]) -> [u8; 32] { Keccak256::digest(data).into() }
@@ -155,6 +155,7 @@ pub mod personal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::from_hex;
 
     #[test]
     fn keccak_matches_ethereum_vectors() {

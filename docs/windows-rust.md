@@ -21,7 +21,7 @@ from the leaves (pure parsing and math) to the chat.
 | Step | Crate | Swift it replaces | State |
 | --- | --- | --- | --- |
 | 1 | `wallet` | `Wallet/Core`: BIP-39, BIP-32, SLIP-10, addresses, base58, Keccak, EIP-55, EIP-712, ECDSA, typed data, NEAR borsh, address checks | done, 26 tests |
-| 2 | `hyperliquid` | `Protocols/Hyperliquid`: msgpack, actions, L1 and user-signed actions | |
+| 2 | `hyperliquid` | `Protocols/Hyperliquid`: msgpack, actions, L1 and user-signed actions | done, 10 tests (the SDK's vectors) |
 | 3 | `solana` | `Chains/Solana`: message parsing, SPL, transactions | |
 | 4 | `evm` | the parts of `Chains/EVM` the signer reads: RLP, EIP-1559/7702 transactions, calldata | |
 | 5 | `signer-api` | `Signer/API`: requests and replies, byte for byte the Swift JSON | |
