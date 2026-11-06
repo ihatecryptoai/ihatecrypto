@@ -18,3 +18,9 @@ unicode-segmentation.workspace = true
 getrandom.workspace = true
 # Swift's Regex has lookahead; the regex crate doesn't.
 fancy-regex = "0.20"
+# Round 3: the bridges' dry quotes (Relay, 1Click), NEAR's base64, and requests sent side by side as Swift's `async let`.
+protocols = { path = "../protocols" }
+base64.workspace = true
+tokio.workspace = true
+# Round 2: ModelEdit's request to whichever model the user connected.
+llm = { path = "../llm" }

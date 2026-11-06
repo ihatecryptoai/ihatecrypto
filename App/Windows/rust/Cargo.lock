@@ -1567,14 +1567,18 @@ dependencies = [
 name = "ihatecrypto-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "fancy-regex",
  "getrandom 0.3.4",
  "hyperliquid",
+ "llm",
  "net",
+ "protocols",
  "rust_decimal",
  "serde",
  "serde_json",
+ "tokio",
  "unicode-segmentation",
  "wallet",
 ]

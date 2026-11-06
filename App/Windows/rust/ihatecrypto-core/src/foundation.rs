@@ -18,10 +18,15 @@ use unicode_segmentation::UnicodeSegmentation;
 pub(crate) type Caps<'t> = fancy_regex::Captures<'t, str>;
 
 /// Swift's `\b` is Unicode's default word boundary (UAX #29), not the edge of `\w`: «base.org», «xyz:gold», «don't»
-/// and «2,800» are one word each there. A letter–mark–letter or digit–mark–digit run stays one word here too.
-// ponytail: those two joins only; UAX #29's other rules (Katakana, emoji, a format character inside a word, a boundary
-// between two marks) are the `\w` edge's. Add them when a phrase needs one.
-const BOUNDARY: &str = r"(?:\b(?!(?<=\p{L})[.:'’·](?=\p{L}))(?!(?<=\d)[.,;'’](?=\d))(?!(?<=\p{L}[.:'’·])\p{L})(?!(?<=\d[.,;'’])\d))";
+/// and «2,800» are one word each there. A letter–mark–letter or digit–mark–digit run stays one word here too. And it
+/// breaks between two characters that aren't a word's and at the text's ends («1.5 × the», «$ 5»), except inside a run
+/// of spaces (WB3d): Swift's `/×\b/` finds «× the».
+// ponytail: those joins only; UAX #29's other rules (Katakana, emoji, a format character inside a word, CR LF, a
+// boundary between two marks) are the `\w` edge's. Add them when a phrase needs one.
+const BOUNDARY: &str = concat!(
+    r"(?:\b(?!(?<=\p{L})[.:'’·](?=\p{L}))(?!(?<=\d)[.,;'’](?=\d))(?!(?<=\p{L}[.:'’·])\p{L})(?!(?<=\d[.,;'’])\d)",
+    r"|(?<!\w)(?!\w)(?!(?<=[\p{Zs}--[\x{A0}\x{2007}\x{202F}]])[\p{Zs}--[\x{A0}\x{2007}\x{202F}]]))",
+);
 
 type Cache = Mutex<HashMap<(&'static str, u8), &'static Regex>>;
 static CACHE: LazyLock<Cache> = LazyLock::new(Default::default);
@@ -313,4 +318,111 @@ impl<'de> Deserialize<'de> for Uuid {
         let s = String::deserialize(d)?;
         Self::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("not a UUID: {s}")))
     }
+}
+
+// MARK: Round 3: arithmetic that can't panic, `String(format:)`'s %g, compact dollars, ISO 8601
+
+/// Swift's Decimal doesn't trap where rust_decimal panics: a result past rust_decimal's range, or divided by zero (NaN in
+/// Swift), is None here and stays None through what follows. Money math on outside numbers (a chat, an API, a node)
+/// goes through this: `Num::of(entry) * (1 - dir * s)`, then `.0?`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Num(pub Option<Decimal>);
+
+impl Num {
+    pub fn of(d: Decimal) -> Self { Self(Some(d)) }
+    pub fn rounded(self, scale: u32, mode: Rounding) -> Self { Self(self.0.map(|d| rounded(d, scale, mode))) }
+    pub fn abs(self) -> Self { Self(self.0.map(|d| d.abs())) }
+}
+
+impl From<Decimal> for Num {
+    fn from(d: Decimal) -> Self { Self(Some(d)) }
+}
+
+macro_rules! num_op {
+    ($op:ident, $f:ident, $checked:ident) => {
+        impl std::ops::$op for Num {
+            type Output = Num;
+            fn $f(self, r: Num) -> Num { Num(self.0.zip(r.0).and_then(|(a, b)| a.$checked(b))) }
+        }
+        impl std::ops::$op<Decimal> for Num {
+            type Output = Num;
+            fn $f(self, r: Decimal) -> Num { std::ops::$op::$f(self, Num::of(r)) }
+        }
+        impl std::ops::$op<Num> for Decimal {
+            type Output = Num;
+            fn $f(self, r: Num) -> Num { std::ops::$op::$f(Num::of(self), r) }
+        }
+        impl std::ops::$op<i64> for Num {
+            type Output = Num;
+            fn $f(self, r: i64) -> Num { std::ops::$op::$f(self, Num::of(Decimal::from(r))) }
+        }
+        impl std::ops::$op<Num> for i64 {
+            type Output = Num;
+            fn $f(self, r: Num) -> Num { std::ops::$op::$f(Num::of(Decimal::from(self)), r) }
+        }
+    };
+}
+num_op!(Add, add, checked_add);
+num_op!(Sub, sub, checked_sub);
+num_op!(Mul, mul, checked_mul);
+num_op!(Div, div, checked_div);
+
+/// `NSDecimalNumber(decimal:).doubleValue`.
+pub fn double(d: Decimal) -> f64 { text(d).parse().unwrap_or(0.0) }
+
+/// `String(format: "%.<precision>g", x)`: `precision` significant digits, the shorter of fixed and exponent forms
+/// (C's rule: the exponent form below 1e-4 or from 10^precision), trailing zeros dropped, «e-05» with two digits at
+/// least.
+pub fn format_g(x: f64, precision: usize) -> String {
+    if x.is_nan() { return "nan".into() }
+    if x.is_infinite() { return if x < 0.0 { "-inf".into() } else { "inf".into() } }
+    let p = precision.max(1);
+    let scientific = format!("{:.*e}", p - 1, x);
+    let (mantissa, exp) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |s: &str| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s.to_string() };
+    if exp < -4 || exp >= p as i32 {
+        format!("{}e{}{:02}", trim(mantissa), if exp < 0 { '-' } else { '+' }, exp.abs())
+    } else {
+        trim(&format!("{:.*}", (p as i32 - 1 - exp).max(0) as usize, x))
+    }
+}
+
+/// `.currency(code: "USD").notation(.compactName).precision(.significantDigits(3))` in en_US: «$19.6K», «$400K»,
+/// «$0.500», «-$5.00», rounded half to even before the unit is picked (999,999 is «$1.00M»).
+pub fn compact_usd(d: Decimal) -> String {
+    let r = d.abs().round_sf_with_strategy(3, RoundingStrategy::MidpointNearestEven).unwrap_or(d.abs());
+    let units = [(dec("1000000000000"), "T"), (dec("1000000000"), "B"), (dec("1000000"), "M"), (dec("1000"), "K")];
+    let (v, unit) = units.iter().find(|(u, _)| r >= *u).map_or((r, ""), |(u, name)| (r / u, *name));
+    // Places for three significant digits: the exponent of the leading digit.
+    let exponent = if v.is_zero() { 0 } else {
+        let t = text(v);
+        let whole = t.split('.').next().unwrap_or("0");
+        if whole != "0" { whole.len() as i32 - 1 } else { -(t.split('.').nth(1).unwrap_or("").chars().take_while(|&c| c == '0').count() as i32 + 1) }
+    };
+    let places = (2 - exponent).max(0) as u32;
+    let fixed = rounded(v, places, Rounding::Bankers);
+    let mut s = format!("{:.*}", places as usize, fixed);
+    // Compact notation groups thousands only from five digits («1500T», «10,000T»).
+    let whole_len = s.split('.').next().map_or(0, str::len);
+    if whole_len >= 5 {
+        let (whole, rest) = s.split_at(whole_len);
+        let mut grouped = String::new();
+        for (i, c) in whole.chars().enumerate() {
+            if i > 0 && (whole_len - i) % 3 == 0 { grouped.push(',') }
+            grouped.push(c);
+        }
+        s = grouped + rest;
+    }
+    format!("{}${s}{unit}", if d.is_sign_negative() && !r.is_zero() { "-" } else { "" })
+}
+
+/// `ISO8601DateFormatter().date(from:)`: «2026-09-06T04:36:17Z» or with «+03:00» / «+0300»; no fractions, no
+/// lowercase «t» or «z».
+pub fn iso8601(s: &str) -> Option<Date> {
+    use chrono::NaiveDateTime;
+    if let Some(utc) = s.strip_suffix('Z') {
+        return NaiveDateTime::parse_from_str(utc, "%Y-%m-%dT%H:%M:%S").ok().map(|n| n.and_utc());
+    }
+    ["%Y-%m-%dT%H:%M:%S%:z", "%Y-%m-%dT%H:%M:%S%z"].iter().find_map(|f| DateTime::parse_from_str(s, f).ok()).map(|d| d.with_timezone(&Utc))
 }

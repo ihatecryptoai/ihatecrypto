@@ -19,6 +19,23 @@ mod stock_names;
 mod take_style;
 mod tokens;
 mod top_up;
+// Round 2.
+mod intent;
+mod model_edit;
+mod position_command;
+// Round 3.
+mod charts;
+mod modules;
+mod network;
+mod plan;
+mod risk;
+mod token_research;
+// Round 5 (the other session).
+mod holdings;
+mod pnl;
+mod trade_history;
+mod trade_journal;
+mod trade_study;
 
 use std::collections::HashSet;
 
