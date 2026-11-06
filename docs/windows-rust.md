@@ -21,6 +21,12 @@ cd App/Windows/rust && cargo test
 - The EVM client read a node's refusal with a JSON body of its own (`{"error": "forbidden"}`, HTTP 403) as an empty
   result. The Rust client takes it as a refusal and asks the next node.
 
+## For the engine
+
+- `rust_decimal`'s operators panic on overflow where Swift's Decimal doesn't, and the release profile aborts on a panic:
+  sums and products of numbers from someone's API (Kamino, Jupiter, a node) must not be able to take the engine down —
+  checked arithmetic on outside numbers, or the engine's tasks isolated so one bad answer fails one read.
+
 ## Order
 
 The signer first: it is small, it holds the keys, and everything it does is checkable offline. The engine after it,
@@ -40,8 +46,9 @@ from the leaves (pure parsing and math) to the chat.
 | 10 | `protocols` | `Protocols/Relay`, `OneClick`, `Jupiter` + `JupiterRecurring`: quotes, the payment-by-signature and v3.2 steps, 1Click tokens, quotes and statuses, Jupiter quotes, orders, execute, recurring orders | done, 16 tests (GaslessTests' Relay steps, OneClickTests, Jupiter's impact) + 1 live read-only |
 | 10 | `llm` | `LLM/Core`, `APIKey`, `Anthropic`, `OpenRouter`, `ChatGPT`, `ClaudeCode`, `Catalog` (not Apple): requests, streaming, usage and context, OAuth and refresh, the fallback beta; logins handed in and out, never stored here, the Swift `credentials.bin` JSON read as is | done, 33 tests (LLMTests, stand-in servers, a fake `claude`) |
 | 11 | `execution` | `Execution` without `Trade`: the envelope a person approves (limits, not a snapshot), the write-before-send journal (synced to disk before a send, 0600, unresolved sends, what went through, money in transit) | done, 7 tests (EnvelopeTests, JournalTests); reads the Swift envelope's JSON |
+| 11 | `defi` | `DeFi`: Jupiter Lend Earn, Kamino (vaults, loans, obligations, klend's fixed point), yields, allocation and rebalance | done, 29 tests (AllocationTests, RebalanceTests, KaminoVaultTests, KaminoBorrowTests' Kamino parts, trimmed real answers) + 1 live read-only |
 | 12 | `ihatecrypto-core` | `IhatecryptoCore`, round 1 of 5: ChatLanguage, Folders, SiteCheck, Skills, TopUp, Guardian, AddressBookCommand, TakeStyle, FundingPlan, AgentCommands, ScheduledTask, MovedLine, Stablecoins, Tokens, StockNames, Hedge, Alerts, and `foundation` (Swift's regexes, word bounds, Decimal printing, dates and UUIDs in Swift's JSON) | round 1 done, 64 tests; next: Intent, PositionCommand, ModelEdit; then Plan, Risk, Network, Modules, TokenResearch; then Normalize; then Holdings, PnL, trade history |
-| 12+ | engine crates | `DeFi` (in progress), `Execution/Trade` (after core's round 3), `Desktop/Engine`, leaves first | |
+| 12+ | engine crates | `Execution/Trade` (after core's round 3), `Desktop/Engine`, leaves first | |
 
 Shared modules are ported from `main`, not from this branch's older copy: steps 1–2 and on match main at `bc90340`
 (trailing stops and TWAPs, Morpho's Authorization refused, address twins). The Mac app stays Swift; to catch up,
