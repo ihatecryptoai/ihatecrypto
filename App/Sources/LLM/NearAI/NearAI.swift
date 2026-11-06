@@ -27,6 +27,10 @@ public struct NearAI: LLMProvider {
         lock.withLock { checks[model] }.flatMap { Date().timeIntervalSince($0.at) < 600 ? $0 : nil }
     }
 
+    /// The last check that passed for `model`, however old: the chat says it's private until a check fails (which
+    /// clears it) or another model is picked. Each message still waits for a check under ten minutes old.
+    public static func lastVerified(_ model: String) -> NearAttestation.Verified? { lock.withLock { checks[model] } }
+
     /// The enclaves behind `model` checked now, or within the last ten minutes.
     public static func ensureVerified(_ model: String) async throws -> NearAttestation.Verified {
         if let v = verified(model) { return v }

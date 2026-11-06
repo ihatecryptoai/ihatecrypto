@@ -1,35 +1,65 @@
 import LLMNearAI
 import SwiftUI
 
-/// Beside the model menu while the chat runs on NEAR AI Cloud: the enclave check that let the last message go
-/// (NearAI.ensureVerified, before every message, at most ten minutes old). A click shows what was checked.
-struct TEEChip: View {
-    @Environment(Workspace.self) private var ws
+extension Brand {
+    /// The private model's green (T4): the sealed hardware the chat runs in.
+    static let tee = Color(hex: 0x7FD6A0)
+    static let teeInk = Color(light: 0x1C7A48, dark: 0x7FD6A0)
+}
+
+extension Workspace {
+    /// The last enclave check that passed while the chat runs on NEAR AI Cloud (NearAI.ensureVerified, before every
+    /// message, at most ten minutes old when it goes); nil on any other model, before a check passed or after one failed.
+    var teeVerified: NearAttestation.Verified? {
+        // NearAI's check isn't observed: the meter, which every answer updates, brings the redraw that reads it.
+        _ = meter
+        return providerID == NearAI().info.id ? NearAI.lastVerified(model) : nil
+    }
+}
+
+/// T4 «Private assistant» (owner's pick, 2026-11-06): the coin's lock in the chat's header while the model runs in an
+/// attested enclave. Green, the color of the sealed hardware.
+struct TEELockBadge: View {
+    var size: CGFloat = 17
+
+    var body: some View {
+        Image(systemName: "lock.fill").font(.system(size: size * 0.5, weight: .bold)).foregroundStyle(Color(hex: 0x1D1B19))
+            .frame(width: size, height: size)
+            .background(Circle().fill(Brand.tee))
+            .overlay(Circle().strokeBorder(Brand.card, lineWidth: 1.5))
+            .accessibilityHidden(true)
+    }
+}
+
+/// «Proof» in the private assistant's header: what was checked before the last message went, and whether the reply's own
+/// bytes were signed by the attested model key.
+struct TEEProofButton: View {
+    let verified: NearAttestation.Verified
+    /// The chat's model as the app names it: the reply's signature is kept under this name, not the attestation's.
+    let model: String
     @State private var open = false
 
     var body: some View {
-        // NearAI's check isn't observed: the meter, which every answer updates, brings the redraw that reads it.
-        let _ = ws.meter
-        if ws.providerID == NearAI().info.id, let v = NearAI.verified(ws.model) {
-            // A check mark only when the last reply's own bytes were signed by the attested model key.
-            let signed = NearAI.lastReply(ws.model) == .model
-            Button { open.toggle() } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: signed ? "checkmark.shield.fill" : "shield").font(.system(size: 11, weight: .semibold))
-                    Text("TEE")
-                }
-                .font(.ui(12, .semibold)).lineLimit(1)
-                .padding(.leading, 8).padding(.trailing, 10).frame(height: 30)
-                .background(Capsule().fill(open ? Brand.accent.opacity(0.14) : Brand.glassFill))
-                .overlay(Capsule().strokeBorder(Brand.glassRim))
-                .contentShape(Capsule())
+        // A warning only for a reply that came back unproven: none yet (the first answer is on its way) is no warning.
+        let proof = NearAI.lastReply(model), signed = proof == nil || proof == .model
+        Button { open.toggle() } label: {
+            HStack(spacing: 4) {
+                if !signed { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9, weight: .bold)) }
+                Text("Proof")
             }
-            .buttonStyle(.plain)
-            .fixedSize()
-            .accessibilityLabel("Enclave attested")
-            .help("NEAR AI's hardware enclaves for this model were attested before your message went. Click for what was checked.")
-            .popover(isPresented: $open, arrowEdge: .top) { details(v) }
+            .font(.ui(12, .semibold)).foregroundStyle(signed ? Brand.teeInk : Color.orange)
+            .padding(.horizontal, 11).frame(height: 28)
+            .background(Capsule().fill(open ? Brand.tee.opacity(0.18) : Color.clear))
+            .overlay(Capsule().strokeBorder(Brand.tee.opacity(0.55)))
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .fixedSize()
+        .accessibilityLabel("Proof that the model runs in a sealed enclave")
+        .help(signed ? "NEAR AI's hardware enclaves for this model were attested before your message went, and the reply came signed by the model's own key. Click for what was checked."
+                     : "The enclaves were attested, but the last reply wasn't signed by the model's own key. Click for what was checked.")
+        .popover(isPresented: $open, arrowEdge: .bottom) { details(verified) }
     }
 
     private func details(_ v: NearAttestation.Verified) -> some View {
@@ -42,7 +72,7 @@ struct TEEChip: View {
                 row("NVIDIA GPU", "NVIDIA's attestation service passed the GPUs")
                 row("Fresh", "Answers a random number from this Mac, checked \(v.at.formatted(date: .omitted, time: .shortened))")
                 row("Enclave key", String(v.gatewayKey.prefix(8)) + "…" + String(v.gatewayKey.suffix(8)))
-                switch NearAI.lastReply(v.model) {
+                switch NearAI.lastReply(model) {
                 case .model?: row("Reply", "Its exact bytes signed by this model's enclave key")
                 case .gateway?: row("Reply", "Signed by NEAR AI's attested gateway, not by the model's own key", ok: false)
                 case .unverified(let why)?: row("Reply", "Not verified: \(why)", ok: false)
@@ -50,7 +80,7 @@ struct TEEChip: View {
                 }
             }
             Divider()
-            Text("NEAR AI runs this model inside hardware enclaves. ihatecrypto checks their evidence itself before every message, at most ten minutes old; when a check fails, nothing is sent and this chip goes away. Each reply's signature is checked against the enclave's key.")
+            Text("NEAR AI runs this model inside hardware enclaves. ihatecrypto checks their evidence itself before every message, at most ten minutes old. When a check fails, nothing is sent and the header turns back to the plain assistant. Each reply's signature is checked against the enclave's key.")
                 .font(.ui(11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)

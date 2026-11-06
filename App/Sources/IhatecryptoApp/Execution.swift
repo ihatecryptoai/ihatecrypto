@@ -233,6 +233,7 @@ extension Workspace {
             Task { @MainActor in
                 self?.reply(text, note: "execution")
                 self?.runningAction?.lines.append(text)
+                self?.journeyRead(text)
             }
         } swapped: { [weak self] from, to, spent, received in
             // Bought with USDC: its cost; sold for USDC: that share of the cost goes. Other swaps (SOL ⇄ JitoSOL) have no dollar side.
@@ -484,6 +485,7 @@ extension Workspace {
                 runningAction = nil
             }
             finishedAction = (confirmedRoute?.title ?? readable(Self.canvasTitle(command)), CanvasOutcome(at: Date(), ok: ok, unknown: unknown ? true : nil), steps)
+            journey = journey?.ended(ok: ok, unknown: unknown)
             retryCommand = ok || unknown ? nil : (canvasID, command)
             // The outcome board comes from the saved canvas: save now, not after the balance refresh that follows,
             // or the canvas stays blank for those seconds.
@@ -497,11 +499,17 @@ extension Workspace {
             withAnimation(StudioView.spring) {
                 runningAction = (confirmedRoute?.title ?? readable(Self.canvasTitle(command)), confirmedRoute?.steps ?? [], [], Date())
             }
+            // N5: a move through NEAR Intents shows its way in the chat's field while it runs (carryOut runs it after
+            // Confirm without `confirmed`, which only a spread's two steps use). A chain's next step that isn't one
+            // leaves the last journey as it ended, until the next message.
+            if let j = IntentsJourney(self, command) { journey = j }
         }
         if ownsExecuting { executing = true }
         // The board first: `executing` going false starts a chain's next step (continueTask), which lays its own board.
         defer {
             if ownsBoard { runningAction = nil }
+            // A path that left without finish(): no journey is left running in the field.
+            if ownsBoard, journey?.endedAt == nil { journey = nil }
             if ownsExecuting { executing = false }
         }
         let started = Date()

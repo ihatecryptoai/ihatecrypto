@@ -60,6 +60,8 @@ def check(expect, state, replies):
             why.append("no enclave check on the chat (TEE chip)" if want else "a TEE chip where none belongs")
         elif key == "tee_reply" and state.get("teeReply") != want:
             why.append(f"the last reply's signature proved {state.get('teeReply')!r}, expected {want!r}")
+        elif key == "privacy" and (state.get("privacy") or {}).get("private") != (want == "private"):
+            why.append(f"the send offers {text(state.get('privacy')) or 'no Regular | Private choice'}, expected it {want}")
         elif key == "drawn_route" and (pending or {}).get("drawnRoute") != want:
             why.append("the card has no drawn route (fallback card)")
         elif key == "steps":

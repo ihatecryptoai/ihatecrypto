@@ -1121,7 +1121,7 @@
     }
   },
   {
-    "name": "chat on NEAR AI Cloud → the enclave checked before the message, the reply signed by the attested model key, the TEE chip on, a send drawn for Confirm",
+    "name": "chat on NEAR AI Cloud → the enclave checked before the message, the reply signed by the attested model key, the private assistant header on, a send drawn for Confirm",
     "provider": "nearai",
     "send": [
       "переведи 1 USDC на Automation в base"
@@ -1133,23 +1133,34 @@
     }
   },
   {
-    "name": "send USDC privately → a NEAR Intents Confidential Intents card to the saved address, quoted, waiting for Confirm",
+    "name": "send USDC privately → a NEAR Intents Confidential Intents card to the saved address, quoted, Private picked over Confirm",
     "send": [
-      "переведи приватно 2 USDC на Automation в base"
+      "переведи приватно 1 USDC на Automation в base"
     ],
     "expect": {
       "pending_kind": "wallet",
       "drawn_route": true,
       "wait_quote": true,
       "steps": [
-        
         "CONFIDENTIAL INTENTS"
       ],
       "title_contains": "privately",
-      "footer_contains": "can't be matched"
+      "footer_contains": "can't be matched",
+      "privacy": "private"
     },
     "only_if": {
       "wallet": "test"
+    }
+  },
+  {
+    "name": "send USDC on Base → a plain transfer card with Regular | Private over Confirm, Regular picked",
+    "send": [
+      "переведи 1 USDC на Automation в base"
+    ],
+    "expect": {
+      "pending_kind": "transfer",
+      "privacy": "regular",
+      "reply_contains": "Private"
     }
   },
   {

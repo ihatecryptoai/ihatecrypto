@@ -3239,6 +3239,8 @@ struct WithdrawBoard: View {
                 .task(id: QuoteRun(command: command, round: ws.quoteRound)) { await ws.quoteSwap(command) }
         case .transfer(let entry, let amount)?:
             board(ws.transferRoute(entry, amount), nil)
+                // P3: what the same send would cost privately, for the switch over Confirm.
+                .task(id: "\(entry.id) \(amount)") { await ws.quotePrivateTwin() }
         default:
             EmptyView()
         }

@@ -368,9 +368,14 @@ final class DebugAPI {
             "model": ws.model,
             "provider": ws.provider.info.name,
             // On NEAR AI Cloud: the enclave check that let the last message go, as the chat's TEE chip shows it.
-            "tee": ws.providerID == NearAI().info.id && NearAI.verified(ws.model) != nil,
+            "tee": ws.teeVerified != nil,
             // What the last NEAR AI reply proved: "model" (its bytes signed by the attested model key), "gateway", or why not.
             "teeReply": ws.providerID == NearAI().info.id ? NearAI.lastReply(ws.model).map { "\($0)" } ?? NSNull() : NSNull(),
+            // P3: the send waiting for Confirm offered both ways, and which one it is now.
+            "privacy": ws.privacyChoice.map { c in ["private": c.isPrivate, "rows": c.rows.map { "\($0.label): \($0.value) · \($0.note)" }] as [String: Any] } ?? NSNull(),
+            // N5: a NEAR Intents move after Confirm, as the chat's field shows it.
+            "journey": ws.journey.map { j in ["stage": "\(j.stage)", "from": j.from, "to": j.to, "private": j.privately, "stuck": j.stuck,
+                                              "deposit": j.deposit ?? NSNull(), "ended": j.endedAt != nil] as [String: Any] } ?? NSNull(),
             "boards": boards(ws, canvas),
             "outcome": canvas?.outcome.map { $0.ok ? "executed" : "failed" } ?? NSNull(),
             "pending": ws.pendingText ?? NSNull(),

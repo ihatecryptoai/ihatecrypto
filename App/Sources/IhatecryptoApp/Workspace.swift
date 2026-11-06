@@ -430,6 +430,10 @@ final class Workspace {
     /// A send through NEAR Intents waiting for Confirm, as its quote reads: the receipt over Cancel and Confirm
     /// (Studio's receiptRow) — what it pays and from where, what 1Click and the network keep, how long it takes.
     var acrossReceipt: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?)?
+    /// P3: the private twin of the regular send waiting for Confirm, quoted dry: what NEAR Intents keeps, how long it takes.
+    var privateTwin: (command: WalletCommand, fee: Decimal?, seconds: Int?)?
+    /// N5: a move through NEAR Intents after Confirm, as 1Click reports it (IntentsJourney), until the next message.
+    var journey: IntentsJourney?
     /// The swap whose card shows a price (Workspace.quoteSwap): the one Confirm waits on a fresh quote for.
     var pricedCommand: WalletCommand?
     /// A Solana swap's output as its card showed it, in the token's units: the swap won't go for 1% less (Executor.convert).
@@ -1082,6 +1086,7 @@ final class Workspace {
         defer { heldAnswer = nil }
         // Cleared only when set: a tuple and NextSteps aren't Equatable, so even nil over nil redraws what reads them.
         if finishedAction != nil { finishedAction = nil }
+        if journey?.endedAt != nil { journey = nil }
         // The cards of the last answer go with any new message; the model still knows them («да», «второй»).
         let offered = liveSteps?.options ?? []
         if nextSteps != nil { nextSteps = nil }

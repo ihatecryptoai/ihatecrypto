@@ -2413,14 +2413,19 @@ struct FloatingChat: View {
     @State private var follow = true
 
     var body: some View {
+        // T4: on an attested NEAR AI model the header says the chat is private, with the proof a click away.
+        let tee = ws.teeVerified
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 BrandLogo(size: 30, mood: mood, animated: true)
+                    .overlay(alignment: .bottomTrailing) { if tee != nil { TEELockBadge().offset(x: 5, y: 5) } }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Assistant").font(.ui(14, .semibold))
-                    Text(status).font(.ui(10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(tee == nil ? "Assistant" : "Private assistant").font(.ui(14, .semibold))
+                    Text(tee == nil ? status : "Runs in sealed hardware. The host can't read this chat.")
+                        .font(.ui(10)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 6)
+                if let tee { TEEProofButton(verified: tee, model: ws.model) }
                 Button { withAnimation(StudioView.spring) { ws.newCanvas() } } label: { headerIcon("square.and.pencil") }
                     .buttonStyle(.hoverIcon).help("New canvas").disabled(ws.busy)
                 Button(action: toggleWide) { headerIcon(wide ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") }
@@ -2433,6 +2438,13 @@ struct FloatingChat: View {
                 .onChanged { drag = $0.translation }
                 .onEnded { endDrag($0.translation) })
                 .simultaneousGesture(TapGesture(count: 2).onEnded { dock() }))
+            .background {
+                if tee != nil {
+                    UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous).fill(Brand.tee.opacity(0.08))
+                        .overlay(alignment: .bottom) { Rectangle().fill(Brand.tee.opacity(0.25)).frame(height: 1) }
+                }
+            }
+            .padding(.bottom, tee == nil ? 0 : 6)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -2524,6 +2536,7 @@ struct FloatingChat: View {
         .environment(\.colorScheme, scheme)
         // Liquid Glass, floating over the canvas like the rail.
         .measuredGlass(.regular.tint(Brand.glassTint), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay { if tee != nil { RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Brand.tee.opacity(0.45)).allowsHitTesting(false) } }
     }
 
     private func headerIcon(_ name: String) -> some View {
@@ -2907,7 +2920,6 @@ private struct ChatComposer: View {
             } else {
                 HStack(spacing: 6) {
                     ChatModelMenu()
-                    TEEChip()
                     NetworksChip()
                     Spacer(minLength: 0)
                     // What the chat fills of the model's window, or what a key paid for its answers; after the first answer.
@@ -2981,36 +2993,42 @@ private struct ChatComposer: View {
 
     private var field: some View {
         let waiting = waiting
+        // N5: after Confirm, a move through NEAR Intents shows its way where the receipt was.
+        let journey = waiting == nil ? ws.journey : nil
+        // The head's color: orange for a move waiting, violet for a private one (P3), NEAR's green for its journey (N5).
+        let tint: Color? = waiting != nil ? (ws.pendingIsPrivate ? Brand.privacy : Brand.accent) : journey != nil ? Brand.near : nil
         return VStack(spacing: 0) {
-            if let waiting { waitingBar(waiting) }
+            if let waiting { waitingBar(waiting, tint: tint ?? Brand.accent) }
+            else if let journey { JourneyBar(journey: journey) }
             // A signature waiting for the passcode takes the field's place (Passcode.swift).
-            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil) }
+            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil, corner: waiting != nil ? tint?.opacity(0.10) : tint?.opacity(0.06)) }
         }
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         // A glass pill on the glass chat, its rim orange while a move waits for Confirm.
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(waiting == nil ? Brand.glassRim : Brand.accent, lineWidth: waiting == nil ? 1 : 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(tint ?? Brand.glassRim, lineWidth: tint == nil ? 1 : 1.5))
     }
 
     /// Variant E: while a move waits, the field carries it — what it is, Cancel and Confirm in one place, the orange bar
     /// above the field gone. The steps stay on the canvas; the field below still asks about it or changes it.
-    private func waitingBar(_ title: String) -> some View {
+    private func waitingBar(_ title: String, tint: Color) -> some View {
         // Once a second while a priced swap's Confirm counts down its 15 s after the quote, then Refresh asks again
         // (quoteState). Otherwise nothing here changes with the time, and each tick redraws the window.
         Group {
             // The receipt is read once per change, not on every tick of the countdown.
             let receipt = ws.executing ? nil : Receipt(ws)
+            let choice = ws.executing ? nil : ws.privacyChoice
             if case .fresh = ws.quoteState(at: Date()) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date), receipt: receipt) }
+                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date), receipt: receipt, choice: choice) }
             } else {
-                waitingRow(title, state: ws.quoteState(at: Date()), receipt: receipt)
+                waitingRow(title, state: ws.quoteState(at: Date()), receipt: receipt, choice: choice)
             }
         }
         .padding(.vertical, 10).padding(.leading, 14).padding(.trailing, 9)
-        .background(Brand.accent.opacity(0.10))
+        .background(tint.opacity(0.10))
     }
 
-    private func waitingRow(_ title: String, state: Workspace.QuoteState, receipt: Receipt?) -> some View {
+    private func waitingRow(_ title: String, state: Workspace.QuoteState, receipt: Receipt?, choice: PrivacyChoice?) -> some View {
         let sign = ws.pendingText == nil
         // A swap: what it gets and at what rate, as quoted now; else where its steps are.
         let line: String = {
@@ -3057,7 +3075,7 @@ private struct ChatComposer: View {
         .disabled(ws.busy || ws.executing)
         return Group {
             if !ws.executing, let receipt {
-                receiptRow(receipt, state: state, buttons: buttons)
+                receiptRow(receipt, state: state, choice: choice, buttons: buttons)
             } else {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
@@ -3069,7 +3087,7 @@ private struct ChatComposer: View {
 
     /// Variant A «Receipt» (owner, 2026-11-05), for every move: what it is, how much goes where, then what you pay and
     /// from where, what the blockchain keeps and what arrives — and what runs after it.
-    private func receiptRow(_ r: Receipt, state: Workspace.QuoteState, buttons: some View) -> some View {
+    private func receiptRow(_ r: Receipt, state: Workspace.QuoteState, choice: PrivacyChoice?, buttons: some View) -> some View {
         func cell(_ c: (label: String, value: String, note: String)) -> some View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(c.label).font(.ui(9.5, .semibold)).kerning(0.6).foregroundStyle(.secondary).lineLimit(1)
@@ -3084,7 +3102,10 @@ private struct ChatComposer: View {
         }
         // As short as it reads: the chat above keeps the room for the reply and its cards.
         return VStack(alignment: .leading, spacing: 8) {
-            Label(r.header, systemImage: r.icon).font(.ui(10.5, .semibold)).kerning(0.6).foregroundStyle(Brand.accentInk).lineLimit(1)
+            // P3: the switch says which way it goes, so no header over it.
+            if choice == nil {
+                Label(r.header, systemImage: r.icon).font(.ui(10.5, .semibold)).kerning(0.6).foregroundStyle(Brand.accentInk).lineLimit(1)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let to = r.to {
                     Text(r.amount).font(.ui(21, .bold)).monospacedDigit()
@@ -3098,17 +3119,22 @@ private struct ChatComposer: View {
                         .padding(.horizontal, 8).padding(.vertical, 2).overlay(Capsule().strokeBorder(Brand.cardBorder))
                 }
             }
-            if let line = r.line {
-                Text(line).font(.ui(11)).foregroundStyle(.secondary).monospacedDigit().lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-            if !r.cells.isEmpty {
-                HStack(alignment: .top, spacing: 6) { ForEach(r.cells.indices, id: \.self) { cell(r.cells[$0]) } }
+            if let choice {
+                PrivacyChoiceRows(choice: choice)
+            } else {
+                if let line = r.line {
+                    Text(line).font(.ui(11)).foregroundStyle(.secondary).monospacedDigit().lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                if !r.cells.isEmpty {
+                    HStack(alignment: .top, spacing: 6) { ForEach(r.cells.indices, id: \.self) { cell(r.cells[$0]) } }
+                }
             }
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(r.then, id: \.self) { step in
                         Label(step, systemImage: "arrow.turn.down.right").font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1)
                     }
+                    if choice != nil, r.then.isEmpty, state == .none { Text("Either way it waits for Confirm").font(.ui(11)).foregroundStyle(.secondary).lineLimit(1) }
                     QuoteClock(state: state)
                 }
                 Spacer(minLength: 6)
@@ -3117,7 +3143,8 @@ private struct ChatComposer: View {
         }
     }
 
-    private func entry(waiting: Bool) -> some View {
+    /// `corner`: the head's fill above the field, which its top corners take.
+    private func entry(waiting: Bool, corner: Color?) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             Button { templatesOpen.toggle() } label: {
                 Image(systemName: "square.grid.2x2").font(.system(size: 14, weight: .semibold))
@@ -3184,7 +3211,7 @@ private struct ChatComposer: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         // Under a waiting move, the corners past its rounded top take the move's tint: the frame's own colour showed
         // there as a third one, left and right of the field.
-        .background { if waiting { TopCorners(radius: 22).fill(Brand.accent.opacity(0.10)) } }
+        .background { if let corner { TopCorners(radius: 22).fill(corner) } }
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Brand.glassRim))
     }
 

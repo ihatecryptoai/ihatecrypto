@@ -1217,7 +1217,11 @@ extension Workspace {
         reply(say("The transfer is on the canvas: \(Fmt.num(amount)) USDC to “\(entry.name)” on \(entry.network.title), \(ends.start) … \(ends.end). Sign it",
                   "Перевод на холсте: \(Fmt.num(amount)) USDC на «\(entry.name)» в \(entry.network.title), \(ends.start) … \(ends.end). Подпиши",
                   "La transferencia está en el lienzo: \(Fmt.num(amount)) USDC a «\(entry.name)» en \(entry.network.title), \(ends.start) … \(ends.end). Fírmala")
-              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar.")), note: note)
+              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar."))
+              // P3: the private way is one click over Confirm.
+              + (privacyTwin() == nil ? "" : say(" It can also go privately through NEAR Intents, so nobody can link it to you: pick Private over Confirm.",
+                                                 " Можно отправить и приватно, через NEAR Intents, чтобы никто не связал перевод с тобой: выбери Private над Confirm.",
+                                                 " También puede ir en privado por NEAR Intents, sin que nadie lo vincule contigo: elige Private sobre Confirm.")), note: note)
     }
 
     /// A send no balance can cover is said at once, not a card whose Confirm could only fail («send 100 USDC to Automation
