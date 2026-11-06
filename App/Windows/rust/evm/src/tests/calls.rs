@@ -268,6 +268,9 @@ fn reward_sweep_sells_what_is_worth_it() {
     let owed = [r("MORPHO", "7"), r("WELL", "0.4"), r("USDC", "3"), r("WETH", "2")];
     assert_eq!(merkl::to_sell(&owed, None).iter().map(|x| x.symbol.as_str()).collect::<Vec<_>>(), ["MORPHO", "WETH"]);
     assert_eq!(merkl::to_sell(&owed, Some("weth")).iter().map(|x| x.symbol.as_str()).collect::<Vec<_>>(), ["MORPHO"]);
+    // A price and an amount from Merkl whose product is past Decimal: unpriced, not a panic, and not sold.
+    let huge = merkl::Reward { decimals: 0, price: Some(Decimal::MAX), ..reward("0x01", "1000", &[]) };
+    assert_eq!((huge.worth_usd(), merkl::to_sell(&[huge], None).len()), (None, 0));
 }
 
 #[test]

@@ -1,0 +1,26 @@
+[package]
+name = "trade"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Runs an approved plan: the Rust port of App/Sources/Execution/Trade (the executor, its bridges, swaps, sends, loans and reads)"
+
+[dependencies]
+execution.workspace = true
+evm.workspace = true
+guard.workspace = true
+hyperliquid.workspace = true
+net.workspace = true
+solana.workspace = true
+wallet.workspace = true
+# Not in the workspace's list: the path, as ihatecrypto-core names protocols.
+ihatecrypto-core = { path = "../ihatecrypto-core" }
+protocols = { path = "../protocols" }
+defi = { path = "../defi" }
+llm = { path = "../llm" }
+tokio.workspace = true
+reqwest = { workspace = true, features = ["query"] }
+serde_json.workspace = true
+rust_decimal.workspace = true
+chrono.workspace = true
+base64.workspace = true

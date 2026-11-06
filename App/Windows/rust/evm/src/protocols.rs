@@ -172,8 +172,9 @@ pub mod merkl {
 
     impl Reward {
         /// What claiming pays now, in tokens.
-        pub fn claimable(&self) -> Decimal { (0..self.decimals).fold(self.amount - self.claimed, |x, _| x / Decimal::TEN) }
-        pub fn worth_usd(&self) -> Option<Decimal> { self.price.map(|p| self.claimable() * p) }
+        pub fn claimable(&self) -> Decimal { (0..self.decimals).fold(self.amount.saturating_sub(self.claimed), |x, _| x / Decimal::TEN) }
+        /// None without a price, or past Decimal's range (Merkl's numbers are outside data: no panic on them).
+        pub fn worth_usd(&self) -> Option<Decimal> { self.price.and_then(|p| self.claimable().checked_mul(p)) }
     }
 
     /// A sweep's floor: what the person said, never under $5 — below it the claim and the sale cost most of it in gas.
