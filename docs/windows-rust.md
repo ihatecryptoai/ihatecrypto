@@ -39,7 +39,8 @@ from the leaves (pure parsing and math) to the chat.
 | 9 | `net` | `RPCRetry`, `SolanaRPC`, `EVMRPC`, the node lists, ENS, SNS: one HTTP client (the system's TLS), retries, the walk to the next node | done, 8 tests against a stand-in node + a live read-only check |
 | 10 | `protocols` | `Protocols/Relay`, `OneClick`, `Jupiter` + `JupiterRecurring`: quotes, the payment-by-signature and v3.2 steps, 1Click tokens, quotes and statuses, Jupiter quotes, orders, execute, recurring orders | done, 16 tests (GaslessTests' Relay steps, OneClickTests, Jupiter's impact) + 1 live read-only |
 | 10 | `llm` | `LLM/Core`, `APIKey`, `Anthropic`, `OpenRouter`, `ChatGPT`, `ClaudeCode`, `Catalog` (not Apple): requests, streaming, usage and context, OAuth and refresh, the fallback beta; logins handed in and out, never stored here, the Swift `credentials.bin` JSON read as is | done, 33 tests (LLMTests, stand-in servers, a fake `claude`) |
-| 11+ | engine crates | `IhatecryptoCore` (in progress), `DeFi`, `Execution`, `Desktop/Engine`, leaves first | |
+| 11 | `execution` | `Execution` without `Trade`: the envelope a person approves (limits, not a snapshot), the write-before-send journal (synced to disk before a send, 0600, unresolved sends, what went through, money in transit) | done, 7 tests (EnvelopeTests, JournalTests); reads the Swift envelope's JSON |
+| 11+ | engine crates | `IhatecryptoCore` (in progress), `DeFi` (in progress), `Execution/Trade`, `Desktop/Engine`, leaves first | |
 
 Shared modules are ported from `main`, not from this branch's older copy: steps 1–2 and on match main at `bc90340`
 (trailing stops and TWAPs, Morpho's Authorization refused, address twins). The Mac app stays Swift; to catch up,
