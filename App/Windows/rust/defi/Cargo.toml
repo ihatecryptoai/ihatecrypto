@@ -1,0 +1,15 @@
+[package]
+name = "defi"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "Jupiter Lend, Kamino and where money earns (Yields, Allocation, Rebalance): the Rust port of App/Sources/DeFi"
+
+[dependencies]
+wallet.workspace = true
+net.workspace = true
+serde_json.workspace = true
+rust_decimal.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+tokio.workspace = true

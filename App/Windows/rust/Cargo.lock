@@ -737,6 +737,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "defi"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "net",
+ "reqwest",
+ "rust_decimal",
+ "serde_json",
+ "tokio",
+ "wallet",
+]
+
+[[package]]
 name = "defmt"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
