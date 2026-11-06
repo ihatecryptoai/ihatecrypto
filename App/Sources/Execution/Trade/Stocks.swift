@@ -366,7 +366,10 @@ extension Executor {
             try await Task.sleep(for: .seconds(1))
             after = try await rpc.tokenBalance(usdg, owner: me)
         }
-        traded?("robinhood:\(token.address.lowercased())", -wanted / scale, Decimal(after > before ? after - before : 0) / 1_000_000)
-        return "Sold \(Fmt.num(wanted / scale, maxFraction: 6)) \(symbol) for \(Fmt.num(Decimal(after - before) / 1_000_000)) USDG. Say “move USDG from Robinhood to Solana” to bring it back. \(EVMNetwork.robinhood.explorer)/tx/\(hash)"
+        // A balance read lower after the sale (a node behind, USDG leaving at the same time) gives 0, never a UInt64 trap
+        // after the sale went through.
+        let received = Decimal(after > before ? after - before : 0) / 1_000_000
+        traded?("robinhood:\(token.address.lowercased())", -wanted / scale, received)
+        return "Sold \(Fmt.num(wanted / scale, maxFraction: 6)) \(symbol) for \(Fmt.num(received)) USDG. Say “move USDG from Robinhood to Solana” to bring it back. \(EVMNetwork.robinhood.explorer)/tx/\(hash)"
     }
 }
