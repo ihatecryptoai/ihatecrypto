@@ -16,15 +16,22 @@ use wallet::evm::EvmSignature;
 /// Why a signature didn't come back. `Guard`: the guard, the signer or a scam check stopped it — something in the move is
 /// not what it should be, and nothing is offered around it (the Mac's GuardStop). `Failed`: anything else (no route, no
 /// money, the network), which the chat may offer a way around.
+/// `Device`: the hardware wallet's own answer (declined on its buttons, locked, the wrong app open), with its status word.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TradeError {
     Guard(String),
     Failed(String),
+    Device { status: Option<u16>, message: String },
+}
+
+impl TradeError {
+    /// The person turned it down on the device: nothing to retry or route around.
+    pub fn declined(&self) -> bool { matches!(self, TradeError::Device { status: Some(0x6985 | 0x5501), .. }) }
 }
 
 impl std::fmt::Display for TradeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { TradeError::Guard(m) | TradeError::Failed(m) => f.write_str(m) }
+        match self { TradeError::Guard(m) | TradeError::Failed(m) | TradeError::Device { message: m, .. } => f.write_str(m) }
     }
 }
 

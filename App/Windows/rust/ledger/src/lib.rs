@@ -4,6 +4,7 @@
 //! large as the link allows (both through winsec on Windows), and the Speculos emulator takes them over TCP.
 
 pub mod descriptors;
+pub mod signer;
 pub mod tcp;
 #[cfg(windows)]
 pub mod windows;
