@@ -938,6 +938,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde_json",
+ "signer-api",
+ "tokio",
+ "wallet",
+ "winsec",
+ "zeroize",
+]
+
+[[package]]
 name = "enum-ordinalize"
 version = "4.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

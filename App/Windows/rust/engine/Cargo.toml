@@ -1,0 +1,18 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "ihatecrypto's engine for Windows: the Rust port of App/Sources/Desktop/Engine, built up from its leaves (the platform calls, the link to the signer)"
+
+[dependencies]
+signer-api.workspace = true
+wallet.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
+getrandom.workspace = true
+
+# Windows Hello, the session's state and the signer's hardened start: winsec as a Rust library.
+[target.'cfg(windows)'.dependencies]
+winsec = { path = "../../native" }
