@@ -1,0 +1,12 @@
+[package]
+name = "evm"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "EVM transactions and calldata read and built offline: the Rust port of App/Sources/Chains/EVM (no network here)"
+
+[dependencies]
+wallet.workspace = true
+rust_decimal.workspace = true
+ruint.workspace = true
+serde_json.workspace = true

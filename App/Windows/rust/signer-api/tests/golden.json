@@ -1,0 +1,572 @@
+{
+  "_decodes" : {
+    "address_no_memo" : false,
+    "reply_no_checks" : false,
+    "signSolana_no_extraPrograms" : false,
+    "signSolana_sponsor_null" : true,
+    "status_null" : false,
+    "status_string" : false,
+    "two_keys" : false
+  },
+  "addressBook" : {
+    "addressBook" : {
+
+    }
+  },
+  "asWallet" : {
+    "asWallet" : {
+      "id" : "9",
+      "request" : {
+        "asWallet" : {
+          "id" : "8",
+          "request" : {
+            "signPersonal" : {
+              "message" : "AQID+\/8="
+            }
+          }
+        }
+      }
+    }
+  },
+  "clearCode" : {
+    "clearCode" : {
+
+    }
+  },
+  "createAutomationWallet" : {
+    "createAutomationWallet" : {
+
+    }
+  },
+  "createWallet" : {
+    "createWallet" : {
+      "requirePresence" : false
+    }
+  },
+  "enableAgent" : {
+    "enableAgent" : {
+
+    }
+  },
+  "endSession" : {
+    "endSession" : {
+
+    }
+  },
+  "enterCode" : {
+    "enterCode" : {
+      "code" : "130579",
+      "sign" : true
+    }
+  },
+  "forget" : {
+    "forget" : {
+
+    }
+  },
+  "importMnemonic" : {
+    "importMnemonic" : {
+      "passphrase" : "",
+      "phrase" : "abandon about",
+      "requirePresence" : true
+    }
+  },
+  "importPrivateKey" : {
+    "importPrivateKey" : {
+      "key" : "0xabc"
+    }
+  },
+  "ledgerAgent" : {
+    "ledgerAgent" : {
+      "create" : true,
+      "owner" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "lock" : {
+    "lock" : {
+
+    }
+  },
+  "nearAddress" : {
+    "nearAddress" : {
+
+    }
+  },
+  "relayOrder" : {
+    "relayOrder" : {
+      "order" : "eyJhIjoxfQ=="
+    }
+  },
+  "removeAddress" : {
+    "removeAddress" : {
+      "name" : "Mom",
+      "network" : "solana"
+    }
+  },
+  "removeWallet" : {
+    "removeWallet" : {
+      "id" : "3"
+    }
+  },
+  "renameWallet" : {
+    "renameWallet" : {
+      "id" : "1",
+      "label" : "Main"
+    }
+  },
+  "replyFull" : {
+    "action" : {
+      "keys" : [
+        "type",
+        "n",
+        "x",
+        "b",
+        "l"
+      ],
+      "kind" : "map",
+      "values" : [
+        {
+          "kind" : "string",
+          "string" : "order"
+        },
+        {
+          "kind" : "uint",
+          "uint" : 18446744073709551615
+        },
+        {
+          "kind" : "null"
+        },
+        {
+          "bool" : true,
+          "kind" : "bool"
+        },
+        {
+          "array" : [
+            {
+              "kind" : "uint",
+              "uint" : 1
+            }
+          ],
+          "kind" : "array"
+        }
+      ]
+    },
+    "activeWallet" : "1",
+    "addresses" : [
+      {
+        "address" : "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+        "memo" : "",
+        "name" : "Mom",
+        "network" : "solana"
+      }
+    ],
+    "agentActive" : false,
+    "agentAddress" : "0x00000000000000000000000000000000000000aa",
+    "checks" : [
+      "c"
+    ],
+    "codeOff" : false,
+    "codeSet" : true,
+    "error" : "e",
+    "evmAddress" : "0x00000000000000000000000000000000000000aa",
+    "hasWallet" : true,
+    "nearAddress" : "n",
+    "needsCode" : false,
+    "nonce" : 5,
+    "ok" : true,
+    "phrase" : "p",
+    "problems" : [
+      "x"
+    ],
+    "sessionLength" : 60,
+    "signature" : {
+      "r" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "s" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "v" : 28
+    },
+    "signatureBytes" : "AQID+\/8=",
+    "signatures" : [
+      {
+        "r" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        "s" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        "v" : 27
+      }
+    ],
+    "signedRaw" : "AQID+\/8=",
+    "signedWire" : "AQID+\/8=",
+    "solanaAddress" : "S",
+    "wallets" : [
+      {
+        "automation" : true,
+        "evm" : "0x00000000000000000000000000000000000000aa",
+        "id" : "1",
+        "kind" : "phrase",
+        "label" : "Main",
+        "solana" : "S"
+      }
+    ]
+  },
+  "replyMinimal" : {
+    "checks" : [
+
+    ],
+    "ok" : false,
+    "problems" : [
+
+    ]
+  },
+  "saveAddresses" : {
+    "saveAddresses" : {
+      "_0" : [
+        {
+          "address" : "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
+          "memo" : "",
+          "name" : "Mom",
+          "network" : "solana"
+        },
+        {
+          "address" : "rX",
+          "memo" : "123",
+          "name" : "Ex",
+          "network" : "xrp"
+        }
+      ]
+    }
+  },
+  "setActiveWallet" : {
+    "setActiveWallet" : {
+      "id" : "2"
+    }
+  },
+  "setAgentActive" : {
+    "setAgentActive" : {
+      "_0" : true
+    }
+  },
+  "setCode" : {
+    "setCode" : {
+      "code" : "130579"
+    }
+  },
+  "setLedgerAgentActive" : {
+    "setLedgerAgentActive" : {
+      "active" : false,
+      "owner" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "setSessionLength" : {
+    "setSessionLength" : {
+      "seconds" : 300
+    }
+  },
+  "signEVMBatch" : {
+    "signEVMBatch" : {
+      "calls" : [
+        {
+          "data" : "AQID+\/8=",
+          "to" : "0x00000000000000000000000000000000000000aa"
+        }
+      ],
+      "chainId" : 1,
+      "gasLimit" : 3,
+      "maxFee" : 2,
+      "maxPriorityFee" : 1,
+      "nonce" : 0,
+      "recipients" : [
+
+      ]
+    }
+  },
+  "signEVMTransaction" : {
+    "signEVMTransaction" : {
+      "chainId" : 8453,
+      "data" : "AQID+\/8=",
+      "gasLimit" : 21000,
+      "maxFee" : 2,
+      "maxPriorityFee" : 1,
+      "nonce" : 7,
+      "recipients" : [
+        "0x00000000000000000000000000000000000000aa"
+      ],
+      "to" : "0x00000000000000000000000000000000000000aa",
+      "value" : 18446744073709551615
+    }
+  },
+  "signHyperliquidL1" : {
+    "signHyperliquidL1" : {
+      "action" : {
+        "keys" : [
+          "type",
+          "n",
+          "x",
+          "b",
+          "l"
+        ],
+        "kind" : "map",
+        "values" : [
+          {
+            "kind" : "string",
+            "string" : "order"
+          },
+          {
+            "kind" : "uint",
+            "uint" : 18446744073709551615
+          },
+          {
+            "kind" : "null"
+          },
+          {
+            "bool" : true,
+            "kind" : "bool"
+          },
+          {
+            "array" : [
+              {
+                "kind" : "uint",
+                "uint" : 1
+              }
+            ],
+            "kind" : "array"
+          }
+        ]
+      },
+      "mainnet" : true,
+      "nonce" : 1700000000000
+    }
+  },
+  "signHyperliquidUser" : {
+    "signHyperliquidUser" : {
+      "action" : {
+        "keys" : [
+          "type",
+          "n",
+          "x",
+          "b",
+          "l"
+        ],
+        "kind" : "map",
+        "values" : [
+          {
+            "kind" : "string",
+            "string" : "order"
+          },
+          {
+            "kind" : "uint",
+            "uint" : 18446744073709551615
+          },
+          {
+            "kind" : "null"
+          },
+          {
+            "bool" : true,
+            "kind" : "bool"
+          },
+          {
+            "array" : [
+              {
+                "kind" : "uint",
+                "uint" : 1
+              }
+            ],
+            "kind" : "array"
+          }
+        ]
+      },
+      "mainnet" : false,
+      "recipients" : [
+        "0x00000000000000000000000000000000000000aa"
+      ]
+    }
+  },
+  "signLedgerAgentL1" : {
+    "signLedgerAgentL1" : {
+      "action" : {
+        "keys" : [
+          "type",
+          "n",
+          "x",
+          "b",
+          "l"
+        ],
+        "kind" : "map",
+        "values" : [
+          {
+            "kind" : "string",
+            "string" : "order"
+          },
+          {
+            "kind" : "uint",
+            "uint" : 18446744073709551615
+          },
+          {
+            "kind" : "null"
+          },
+          {
+            "bool" : true,
+            "kind" : "bool"
+          },
+          {
+            "array" : [
+              {
+                "kind" : "uint",
+                "uint" : 1
+              }
+            ],
+            "kind" : "array"
+          }
+        ]
+      },
+      "nonce" : 3,
+      "owner" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "signNearDeleteAccount" : {
+    "signNearDeleteAccount" : {
+      "beneficiary" : "bob.near",
+      "blockHash" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "nonce" : 4,
+      "recipients" : [
+        "bob.near"
+      ]
+    }
+  },
+  "signNearIntentDeposit" : {
+    "signNearIntentDeposit" : {
+      "amount" : "1000000000000000000000000",
+      "blockHash" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "depositAddress" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "nonce" : 2
+    }
+  },
+  "signNearTransfer" : {
+    "signNearTransfer" : {
+      "amount" : "1",
+      "blockHash" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "nonce" : 3,
+      "receiver" : "bob.near",
+      "recipients" : [
+        "bob.near"
+      ]
+    }
+  },
+  "signPersonal" : {
+    "signPersonal" : {
+      "message" : "AQID+\/8="
+    }
+  },
+  "signReceiveAuthorization" : {
+    "signReceiveAuthorization" : {
+      "chainId" : 10,
+      "nonce" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "to" : "0x00000000000000000000000000000000000000aa",
+      "token" : "0x00000000000000000000000000000000000000aa",
+      "validBefore" : 1800000000,
+      "value" : 1000000
+    }
+  },
+  "signRelayMulticallPermit" : {
+    "signRelayMulticallPermit" : {
+      "calls" : [
+        {
+          "allowFailure" : false,
+          "data" : "AQID+\/8=",
+          "target" : "0x00000000000000000000000000000000000000aa",
+          "value" : 0
+        }
+      ],
+      "chainId" : 8453,
+      "metadata" : "AQID+\/8=",
+      "nftRecipient" : "0x00000000000000000000000000000000000000aa",
+      "refundTo" : "0x00000000000000000000000000000000000000aa",
+      "relayer" : "0x00000000000000000000000000000000000000aa",
+      "token" : "0x00000000000000000000000000000000000000aa",
+      "validBefore" : 6,
+      "value" : 5
+    }
+  },
+  "signRelayNonceMapping" : {
+    "signRelayNonceMapping" : {
+      "depositor" : "0x00000000000000000000000000000000000000aa",
+      "id" : "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+      "nonce" : 4,
+      "wallet" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "signSafeMove" : {
+    "signSafeMove" : {
+      "chainId" : 42161,
+      "data" : "",
+      "nonce" : 9,
+      "recipients" : [
+        "0x00000000000000000000000000000000000000aa"
+      ],
+      "safe" : "0x00000000000000000000000000000000000000aa",
+      "to" : "0x00000000000000000000000000000000000000aa",
+      "value" : 5
+    }
+  },
+  "signSolana" : {
+    "signSolana" : {
+      "accounts" : [
+        "A",
+        "B"
+      ],
+      "extraPrograms" : [
+
+      ],
+      "recipients" : [
+        "R"
+      ],
+      "tokenOwners" : {
+        "T" : "O"
+      },
+      "wire" : "AQID+\/8="
+    }
+  },
+  "signSolanaMessage" : {
+    "signSolanaMessage" : {
+      "message" : "AQID+\/8="
+    }
+  },
+  "signSolanaSponsored" : {
+    "signSolana" : {
+      "accounts" : [
+
+      ],
+      "extraPrograms" : [
+        "P"
+      ],
+      "recipients" : [
+
+      ],
+      "sponsor" : "S",
+      "tokenOwners" : {
+
+      },
+      "wire" : "AQID+\/8="
+    }
+  },
+  "signSponsoredTransfer" : {
+    "signSponsoredTransfer" : {
+      "amount" : "1.5",
+      "chainId" : 56,
+      "gasLimit" : 60000,
+      "nonce" : 1,
+      "recipients" : [
+        "0x00000000000000000000000000000000000000aa"
+      ],
+      "to" : "0x00000000000000000000000000000000000000aa",
+      "token" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "signTypedData" : {
+    "signTypedData" : {
+      "json" : "e30="
+    }
+  },
+  "status" : {
+    "status" : {
+
+    }
+  }
+}
