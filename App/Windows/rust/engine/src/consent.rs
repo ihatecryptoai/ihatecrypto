@@ -263,12 +263,14 @@ impl Engine {
         self.set_options(vec![]);
         if self.answer_new_modules(&o.command) { return }
         if self.answer_trading_key(&o.command).await { return }
-        if o.command == SEND_ANYWAY {
-            self.send_anyway().await;
+        if let Some(id) = o.command.strip_prefix(SEND_ANYWAY).map(str::trim) {
+            self.send_anyway(id).await;
             return;
         }
-        if o.command == LEAVE_COSTLY {
-            self.st_mut().costly = None;
+        if let Some(id) = o.command.strip_prefix(LEAVE_COSTLY).map(str::trim) {
+            let mut st = self.st_mut();
+            if st.costly.as_ref().is_some_and(|c| c.id == id) { st.costly = None }
+            drop(st);
             self.reply(&self.say("Left as it was: nothing was signed.", "Оставил как есть: ничего не подписано."), None);
             return;
         }

@@ -32,6 +32,9 @@ tokio::task_local! {
     /// The automation wallet a scheduled task runs on, for the moves inside that run only (Swift's `TaskRun.automation`;
     /// the executor picks it up). Outside a run: none.
     pub static TASK_RUN: Option<SignerWallet>;
+    /// The task that run is of, for the prices Confirmed in it (ScheduledTask.prices): set only on the automation wallet
+    /// (Swift's `TaskRun.task`).
+    pub static RUN_TASK: Option<Uuid>;
 }
 
 /// The automation wallet of the run under way, if any.
@@ -284,7 +287,7 @@ impl Engine {
         let started = Utc::now();
         self.reply(&self.say(&format!("From the automation wallet «{}», no Windows Hello.", automation.label),
                              &format!("С кошелька автоматизации «{}», без Windows Hello.", automation.label)), Some("schedule".into()));
-        if !TASK_RUN.scope(Some(automation.clone()), self.run_automation_steps(task)).await { return false }
+        if !TASK_RUN.scope(Some(automation.clone()), RUN_TASK.scope(Some(task.id), self.run_automation_steps(task))).await { return false }
         // Short of SOL, it fails the same way every run: said with what its tasks need for 4 weeks, and that as a card.
         let failed = self.st().boards().iter().any(|b| b.kind == "move" && b.state.as_deref() == Some("failed") && b.at >= started);
         if failed && let Some(a) = &automation.solana && let Ok(read) = Solana::balance(a, false).await && read.sol < SOL_FLOOR {
@@ -315,7 +318,8 @@ impl Engine {
     }
 
     /// A task's steps as chain steps: a Solana token Jupiter-verified first, Modules asked, a send to a saved name as the
-    /// transfer to that entry, a contract call or a step that moves nothing run by its words. None when one can't go (said).
+    /// transfer to that entry, a contract call or a step that moves nothing run by its words, a paid request priced when
+    /// it's reached (pays_by_itself). None when one can't go (said).
     pub async fn automation_steps(&self, task: &ScheduledTask) -> Option<Vec<ChainStep>> {
         let note = Some("schedule".to_string());
         let mut parsed = vec![];

@@ -313,6 +313,25 @@ fn a_task_list_changed_outside_loads_paused() {
     assert!(tampered && tasks.iter().all(|t| t.paused == Some(true)));
 }
 
+/// The prices Confirmed in a task are kept under the seal and dropped with a broken one: the Schedule doesn't show them,
+/// so one written in could pass unseen.
+#[test]
+fn a_tasks_confirmed_prices_keep_under_the_seal_and_go_when_it_breaks() {
+    let _dir = store::test_folder();
+    let (list, key) = ("tasks-t3.json", "seal-t3.key");
+    let pay = ihatecrypto_core::position_command::WalletCommand::Pay { method: "GET".into(), url: "https://api.example.com/answer".into(), body: None };
+    let mut t = task(&["pay GET https://api.example.com/answer"]);
+    t.approve(60_000, &pay);
+    task_seal::save(std::slice::from_ref(&t), list, key);
+    let (tasks, tampered) = task_seal::load(list, key);
+    assert!(!tampered && tasks[0].approves(60_000, &pay) && !tasks[0].approves(60_001, &pay));
+    // Another program raises the price kept: the list loads paused, with no prices.
+    t.approve(u64::MAX, &pay);
+    std::fs::write(store::url(list), serde_json::to_vec(&[t]).unwrap()).unwrap();
+    let (tasks, tampered) = task_seal::load(list, key);
+    assert!(tampered && tasks[0].paused == Some(true) && tasks[0].prices.is_none() && !tasks[0].approves(1, &pay));
+}
+
 #[test]
 fn each_wallets_tasks_have_their_own_list_and_seal() {
     let _dir = store::test_folder();

@@ -115,7 +115,7 @@ fn board(e: &Engine, id: &str) -> Board { e.st().boards().iter().find(|b| b.id =
 fn payment(e: &Engine) -> WalletCommand {
     let pay = WalletCommand::Pay { method: "GET".into(), url: "https://svc.example/price".into(), body: None };
     let challenge = MppChallenge { params: HashMap::from([("realm".into(), "svc.example".into())]), amount: 10_000, payee: PHONE.into(), memo: None, expires: None };
-    e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: String::new(), service: "Example".into(), probed: false });
+    e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: String::new(), service: "Example".into(), probed: false, task: None });
     pay
 }
 

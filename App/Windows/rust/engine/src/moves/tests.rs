@@ -14,7 +14,7 @@ use trade::executor::{Order, Position};
 
 use super::Engine;
 use crate::chains::AfterCall;
-use crate::engine::{Card, Pending};
+use crate::engine::{Card, Costly, Pending};
 use crate::multisig::Multisig;
 use crate::outbox::Outbox;
 use crate::signer_link::SignerLink;
@@ -291,5 +291,19 @@ async fn the_history_lists_the_journal_newest_first_with_its_explorer() {
         assert_eq!(h.iter().map(|l| l.link.as_deref()).collect::<Vec<_>>(),
                    [None, Some("https://nearblocks.io/txns/Hnear"), Some("https://basescan.org/tx/0xabc"), Some("https://solscan.io/tx/5sig")]);
         assert!(h.iter().all(|l| l.kind == "signed"));
+    }).await;
+}
+
+/// «Send anyway» sends only the move its button was offered for: a button left from another move (another canvas, an
+/// earlier refusal) says so, signs nothing and leaves the move that waits now waiting.
+#[tokio::test]
+async fn send_anyway_sends_only_the_move_its_button_was_for() {
+    run(async |e| {
+        let waiting = Pending::Wallet(WalletCommand::ClaimRewards);
+        e.st_mut().costly = Some(Costly { id: "b".into(), pending: waiting, title: "claim".into(), lost: 3.into() });
+        e.send_anyway("a").await;
+        let st = e.st();
+        assert!(st.costly.as_ref().is_some_and(|c| c.id == "b") && st.pending.is_none() && st.card.is_none());
+        assert!(st.messages().last().is_some_and(|m| m.text == "That move isn't waiting any more: nothing was signed. Ask for it again."));
     }).await;
 }

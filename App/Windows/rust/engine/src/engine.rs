@@ -257,6 +257,8 @@ pub struct ClaimOwed {
 /// A move the loss cap stopped (CostlyMove): offered again with that loss accepted («Send anyway»), never by itself.
 #[derive(Debug, Clone)]
 pub struct Costly {
+    /// The option's own id, in its command (`__send anyway <id>`): a button kept on another canvas never sends this move.
+    pub id: String,
     pub pending: Pending,
     pub title: String,
     pub lost: Decimal,

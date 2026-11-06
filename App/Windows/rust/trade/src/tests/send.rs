@@ -36,3 +36,15 @@ async fn an_empty_account_opens_with_the_networks_rent_minimum() {
     assert_eq!(Executor::usdc(1_234_567), "1.234567");
     assert_eq!(Executor::usdc(0), "0");
 }
+
+/// A 402's amount is the service's to write: one the fee can't ride on in 64 bits (`units + fee_reserve`, Tempo's cent)
+/// is refused before any call, not a crash after Confirm (ExecutorTests.payTempoRefusesAnAmountTheFeeCantRideOn).
+#[tokio::test]
+async fn pay_tempo_refuses_an_amount_the_fee_cant_ride_on() {
+    let journal = TempJournal::new("paytempo");
+    let e = executor("", None, &journal);
+    for units in [u64::MAX, u64::MAX - crate::EvmNetwork::tempo().fee_reserve() + 1] {
+        let said = e.pay_tempo(units, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", None, "x").await.map_or_else(|e| e.to_string(), |_| "paid".into());
+        assert_eq!(said, "The service asks more USDC than exists. Nothing was paid.");
+    }
+}

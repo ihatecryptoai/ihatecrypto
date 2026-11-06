@@ -107,6 +107,24 @@ fn a_confirm_carries_out_only_what_the_macs_run_steps_would() {
     let pay_out = WalletCommand::MultisigSend { token: "USDC".into(), amount: Some(Decimal::TEN), to: MOM.into(), network: Some("base".into()) };
     assert!(!Engine::carried_on_chain(Some(&Pending::Wallet(pay_out))));
     assert!(!Engine::carried_on_chain(Some(&Pending::Chain(vec![]))));
+    // A paid request's card shows a price no one has seen yet: it waits for its own Confirm (the Mac's paysUnseen).
+    let pay = WalletCommand::Pay { method: "GET".into(), url: "https://api.example.com/answer".into(), body: None };
+    assert!(!Engine::carried_on_chain(Some(&Pending::Wallet(pay))));
+}
+
+/// A paid request after a chain's first step isn't on its card's one Confirm: the card names it by its words, nothing is
+/// asked or paid now, and once reached it shows its price on its own card (the Mac's paysUnseen).
+#[tokio::test]
+async fn a_later_paid_request_waits_for_its_own_card() {
+    local(async {
+        let e = engine();
+        e.st_mut().book = vec![mom()];
+        let steps = ["send 5 USDC to Mom".to_string(), "pay GET https://api.example.com/answer".into()];
+        assert!(e.chain(&steps, None, None, false).await);
+        let pending = e.st().pending.clone();
+        assert!(matches!(&pending, Some(Pending::Chain(s)) if *s == [ChainStep::Transfer(mom(), Decimal::from(5)), ChainStep::Said(steps[1].clone())]), "{pending:?}");
+        assert!(e.st().payment.is_none() && !e.st().chain_state.stopped);
+    }).await;
 }
 
 /// R8-2: a card a chain stops at holds the steps after it (its Confirm names them, and they run once it's through) — any
@@ -165,7 +183,7 @@ async fn a_chains_paid_first_step_names_its_price() {
         let pay = WalletCommand::Pay { method: "GET".into(), url: "https://api.example.com/answer".into(), body: None };
         assert_eq!(e.chain_line(&ChainStep::Wallet(pay.clone())), pay.summary());
         let challenge = MppChallenge { params: HashMap::new(), amount: 10_000, payee: PHONE.into(), memo: None, expires: None };
-        e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: "the answer".into(), service: "Example".into(), probed: false });
+        e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: "the answer".into(), service: "Example".into(), probed: false, task: None });
         assert_eq!(e.chain_line(&ChainStep::Wallet(pay)), "pay 0.01 USDC to Example");
         assert_eq!(e.chain_line(&ChainStep::Transfer(mom(), Decimal::from(5))), "send 5 USDC to Mom");
         assert_eq!(e.chain_line(&ChainStep::Said("chart SOL".into())), "chart SOL");

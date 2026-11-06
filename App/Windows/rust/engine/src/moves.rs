@@ -74,7 +74,8 @@ pub struct HistoryLine {
 
 /// The EVM networks a move's place can be.
 pub const EVM_PLACES: [&str; 9] = ["base", "arbitrum", "ethereum", "polygon", "robinhood", "tempo", "hyperevm", "optimism", "bnb"];
-/// The cards a stopped costly move offers: send it anyway, or leave it.
+/// The cards a stopped costly move offers: send it anyway, or leave it — each followed by that move's id, so a card left on
+/// another canvas, or from an earlier move, never sends the move that waits now.
 pub const SEND_ANYWAY: &str = "__send anyway";
 pub const LEAVE_COSTLY: &str = "__leave it";
 /// Exchanges whose logo a saved name brings, by the name's first word: their own sites, nobody else's (the Mac's
@@ -260,6 +261,8 @@ impl Engine {
         st.pending = None;
         st.card = None;
         st.awaiting_amount = None;
+        // A multisig payment waits only with its card: cancelled, a task's same «send … from the multisig» finds none.
+        st.multisig_payment = None;
         drop(st);
         self.changed();
     }
@@ -984,12 +987,13 @@ impl Engine {
             // More lost than a move may lose on its own: asked, not refused.
             let lost = loss.lost;
             let rent_free = self.rent_free_instead(&waiting);
-            self.st_mut().costly = Some(Costly { pending: waiting, title: title.into(), lost });
+            let id = ihatecrypto_core::foundation::Uuid::new().to_string();
+            self.st_mut().costly = Some(Costly { id: id.clone(), pending: waiting, title: title.into(), lost });
             self.reply(&(why.clone() + &self.say(" Send it anyway?", " Отправить всё равно?")), None);
             let options = std::iter::once(RouterOption::new(
-                &self.say(&format!("Send anyway · ≈ {} lost", Fmt::usd(lost)), &format!("Отправить всё равно · потеря ≈ {}", Fmt::usd(lost))), &why, SEND_ANYWAY, false))
+                &self.say(&format!("Send anyway · ≈ {} lost", Fmt::usd(lost)), &format!("Отправить всё равно · потеря ≈ {}", Fmt::usd(lost))), &why, &format!("{SEND_ANYWAY} {id}"), false))
                 .chain(rent_free)
-                .chain(std::iter::once(RouterOption::new(&self.say("Cancel", "Отмена"), &self.say("Nothing was signed", "Ничего не подписано"), LEAVE_COSTLY, false)))
+                .chain(std::iter::once(RouterOption::new(&self.say("Cancel", "Отмена"), &self.say("Nothing was signed", "Ничего не подписано"), &format!("{LEAVE_COSTLY} {id}"), false)))
                 .collect();
             self.set_options(options);
         } else if sent.is_empty() && matches!(waiting, Pending::Address(_)) {
@@ -1131,9 +1135,15 @@ impl Engine {
         (Num::of(lost) * Decimal::new(125, 2) + Decimal::new(5, 2)).0.unwrap_or(Decimal::MAX)
     }
 
-    /// «Send anyway» on a move the loss cap stopped: the same move once more, that loss accepted.
-    pub async fn send_anyway(&self) {
-        let Some(c) = self.st_mut().costly.take() else { return };
+    /// «Send anyway» on a move the loss cap stopped: the same move once more, that loss accepted — only the move this button
+    /// was offered for (`id`); a button left from another move says so and sends nothing.
+    pub async fn send_anyway(&self, id: &str) {
+        let taken = { let mut st = self.st_mut(); if st.costly.as_ref().is_some_and(|c| c.id == id) { st.costly.take() } else { None } };
+        let Some(c) = taken else {
+            self.reply(&self.say("That move isn't waiting any more: nothing was signed. Ask for it again.",
+                                 "Этот перевод уже не ждёт: ничего не подписано. Попроси его заново."), None);
+            return;
+        };
         // A fresh quote can lose a little more than the one asked about: a quarter more and 5 cents, as the Mac's.
         trade::LOSS_ACCEPTED.scope(Self::accepted_loss(c.lost), async {
             self.show(c.pending, &c.title, vec![], vec![], vec![]);

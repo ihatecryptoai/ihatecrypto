@@ -28,6 +28,7 @@ use signer_api::SignerAddress;
 use tokio::task::JoinHandle;
 use trade::{EvmNetwork, Landings};
 
+use crate::automation::task_run;
 use crate::canvas::Step;
 use crate::engine::{ChainStep, Engine, Pending};
 use crate::modules::CommandRefusal;
@@ -217,18 +218,21 @@ impl Engine {
                 if let Err(e) = self.native_recipient(&c) { stop(&e.to_string()); return true }
                 // A contract call is checked and simulated on its own card, never carried out on a chain's Confirm: after
                 // the moves before it, its card comes for its own Confirm (the Mac's runSteps). One that comes first is
-                // asked alone.
-                if let W::ContractCall(_) = c {
+                // asked alone. So is a paid request this card wouldn't price (after the first step) or that no one would see
+                // (steps a confirmed card holds): its price on its own card, for its own Confirm (the Mac's paysUnseen).
+                let pays = matches!(c, W::Pay { .. }) && (i > k || confirmed);
+                if pays || matches!(c, W::ContractCall(_)) {
                     if i > k {
                         parsed.push(ChainStep::Said(step.clone()));
                         continue;
                     }
-                    // First: its own card now, checked and simulated; the steps after it ride on that card's Confirm.
+                    // First: its own card now (a call checked and simulated, a request priced); the steps after it ride on
+                    // that card's Confirm.
                     let before = self.card_id();
-                    self.prepare_contract_call(&c, note.map(Into::into)).await;
+                    if pays { self.prepare_payment(&c, note.map(Into::into)).await } else { self.prepare_contract_call(&c, note.map(Into::into)).await }
                     let drawn = {
                         let st = self.st();
-                        matches!(st.pending, Some(Pending::Wallet(W::ContractCall(_)))) && st.card.as_ref().map(|c| c.id.clone()) != before
+                        matches!(st.pending, Some(Pending::Wallet(W::ContractCall(_) | W::Pay { .. }))) && st.card.as_ref().map(|c| c.id.clone()) != before
                     };
                     if !drawn {
                         // Refused before its card: the rest doesn't run, and a scheduled run reads it as stopped.
@@ -262,8 +266,8 @@ impl Engine {
                         other => other,
                     };
                 }
-                // A paid request first: its price asked now, so the chain's card shows what it pays (the Mac's runSteps →
-                // preparePayment); pay() takes this quote at Confirm.
+                // A paid request first, on a card the person sees: its price asked now, so the chain's card shows what it
+                // pays (the Mac's runSteps → preparePayment); pay() takes this quote at Confirm.
                 if i == k && matches!(c, W::Pay { .. }) {
                     match self.ask_price(&c).await {
                         Ok(PriceAsked::Answered(text)) => {
@@ -386,9 +390,11 @@ impl Engine {
 
     /// What a confirmed run carries out on the Confirm that named it, as the Mac's runSteps carries out a pendingAction: a
     /// move, a transfer, a position, its orders, an address, a recurring buy's first buy (Execution.swift:684-703) — never
-    /// a contract call (its own simulated card waits) or a trade plan (its own route and checklist).
+    /// a contract call (its own simulated card waits), a paid request (its price, never seen yet: the Mac's paysUnseen) or
+    /// a trade plan (its own route and checklist).
     pub fn carried_on_chain(p: Option<&Pending>) -> bool {
         match p {
+            Some(Pending::Wallet(W::Pay { .. })) => false,
             // A multisig's own card (its keys, networks and cost; its payment's check) waits for its own Confirm. Stricter
             // than the Mac's runSteps, which carries out the multisig it just drew without showing it for adjustment.
             Some(Pending::Wallet(W::ContractCall(_) | W::MultisigCreate { .. } | W::MultisigSend { .. })) => false,
@@ -600,6 +606,22 @@ impl Engine {
                     self.wait_for_deposit(need, &c.summary()).await;
                 }
                 let c = if i > 0 { self.fitted_to_arrival(c).await } else { c.clone() };
+                // A paid request pays a price a card showed: the chain's card shows its first step's (chain()). Any other,
+                // a step of a task's run on the automation wallet, is priced now and goes by itself only up to the price
+                // Confirmed for it in that task. Else its own card waits, the steps after it held behind it.
+                let shown = i == 0 && task_run().is_none() && self.st().payment.as_ref().is_some_and(|q| q.command == c);
+                if matches!(c, W::Pay { .. }) && !shown {
+                    match self.ask_price(&c).await? {
+                        PriceAsked::Answered(text) => {
+                            self.reply(&text, None);
+                            return Ok(true);
+                        }
+                        PriceAsked::Quoted(q) => {
+                            let rest: Vec<String> = steps[i + 1..].iter().map(ChainStep::title).collect();
+                            if !self.pays_by_itself(*q, &rest) { return Ok(false) }
+                        }
+                    }
+                }
                 self.r#move(&c).await?;
                 if let Some(to) = Self::arrives(&c) { arrived.insert(to); }
                 Ok(true)

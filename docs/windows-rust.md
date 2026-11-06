@@ -31,6 +31,12 @@ cd App/Windows/rust && cargo test
 - The engine has no TWAP guardian yet (main's Mac stops a TWAP whose stop fired, c308a92): a TWAP is turned down before
   any plan is drawn, rather than started with nothing to stop it.
 - About 120 of the engine's words still carry a «;» from the Swift Windows engine; main dropped them from its own UI.
+- A review of the Confirm rule over the Rust engine found two gaps it had taken from the Swift Windows engine. A paid
+  request in a task (on the automation wallet, as a chain's later step, or held behind a card confirmed at once) paid the
+  price the service asked at run time: as main since dee2739, a pay step now waits for its own card, and a run on the
+  automation wallet pays by itself only up to the price Confirmed for that task. «Send anyway» acted on whichever move
+  last hit the loss cap, so its button kept on another canvas could send another move with that move's loss accepted:
+  the button now names its move. Cancel also drops a waiting multisig payment.
 
 Checked on a real Windows 11 ARM64 (the VM) at 62937d95: `cargo test --workspace --locked` passes 304 tests there, among them DPAPI, Windows Hello not faked, and the signer refusing a parent that isn't ihatecrypto-engine.exe from both its own side and the engine's. Again at 9431cab2, with ledger, trade and core round 5: 630 tests.
 

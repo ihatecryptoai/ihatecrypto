@@ -2,12 +2,15 @@
 //! in USDC on Tempo after Confirm, then asked again with the payment's hash — the Mac's Payments, over the shared MPP
 //! and `Executor::pay_tempo`. Services quoted with the request's content are `State::priced_with_content`.
 
+use ihatecrypto_core::foundation::Uuid;
 use ihatecrypto_core::intent::Fmt;
 use ihatecrypto_core::mpp::{self, Answer};
 use ihatecrypto_core::position_command::WalletCommand;
+use ihatecrypto_core::scheduled_task::ScheduledTask;
 use rust_decimal::Decimal;
 use trade::{EvmNetwork, Executor};
 
+use crate::automation::RUN_TASK;
 use crate::blocks::{BlockData, ServiceCard};
 use crate::engine::{Engine, Pending};
 use crate::from_core::MppChallenge;
@@ -27,6 +30,8 @@ pub struct PaymentQuote {
     pub service: String,
     /// Quoted without the request's content: Confirm sends it, asking the price again with it before paying.
     pub probed: bool,
+    /// Asked in a run of this task on the automation wallet: paid, the price is what its later runs may pay by themselves.
+    pub task: Option<Uuid>,
 }
 
 /// What a service asks, read as its card reads it: its price, or its answer when it asks none.
@@ -79,17 +84,26 @@ impl Engine {
         }
         match mpp::challenge(headers.get("www-authenticate").map_or("", String::as_str), chrono::Utc::now()) {
             Err(refusal) => said!(self.say(&format!("Can't pay {service}: "), &format!("Не могу оплатить {service}: ")) + &refusal.reason),
-            Ok(challenge) => Ok(PriceAsked::Quoted(Box::new(PaymentQuote { command: command.clone(), challenge, ask, service, probed }))),
+            Ok(challenge) => {
+                let task = self.automation_task(command).map(|t| t.id);
+                Ok(PriceAsked::Quoted(Box::new(PaymentQuote { command: command.clone(), challenge, ask, service, probed, task })))
+            }
         }
     }
 
     pub async fn prepare_payment(&self, command: &WalletCommand, note: Option<String>) {
-        let q = match self.ask_price(command).await {
-            Ok(PriceAsked::Answered(text)) => return self.reply(&text, note),
-            Ok(PriceAsked::Quoted(q)) => *q,
-            Err(e) => return self.reply(&e.to_string(), note),
-        };
+        match self.ask_price(command).await {
+            Ok(PriceAsked::Answered(text)) => self.reply(&text, note),
+            Ok(PriceAsked::Quoted(q)) => self.show_payment(*q, note),
+            Err(e) => self.reply(&e.to_string(), note),
+        }
+    }
+
+    /// The price on its card for Confirm, said in the chat; in a task's run on the automation wallet, with what that
+    /// Confirm lets its later runs pay by themselves.
+    fn show_payment(&self, q: PaymentQuote, note: Option<String>) {
         self.st_mut().payment = Some(q.clone());
+        let command = &q.command;
         let host = match command { WalletCommand::Pay { url, .. } => host(url), _ => None }.unwrap_or_else(|| q.service.clone());
         let (c, service) = (&q.challenge, &q.service);
         let price = Fmt::num(c.usdc(), 6);
@@ -102,27 +116,49 @@ impl Engine {
                 self.say(&format!("What's short comes from {src} over Relay first: a dollar, so the next requests don't each need a bridge."),
                          &format!("Сначала из {src} через Relay придёт доллар, чтобы следующие запросы не гоняли мост каждый раз."))
             } else {
-                self.say("From your USDC on Tempo; the fee, ≈ $0.001, comes out of the USDC.", "Из твоих USDC на Tempo; комиссия ≈ $0.001 — из тех же USDC.")
+                self.say("From your USDC on Tempo. The fee, ≈ $0.001, comes out of the USDC.", "Из твоих USDC на Tempo, комиссия ≈ $0.001 — из тех же USDC.")
             },
             c.purpose().map_or_else(|| self.say("For one request.", "За один запрос."), |p| self.say("For: ", "За: ") + p),
         ], vec![], vec![]);
-        self.reply(&self.say(&format!("{service} asks {price} USDC. Press Confirm to pay it in USDC on Tempo, or Cancel."),
-                             &format!("{service} просит {price} USDC. Нажми «Подтвердить», чтобы оплатить в USDC на Tempo, или «Отмена».")), note);
+        let then = if q.task.is_none() { String::new() } else {
+            self.say(&format!(" After that, this task pays up to {price} USDC for this request by itself. A higher price waits for your Confirm again."),
+                     &format!(" Дальше эта задача будет сама платить за этот запрос до {price} USDC. Если цена вырастет, снова спрошу."))
+        };
+        self.reply(&(self.say(&format!("{service} asks {price} USDC. Press Confirm to pay it in USDC on Tempo, or Cancel."),
+                              &format!("{service} просит {price} USDC. Нажми «Подтвердить», чтобы оплатить в USDC на Tempo, или «Отмена».")) + &then), note);
+    }
+
+    /// The repeating task this is a run of on the automation wallet (`RUN_TASK`), with the prices Confirmed in it, when the
+    /// request is one of its steps (the Mac's automationTask(of:)).
+    pub fn automation_task(&self, command: &WalletCommand) -> Option<ScheduledTask> {
+        let id = RUN_TASK.try_with(|t| *t).ok().flatten()?;
+        self.st().tasks.iter().find(|t| t.id == id && t.steps.iter().any(|s| WalletCommand::parse(s).as_ref() == Some(command))).cloned()
+    }
+
+    /// A paid request reached in a running chain with no card that showed its price (a step of a task's run on the
+    /// automation wallet), its price just asked: true when the price Confirmed for it in that task covers it, and pay()
+    /// takes it with no card. Otherwise its own card shows the price and waits for its own Confirm, the steps after it
+    /// (`rest`) held behind it: no price the user hasn't seen is paid (the Mac's paysUnseen).
+    pub fn pays_by_itself(&self, q: PaymentQuote, rest: &[String]) -> bool {
+        if !self.automation_task(&q.command).is_some_and(|t| t.approves(q.challenge.amount, &q.command)) {
+            self.show_payment(q, None);
+            self.hold_after_call(rest);
+            return false;
+        }
+        let (price, service) = (Fmt::num(q.challenge.usdc(), 6), q.service.clone());
+        self.st_mut().payment = Some(q);
+        self.reply(&self.say(&format!("{service} asks {price} USDC — no more than you Confirmed for this task, so it goes without a card, from the automation wallet."),
+                             &format!("{service} просит {price} USDC — не больше, чем ты подтвердил для этой задачи, поэтому без карточки, с кошелька автоматизации.")), None);
+        true
     }
 
     /// After Confirm: the price shown is asked again when it was quoted without the content or is about to expire, and
     /// paid only if it's the same amount to the same payee; then the service is asked again with the payment's proof.
+    /// Only a price shown is paid (or one a task's Confirmed price covers, pays_by_itself), never one asked here.
     pub async fn pay(&self, command: &WalletCommand, e: &Executor) -> trade::Result<String> {
-        let WalletCommand::Pay { method, url, body } = command else { return said!("The service's price is gone; ask for it again.".into()) };
         let shown = self.st().payment.clone().filter(|p| &p.command == command);
-        let quote = match shown {
-            Some(q) => q,
-            // A pay step of a confirmed chain or a scheduled run: its price asked now and paid, as the Mac's runSteps
-            // prepares it on the chain's Confirm.
-            None => match self.ask_price(command).await? {
-                PriceAsked::Answered(text) => return Ok(text),
-                PriceAsked::Quoted(q) => *q,
-            },
+        let (WalletCommand::Pay { method, url, body }, Some(quote)) = (command, shown) else {
+            return said!("The service's price is gone. Ask for it again.".into());
         };
         let mut c = quote.challenge.clone();
         if quote.probed || c.expires.is_some_and(|x| (x - chrono::Utc::now()).num_milliseconds() < 30_000) {
@@ -138,6 +174,8 @@ impl Engine {
         }
         let hash = e.pay_tempo(c.amount, &c.payee, c.memo.as_deref(), &quote.service).await?;
         self.st_mut().payment = None;
+        // Asked in a task's run on the automation wallet and paid: its later runs pay up to this by themselves.
+        if let Some(id) = quote.task { self.set_tasks(|t| if let Some(t) = t.iter_mut().find(|t| t.id == id) { t.approve(c.amount, command) }) }
         let proof = format!("{}/tx/{hash}", EvmNetwork::tempo().explorer);
         let waiting = self.say(&format!("Waiting for {}'s answer", quote.service), &format!("Жду ответ {}", quote.service));
         if let Some(r) = self.st_mut().running.as_mut() { r.lines.push(waiting) }

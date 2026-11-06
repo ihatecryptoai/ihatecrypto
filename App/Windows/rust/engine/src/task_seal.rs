@@ -48,7 +48,8 @@ pub fn save(tasks: &[ScheduledTask], file: &str, key_file: &str) {
     }
 }
 
-/// The saved tasks, every one paused when their list was changed outside ihatecrypto; and whether it was.
+/// The saved tasks, every one paused and without its Confirmed prices when their list was changed outside ihatecrypto;
+/// and whether it was.
 pub fn load(file: &str, key_file: &str) -> (Vec<ScheduledTask>, bool) {
     let Ok(data) = std::fs::read(store::url(file)) else { return (vec![], false) };
     let mut tasks: Vec<ScheduledTask> = serde_json::from_slice(&data).unwrap_or_default();
@@ -57,7 +58,13 @@ pub fn load(file: &str, key_file: &str) -> (Vec<ScheduledTask>, bool) {
         Some((key, false)) => std::fs::read(store::url(&seal_name(file))).ok() == Some(tag(&data, &key)),
         _ => tasks.is_empty(),
     };
-    if !intact { for t in &mut tasks { t.paused = Some(true) } }
+    // The prices Confirmed in them too: the Schedule doesn't show them, so one written in could pass unseen.
+    if !intact {
+        for t in &mut tasks {
+            t.paused = Some(true);
+            t.prices = None;
+        }
+    }
     let tampered = !intact && !tasks.is_empty();
     (tasks, tampered)
 }
