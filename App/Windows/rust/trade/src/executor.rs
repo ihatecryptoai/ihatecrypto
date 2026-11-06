@@ -1175,7 +1175,14 @@ impl Executor {
             return Ok(format!("No open {asset} position."));
         };
         let long = position.size > Decimal::ZERO;
-        if STOP_MOVE_FAIL_TEST.fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1)).is_ok() { return fail("stopMoveFailTest: nothing sent.") }
+        // One failure taken off the Dev flag's count (fetch_update is try_update past Rust 1.97, so by hand).
+        let mut left = STOP_MOVE_FAIL_TEST.load(SeqCst);
+        while left > 0 {
+            match STOP_MOVE_FAIL_TEST.compare_exchange(left, left - 1, SeqCst, SeqCst) {
+                Ok(_) => return fail("stopMoveFailTest: nothing sent."),
+                Err(now) => left = now,
+            }
+        }
         let sz = market.sz_decimals;
         let stop = price(target.unwrap_or_else(|| guardian::breakeven(position.entry, long)), sz);
         if !(if long { stop < market.mark_px } else { stop > market.mark_px }) {
