@@ -7,7 +7,7 @@ description = "The Windows calls ihatecrypto's Swift signer and engine make: Win
 
 [lib]
 # A DLL with a C ABI: the Swift signer and engine link its import library.
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [target.'cfg(windows)'.dependencies]
 zeroize = "1.9.1"
