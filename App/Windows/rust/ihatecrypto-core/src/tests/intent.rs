@@ -320,3 +320,14 @@ fn fmt_prices_dots_and_fees_are_swifts() {
     assert_eq!(Fmt::fee_warning(d("1"), d("0.95")), None);
     assert_eq!(Fmt::pct(d("2.345")), "2.34%");
 }
+
+/// Any number of places, never a panic: past Decimal's 28 the places are what Decimal can show.
+#[test]
+fn num_takes_any_places() {
+    use crate::intent::Fmt;
+    assert_eq!(Fmt::num(super::d("0.00001196"), 8), "0.00001196");
+    for places in [28, 29, 40, u32::MAX] {
+        let _ = Fmt::num(super::d("0.00001196"), places);
+        let _ = Fmt::num(super::d("79228162514264337593543950335"), places);
+    }
+}

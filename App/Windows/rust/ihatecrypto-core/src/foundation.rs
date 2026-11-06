@@ -193,7 +193,9 @@ pub fn rounded(d: Decimal, scale: u32, mode: Rounding) -> Decimal {
 }
 
 /// `pow(10, n)` as a Decimal.
-pub(crate) fn pow10(n: u32) -> Decimal { Decimal::from_i128_with_scale(10i128.pow(n), 0) }
+/// 10^n, at most 10^28: the largest power of ten Decimal holds (10^29 panicked, and Fmt.num took any number of places).
+/// A shift past it goes in steps (`shifted`).
+pub(crate) fn pow10(n: u32) -> Decimal { Decimal::from_i128_with_scale(10i128.pow(n.min(28)), 0) }
 
 /// `Decimal(string:)` of a literal in the code.
 pub(crate) fn dec(s: &str) -> Decimal { Decimal::from_str(s).expect("a decimal literal") }
