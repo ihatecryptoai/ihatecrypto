@@ -18,6 +18,8 @@ cd App/Windows/rust && cargo test
 - The Swift Windows signer kept the Hyperliquid trading key's week as a Double, which its trusted settings can't hold:
   the week never started, so every order that opens or adds went to the main key with a prompt. The Rust signer keeps
   whole seconds.
+- The EVM client read a node's refusal with a JSON body of its own (`{"error": "forbidden"}`, HTTP 403) as an empty
+  result. The Rust client takes it as a refusal and asks the next node.
 
 ## Order
 
@@ -34,7 +36,8 @@ from the leaves (pure parsing and math) to the chat.
 | 6 | `guard` | `Guard/Core`: the Solana guard (balance rules, account rights, known programs, sponsor refunds), Hyperliquid actions, quote bindings, injection screening | done, 39 tests (GuardTests' real transactions) |
 | 7 | `signer` | `Signer/Core` + `Signer/Windows`: every request's decisions (main's Signer.swift with the Windows lines), the vault under Windows Hello, the trusted settings, the door over pipes, the binary `ihatecrypto-signer`; winsec as a Rust library, not a DLL | done, 23 tests (VaultTests, AgentKeyTests, AgentFallbackTests, CodeTests, LedgerAgentKeyTests, the binary over its pipes); checks for `x86_64-pc-windows-msvc` |
 | 8 | — | `ihatecrypto-signer.exe` from Rust in `build.ps1` and CI; the Swift engine talks to it unchanged | done: on this Mac the Swift engine imported a phrase, renamed the wallet and saved an address through the Rust signer; the real Windows build (the VM) is next |
-| 9+ | engine crates | `IhatecryptoCore`, `Protocols`, `DeFi`, `Execution`, `LLM`, `Desktop/Engine`, leaves first | |
+| 9 | `net` | `RPCRetry`, `SolanaRPC`, `EVMRPC`, the node lists, ENS, SNS: one HTTP client (the system's TLS), retries, the walk to the next node | done, 8 tests against a stand-in node + a live read-only check |
+| 10+ | engine crates | `LLM/Core`, `Protocols` (Relay, 1Click, Jupiter), `IhatecryptoCore`, `DeFi`, `Execution`, `LLM`, `Desktop/Engine`, leaves first | |
 
 Shared modules are ported from `main`, not from this branch's older copy: steps 1–2 and on match main at `bc90340`
 (trailing stops and TWAPs, Morpho's Authorization refused, address twins). The Mac app stays Swift; to catch up,

@@ -1,0 +1,16 @@
+[package]
+name = "net"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+description = "What the engine asks the networks: retries, Solana and EVM JSON-RPC with their fallback nodes, ENS and SNS (RPCRetry, SolanaRPC, EVMRPC, EVMNodes, SolanaNodes, ENS, SNS in Swift)"
+
+[dependencies]
+wallet.workspace = true
+solana.workspace = true
+evm.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+rust_decimal.workspace = true
