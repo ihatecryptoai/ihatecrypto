@@ -1,5 +1,47 @@
 [
   {
+    "version": "0.8.2",
+    "date": "2026-11-07",
+    "stories": [
+      {
+        "title": "Send and swap privately",
+        "text": "«send 20 USDC privately to Mom» or «buy NEAR for 5 USDC privately» goes through NEAR Intents' Confidential Intents: on chain the deposit and what arrives can't be matched. A USDC send to a saved address offers Regular or Private right over Confirm, with each way's fees and time.",
+        "symbol": "lock.fill",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "A private assistant",
+        "text": "Pick NEAR AI Cloud and the chat runs in sealed hardware. Before every message ihatecrypto checks the enclave down to Intel and NVIDIA, and each reply's bytes against the model's own key. The header says «Private assistant», and Proof shows what was checked.",
+        "symbol": "lock.shield.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Won't let you get liquidated",
+        "text": "«guard my loan on kamino» watches a Kamino or Aave loan and, under its line, prepares the repay, with the USDC it lacks brought through NEAR Intents, for one Confirm. You can also borrow USDC against SOL on Kamino's main market.",
+        "symbol": "shield.checkered",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "Pay any API, run an agent wallet",
+        "text": "A paid API answers after you Confirm: x402 by a signature on Base, MPP on Tempo or through NEAR Intents from the USDC you hold. An agent wallet on NEAR Intents spends within the daily limit your NEAR key signed, and you can freeze it.",
+        "symbol": "creditcard.fill",
+        "color": "0A84FF"
+      },
+      {
+        "title": "TWAP and trailing stops",
+        "text": "«buy ETH for $2000 over 2 hours» is one TWAP on Hyperliquid, its stop and take covering the whole position from the first part. «trailing 2%» puts Hyperliquid's own trailing stop on the exchange.",
+        "symbol": "chart.line.uptrend.xyaxis",
+        "color": "30B0C7"
+      },
+      {
+        "title": "See where your money goes",
+        "text": "Every move waiting for Confirm reads as a receipt: what you pay and from where, the blockchain's fees, what arrives. A move through NEAR Intents shows its way after Confirm. Lookalike addresses, scam addresses from GoPlus and sites asking for more than they show are called out before you sign.",
+        "symbol": "doc.text.magnifyingglass",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
     "version": "0.8.1",
     "date": "2026-10-29",
     "stories": [
