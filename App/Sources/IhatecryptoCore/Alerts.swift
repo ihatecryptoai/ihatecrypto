@@ -16,6 +16,8 @@ public struct PriceAlert: Codable, Equatable, Sendable, Identifiable {
     public var plan: UUID?
     /// Set through the local debug API: its steps never run on the automation wallet by themselves (ScheduledTask).
     public var untrusted: Bool?
+    /// Switched off on the Schedule: it waits without firing until switched on again.
+    public var paused: Bool?
 
     public init(coin: String, above: Bool, price: Decimal, steps: [String]? = nil) {
         self.coin = coin

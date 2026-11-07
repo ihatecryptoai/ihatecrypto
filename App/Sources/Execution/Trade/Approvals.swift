@@ -11,7 +11,8 @@ public struct TokenApproval: Sendable, Identifiable, Equatable {
     public let chain: String
     public let token: String
     public let symbol: String
-    public let decimals: Int
+    /// nil: the token didn't answer decimals(), so the amount can't be shown (never 18's guess). Revoking doesn't need it.
+    public let decimals: Int?
     public let spender: String
     /// Uniswap's router, Relay, Aave… — nil for a contract ihatecrypto doesn't know.
     public let spenderName: String?
@@ -21,6 +22,12 @@ public struct TokenApproval: Sendable, Identifiable, Equatable {
     public let permit2: Bool
     /// ≥ 2⁹⁶ units: the drainers' «unlimited».
     public var unlimited: Bool { amount >= Decimal(sign: .plus, exponent: 28, significand: 7.9) }
+    /// The amount as the approvals board shows it.
+    public var shown: String {
+        if unlimited { return "unlimited" }
+        guard let decimals else { return "amount unknown: decimals() didn't answer" }
+        return Fmt.num(amount / Decimal(sign: .plus, exponent: decimals, significand: 1), maxFraction: 6)
+    }
 }
 
 extension Executor {
@@ -91,7 +98,7 @@ extension Executor {
             next = list?["next_page_params"] as? [String: Any]
         }
         var out: [TokenApproval] = []
-        var tokenInfo: [String: (String, Int)] = [:]
+        var tokenInfo: [String: (String, Int?)] = [:]
         for pair in pairs {
             let p = pair.split(separator: "|").map(String.init)
             let (token, spender, permit2) = (p[0], p[1], p[2] == "1")
@@ -110,8 +117,8 @@ extension Executor {
             guard !expired, let amount = ABI.decimal(in: answer, word: 0), amount > 0 else { continue }
             if tokenInfo[token] == nil {
                 let symbol = (try? await net.rpc.read(token, Data([0x95, 0xd8, 0x9b, 0x41]))).flatMap { ABI.string($0) } ?? "\(token.prefix(6))…\(token.suffix(4))"
-                let decimals = (try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))).flatMap { ABI.uint(in: $0, word: 0) }.map(Int.init) ?? 18
-                tokenInfo[token] = (Holdings.bridgedUSDC[chain] == token ? "USDC.e" : symbol, min(decimals, 36))
+                let decimals = ABI.decimals(try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67])))
+                tokenInfo[token] = (Holdings.bridgedUSDC[chain] == token ? "USDC.e" : symbol, decimals)
             }
             let info = tokenInfo[token]!
             out.append(TokenApproval(chain: chain, token: token, symbol: info.0, decimals: info.1, spender: spender,

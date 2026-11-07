@@ -30,7 +30,7 @@ public enum AgentReads {
                                            "getEpochInfo", "getRecentPrioritizationFees", "getInflationRate", "getVoteAccounts"]
     /// Public data APIs `fetch` reads (GET only), plus every Blockscout explorer.
     static let hosts: Set<String> = ["api.llama.fi", "yields.llama.fi", "coins.llama.fi", "stablecoins.llama.fi", "bridges.llama.fi",
-                                     "api.dexscreener.com", "api.geckoterminal.com", "api.coingecko.com", "lite-api.jup.ag",
+                                     "api.dexscreener.com", "api.geckoterminal.com", "api.coingecko.com", "lite-api.jup.ag", "api.jup.ag",
                                      "api.kamino.finance", "api-v2.pendle.finance", "explorer.optimism.io"]
 
     public static func answer(_ tool: String, _ arg: String, me: Me) async -> String {
@@ -94,7 +94,11 @@ public enum AgentReads {
 
     static func word(_ type: String, _ value: String) throws -> Data {
         switch type {
-        case "address": return try ABI.address(value)
+        // Only as 0x and 40 hex digits: the chat's checks of the addresses in a call find them that way, and ABI.address
+        // would take one without the 0x too.
+        case "address":
+            guard value.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil else { throw LLMError("«\(value)» isn't an address: write it as 0x and 40 hex digits.") }
+            return try ABI.address(value)
         case "bool": return ABI.uint(["true", "1"].contains(value.lowercased()) ? 1 : 0)
         case let t where t.hasPrefix("uint") || t.hasPrefix("int"):
             // «max»: all of it (type(uint256).max), the way vaults and Compound take «everything».
@@ -115,8 +119,9 @@ public enum AgentReads {
         func slot(_ i: Int) -> Data? { data.count >= (i + 1) * 32 ? data.subdata(in: (i * 32)..<((i + 1) * 32)) : nil }
         func number(_ w: Data) -> Decimal { w.reduce(Decimal(0)) { $0 * 256 + Decimal($1) } }
         func dynamic(_ i: Int) -> Data? {
+            // The offset is held to the data by ABI.uint; the length is too before it becomes an Int (2⁶⁴ − 1 would trap).
             guard let offset = ABI.uint(in: data, word: i), offset % 32 == 0, let length = ABI.uint(in: data, word: Int(offset / 32)),
-                  data.count >= Int(offset) + 32 + Int(length) else { return nil }
+                  length <= UInt64(data.count), data.count >= Int(offset) + 32 + Int(length) else { return nil }
             return data.subdata(in: (Int(offset) + 32)..<(Int(offset) + 32 + Int(length)))
         }
         return types.enumerated().map { i, t in

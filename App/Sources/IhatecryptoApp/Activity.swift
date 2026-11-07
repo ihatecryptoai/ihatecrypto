@@ -95,8 +95,9 @@ extension Workspace {
         currentActivity = activities.last?.id
     }
 
-    func updateActivity(_ change: (inout Activity) -> Void) {
-        guard let id = currentActivity, let i = activities.lastIndex(where: { $0.id == id }) else { return }
+    /// `id`: that record, not the current one (another may have begun during an await).
+    func updateActivity(_ id: UUID? = nil, _ change: (inout Activity) -> Void) {
+        guard let id = id ?? currentActivity, let i = activities.lastIndex(where: { $0.id == id }) else { return }
         change(&activities[i])
     }
 
@@ -273,10 +274,17 @@ extension Workspace {
         }
         let week = equitySeries()
         if week.count > 2, let first = week.first, let last = week.last {
-            facts.append("Portfolio since \(Fmt.date(first.at)): \(Fmt.usd(first.usd)) → \(Fmt.usd(last.usd)) (\(signed(last.usd - first.usd))).")
+            facts.append("Portfolio since \(Fmt.date(first.at)): \(Fmt.usd(first.usd)) → \(Fmt.usd(last.usd)) (\(signed(last.usd - first.usd)), top-ups and transfers included).")
+        }
+        let pnl = pnlSeries()
+        if pnl.count > 2, let first = pnl.first, let last = pnl.last {
+            facts.append("Portfolio P/L since \(Fmt.date(first.at)) (the card's line; price moves of what was held, top-ups and transfers not counted): \(signed(last.usd - first.usd)).")
         }
         if let h = hlTotal { facts.append("Hyperliquid account: \(Fmt.usd(h)).") }
-        if lendTotal > 0 { facts.append("Jupiter Lend vault: \(Fmt.num(lendTotal)) USDC.") }
+        for d in lendDeposits {
+            let earned = lendEarned[d.address].map { ", earned \(Fmt.num($0 / pow(10, d.decimals), maxFraction: 6)) \(d.coin) so far" } ?? ""
+            facts.append("Jupiter Lend: \(Fmt.num(d.amount, maxFraction: 6)) \(d.coin)\(d.apy.map { " at ≈ \(Fmt.num($0.rounded(2, .plain)))% a year" } ?? "")\(earned).")
+        }
         if kamino > 0 { facts.append("Kamino Lend: \(Fmt.usd(kamino)).") }
         if near > 0 { facts.append("NEAR on the user's own NEAR account: \(Fmt.num(near, maxFraction: 6)) NEAR (≈ \(Fmt.usd(nearUSD))).") }
         if hlp.equity > 0 { facts.append("HLP vault on Hyperliquid: \(Fmt.usd(hlp.equity))\(hlp.lockedUntil.map { ", locked until \(Fmt.date($0)) (4 days after a deposit)" } ?? ", can be withdrawn").") }

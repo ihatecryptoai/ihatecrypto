@@ -4,6 +4,7 @@
     python3 App/Tools/uitest.py                 # every scenario in uitest-scenarios.json
     python3 App/Tools/uitest.py deposit chart   # only those whose name contains a word
     IHATECRYPTO_APP=work python3 App/Tools/uitest.py   # against the working app, not «ihatecrypto Dev»
+    UITEST_SHOTS=<folder> python3 App/Tools/uitest.py  # also a picture of the window after each scenario (done.sh)
 
 A scenario is one or more phrases and what the canvas and the reply must show after the last ("send" + "expect"), or a
 conversation checked after every message ("turns": [{"send": "…", "expect": {…}}, …]): a card that waits while it's
@@ -14,9 +15,11 @@ canvas boards, and drops what waits for Confirm (/cancel). At the end the test c
 that was open is reopened (/restore). Nothing can sign through the debug API, so no money moves. It refuses to start
 while a move waits for Confirm or runs on the user's own canvas. Exit code 1 when any scenario fails.
 """
+import atexit
 import re
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -27,6 +30,38 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.environ.get("IHATECRYPTO_APP") == "work"
 TOKEN = open(os.path.expanduser("~/Library/Application Support/ihatecrypto" + ("" if WORK else "-dev") + "/debug-token")).read().strip()
 BASE = "http://127.0.0.1:" + ("51789" if WORK else "51790")
+SHOTS = os.environ.get("UITEST_SHOTS")
+DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
+
+
+def settings(values):
+    """Writes app settings a scenario needs («defaults»: the chat full height and docked…), which the window picks up at
+    once; gives back what was there, for putting back after it."""
+    old = {}
+    for key, value in values.items():
+        r = subprocess.run(["defaults", "read", DOMAIN, key], capture_output=True, text=True)
+        old[key] = (r.stdout.strip() if r.returncode == 0 else None, value)
+        write(key, value, value)
+    time.sleep(1.5 if values else 0)
+    return old
+
+
+def write(key, value, kind):
+    """`defaults write` takes a bool as true/false only; `defaults read` gives it back as 1/0."""
+    if isinstance(kind, bool):
+        subprocess.run(["defaults", "write", DOMAIN, key, "-bool", "true" if str(value).lower() in ("true", "1") else "false"])
+    elif isinstance(kind, str):
+        subprocess.run(["defaults", "write", DOMAIN, key, "-string", str(value)])
+    else:
+        subprocess.run(["defaults", "write", DOMAIN, key, "-float", str(value)])
+
+
+def restore_settings(old):
+    for key, (was, value) in old.items():
+        if was is None:
+            subprocess.run(["defaults", "delete", DOMAIN, key], capture_output=True)
+        else:
+            write(key, was, value)
 
 
 def call(method, path, body=None, timeout=240):
@@ -53,18 +88,36 @@ def check(expect, state, replies):
     for key, want in expect.items():
         if key == "pending_kind" and (pending or {}).get("kind") != want:
             why.append(f"pending {text(pending) or 'none'}, expected a {want} card")
+        elif key == "tee" and state.get("tee") != want:
+            why.append("no enclave check on the chat (TEE chip)" if want else "a TEE chip where none belongs")
+        elif key == "tee_reply" and state.get("teeReply") != want:
+            why.append(f"the last reply's signature proved {state.get('teeReply')!r}, expected {want!r}")
+        elif key == "privacy" and (state.get("privacy") or {}).get("private") != (want == "private"):
+            why.append(f"the send offers {text(state.get('privacy')) or 'no Regular | Private choice'}, expected it {want}")
         elif key == "drawn_route" and (pending or {}).get("drawnRoute") != want:
             why.append("the card has no drawn route (fallback card)")
         elif key == "steps":
             labels = [s["label"].upper() for s in (pending or {}).get("steps", [])]
             if not all(any(w in l for l in labels) for w in want):
                 why.append(f"steps {labels}, expected {want}")
+        elif key == "steps_lack" and any(want.upper() in s["label"].upper() for s in (pending or {}).get("steps", [])):
+            why.append(f"steps {[s['label'] for s in (pending or {}).get('steps', [])]} name «{want}»")
         elif key == "pending_name" and (pending or {}).get("name") != want:
             why.append(f"the card saves «{(pending or {}).get('name')}», expected «{want}»")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):
             why.append(f"title {text((pending or {}).get('title'))}, expected «{want}»")
         elif key.startswith("command_contains") and want.lower() not in text((pending or {}).get("command")):
             why.append(f"command {text((pending or {}).get('command'))}, expected «{want}»")
+        elif key == "quote_contains" and want.lower() not in text((pending or {}).get("quote")):
+            why.append(f"the card's quote {text((pending or {}).get('quote')) or 'none'}, expected «{want}»")
+        elif key == "footer_contains" and want.lower() not in text((pending or {}).get("footer")):
+            why.append(f"the card's footer {text((pending or {}).get('footer'))}, expected «{want}»")
+        elif key == "warning_contains" and want.lower() not in text((pending or {}).get("warning")):
+            why.append(f"the card's warning {text((pending or {}).get('warning'))}, expected «{want}»")
+        elif key == "text_lacks" and want.lower() in text(pending):
+            why.append(f"the card says «{want}»: {text(pending)[:240]}")
+        elif key == "recipient" and (pending or {}).get("recipient") != want:
+            why.append(f"the recipient's Hyperliquid account reads {(pending or {}).get('recipient')}, expected {want}")
         elif key == "no_pending" and pending:
             why.append(f"a card waits: {text(pending)[:160]}")
         elif key == "plan_first" and not ((b.get("plan") or {}).get("steps") or [{}])[0].get("label", "").upper().startswith(want):
@@ -77,6 +130,10 @@ def check(expect, state, replies):
             why.append(f"chart range {text(b.get('chart'))}, expected {want}")
         elif key == "chart_place" and (b.get("chart") or {}).get("place") != want:
             why.append(f"the chart is {(b.get('chart') or {}).get('place')} on the canvas, expected {want}")
+        elif key == "receive" and bool(b.get("receive")) != want:
+            why.append(f"the Top up board is {'not ' if want else ''}on the canvas")
+        elif key == "add_block_clear" and (b.get("addBlockClear") != want or not (b.get("addBlock") or {}).get("chatFull")):
+            why.append(f"«Add block» is {'not ' if want else ''}in the right corner clear of a full chat: {text(b.get('addBlock'))}")
         elif key == "yields" and not b.get("yields"):
             why.append("no rate bubbles")
         elif key == "pnl_period" and (b.get("pnl") or {}).get("period") != want:
@@ -85,7 +142,7 @@ def check(expect, state, replies):
             why.append(f"note card {text(b.get('note')) or 'none'}, expected «{want}»")
         elif key == "reply" and not replies:
             why.append("no reply")
-        elif key == "reply_contains" and not any(want.lower() in r.lower() for r in replies):
+        elif key.startswith("reply_contains") and not any(want.lower() in r.lower() for r in replies):
             why.append(f"no reply with «{want}»: {replies[-3:]}")
         elif key == "reply_cyrillic" and bool(re.search("[а-яё]", (replies or [""])[-1].lower())) != want:
             why.append(f"the reply is {'not ' if want else ''}in Russian: {replies[-1:]}")
@@ -95,8 +152,14 @@ def check(expect, state, replies):
                 why.append(f"unexpected boards: {present}")
         elif key == "detail_contains" and want.lower() not in (b.get("detail") or "").lower():
             why.append(f"canvas block {b.get('detail')}, expected «{want}»")
+        elif key == "token_card_contains" and want.lower() not in (b.get("tokenCard") or "").lower():
+            why.append(f"the token card says {text(b.get('tokenCard'))[:240]}, expected «{want}»")
+        elif key == "token_card_lacks" and (not b.get("tokenCard") or want.lower() in b["tokenCard"].lower()):
+            why.append(f"the token card says «{want}»: {text(b.get('tokenCard'))[:240]}" if b.get("tokenCard") else "no token card")
         elif key == "cards_in_chat" and len(next((m.get("cards") or [] for m in reversed(state.get("messages") or []) if not m["user"]), [])) < want:
             why.append(f"the last reply has fewer than {want} cards under it in the chat")
+        elif key == "cards_contain" and not any(want.lower() in c.lower() for c in next((m.get("cards") or [] for m in reversed(state.get("messages") or []) if not m["user"]), [])):
+            why.append(f"no card under the last reply says «{want}»")
         elif key == "next_steps_at_least" and len(b.get("nextSteps") or []) < want:
             why.append(f"{len(b.get('nextSteps') or [])} cards to go on, expected at least {want}: {text(b.get('nextSteps'))[:200]}")
         elif key == "not_executing" and state.get("executing"):
@@ -112,6 +175,13 @@ def check(expect, state, replies):
     return why
 
 
+def twin(address):
+    """The wallet's EVM address with its middle changed and its first and last 4 characters kept: address poisoning's
+    look-alike, for «{twin}» in a scenario's phrase."""
+    a = address.lower()
+    return a[:6] + "".join("0123456789abcdef"[(int(c, 16) + 1) % 16] for c in a[6:-4]) + a[-4:] if len(a) == 42 else address
+
+
 def main():
     scenarios = json.load(open(os.path.join(HERE, "uitest-scenarios.json")))
     only = [a.lower() for a in sys.argv[1:]]
@@ -124,30 +194,73 @@ def main():
     print(f"ihatecrypto · {start['provider']} · {start['model']} · {len(scenarios)} scenarios\n")
     failed = skipped = 0
     try:
-        for s in scenarios:
-            cond = s.get("only_if")  # a scenario that depends on what the wallet holds, or on which wallet signs
+        for n, s in enumerate(scenarios, 1):
+            cond = s.get("only_if")  # a scenario that depends on what the wallet holds, on which wallet signs, or on Jev
+            if cond and "second_check" in cond and cond["second_check"] != bool(start.get("secondCheck")):
+                skipped += 1
+                print(f"SKIP  {s['name']}  (the second check is {'off' if cond['second_check'] else 'on'})")
+                continue
             if cond and "wallet" in cond:
                 if (cond["wallet"] == "test") != bool(start["wallet"].get("test")):
                     skipped += 1
                     print(f"SKIP  {s['name']}  (needs the {cond['wallet']} wallet)")
                     continue
-            elif cond:
+            elif cond and "balance" in cond:
                 have = float(start["balances"].get(cond["balance"]) or 0)
                 if ("at_least" in cond and have < cond["at_least"]) or ("below" in cond and have >= cond["below"]):
                     skipped += 1
                     print(f"SKIP  {s['name']}  ({cond['balance']} = {have})")
                     continue
             t0 = time.time()
-            call("POST", "/reset")
+            old = settings(s.get("defaults") or {})
+            # Put back even when a scenario raises: a «jupiterBusyTest» left on refuses every buy in Dev.
+            atexit.register(restore_settings, old)
+            # "provider": the test canvas talks to that model provider (each canvas keeps its own).
+            call("POST", "/reset", {"provider": s["provider"]} if s.get("provider") else None)
             why = []
             for k, turn in enumerate(s.get("turns") or [{"send": s["send"], "expect": s["expect"]}]):
                 replies, state = [], None
                 for phrase in [turn["send"]] if isinstance(turn["send"], str) else turn["send"]:
-                    state = call("POST", "/send", {"text": phrase})
+                    state = call("POST", "/send", {"text": phrase.replace("{twin}", twin(start["wallet"].get("evm") or ""))})
                     replies += [m["text"] for m in state["messages"] if not m["user"]]
+                # A swap's card names its way once quoted (Uniswap's until then): asked again for a while.
+                for _ in range(30 if turn["expect"].get("wait_quote") else 0):
+                    if (state["boards"].get("pending") or {}).get("quote"):
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
+                # A Hyperliquid send card asks whether the recipient's account is new after it's drawn: asked again for a while.
+                for _ in range(15 if "recipient" in turn["expect"] else 0):
+                    if (state["boards"].get("pending") or {}).get("recipient") != "checking":
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
+                # The token card tells what it shows after its market and the registry's read: asked again for a while.
+                # Alone, token_card_lacks stops at the first text, which on Robinhood Chain may come before the registry's
+                # answer: pair it there with token_card_contains.
+                want = turn["expect"].get("token_card_contains", "").lower()
+                for _ in range(15 if want or "token_card_lacks" in turn["expect"] else 0):
+                    card = (state["boards"].get("tokenCard") or "").lower()
+                    if card and want in card:
+                        break
+                    time.sleep(1)
+                    state = call("GET", "/state")
                 why += [(f"after «{turn['send']}»: " if "turns" in s else "") + w for w in check(turn["expect"], state, replies)]
+            if SHOTS and state.get("windowID"):
+                # Route cards fade in one at a time, about a second each: a picture before the last caught «2 of 4».
+                time.sleep(2 + len((state["boards"].get("pending") or {}).get("steps") or []))
+                # /screenshot comes out blank (glass chrome): screencapture needs the terminal's Screen Recording right.
+                shot = os.path.join(SHOTS, f"{n:02d} {re.sub(r'[/:]', '-', s['name'])[:80]}.png")
+                taken = subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot], capture_output=True)
+                # A window on another desktop can't be pictured. SHOW_DEV=1 (only when the owner allowed showing Dev)
+                # brings Dev's window to this desktop and tries once more; without it the window is never raised.
+                if taken.returncode != 0 and os.environ.get("SHOW_DEV") == "1" and not WORK:
+                    subprocess.run(["osascript", "-e", 'tell application id "app.ihatecrypto.mac.dev" to activate'], capture_output=True)
+                    time.sleep(2)
+                    subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])
             if state["boards"].get("pending"):
                 call("POST", "/cancel")
+            restore_settings(old)
             ok = not why
             failed += not ok
             print(f"{'PASS' if ok else 'FAIL'}  {s['name']}  ({time.time() - t0:.0f} s)")

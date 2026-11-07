@@ -8,7 +8,7 @@
 <link rel="canonical" href="https://ihatecrypto.ai/">
 <meta name="theme-color" content="#FAFAFB">
 <!-- Not on a Mac (a phone, an iPad, another computer): the page offers to send its link to a Mac instead of a download. -->
-<script>if (!/Macintosh/.test(navigator.userAgent) || navigator.maxTouchPoints > 1) document.documentElement.classList.add('away');</script>
+<script>{ const u = navigator.userAgent, d = document.documentElement; if (/Windows NT/.test(u)) d.classList.add('win'); else if (!/Macintosh/.test(u) || navigator.maxTouchPoints > 1) d.classList.add('away'); }</script>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ihatecrypto">
 <meta property="og:url" content="https://ihatecrypto.ai/">
@@ -84,6 +84,7 @@
   .btn:hover { box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
   button.btn { border: 0; cursor: pointer; }
   .away .mac-only, html:not(.away) .away-only { display: none !important; }
+  .win .mac-only, .win .not-win, html:not(.win) .win-only { display: none !important; }
   /* Send it to a Mac: the share sheet, or a messenger, mail, X or the link copied. */
   .sendbox { display: flex; flex-direction: column; align-items: center; }
   .shares { display: flex; gap: 10px; margin-top: 14px; }
@@ -104,6 +105,7 @@
   .btn:focus-visible, .sh:focus-visible, .menu-btn:focus-visible, .menu a:focus-visible, .mlangs button:focus-visible, .faq summary:focus-visible, .chip:focus-visible, .nav a:focus-visible, .lang button:focus-visible, .logo:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .meta { color: var(--muted); font-size: 13px; margin-top: 10px; text-align: center; text-wrap: balance; }
+  .meta a.win { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
   /* The header: always there, always with the download. */
   .top { position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding: 10px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); pointer-events: none; }
@@ -514,8 +516,9 @@
       <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a>
       <div class="mlangs"><button type="button" data-l="en" aria-pressed="true"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg>EN</button><button type="button" data-l="es" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-es"/></svg>ES</button><button type="button" data-l="ru" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-ru"/></svg>RU</button></div>
     </div>
-    <button type="button" class="btn sendto away-only"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send_s">Send to Mac</span></button>
+    <button type="button" class="btn sendto away-only"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send_s">Send</span></button>
     <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_s">Download</span></a>
+    <a class="btn win-only dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_s">Download</span></a>
   </div>
 </header>
 
@@ -524,12 +527,14 @@
   <div class="pin">
     <canvas class="gl" aria-hidden="true"></canvas>
     <div class="beat b0 on">
-      <p class="eyebrow"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span data-t="eyebrow">A Mac app that does crypto for you</span></p>
+      <p class="eyebrow"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span data-t="eyebrow">An app that does crypto for you</span></p>
       <h1 data-t="h1">Close the ten tabs.</h1>
       <p class="lead" data-t="lead">A wallet, a swap, a bridge, an explorer, a perps exchange, a gas tracker… Moving ten dollars shouldn't take ten sites. With ihatecrypto it takes one sentence.</p>
       <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl">Download for Mac</span></a>
-      <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}}</p>
-      <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send the link to my Mac</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">ihatecrypto is a Mac app: send yourself the link and open it on your Mac.</p></div>
+      <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}} · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
+      <a class="btn win-only dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_win">Download for Windows</span></a>
+      <p class="meta win-only"><span data-t="req_win">Free · Windows 10 or 11 · Preview</span> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win_more">ARM and what's new</a></p>
+      <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send me the link</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">Open it on a Mac or a Windows PC.</p></div>
     </div>
     <div class="beat b1">
       <p class="kicker" data-t="k1">Instead</p>
@@ -656,12 +661,12 @@
 
 <section class="sec" id="safe">
   <h2 class="h" data-t="safe_h">Why it's safe</h2>
-  <p class="sub" data-t="safe_p">Your keys never leave your Mac, the AI never signs, and nothing moves without your finger.</p>
+  <p class="sub not-win" data-t="safe_p">Your keys never leave your Mac, the AI never signs, and nothing moves without your finger.</p><p class="sub win-only" data-t="safe_p_win">Your keys never leave your PC, the AI never signs, and nothing moves without Windows Hello.</p>
   <div class="tiles">
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 2.5V5M15 2.5V5M9 19v2.5M15 19v2.5M2.5 9H5M2.5 15H5M19 9h2.5M19 15h2.5"/><rect x="9.5" y="11.5" width="5" height="4" rx="1"/><path d="M10.5 11.5v-1a1.5 1.5 0 0 1 3 0v1"/></svg></span>
-      <h3 data-t="sf0t">Keys sealed in your Mac</h3><p data-t="sf0p">The wallet is made on your Mac and sealed by its Secure Enclave. It never leaves the device: no iCloud backup, nothing kept on a server.</p></article>
+      <h3 class="not-win" data-t="sf0t">Keys sealed in your Mac</h3><h3 class="win-only" data-t="sf0t_win">Keys sealed on your PC</h3><p class="not-win" data-t="sf0p">The wallet is made on your Mac and sealed by its Secure Enclave. It never leaves the device: no iCloud backup, nothing kept on a server.</p><p class="win-only" data-t="sf0p_win">The wallet is made on your PC and sealed with a key Windows Hello keeps in the TPM chip, which every Windows 11 PC has. It never leaves the device: no cloud copy, nothing kept on a server.</p></article>
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11v4M8.5 14.5V12a3.5 3.5 0 0 1 7 0v2.5M5.5 15v-3a6.5 6.5 0 0 1 13 0v1.5M10 20.5c-1-1.5-1.5-3.3-1.5-5M14.5 20.5c.7-1.4 1-3 1-4.5M18.2 17.5c-.2 1-.5 2-.9 2.8"/></svg></span>
-      <h3 data-t="sf1t">Touch ID for every move</h3><p data-t="sf1p">Each move asks for your fingerprint, and one touch covers one move. Or confirm on a Ledger and keep the bulk there.</p></article>
+      <h3 class="not-win" data-t="sf1t">Touch ID for every move</h3><h3 class="win-only" data-t="sf1t_win">Windows Hello for every move</h3><p class="not-win" data-t="sf1p">Each move asks for your fingerprint, and one touch covers one move. Or confirm on a Ledger and keep the bulk there.</p><p class="win-only" data-t="sf1p_win">Each move asks Windows Hello, and one prompt covers one move. Or confirm on a Ledger and keep the bulk there.</p></article>
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="10" rx="3"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span>
       <h3 data-t="sf2t">The AI can't press Confirm</h3><p data-t="sf2p">The model reads, looks things up and proposes; it never holds a key. Only the Confirm button on a card signs. A typed "yes", or a web page trying to talk it into one, moves nothing.</p></article>
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12.5l4 4 8-9M10.5 15.5l1 1 8-9"/></svg></span>
@@ -671,7 +676,7 @@
     <article class="tile"><span class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span>
       <h3 data-t="sf5t">Checked before it's sent</h3><p data-t="sf5p">Contracts are checked for age, verified code and scam reports; lookalike sites are blocked.</p></article>
   </div>
-  <p class="fine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span data-t="safe_fine">Signed and notarized by Apple. Updates are signed too and install only when you choose to.</span></p>
+  <p class="fine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span class="not-win" data-t="safe_fine">Signed and notarized by Apple. Updates are signed too and install only when you choose to.</span><span class="win-only" data-t="safe_fine_win">The installer isn't code-signed yet, so Windows asks before running it. Updates are signed and install only when you choose to.</span></p>
 </section>
 
 <section class="sec" id="open">
@@ -705,12 +710,12 @@
 <section class="sec" id="faq">
   <h2 class="h" data-t="q_h">Questions</h2>
   <div class="faq">
-    <details><summary><span data-t="f0q">Who holds the keys?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f0a">You do. The wallet is made on your Mac and sealed in its Secure Enclave; you confirm moves with Touch ID, or with a Ledger. Nothing is kept on a server.</p></details>
+    <details><summary><span data-t="f0q">Who holds the keys?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f0a">You do. The wallet is made on your Mac and sealed in its Secure Enclave; you confirm moves with Touch ID, or with a Ledger. Nothing is kept on a server.</p><p class="win-only" data-t="f0a_win">You do. The wallet is made on your PC and sealed with a key in its TPM chip; you confirm moves with Windows Hello, or with a Ledger. Nothing is kept on a server.</p></details>
     <details><summary><span data-t="f5q">Can the AI move my money by itself?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f5a">No. It can look things up and lay out a move; only your Confirm, with Touch ID, carries one out.</p></details>
     <details><summary><span data-t="f1q">Which networks does it work with?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f1a">Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR and Tempo, through Jupiter, Kamino, Aave, Morpho, Relay, Uniswap and NEAR Intents.</p></details>
-    <details><summary><span data-t="f2q">Which AI does it use?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f2a">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac.</p></details>
+    <details><summary><span data-t="f2q">Which AI does it use?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f2a">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac.</p><p class="win-only" data-t="f2a_win">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your PC.</p></details>
     <details><summary><span data-t="f3q">What does it cost?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f3a">The app is a free download. You pay the networks' fees and your own AI plan. On Hyperliquid, ihatecrypto takes 0.05% of each trade, on top of the exchange's own fee.</p></details>
-    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to.</p></details>
+    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to.</p><p class="win-only" data-t="f4a_win">A PC with Windows 10 or 11 and Windows Hello set up (a PIN is enough). A new version installs only when you choose to.</p></details>
   </div>
 </section>
 
@@ -720,12 +725,14 @@
     <h2 data-t="slogan">Even crypto hates crypto.</h2>
     <p data-t="end_p">So close the tabs and let it do the crypto. All you do is say what you want.</p>
     <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl">Download for Mac</span></a>
-    <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}}</p>
-    <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send the link to my Mac</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">ihatecrypto is a Mac app: send yourself the link and open it on your Mac.</p></div>
+    <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}} · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
+    <a class="btn win-only dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_win">Download for Windows</span></a>
+    <p class="meta win-only"><span data-t="req_win">Free · Windows 10 or 11 · Preview</span> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win_more">ARM and what's new</a></p>
+    <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send me the link</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">Open it on a Mac or a Windows PC.</p></div>
   </div>
 </section>
 </main>
-<footer>ihatecrypto · <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a> · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
+<footer>ihatecrypto · <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a> · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><span class="win-only"><a class="dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe" data-t="dl_win">Download for Windows</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
 
 <!-- The words in Spanish and Russian (English is the page itself); build.py renders /es/ and /ru/ from them. -->
 <script type="application/json" id="i18n">
@@ -739,17 +746,21 @@
 "n_mf": "Manifiesto",
 "menu": "Menú",
 "swipe": "← Desliza el lienzo →",
-"send_s": "A mi Mac",
-"send": "Enviar el enlace a mi Mac",
-"away": "ihatecrypto es una app para Mac: envíate el enlace y ábrelo en tu Mac.",
-"share": "ihatecrypto: una app para Mac que se encarga de tus criptos con una sola frase",
+"send_s": "Enviar",
+"send": "Enviarme el enlace",
+"away": "Ábrelo en un Mac o en un PC con Windows.",
+"share": "ihatecrypto: una app que se encarga de tus criptos con una sola frase",
 "copied": "Copiado",
 "copy": "Copiar enlace",
 "mail": "Correo",
 "dl_s": "Descargar",
 "dl": "Descargar para Mac",
 "req": "Gratis · macOS 26 o posterior",
-"eyebrow": "Una app para Mac que se encarga de tus criptos",
+"win": "También para Windows (vista previa)",
+"dl_win": "Descargar para Windows",
+"req_win": "Gratis · Windows 10 u 11 · vista previa",
+"win_more": "ARM y novedades",
+"eyebrow": "Una app que se encarga de tus criptos",
 "h1": "Cierra las diez pestañas.",
 "lead": "Una billetera, un DEX, un puente, un explorador de bloques, un exchange de perpetuos, un medidor de gas… Mover diez dólares no debería requerir diez sitios. Con ihatecrypto basta una frase.",
 "hint": "Desliza",
@@ -778,10 +789,15 @@
 "chip2s": "Corto petróleo",
 "safe_h": "Por qué es seguro",
 "safe_p": "Tus claves nunca salen de tu Mac, la IA nunca firma y nada se mueve sin tu Touch ID.",
+"safe_p_win": "Tus claves nunca salen de tu PC, la IA nunca firma y nada se mueve sin Windows Hello.",
 "sf0t": "Claves guardadas solo en tu Mac",
+"sf0t_win": "Claves guardadas solo en tu PC",
 "sf0p": "La billetera se crea en tu Mac y la protege su chip Secure Enclave. Nunca sale del dispositivo: ni copia en iCloud ni nada guardado en un servidor.",
+"sf0p_win": "La billetera se crea en tu PC y la protege una clave de Windows Hello en el chip TPM, que tiene todo PC con Windows 11. Nunca sale del dispositivo: ni copia en la nube ni nada guardado en un servidor.",
 "sf1t": "Touch ID en cada movimiento",
+"sf1t_win": "Windows Hello en cada movimiento",
 "sf1p": "Cada movimiento pide tu huella, y cada toque confirma uno solo. Para sumas grandes, conecta un Ledger y confirma en él.",
+"sf1p_win": "Cada movimiento lo confirma Windows Hello, y cada confirmación vale para uno solo. Para sumas grandes, conecta un Ledger y confirma en él.",
 "sf2t": "La IA no puede pulsar Confirm",
 "sf2p": "El modelo lee, busca y propone, pero nunca tiene una clave. Lo único que firma es el botón Confirm de una tarjeta. Ni un «sí» en el chat ni una inyección de prompt desde una página web mueven nada.",
 "sf3t": "Dos IA leen cada orden",
@@ -791,6 +807,7 @@
 "sf5t": "Revisado antes de enviar",
 "sf5p": "Los contratos se revisan por antigüedad, código verificado y reportes de estafa; los sitios imitadores se bloquean.",
 "safe_fine": "Firmada y notarizada por Apple. Las actualizaciones también van firmadas y se instalan solo cuando tú lo decides.",
+"safe_fine_win": "El instalador aún no está firmado con un certificado, así que Windows te pregunta antes de abrirlo. Las actualizaciones van firmadas y se instalan solo cuando tú lo decides.",
 "oss_k": "Código abierto · GPL-3.0",
 "oss_h": "Billetera no custodial y de código totalmente abierto",
 "oss_p": "Las claves solo las tienes tú: ni nosotros ni nadie más puede tocar tu dinero. Todo el código de la app está en GitHub, así que no tienes que creernos: compruébalo tú mismo o pídeselo a Claude.",
@@ -828,16 +845,19 @@
 "q_h": "Preguntas",
 "f0q": "¿Quién guarda las claves?",
 "f0a": "Tú. La billetera se crea en tu Mac y la protege su Secure Enclave; confirmas los movimientos con Touch ID o con un Ledger. Nada se guarda en un servidor.",
+"f0a_win": "Tú. La billetera se crea en tu PC y la protege una clave en su chip TPM; confirmas los movimientos con Windows Hello o con un Ledger. Nada se guarda en un servidor.",
 "f5q": "¿Puede la IA mover mi dinero por su cuenta?",
 "f5a": "No. Puede buscar cosas y preparar un movimiento; solo tu Confirm, con Touch ID, lo ejecuta.",
 "f1q": "¿Con qué redes funciona?",
 "f1a": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR y Tempo, a través de Jupiter, Kamino, Aave, Morpho, Relay, Uniswap y NEAR Intents.",
 "f2q": "¿Qué IA usa?",
 "f2a": "La tuya: una suscripción a ChatGPT Plus o Pro, una suscripción a Claude a través de Claude Code, OpenRouter, una clave de API o un modelo que corre en tu Mac.",
+"f2a_win": "La tuya: una suscripción a ChatGPT Plus o Pro, una suscripción a Claude a través de Claude Code, OpenRouter, una clave de API o un modelo que corre en tu PC.",
 "f3q": "¿Cuánto cuesta?",
 "f3a": "La app se descarga gratis. Pagas las comisiones de las redes y tu propio plan de IA. En Hyperliquid, ihatecrypto cobra un 0,05% de cada operación, además de la comisión del propio exchange.",
 "f4q": "¿Qué necesito?",
 "f4a": "Un Mac con macOS 26 o posterior, Apple silicon o Intel. Una versión nueva se instala solo cuando tú lo decides.",
+"f4a_win": "Un PC con Windows 10 u 11 y Windows Hello activado (basta con un PIN). Una versión nueva se instala solo cuando tú lo decides.",
 "slogan": "Hasta la cripto odia la cripto.",
 "end_p": "Así que cierra las pestañas. Solo di lo que quieres y la app hará el resto.",
 "meta_title": "ihatecrypto — una app para Mac que se encarga de tus criptos",
@@ -848,17 +868,21 @@
 "n_mf": "Манифест",
 "menu": "Меню",
 "swipe": "← Листайте холст →",
-"send_s": "На Mac",
-"send": "Отправить ссылку на Mac",
-"away": "ihatecrypto — приложение для Mac: отправьте себе ссылку и откройте её на Mac.",
-"share": "ihatecrypto — приложение для Mac: вся крипта одной фразой",
+"send_s": "Ссылка",
+"send": "Отправить себе ссылку",
+"away": "Откройте её на Mac или на компьютере с Windows.",
+"share": "ihatecrypto — вся крипта одной фразой",
 "copied": "Скопировано",
 "copy": "Скопировать ссылку",
 "mail": "Почта",
 "dl_s": "Скачать",
 "dl": "Скачать для Mac",
 "req": "Бесплатно · macOS 26 и новее",
-"eyebrow": "Приложение для Mac, которое берёт крипту на себя",
+"win": "Есть и для Windows (превью)",
+"dl_win": "Скачать для Windows",
+"req_win": "Бесплатно · Windows 10 или 11 · превью",
+"win_more": "ARM и что нового",
+"eyebrow": "Приложение, которое берёт крипту на себя",
 "h1": "Закройте десять вкладок.",
 "lead": "Кошелёк, обменник, мост, эксплорер, фьючерсы, трекер газа… Десять сайтов, чтобы перевести десять баксов. Серьёзно? В ihatecrypto хватит одной фразы.",
 "hint": "Листайте",
@@ -887,10 +911,15 @@
 "chip2s": "Шорт нефти",
 "safe_h": "Почему это безопасно",
 "safe_p": "Ключи не покидают ваш Mac, ИИ ничего не подписывает, а без Touch ID не сдвинется ни цента.",
+"safe_p_win": "Ключи не покидают ваш компьютер, ИИ ничего не подписывает, а без Windows Hello не сдвинется ни цента.",
 "sf0t": "Ключи живут только на вашем Mac",
+"sf0t_win": "Ключи живут только на вашем компьютере",
 "sf0p": "Кошелёк создаётся прямо на Mac и защищён чипом Secure Enclave. Он никуда не уходит: ни копии в iCloud, ни записи на сервере.",
+"sf0p_win": "Кошелёк создаётся прямо на компьютере и защищён ключом Windows Hello в чипе TPM, который есть в любом компьютере с Windows 11. Он никуда не уходит: ни копии в облаке, ни записи на сервере.",
 "sf1t": "Touch ID на каждую операцию",
+"sf1t_win": "Windows Hello на каждую операцию",
 "sf1p": "Каждая операция — отдельный отпечаток: одно касание подтверждает только одну. Для крупных сумм подключите Ledger: подтверждать будете на нём.",
+"sf1p_win": "Каждую операцию подтверждает Windows Hello, и одно подтверждение действует только на одну. Для крупных сумм подключите Ledger: подтверждать будете на нём.",
 "sf2t": "ИИ не может нажать Confirm",
 "sf2p": "Модель читает, ищет и предлагает, но ключей у неё нет. Подписать операцию может только кнопка Confirm на карточке. Ни «да» в чате, ни промпт-инъекция с чужой страницы ничего не отправят.",
 "sf3t": "Каждую команду читают два ИИ",
@@ -900,6 +929,7 @@
 "sf5t": "Проверка перед отправкой",
 "sf5p": "У контрактов проверяются возраст, верифицированный код и жалобы на скам; сайты-двойники блокируются.",
 "safe_fine": "Приложение подписано и заверено Apple. Обновления тоже подписаны и ставятся, только когда вы сами решите.",
+"safe_fine_win": "Установщик пока не подписан сертификатом, поэтому Windows спросит, запускать ли его. Обновления подписаны и ставятся, только когда вы сами решите.",
 "oss_k": "Открытый код · GPL-3.0",
 "oss_h": "Некастодиальный кошелёк с полностью открытым кодом",
 "oss_p": "Ключи есть только у вас: ни у нас, ни у кого-то ещё нет доступа к вашим деньгам. Весь код приложения открыт на GitHub, так что верить нам на слово не нужно: проверьте сами или попросите Claude.",
@@ -937,16 +967,19 @@
 "q_h": "Вопросы",
 "f0q": "Кто хранит ключи?",
 "f0a": "Вы. Кошелёк создаётся на вашем Mac и защищён его Secure Enclave, а операции вы подтверждаете через Touch ID или Ledger. На серверах ничего не хранится.",
+"f0a_win": "Вы. Кошелёк создаётся на вашем компьютере и защищён ключом в чипе TPM, а операции вы подтверждаете через Windows Hello или Ledger. На серверах ничего не хранится.",
 "f5q": "Может ли ИИ сам потратить мои деньги?",
 "f5a": "Нет. Он может что-то узнать и подготовить операцию, но выполнить её можно только вашим Confirm с Touch ID.",
 "f1q": "Какие сети поддерживаются?",
 "f1a": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR и Tempo — через Jupiter, Kamino, Aave, Morpho, Relay, Uniswap и NEAR Intents.",
 "f2q": "Какой ИИ внутри?",
 "f2a": "Ваш собственный: подписка ChatGPT Plus или Pro, подписка Claude через Claude Code, OpenRouter, API-ключ или локальная модель на Mac.",
+"f2a_win": "Ваш собственный: подписка ChatGPT Plus или Pro, подписка Claude через Claude Code, OpenRouter, API-ключ или локальная модель на компьютере.",
 "f3q": "Сколько стоит?",
 "f3a": "Приложение бесплатное. Вы платите комиссии сетей и за свою подписку на ИИ. Со сделок на Hyperliquid ihatecrypto берёт 0,05% сверх комиссии самой биржи.",
 "f4q": "Что нужно для работы?",
 "f4a": "Mac с macOS 26 или новее, Apple silicon или Intel. Новая версия ставится, только когда вы сами решите.",
+"f4a_win": "Компьютер с Windows 10 или 11 и включённым Windows Hello (хватит PIN-кода). Новая версия ставится, только когда вы сами решите.",
 "slogan": "Даже крипта ненавидит крипту.",
 "end_p": "Так что закрывайте вкладки. Просто скажите, что нужно, — остальное сделает приложение.",
 "meta_title": "ihatecrypto — приложение для Mac, которое берёт крипту на себя",
@@ -1148,12 +1181,15 @@ $$('[data-ta]').forEach((el) => { T.en[el.dataset.ta] ??= el.getAttribute('aria-
 // Counts, not people: the page tells the site what was pressed or reached, with the language and nothing else (no cookie,
 // no id); the site adds them up by day (Tools/updates/worker.js). Downloads it counts itself.
 const told = new Set();
+if (document.documentElement.classList.contains('win')) navigator.userAgentData?.getHighEntropyValues?.(['architecture'])
+  .then((v) => { if (v.architecture === 'arm') $$('a.dlwin').forEach((a) => { a.href = a.href.replace('-x64-', '-arm64-'); }); })
+  .catch(() => {});
 function track(n, once = true) {
   if (once && told.has(n)) return;
   told.add(n);
   try { navigator.sendBeacon('/e', JSON.stringify({ n, l: lang })); } catch (e) {}
 }
-T.en.share = 'ihatecrypto: a Mac app that does crypto from one sentence'; T.en.copied = 'Copied';
+T.en.share = 'ihatecrypto: an app that does crypto from one sentence'; T.en.copied = 'Copied';
 
 // Off a Mac the link travels: the share sheet (AirDrop, Messages, Notes, any messenger), or these, or the clipboard.
 const SHARE = 'https://ihatecrypto.ai/?send';

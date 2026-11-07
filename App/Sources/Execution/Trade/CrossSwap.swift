@@ -35,8 +35,9 @@ extension Executor {
             default:
                 // USDT, USDS and USDe by their mints (Stablecoins): a ticker search can land on a lookalike.
                 let stable = Stablecoins.find(token, on: "solana")?.address
-                let mint = token.count >= 32 ? token : stable != nil ? stable : await TokenResearch.solanaMint(symbol: token)
-                guard let mint, let info = await TokenResearch.solanaToken(mint) else { throw ExecutionError("Jupiter knows no verified \(token) on Solana. Nothing was signed.") }
+                // Jupiter not answering throws its own words (TokenResearch.get): «knows no verified» is only its «no».
+                let mint: String? = if token.count >= 32 { token } else if let stable { stable } else { try await TokenResearch.solanaMint(symbol: token) }
+                guard let mint, let info = try await TokenResearch.solanaToken(mint) else { throw ExecutionError("Jupiter knows no verified \(token) on Solana. Nothing was signed.") }
                 return CrossSide(chain: Relay.Chain.solana, currency: mint, decimals: info.decimals, symbol: info.symbol, coin: false, token2022: info.token2022)
             }
         }
@@ -47,9 +48,10 @@ extension Executor {
     }
 
     /// Relay's quote for the swap, checked: from this wallet to this wallet, and no more value lost than allowed.
-    /// `amount` nil = all of a token (never all of a coin: its fees come from it).
+    /// `amount` nil = all of a token held now (never all of a coin: its fees come from it).
     /// `capped` false: for the card, which shows the cost instead of stopping at it, priced at the amount asked even when
-    /// the wallet holds less (the run checks it).
+    /// the wallet holds less (the run checks it). No dollar price for what goes in stops both, so the card shows the way
+    /// Confirm takes.
     func crossQuote(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, capped: Bool = true)
         async throws -> (quote: Relay.Quote, origin: CrossSide, destination: CrossSide, units: Decimal) {
         guard from != to else { throw ExecutionError("Both sides are on \(WalletCommand.placeName(from)): that's a swap there, not between networks.") }
@@ -62,13 +64,16 @@ extension Executor {
         } else {
             origin.coin ? Decimal(try await EVMNetwork.named(from)!.rpc.balance(wallet.evm)) : try await balance(origin.currency, on: EVMNetwork.named(from)!.rpc)
         }
-        guard let amount else {
+        // «All» is what was just read, priced here: a second pass would read it again and drop `capped`.
+        if amount == nil {
             guard !origin.coin else { throw ExecutionError("Say how much \(origin.symbol): its network fees come out of it. Nothing was signed.") }
             guard held > 0 else { throw ExecutionError("No \(origin.symbol) on \(WalletCommand.placeName(from)).") }
-            return try await crossQuote(a, on: from, for: b, on: to, amount: held / scale)
         }
+        let amount = amount ?? held / scale
         let units = (amount * scale).whole
         guard units > 0 else { throw ExecutionError("\(Fmt.num(amount)) \(origin.symbol) is less than its smallest unit.") }
+        // A coin goes as one transaction's value, under 2⁶⁴ wei (the signer's UInt64): 18.44 coins.
+        guard !origin.coin || units <= Decimal(UInt64.max) else { throw ExecutionError("At most 18 \(origin.symbol) at once. Nothing was signed.") }
         guard units <= held || !capped else {
             throw ExecutionError("\(Fmt.num(held / scale, maxFraction: 8)) \(origin.symbol) on \(WalletCommand.placeName(from)); \(Fmt.num(amount, maxFraction: 8)) is more. Nothing was signed.")
         }
@@ -80,12 +85,28 @@ extension Executor {
         guard binding.ok else { throw GuardStop(binding.problems.joined(separator: " ")) }
         let worthIn = Decimal(string: quote.amountInUSD) ?? 0, worthOut = Decimal(string: quote.amountOutUSD) ?? 0
         guard worthOut > 0 else { throw ExecutionError("Relay doesn't quote \(origin.symbol) for \(destination.symbol) now. Nothing was signed.") }
-        if capped { try Self.checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap") }
+        try Self.holdsCrossLoss(in: worthIn, out: worthOut, unpriced: "Relay doesn't price \(origin.symbol) on \(WalletCommand.placeName(from))",
+                                what: "Relay's swap", capped: capped)
         return (quote, origin, destination, units)
     }
 
+    /// A swap across networks judged by value: no dollar price for either side stops it before signing (read as $0, it
+    /// let any loss through, or asked about a loss that wasn't); `capped`, at most 3% (or $0.15) lost, past that a
+    /// CostlyMove to ask about.
+    static func holdsCrossLoss(in worthIn: Decimal, out worthOut: Decimal, unpriced: String, what: String, capped: Bool = true) throws {
+        guard worthIn > 0, worthOut > 0 else { throw ExecutionError("\(unpriced) now, so what \(what) keeps can't be checked. Nothing was signed.") }
+        guard capped else { return }
+        try checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: what)
+    }
+
+    /// A failure of Relay's that NEAR Intents may take over: no route, no quote, the network. Never a stop by the guard or
+    /// the signer (GuardStop: nothing is offered around it), nor a loss past the cap (CostlyMove: «Send anyway» asks about
+    /// this route). The card and the run go by this one rule, so the card shows the way Confirm takes.
+    static func intentsMayTake(_ error: any Error) -> Bool { !(error is GuardStop || error is CostlyMove) }
+
     /// The swap's quote for the card: what arrives, its worth, and how long Relay says it takes. Nothing is signed.
-    /// NEAR's side, or a pair Relay has no route for, is NEAR Intents' (IntentSwap.swift).
+    /// NEAR's side, or a pair Relay has no route for, is NEAR Intents' (IntentSwap.swift). A stop by the guard or the
+    /// signer on Relay's quote stays a stop: no quote, not NEAR's.
     public func crossQuoteText(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String? = nil) async throws -> (gets: String, way: String) {
         if from == "near" || to == "near" {
             guard let amount else { throw ExecutionError("Say how much \(a.uppercased()).") }
@@ -94,7 +115,7 @@ extension Executor {
         do {
             let (q, _, d, _) = try await crossQuote(a, on: from, for: b, on: to, amount: amount, capped: false)
             return ("\(Fmt.num(Decimal(string: q.amountOutFormatted) ?? 0, maxFraction: 8)) \(d.symbol) ≈ \(Fmt.usd(Decimal(string: q.amountOutUSD) ?? 0))", "≈ \(max(q.seconds, 1)) s")
-        } catch {
+        } catch where Self.intentsMayTake(error) {
             guard let amount, let other = try? await intentQuoteText(a, on: from, for: b, on: to, amount: amount, near: near) else { throw error }
             return other
         }
@@ -102,12 +123,13 @@ extension Executor {
 
     /// The swap: Relay's quote checked, its one transaction signed on the origin network, then Relay's word that it landed.
     /// NEAR's side goes through NEAR Intents, and so does a pair Relay has no route for when 1Click lists both tokens.
+    /// A stop by the guard or the signer on Relay's quote reaches the user as it is, never taken to NEAR Intents.
     public func crossSwap(_ a: String, on from: String, for b: String, on to: String, amount: Decimal?, near: String? = nil) async throws -> String {
         if from == "near" || to == "near" { return try await intentSwap(a, on: from, for: b, on: to, amount: amount, near: near) }
         if let why = Modules.current.refusal(.relay) { throw ExecutionError(why) }
         let quoted: (quote: Relay.Quote, origin: CrossSide, destination: CrossSide, units: Decimal)
         do { quoted = try await crossQuote(a, on: from, for: b, on: to, amount: amount) }
-        catch where !(error is CostlyMove) {
+        catch where Self.intentsMayTake(error) {
             guard let amount, (try? await intentQuote(a, on: from, for: b, on: to, amount: amount, near: near, dry: true)) != nil else { throw error }
             report("Relay: \(error.localizedDescription) NEAR Intents has a route: taking it.")
             return try await intentSwap(a, on: from, for: b, on: to, amount: amount, near: near)
@@ -181,7 +203,7 @@ extension Executor {
         let note = "Relay: \(sent) on \(net.name) → \(quote.recipient == wallet.solana ? "Solana" : "another network")"
         if origin.coin {
             guard let depository = try await Relay.depository(chainId: net.relayChain)?.lowercased(), quote.evm.count == 1, let call = quote.evm.first,
-                  call.to.lowercased() == depository, call.chainId == net.relayChain, Decimal(string: call.value) == units, let value = UInt64(exactly: NSDecimalNumber(decimal: units).uint64Value) else {
+                  call.to.lowercased() == depository, call.chainId == net.relayChain, Decimal(string: call.value) == units, let value = UInt64(exactly: NSDecimalNumber(decimal: units).uint64Value), Decimal(value) == units else {
                 throw ExecutionError("Relay's transaction isn't one deposit of exactly \(sent) to the depository it publishes for \(net.name). Nothing was signed.")
             }
             // Coins to Relay's depository pay Relay: the signer asks to allow that address in person the first time.

@@ -628,6 +628,10 @@ struct AddressEditor: View {
                 Label("Valid \(network.title) address. Compare it with the source: starts \(ends.start), ends \(ends.end).", systemImage: "checkmark.seal.fill")
                     .foregroundStyle(Brand.profit)
                 if let duplicate { Label("Already saved as “\(duplicate.name)”.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.jevInk) }
+                if duplicate == nil, let twin = ws.lookalike(trimmed) {
+                    Label("Looks like \(twin.name): same start and end, a different middle. That is how address poisoning looks. Check it against the source.",
+                          systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.loss)
+                }
                 if isOwn { Label("This is your own wallet.", systemImage: "person.crop.circle.badge.checkmark").foregroundStyle(.secondary) }
                 if let saveError { Label(saveError, systemImage: "xmark.octagon.fill").foregroundStyle(Brand.loss) }
                 if isExchange {
@@ -983,7 +987,10 @@ extension Workspace {
         pendingAction = .address(entry)
         pendingText = "save “\(name)”"
         let ends = AddressCheck.ends(address)
-        if let domain {
+        if let twin = lookalike(address), let ru = lookalike(address, russian: true) {
+            reply(say("This looks like address poisoning: it starts \(ends.start) and ends \(ends.end) like \(twin.name), but the middle is different. Check it against the source. You can still save it: Save asks for \(Presence.name), and the prompt shows the warning.",
+                      "Похоже на подмену адреса: начало \(ends.start) и конец \(ends.end) как у \(ru.name), а середина другая. Сверь с источником. Сохранить всё равно можно: Save спросит \(Presence.ru), и в запросе будет предупреждение."), note: note)
+        } else if let domain {
             reply(say("\(domain) points at \(ends.start)…\(ends.end) on \(network.title), read on-chain just now. Check it on the canvas; Save asks for \(Presence.name) with the whole address.",
                       "\(domain) ведёт на \(ends.start)…\(ends.end) в \(network.title) — прочитано в сети только что. Сверь на холсте; Save спросит \(Presence.ru) с полным адресом."), note: note)
         } else {
@@ -1007,6 +1014,12 @@ extension Workspace {
 struct PendingAddressBoard: View {
     @Environment(Workspace.self) private var ws
 
+    /// «0x7a3F 0d5e A1b3 …»: groups of four after the 0x, the way to compare a middle by eye.
+    static func grouped(_ address: String) -> String {
+        let evm = address.hasPrefix("0x"), body = evm ? String(address.dropFirst(2)) : address
+        return (evm ? "0x" : "") + stride(from: 0, to: body.count, by: 4).map { String(body.dropFirst($0).prefix(4)) }.joined(separator: " ")
+    }
+
     var body: some View {
         if case .address(let entry)? = ws.pendingAction {
             VStack(alignment: .leading, spacing: 10) {
@@ -1019,8 +1032,19 @@ struct PendingAddressBoard: View {
                       ? "Taken from your own message and checked for \(entry.network.title). Compare it with the source: Save asks for \(Presence.name) with the whole address on the prompt."
                       : "Resolved from \(entry.note.components(separatedBy: " — ").first ?? "") on \(entry.network.title) just now and checked. Save asks for \(Presence.name) with the whole address on the prompt.",
                       systemImage: "checkmark.shield")
-                    .font(.ui(10)).foregroundStyle(.secondary).frame(width: 470, alignment: .leading)
-                PendingButtons(confirm: "Save")
+                    .font(.ui(10)).foregroundStyle(.secondary).frame(width: 340, alignment: .leading)
+                let twin = ws.lookalike(entry.address)
+                if let twin {
+                    // Both whole, one under the other: the middle is where they differ.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Looks like \(twin.name): same start and end, a different middle. That is how address poisoning looks.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.ui(11, .semibold)).foregroundStyle(Brand.loss)
+                        Text("Known · " + Self.grouped(twin.address)).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                        Text("New   · " + Self.grouped(entry.address)).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    }
+                    .frame(width: 340, alignment: .leading)
+                }
+                PendingButtons(confirm: twin == nil ? "Save" : "Save anyway")
             }
             .transition(.opacity)
         }
@@ -1045,6 +1069,14 @@ extension Workspace {
         return wallets.first { $0.id != activeWalletID && ($0.label.lowercased() == key || ledger && $0.kind == "ledger") }.flatMap { w in
             w.solana.map { SavedAddress(name: w.label, address: $0, network: .solana, category: "Your wallet", icon: .logo("sol")) }
         }
+    }
+
+    /// The saved address or own wallet `address` is a twin of (AddressCheck.lookalike), as «name»; nil when none. The
+    /// signer compares it again with its own lists and says so on the prompt.
+    /// `russian`: the name as «как у …» takes it.
+    func lookalike(_ address: String, russian: Bool = false) -> (name: String, address: String)? {
+        let own = wallets.flatMap { w in [w.solana, w.evm].compactMap { $0 }.map { (russian ? "твоего кошелька «\(w.label)»" : "your wallet «\(w.label)»", $0) } }
+        return AddressCheck.lookalike(address, among: addressBook.map { ("«\($0.name)»", $0.address) } + own)
     }
 
     func markSent(_ entry: SavedAddress) {
@@ -1127,6 +1159,32 @@ extension Workspace {
         return (entry, asset.symbol, address)
     }
 
+    /// A private send's saved address, what NEAR Intents pays there (OneClick.Asset.payout) and the network it pays on:
+    /// the one named, else the entry's own. Throws why it can't, before any card is drawn.
+    func privateRecipient(_ name: String, token: String, network: String?) throws -> (entry: SavedAddress, symbol: String, address: String, network: String) {
+        guard let entry = savedEntry(name, network: network) else { throw ExecutionError("There’s no “\(name)” in Addresses.") }
+        let net = network ?? entry.network.rawValue, saved = entry.network.rawValue
+        // USDC on an EVM network goes to a 0x entry saved on any of them; everything else only to the network it's saved on.
+        let evm: Set<String> = ["base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperevm", "robinhood", "tempo"]
+        guard net == saved || (evm.contains(net) && evm.contains(saved)) else {
+            throw ExecutionError("“\(entry.name)” is a \(entry.network.title) address, so it can't be paid on \(WalletCommand.placeName(net)).")
+        }
+        guard let asset = OneClick.Asset.payout(token, on: net) else {
+            throw ExecutionError("A private send pays USDC on Solana, Base, Arbitrum or Ethereum, or a coin on a network only NEAR Intents reaches (BTC, ZEC, TRX, USDT on TRON, XRP, DOGE, SUI) — not \(token.uppercased()) on \(WalletCommand.placeName(net)).")
+        }
+        var address = entry.address
+        if !entry.memo.isEmpty {
+            guard entry.network == .xrp, let tag = UInt32(entry.memo.trimmingCharacters(in: .whitespaces)), let x = AddressCheck.xAddress(entry.address, tag: tag) else {
+                throw ExecutionError("“\(entry.name)” needs a memo, and NEAR Intents can't add one on \(entry.network.title).")
+            }
+            address = x
+        }
+        if let off = Modules.current.refusal(.oneClick, ru: modulesRussian) { throw ExecutionError(off) }
+        guard OneClick.key != nil else { throw ExecutionError("A private send needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.") }
+        try requireConfirmed(entry)
+        return (entry, asset.symbol, address, net)
+    }
+
     /// The entry a name means. One name can be saved on several networks («Automation» on Solana and on Base): the one
     /// that can receive on the network named comes first; a 0x address on one EVM network is the same on another.
     func savedEntry(_ name: String, network: String?) -> SavedAddress? {
@@ -1191,7 +1249,11 @@ extension Workspace {
         reply(say("The transfer is on the canvas: \(Fmt.num(amount)) USDC to “\(entry.name)” on \(entry.network.title), \(ends.start) … \(ends.end). Sign it",
                   "Перевод на холсте: \(Fmt.num(amount)) USDC на «\(entry.name)» в \(entry.network.title), \(ends.start) … \(ends.end). Подпиши",
                   "La transferencia está en el lienzo: \(Fmt.num(amount)) USDC a «\(entry.name)» en \(entry.network.title), \(ends.start) … \(ends.end). Fírmala")
-              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar.")), note: note)
+              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar."))
+              // P3: the private way is one click over Confirm.
+              + (privacyTwin() == nil ? "" : say(" It can also go privately through NEAR Intents, so nobody can link it to you: pick Private over Confirm.",
+                                                 " Можно отправить и приватно, через NEAR Intents, чтобы никто не связал перевод с тобой: выбери Private над Confirm.",
+                                                 " También puede ir en privado por NEAR Intents, sin que nadie lo vincule contigo: elige Private sobre Confirm.")), note: note)
     }
 
     /// A send no balance can cover is said at once, not a card whose Confirm could only fail («send 100 USDC to Automation

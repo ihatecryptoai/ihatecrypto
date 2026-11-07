@@ -32,6 +32,22 @@ public enum PnL {
         }
     }
 
+    /// A holding's amount and price at one moment: what the portfolio's P/L line is counted from.
+    public struct Mark: Codable, Sendable, Equatable {
+        public let amount: Decimal
+        public let price: Decimal
+        public init(amount: Decimal, price: Decimal) { self.amount = amount; self.price = price }
+    }
+
+    /// What prices did to the holdings between two moments: each amount held at the first, times how far its price moved.
+    /// Money that came in or left, swaps and bridges change amounts, not prices, so the line doesn't jump with them; a
+    /// coin missing at either moment (sold, or not read) adds nothing.
+    // ponytail: funding, fees, slippage and lending yield aren't price moves, so they're left out; add them from
+    // Hyperliquid's ledger and the vaults' rates if the line drifts from the P/L board.
+    public static func priceEffect(from a: [String: Mark], to b: [String: Mark]) -> Decimal {
+        a.reduce(0) { sum, held in b[held.key].map { sum + held.value.amount * ($0.price - held.value.price) } ?? sum }
+    }
+
     /// A funding payment on a Hyperliquid position: − paid, + received.
     public struct Funding: Sendable, Equatable {
         public let time: Date

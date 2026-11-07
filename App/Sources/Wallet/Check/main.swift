@@ -36,6 +36,7 @@ import WalletCore
 //   relay-back <USDC> [--yes]     Hyperliquid perp USDC → USDC on Solana through Relay, timed
 //   evm-sig                       sign an Arbitrum transfer with a random key; the node must name our address
 //   guard-demo                    feed the guard a real transaction with a swapped-in scam address
+//   site-rights [address]         a site's Assign, Allocate, Approve and SetAuthority, simulated, never signed: the browser must see each
 //   return <USDC> [--yes]         HyperCore spot USDC → Solana USDC through 1Click (spotSend to the deposit address)
 //   reconcile                     check every signed-but-unfinished entry of the journal on chain
 //   hl-sig                        testnet signature check with a random key
@@ -79,7 +80,7 @@ do {
     case "jev-screen":
         let text = args.dropFirst().filter { $0 != "--yes" }.joined(separator: " ")
         let key = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
-        printVerdict(await InjectionGuard.screen(text, source: "terminal check", classifier: key.map { JevClassifier(apiKey: $0) }))
+        printVerdict(await InjectionGuard.screen(text, source: "terminal check", classifier: key.map { JevClassifier(apiKey: $0) }).verdict)
     case "jev-eval": try await jevEval(args.dropFirst().first ?? "")
     case "lookup":
         let tool = args.dropFirst().first ?? "", arg = args.dropFirst(2).joined(separator: " ")
@@ -102,6 +103,7 @@ do {
     case "sweep-hyperliquid": try await sweepHyperliquid(to: args.dropFirst().first { !$0.hasPrefix("--") } ?? "")
     case "ledger": try await ledgerCheck(Array(args.dropFirst()))
     case "browser-test-page": try await writeBrowserTestPage(args.dropFirst().first ?? "/tmp/ihatecrypto-test.html")
+    case "site-rights": try await siteRightsCheck(args.dropFirst().first)
     default: print("Unknown command: \(command)"); exit(2)
     }
 } catch {
@@ -175,15 +177,8 @@ func guardSolana(_ signed: (signature: String, wire: Data), lastValid: UInt64, r
     let accounts = try await rpc.resolveAccounts(message)
     var verdict = SolanaGuard.check(message, accounts: accounts, policy: SolanaPolicy(owner: a.solana, recipients: recipients), tokenOwners: tokenOwners)
 
-    var before: [String: Int64] = [:]
-    for w in watch {
-        if w.token {
-            let r = try? await rpc.call("getTokenAccountBalance", [w.address, ["commitment": "confirmed"]]) as? [String: Any]
-            before[w.address] = ((r?["value"] as? [String: Any])?["amount"] as? String).flatMap(Int64.init) ?? 0
-        } else {
-            before[w.address] = Int64(try await rpc.balance(w.address))
-        }
-    }
+    // One read; a node that fails throws rather than a 0 that would switch the balance rules off (as in signAndSend).
+    let before = try SolanaRPC.before(watch.map { ($0.address, $0.label, $0.token) }, try await rpc.accounts(watch.map(\.address)))
     let simulation = try await rpc.simulate(signed.wire, watch: watch.map(\.address))
     if let error = simulation.error { verdict.problems.append("Simulation failed: \(error)") }
     else {

@@ -1,7 +1,10 @@
+import AgentAPIKit
 import AppKit
 import EVMChain
 import GuardJev
 import IhatecryptoCore
+import LLMCatalog
+import LLMNearAI
 import Network
 import SignerAPI
 import SwiftUI
@@ -55,6 +58,8 @@ final class DebugAPI {
     }
     /// /reset opened a fresh canvas: the first /send's canvas is a test canvas.
     private var freshCanvas = false
+    /// The user's own chat provider while a test canvas talks to another one (/reset {"provider"}).
+    private var providerBefore: String?
     /// Folders a scenario made («write to folder …»): /restore removes them with the test canvases.
     private var testFolders: Set<String> = []
     /// Scheduled tasks a test message made («every month on the 1st: …»): /reset and /restore cancel them, or they'd
@@ -144,10 +149,35 @@ final class DebugAPI {
             guard testCanvas || (ws.pendingAction == nil && ws.pendingAllocation == nil) else {
                 return (409, "text/plain", Data("a move waits for Confirm on the user's canvas\n".utf8))
             }
+            // {"provider":"nearai"}: the test canvas talks to that provider (each canvas keeps its own); the user's own
+            // provider comes back with the next /reset or /restore, so a test never changes it for good.
+            let asked = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["provider"] as? String
+            if let asked, LLMCatalog.provider(id: asked) == nil { return (404, "text/plain", Data("no such provider\n".utf8)) }
+            if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.deleteCanvas(id) } else { ws.newCanvas() }
+            if let asked, asked != ws.providerID { providerBefore = ws.providerID; ws.providerID = asked }
+            // A trade's signing sheet left open (a failed preparation) would sit over every scenario after it.
+            ws.prepared = nil
+            ws.executionError = nil
             freshCanvas = true
             dropTestTasks(ws)
             return (200, "application/json", json(state(ws, since: ws.messages.count)))
+        case ("POST", "/agentapi"):
+            // A read of NEAR Intents' Agent API with the partner key from the Keychain, for live checks from a terminal:
+            // {"method":"GET","path":"/v1/network"}; {"method":"POST","path":"/v1/generate-intent","body":{…}} only
+            // asks what an owner would sign. Nothing here signs or submits: submit-intent and agent actions are refused.
+            let o = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:]
+            let method = (o["method"] as? String ?? "GET").uppercased(), path = o["path"] as? String ?? ""
+            guard path.hasPrefix("/v1/"), method == "GET" || (method == "POST" && path == "/v1/generate-intent") else {
+                return (403, "text/plain", Data("only GET reads and generate-intent\n".utf8))
+            }
+            do {
+                try NodeStore.agentAPIReady()
+                let body = o["body"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                return (200, "application/json", try await AgentAPI.call(method, path, body: body))
+            } catch let e as AgentAPI.Failure {
+                return (e.status, "text/plain", Data((e.errorDescription ?? "") .utf8))
+            } catch { return (502, "text/plain", Data(error.localizedDescription.utf8)) }
         case ("POST", "/pick"):
             let index = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["index"] as? Int) ?? 0
             guard !ws.busy else { return (409, "text/plain", Data("busy\n".utf8)) }
@@ -176,6 +206,7 @@ final class DebugAPI {
         case ("POST", "/restore"):
             guard !ws.busy, !ws.executing else { return (409, "text/plain", Data("busy\n".utf8)) }
             let back = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["canvas"] as? String).flatMap(UUID.init(uuidString:))
+            if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.newCanvas() }
             for id in testCanvases { ws.deleteCanvas(id) }
             testCanvases = []
@@ -279,12 +310,36 @@ final class DebugAPI {
             var result: [String: Any] = metered ? meter.stop() : [:]
             result["visible"] = visible
             return (200, "application/json", (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])) ?? Data())
-        case ("GET", let path) where path.hasPrefix("/render/approval"):
-            // The browser's signing sheet for a sample Kamino deposit, drawn off screen («?dark» for the dark look):
-            // to see a design change without a site asking for a real signature. Nothing can be approved from it.
+        case (let method, let path) where path.hasPrefix("/render/approval") && ["GET", "POST"].contains(method):
+            // The browser's signing sheet for a sample Kamino deposit, drawn off screen («?dark» for the dark look,
+            // «?closed» for a site taking all of a token and closing its account): to see a design change without a site
+            // asking for a real signature. POST {"wire": base64} reviews that transaction the way a site's is, simulation
+            // included, for this copy's wallet. POST {"evm": {"to", "data", "value"?, "chain"?}} does the same for a site's
+            // EVM transaction (Arbitrum unless named). Nothing can be approved or signed from it.
+            var origin = "https://kamino.com", site = SiteCheck.Verdict.known, review = Self.sampleReview
+            var evm: EVMReview?
+            if method == "POST", let e = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["evm"] as? [String: Any] {
+                // value and chain as a site sends them: hex strings or numbers (Browser.quantity, as the real path reads).
+                guard let to = e["to"] as? String, let value = Browser.quantity(e["value"]), let chain = e["chain"] == nil ? 42161 : Browser.quantity(e["chain"]),
+                      let url = Browser.evmRPC[chain].flatMap(URL.init(string:)), let from = ws.signerWallet?.evm else {
+                    return (400, "text/plain", Data("POST {\"evm\": {\"to\", \"data\", \"value\", \"chain\"}}, a chain the browser reads, a wallet in this copy\n".utf8))
+                }
+                evm = await Browser.evmReview(to: to, value: value, data: Data(hex: e["data"] as? String ?? "0x") ?? Data(), from: from,
+                                              rpc: EVMRPC(url: url, chainId: chain), simulator: Browser.evmSimulationRPC[chain])
+                (origin, site) = ("file://", .local)
+            } else if method == "POST" {
+                guard let b64 = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["wire"] as? String,
+                      let wire = Data(base64Encoded: b64), let owner = ws.signerWallet?.solana else {
+                    return (400, "text/plain", Data("POST {\"wire\": base64 transaction}, with a wallet in this copy\n".utf8))
+                }
+                do { review = try await ws.browser.review(wire, owner: owner) } catch { return (502, "text/plain", Data("\(error.localizedDescription)\n".utf8)) }
+                (origin, site) = ("file://", .local)
+            } else if path.contains("closed") {
+                (origin, site, review) = ("https://bonk-claim.app", .unknown, Self.closedSampleReview)
+            }
             var png: Data?
             _ = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
-                png = Self.renderApproval(SiteRequest(origin: "https://kamino.com", site: .known, kind: .transaction(Self.sampleReview, send: false), answer: done),
+                png = Self.renderApproval(SiteRequest(origin: origin, site: site, kind: evm.map { .evmTransaction($0) } ?? .transaction(review, send: false), answer: done),
                                           ws: ws, dark: path.contains("dark"))
                 done.resume(returning: false)
             }
@@ -303,6 +358,12 @@ final class DebugAPI {
     }
 
     private func dropTestTasks(_ ws: Workspace) {
+        // A loan guard a test message set (every one sent here is untrusted) would watch the Dev wallet's loan for real.
+        let tests = ws.loanGuards.filter { $0.untrusted == true }
+        if !tests.isEmpty {
+            ws.tasks.removeAll { t in tests.contains { $0.fired == t.id } }
+            ws.loanGuards.removeAll { $0.untrusted == true }
+        }
         guard !testTasks.isEmpty else { return }
         ws.tasks.removeAll { testTasks.contains($0.id) }
         testTasks = []
@@ -317,21 +378,33 @@ final class DebugAPI {
             "executing": ws.executing,
             "model": ws.model,
             "provider": ws.provider.info.name,
+            // On NEAR AI Cloud: the enclave check that let the last message go, as the chat's TEE chip shows it.
+            "tee": ws.teeVerified != nil,
+            // What the last NEAR AI reply proved: "model" (its bytes signed by the attested model key), "gateway", or why not.
+            "teeReply": ws.providerID == NearAI().info.id ? NearAI.lastReply(ws.model).map { "\($0)" } ?? NSNull() : NSNull(),
+            // P3: the send waiting for Confirm offered both ways, and which one it is now.
+            "privacy": ws.privacyChoice.map { c in ["private": c.isPrivate, "rows": c.rows.map { "\($0.label): \($0.value) · \($0.note)" }] as [String: Any] } ?? NSNull(),
+            // N5: a NEAR Intents move after Confirm, as the chat's field shows it.
+            "journey": ws.journey.map { j in ["stage": "\(j.stage)", "from": j.from, "to": j.to, "private": j.privately, "stuck": j.stuck,
+                                              "deposit": j.deposit ?? NSNull(), "ended": j.endedAt != nil] as [String: Any] } ?? NSNull(),
             "boards": boards(ws, canvas),
             "outcome": canvas?.outcome.map { $0.ok ? "executed" : "failed" } ?? NSNull(),
             "pending": ws.pendingText ?? NSNull(),
             // Jev's reading of the plan against the chat, or why there is none.
             "jev": ws.planReview.map { ["label": $0.label, "concern": $0.concern, "text": $0.text] as [String: Any] } ?? ws.jevNote ?? NSNull(),
             "checklist": ws.planChecklist,
+            // Jev reads the chat (Settings › Second check, with OpenRouter connected): uitest skips what needs it otherwise.
+            "secondCheck": ws.jevScreening && ws.jevKey != nil,
             "busy": ws.busy,
-            // The chip over the field: tokens the model read with the last message, its window, the answers' dollars.
-            "context": ["used": ws.meter.used ?? NSNull(), "window": ws.meter.window ?? NSNull(), "sent": ws.meter.sent, "lines": ws.meter.lines,
-                        "spent": ws.meter.spent] as [String: Any],
+            // The chip over the field: tokens the model read with the last message (the cache's part), its window, the answers' dollars.
+            "context": ["used": ws.meter.used ?? NSNull(), "cached": ws.meter.cached ?? NSNull(), "window": ws.meter.window ?? NSNull(), "sent": ws.meter.sent, "lines": ws.meter.lines,
+                        "spent": ws.meter.spent, "credits": ws.meter.credits ?? false] as [String: Any],
             "messages": ws.messages.dropFirst(since).map { ["user": $0.fromUser, "text": $0.text, "note": $0.note ?? NSNull(),
                                                              "cards": ($0.options ?? []).map(\.title)] as [String: Any] },
             "balances": [
                 "total": num(ws.equity), "solanaUSDC": num(ws.solana?.usdc), "sol": num(ws.solana?.sol),
-                "hyperliquid": num(ws.hlTotal), "near": num(ws.near), "kamino": num(ws.kamino), "jupiterLend": num(ws.lendTotal),
+                "hyperliquid": num(ws.hlTotal), "near": num(ws.near), "kamino": num(ws.kamino), "kaminoBackpack": num(ws.kaminoLoan.map { $0.depositUSD - $0.debtUSD }), "solanaSPCX": num(ws.heldOnSolana("SPCX")),
+                "kaminoSOL": num(ws.kaminoMainLoan?.collateral.first { $0.symbol == "SOL" }?.tokens), "kaminoMainDebt": num(ws.kaminoMainLoan?.debtUSD), "jupiterLend": num(ws.lent("USDC")),
                 "baseAave": num(ws.base?.aave), "baseMorpho": num(ws.base?.morpho), "baseUSDC": num(ws.base?.usdc),
                 "robinhoodUSDG": num(ws.robinhood?.usdg), "arbitrumUSDC": num(ws.arbitrumUSDC),
                 "arbitrumUSDT": num(USDT0.on(42161).flatMap { ws.heldUSDC("arbitrum", $0.token) }),
@@ -358,13 +431,16 @@ final class DebugAPI {
             let route = ws.route(command)
             let drawn = route ?? ws.fallbackRoute(command)
             out["pending"] = ["kind": "wallet", "command": String(describing: command), "title": drawn.title, "footer": drawn.footer,
-                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "drawnRoute": route != nil, "confirm": true,
+                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "drawnRoute": route != nil, "confirm": true, "warning": drawn.warning ?? NSNull(),
                               // What the swap gets as quoted now, the chat's line; nil while quoting or for a move without a price.
                               "quote": ws.swapLine(command) ?? NSNull(), "quoteState": "\(ws.quoteState(at: Date()))"] as [String: Any]
         case .position(let command, let coin)?:
             out["pending"] = ["kind": "position", "command": String(describing: command), "coin": coin, "confirm": true] as [String: Any]
         case .transfer(let entry, let amount)?:
-            out["pending"] = ["kind": "transfer", "to": entry.name, "amount": NSDecimalNumber(decimal: amount).stringValue, "confirm": true] as [String: Any]
+            let route = ws.transferRoute(entry, amount)
+            out["pending"] = ["kind": "transfer", "to": entry.name, "amount": NSDecimalNumber(decimal: amount).stringValue, "confirm": true,
+                              "title": route.title, "footer": route.footer, "steps": steps(route.steps), "warning": route.warning ?? NSNull(),
+                              "recipient": (entry.network == .hyperliquid ? ws.hlRecipients[entry.address.lowercased()]?.rawValue : nil) ?? NSNull()] as [String: Any]
         case .orders(let commands, let coin, _)?:
             out["pending"] = ["kind": "orders", "commands": commands.map { String(describing: $0) }, "coin": coin, "confirm": true] as [String: Any]
         case .address(let entry)?:
@@ -389,6 +465,7 @@ final class DebugAPI {
                             "place": ws.chartPlace(tradePlan: ws.intent != TradeIntent() && !ws.managesPosition)?.rawValue ?? NSNull()] as [String: Any]
         }
         if let d = ws.detail { out["detail"] = d }
+        if let c = ws.tokenCard, c.place == ws.detail { out["tokenCard"] = c.text }
         if let n = ws.nextSteps { out["nextSteps"] = n.options.map { ["title": $0.title, "command": $0.command, "recommended": $0.recommended] as [String: Any] } }
         if let a = ws.allocationPreview {
             func n(_ d: Decimal) -> Double { NSDecimalNumber(decimal: d).doubleValue }
@@ -407,6 +484,14 @@ final class DebugAPI {
                            "steps": steps(ws.planRoute(StudioNode.build(ws)).steps)] as [String: Any]
         }
         if ws.showReceive { out["receive"] = true }
+        // «Add block» in the top right corner, off the chat: past the column the canvas fits its boards in, so never on a
+        // board's × (Studio, variant A).
+        if let width = NSApp.windows.first(where: { $0.title == AppMain.mainTitle })?.contentView?.bounds.width, ws.addBlockFrame != .zero {
+            let f = ws.addBlockFrame
+            out["addBlockClear"] = abs(width - 16 - f.maxX) < 2 && !f.intersects(ws.chatFrame)
+            out["addBlock"] = ["x": f.minX, "y": f.minY, "w": f.width, "h": f.height, "chatTop": ws.chatFrame.minY, "window": width,
+                               "chatFull": UserDefaults.standard.bool(forKey: "chatFull")] as [String: Any]
+        }
         if let saved = ws.savedBoard { out["saved"] = saved.displayTitle }
         if let n = ws.noteCard { out["note"] = ["text": n.texts.last ?? "", "texts": n.texts, "folder": n.folder ?? NSNull(), "own": n.canvas == ws.canvasID] as [String: Any] }
         return out
@@ -419,11 +504,23 @@ final class DebugAPI {
     /// A Kamino Vault deposit as the browser saw one (2026-10-01): 5 USDC in, two of Kamino's programs not on the list.
     static var sampleReview: TxReview {
         var r = TxReview(wire: Data(), accounts: [], tokenOwners: [:], unknownPrograms: ["FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr", "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"],
-                         programNames: [], changes: [],
+                         programNames: [],
                          checks: ["Only your wallet signs and pays the fee.", "Creates a token account owned by your wallet."], problems: [],
                          jev: JevReview(label: "ok", confidence: 0.9, concern: false, text: "An ordinary action for this kind of site."))
-        r.deltas = [("SOL", SpotAsset.all[0].mint, Decimal(string: "-0.006865555")!), ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", -5)]
+        r.deltas = [("SOL", TxReview.nativeSOL, Decimal(string: "-0.006865555")!), ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", -5)]
         r.programs = [("Associated Token", true), ("Compute Budget", true), ("Kamino Farms", false), ("Kamino Vault", false)]
+        return r
+    }
+
+    /// An unfamiliar site's program takes all 1,250,000 BONK and closes the account; its rent comes back. Before the fix
+    /// (2026-11-01) the sheet showed only «You get 0.002034 SOL».
+    static var closedSampleReview: TxReview {
+        var r = TxReview(wire: Data(), accounts: [], tokenOwners: [:], unknownPrograms: ["7xQp…9fLm"], programNames: [],
+                         checks: ["Only your wallet signs and pays the fee."], problems: [])
+        r.deltas = [("SOL", TxReview.nativeSOL, Decimal(string: "0.002034")!), ("BONK", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", -1_250_000)]
+        r.closed = [1]
+        r.rentBack = Decimal(string: "0.00203928")!
+        r.programs = [("Compute Budget", true), ("SPL Token", true), ("7xQp…9fLm", false)]
         return r
     }
 

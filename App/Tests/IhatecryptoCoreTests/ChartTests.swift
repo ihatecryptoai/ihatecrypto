@@ -102,3 +102,29 @@ func notCharts(_ phrase: String) {
         #expect(abs(next.y + c.y * scale * k - fingers.y) < 0.0001)
     }
 }
+
+@Test func aTrackpadScrollMovesEvenlyFrameToFrame() {
+    // Momentum as recorded on a trackpad: an event every 8.3 ms give or take a millisecond, around the 120 Hz frames'
+    // edges. Moved on each event, frames went 0, 100, 0, 50, 100 pt.
+    let jitter = [-0.3, 0.8, -0.9, 0.2, 0.9, -0.6, 0.4, -1.0, 0.7, -0.2, 1.0, -0.8], frame = 1.0 / 120
+    let events = (1...60).map { (t: 1 + Double($0) * frame + jitter[$0 % jitter.count] / 1000, d: 50.0) }
+    var trail = ScrollTrail(), fed = 0, shown = 0.0, steps: [Double] = []
+    for f in 1...80 {
+        let v = 1 + Double(f) * frame
+        // A frame's tick runs a frame before it's shown, knowing the events that came by then.
+        while fed < events.count, events[fed].t < v - frame {
+            trail.add((events[fed].d, 0), at: events[fed].t)
+            fed += 1
+        }
+        let now = trail.frame(at: v).x
+        steps.append(now - shown)
+        shown = now
+    }
+    #expect(steps[12..<56].allSatisfy { (40...60).contains($0) })
+    #expect(shown == 3000)
+    // After a pause a step plays over a few frames, not at once.
+    var one = ScrollTrail()
+    one.add((10, 0), at: 5)
+    #expect(one.frame(at: 5).x < 1)
+    #expect(one.frame(at: 5.1).x == 10)
+}

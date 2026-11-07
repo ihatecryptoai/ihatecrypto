@@ -207,7 +207,7 @@ extension Workspace {
     /// service's docs, a contract's string, a page — and used to reach the model with one line of its brief as the only
     /// defence. Now it passes the guard first (InjectionGuard.lookupProblem): local rules on every lookup, the
     /// classifier on those that bring others' prose; a text that speaks to the assistant is withheld whole, and the
-    /// model is told so instead.
+    /// model is told so instead. A paid service's answer passes the same guard (Payments.answered).
     func screenedLookup(_ l: ChatRouter.Lookup) async -> String {
         let found = await agentLookup(l)
         // A skill is instructions the user added themselves, and its text goes with every later message unscreened anyway.
@@ -261,7 +261,7 @@ extension Workspace {
             agentStep = say("Comparing rates", "Сравниваю ставки")
             let asset = l.arg.uppercased().contains("SOL") ? "SOL" : "USDC"
             let options = await loadYields(asset)
-            let held = lend.filter { $0.usdc > 0 }.map { "Jupiter Lend \($0.vault) \(Fmt.num($0.usdc))" } + (kamino > 0 ? ["Kamino \(Fmt.usd(kamino))"] : [])
+            let held = lendDeposits.map { "Jupiter Lend \(Fmt.num($0.amount, maxFraction: 6)) \($0.coin)" } + (kamino > 0 ? ["Kamino \(Fmt.usd(kamino))"] : [])
                 + (base.map { [$0.aave > 0 ? "Aave · Base \(Fmt.num($0.aave)) USDC" : nil, $0.morpho > 0 ? "Morpho · Base \(Fmt.num($0.morpho)) USDC" : nil].compactMap { $0 } } ?? [])
                 + lendingElsewhere.map { "\($0.place) \(Fmt.num($0.usdc)) USDC" }
             return (options.isEmpty ? ["The rate sources didn't answer."] : options.prefix(16).map { o in
@@ -345,9 +345,7 @@ extension Workspace {
                 "\(Fmt.num(o.used))/\(Fmt.num(o.deposited)) USDC spent into \(SpotAsset.all.first { $0.mint == o.outputMint }?.symbol ?? o.outputMint), \(Fmt.num(o.perCycle)) every \(WalletCommand.everyText(o.every)), \(o.fills) fills"
             }.joined(separator: "; "))
         }
-        if let a = serviceAnswer {
-            out.append("\(a.service)'s answer" + (a.usdc.map { " (paid \(Fmt.num($0, maxFraction: 6)) USDC)" } ?? "") + ": " + a.raw.prefix(2000))
-        }
+        if let a = serviceAnswer { out.append(a.forModel) }
         if let takes = takeChoices ?? heldAnswer?.takes { out.append("take-profit choices: " + takes.map { "\($0.title) — \($0.detail)" }.joined(separator: "; ")) }
         if let r = runningAction { out.append("running now: \(readable(r.title))" + (r.lines.isEmpty ? "" : " (\(r.lines.joined(separator: "; ")))")) }
         func outcome(_ o: CanvasOutcome) -> String { o.ok ? "done" : o.unknown == true ? "sent, no outcome back" : "failed" }
@@ -494,14 +492,22 @@ extension Workspace {
                       "Оставил выключенным. Включить можно в Settings › Wallet › Hyperliquid или словами «включи торговый ключ»."))
             return
         }
-        if option.command == Self.sendAnyway || option.command == Self.leaveCostly {
+        if option.command == Self.sendAnyway || option.command == Self.leaveCostly || option.command == Self.sendPart {
             let costly = costlyMove
             costlyMove = nil
-            guard option.command == Self.sendAnyway, let costly else {
+            guard option.command != Self.leaveCostly, let costly else {
                 reply(say("Left as is: nothing was signed.", "Оставил как есть: ничего не подписано."))
                 return
             }
-            await Executor.$lossAccepted.withValue(costly.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) { await move(costly.command) }
+            // The part: the same swap for less, checked again as any swap.
+            if option.command == Self.sendPart, let part = costly.stop.part { await move(costly.command.with(amount: part.amount)); return }
+            // A swap's price impact is taken as that impact (a little room for the price to move): the dollar caps on the
+            // bridges and gas around it stay.
+            if let impact = costly.stop.impact {
+                await Executor.$impactAccepted.withValue(min(1, impact * Decimal(string: "1.25")! + Decimal(string: "0.005")!)) { await move(costly.command) }
+                return
+            }
+            await Executor.$lossAccepted.withValue(costly.stop.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) { await move(costly.command) }
             return
         }
         if await !runCanonical(option.command, userText: steps.userText, before: intent) {

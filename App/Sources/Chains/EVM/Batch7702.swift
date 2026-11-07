@@ -16,11 +16,24 @@ public enum Batch7702 {
     /// ERC-4337's EntryPoints v0.6, v0.7 and v0.8: a delegated account obeys a user operation its key signed for one.
     public static let entryPoints: Set<String> = ["0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789", "0x0000000071727de22e5e9d8baf0edac6f37da032",
                                                   "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"]
-    /// Gas a transaction's authorization adds on top of what its calls use (EIP-7702's PER_EMPTY_ACCOUNT_COST): the
-    /// dry run, made with the code already in place, doesn't count it.
-    public static let authorizationGas: UInt64 = 25_000
+    /// Gas a transaction's authorization adds on top of what its calls use: the dry run, made with the code already in
+    /// place, doesn't count it. Only a gas limit — unused gas isn't paid, the prompt's «network fee up to» is a ceiling.
+    /// Before Glamsterdam it's EIP-7702's PER_EMPTY_ACCOUNT_COST, 25,000. After it (EIP-2780 + EIP-8037, Last Call
+    /// 2026-11) the wallet's own first delegation costs EXECUTION_PER_AUTH_BASE_COST 7,816 + 23 bytes × CPSB 1,530 =
+    /// 35,190 state gas = 43,006 (ACCOUNT_WRITE is skipped for tx.sender); EIP-8038's prices aren't final, hence the margin.
+    public static let authorizationGas: UInt64 = 45_000
     /// More calls than any of ihatecrypto's moves makes (Robinhood's v4 swap is three).
     public static let maxCalls = 4
+
+    /// The contract an address's code (eth_getCode) delegates it to by EIP-7702 — 0xef0100 ‖ 20 bytes — when it isn't
+    /// ours: set up outside ihatecrypto, a phishing signature or a leaked key's sweeper as a rule, so what arrives at the
+    /// address can be taken. nil for no code, a contract, or our own `delegate`.
+    public static func foreignDelegate(code: String) -> String? {
+        let c = code.lowercased()
+        guard c.count == 2 + 46, c.hasPrefix("0xef0100") else { return nil }
+        let to = "0x" + c.dropFirst(8)
+        return to == delegate ? nil : to
+    }
 
     /// One call of the batch; no coins go with it.
     public struct Call: Codable, Sendable, Equatable {

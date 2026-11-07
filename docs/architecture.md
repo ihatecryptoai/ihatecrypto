@@ -123,12 +123,19 @@ and the older `navigator.wallets`) and an EVM provider (EIP-1193, announced thro
 through a confirmation window.
 
 - Solana transactions are parsed and simulated. Programs outside the built-in list sign only after a separate
-  permission (`extraPrograms` to the signer), named on the Touch ID prompt.
+  permission (`extraPrograms` to the signer), named on the Touch ID prompt. The simulation's accounts also show rights
+  no balance does (`SolanaGuard.rightsProblems`): the wallet handed to a program or given data, a token account's new
+  owner, delegate or close authority — refused.
 - EVM sign-in (`personal_sign`) and flat typed data: the signer hashes the JSON itself (`Wallet/Core/TypedData.swift`)
-  and refuses Permit and Permit2, nested types and bare hashes.
+  and refuses Permit and Permit2, nested types, bare hashes, and someone else's address beside an amount or a `true`
+  (Morpho's and Compound's Authorization).
 - EVM transactions (`eth_sendTransaction`): calldata is decoded (`EVMCall` in `Chains/EVM/EVM.swift`). Unlimited
-  approvals, `setApprovalForAll`, permits and `transferFrom` out of the user's wallet are refused in the app and in
-  the signer. The call is checked with `eth_call`, gas is estimated, and the signer builds and signs the transaction.
+  approvals and increases, `setApprovalForAll`, authorizations and operators, permits and `transferFrom` out of the
+  user's wallet are refused in the app and in the signer. The call is simulated with `eth_simulateV1` (no simulation,
+  no signature), rights its events show are refused or asked about like a recipient, gas is estimated, and the signer
+  builds and signs the transaction.
+- After Sign, both kinds are simulated again: more leaving than the window showed, another recipient or right, or a
+  new refusal stops it with a note in the chat (`SimulationDrift`).
 - `SiteCheck` flags hosts that look like known dApps, and the browser checks MetaMask's phishing list. Jev
   (`JevReviewer.site`) gives a second opinion on the site and the transaction.
 
@@ -175,7 +182,8 @@ Plain code, not a model. A model can be fooled by text on a page; a check agains
   the user's own accounts or to an address bound to an approved quote. Token approvals, owner changes and other fee
   payers are refused, and the priority fee has a cap.
 - **Simulation:** before sending, the transaction runs on the network, and the balances after are compared with what
-  the user approved. This catches a route that pays its output to someone else inside a program.
+  the user approved. This catches a route that pays its output to someone else inside a program. The balances before
+  are read in one request: a node that fails stops the move, and an account that doesn't exist yet counts as 0.
 - **1Click** (`DepositGuard`): the deposit address must be the one 1Click bound to the user's recipient, refund
   address, assets and amount.
 - **Relay:** only `deposit_token` and `deposit_native` of the Relay Depository, from the user's wallet. The quote must
@@ -191,9 +199,11 @@ stop a text: it never clears what the rules found and never allows a signature. 
 (whose orders to the assistant are normal; it looks for pasted text from someone else) or a lookup's result, such as a
 token's description, a service's docs, an API reply or a contract's string (`Workspace.screenedLookup`,
 `InjectionGuard.lookupProblem`). A lookup result that addresses the assistant or pushes money to an address never
-reaches the model. Jev reads a message when it has an address, a link or more than 100 characters, and always reads
-the results of the `token`, `services`, `service`, `call`, `rpc`, `hl` and `fetch` lookups. Other text gets the local
-rules only.
+reaches the model. Jev reads every chat message but the Confirm button's own, and the results of the `token`,
+`services`, `service`, `call`, `rpc`, `hl` and `fetch` lookups. Other text gets the local rules only. The local rules
+stop «ты теперь» and «you are now» only with a new role or mode («ты теперь в режиме разработчика»), so the user's own
+«ты теперь всегда отвечай по-русски» reaches the model. Why a message was stopped comes back as data
+(`InjectionGuard.Stop`), and the chat says it in the chat's language.
 
 ## Data on the Mac
 

@@ -24,18 +24,44 @@ public struct AppleIntelligence: LLMProvider {
         if local == .available { models.append(onDevice) }
         return ProviderInfo(
             id: "apple", name: "Apple Intelligence", kind: .local, defaultModel: models.first ?? onDevice,
-            note: "Apple's Foundation Models: free, no key. On this Mac the model holds only 4,096 tokens, too small for the chat's "
+            note: "Apple's Foundation Models: free, no key. On this Mac the model holds only \(window) tokens, too small for the chat's "
                 + "brief. Private Cloud Compute (32k, on Apple's servers): " + (privateCloudBlocker ?? "available") + ".",
             unavailable: models.isEmpty ? reason(local) : nil,
             models: models
         )
     }()
 
-    /// Why a model can't be the chat's: the one on this Mac holds 4,096 tokens and reads no Russian, and the chat's brief
-    /// alone is 5,042. Settings › Test still asks it.
+    /// Why a model can't be the chat's: the one on this Mac holds `window` tokens (4,096 on macOS 27.0), less than the
+    /// chat's brief alone, and reads no Russian. The words name no brief size: it grows with every form. Settings › Test
+    /// still asks it.
     public static func chatRefusal(model: String) -> String? {
-        model == onDevice ? "Apple's model on this Mac holds 4,096 tokens and doesn't read Russian, while the chat's brief alone is 5,042: "
-            + "it can't be the chat's model. Test it in Settings; the bigger Apple model comes once Apple grants the app its entitlement." : nil
+        model == onDevice ? "Apple's model on this Mac holds \(window) tokens, less than the chat's brief needs, and doesn't read Russian: "
+            + "it can't be the chat's model. Test it in Settings. The bigger Apple model comes once Apple grants the app its entitlement." : nil
+    }
+
+    /// The window of the model on this Mac as the framework tells it, «4,096» (before macOS 27 the framework answers
+    /// 4,096 itself). Read once, like `info`. A model that isn't there may answer 0: then the 4,096 it has had.
+    static let window = { $0 > 0 ? $0 : 4096 }(SystemLanguageModel.default.contextSize).formatted(.number.locale(Locale(identifier: "en_US")))
+
+    static func tooLong(model: String) -> String {
+        chatRefusal(model: model) ?? "Apple Intelligence: the request is longer than this model holds. Pick a bigger model for the chat."
+    }
+
+    /// What a failed answer says. macOS 27 throws LanguageModelError, older systems GenerationError: both read the same.
+    static func words(_ error: any Error, model: String) -> String {
+        let declined = "Apple Intelligence declined this request (its safety guardrails)."
+        if #available(macOS 27, *), let error = error as? LanguageModelError {
+            switch error {
+            case .contextSizeExceeded: return tooLong(model: model)
+            case .guardrailViolation: return declined
+            default: break
+            }
+        }
+        switch error as? LanguageModelSession.GenerationError {
+        case .exceededContextWindowSize: return tooLong(model: model)
+        case .guardrailViolation: return declined
+        default: return "Apple Intelligence: \(error.localizedDescription)"
+        }
     }
 
     static var hasPrivateCloud: Bool { privateCloudBlocker == nil }
@@ -63,7 +89,7 @@ public struct AppleIntelligence: LLMProvider {
         switch availability {
         case .unavailable(.deviceNotEligible): "This Mac can't run Apple Intelligence."
         case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in System Settings, then restart ihatecrypto."
-        case .unavailable(.modelNotReady): "Apple Intelligence is still downloading its model; restart ihatecrypto when it's done."
+        case .unavailable(.modelNotReady): "Apple Intelligence is still downloading its model. Restart ihatecrypto when it's done."
         default: "Apple Intelligence isn't available on this Mac."
         }
     }
@@ -82,19 +108,18 @@ struct AppleIntelligenceClient: LLMClient {
         if r.model == AppleIntelligence.privateCloud, #available(macOS 27, *) {
             session = LanguageModelSession(model: PrivateCloudComputeLanguageModel(), instructions: instructions)
         } else {
-            session = LanguageModelSession(model: SystemLanguageModel.default, instructions: instructions)
+            let model = SystemLanguageModel.default
+            // Counted first where the framework can (macOS 26.4): a request past the window stops without a run.
+            if #available(macOS 26.4, *), let used = try? await model.tokenCount(for: Instructions(r.system)) + model.tokenCount(for: prompt),
+               used >= model.contextSize {
+                throw LLMError(AppleIntelligence.tooLong(model: r.model))
+            }
+            session = LanguageModelSession(model: model, instructions: instructions)
         }
         do {
             return try await session.respond(to: prompt).content
-        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
-            throw LLMError("Apple Intelligence: the request is longer than this model holds. Pick a bigger model for the chat.")
-        } catch LanguageModelSession.GenerationError.guardrailViolation {
-            throw LLMError("Apple Intelligence declined this request (its safety guardrails).")
         } catch {
-            // macOS 27's LanguageModelError already reads well: «Content contains 8058 tokens, which exceeds … 4096.»
-            // Its «transcript exceeded the model's context size» is the same too-long case.
-            if error.localizedDescription.contains("context size") { throw LLMError(AppleIntelligence.chatRefusal(model: r.model) ?? "Apple Intelligence: the request is longer than this model holds.") }
-            throw LLMError("Apple Intelligence: \(error.localizedDescription)")
+            throw LLMError(AppleIntelligence.words(error, model: r.model))
         }
     }
 }

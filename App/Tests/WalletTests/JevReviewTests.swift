@@ -49,3 +49,14 @@ private let labels: KeyValuePairs = ["matches": "It does.", "mismatch": "It does
     #expect(!fine.concern && fine.label == "matches" && fine.text == "matches.")
     #expect(JevReviewer.review(["matches": 0.5, "mismatch": 0.25, "risky": 0.25], good: "matches", texts: texts).concern)
 }
+
+/// A mismatch names what differs — the ask least likely «yes», under one half — as data the app words in the chat's language.
+@Test func readingReviewNamesWhatDiffers() {
+    let wrong = JevReviewer.readingReview(["matches": 0.1, "mismatch": 0.85, "unclear": 0.05], yes: ["action": 0.2, "asset": 0.9, "place": 0.7, "amount": 0.95])
+    #expect(wrong.concern && wrong.about == "action" && wrong.text == "the command does something other than the message asks: the action isn't the one asked for.")
+    let right = JevReviewer.readingReview(["matches": 0.9, "mismatch": 0.08, "unclear": 0.02], yes: ["action": 0.2])
+    #expect(!right.concern && right.about == nil)
+    // Every ask said «yes»: a mismatch with nothing named.
+    let vague = JevReviewer.readingReview(["matches": 0.2, "mismatch": 0.7, "unclear": 0.1], yes: ["action": 0.9, "asset": 0.8])
+    #expect(vague.concern && vague.about == nil)
+}

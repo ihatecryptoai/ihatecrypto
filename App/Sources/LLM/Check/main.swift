@@ -2,6 +2,7 @@ import Foundation
 import LLMCatalog
 import IhatecryptoCore
 import LLMCore
+import LLMNearAI
 import TradeExecution
 
 // Checks one provider from the terminal, without the app:
@@ -10,6 +11,7 @@ import TradeExecution
 //   IHATECRYPTO_LLM_KEY=sk-… swift run LLMCheck deepseek "hello"
 //   IHATECRYPTO_LLM_MODEL=… overrides the default model.
 //   swift run LLMCheck chatgpt --models                    the models the app offers, live
+//   swift run LLMCheck nearai --attest                     NEAR AI Cloud's enclaves checked as the chat checks them (no key)
 //   swift run LLMCheck chatgpt --route "купи AI на $2" …   how the chat router reads each message
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -35,6 +37,23 @@ let prompt = args.dropFirst().first ?? "Answer in one word: working"
 if prompt == "--models" {
     print(try await provider.models(credential).joined(separator: "\n"))
     exit(0)
+}
+
+// `--attest`: NEAR AI Cloud's enclaves checked the way the chat checks them before a message; it needs no key.
+if prompt == "--attest", id == "nearai" {
+    do {
+        let v = try await NearAI.ensureVerified(model)
+        print("""
+        Verified \(v.model): the gateway's and the model's Intel TDX quotes are signed down to Intel's root and bound to a \
+        fresh nonce and to the keys below, their configuration and event log match, and NVIDIA passed the GPUs.
+          gateway key \(v.gatewayKey)
+          model key   \(v.modelKeys.joined(separator: ", "))
+        """)
+        exit(0)
+    } catch {
+        fputs("Not verified: \(error.localizedDescription)\n", stderr)
+        exit(1)
+    }
 }
 
 // `--verify "message" "command"`: the second reading alone, as the chat runs it on every command.

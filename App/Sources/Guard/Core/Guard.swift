@@ -58,20 +58,40 @@ public enum SolanaGuard {
     public static let jupiterLend = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
     /// Jupiter's on-chain DCA (Recurring v1): open_dca_v2 and close_dca on the user's own order account.
     public static let jupiterDCA = "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M"
+    /// JupiterZ, Jupiter's market makers (its order engine, jup-ag/rfq-webhook-toolkit): one instruction, `fill`, where the
+    /// maker pays the fee, signs first and swaps with the taker at its quoted price.
+    public static let jupiterZ = "61DFfeTKM7trxYcPQCM78bJ794ddZprZpAwAnLiwTpYH"
+    /// fill(input_amount, output_amount, expire_at): sha256("global:fill")[0..<8]; its accounts taker 0, maker 1, the taker's
+    /// input 2 and output 4 accounts (the program's own id for none: SOL then comes as lamports), input mint 6, output mint 8.
+    static let jupiterZFill = "a860b7a35c0a28a0"
+    /// What a JupiterZ market maker runs beside its fill to source the coin, seen in its orders for Ondo's tokenized stocks
+    /// (2026-10-29): Ondo Global Markets mints or redeems the stock for the maker against a price it signed (the secp256k1
+    /// precompile checks that signature), between two calls of a Jupiter program (jupgf…) on the maker's accounts. Allowed
+    /// only beside the one fill, with a maker paying, and never given this wallet or one of its accounts.
+    static let jupiterZMakerPrograms = [
+        "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm": "Ondo Global Markets", "KeccakSecp256k11111111111111111111111111111": "the secp256k1 check",
+        "jupgfSgfuAXv4B6R2Uxu85Z1qdzgju79s6MfZekN6XS": "Jupiter's maker program",
+    ]
+    static let wrappedSOL = "So11111111111111111111111111111111111111112"
     /// Relay Depository (github.com/relayprotocol/relay-depository), Anchor program.
     public static let relayDepository = "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2"
     public static let kaminoLend = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
     /// Kamino's vaults (Earn) and the farm their shares are staked in: a vault withdrawal unstakes, then redeems.
     public static let kaminoVault = "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd"
     public static let kaminoFarms = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
-    /// Kamino's main lending market, the only one ihatecrypto lends on (Kamino.mainMarket).
+    /// Kamino's main lending market (Kamino.mainMarket).
     public static let kaminoMainMarket = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
+    /// Kamino's Backpack market (Kamino.backpackMarket): Backpack's tokenized stocks as collateral, USDC lent against them.
+    public static let kaminoBackpackMarket = "4iRHKGsTq3e4uut6e4PfyV9AEbNuXaMu9JaSP378p9qy"
+    /// The markets ihatecrypto lends and borrows on; a position on any other is refused.
+    public static let kaminoMarkets = [kaminoMainMarket, kaminoBackpackMarket]
 
     /// The Kamino instructions ihatecrypto's deposits and withdrawals use whose programs pay out only to the signer
     /// (token::authority = owner, has_one = owner; read in the verified source, klend e921c64, kvault 2dadf94, kfarms
-    /// bfa1860, 2026-10-23), by 8-byte discriminator. Any other — a deposit minting to someone else's account, repaying
-    /// someone else's debt, a flash loan, handing a farm stake over (transfer_ownership), topping up a vault's rewards —
-    /// is refused, whatever the app says. KLend's value is the index of the obligation the instruction acts on (nil: none).
+    /// bfa1860, 2026-10-23; the repays klend 77e8185, 2026-10-28), by 8-byte discriminator. Any other — a deposit
+    /// minting to someone else's account, a flash loan, handing a farm stake over (transfer_ownership), topping up a
+    /// vault's rewards — is refused, whatever the app says. KLend's value is the index of the obligation the instruction
+    /// acts on (nil: none), which must be the owner's own on one of `kaminoMarkets`: a repay of someone else's debt fails it.
     static let kaminoLendAllowed: [String: Int?] = [
         "75a9b045c5170fa2": nil,                                                  // init_user_metadata (no referrer, below)
         "fb0ae74c1b0b9f60": 2, "883f0fbad398a8a4": 2,                             // init_obligation, init_obligation_farms_for_reserve
@@ -82,13 +102,34 @@ public enum SolanaGuard {
         "2574cd67f3c05cc6": 1, "caf97572e7c02f8a": 1,                             // withdraw_obligation_collateral(_v2)
         "6cd1044815167685": 1, "8991975ea7710491": 1,                             // deposit_obligation_collateral(_v2)
         "797f12cc49f5e141": 1, "a1808ff5abc7c206": 1,                             // borrow_obligation_liquidity(_v2)
+        // repay_obligation_liquidity(_v2): the program lets anyone repay any obligation; pinned to the owner's own, it
+        // pays back only this wallet's debt. The money comes from an account the signer is the authority of (the
+        // transfer runs under `owner`'s signature), and the balance simulation checks how much leaves.
+        "91b20de14cf09348": 1, "74aed54cb435d290": 1,
         "ea75b57db98edc1d": nil,                                                  // redeem_reserve_collateral
+    ]
+    /// KLend's borrows and withdrawals by discriminator: the index of the account they pay into (user_destination_liquidity,
+    /// klend's IDL; v2 adds its farm accounts after it). Its amount is the u64 after the discriminator: a borrow's in the
+    /// coin, a withdrawal's in Kamino's shares of it (checked on transactions ktx built, 2026-11-05).
+    static let kaminoPayouts: [String: (to: Int, borrow: Bool)] = [
+        "797f12cc49f5e141": (8, true), "a1808ff5abc7c206": (8, true),             // borrow_obligation_liquidity(_v2)
+        "4b5d5ddc2296dac4": (9, false), "eb34779895c51407": (9, false),           // withdraw_obligation_collateral_and_redeem_reserve_collateral(_v2)
     ]
     /// Vault withdrawals (withdraw, sell, withdraw_from_available, redeem_in_kind): to the signer's own accounts. No deposits.
     static let kaminoVaultAllowed: Set<String> = ["b712469c946da122", "33e685a4017f83ad", "1383709baadc2239", "663abdfcc0db8c59"]
     /// Farms: unstake, withdraw_unstaked_deposits, harvest_reward (to the owner), refresh_farm, refresh_user_state, initialize_user.
     static let kaminoFarmsAllowed: Set<String> = ["5a5f6b2acd7c32e1", "2466bb31dc248443", "44c8e4e9b820e2bc", "d6838ab790c2ac2a", "01870c3ef38c4d6c",
                                                   "6f11b9fa3c7a26fe"]
+
+    /// Whether the transaction sends this wallet's SOL to the fee payer (rent it fronted, coming back): only then is the
+    /// payer someone the wallet pays, to be allowed as such. A JupiterZ maker isn't: the swap's prompt names it.
+    public static func refundsSponsor(_ m: SolanaMessage, accounts: [String], owner: String, sponsor: String) -> Bool {
+        m.instructions.contains { ix in
+            ix.programIndex < accounts.count && accounts[ix.programIndex] == system && ix.data.count >= 12 && le32(ix.data, 0) == 2
+                && ix.accounts.count > 1 && ix.accounts[0] < accounts.count && ix.accounts[1] < accounts.count
+                && accounts[ix.accounts[0]] == owner && accounts[ix.accounts[1]] == sponsor
+        }
+    }
 
     /// The Relay order ids the transaction's depository deposits name (bytes 16..<48 of each one's data).
     public static func relayDepositIDs(_ m: SolanaMessage) -> [Data] {
@@ -120,7 +161,7 @@ public enum SolanaGuard {
     /// public). Measured on mainnet 2026-10-23: the program refuses another payee, and the signer checks it as well.
     static let jupiterDCAOpen = "8e772b6da2340bb1", jupiterDCAClose = "16072162a8b722f3"
 
-    /// The owner's plain obligation on Kamino's main market: seeds [tag 0, id 0, owner, market, default, default] (klend
+    /// The owner's plain obligation on a Kamino market: seeds [tag 0, id 0, owner, market, default, default] (klend
     /// handler_init_obligation.rs). An instruction on it acts on that market (has_one = lending_market), whatever market
     /// a lookup table names: the signer can't read those, so this pins the market from a static account instead.
     /// `account` is `owner`'s associated token account for `mint`, under SPL Token or Token-2022.
@@ -129,8 +170,8 @@ public enum SolanaGuard {
         return [SPL.tokenProgram, SPL.token2022Program].contains { (try? SPL.associatedAccount(owner: owner, mint: mint, program: $0)) == account }
     }
 
-    public static func kaminoObligation(owner: String) -> String? {
-        guard let o = try? Base58.decode(owner), let m = try? Base58.decode(kaminoMainMarket), let p = try? Base58.decode(kaminoLend),
+    public static func kaminoObligation(owner: String, market: String = kaminoMainMarket) -> String? {
+        guard let o = try? Base58.decode(owner), let m = try? Base58.decode(market), let p = try? Base58.decode(kaminoLend),
               let pda = try? SPL.programAddress(seeds: [Data([0]), Data([0]), o, m, Data(count: 32), Data(count: 32)], program: p) else { return nil }
         return Base58.encode(pda)
     }
@@ -138,7 +179,7 @@ public enum SolanaGuard {
     public static let lookupTableProgram = "AddressLookupTab1e1111111111111111111111111"
     public static let knownPrograms: [String: String] = [
         system: "System", computeBudget: "Compute Budget", SPL.tokenProgram: "SPL Token", SPL.token2022Program: "SPL Token-2022",
-        SPL.associatedTokenProgram: "Associated Token", jupiterSwap: "Jupiter Swap", jupiterLend: "Jupiter Lend Earn", jupiterDCA: "Jupiter DCA",
+        SPL.associatedTokenProgram: "Associated Token", jupiterSwap: "Jupiter Swap", jupiterLend: "Jupiter Lend Earn", jupiterDCA: "Jupiter DCA", jupiterZ: "JupiterZ",
         relayDepository: "Relay Depository", kaminoLend: "Kamino Lend", kaminoVault: "Kamino Vault", kaminoFarms: "Kamino Farms",
         lookupTableProgram: "Address Lookup Table",
     ]
@@ -152,6 +193,9 @@ public enum SolanaGuard {
         "So11111111111111111111111111111111111111112": ("SOL", 9),
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": ("USDC", 6),
         "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": ("USDT", 6),
+        // Backpack's stocks, Token-2022 (Kamino's Backpack market): a withdrawal of one names it.
+        "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb": ("SPCX", 6), "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1": ("MU", 6),
+        "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3": ("SKHY", 6), "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH": ("SNDK", 6),
     ]
 
     /// `accounts`: the message's full account list (static keys plus lookup tables).
@@ -197,12 +241,27 @@ public enum SolanaGuard {
         var unitLimit: UInt64 = 200_000
         var unitPrice: UInt64 = 0
         var refunded: UInt64 = 0
+        var fills = 0, makerSteps = 0
+        // The fill's taker side — the taker (0), what it gives from (2) and what it gets into (4) — found before the loop:
+        // a maker's step never touches them, whatever the app claimed about whose they are.
+        let takerSide = Set(m.instructions.first { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == jupiterZ }
+            .map { ix in [0, 2, 4].compactMap { $0 < ix.accounts.count ? ix.accounts[$0] : nil } } ?? [])
         for (n, ix) in m.instructions.enumerated() {
             guard ix.programIndex < m.staticKeys.count else {
                 v.problems.append("Instruction \(n + 1): the program is loaded from a lookup table.")
                 continue
             }
             let program = accounts[ix.programIndex]
+            // The wallet signs as account 1 and is a static key, so a step not given it can't act with its signature.
+            if policy.sponsor != nil, let maker = jupiterZMakerPrograms[program] {
+                guard !ix.accounts.contains(where: { takerSide.contains($0) || $0 < accounts.count && (accounts[$0] == policy.owner || mine(accounts[$0])) }) else {
+                    v.problems.append("Instruction \(n + 1): \(maker) is given your wallet or one of its accounts.")
+                    continue
+                }
+                makerSteps += 1
+                if makerSteps == 1 { v.checks.append("The market maker sources the coin itself (\(maker) and the like), given none of your swap's accounts.") }
+                continue
+            }
             guard let programName = policy.programs[program] else {
                 v.problems.append("Instruction \(n + 1): program \(program) is not on the allowed list.")
                 continue
@@ -314,8 +373,9 @@ public enum SolanaGuard {
                     continue
                 }
                 if program == kaminoLend, case .some(.some(let at)) = kaminoLendAllowed[kind] {
-                    guard let obligation = account(at), staticKeys.contains(obligation), obligation == kaminoObligation(owner: policy.owner) else {
-                        v.problems.append("Instruction \(n + 1): the Kamino position isn't your own on Kamino's main market.")
+                    guard let obligation = account(at), staticKeys.contains(obligation),
+                          kaminoMarkets.contains(where: { kaminoObligation(owner: policy.owner, market: $0) == obligation }) else {
+                        v.problems.append("Instruction \(n + 1): the Kamino position isn't your own on Kamino's main or Backpack market.")
                         continue
                     }
                 }
@@ -324,7 +384,41 @@ public enum SolanaGuard {
                     v.problems.append("Instruction \(n + 1): Kamino's account setup names a referrer.")
                     continue
                 }
-                v.checks.append("Calls \(programName): an instruction that pays only you. The balance simulation checks the amount.")
+                // A borrow or a withdrawal pays this wallet's own account, and the prompt says how much, read here: a borrow
+                // ten times the card's would otherwise sign as «Calls Kamino Lend» (the 2026-11-05 review).
+                if program == kaminoLend, let payout = kaminoPayouts[kind] {
+                    guard ix.data.count >= 16, let to = account(payout.to), staticKeys.contains(to), mine(to) else {
+                        v.problems.append("Instruction \(n + 1): Kamino would pay an account that isn't yours.")
+                        continue
+                    }
+                    let raw = le64(ix.data, 8)
+                    let what = mintNames.first { ownTokenAccount(to, owner: policy.owner, mint: $0.key) }
+                        .map { "\(Decimal(raw) / pow(10, $0.value.decimals)) \($0.value.symbol)" } ?? "\(raw) units"
+                    v.checks.append(payout.borrow ? "Kamino lends \(what) → your account, owed back to Kamino."
+                                                  : "Kamino withdrawal: up to \(what) in Kamino's shares, each worth one or more → your account.")
+                }
+                v.checks.append("Calls \(programName) on your own position: it pays only you, and a repay pays only your debt. The balance simulation checks the amount.")
+            case jupiterZ:
+                // One fill, this wallet the taker: what it gives comes from its own account for the input mint (or, with none
+                // named — the program's id — as SOL), and what it gets lands in its own account for the output mint (or as
+                // SOL). Another fill, or one drawing on a different account of the wallet, could hand the maker a token the
+                // app's simulation doesn't watch (the 2026-10-28 review). The amounts go on the prompt; the simulation checks them.
+                fills += 1
+                guard fills == 1, ix.data.prefix(8).hex == jupiterZFill, ix.data.count >= 24, account(0) == policy.owner,
+                      let source = account(2), let inMint = account(6), let out = account(4), let mint = account(8) else {
+                    v.problems.append("Instruction \(n + 1): a JupiterZ instruction that isn't the one fill with your wallet as the taker.")
+                    continue
+                }
+                func own(_ a: String, _ m: String) -> Bool {
+                    (a == jupiterZ && m == wrappedSOL) || (mine(a) || ownTokenAccount(a, owner: policy.owner, mint: m)) && (policy.trustLookupTables || staticKeys.contains(a))
+                }
+                guard own(source, inMint) else { v.problems.append("The JupiterZ fill takes from \(source), not your account for what you swap."); continue }
+                guard own(out, mint) else { v.problems.append("The JupiterZ fill pays \(out), not your wallet."); continue }
+                // A mint a lookup table names is unread here: the wallet's own account for it says which it is (its address
+                // derives from the mint), so the prompt reads «3 USDC», not «3000000 units of lookup-table entry 21».
+                func named(_ a: String, _ m: String) -> String { mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m }
+                func units(_ n: UInt64, _ m: String) -> String { mintNames[m].map { "\(Decimal(n) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(n) units of \(m.prefix(6))…" }
+                v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), named(source, inMint))) for \(units(le64(ix.data, 16), named(out, mint))) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
             case jupiterSwap:
                 // Every swap form's output account (its «instead» one when set: the program's own id when not) must be this
                 // wallet's own; any other Jupiter instruction is refused (the 2026-10-24 review: the gasless path's route_v2
@@ -346,6 +440,10 @@ public enum SolanaGuard {
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
             }
         }
+        if makerSteps > 0, fills != 1 { v.problems.append("A market maker's steps come without its one JupiterZ fill.") }
+        // A JupiterZ maker fronts no rent: the wallet's own new account is paid by its own create step. SOL «back» to the
+        // fee payer beside a fill would be the maker skimming the wallet (the 2026-10-29 review).
+        if fills > 0, refunded > 0 { v.problems.append("\(Double(refunded) / 1e9) SOL to the market maker: a JupiterZ fill takes no SOL from your wallet.") }
         // Both numbers are the transaction's: a product past 64 bits is refused, not trapped on.
         let (product, overflow) = unitLimit.multipliedReportingOverflow(by: unitPrice)
         let fee = product / 1_000_000
@@ -359,12 +457,15 @@ public enum SolanaGuard {
         public let after: Int64
         /// The change must be at least this (negative: at most this much may leave).
         public let atLeast: Int64
+        /// And at most this, when set: a borrow or a withdrawal brings no more than the card said.
+        public let atMost: Int64?
 
-        public init(label: String, before: Int64, after: Int64, atLeast: Int64) {
+        public init(label: String, before: Int64, after: Int64, atLeast: Int64, atMost: Int64? = nil) {
             self.label = label
             self.before = before
             self.after = after
             self.atLeast = atLeast
+            self.atMost = atMost
         }
     }
 
@@ -373,15 +474,66 @@ public enum SolanaGuard {
         var v = Verdict()
         for r in rules {
             let delta = r.after - r.before
-            if delta >= r.atLeast { v.checks.append("Simulation: \(r.label) \(delta >= 0 ? "+" : "")\(delta).") }
-            else { v.problems.append("Simulation: \(r.label) changes by \(delta); the minimum allowed is \(r.atLeast).") }
+            if delta < r.atLeast { v.problems.append("Simulation: \(r.label) changes by \(delta); the minimum allowed is \(r.atLeast).") }
+            else if let most = r.atMost, delta > most { v.problems.append("Simulation: \(r.label) changes by \(delta), over the most allowed, \(most).") }
+            else { v.checks.append("Simulation: \(r.label) \(delta >= 0 ? "+" : "")\(delta).") }
         }
         return v
+    }
+
+    /// Rights a transaction hands out that no balance shows (research E-1; SlowMist, December 2025: a program outside the
+    /// list Assigned wallets to itself while the signing window's balances didn't move). Read from the simulation: the
+    /// wallet still belongs to the System program and holds no data, and each of our token accounts in `before` keeps its
+    /// owner and gets no new close authority, no new delegate and no more for its delegate to spend. A change is refused,
+    /// never a field already set: spam accounts others open for a wallet carry a stranger's close authority from the start.
+    /// A token account of the wallet's in `after` that isn't in `before` was opened by this transaction: it starts with no
+    /// one else's rights (a delegate on it would drain every later deposit). An account missing from `after` was closed:
+    /// it has no rights left. `names`: a token account's coin, «USDC».
+    /// ponytail: the wallet and its token accounts only (variant A); stake, nonce and lookup-table authorities and Token-2022's
+    /// extensions aren't compared — every writable account's address fields (variant B) once wallets hold those.
+    public static func rightsProblems(owner: String, before: [String: SolanaAccountRights], after: [String: SolanaAccountRights],
+                                      names: [String: String] = [:]) -> [String] {
+        var out: [String] = []
+        if let w = after[owner] {
+            if w.program != system {
+                out.append("Your wallet would be handed to \(w.program.isEmpty ? "a program the simulation doesn't name" : "the program \(w.program)"): "
+                           + "from then on that program, not your key, decides what leaves it.")
+            }
+            if w.space > 0 { out.append("Your wallet would get \(w.space) bytes of data and could no longer pay Solana's fee.") }
+        }
+        let opened = after.filter { before[$0.key] == nil && $0.value.owner == owner }.mapValues { _ in SolanaAccountRights() }
+        for (address, was) in before.merging(opened, uniquingKeysWith: { a, _ in a }).sorted(by: { $0.key < $1.key }) {
+            guard let now = after[address], let holder = now.owner else { continue }
+            let coin = names[address] ?? "tokens in \(address.prefix(4))…\(address.suffix(4))"
+            let account = names[address].map { "\($0) account" } ?? "token account \(address.prefix(4))…\(address.suffix(4))"
+            if holder != owner { out.append("Your \(account) would belong to \(holder).") }
+            if let c = now.closeAuthority, c != owner, c != was.closeAuthority { out.append("\(c) could close your \(account) and take its rent.") }
+            if let d = now.delegate, d != owner, d != was.delegate || now.delegatedAmount > was.delegatedAmount { out.append("\(d) could spend your \(coin).") }
+        }
+        return out
     }
 
     static func le16(_ d: Data, _ at: Int) -> UInt16 { UInt16(d[d.startIndex + at]) | UInt16(d[d.startIndex + at + 1]) << 8 }
     static func le32(_ d: Data, _ at: Int) -> UInt32 { (0..<4).reduce(0) { $0 | UInt32(d[d.startIndex + at + $1]) << (8 * $1) } }
     static func le64(_ d: Data, _ at: Int) -> UInt64 { (0..<8).reduce(0) { $0 | UInt64(d[d.startIndex + at + $1]) << (8 * $1) } }
+}
+
+// MARK: - A second simulation
+
+/// What a second simulation, run after the user pressed Sign, may differ in from the one the window showed (research E-4;
+/// ScamSniffer: a site changes the state in the seconds between the look and the signature).
+public enum SimulationDrift {
+    /// Why what leaves now isn't what was shown: an asset leaves that didn't, or more than 1 % more of one leaves. Keys are
+    /// assets, values their signed change. Arrivals aren't compared: the transaction's own minimum holds them, and a price
+    /// moves in half a minute. `names`: how an asset reads in the reason.
+    public static func outflowsGrew(shown: [String: Decimal], now: [String: Decimal], names: [String: String] = [:]) -> String? {
+        for (asset, change) in now.sorted(by: { $0.key < $1.key }) where change < 0 {
+            let name = names[asset] ?? asset
+            guard let was = shown[asset], was < 0 else { return "\(name) would leave too, which the window didn't show" }
+            if -change > -was * Decimal(string: "1.01")! { return "more \(name) would leave than the window showed" }
+        }
+        return nil
+    }
 }
 
 // MARK: - Hyperliquid
@@ -430,6 +582,32 @@ public enum HLGuard {
             v.checks.append("Trading action inside your account; ihatecrypto's fee \(HLBuilder.rate).")
         case "cancel":
             v.checks.append("Trading action inside your account.")
+        case "trailingStop":
+            // The trading key signs it without a prompt: only one that can close, never open or add to, a position. The
+            // exchange holds a reduce-only order to the position's own coin and size.
+            guard pairs.first(where: { $0.0 == "reduceOnly" })?.1 == .bool(true) else {
+                v.problems.append("A trailing stop that could open or add to a position is not allowed.")
+                return v
+            }
+            let side = pairs.first(where: { $0.0 == "isBuy" })?.1 == .bool(true) ? "buy" : "sell"
+            let market = if case .uint(let a)? = pairs.first(where: { $0.0 == "asset" })?.1 { "market #\(a)" } else { "a market" }
+            let pct = if case .map(let r)? = pairs.first(where: { $0.0 == "retracement" })?.1, case .string(let p)? = r.first?.1 { p } else { "?" }
+            v.checks.append("Trailing stop: \(side) \(text("sz") ?? "?") on \(market) once the price falls back \(pct) from its best, only reducing a position → your account")
+        case "twapOrder":
+            // Parts at the market inside the account, like an order; it takes no builder field, so no fee can ride on it.
+            guard case .map(let t)? = pairs.first(where: { $0.0 == "twap" })?.1, t.count == 6,
+                  // Up to 4 hours: a stop that fires leaves a TWAP buying, and only the app watching stops it (Plan.twapMaxMinutes).
+                  case .uint(let minutes)? = t.first(where: { $0.0 == "m" })?.1, (5...240).contains(minutes) else {
+                v.problems.append("A TWAP that isn't 5 minutes to 4 hours of parts inside your account is not allowed.")
+                return v
+            }
+            func field(_ k: String) -> MsgPack? { t.first(where: { $0.0 == k })?.1 }
+            let side = field("b") == .bool(true) ? "buy" : "sell"
+            let size = if case .string(let s)? = field("s") { s } else { "?" }
+            let market = if case .uint(let a)? = field("a") { "market #\(a)" } else { "a market" }
+            v.checks.append("TWAP: \(side) \(size) on \(market) over \(minutes) min at the market\(field("r") == .bool(true) ? ", only reducing a position" : "") → your account")
+        case "twapCancel":
+            v.checks.append("Stops a TWAP inside your account.")
         case "setReferrer":
             if text("code") == HLBuilder.referralCode { v.checks.append("Referral code \(HLBuilder.referralCode): 4% off your Hyperliquid fees.") }
             else { v.problems.append("Referral code \(text("code") ?? "?") is not ihatecrypto's.") }
@@ -495,6 +673,47 @@ public enum DepositGuard {
             v.problems.append("The deposit address is bound to a different \(field): \(bound[field] ?? "none") instead of \(value).")
         }
         if v.ok { v.checks.append("The deposit address is bound to a quote with your recipient, refund address and amount.") }
+        return v
+    }
+
+    /// A private move goes only where 1Click itself holds the deposit as confidential (Confidential Intents): else it
+    /// would go in the open.
+    public static func confidential(bound: [String: String]) -> Verdict {
+        var v = Verdict()
+        if bound["confidentiality"]?.lowercased() == "basic" { v.checks.append("1Click holds the deposit as confidential.") }
+        else { v.problems.append("1Click didn't take it as private (Confidential Intents): it says «\(bound["confidentiality"] ?? "nothing")».") }
+        return v
+    }
+
+    /// A deposit an MPP service asks for through NEAR Intents (its quote, not ours): 1Click itself must hold the address
+    /// for an exact-output quote paying the service's recipient exactly `amountOut`, refunding to the address the service
+    /// named, taking USDC from the network paid on and, when it's known, paying the asset the card shows. And the deposit
+    /// can't be more than 1Click's quote takes plus its slippage: the rest would only come back as a refund — to the
+    /// service. `bound` as OneClick.boundRequest reads it.
+    public static func charge(bound: [String: String], recipient: String, refundTo: String, origin: String, destination: String?,
+                              amountOut: String, deposit: UInt64, now: Date = Date()) -> Verdict {
+        var v = Verdict()
+        if bound["swapType"] != "EXACT_OUTPUT" { v.problems.append("1Click holds it as \(bound["swapType"] ?? "an unknown") quote, not one paying an exact amount.") }
+        var expected = ["recipient": recipient, "refundTo": refundTo, "originAsset": origin, "amount": amountOut]
+        if let destination { expected["destinationAsset"] = destination }
+        for (field, value) in expected.sorted(by: { $0.key < $1.key }) where bound[field]?.lowercased() != value.lowercased() {
+            v.problems.append("The deposit address is bound to a different \(field): \(bound[field] ?? "none") instead of \(value).")
+        }
+        if let asked = bound["quoteAmountIn"].flatMap({ UInt64($0) }) {
+            // 1Click's own price for this deposit, plus 1% for its slippage and rounding.
+            if deposit > asked + asked / 100 + 1 { v.problems.append("The service asks \(deposit) units, more than the \(asked) 1Click takes for it.") }
+        } else {
+            v.problems.append("1Click didn't say what this deposit costs.")
+        }
+        // Under 1Click's minimum, or after its quote runs out, the deposit only comes back — to the service's refund address.
+        if let least = bound["quoteMinAmountIn"].flatMap({ UInt64($0) }), deposit < least {
+            v.problems.append("The deposit is under the \(least) units 1Click needs for it.")
+        }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let deadline = bound["deadline"].flatMap { f.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+        if let deadline, deadline < now.addingTimeInterval(120) { v.problems.append("1Click's quote for this deposit runs out at \(bound["deadline"] ?? "")") }
+        if v.ok { v.checks.append("1Click holds the deposit for the service's recipient, its exact amount and its refund address, at 1Click's own price.") }
         return v
     }
 }

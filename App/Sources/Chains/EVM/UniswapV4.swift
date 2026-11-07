@@ -4,13 +4,14 @@ import WalletCore
 /// Uniswap v4 (developers.uniswap.org v4 deployments): one PoolManager a network holds every pool; a swap goes through
 /// the Universal Router's V4_SWAP command, which pulls the input through Permit2. The formats are the deployed router's own
 /// (its verified source on Blockscout): ExactInputSingleParams carries `minHopPriceX36`, which older docs and the first
-/// Universal Router don't have — so on Base, Arbitrum, Ethereum and Polygon it's their Universal Router 2.1.2, whose
-/// verified source has the same struct and the same SWAP_EXACT_IN_SINGLE 0x06, SETTLE_ALL 0x0c, TAKE_ALL 0x0f as
-/// Robinhood Chain's (checked 2026-10-05).
+/// Universal Router don't have — so it's Universal Router 2.1.2 on every network, whose verified source has the same
+/// struct and the same SWAP_EXACT_IN_SINGLE 0x06, SETTLE_ALL 0x0c, TAKE_ALL 0x0f as Robinhood Chain's 2.1.1 (checked
+/// 2026-10-05). Robinhood Chain moved to 2.1.2 (Uniswap/universal-router deploy-addresses/robinhood.json, 2026-09-18,
+/// its poolManager() read on-chain 2026-11-05): Permit2's allowance is per router, so v4Swap reads it and asks anew.
 public enum UniswapV4 {
     public static let robinhoodPoolManager = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
     public static let robinhoodQuoter = "0x8dc178efb8111bb0973dd9d722ebeff267c98f94"
-    public static let robinhoodRouter = "0x8876789976decbfcbbbe364623c63652db8c0904"
+    public static let robinhoodRouter = "0x204faca1764b154221e35c0d20abb3c525710498"
     public static let permit2 = "0x000000000022d473030f116ddee9f6b43ac78ba3"
     /// The currency v4 pools name the network's own coin by (ETH, POL): paid with the call's value, taken as coins.
     public static let native = "0x0000000000000000000000000000000000000000"

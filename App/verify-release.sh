@@ -53,12 +53,15 @@ echo "· building v$version (build $(key CFBundleVersion)) with Xcode $xcode and
 $root/src/App/Tools/build-release.sh $version $(key CFBundleVersion) "$(key SUFeedURL)" $root/built.xcarchive --unsigned
 
 echo "· comparing"
-# Each Mach-O file loses its signature; the signatures' own files go: _CodeSignature, the stapled notarization ticket
-# (Contents/CodeResources) and the signer's provisioning profile.
+# Each Mach-O file loses its signature; the signatures' own files go, only where codesign and stapler put them: a bundle's
+# Contents/_CodeSignature and Contents/embedded.provisionprofile (a framework's Versions/<v>/_CodeSignature) and the
+# app's stapled notarization ticket, its own Contents/CodeResources. Those names anywhere else are compared (what lies
+# inside a real _CodeSignature isn't), and a new kind of nested bundle (.appex) shows as a difference until it's named here.
 unsign() {
   ditto "$1" "$2"
-  find "$2" \( -name _CodeSignature -o -name embedded.provisionprofile \) -prune -exec rm -rf {} +
-  find "$2" -path '*/Contents/CodeResources' -delete
+  find -E "$2" \( -regex '.*\.(app|xpc)/Contents/(_CodeSignature|embedded\.provisionprofile)' \
+    -o -regex '.*\.framework/Versions/[^/]+/_CodeSignature' \) -prune -exec rm -rf {} +
+  rm -f "$2/Contents/CodeResources"
   # codesign --remove-signature leaves __LINKEDIT's size in memory as big as the signature made it, so on both copies
   # it is set from the segment's size in the file, rounded to 16 KB pages, as the linker sets it for an unsigned file.
   python3 -I - "$2" <<'EOF'

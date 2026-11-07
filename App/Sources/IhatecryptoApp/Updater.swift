@@ -57,7 +57,22 @@ extension Updater: SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDele
         immediateFocus
     }
 
+    /// Found: it stays offered by the logo and in the menus, not only in one notification — a gentle reminder holds
+    /// Sparkle's session open and no other check runs, so 0.7.0 sat two days with 0.7.7 out and nothing on screen
+    /// (the owner: «почему не показывает иконку с обновлением», 2026-10-26).
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        workspace?.updateReady = item.displayVersionString
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) { workspace?.updateReady = nil }
+
+    /// «Skip This Version» drops it; «Remind Me Later» keeps the tag.
+    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
+        if choice == .skip { workspace?.updateReady = nil }
+    }
+
     func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        workspace?.updateReady = update.displayVersionString
         guard !handleShowingUpdate, !state.userInitiated, let ws = workspace else { return }
         ws.notify(.update, ws.say("ihatecrypto \(update.displayVersionString) is ready", "Готова ihatecrypto \(update.displayVersionString)"),
                   ws.say("Click to see what's new and install it.", "Нажми, чтобы посмотреть, что нового, и установить."), record: false)

@@ -94,11 +94,11 @@ public enum ModuleKind: String, CaseIterable, Sendable {
 }
 
 public enum ModuleProtocol: String, CaseIterable, Sendable {
-    case jupiter, jupiterDCA, uniswap, jupiterLend, kamino, jitoSOL, aave, morpho, hlp, hlPerps, xyz, robinhoodStocks, relay, oneClick, mpp
+    case jupiter, jupiterDCA, uniswap, kyberswap, jupiterLend, kamino, jitoSOL, aave, morpho, hlp, hlPerps, xyz, robinhoodStocks, relay, oneClick, mpp
 
     public var kind: ModuleKind {
         switch self {
-        case .jupiter, .jupiterDCA, .uniswap: .swaps
+        case .jupiter, .jupiterDCA, .uniswap, .kyberswap: .swaps
         case .jupiterLend, .kamino, .jitoSOL, .aave, .morpho, .hlp: .earn
         case .hlPerps: .perps
         case .xyz, .robinhoodStocks: .stocks
@@ -112,7 +112,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         switch self {
         case .jupiter, .jupiterDCA, .jupiterLend, .kamino, .jitoSOL, .relay: [.solana]
         // Uniswap works on Robinhood Chain, Base and Arbitrum: the network is checked per move.
-        case .uniswap: []
+        case .uniswap, .kyberswap: []
         case .robinhoodStocks: [.robinhood]
         // Aave and Morpho work on several networks: the one a move uses is checked per move.
         case .aave, .morpho: []
@@ -127,6 +127,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         case .jupiter: "Jupiter"
         case .jupiterDCA: "Jupiter DCA"
         case .uniswap: "Uniswap"
+        case .kyberswap: "KyberSwap"
         case .jupiterLend: "Jupiter Lend"
         case .kamino: "Kamino"
         case .jitoSOL: "JitoSOL staking"
@@ -150,6 +151,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         case .xyz: "Oil, metals, stocks"
         case .relay: "Solana ⇄ Base · Arbitrum · Polygon · Ethereum · Robinhood · Tempo · HyperEVM · Optimism · BNB Chain"
         case .uniswap: "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · Robinhood"
+        case .kyberswap: "Base · Arbitrum · Polygon · Ethereum · Optimism · BNB Chain · HyperEVM"
         case .aave: "Base · Arbitrum · Polygon · Ethereum"
         case .morpho: "Base · Arbitrum · Ethereum"
         case .oneClick: "NEAR ⇄ Solana"
@@ -163,6 +165,7 @@ public enum ModuleProtocol: String, CaseIterable, Sendable {
         switch self {
         case .jupiter, .jupiterDCA, .jupiterLend: "jup"
         case .uniswap: "uni"
+        case .kyberswap: "kyber"
         case .kamino: "kamino"
         case .jitoSOL: "jitosol"
         case .aave: "aave"
@@ -267,7 +270,7 @@ public struct Modules: Equatable, Sendable {
         case .jupiterDCA, .jupiterDCACancel, .jupiterDCAOrders: return r(.jupiterDCA)
         case .stake, .unstake: return r(.jitoSOL)
         case .lendDeposit, .lendWithdraw: return r(.jupiterLend)
-        case .kamino: return r(.kamino)
+        case .kamino, .kaminoBorrow, .kaminoRepay: return r(.kamino)
         case .hlp: return r(.hlp)
         case .aave(_, _, let net): return r(.aave) ?? r(.relay, via: ModuleNetwork(place: net).map { [$0] } ?? [])
         case .aaveBorrow(_, let net), .aaveRepay(_, let net), .aaveCollateral(_, let net): return r(.aave, via: ModuleNetwork(place: net).map { [$0] } ?? [])
@@ -299,8 +302,14 @@ public struct Modules: Equatable, Sendable {
         case .swapOn("tempo", _, _, _):
             return isOn(.swaps) ? refusal(network: .tempo, ru: ru)
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        // One token for another on the network itself: whichever of Uniswap, KyberSwap and Relay's swap is on there (the
+        // executor's bestPair takes only those); refused, in Uniswap's words, when none is.
         case .swapOn(let place, _, _, _):
-            return isOn(.swaps) ? r(.uniswap, via: ModuleNetwork(place: place).map { [$0] } ?? [])
+            let via = ModuleNetwork(place: place).map { [$0] } ?? [], ways = [r(.uniswap, via: via), r(.kyberswap, via: via), r(.relay, via: via)]
+            return isOn(.swaps) ? (ways.contains { $0 == nil } ? nil : ways[0])
+                : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        case .swapPrivately(_, let from, _, let to, _):
+            return isOn(.swaps) ? r(.oneClick, via: [from, to].compactMap(ModuleNetwork.init(place:)))
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
         case .crossSwap(_, let from, _, let to, _):
             return isOn(.swaps) ? r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))
@@ -311,6 +320,9 @@ public struct Modules: Equatable, Sendable {
         case .sendNear, .closeNear: return refusal(network: .near, ru: ru)
         case .sendSol: return refusal(network: .solana, ru: ru)
         case .sendToken(_, _, _, let net): return net.flatMap(ModuleNetwork.init(place:)).flatMap { refusal(network: $0, ru: ru) }
+        case .agentCreate, .agentSend, .agentFreeze: return nil
+        case .agentFund: return r(.oneClick, via: [.solana])
+        case .sendPrivately(_, _, _, let net): return r(.oneClick, via: [.solana] + (net.flatMap(ModuleNetwork.init(place:)).map { [$0] } ?? []))
         case .showApprovals, .revokeApproval: return nil   // reading them and setting one to zero is always allowed
         case .contractCall(let c): return ModuleNetwork(place: c.network).flatMap { refusal(network: $0, ru: ru) }
         case .sweepDust: return isOn(.swaps) ? r(.uniswap) : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
@@ -320,6 +332,7 @@ public struct Modules: Equatable, Sendable {
         case .pay: return r(.mpp)
         case .gas(let place, _): return r(.relay, via: ModuleNetwork(place: place).map { [$0] } ?? [])
         case .bridge(let from, let to, _): return r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))
+        case .intents(let from, let to, _): return r(.oneClick, via: [from, to].compactMap(ModuleNetwork.init(place:)))
         case .cctp(let from, let to, _):
             if let off = [from, to].compactMap(ModuleNetwork.init(place:)).lazy.compactMap({ self.refusal(network: $0, ru: ru) }).first { return off }
             return isOn(.bridges) ? nil : ru ? "\(ModuleKind.bridges.name) выключены в Settings › Modules." : "\(ModuleKind.bridges.name) is off in Settings › Modules."

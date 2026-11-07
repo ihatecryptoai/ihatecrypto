@@ -34,11 +34,25 @@ public enum RobinhoodStocks {
         }
     }
 
+    /// What Robinhood's registry says of a token: true for its own contract on Robinhood Chain, false for another
+    /// contract there under one of its tickers (a copy), nil for anything else. By the contract, never by the ticker alone.
+    public static func listed(_ address: String, symbol: String, chain: String, in registry: [Token]) -> Bool? {
+        guard chain == "robinhood" else { return nil }
+        if registry.contains(where: { $0.address.lowercased() == address.lowercased() }) { return true }
+        return registry.contains { $0.symbol.uppercased() == symbol.uppercased() } ? false : nil
+    }
+
     /// Robinhood's own bid and ask for the token (api.robinhood.com/rhj/prices/{symbol}).
     public static func quote(_ symbol: String) async throws -> (bid: Decimal, ask: Decimal)? {
         let (data, _) = try await URLSession.shared.data(from: URL(string: "https://api.robinhood.com/rhj/prices/\(symbol)")!)
+        return parseQuote(data)
+    }
+
+    /// Robinhood's bid and ask; nil for an error body (a 404's «no whitelisted asset», a 5xx), no quotes, or a side at zero.
+    public static func parseQuote(_ data: Data) -> (bid: Decimal, ask: Decimal)? {
         guard let q = ((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["quotes"] as? [[String: Any]])?.first,
-              let bid = (q["bid"] as? String).flatMap({ Decimal(string: $0) }), let ask = (q["ask"] as? String).flatMap({ Decimal(string: $0) }) else { return nil }
+              let bid = (q["bid"] as? String).flatMap({ Decimal(string: $0) }), let ask = (q["ask"] as? String).flatMap({ Decimal(string: $0) }),
+              bid > 0, ask > 0 else { return nil }
         return (bid, ask)
     }
 
@@ -120,9 +134,8 @@ extension Executor {
         if best.name == "relay", let listing { return try await relaySwap(token, buy: true, units: Decimal(units), listing: listing) }
         let useV4 = best.name == "v4", out = best.out
         let price = (Decimal(units) / 1_000_000) / (out / scale)
-        var band = listing?.priceUSD.map { (bid: $0, ask: $0) }
-        if listing == nil { band = try await RobinhoodStocks.quote(symbol) }
-        if let q = band, price > q.ask * Decimal(string: "1.05")! || price < q.bid * Decimal(string: "0.95")! {
+        let q = try await Self.priceBand(symbol, listing: listing, robinhood: listing == nil ? RobinhoodStocks.quote(symbol) : nil)
+        if Self.offBand(price, q) {
             // Relay's swap has its own checks (within 5% of DexScreener's price, at most 3% lost).
             if let listing {
                 report("Uniswap would pay \(Fmt.usd(price)) a token for this much, DexScreener says \(Fmt.usd(q.bid)): its pools are thin. Relay's swap goes through the deeper ones.")
@@ -134,15 +147,24 @@ extension Executor {
         try await ensureEVM(.robinhood, usdc: units)
         let before = try await balance(token.address, on: rpc)
         let hash: String
-        // Quoted again with the money there: the price may have moved while the bridge ran.
+        // Quoted again with the money there: the price may have moved while the bridge ran. That quote is the one signed,
+        // so it is held to the same band.
+        let band = listing == nil ? "Robinhood's own \(Fmt.usd(q.bid))–\(Fmt.usd(q.ask))" : "DexScreener's \(Fmt.usd(q.bid))"
+        func checkAgain(_ fresh: Decimal) throws {
+            let now = fresh > 0 ? (Decimal(units) / 1_000_000) / (fresh / scale) : 0
+            guard Self.offBand(now, q) else { return }
+            throw ExecutionError("Asked again with the USDG on Robinhood Chain, Uniswap's price \(Fmt.usd(now)) is more than 5% off \(band). The USDG waits there; nothing was swapped.")
+        }
         if useV4, let route = v4 {
             guard let fresh = await v4Quote(route.key, zeroForOne: route.zeroForOne, amount: Decimal(units)) else {
                 throw ExecutionError("Uniswap v4 no longer quotes \(symbol); the USDG waits on Robinhood Chain. Nothing was swapped.")
             }
+            try checkAgain(fresh)
             hash = try await v4Swap(route, tokenIn: usdg, units: Decimal(units), minOut: (fresh * 99 / 100).rounded(0, .down),
                                     what: "\(Fmt.num(Decimal(units) / 1_000_000)) USDG", note: "Buy \(symbol) for \(Fmt.num(Decimal(units) / 1_000_000)) USDG on Uniswap v4")
         } else {
             guard let fresh = try await bestPool(usdg, token.address, amountIn: Decimal(units)) else { throw ExecutionError(noPool(symbol, listing)) }
+            try checkAgain(fresh.out)
             let minimum = (fresh.out * 99 / 100).rounded(0, .down)
             hash = try await approveAndSend(rpc, token: usdg, spender: UniswapV3.robinhoodRouter, units: Decimal(units),
                                             approveNote: "Approve exactly \(Fmt.num(Decimal(units) / 1_000_000)) USDG to Uniswap", to: UniswapV3.robinhoodRouter,
@@ -173,6 +195,8 @@ extension Executor {
         let inScale: Decimal = buy ? 1_000_000 : scale, outScale: Decimal = buy ? scale : 1_000_000
         let (inSymbol, outSymbol) = buy ? ("USDG", token.symbol) : (token.symbol, "USDG")
         let amountIn = units / inScale
+        // DexScreener's price, the one Relay's is checked against: none, and nothing is bridged or signed.
+        let p = try Self.priceBand(token.symbol, listing: listing, robinhood: nil).bid
         try await ensureEVM(.robinhood, usdc: buy ? NSDecimalNumber(decimal: units).uint64Value : 0)
         guard let proxy = try await Relay.approvalProxy(chainId: chain)?.lowercased() else { throw ExecutionError("Relay publishes no approval proxy for Robinhood Chain.") }
         /// Relay's quote with every check: from and to this wallet, its call to the proxy after an exact approve, the price.
@@ -192,7 +216,7 @@ extension Executor {
             guard out > 0 else { throw ExecutionError("Relay doesn't quote \(inSymbol) now. Nothing was signed.") }
             try Self.checkLoss(worthIn - worthOut, paid: worthIn, cap: max(worthIn * Decimal(string: "0.03")!, Decimal(string: "0.15")!), what: "Relay's swap")
             let price = buy ? amountIn / out : out / amountIn
-            if let p = listing.priceUSD, price > p * Decimal(string: "1.05")! || price < p * Decimal(string: "0.95")! {
+            if price > p * Decimal(string: "1.05")! || price < p * Decimal(string: "0.95")! {
                 throw ExecutionError("Relay's price \(Fmt.usd(price)) is off DexScreener's \(Fmt.usd(p)) by more than 5%. Nothing was signed.")
             }
             return (quote, call, price, out)
@@ -248,6 +272,26 @@ extension Executor {
             + "\(EVMNetwork.robinhood.explorer)/tx/\(hash)"
     }
 
+    /// What a Uniswap or Relay price is checked against: DexScreener's price for a token bought by its contract, Robinhood's
+    /// own bid–ask for a Stock Token. Neither, and the trade stops: a price nobody can check isn't signed.
+    static func priceBand(_ symbol: String, listing: TokenLookup.Info?, robinhood: (bid: Decimal, ask: Decimal)?) throws -> (bid: Decimal, ask: Decimal) {
+        if let listing {
+            guard let p = listing.priceUSD, p > 0 else {
+                throw ExecutionError("DexScreener gives no price for \(symbol) right now, so the swap's price can't be checked. Nothing was signed.")
+            }
+            return (p, p)
+        }
+        guard let q = robinhood else {
+            throw ExecutionError("Robinhood gives no quote for \(symbol) right now, so Uniswap's price can't be checked against it. Nothing was signed. Try again in a minute.")
+        }
+        return q
+    }
+
+    /// A buy's price more than 5% outside the band, or no price at all (zero, or a quote of nothing).
+    static func offBand(_ price: Decimal, _ q: (bid: Decimal, ask: Decimal)) -> Bool {
+        !(price > 0) || price > q.ask * Decimal(string: "1.05")! || price < q.bid * Decimal(string: "0.95")!
+    }
+
     /// How much worse (%, one decimal) a fresh quote is than the first, when that's more than 10%; nil otherwise.
     public static func worseByMoreThanTenPercent(first: Decimal, now: Decimal) -> Decimal? {
         guard first > 0, now < first * Decimal(string: "0.9")! else { return nil }
@@ -286,9 +330,8 @@ extension Executor {
         if best.name == "relay", let listing { return try await relaySwap(token, buy: false, units: wanted, listing: listing) }
         let useV4 = best.name == "v4", out = best.out
         let got = (out / 1_000_000) / (wanted / scale)
-        var band = listing?.priceUSD.map { (bid: $0, ask: $0) }
-        if listing == nil { band = try await RobinhoodStocks.quote(symbol) }
-        if let q = band, got < q.bid * Decimal(string: "0.95")! {
+        let q = try await Self.priceBand(symbol, listing: listing, robinhood: listing == nil ? RobinhoodStocks.quote(symbol) : nil)
+        if got < q.bid * Decimal(string: "0.95")! {
             if let listing {
                 report("Uniswap would pay \(Fmt.usd(got)) a token for this much, DexScreener says \(Fmt.usd(q.bid)): its pools are thin. Relay's swap goes through the deeper ones.")
                 return try await relaySwap(token, buy: false, units: wanted, listing: listing)
@@ -302,6 +345,11 @@ extension Executor {
         if useV4, let route = v4 {
             guard let fresh = await v4Quote(route.key, zeroForOne: route.zeroForOne, amount: wanted) else {
                 throw ExecutionError("Uniswap v4 no longer quotes \(symbol). Nothing was swapped.")
+            }
+            // The quote signed, held to the same bid.
+            let now = (fresh / 1_000_000) / (wanted / scale)
+            guard now >= q.bid * Decimal(string: "0.95")! else {
+                throw ExecutionError("Asked again, Uniswap would pay \(Fmt.usd(now)) a token, more than 5% under \(listing == nil ? "Robinhood's own bid" : "DexScreener's price") \(Fmt.usd(q.bid)). Nothing was swapped.")
             }
             hash = try await v4Swap(route, tokenIn: token.address, units: wanted, minOut: (fresh * 99 / 100).rounded(0, .down), what: tokens,
                                     note: "Sell \(tokens) on Uniswap v4")
@@ -318,7 +366,10 @@ extension Executor {
             try await Task.sleep(for: .seconds(1))
             after = try await rpc.tokenBalance(usdg, owner: me)
         }
-        traded?("robinhood:\(token.address.lowercased())", -wanted / scale, Decimal(after > before ? after - before : 0) / 1_000_000)
-        return "Sold \(Fmt.num(wanted / scale, maxFraction: 6)) \(symbol) for \(Fmt.num(Decimal(after - before) / 1_000_000)) USDG. Say “move USDG from Robinhood to Solana” to bring it back. \(EVMNetwork.robinhood.explorer)/tx/\(hash)"
+        // A balance read lower after the sale (a node behind, USDG leaving at the same time) gives 0, never a UInt64 trap
+        // after the sale went through.
+        let received = Decimal(after > before ? after - before : 0) / 1_000_000
+        traded?("robinhood:\(token.address.lowercased())", -wanted / scale, received)
+        return "Sold \(Fmt.num(wanted / scale, maxFraction: 6)) \(symbol) for \(Fmt.num(received)) USDG. Say “move USDG from Robinhood to Solana” to bring it back. \(EVMNetwork.robinhood.explorer)/tx/\(hash)"
     }
 }

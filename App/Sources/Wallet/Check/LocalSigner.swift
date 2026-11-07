@@ -52,7 +52,8 @@ struct LocalSigner: TradeSigner {
                  recipients: [String]) async throws -> Data {
         guard EVMRPC.signable.contains(chainId) else { throw ExecutionError("Not signing for network \(chainId).") }
         let call = EVMCall.decode(data)
-        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm) { throw ExecutionError(refusal) }
+        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm)
+            ?? EVMCall.targetRefusal(to: to, data: data, sender: wallet.evm) { throw ExecutionError(refusal) }
         if let payee = call.payees(to: to, value: 0, chainId: chainId).first(where: { p in !(recipients + [wallet.evm]).contains { $0.lowercased() == p.lowercased() } }) {
             throw ExecutionError("Tokens or the right to spend them would go to \(payee).")
         }
@@ -65,7 +66,8 @@ struct LocalSigner: TradeSigner {
                         data: Data, recipients: [String]) async throws -> Data {
         guard EVMRPC.signable.contains(chainId) else { throw ExecutionError("Not signing for network \(chainId).") }
         let call = EVMCall.decode(data)
-        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm) { throw ExecutionError(refusal) }
+        if let refusal = call.refusal(sender: wallet.evm, chainId: chainId) ?? Batch7702.selfCall(to: to, data: data, owner: wallet.evm)
+            ?? EVMCall.targetRefusal(to: to, data: data, sender: wallet.evm) { throw ExecutionError(refusal) }
         if let payee = call.payees(to: to, value: value, chainId: chainId).first(where: { p in !(recipients + [wallet.evm]).contains { $0.lowercased() == p.lowercased() } }) {
             throw ExecutionError("Coins or tokens would go to \(payee).")
         }
@@ -174,7 +176,8 @@ func moveMoney(_ text: String) async throws {
     case .evmToSolana(let net, let amount):
         guard let n = EVMNetwork.named(net) else { throw ExecutionError("ihatecrypto doesn't move money on \(net).") }
         print(try await executor.evmToSolana(n, usdc: amount))
-    case .sendTo, .sendNear, .closeNear, .sendSol, .sendToken: throw ExecutionError("Sending to a saved address works in the ihatecrypto app, where the address book is.")
+    case .swapPrivately: throw ExecutionError("A private swap needs the wallet's NEAR account and the NEAR Intents key: it runs in the ihatecrypto app.")
+    case .sendTo, .sendNear, .closeNear, .sendSol, .sendToken, .sendPrivately, .agentCreate, .agentFund, .agentSend, .agentFreeze: throw ExecutionError("Sending to a saved address works in the ihatecrypto app, where the address book is.")
     case .buyStock(let symbol, let usdc): print(try await executor.buyStock(symbol, usdc: usdc ?? 1))
     case .sellStock(let symbol, let amount): print(try await executor.sellStock(symbol, amount: amount))
     case .buyOn(let place, let token, let usdc, let from): print(try await executor.buyOn(EVMNetwork.named(place) ?? .base, token, usdc: usdc ?? 1, from: from))
@@ -189,10 +192,13 @@ func moveMoney(_ text: String) async throws {
     case .sweepDust: throw ExecutionError("Sweeping dust works in the ihatecrypto app, where the portfolio is.")
     case .swapOn(let place, let from, let to, let amount): print(try await executor.swapOn(EVMNetwork.named(place) ?? .base, from: from, to: to, amount: amount))
     case .cctp(let from, let to, let amount): print(try await executor.cctpBridge(from: EVMNetwork.named(from) ?? .base, to: EVMNetwork.named(to) ?? .arbitrum, usdc: amount))
+    case .intents(let from, let to, let amount): print(try await executor.intentsBridge(from: from, to: to, usdc: amount))
     case .usdt(let from, let to, let amount, let layerZero):
         guard let a = EVMNetwork.named(from), let b = EVMNetwork.named(to) else { throw ExecutionError("ihatecrypto doesn't move USDT between \(from) and \(to).") }
         print(try await executor.usdtMove(from: a, to: b, usdt: amount, layerZero: layerZero))
     case .aaveBorrow(let x, let net): print(try await executor.aaveBorrow(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, usdc: x ?? 0))
+    case .kaminoBorrow(let x, let stock, let adding): print(try await executor.kaminoBorrow(usdc: x ?? 0, against: stock, adding: adding))
+    case .kaminoRepay(let x, let against): print(try await executor.kaminoRepay(usdc: x, against: against))
     case .aaveRepay(let x, let net): print(try await executor.aaveRepay(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, usdc: x))
     case .aaveCollateral(let x, let net): print(try await executor.aaveSupplyETH(AaveV3.markets.first { $0.chain == net } ?? AaveV3.base, eth: x ?? 0))
     case .receiveAcross: print("Receiving through NEAR Intents opens a deposit address in the app.")
@@ -216,8 +222,10 @@ func moveMoney(_ text: String) async throws {
         print("Price: \(Fmt.num(c.usdc, maxFraction: 6)) USDC to \(c.payee) (\(c.realm))\(c.purpose.map { " for «\($0)»" } ?? ""), memo \(c.memo.map { "0x" + $0.hex } ?? "none")")
         guard send else { print("Add --yes to pay it."); return }
         let hash = try await executor.payTempo(c.amount, to: c.payee, memo: c.memo, label: c.realm)
-        let (paid, _, answer) = try await MPP.call(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: wallet.evm)))
-        print("Paid: \(EVMNetwork.tempo.explorer)/tx/\(hash)\n\(paid):\n\(MPP.shown(answer))")
+        let proof = "\(EVMNetwork.tempo.explorer)/tx/\(hash)"
+        let answer = try await MPP.paid(method, url, body, credential: (c.field, MPP.credential(c, hash: hash, payer: wallet.evm)),
+                                        usdc: c.usdc, service: c.realm, proof: proof)
+        print("Paid: \(proof)\n\(MPP.shown(answer))")
     case .claimRewards:
         // Without --yes: what Merkl owes. With it: claimed on each chain.
         let owed = try await Merkl.rewards(user: wallet.evm)
@@ -238,12 +246,21 @@ func moveMoney(_ text: String) async throws {
     case .yields(let asset):
         for o in await Yields.options(for: asset) { print("\(o.asset) · \(o.place): \(Fmt.num(o.apy.rounded(2, .plain)))%  \(o.note)") }
         return
-    case .buy(let asset, let usdc): _ = try await executor.swap(asset, buy: true, amount: usdc)
-    case .sell(let asset, let amount): _ = try await executor.swap(asset, buy: false, amount: amount)
+    case .buy(let asset, let usdc): _ = try await executor.swap(try await lookedUp(asset), buy: true, amount: usdc)
+    case .sell(let asset, let amount): _ = try await executor.swap(try await lookedUp(asset), buy: false, amount: amount)
     case .schedule, .stopSchedules: print("Scheduled buys are run by the ihatecrypto app while it is open.")
     }
     try await printLendPositions()
     try await printBalances()
+}
+
+/// A token named by its ticker or mint alone, looked up on Jupiter as the app does (TokensUI.spotToken): its decimals and
+/// token program, so a Token-2022 coin (Ondo's stocks) reads from its own account.
+func lookedUp(_ asset: SpotAsset) async throws -> SpotAsset {
+    guard !asset.resolved else { return asset }
+    let mint: String? = if asset.mint.isEmpty { try await TokenResearch.solanaMint(symbol: asset.symbol) } else { asset.mint }
+    guard let mint, let t = try await TokenResearch.solanaToken(mint) else { throw WalletError("Jupiter has no verified token \(asset.symbol) on Solana.") }
+    return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
 }
 
 /// `manage "стоп в безубыток"` and the like, on the position of the named or ETH asset.
@@ -270,6 +287,42 @@ func printPosition() async throws {
         print("Order \(o.coin) #\(o.oid) \(o.side ?? "?") \(o.size.map { "\($0)" } ?? "?")\(o.isTrigger ? " trigger \(o.triggerPx.map { "\($0)" } ?? "?")" : " limit \(o.limitPx.map { "\($0)" } ?? "?")")")
     }
     try await printBalances()
+}
+
+/// `site-rights`: research E-1's live half. The browser reads rights no balance shows from the simulation's jsonParsed
+/// accounts; this proves the node returns them. Builds, never signs, an Assign and an Allocate of the test wallet and an
+/// Approve, SetAuthority(AccountOwner) and SetAuthority(CloseAccount) of its USDC account to a stranger, simulates each with
+/// both watched and compares the rights as the browser does. A memo must show none. Nothing is signed, so any wallet's
+/// address does (the Dev copy's test wallet, from its /state); the test wallet's when none is given.
+func siteRightsCheck(_ address: String?) async throws {
+    let owner = try address ?? LocalSigner().wallet.solana
+    let usdc = try SPL.associatedAccount(owner: owner, mint: Jupiter.usdcMint)
+    let stranger = Base58.encode(Data((0..<32).map { _ in UInt8.random(in: 0...255) })), key = try Base58.decode(stranger)
+    let info = try await rpc.call("getAccountInfo", [usdc, ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
+    guard let before = info?["value"].flatMap(SolanaRPC.rights) else { throw WalletError("The test wallet has no USDC account: \(usdc)") }
+    let (hash, _) = try await rpc.latestBlockhash()
+    func le<T: FixedWidthInteger>(_ n: T) -> Data { withUnsafeBytes(of: n.littleEndian) { Data($0) } }
+    let wallet = SolanaInstruction.Account(pubkey: owner, isSigner: true, isWritable: true)
+    let account = SolanaInstruction.Account(pubkey: usdc, isSigner: false, isWritable: true)
+    let cases: [(name: String, ix: SolanaInstruction, refused: Bool)] = [
+        ("memo", SolanaInstruction(program: "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", accounts: [wallet], data: Data("ihatecrypto site-rights".utf8)), false),
+        ("Assign", SolanaInstruction(program: SolanaGuard.system, accounts: [wallet], data: le(UInt32(1)) + key), true),
+        ("Allocate", SolanaInstruction(program: SolanaGuard.system, accounts: [wallet], data: le(UInt32(8)) + le(UInt64(64))), true),
+        ("Approve", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, .init(pubkey: stranger, isSigner: false, isWritable: false), wallet],
+                                      data: Data([4]) + le(UInt64(1_000_000))), true),
+        ("SetAuthority owner", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, wallet], data: Data([6, 2, 1]) + key), true),
+        ("SetAuthority close", SolanaInstruction(program: SPL.tokenProgram, accounts: [account, wallet], data: Data([6, 3, 1]) + key), true),
+    ]
+    var failed = 0
+    for c in cases {
+        let wire = SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([c.ix], payer: owner, blockhash: hash))
+        let sim = try await rpc.simulate(wire, watch: [owner, usdc], sigVerify: false)
+        let problems = SolanaGuard.rightsProblems(owner: owner, before: [usdc: before], after: sim.rights, names: [usdc: "USDC"])
+        let pass = sim.error == nil && problems.isEmpty != c.refused
+        if !pass { failed += 1 }
+        print("\(pass ? "PASS" : "FAIL") \(c.name): \(sim.error.map { "the simulation failed — \($0)" } ?? problems.first ?? "no right changes")")
+    }
+    if failed > 0 { throw WalletError("\(failed) of \(cases.count) checks failed") }
 }
 
 /// `browser-test-page <path>`: a local dApp page for the in-app browser test, with fresh unsigned transactions
@@ -357,6 +410,9 @@ func writeBrowserTestPage(_ path: String) async throws {
       await refused('setApprovalForAll', 'eth_sendTransaction', [{ from: addr, to: USDC, data: '0xa22cb465' + pad(spender) + pad('1') }]);
       try { await req('eth_sendTransaction', [{ from: addr, to: USDC, data: '0xa9059cbb' + pad(spender) + pad((1000000).toString(16)) }]); log('FAIL: transfer sent'); }
       catch (e) { log('USDC transfer without balance: refused, code ' + e.code + ' — ' + e.message.slice(0, 90)); }
+      // Uniswap v3's positions (an NFT) answer no decimals(): the amount can't be shown, so it isn't signed — not 18's guess.
+      try { await req('eth_sendTransaction', [{ from: addr, to: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', data: '0x095ea7b3' + pad(spender) + pad((1000000).toString(16)) }]); log('FAIL: approve without decimals() sent'); }
+      catch (e) { log('approve on a contract without decimals(): ' + (e.message.includes('decimals()') ? 'refused' : 'FAIL') + ', code ' + e.code + ' — ' + e.message.slice(0, 120)); }
       let changed = null; eth.on('chainChanged', (c) => { changed = c; });
       await req('wallet_switchEthereumChain', [{ chainId: '0x1' }]);
       log('switch to Ethereum: chainChanged ' + changed + ', balance ' + await req('eth_getBalance', [addr, 'latest']));
@@ -424,8 +480,8 @@ func sweepSolana(to destination: String) async throws {
     if usdc > 0 { print(try await executor.sendUSDC(Decimal(usdc) / 1_000_000, to: .solana(destination), label: "the new wallet")) }
 
     // Empty token accounts hold ≈ 0.002 SOL of rent each: closing them brings it back before the SOL leaves.
-    // «confirmed», not the default «finalized»: right after the USDC left, finalized still shows it there.
-    let accounts = (try await rpc.call("getTokenAccountsByOwner", [me, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any])?["value"] as? [[String: Any]] ?? []
+    // «finalized», the same slot as «confirmed» since Alpenglow (before it, finalized still showed the USDC that had left).
+    let accounts = (try await rpc.call("getTokenAccountsByOwner", [me, ["programId": SPL.tokenProgram], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any])?["value"] as? [[String: Any]] ?? []
     let empty = accounts.compactMap { a -> String? in
         let amount = ((((a["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any])
             .flatMap { ($0["tokenAmount"] as? [String: Any])?["amount"] as? String }
@@ -453,7 +509,7 @@ func sweepSolana(to destination: String) async throws {
         ], data: data)], payer: me, blockhash: hash, microLamportsPerCU: 0)
     }
     let (hash, lastValid) = try await rpc.latestBlockhash()
-    let feeReply = try await rpc.call("getFeeForMessage", [try transfer(lamports, hash).base64EncodedString(), ["commitment": "confirmed"]]) as? [String: Any]
+    let feeReply = try await rpc.call("getFeeForMessage", [try transfer(lamports, hash).base64EncodedString(), ["commitment": "finalized"]]) as? [String: Any]
     guard let fee = (feeReply?["value"] as? NSNumber)?.uint64Value, lamports > fee else { throw WalletError("No fee quote, or nothing to move (\(lamports) lamports).") }
     let wire = SolanaTransaction.unsigned(try transfer(lamports - fee, hash))
     let signed = try await signer.signSolana(wire, accounts: try SolanaMessage.parse(transaction: wire).staticKeys, recipients: [destination], tokenOwners: [:])
@@ -550,19 +606,20 @@ func sweepEVM(to destination: String) async throws {
         if net.key == "base" {
             // OP stack: the L1 data fee is charged on top; ask the oracle for this very transaction's size.
             let sample = try EVMTransaction(chainId: chain.chainId, nonce: try await chain.nonce(me), maxPriorityFeePerGas: tip, maxFeePerGas: maxFee,
-                                            gasLimit: gas, to: destination, value: balance, data: Data()).signed(privateKey: signer.keys.evm).raw
+                                            gasLimit: gas, to: destination, value: UInt64(clamping: balance), data: Data()).signed(privateKey: signer.keys.evm).raw
             var call = Data([0x49, 0x94, 0x8e, 0x0e])   // getL1Fee(bytes)
             call += ABI.uint(32) + ABI.uint(UInt64(sample.count)) + sample + Data(count: (32 - sample.count % 32) % 32)
             let l1 = ABI.uint(in: try await chain.read("0x420000000000000000000000000000000000000F", call), word: 0) ?? 0
             fee += l1 + l1 / 2
         }
         guard balance > fee else { print("\(net.name): \(balance) wei is less than the fee (\(fee)); it stays."); continue }
+        guard let move = UInt64(exactly: balance - UInt128(fee)) else { print("\(net.name): \(balance) wei is past one transfer; move it by hand."); continue }
         let tx = EVMTransaction(chainId: chain.chainId, nonce: try await chain.nonce(me), maxPriorityFeePerGas: tip, maxFeePerGas: maxFee,
-                                gasLimit: gas, to: destination, value: balance - fee, data: Data())
+                                gasLimit: gas, to: destination, value: move, data: Data())
         let (raw, hash) = try tx.signed(privateKey: signer.keys.evm)
         _ = try await chain.send(raw)
         let ok = try await chain.waitForReceipt(hash)
-        print("\(net.name): sent \(balance - fee) wei → \(ok ? "confirmed" : "FAILED") \(net.explorer)/tx/\(hash); left \(try await chain.balance(me)) wei")
+        print("\(net.name): sent \(move) wei → \(ok ? "confirmed" : "FAILED") \(net.explorer)/tx/\(hash); left \(try await chain.balance(me)) wei")
     }
 }
 

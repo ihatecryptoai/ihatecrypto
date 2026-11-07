@@ -92,6 +92,22 @@ private let rfcPublic = Data(hex: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62
     }
 }
 
+@Test func theAutomationWalletIsNeverTheOneThatSigns() {
+    let main = SignerWallet(id: "1", label: "Main", kind: "phrase", solana: "S", evm: "E", near: nil)
+    let auto = SignerWallet(id: "a1", label: "Automation", kind: "phrase", solana: "S2", evm: "E2", near: nil, automation: true)
+    let third = SignerWallet(id: "w3", label: "Wallet 3", kind: "evm", solana: nil, evm: "E3", near: nil)
+    // What remove() leaves once Main goes: the next wallet that isn't Automation, or none.
+    #expect(SignerWallet.on([auto], chosen: nil) == nil)
+    #expect(SignerWallet.on([auto, third], chosen: nil) == third)
+    // A registry that has Automation on (before the fix): another wallet signs, or none.
+    #expect(SignerWallet.on([main, auto], chosen: "a1") == main)
+    #expect(SignerWallet.on([auto], chosen: "a1") == nil)
+    // The user's choice holds as before, and a stale id still falls back to the first.
+    #expect(SignerWallet.on([main, auto, third], chosen: "w3") == third)
+    #expect(SignerWallet.on([main, third], chosen: "gone") == main)
+    #expect(SignerWallet.on([], chosen: nil) == nil)
+}
+
 /// A saved name sends only to the address confirmed for it: the name in any case, a 0x address in any case, a
 /// Solana one exactly — a look-alike or a swapped address is another entry.
 @Test func addressBookEntryMatchesOnlyItsConfirmedAddress() {

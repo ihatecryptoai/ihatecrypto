@@ -48,6 +48,13 @@ public struct TypedData: Sendable {
         // (an open order). Beside it, any number that isn't a nonce, a time or a choice may be the amount (the 2026-10-24
         // review: «total», «amt» and «num» passed a list of amount words).
         let others = fields.filter { $0.type == "address" && ![owner, verifyingContract].contains($0.value.lowercased()) }
+        // A right given by a yes, no amount at all (research E-2): Morpho's Authorization(authorizer, authorized,
+        // isAuthorized…) and Compound's (owner, manager, isAllowed…) let someone else manage the wallet's positions.
+        // A false is a revoke and signs.
+        if let other = others.first, let flag = fields.first(where: { $0.type == "bool" && ["1", "true"].contains($0.value) }) {
+            return "\(primaryType) gives \(other.value) («\(other.name)») rights over your account («\(flag.name)»): Morpho's and Compound's "
+                + "Authorization work like this. ihatecrypto doesn't sign it for a site."
+        }
         let notAmounts = ["nonce", "deadline", "expir", "valid", "time", "chainid", "salt", "version", "choice"]
         let amount = fields.first { f in
             f.type.hasPrefix("uint") && f.value != "0" && !notAmounts.contains { f.name.lowercased().contains($0) }
@@ -90,9 +97,12 @@ public struct TypedData: Sendable {
     }
 
     /// The Touch ID prompt's text: the type, the site's name for itself and the fields with their values, as text that
-    /// can't draw a line of its own (breaks, controls and bidi marks dropped) and doesn't run on.
+    /// can't draw a line of its own (breaks, controls and bidi marks dropped) and doesn't run on: a cut one ends in «…».
     public var prompt: String {
-        func plain(_ s: String, _ n: Int) -> String { String(String(s.unicodeScalars.filter { !AddressCheck.hidden($0) }).prefix(n)) }
+        func plain(_ s: String, _ n: Int) -> String {
+            let t = String(s.unicodeScalars.filter { !AddressCheck.hidden($0) })
+            return t.count > n ? t.prefix(n) + "…" : t
+        }
         // What passed `refusal` is still a kind ihatecrypto can't read: the site's own word for it is all there is.
         return (["sign \(plain(primaryType, 60)) for «\(plain(domainName, 60))»",
                  "ihatecrypto can't tell what this signature allows. Sign only if you trust this site."]
@@ -186,5 +196,13 @@ public enum PersonalMessage {
     /// 32 raw bytes are a hash, not text: signing one blind can authorise anything.
     public static func isBlindHash(_ message: Data) -> Bool {
         message.count == 32 && String(data: message, encoding: .utf8).map { $0.unicodeScalars.contains { $0.value < 0x20 } } != false
+    }
+
+    /// The Touch ID prompt for text a site asks to sign (personal_sign, Solana's signMessage): the first `shown`
+    /// characters. A longer text says its whole length on the first line, before the site's text so nothing in it can
+    /// move that line, and ends in «…» where it was cut.
+    public static func prompt(_ text: String, shown: Int = 160) -> String {
+        guard text.count > shown else { return "sign text for a site:\n" + text }
+        return "sign text for a site (\(text.count) characters, the first \(shown) shown):\n" + text.prefix(shown) + "…"
     }
 }

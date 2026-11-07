@@ -11,15 +11,16 @@ let package = Package(
         .library(name: "IhatecryptoKit", targets: [
             "IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
             "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
+            "LLMNearAI", "AgentAPIKit",
         ]),
         .library(name: "IhatecryptoSignerKit", targets: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"]),
     ],
     dependencies: [
         // libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
-        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.23.2"),
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.24.0"),
         // Updates for the copy from the site (Updater.swift). Declared here too, so `swift build` and the Xcode
         // project resolve the same packages and stop rewriting Package.resolved over each other.
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
     ],
     targets: [
         // Model access: one protocol in Core, one folder per way to connect, Catalog lists them all.
@@ -28,16 +29,19 @@ let package = Package(
         .target(name: "LLMOpenRouter", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/OpenRouter"),
         .target(name: "LLMChatGPT", dependencies: ["LLMCore"], path: "Sources/LLM/ChatGPT"),
         .target(name: "LLMClaudeCode", dependencies: ["LLMCore"], path: "Sources/LLM/ClaudeCode"),
+        .target(name: "LLMAnthropic", dependencies: ["LLMCore"], path: "Sources/LLM/Anthropic"),
         .target(name: "LLMApple", dependencies: ["LLMCore"], path: "Sources/LLM/Apple"),
+        .target(name: "LLMNearAI", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/NearAI"),
         .target(
             name: "LLMCatalog",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple"],
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMNearAI"],
             path: "Sources/LLM/Catalog"
         ),
-        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
+        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "LLMNearAI", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
 
         // Keys and signatures: BIP-39, derivation, Keccak, EIP-712. Knows nothing about protocols or UI.
-        .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1")], path: "Sources/Wallet/Core"),
+        .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1"),
+                                                   .product(name: "libsecp256k1", package: "swift-secp256k1")], path: "Sources/Wallet/Core"),
         // Hyperliquid wire format and signing, checked against the official Python SDK vectors.
         .target(name: "HyperliquidSigning", dependencies: ["WalletCore"], path: "Sources/Protocols/Hyperliquid"),
         .target(name: "SolanaChain", dependencies: ["WalletCore"], path: "Sources/Chains/Solana"),
@@ -46,6 +50,7 @@ let package = Package(
         .target(name: "ExecutionCore", path: "Sources/Execution", exclude: ["Trade"]),
         .target(name: "JupiterSwap", dependencies: ["WalletCore"], path: "Sources/Protocols/Jupiter"),
         .target(name: "OneClickKit", dependencies: ["WalletCore"], path: "Sources/Protocols/OneClick"),
+        .target(name: "AgentAPIKit", dependencies: ["WalletCore"], path: "Sources/Protocols/AgentAPI"),
         .target(name: "RelayBridge", dependencies: ["SolanaChain", "WalletCore"], path: "Sources/Protocols/Relay"),
         // DeFi: one folder per protocol. Jupiter Lend Earn first.
         .target(name: "DeFiJupiterLend", dependencies: ["WalletCore"], path: "Sources/DeFi/JupiterLend"),
@@ -78,7 +83,7 @@ let package = Package(
         .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge", "HyperliquidSigning"]),
         .executableTarget(
             name: "IhatecryptoApp",
-            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
+            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "LLMNearAI", "AgentAPIKit", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
                            "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
                            .product(name: "Sparkle", package: "Sparkle")],
             // Logos, sounds and the stories are bundled by the Xcode project; `swift run` shows lettered circles instead.
@@ -89,13 +94,14 @@ let package = Package(
 
         .testTarget(name: "IhatecryptoCoreTests", dependencies: ["IhatecryptoCore", "LLMCore"]),
         // The window's own logic that needs no window: the profile menu's accounts, Settings › Modules' rows.
-        .testTarget(name: "IhatecryptoAppTests", dependencies: ["IhatecryptoApp", "IhatecryptoCore", "LLMCore", "LLMCatalog"],
+        .testTarget(name: "IhatecryptoAppTests", dependencies: ["IhatecryptoApp", "IhatecryptoCore", "LLMCore", "LLMCatalog", "DeFiJupiterLend"],
                     swiftSettings: [.defaultIsolation(MainActor.self)]),
         .testTarget(name: "DeFiTests", dependencies: ["DeFiYields"]),
-        .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev"]),
+        .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev", "JupiterSwap", "DeFiKamino"]),
         .testTarget(
             name: "LLMTests",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMApple", "LLMCatalog"]
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMCatalog", "LLMNearAI"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

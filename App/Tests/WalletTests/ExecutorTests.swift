@@ -1,3 +1,4 @@
+import ExecutionCore
 import Foundation
 import HyperliquidSigning
 import IhatecryptoCore
@@ -75,11 +76,38 @@ import WalletCore
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 2000, policy: policy) == nil)
 }
 
+@Test func aShareBelowOneStepIsRefusedNotAFullClose() throws {
+    let btc = Decimal(string: "0.00015")!   // ≈ $12 at $84k, BTC steps of 0.00001
+    for text in ["close 5% BTC", "закрой 5% BTC"] {
+        guard case .close(let share)? = PositionCommand.parse(text) else { Issue.record("\(text) didn't parse"); continue }
+        #expect(throws: ExecutionError.self) { try Executor.partialCloseSize(position: btc, fraction: share, szDecimals: 5, asset: "BTC") }
+    }
+    for text in ["close half", "закрой половину"] {
+        guard case .close(let share)? = PositionCommand.parse(text) else { Issue.record("\(text) didn't parse"); continue }
+        #expect(try Executor.partialCloseSize(position: btc, fraction: share, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00007")!)
+    }
+    #expect(try Executor.partialCloseSize(position: -1000, fraction: Decimal(1) / 3, szDecimals: 0, asset: "kPEPE") == 333)   // a short too
+    // A third is 0.333…3: rounded down as it was, a third of 3 steps was none and a third of 0.00015 one step short.
+    #expect(try Executor.partialCloseSize(position: 3, fraction: Decimal(1) / 3, szDecimals: 0, asset: "kPEPE") == 1)
+    #expect(try Executor.partialCloseSize(position: btc, fraction: Decimal(1) / 3, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00005")!)
+}
+
 @Test func gasTopUpTargetIsAWholeNumberOfWei() {
     // $1 at $3000 an ETH, 80% of it: 266,666,666,666,666 wei, not the 0 an unrounded quotient read as.
     #expect(Executor.gasExpected(usd: 1, price: 3000) == 266_666_666_666_666)
     #expect(Executor.gasExpected(usd: 2, price: Decimal(string: "2456.37")!) > 600_000_000_000_000)
     #expect(Executor.gasExpected(usd: 1, price: 0) == 1)
+}
+
+@Test func gasTopUpIsSaidDoneOnlyWhenTheCoinGrew() {
+    let before: UInt128 = 420_000_000_000_000
+    #expect(Executor.gasLine(.base, before: before, after: 690_000_000_000_000, usd: 1) == "Topped up gas on Base: 0.00042 → 0.00069 ETH (≈ $1.00).")
+    // Not there yet (a node behind): said so, with a wait before another top-up.
+    let same = Executor.gasLine(.base, before: before, after: before, usd: 1)
+    #expect(!same.contains("Topped up") && same.contains("hasn't shown up yet") && same.contains("before topping up again"))
+    // Less than before: the swap's own fees here took more than it brought, and another swap would too.
+    let less = Executor.gasLine(.ethereum, before: before, after: 390_000_000_000_000, usd: 1)
+    #expect(!less.contains("Topped up") && less.contains("0.00042 → 0.00039 ETH") && less.contains("fees") && less.contains("Solana"))
 }
 
 @Test func kaminoWithdrawAllAsksForTokensNotDollars() {
@@ -99,11 +127,82 @@ import WalletCore
 
 @Test func aPickedSwapWayOnlyNarrowsTheQuotedOnes() {
     let relay = Executor.SwapWay(name: "relay", out: 100, worth: 1.90, line: "")
-    let uniswap = Executor.SwapWay(name: "uniswap", out: 101, worth: 1.95, line: "")
-    #expect(Executor.pick([relay, uniswap], prefer: nil)?.name == "uniswap")      // whichever leaves more
-    #expect(Executor.pick([relay, uniswap], prefer: "relay")?.name == "relay")    // the one picked, even if it leaves less
-    #expect(Executor.pick([uniswap], prefer: "relay") == nil)                     // picked but unquoted: nothing is signed
+    let bridge = Executor.SwapWay(name: "bridge", out: 101, worth: 1.95, line: "", venue: "KyberSwap")
+    #expect(Executor.pick([relay, bridge], prefer: nil)?.name == "bridge")        // whichever leaves more
+    #expect(Executor.pick([relay, bridge], prefer: "relay")?.name == "relay")     // the one picked, even if it leaves less
+    #expect(Executor.pick([bridge], prefer: "relay") == nil)                      // picked but unquoted: nothing is signed
+    // The card names the exchange after the bridge, and a pick of the bridge's way finds it whichever exchange it is.
+    #expect(Executor.wayKey(bridge) == "bridge:KyberSwap" && Executor.wayKey(relay) == "relay")
+    #expect(Executor.pick([relay, bridge], prefer: "bridge")?.venue == "KyberSwap")
     #expect(Executor.pick([], prefer: nil) == nil)
+}
+
+// Relay's swap losing past its cap asks once: «Send anyway» takes its loss as an impact, which passes the impact stop on
+// the same loss too — two separate answers had asked in turn forever.
+@Test func relaysLossAsksOnceForBothStops() throws {
+    try Executor.holdsRelayLoss(in: 100, out: 98)                     // 2%: under its 3% cap
+    do {
+        try Executor.holdsRelayLoss(in: 100, out: 90)
+        Issue.record("a 10% loss went without asking")
+    } catch let stop as CostlyMove {
+        let impact = try #require(stop.impact)
+        #expect(impact == Decimal(string: "0.1"))
+        try Executor.$impactAccepted.withValue(min(1, impact * Decimal(string: "1.25")! + Decimal(string: "0.005")!)) {
+            try Executor.holdsRelayLoss(in: 100, out: 90)
+            try Executor.checkImpact(impact, paid: 100, amount: 100, symbol: "USDC", venue: "Relay's swap")
+        }
+    }
+}
+
+// A failure after the coin's wrap says it's the wrapped token now and how it comes back, never «Nothing was signed»; a
+// guard's stop stays a guard's stop.
+@Test func aFailureAfterTheWrapSaysWhereTheCoinIs() {
+    let back = " 0.001 ETH is WETH in the wallet now: «swap 0.001 WETH for ETH on base» turns it back."
+    let failed = Executor.leftWrapped(ExecutionError("Approve exactly 0.001 WETH to Relay failed. Nothing was signed."), coins: Decimal(string: "0.001")!, wrapped: "WETH", net: .base)
+    #expect(failed is ExecutionError && failed.localizedDescription == "Approve exactly 0.001 WETH to Relay failed." + back)
+    let stop = Executor.leftWrapped(GuardStop("pays 0xdead"), coins: Decimal(string: "0.001")!, wrapped: "WETH", net: .base)
+    #expect(stop is GuardStop && stop.localizedDescription == "pays 0xdead." + back)
+    // «All» of the coin is its balance less the fees, in wei: the way back names it rounded down, never over what was wrapped.
+    let bnb = Executor.leftWrapped(URLError(.timedOut), coins: Decimal(string: "0.012345678987654321")!, wrapped: "WBNB", net: .bnb)
+    #expect(bnb.localizedDescription.hasSuffix(" 0.01234567 BNB is WBNB in the wallet now: «swap 0.01234567 WBNB for BNB on bnb» turns it back."))
+}
+
+// A stop by the guard or the signer on Relay's quote is never taken to NEAR Intents, nor is a loss «Send anyway» asks
+// about; a missing route is.
+@Test func relaysGuardStopIsNeverTakenToNearIntents() {
+    #expect(!Executor.intentsMayTake(GuardStop("Relay quote: recipient is 0xdead…, expected 0x9858….")))
+    #expect(!Executor.intentsMayTake(GuardStop("The Relay order refunds someone else. Nothing was signed.")))
+    #expect(!Executor.intentsMayTake(CostlyMove(lost: 1, paid: 10, what: "Relay's swap")))
+    #expect(Executor.intentsMayTake(ExecutionError("Relay doesn't quote BONK for ETH now. Nothing was signed.")))
+    #expect(Executor.intentsMayTake(URLError(.timedOut)))
+}
+
+// Relay's sale with no dollar price for what goes in stops before the swap: read as $0, any loss had passed.
+@Test func relaysSaleWithoutAPriceStops() throws {
+    #expect(throws: ExecutionError.self) { try Executor.holdsRelaySale(worthIn: 0, arriving: 5, symbol: "XYZ", network: "Base") }
+    try Executor.holdsRelaySale(worthIn: 10, arriving: Decimal(string: "9.8")!, symbol: "AERO", network: "Base")   // 2%: passes
+    #expect(throws: CostlyMove.self) { try Executor.holdsRelaySale(worthIn: 10, arriving: 9, symbol: "AERO", network: "Base") }
+}
+
+// What goes in: Relay's valuation first (DefiLlama not asked), else DefiLlama's sure price × the amount, else 0 (stopped).
+@Test func relaysSaleIsWorthRelaysPriceElseDefiLlamasSureOne() async {
+    var asked = false
+    #expect(await Executor.relayWorthIn(relayUSD: "0.697351", amount: 1) { asked = true; return (5, true) } == Decimal(string: "0.697351"))
+    #expect(!asked)
+    for empty in ["", "0", "-1", "NaN"] {
+        #expect(await Executor.relayWorthIn(relayUSD: empty, amount: Decimal(string: "1.5")!) { (Decimal(string: "0.68")!, true) } == Decimal(string: "1.02"))
+    }
+    #expect(await Executor.relayWorthIn(relayUSD: "", amount: 2) { (Decimal(string: "0.68")!, false) } == 0)   // unsure
+    #expect(await Executor.relayWorthIn(relayUSD: "", amount: 2) { nil } == 0)                                   // no price
+}
+
+// Confirm takes the way the card showed: Uniswap's versions are one; another exchange or way stops before anything is signed.
+@Test func aWayOtherThanTheCardsStopsBeforeSigning() throws {
+    try Executor.holdsShownWay("bridge:Uniswap v4", shown: "bridge:Uniswap v3")
+    try Executor.holdsShownWay("here:KyberSwap", shown: nil)            // no card: a scheduled buy
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("bridge:Uniswap v3", shown: "bridge:KyberSwap") }
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("relay", shown: "bridge:KyberSwap") }
+    #expect(throws: ExecutionError.self) { try Executor.holdsShownWay("bridge:KyberSwap", shown: "here:KyberSwap") }
 }
 
 // Solana short: the first network holding the amount and a dime for Relay; Ethereum last (its gas costs dollars), never out.
@@ -172,4 +271,15 @@ import WalletCore
     #expect(RPCRetry.transient("You've reached the usage limit for your current plan. To continue … upgrade here: https://www.1rpc.io/#pricing"))
     #expect(RPCRetry.transient("daily request quota exceeded"))
     #expect(!RPCRetry.transient("execution reverted: ERC20: transfer amount exceeds allowance"))
+}
+
+/// A 402's amount is the service's to write: one the fee can't ride on in 64 bits (`units + feeReserve`, Tempo's cent)
+/// is refused before any call, not a crash after Confirm.
+@Test func payTempoRefusesAnAmountTheFeeCantRideOn() async {
+    let me = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    let e = Executor(wallet: TradeWallet(solana: "", evm: me), signer: ForkSigner(key: Data(repeating: 1, count: 32), address: me),
+                     journal: Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("paytempo-\(UUID().uuidString).jsonl"))) { _ in }
+    for units in [UInt64.max, UInt64.max - EVMNetwork.tempo.feeReserve + 1] {
+        await #expect(throws: ExecutionError.self) { try await e.payTempo(units, to: me, memo: nil, label: "x") }
+    }
 }

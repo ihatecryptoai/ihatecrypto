@@ -34,10 +34,18 @@ public struct Holding: Sendable, Identifiable, Equatable {
 
     public init(chain: String, contract: String, amount: Decimal, symbol: String, icon: URL? = nil, price: Decimal? = nil,
                 verified: Bool = false, liquidity: Decimal? = nil, native: Bool = false, change24h: Decimal? = nil) {
-        (self.chain, self.contract, self.amount, self.symbol, self.icon, self.price) = (chain, contract, amount, symbol, icon, price)
+        (self.chain, self.contract, self.amount, self.symbol, self.icon, self.price) = (chain, contract, amount, Holding.plain(symbol), icon, price)
         (self.verified, self.liquidity, self.native, self.change24h) = (verified, liquidity, native, change24h)
     }
     public var usd: Decimal? { price.map { $0 * amount } }
+
+    /// A token's ticker or name as anyone deploying it wrote it, made fit for the chat's model and the screen (research
+    /// E-9): no line breaks or invisible characters (AddressCheck.hidden), at most `max` characters — a «symbol» can be a
+    /// paragraph of instructions.
+    public static func plain(_ text: String, max: Int = 16) -> String {
+        let s = String(String.UnicodeScalarView(text.unicodeScalars.filter { !AddressCheck.hidden($0) })).trimmingCharacters(in: .whitespaces)
+        return s.count > max ? s.prefix(max - 1) + "…" : s
+    }
     /// Airdropped look-alikes are unverified with no real pool behind them: they stay out of sight until the user
     /// asks. A token the user bought has a pool (or a market list's check) and shows.
     public var looksReal: Bool { verified || ((liquidity ?? 0) >= 10_000 && (usd ?? 0) >= 0.01) }
@@ -410,12 +418,14 @@ public enum Holdings {
     // MARK: Hyperliquid spot
 
     /// Everything on Hyperliquid's spot side, USDC included (the perp account doesn't count it), priced off its own book.
+    /// A unified account's USDC is the account itself (Hyperliquid.balance counts it), so it isn't listed again.
     /// nil when it couldn't be read.
     public static func hyperliquidSpot(user: String) async -> [Holding]? {
         async let state = retrying { try await HTTP.post("https://api.hyperliquid.xyz/info", json: ["type": "spotClearinghouseState", "user": user]) }
         async let meta = retrying { try await HTTP.post("https://api.hyperliquid.xyz/info", json: ["type": "spotMetaAndAssetCtxs"]) }
-        guard let s = await state, let m = await meta else { return nil }
-        return hyperliquidSpot(s, meta: m)
+        async let one = retrying { try await Hyperliquid.unified(user: user) }
+        guard let s = await state, let m = await meta, let unified = await one else { return nil }
+        return hyperliquidSpot(s, meta: m).filter { !(unified && $0.contract == "USDC") }
     }
 
     static func hyperliquidSpot(_ state: Data?, meta: Data?) -> [Holding] {

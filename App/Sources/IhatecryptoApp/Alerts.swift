@@ -77,7 +77,7 @@ extension Workspace {
     /// Runs with every refresh: an alert that fires sends one notification and is done.
     func checkAlerts() {
         for a in alerts {
-            guard let mark = markets[a.coin]?.markPx, a.fires(at: mark) else { continue }
+            guard a.paused != true, let mark = markets[a.coin]?.markPx, a.fires(at: mark) else { continue }
             alerts.removeAll { $0.id == a.id }
             // Its steps run as a task due now: on their own canvas once nothing else is going on, and a move or a plan
             // waits there for Confirm with a notification (runDueTask).
@@ -103,6 +103,16 @@ extension Workspace {
     }
 }
 
+extension PriceAlert {
+    /// Its steps read as the task it becomes when it fires (checkAlerts): from the wallet that's on, each move confirmed.
+    var task: ScheduledTask {
+        var t = ScheduledTask(steps: steps ?? [], next: .distantFuture, every: nil)
+        t.fromActive = true
+        t.untrusted = untrusted
+        return t
+    }
+}
+
 /// The alerts as a board on the canvas, each one as the blocks the agent built it from: the level, every step it
 /// prepares when the price gets there, and the notification that asks for the user's Confirm, arrows between them.
 struct AlertsBoard: View {
@@ -118,20 +128,21 @@ struct AlertsBoard: View {
     }
 
     var body: some View {
-        if ws.alerts.contains(where: { $0.id != ws.planAlert?.id }) { board }
+        if ws.alerts.contains(where: { $0.id != ws.planAlert?.id }) || !ws.loanGuards.isEmpty { board }
     }
 
     private var board: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
-                Text("Price alerts").font(.ui(15, .bold))
+                Text(ws.loanGuards.isEmpty ? "Price alerts" : "Alerts").font(.ui(15, .bold))
                 Spacer()
                 Button { withAnimation(StudioView.spring) { ws.showAlerts = false } } label: { Image(systemName: "xmark") }
                     .buttonStyle(.hoverIcon).help("Hide the board; the alerts stay")
             }
             // One tied to this canvas's plan is drawn as that plan's first step instead.
             ForEach(ws.alerts.filter { $0.id != ws.planAlert?.id }) { chain(blocks($0)) }
+            ForEach(ws.loanGuards) { chain(blocks($0)) }
             Text("Checked every 10 s while ihatecrypto is open or in the menu bar. Nothing moves until you confirm it.")
                 .font(.ui(10)).foregroundStyle(.tertiary)
         }
@@ -156,12 +167,29 @@ struct AlertsBoard: View {
             }
             return Block(id: "\(a.id)-\(k)", icon: "bolt.fill", label: "THEN", title: ScheduleCanvas.readable(step))
         }
-        return [Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
-                      line: now) { withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } } }]
-            + steps
+        // A plain alert only tells you: said on its own card, not as a second «A notification» card under it.
+        let when = Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
+                         line: steps.isEmpty ? (now.map { $0 + " · then a notification" } ?? "then a notification") : now) {
+            withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } }
+        }
+        guard !steps.isEmpty else { return [when] }
+        return [when] + steps
             + [Block(id: "\(a.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
-                     title: steps.isEmpty ? "A notification" : "A notification, then your Confirm",
-                     line: steps.isEmpty ? nil : "Prepared on its own canvas; nothing moves without \(Presence.name).")]
+                     title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
+    }
+
+    /// A guarded loan: its line, the repay it prepares, and the Confirm it waits for (LoanGuards.swift).
+    private func blocks(_ g: LoanGuard) -> [Block] {
+        let now = ws.guardHealth[g.id].map { $0.map { "now \(Fmt.num($0, maxFraction: 2)) · liquidation at 1" } ?? "no loan yet · watching" } ?? "reading…"
+        return [Block(id: "\(g.id)-when", icon: "shield.lefthalf.filled", label: "WHEN · LOAN HEALTH",
+                      title: "\(ws.guardName(g)) loan under \(Fmt.num(g.below))", line: now + (g.armed ? "" : " · repay prepared")) {
+                    withAnimation(.snappy) { ws.loanGuards.removeAll { $0.id == g.id } }
+                },
+                Block(id: "\(g.id)-then", icon: "arrow.uturn.backward", label: "THEN · REPAY",
+                      title: "USDC back to health \(Fmt.num(g.target))",
+                      line: "USDC it lacks comes through NEAR Intents"),
+                Block(id: "\(g.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
+                      title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
     }
 
     private func chain(_ blocks: [Block]) -> some View {
@@ -239,15 +267,46 @@ nonisolated struct EquityPoint: Codable, Equatable {
     let usd: Decimal
     /// The wallet it was measured for (P/L); nil in points kept before wallets were told apart.
     var wallet: String? = nil
+    /// The P/L line's count at that moment (`PnLMarks`); nil in points kept before it was counted.
+    var pnl: Decimal? = nil
+}
+
+/// The P/L line's running count: what prices did to the holdings since counting began, and the holdings it was last
+/// counted from. Saved with each point (pnlmarks.json, per wallet), so a closed app picks up where it stopped.
+nonisolated struct PnLMarks: Codable {
+    var marks: [String: PnL.Mark]
+    var pnl: Decimal
 }
 
 extension Workspace {
-    /// Only when both main balances are in: a half-loaded portfolio would draw a false dip.
+    /// Only when both main balances are in: a half-loaded portfolio would draw a false dip. The P/L count moves on every
+    /// pass, once everything is read: a half-read wallet would leave coins out of it.
     func recordEquity() {
         guard solana != nil, hl != nil, let e = equity, e > 0 else { return }
+        if balanceReady {
+            let now = priceMarks
+            pnlMarks = PnLMarks(marks: now, pnl: pnlMarks.map { $0.pnl + PnL.priceEffect(from: $0.marks, to: now) } ?? 0)
+        }
         if let last = equityHistory.last, Date().timeIntervalSince(last.at) < 600 { return }
         let cutoff = Date().addingTimeInterval(-30 * 86_400)
-        equityHistory = equityHistory.filter { $0.at > cutoff } + [EquityPoint(at: Date(), usd: e, wallet: pnlWallet)]
+        equityHistory = equityHistory.filter { $0.at > cutoff } + [EquityPoint(at: Date(), usd: e, wallet: pnlWallet, pnl: pnlMarks?.pnl)]
+        if let m = pnlMarks { LocalStore.save(m, Self.scoped("pnlmarks", activeWalletID) + ".json") }
+    }
+
+    /// Every coin on screen with its amount and price now: tokens, stocks, the gas coins, NEAR, and Hyperliquid's positions
+    /// at the price their P/L is counted at. Dollars in lending and vaults have no price to move and are left out.
+    var priceMarks: [String: PnL.Mark] {
+        var out: [String: PnL.Mark] = [:]
+        func add(_ key: String, _ amount: Decimal, _ price: Decimal?) {
+            if amount != 0, let price, price > 0 { out[key] = PnL.Mark(amount: amount, price: price) }
+        }
+        for t in shownTokens { add(t.id, t.amount, t.price) }
+        for s in robinhood?.stocks ?? [] { add("robinhood:\(s.address.lowercased())", s.amount, s.price) }
+        add("sol", solana?.sol ?? 0, markets["SOL"]?.markPx)
+        add("eth", gasETH, markets["ETH"]?.markPx)
+        add("near", near, markets["NEAR"]?.markPx)
+        for p in positions where p.size != 0 { add("perp:\(p.coin)", p.size, p.entry + p.unrealizedPnl / p.size) }
+        return out
     }
 
     /// The last `days` of history plus the value now. «Now» is when the balances were read: stamped with the clock, the
@@ -256,25 +315,35 @@ extension Workspace {
         let since = Date().addingTimeInterval(-days * 86_400)
         return equityHistory.filter { $0.at >= since } + (equity.map { [EquityPoint(at: updatedAt ?? Date(), usd: $0)] } ?? [])
     }
+
+    /// The P/L line over the last `days` (`usd` is the P/L) plus the count now: top-ups and transfers don't move it.
+    func pnlSeries(days: Double = 7) -> [EquityPoint] {
+        let since = Date().addingTimeInterval(-days * 86_400)
+        return equityHistory.filter { $0.at >= since }.compactMap { p in p.pnl.map { EquityPoint(at: p.at, usd: $0) } }
+            + (pnlMarks.map { [EquityPoint(at: updatedAt ?? Date(), usd: $0.pnl)] } ?? [])
+    }
 }
 
-/// A small line of the portfolio's value; green when it grew over the period, red when it fell.
+/// A small line of the portfolio's P/L; green when it grew over the period, red when it fell. Averaged into slices of
+/// time and drawn as a curve: a point every ten minutes for a week made a jagged line.
 struct EquitySparkline: View {
     let points: [EquityPoint]
     var height: CGFloat = 26
 
     var body: some View {
-        let values = points.map { NSDecimalNumber(decimal: $0.usd).doubleValue }
-        let up = (values.last ?? 0) >= (values.first ?? 0)
+        let curve = Self.smoothed(points)
+        let up = (points.last?.usd ?? 0) >= (points.first?.usd ?? 0)
         Canvas { context, size in
-            guard values.count > 1, let lo = values.min(), let hi = values.max() else { return }
-            let span = max(hi - lo, max(hi * 0.002, 0.01))
-            let start = points.first!.at.timeIntervalSince1970, total = max(points.last!.at.timeIntervalSince1970 - start, 1)
+            guard curve.count > 1, let lo = curve.map(\.y).min(), let hi = curve.map(\.y).max() else { return }
+            let span = max(hi - lo, max(abs(hi) * 0.002, 0.01))
+            let pts = curve.map { CGPoint(x: size.width * $0.x, y: size.height * (1 - ($0.y - lo) / span)) }
+            // Through the midpoints, each point a control: smooth, and never past the highest or lowest value.
             var line = Path()
-            for (i, p) in points.enumerated() {
-                let pt = CGPoint(x: size.width * (p.at.timeIntervalSince1970 - start) / total, y: size.height * (1 - (values[i] - lo) / span))
-                i == 0 ? line.move(to: pt) : line.addLine(to: pt)
+            line.move(to: pts[0])
+            for i in 1..<pts.count - 1 {
+                line.addQuadCurve(to: CGPoint(x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2), control: pts[i])
             }
+            line.addLine(to: pts[pts.count - 1])
             var area = line
             area.addLine(to: CGPoint(x: size.width, y: size.height))
             area.addLine(to: CGPoint(x: 0, y: size.height))
@@ -285,6 +354,20 @@ struct EquitySparkline: View {
             context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
         }
         .frame(height: height)
-        .accessibilityLabel("Portfolio value over the week")
+        .accessibilityLabel("Portfolio P/L over the week")
+    }
+
+    /// The points averaged into `slices` stretches of time (x from 0 to 1), starting and ending on the exact values.
+    static func smoothed(_ points: [EquityPoint], slices: Int = 48) -> [(x: Double, y: Double)] {
+        guard let first = points.first, let last = points.last, points.count > 1 else { return [] }
+        let start = first.at.timeIntervalSince1970, total = max(last.at.timeIntervalSince1970 - start, 1)
+        var sums = [(x: Double, y: Double, n: Double)](repeating: (0, 0, 0), count: slices)
+        for p in points {
+            let x = (p.at.timeIntervalSince1970 - start) / total, i = min(Int(x * Double(slices)), slices - 1)
+            sums[i] = (sums[i].x + x, sums[i].y + NSDecimalNumber(decimal: p.usd).doubleValue, sums[i].n + 1)
+        }
+        let means = sums.filter { $0.n > 0 }.map { (x: $0.x / $0.n, y: $0.y / $0.n) }
+        return [(0, NSDecimalNumber(decimal: first.usd).doubleValue)] + means.dropFirst().dropLast()
+            + [(1, NSDecimalNumber(decimal: last.usd).doubleValue)]
     }
 }

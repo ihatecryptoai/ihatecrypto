@@ -166,7 +166,8 @@ struct ChartBoard: View {
         for (i, o) in ws.orders.filter({ $0.coin == state.coin && $0.isTrigger }).enumerated() {
             guard let px = o.triggerPx else { continue }
             let stop = (o.orderType ?? "").contains("Stop")
-            out.append(ChartLevel(id: "o\(i)", price: d(px), label: stop ? "Stop" : "Take", color: stop ? Brand.loss : Brand.profit, dashed: false))
+            let label = (o.orderType ?? "").contains("Trailing") ? "Trailing" : stop ? "Stop" : "Take"
+            out.append(ChartLevel(id: "o\(i)", price: d(px), label: label, color: stop ? Brand.loss : Brand.profit, dashed: false))
         }
         for a in ws.alerts where a.coin == state.coin {
             out.append(ChartLevel(id: a.id.uuidString, price: d(a.price), label: "Alert", color: .orange, dashed: true))
@@ -427,8 +428,8 @@ struct PlaceDetailBoard: View {
                 Text("USDC rate now ≈ \(Fmt.num(rate.rounded(2, .plain)))% a year.").font(.ui(10)).foregroundStyle(.secondary)
             }
         case "jupiter":
-            ForEach(ws.lend, id: \.vault) { v in row("jup", v.vault, "\(Fmt.num(v.usdc)) USDC", "earning · withdraw any time") }
-            if ws.lend.isEmpty { Text("Nothing in Jupiter Lend yet.").font(.ui(10)).foregroundStyle(.secondary) }
+            ForEach(ws.lendDeposits, id: \.address) { d in row("jup", d.coin, "\(Fmt.num(d.amount, maxFraction: 6)) \(d.coin)", "earning · withdraw any time") }
+            if ws.lendDeposits.isEmpty { Text("Nothing in Jupiter Lend yet.").font(.ui(10)).foregroundStyle(.secondary) }
             if let rate = ws.yieldOptions?.first(where: { $0.place.contains("Jupiter") && $0.asset == "USDC" })?.apy {
                 Text("USDC rate now ≈ \(Fmt.num(rate.rounded(2, .plain)))% a year.").font(.ui(10)).foregroundStyle(.secondary)
             }
@@ -568,6 +569,7 @@ struct Openable: ViewModifier {
 
     @Environment(Workspace.self) private var ws
     let place: String
+    var radius: CGFloat = 16
     @State private var hover = false
 
     func body(content: Content) -> some View {
@@ -575,9 +577,10 @@ struct Openable: ViewModifier {
         let width: CGFloat = open ? 2 : 1.5
         // A fixed-color edge that shows at once: a fade redraws the whole window every frame.
         content
+            // The edge only while its details are open; hovering shows the hand alone (the owner, 2026-10-25).
             .overlay {
-                RoundedRectangle(cornerRadius: 16).strokeBorder(Brand.accent, lineWidth: width)
-                    .opacity(open ? 1 : hover ? 0.6 : 0)
+                RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: width)
+                    .opacity(open ? 1 : 0)
             }
             .contentShape(Rectangle())
             .onHover { hover = $0 }
@@ -660,13 +663,17 @@ extension ButtonStyle where Self == HoverIconStyle {
 struct HoverLift: ViewModifier {
     var radius: CGFloat = 12
     var enabled = true
+    /// Where a row knows whether what it opens is open: the accent edge only then, and hovering only lightens the row
+    /// (the owner, 2026-10-25: «убери когда провожу мимо бордер, только когда селектед бордер»). nil: the edge on hover.
+    var selected: Bool?
     @State private var hover = false
 
     func body(content: Content) -> some View {
         let on = hover && enabled
+        let edge = selected ?? on
         content
             .background(RoundedRectangle(cornerRadius: radius).fill(Color.primary).opacity(on ? 0.07 : 0))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: 1.5).opacity(on ? 0.7 : 0))
+            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Brand.accent, lineWidth: 1.5).opacity(edge ? (selected == nil ? 0.7 : 1) : 0))
             .onHover { hover = $0 }
             .pointerStyle(enabled ? .link : .default)
     }

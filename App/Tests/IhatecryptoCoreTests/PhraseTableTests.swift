@@ -40,6 +40,7 @@ private func d(_ s: String) -> Decimal { Decimal(string: s)! }
     ("застейкай 0.01 sol", .stake(d("0.01"))),
     ("купи сол", .buy(SpotAsset.all[0], usdc: nil)),
     ("buy SOL for 2 USDC", .buy(SpotAsset.all[0], usdc: 2)),
+    ("купи SOL на 1 USDC", .buy(SpotAsset.all[0], usdc: 1)),
     ("купи биткоин на $5", .buy(SpotAsset.all[1], usdc: 5)),
     // Own places elsewhere.
     ("выведи 1 USDC в Solana", .withdrawToSolana(1)),

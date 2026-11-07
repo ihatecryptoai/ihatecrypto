@@ -1,5 +1,6 @@
 import Foundation
 import P256K
+import libsecp256k1
 
 /// EIP-712 typed-data hashing for flat structs, which is all Hyperliquid and a deposit need.
 /// ponytail: no nested structs or arrays; add them when a protocol needs them.
@@ -98,8 +99,18 @@ public enum EVMSigner {
         guard digest.count == 32, signature.r.count == 32, signature.s.count == 32, [27, 28].contains(signature.v) else {
             throw WalletError("Not a signature over a 32-byte hash.")
         }
-        let recoverable = try P256K.Recovery.ECDSASignature(compactRepresentation: signature.r + signature.s, recoveryId: Int32(signature.v - 27))
-        let key = P256K.Recovery.PublicKey(HashDigest(Array(digest)), signature: recoverable, format: .uncompressed)
-        return EVMAccount.checksum(Keccak.hash256(key.dataRepresentation.dropFirst()).suffix(20).hex)
+        // libsecp256k1 itself, not P256K.Recovery.PublicKey: that one stops the app (fatalError) on a signature that
+        // recovers no key, and these bytes come from a device or a co-signer. Parsing refuses r or s ≥ n, recovery
+        // refuses r or s of 0, an r that is no point's x, and a key at infinity.
+        let context = P256K.Context.rawRepresentation
+        var recoverable = secp256k1_ecdsa_recoverable_signature()
+        var key = secp256k1_pubkey()
+        var bytes = [UInt8](repeating: 0, count: 65)
+        var length = bytes.count
+        guard secp256k1_ecdsa_recoverable_signature_parse_compact(context, &recoverable, Array(signature.r + signature.s), Int32(signature.v - 27)) == 1,
+              secp256k1_ecdsa_recover(context, &key, &recoverable, Array(digest)) == 1,
+              secp256k1_ec_pubkey_serialize(context, &bytes, &length, &key, UInt32(SECP256K1_EC_UNCOMPRESSED)) == 1
+        else { throw WalletError("The signature didn't verify.") }
+        return EVMAccount.checksum(Keccak.hash256(Data(bytes.dropFirst())).suffix(20).hex)
     }
 }

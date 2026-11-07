@@ -107,3 +107,51 @@ public enum CanvasZoom {
         (point.x - (point.x - pan.x) * k, point.y - (point.y - pan.y) * k)
     }
 }
+
+/// A two-finger pan's path, to be drawn once a frame. A trackpad sends ≈ 240 scroll events a second while the fingers
+/// move and its momentum ≈ 120 after, neither on the display's beat, so moving on each event gave a 120 Hz frame one, two
+/// or three steps (recorded 2026-10-28; at speed a momentum event is 100 pt). The events' own times jitter too (6.7 ms,
+/// then 1.6), so a frame reads the path averaged over `window`, `lag` before it: replaying the recorded gestures, frames
+/// with a double step went from 1195 to 12, for 19 ms more behind the fingers. The lag leaves an event 8 ms to reach the
+/// main thread (20.8 ms left 4, and a busy moment brought the steps back).
+public struct ScrollTrail {
+    public static let window = 1.0 / 60, lag = 1.0 / 40
+    private var marks: [(t: Double, x: Double, y: Double)] = []
+    /// Everything added so far.
+    public private(set) var sum = (x: 0.0, y: 0.0)
+    public init() {}
+
+    /// The newest event's time.
+    public var last: Double? { marks.last?.t }
+
+    public mutating func add(_ d: (x: Double, y: Double), at t: Double) {
+        let last = marks.last?.t ?? -.infinity
+        // After a pause (and at the start) a step plays over a window like the ones in a run, not at once.
+        if t - last > Self.window * 1.5 { marks.append((t - Self.window, sum.x, sum.y)) }
+        sum = (sum.x + d.x, sum.y + d.y)
+        marks.append((max(t, last), sum.x, sum.y))
+        if marks.count > 16 { marks.removeFirst(marks.count - 16) }
+    }
+
+    /// Forgets the path: what's left of it is no longer played.
+    public mutating func clear() { marks.removeAll() }
+
+    /// Where a frame shown at `t` draws the scroll.
+    public func frame(at t: Double) -> (x: Double, y: Double) {
+        var x = 0.0, y = 0.0
+        for k in 0..<8 {
+            let p = at(t - Self.lag + Self.window * ((Double(k) + 0.5) / 8 - 0.5))
+            x += p.x
+            y += p.y
+        }
+        return (x / 8, y / 8)
+    }
+
+    /// Where the scroll was at `t`, between the two events around it.
+    private func at(_ t: Double) -> (x: Double, y: Double) {
+        guard let last = marks.last, t < last.t else { return sum }
+        guard let i = marks.lastIndex(where: { $0.t <= t }) else { return (marks[0].x, marks[0].y) }
+        let a = marks[i], b = marks[i + 1], k = b.t > a.t ? (t - a.t) / (b.t - a.t) : 1
+        return (a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k)
+    }
+}

@@ -1,3 +1,5 @@
+import AgentAPIKit
+import TradeExecution
 import EVMChain
 import OneClickKit
 import SolanaChain
@@ -79,6 +81,57 @@ nonisolated enum NodeStore {
     static func activate() {
         for net in NodeNetwork.allCases { net.use(load(net)) }
         OneClick.key = oneClickKey
+    }
+
+    /// The Agent API key, read from the Keychain the first time an agent wallet is used, not at launch: a key saved by
+    /// another tool would make macOS ask, and the app must open without waiting on that.
+    static func agentAPIReady() throws {
+        if AgentAPI.key == nil { AgentAPI.key = agentKey }
+        guard AgentAPI.key != nil else { throw ExecutionError("Add the Agent API key first: Settings › General › Agent wallet key.") }
+    }
+
+    /// The agent wallet's grant token (ngt_…): a bearer secret that lets this Mac act within the owner's policy.
+    static var agentGrant: String? {
+        get {
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "agentgrant",
+                                    kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+            var out: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        }
+        set {
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "agentgrant"]
+            SecItemDelete(q as CFDictionary)
+            if let newValue {
+                var add = q
+                add[kSecValueData as String] = Data(newValue.utf8)
+                add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                SecItemAdd(add as CFDictionary, nil)
+            }
+        }
+    }
+
+    /// NEAR Intents' Agent API partner key (naa_…), in the Keychain beside 1Click's; read at launch. Set, it goes on the
+    /// Agent API's requests at once; nil removes it.
+    static var agentKey: String? {
+        get {
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "agentapi",
+                                    kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+            var out: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+            return String(decoding: data, as: UTF8.self)
+        }
+        set {
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "agentapi"]
+            SecItemDelete(q as CFDictionary)
+            if let newValue {
+                var add = q
+                add[kSecValueData as String] = Data(newValue.utf8)
+                add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                SecItemAdd(add as CFDictionary, nil)
+            }
+            AgentAPI.key = newValue
+        }
     }
 
     /// The NEAR Intents partner key (a JWT), in the Keychain beside the nodes; nil removes it. Set, it goes on 1Click's

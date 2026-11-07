@@ -40,6 +40,20 @@ private let dead = "0x000000000000000000000000000000000000dead"
     #expect(call.summary(chainId: 8453, to: move.safe, value: 0).contains("send 0.000005 USDC to 0x0000…dead"))
 }
 
+/// A multisig's move carries a uint256 of wei: 100 ETH reads as 100 ETH on the prompt, not the 18.4 a UInt64 holds.
+@Test func multisigSummaryShowsCoinsPast64Bits() throws {
+    let safe = "0x" + String(repeating: "ab", count: 20)
+    var exec = try Safe.Move(chainId: 8453, safe: safe, to: dead, value: 1, data: Data(), nonce: 0).exec([])
+    func pay(_ wei: Data) -> String {
+        exec.replaceSubrange((4 + 32)..<(4 + 64), with: wei)
+        return EVMCall.decode(exec).summary(chainId: 8453, to: safe, value: 0)
+    }
+    #expect(pay(try ABI.word(Decimal(string: "100000000000000000000")!)) == "carry out the multisig 0xabab…abab's signed move: send 100 ETH to 0x0000…dead on Base")
+    #expect(EVMCall.decode(exec).payees(to: safe, value: 0, chainId: 8453) == [dead])
+    #expect(pay(Data(count: 23) + [1] + Data(count: 8)).hasSuffix("send 18.446744073709551616 ETH to 0x0000…dead on Base"))   // 2⁶⁴
+    #expect(pay(ABI.uint(5)).hasSuffix("send 0.000000000000000005 ETH to 0x0000…dead on Base"))
+}
+
 @Test func safeSignsOnlyPlainPaymentsToApprovedAddresses() throws {
     let safe = "0x" + String(repeating: "ab", count: 20)
     let approved: Set<String> = [owner, safe, dead]
@@ -81,6 +95,7 @@ private struct ForkKey: TradeSigner {
                  recipients: [String]) async throws -> Data {
         let call = EVMCall.decode(data)
         if let why = call.refusal(sender: address, chainId: chainId) { throw ExecutionError(why) }
+        if let why = EVMCall.targetRefusal(to: to, data: data, sender: address) { throw ExecutionError(why) }
         let ok = Set((recipients + [address]).map { $0.lowercased() })
         if let payee = call.payees(to: to, value: 0, chainId: chainId).first(where: { !ok.contains($0.lowercased()) }) { throw ExecutionError("pays \(payee)") }
         return try EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee, gasLimit: gasLimit,

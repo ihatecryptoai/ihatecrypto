@@ -29,7 +29,7 @@ extension Executor {
     /// 0.000012 ETH covers one at twice today's fee, and $0.05 of ETH lands above that at ETH under ≈ $4,000.
     /// On the other networks their own floor is already above it (Ethereum's covers a vault call at today's fee).
     // ponytail: fixed floor and top-up; derive them from the estimate and the ETH price if Base fees jump.
-    static let morphoGas: (floor: UInt64, topupUSD: Decimal) = (12_000_000_000_000, Decimal(string: "0.05")!)
+    static let morphoGas: (floor: UInt128, topupUSD: Decimal) = (12_000_000_000_000, Decimal(string: "0.05")!)
 
     public func morpho(deposit: Bool, usdc requested: Decimal?, vault v: MorphoVault.Vault = MorphoVault.base) async throws -> String {
         guard let net = EVMNetwork.named(v.chain) else { throw ExecutionError("ihatecrypto doesn't move money on \(v.chainName). Nothing was signed.") }

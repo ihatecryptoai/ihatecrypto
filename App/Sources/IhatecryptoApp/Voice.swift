@@ -63,9 +63,18 @@ final class VoiceInput {
             state = .failed("No microphone: connect one, or choose it in System Settings › Sound › Input, and try again.")
             return
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request) { [weak self] level in
+        let tap = Self.tap(request) { [weak self] level in
             Task { @MainActor in self?.push(level) }
-        })
+        }
+        if #available(macOS 27, *) {
+            // A format the input won't take throws here; the older call below raises an exception that ends the app.
+            do { try input.installAudioTap(onBus: 0, bufferSize: 1024, format: format) { tap(AVAudioPCMBuffer(copying: $0), $1) } } catch {
+                state = .failed("The microphone didn't start: \(error.localizedDescription)")
+                return
+            }
+        } else {
+            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: tap)
+        }
         engine.prepare()
         do { try engine.start() } catch {
             input.removeTap(onBus: 0)
@@ -204,7 +213,7 @@ final class VoiceInput {
 
     // The audio tap and the recognizer call back on their own threads: these closures must not be MainActor's.
     nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest,
-                                        level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+                                        level: @escaping @Sendable (Double) -> Void) -> @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void {
         let state = Tap(request)
         return { buffer, _ in
             state.request.append(buffer)

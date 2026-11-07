@@ -69,6 +69,12 @@ enum SignerSelfTest {
             swapped.swapAt(1, 2)
             let mismatch = try? await signer.send(.signSolana(wire: toScam, accounts: swapped, recipients: [scam], tokenOwners: [:]))
             check(mismatch?.ok != true, "swapped account list rejected")
+            // Solana's v1 (message first, signatures last): refused in words, and the signer answers after it.
+            let v1 = Data([0x81, 1, 0, 1]) + Data(count: 4) + Data(repeating: 7, count: 32) + Data([0, 2])
+                + (try Base58.decode(owner)) + (try Base58.decode(scam)) + Data(count: 64)
+            let v1Reply = try? await signer.send(.signSolana(wire: v1, accounts: [owner, scam], recipients: [scam], tokenOwners: [:]))
+            let alive = (try? await signer.send(.status))?.ok == true
+            check(v1Reply?.ok == false && v1Reply?.error?.contains("v1") == true && alive, "v1 refused, the signer still answers: \(v1Reply?.error ?? "no reply")")
 
             // Hyperliquid: orders sign, money out only to an approved address, signatures equal the reference signer's.
             let cancel = HLAction.cancel([(asset: 0, oid: 1)])

@@ -37,8 +37,14 @@ extension Workspace {
         dexBalances = [:]
         hlp = (0, nil)
         solana = nil
-        lend = []
+        lendDeposits = []
+        lendEarned = [:]
+        lendEarnedAt = nil
         kamino = 0
+        kaminoDeposits = []
+        kaminoLoan = nil
+        kaminoLoanRead = false
+        kaminoMainLoan = nil
         near = 0
         base = nil
         arbitrumUSDC = nil
@@ -56,7 +62,10 @@ extension Workspace {
         if loaded.tampered { tasksTampered = true }
         taskQueue = nil
         exitRules = UserDefaults.standard.data(forKey: Self.scoped("exitRules", id)).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) } ?? [:]
+        partialTries = [:]
+        stopTries = [:]
         equityHistory = LocalStore.load(Self.scoped("equity", id) + ".json") ?? []
+        pnlMarks = LocalStore.load(Self.scoped("pnlmarks", id) + ".json")
         costBasis = LocalStore.load(Self.scoped("costbasis", id) + ".json") ?? [:]
         chainCost = [:]
     }
@@ -71,11 +80,12 @@ extension Workspace {
             taskQueue = nil
             exitRules = [:]
             equityHistory = []
+            pnlMarks = nil
             costBasis = [:]
         }
         lastBalance[id] = nil
         for key in ["schedules", "tasks", "exitRules"] { UserDefaults.standard.removeObject(forKey: Self.scoped(key, id)) }
-        for file in ["equity", "costbasis"] { LocalStore.remove(Self.scoped(file, id) + ".json") }
+        for file in ["equity", "pnlmarks", "costbasis"] { LocalStore.remove(Self.scoped(file, id) + ".json") }
     }
 
     /// Asks the signer to sign with `wallet` (Touch ID there), then reads everything for it.
@@ -123,7 +133,17 @@ extension Workspace {
     /// The key a wallet command needs that the active wallet doesn't have, said plainly. A phrase wallet has them all;
     /// a key wallet only its own chain's.
     func missingKey(for command: WalletCommand) -> String? {
-        guard let wallet = activeWallet, wallet.kind != "phrase" else { return nil }
+        guard let wallet = activeWallet else { return nil }
+        // Where the send's entry is saved: the lookup prepareTransfer, tokenRecipient and acrossRecipient make.
+        let savedOn: String? = switch command {
+        case .sendTo(let name, _, let net), .sendToken(let name, _, _, let net): savedEntry(name, network: net)?.network.rawValue
+        default: nil
+        }
+        return Self.missingKey(command, wallet: wallet, savedOn: savedOn)
+    }
+
+    static func missingKey(_ command: WalletCommand, wallet: SignerWallet, savedOn: String?) -> String? {
+        guard wallet.kind != "phrase" else { return nil }
         let chains: [String] = switch command {
         case .yields, .receive, .stopSchedules: []
         case .hlp: ["evm"]
@@ -134,10 +154,21 @@ extension Workspace {
         case .showApprovals, .multisigShow: []
         case .multisigCreate, .multisigSend: ["evm"]
         case .crossSwap(_, let from, _, let to, _): Array(Set([from, to].map { $0 == "solana" || $0 == "near" ? $0 : "evm" })).sorted()
+        case .intents(let from, let to, _): Array(Set([from, to].map { $0 == "solana" ? "solana" : "evm" })).sorted()
         case .gas: ["evm", "solana"]
         case .sendNear, .closeNear: ["near"]
         case .buyNear, .sellNear: ["solana", "near"]
-        default: ["solana"]   // spot, vaults, staking, sends: all on Solana
+        case .contractCall: ["evm"]
+        // A send signs on its recipient's network: the one the message names, else where the entry is saved — but an
+        // entry only NEAR Intents reaches goes there whatever is named (acrossRecipient is tried first).
+        case .sendTo(_, _, let net), .sendToken(_, _, _, let net):
+            switch AddressCheck.Network(rawValue: savedOn.flatMap { ["bitcoin", "zcash", "tron", "xrp", "dogecoin", "sui"].contains($0) ? $0 : nil }
+                                        ?? net ?? savedOn ?? "") {
+            case nil, .near?: []   // no such entry, or a NEAR account: the send itself says what's wrong
+            case .solana?, .bitcoin?, .zcash?, .tron?, .xrp?, .dogecoin?, .sui?: ["solana"]   // NEAR Intents' are paid from Solana's USDC
+            case .hyperliquid?, .ethereum?, .arbitrum?, .base?, .robinhood?, .tempo?, .polygon?, .hyperevm?, .optimism?, .bnb?: ["evm"]
+            }
+        default: ["solana"]   // spot, vaults, staking, SOL sends: on Solana
         }
         return chains.lazy.compactMap { wallet.missing($0) }.first
     }

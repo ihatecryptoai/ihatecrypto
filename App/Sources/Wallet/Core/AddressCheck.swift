@@ -154,6 +154,25 @@ public enum AddressCheck {
         [.control, .format, .lineSeparator, .paragraphSeparator].contains(c.properties.generalCategory)
     }
 
+    /// The known address `address` is a twin of: the same first 4 and last 4 characters (after 0x, any case), a
+    /// different middle. That is address poisoning: a cent comes from a twin of an address the user pays, so it gets copied
+    /// from the history later. MetaMask warns on the same 4 + 4. nil when none is.
+    public static func lookalike(_ address: String, among known: [(name: String, address: String)]) -> (name: String, address: String)? {
+        // What's the same in every address of its kind is no match: 0x, and bc1q / bc1p of a segwit Bitcoin address.
+        func body(_ a: String) -> String {
+            let t = a.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.hasPrefix("0x") ? t.dropFirst(2).lowercased() : t.lowercased().hasPrefix("bc1") ? String(t.lowercased().dropFirst(4)) : t
+        }
+        let a = body(address), evm = address.trimmingCharacters(in: .whitespaces).hasPrefix("0x")
+        // A NEAR name («alice.near») is read by its name, not compared by its ends.
+        guard a.count >= 12, !address.contains(".") else { return nil }
+        return known.first { k in
+            let b = body(k.address)
+            return k.address.trimmingCharacters(in: .whitespaces).hasPrefix("0x") == evm && b.count == a.count && b != a
+                && b.prefix(4) == a.prefix(4) && b.suffix(4) == a.suffix(4)
+        }
+    }
+
     /// «7xKX 9fQm … 3kPq 2Wd1»: the start and the end in groups of four, the way to compare an address by eye.
     public static func ends(_ address: String) -> (start: String, end: String) {
         func groups(_ s: Substring) -> String { stride(from: 0, to: s.count, by: 4).map { i in String(s.dropFirst(i).prefix(4)) }.joined(separator: " ") }

@@ -15,9 +15,14 @@ public enum Hyperliquid {
     static let info = "https://api.hyperliquid.xyz/info"
 
     /// An address Hyperliquid has never seen: its first deposit pays a one-time fee for opening the account.
+    /// An answer without a role throws: read as «not new», a send to a new account lost its 1 USDC. Any role but «missing»
+    /// (user, agent, vault, subAccount, one added later) is an account Hyperliquid knows.
     public static func isNewAccount(_ address: String) async throws -> Bool {
         let data = try await HTTP.post(info, json: ["type": "userRole", "user": address])
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["role"] as? String == "missing"
+        guard let role = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["role"] as? String, !role.isEmpty else {
+            throw NetError(message: "Hyperliquid's userRole answered without a role: \(String(decoding: data.prefix(200), as: UTF8.self))")
+        }
+        return role == "missing"
     }
 
     /// HIP-3 exchanges whose markets ihatecrypto shows: xyz carries the liquid commodities and stocks (oil, gold,
@@ -84,30 +89,57 @@ public enum Hyperliquid {
         public let accountValue: Decimal
         public let withdrawable: Decimal
         public let spotUSDC: Decimal
+        /// A unified account or portfolio margin: one USDC balance on spot carries perps, HIP-3 exchanges and spot.
+        /// accountValue and withdrawable are read from it, spotUSDC is 0 (the same money), nothing moves between them.
+        public var unified = false
     }
 
-    /// A HIP-3 exchange's own margin balance: account value and what is free.
+    /// The account's abstraction mode (userAbstraction): «unifiedAccount» and «portfolioMargin» keep every balance and
+    /// hold in the spot state, where the perp and HIP-3 exchange states mean nothing (account-abstraction-modes doc).
+    /// «disabled» (Manual) and «default» keep perp and spot apart. A reply that isn't a mode reads as apart, as before.
+    public static func unified(user: String) async throws -> Bool {
+        let mode = try JSONSerialization.jsonObject(with: try await HTTP.post(info, json: ["type": "userAbstraction", "user": user]),
+                                                    options: .fragmentsAllowed) as? String
+        return mode == "unifiedAccount" || mode == "portfolioMargin"
+    }
+
+    /// A HIP-3 exchange's own margin balance: account value and what is free. Nothing in a unified account, whose money
+    /// is all on the one balance `balance(user:)` reads.
     public static func dexBalance(user: String, dex: String) async throws -> (accountValue: Decimal, withdrawable: Decimal) {
         struct Summary: Decodable { let accountValue: String }
         struct Perp: Decodable { let marginSummary: Summary; let withdrawable: String }
+        async let one = unified(user: user)
         let perp = try JSONDecoder().decode(Perp.self, from: try await HTTP.post(info, json: ["type": "clearinghouseState", "user": user, "dex": dex]))
+        if try await one { return (0, 0) }
         return (try dec(perp.marginSummary.accountValue), try dec(perp.withdrawable))
     }
 
-    /// Perp and spot are separate balances on HyperCore; they are shown apart, never summed.
+    /// Perp and spot are separate balances on HyperCore; they are shown apart, never summed. In a unified account the
+    /// spot USDC is the whole account (positions' profit and loss included) and what open positions and orders hold
+    /// of it is its `hold`.
+    // ponytail: portfolio margin's other collateral (HYPE, BTC) isn't counted here, and a USDC loan reads as 0; the
+    // spot tokens show in the portfolio on their own. Its `hold` goes negative by what can be borrowed against them:
+    // loan room, not free money, so «free» stays within the account. With positions open and more loan room than their
+    // margin it reads the whole account: too high by that margin, which the exchange then refuses or borrows.
     public static func balance(user: String) async throws -> Balance {
         struct Summary: Decodable { let accountValue: String }
         struct Perp: Decodable { let marginSummary: Summary; let withdrawable: String }
-        struct SpotRow: Decodable { let coin: String; let total: String }
+        struct SpotRow: Decodable { let coin: String; let total: String; let hold: String? }
         struct Spot: Decodable { let balances: [SpotRow] }
         async let perpData = HTTP.post(info, json: ["type": "clearinghouseState", "user": user])
         async let spotData = HTTP.post(info, json: ["type": "spotClearinghouseState", "user": user])
+        async let one = unified(user: user)
         let perp = try JSONDecoder().decode(Perp.self, from: try await perpData)
         let spot = try JSONDecoder().decode(Spot.self, from: try await spotData)
+        let usdc = spot.balances.first { $0.coin == "USDC" }
+        if try await one {
+            let total = max(0, try dec(usdc?.total ?? "0"))
+            return Balance(accountValue: total, withdrawable: min(total, max(0, total - (try dec(usdc?.hold ?? "0")))), spotUSDC: 0, unified: true)
+        }
         return Balance(
             accountValue: try dec(perp.marginSummary.accountValue),
             withdrawable: try dec(perp.withdrawable),
-            spotUSDC: try dec(spot.balances.first { $0.coin == "USDC" }?.total ?? "0")
+            spotUSDC: try dec(usdc?.total ?? "0")
         )
     }
 }
@@ -165,13 +197,14 @@ public enum Solana {
             let result: R?
             let error: RPCError?
         }
-        // «confirmed», not the default «finalized» that runs ~13 s behind: a bridge's 133.94 USDC had landed, and the
-        // chain's next step («lend 150») still read the 17.77 from before and stopped.
-        async let lamportsData = HTTP.post(rpc, json: ["jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [owner, ["commitment": "confirmed"]]])
+        // Explicitly «finalized»: since Alpenglow (2026-10-21) it is the same slot as «confirmed», which is to be removed.
+        // Before, finalized ran ~13 s behind: a bridge's 133.94 USDC had landed, and the chain's next step («lend 150»)
+        // still read the 17.77 from before and stopped.
+        async let lamportsData = HTTP.post(rpc, json: ["jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [owner, ["commitment": "finalized"]]])
         // Both token programs: meme coins (POKEMON…) are Token-2022 and don't show under the classic one.
         func accounts(_ program: String) -> [String: Any] {
             ["jsonrpc": "2.0", "id": 2, "method": "getTokenAccountsByOwner",
-             "params": [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "confirmed"]]]
+             "params": [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "finalized"]]]
         }
         async let classicData = HTTP.post(rpc, json: accounts("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"))
         async let token2022Data = HTTP.post(rpc, json: accounts("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"))
@@ -193,13 +226,14 @@ public enum Solana {
     }
 
     /// Names, icons and prices from Jupiter, 100 mints a request (its search's limit). Jupiter Lend's share tokens are
-    /// left out: the Jupiter Lend row counts them. Without Jupiter the tokens still show, by mint and unpriced.
-    static func holdings(_ amounts: [String: Decimal], lendShares: Bool = false) async -> (tokens: [Holding], priced: Bool) {
+    /// left out: the Jupiter Lend row counts them. Without Jupiter the tokens still show, by mint and unpriced. A throttled
+    /// Jupiter is waited out (TokenResearch.get): three tries in 2 s never outlasted its 10-second window.
+    public static func holdings(_ amounts: [String: Decimal], lendShares: Bool = false) async -> (tokens: [Holding], priced: Bool) {
         let mints = amounts.keys.sorted()
         var pages: [Data] = [], priced = true
         for start in stride(from: 0, to: mints.count, by: 100) {
             let chunk = mints[start..<min(start + 100, mints.count)]
-            if let data = await Holdings.retrying({ try await HTTP.get("https://lite-api.jup.ag/tokens/v2/search?query=" + chunk.joined(separator: ",")) }) {
+            if let data = try? await TokenResearch.get(TokenResearch.jupiterSearch + chunk.joined(separator: ",")) {
                 pages.append(data)
             } else {
                 priced = false
@@ -278,6 +312,19 @@ public enum Near {
         }
         let gasPrice = (block["header"] as? [String: Any])?["gas_price"] as? String ?? "100000000"
         return (nonce + 1, try Base58.decode(hash), balance, storage, gasPrice)
+    }
+
+    /// What a NEP-366 delegate action from the implicit `account` needs: its key's next nonce, and the last block it may
+    /// land in (120 blocks ahead, ≈ 1–2 min, so it's signed right before it's sent).
+    public static func delegateContext(account: String) async throws -> (nonce: UInt64, maxBlockHeight: UInt64) {
+        guard let raw = Data(hex: account), raw.count == 32 else { throw NetError(message: "Not a NEAR implicit account: \(account).") }
+        let data = try await HTTP.post(rpc, json: ["jsonrpc": "2.0", "id": 1, "method": "query", "params": [
+            "request_type": "view_access_key", "finality": "final", "account_id": account, "public_key": "ed25519:" + Base58.encode(raw)]])
+        guard let key = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["result"] as? [String: Any],
+              let nonce = (key["nonce"] as? NSNumber)?.uint64Value, let height = (key["block_height"] as? NSNumber)?.uint64Value else {
+            throw NetError(message: "This NEAR account has no key on chain yet: NEAR opens it with the first NEAR it receives.")
+        }
+        return (nonce + 1, height + 120)
     }
 
     /// NEAR's «NotEnoughBalance» (the fee) or «LackBalanceForState» (what the account must keep for its storage) in words,

@@ -78,20 +78,29 @@ public enum RiskCalc {
     public static let builderFee = HLBuilder.share
     /// What each side of a trade pays in all.
     public static let tradeFee = takerFee + builderFee
+    /// Hyperliquid's tier-0 spot taker fee; ihatecrypto's fee is taken on spot sells only.
+    public static let spotTakerFee = Decimal(string: "0.0007")!
 
-    /// `entry`: a limit price; the mark when nil.
+    /// `entry`: a limit price; the mark when nil. `hedge`: the coins a hedge covers, which set the size instead of the risk.
+    /// `drift`: how far against the trade the entry may still go (a TWAP's parts, `Plan.twapDrift`), as a share; the
+    /// stop stays where `entry` puts it, and the loss at it counts the worst entry.
     public static func size(
-        riskUSD: Decimal, stopPct: Decimal, takePct: Decimal?, leverage: Decimal, side: Side, market: Market, entry limit: Decimal? = nil
+        riskUSD: Decimal, stopPct: Decimal, takePct: Decimal?, leverage: Decimal, side: Side, market: Market, entry limit: Decimal? = nil,
+        hedge: Decimal? = nil, drift: Decimal = 0
     ) -> Sizing {
         let entry = limit ?? market.markPx
         let dir: Decimal = side == .long ? 1 : -1
         let s = stopPct / 100
         let stop = entry * (1 - dir * s)
+        let worst = entry * (1 + dir * drift)
         // Loss per coin if the stop fills at its price: the move plus the fees on both legs.
-        let perCoinLoss = entry * s + (entry + stop) * tradeFee
-        let size = (riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
+        let perCoinLoss = entry * (s + drift) + (worst + stop) * tradeFee
+        let size = (hedge ?? riskUSD / perCoinLoss).rounded(market.szDecimals, .down)
         let notional = size * entry
-        let fees = size * (entry + stop) * tradeFee
+        // A TWAP's parts (drift) pay Hyperliquid only: it takes no builder fee on them. The exit pays both.
+        // ponytail: the size above still counts both fees on the entry, a few cents of headroom on a TWAP.
+        let entryFee = drift > 0 ? takerFee : tradeFee
+        let fees = size * (worst * entryFee + stop * tradeFee)
         let take = takePct.map { entry * (1 + dir * $0 / 100) }
         let profit = take.map { size * abs($0 - entry) - size * (entry + $0) * tradeFee }
         // Isolated margin, lowest tier: maintenance = 1 / (2 · max leverage).
@@ -101,7 +110,9 @@ public enum RiskCalc {
         return Sizing(
             size: size, entry: entry, notional: notional, margin: notional / leverage,
             stopPrice: stop, takePrice: take, liquidationPrice: liq,
-            feesUSD: fees, builderFeesUSD: size * (entry + stop) * builderFee, lossAtStopUSD: size * entry * s + fees, profitAtTakeUSD: profit
+            feesUSD: fees, builderFeesUSD: size * ((drift > 0 ? 0 : entry) + stop) * builderFee,
+            // A hedge loses at its stop what the coins it covers gain: the fees are what's left.
+            lossAtStopUSD: (hedge == nil ? size * entry * (s + drift) : 0) + fees, profitAtTakeUSD: profit
         )
     }
 }
@@ -154,6 +165,8 @@ public struct Live: Sendable {
     public var policy = RiskPolicy()
     /// Loss at the stops of positions already open; nil when one has no stop.
     public var openRisk: Decimal? = 0
+    /// What the wallet holds of the plan's coin, for a hedge; nil when not read.
+    public var spot: Decimal?
     /// What `Plan.resolve` filled in, shown in the risk block.
     public var notes: [String] = []
 
@@ -176,12 +189,15 @@ public enum Plan {
 
     public static func evaluate(_ i: TradeIntent, market: Market?) -> Evaluation {
         var e = Evaluation()
-        if i.riskUSD == nil { e.missing.append("risk in $") }
+        if i.riskUSD == nil, !i.isHedge { e.missing.append("risk in $") }
+        if i.isHedge, i.hedge == nil { e.missing.append("what the wallet holds of \(i.asset)") }
         if i.stopPct == nil { e.missing.append("stop in %") }
-        guard e.missing.isEmpty, let m = market, let risk = i.riskUSD, let stop = i.stopPct else { return e }
+        guard e.missing.isEmpty, let m = market, let stop = i.stopPct else { return e }
+        let risk = i.riskUSD ?? 0
         let lev = i.leverage ?? 1
 
-        if risk <= 0 { e.problem = "Risk must be above zero."; return e }
+        if let h = i.hedge, h <= 0 { e.problem = "Nothing to hedge: the wallet holds no \(IntentParser.pretty(i.asset))."; return e }
+        if i.hedge == nil, risk <= 0 { e.problem = "Risk must be above zero."; return e }
         if stop <= 0 || stop >= 100 { e.problem = "Stop must be above 0% and below 100%."; return e }
         if let t = i.takePct, t <= 0 || (i.side == .short && t >= 100) { e.problem = "Take-profit is out of range."; return e }
         // The signer refuses more than 20× whatever the market allows (HLGuard.maxLeverage): said here, before money moves.
@@ -189,22 +205,48 @@ public enum Plan {
         if lev < 1 || lev > Decimal(maxLev) { e.problem = "Leverage for \(m.name): 1× to \(maxLev)×."; return e }
         if lev != lev.rounded(0, .down) { e.problem = "Leverage on Hyperliquid is a whole number: \(Fmt.num(lev.rounded(0, .down)))× or \(Fmt.num(lev.rounded(0, .up)))×."; return e }
 
+        if let minutes = i.twapMinutes {
+            if i.isHedge || i.entryPx != nil || i.partialTake == true || i.trailingPct != nil {
+                e.problem = "A TWAP is the whole entry, at the market: no limit, hedge, take in parts or trailing with it."
+                return e
+            }
+            if minutes < 5 { e.problem = "A TWAP on Hyperliquid runs 5 minutes at least."; return e }
+            if minutes > twapMaxMinutes {
+                e.problem = "A TWAP here runs 4 hours at most: a longer one could keep buying with no stop after its stop fires and no one is watching. "
+                    + "For days or weeks, use recurring buys («buy ETH for 50 USDC every day»)."
+                return e
+            }
+        }
         if let px = i.entryPx, i.side == .long ? px >= m.markPx : px <= m.markPx {
             e.problem = "Limit \(Fmt.price(px)) is \(i.side == .long ? "above" : "below") the market \(Fmt.price(m.markPx)) and would fill at once. For a market entry, type “at market”."
             return e
         }
-        let s = RiskCalc.size(riskUSD: risk, stopPct: stop, takePct: i.takePct, leverage: lev, side: i.side, market: m, entry: i.entryPx)
+        let s = RiskCalc.size(riskUSD: risk, stopPct: stop, takePct: i.takePct, leverage: lev, side: i.side, market: m, entry: i.entryPx,
+                              hedge: i.hedge, drift: i.twapMinutes == nil ? 0 : twapDrift)
         e.sizing = s
         let liqBeforeStop = i.side == .long ? s.liquidationPrice >= s.stopPrice : s.liquidationPrice <= s.stopPrice
         if s.size <= 0 {
-            e.problem = "Risk is too small for the minimum \(m.name) size step."
+            e.problem = i.isHedge ? "Too little \(m.name) to hedge: below the market's size step." : "Risk is too small for the minimum \(m.name) size step."
         } else if s.notional < minNotional {
-            e.problem = "Notional \(Fmt.usd(s.notional)) is below the Hyperliquid $10 minimum order. Raise the risk or tighten the stop."
+            e.problem = i.isHedge
+                ? "A hedge of \(Fmt.usd(s.notional)) is below Hyperliquid's $10 minimum order: hedge at least $10 of \(m.name)."
+                : "Notional \(Fmt.usd(s.notional)) is below the Hyperliquid $10 minimum order. Raise the risk or tighten the stop."
+        } else if i.twapMinutes != nil, s.notional < twapMinimum {
+            e.problem = "A TWAP on Hyperliquid is from $100: this one is \(Fmt.usd(s.notional)). Put more into the trade, or say «one order»."
         } else if liqBeforeStop {
             e.problem = "Liquidation (\(Fmt.price(s.liquidationPrice))) comes before the stop. Lower the leverage."
         }
         return e
     }
+
+    /// The smallest TWAP Hyperliquid runs, in dollars of the whole order (order-types doc).
+    public static let twapMinimum: Decimal = 100
+    /// The longest TWAP ihatecrypto starts (Hyperliquid runs 7 days): past a few hours a stop that fired leaves it buying
+    /// unwatched more likely than not (a closed lid, a quit app).
+    public static let twapMaxMinutes = 240
+    /// How far a TWAP's parts may fill against the trade: Hyperliquid's 3% slippage cap on each part. Its risk is sized
+    /// from that worst entry, the stop staying where the price now puts it.
+    public static let twapDrift = Decimal(string: "0.03")!
 
     /// The money a plan holds against what its command named, by code rather than by a reader: «N USDC» is the most
     /// that goes in as margin, «risk $N» the most lost at the stop. nil when the plan keeps to it, else what differs.
@@ -319,7 +361,7 @@ public enum Plan {
 
     static func position(_ i: TradeIntent, _ e: Evaluation, _ live: Live) -> Block {
         let label = "Position · Hyperliquid"
-        let title = "\(i.side == .long ? "Long" : "Short") \(IntentParser.pretty(i.asset))"
+        let title = i.isHedge ? "Hedge \(IntentParser.pretty(i.asset)) · short" : "\(i.side == .long ? "Long" : "Short") \(IntentParser.pretty(i.asset))"
         guard let m = live.market else {
             let line = live.marketsLoaded ? "No \(i.asset) market on Hyperliquid." : "Price: no data."
             return Block(id: "position", label: label, title: title, lines: [line], status: live.marketsLoaded ? .blocked : .noData)
@@ -333,14 +375,21 @@ public enum Plan {
         guard let s = e.sizing else {
             return Block(id: "position", label: label, title: title, lines: [e.problem ?? ""], status: .blocked)
         }
+        let fees = "Hyperliquid \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))%, ihatecrypto \(Fmt.num(RiskCalc.builderFee * 100, maxFraction: 3))%"
         var lines = [
-            i.entryPx == nil
+            i.twapMinutes.map { "TWAP: \(Fmt.num(s.size, maxFraction: m.szDecimals)) \(m.name) over \(TradeIntent.duration($0)), parts at the market every 30 s or more, each within 3% of the price"
+                + (i.twapRandomize == true ? ", sizes randomized ±20%." : ", equal sizes.") }
+                ?? (i.entryPx == nil
                 ? "\(Fmt.num(s.size, maxFraction: m.szDecimals)) \(m.name) at ≈ \(Fmt.price(s.entry)) (mark)."
-                : "Limit: \(Fmt.num(s.size, maxFraction: m.szDecimals)) \(m.name) at \(Fmt.price(s.entry)), now \(Fmt.price(m.markPx)). Waiting; stop and take-profit start after entry.",
+                : "Limit: \(Fmt.num(s.size, maxFraction: m.szDecimals)) \(m.name) at \(Fmt.price(s.entry)), now \(Fmt.price(m.markPx)). Waiting; stop and take-profit start after entry."),
             "Notional \(Fmt.usd(s.notional)), margin \(Fmt.usd(s.margin)) at \(Fmt.num(i.leverage ?? 1))× leverage\(i.leverage == nil ? " (default)" : "").",
             "Liquidation ≈ \(Fmt.price(s.liquidationPrice)), isolated margin.",
-            "Fees per side: Hyperliquid \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))%, ihatecrypto \(Fmt.num(RiskCalc.builderFee * 100, maxFraction: 3))%.",
+            i.twapMinutes == nil ? "Fees per side: \(fees)."
+                : "Fees: the TWAP's parts pay Hyperliquid \(Fmt.num(RiskCalc.takerFee * 100, maxFraction: 3))% only, ihatecrypto's 0.05% isn't on a TWAP. The exit pays \(fees).",
         ]
+        if i.isHedge {
+            lines.insert("Covers \(Fmt.num(s.size, maxFraction: m.szDecimals))\(live.spot.map { " of the \(Fmt.num($0, maxFraction: 6))" } ?? "") \(m.name) the wallet holds: what they lose in a fall, the short makes back.", at: 1)
+        }
         if let p = e.problem { lines.append(p) }
         return Block(id: "position", label: label, title: title, lines: lines, status: e.problem == nil ? .ready : .blocked)
     }
@@ -349,6 +398,17 @@ public enum Plan {
         let label = "Protection"
         guard let s = e.sizing, let stopPct = i.stopPct else {
             return Block(id: "protection", label: label, title: "Stop & take-profit", lines: ["Set a stop in %, e.g. “stop 3%”."], status: .needsInput)
+        }
+        if i.isHedge {
+            // Far out, the stop only keeps the margin; near, a rise past it ends the hedge.
+            let guarding = abs(s.stopPrice - s.entry) * 2 >= abs(s.liquidationPrice - s.entry)
+            return Block(id: "protection", label: label, title: "Stop · no take-profit", lines: [
+                guarding
+                    ? "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)): only keeps the margin from liquidation (≈ \(Fmt.price(s.liquidationPrice))). Below it the short covers the coins."
+                    : "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)): a rise past it closes the hedge, and the coins are uncovered from there.",
+                "No take-profit: the hedge stays until you close it («close \(i.asset.hasPrefix("xyz:") ? String(i.asset.dropFirst(4)) : i.asset)»).",
+                "If you sell the coins, the short is left on its own: close it too.",
+            ], status: e.problem == nil ? .ready : .blocked)
         }
         var lines = [
             "Stop \(Fmt.pct(stopPct)) → \(Fmt.price(s.stopPrice)). Loss ≈ \(Fmt.usd(s.lossAtStopUSD)) incl. \(Fmt.usd(s.feesUSD)) fees (ihatecrypto \(Fmt.usd(s.builderFeesUSD))).",
@@ -365,7 +425,15 @@ public enum Plan {
                 : "Can't take in parts: half the position is below the $10 minimum order.")
         }
         if let trail = i.trailingPct {
-            lines.append("Trailing \(Fmt.pct(trail)) from the best price; moves while ihatecrypto is open.")
+            lines.append(i.entryPx == nil ? "Trailing \(Fmt.pct(trail)) from the best price, held by Hyperliquid itself."
+                                          : "Trailing \(Fmt.pct(trail)) from the best price, moved by ihatecrypto while it's open.")
+        }
+        if i.twapMinutes != nil {
+            lines.append("They go on once the TWAP's first part fills, for the whole position: as it grows, they cover all of it.")
+            lines.append("The risk above counts parts filling up to 3% \(i.side == .long ? "higher" : "lower"), each part's limit on Hyperliquid. "
+                + "If the loss at the stop grows past 1.5 × that risk, ihatecrypto stops the TWAP.")
+            lines.append("If the stop or take fires while the TWAP still buys, ihatecrypto stops it and closes what it bought after. "
+                + "The Mac stays awake for that while the TWAP runs. A closed lid, a quit app or a locked trading key leave it buying unwatched.")
         }
         lines.append("Triggers on mark price; a market exit may fill worse.")
         return Block(id: "protection", label: label, title: "Stop & take-profit", lines: lines, status: e.problem == nil ? .ready : .blocked)

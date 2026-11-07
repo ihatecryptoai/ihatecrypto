@@ -21,6 +21,8 @@ enum Signer {
         case .status:
             var r = SignerReply(ok: true)
             let wallets = Wallets.all
+            // remove() before 2026-11-01 could leave the automation wallet on, its addresses mirrored as «ours»: put them back.
+            if defaults.string(forKey: "activeWallet") != Wallets.active?.id { Wallets.activate(Wallets.active) }
             r.hasWallet = !wallets.isEmpty
             r.wallets = wallets
             r.activeWallet = Wallets.active?.id
@@ -176,8 +178,11 @@ enum Signer {
             }
             // The whole address on the prompt, not its ends: a look-alike differs in the middle. It starts the line, before
             // the name, so no name can stand where an address should be.
+            // A twin of an address already known goes on the prompt under it: saving it stays the user's call (E-5, variant B).
+            let known = knownAddresses()
             let lines = entries.map { e in
                 "\(e.address) on \(AddressCheck.Network(rawValue: e.network)?.title ?? e.network) as «\(e.name)»" + (e.memo.isEmpty ? "" : ", memo \(e.memo)")
+                    + (AddressCheck.lookalike(e.address, among: known).map { "\n  looks like \($0.name): same start and end, a different middle" } ?? "")
             }
             try SeedStore.confirm("save to your address book (check every character):\n" + lines.joined(separator: "\n"))
             defer { SeedStore.endSession() } // a confirmation, not a move: it leaves no session for an unrelated signature
@@ -363,6 +368,33 @@ enum Signer {
             r.checks = ["\(NearTransaction.near(yocto)) NEAR → \(receiver)"]
             return r
 
+        case .signAgentMessage(let payload):
+            let m = try AgentOwner.message(payload)
+            try confirmAfresh(m.doing)
+            var r = SignerReply(ok: true)
+            r.signedRaw = try withNearKey(reason: m.doing) { secret, _ in
+                try NearOwnerSigning.nep413(message: m.message, nonce: m.nonce, recipient: m.recipient, privateKey: secret)
+            }
+            r.checks = ["NEP-413 to \(m.recipient): \(m.doing)"]
+            return r
+
+        case .signAgentDelegate(let payload, let nonce, let maxBlockHeight, let policy):
+            let d = try AgentOwner.delegate(payload)
+            // The rules in words from the signer's own reading: only addresses it knows, the owner being this wallet.
+            let rules = try policy.map { json in
+                let owner = try address("near")
+                let known = RecipientStore.all().union(AddressBookStore.all().map(\.address))
+                return try AgentOwner.policy(json, owner: owner, own: OwnStore.all(), known: known)
+            }
+            let doing = "agent wallet on NEAR Intents: \(d.doing)" + (rules.map { " — \($0)" } ?? "")
+            try confirmAfresh(doing)
+            var r = SignerReply(ok: true)
+            r.signedRaw = try withNearKey(reason: doing) { secret, _ in
+                try NearOwnerSigning.signDelegate(receiver: d.receiver, actions: d.actions, nonce: nonce, maxBlockHeight: maxBlockHeight, privateKey: secret)
+            }
+            r.checks = ["NEP-366 to \(d.receiver): \(d.doing)"]
+            return r
+
         case .signNearDeleteAccount(let beneficiary, let recipients, let nonce, let blockHash):
             try checkNearRecipient(beneficiary, recipients, blockHash)
             try approve([beneficiary], doing: "delete your NEAR account into \(beneficiary)")
@@ -393,7 +425,7 @@ enum Signer {
                 return refused(v)
             }
             var r = SignerReply(ok: true)
-            r.signatureBytes = try withKey("solana", reason: "sign text for a site:\n" + String(text.prefix(160))) {
+            r.signatureBytes = try withKey("solana", reason: PersonalMessage.prompt(text)) {
                 try Curve25519.Signing.PrivateKey(rawRepresentation: $0).signature(for: message)
             }
             r.checks = ["Only text was signed, not a transaction."]
@@ -407,7 +439,7 @@ enum Signer {
             }
             let text = String(data: message, encoding: .utf8) ?? "\(message.count) bytes"
             var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: "sign text for a site:\n" + String(text.prefix(160))) {
+            r.signature = try withKey("evm", reason: PersonalMessage.prompt(text)) {
                 try EVMSigner.sign(digest: PersonalMessage.digest(message), privateKey: $0)
             }
             r.checks = ["Text was signed, not a transaction or an approval."]
@@ -535,8 +567,10 @@ enum Signer {
                 .map { "runs \($0), not on ihatecrypto's list" }
             let payer = sponsor.map { ["the network fee is paid by \($0.prefix(4))…\($0.suffix(4)), not by you"] } ?? []
             let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n")
-            // The fee payer may get rent back from this wallet: it's a payee like any other, allowed in person once.
-            try approve(recipients + (sponsor.map { [$0] } ?? []) + relayPayees, doing: doing)
+            // The fee payer may get rent back from this wallet: then it's a payee like any other, allowed in person once. One that
+            // gets nothing of the wallet's (a JupiterZ maker, which only swaps) isn't kept as an address money may go to.
+            let payee = sponsor.flatMap { SolanaGuard.refundsSponsor(message, accounts: accounts, owner: owner, sponsor: $0) ? [$0] : nil } ?? []
+            try approve(recipients + payee + relayPayees, doing: doing)
             // A program not on the list runs with this wallet's authority and the signer can't read what it does: every
             // such transaction asks in person afresh, whatever session is open (the 2026-10-24 review).
             if !extra.isEmpty { try confirmAfresh(doing + "\nit can move anything in this wallet: sign only if you trust this site") }
@@ -553,6 +587,25 @@ enum Signer {
             var v = Verdict()
             v.problems.append("A payment by signature that names no Relay order: whom it pays can't be checked, so ihatecrypto doesn't sign it.")
             return refused(v)
+
+        case .signX402(let chainId, let token, let to, let value, let validBefore, let nonce, let service):
+            let owner = try address("evm")
+            let a = X402Authorization(chainId: chainId, token: token, from: owner, to: to, value: value, validBefore: validBefore, nonce: nonce)
+            if let refusal = a.refusal(owner: owner, now: UInt64(Date().timeIntervalSince1970)) {
+                var v = Verdict()
+                v.problems.append(refusal)
+                return refused(v)
+            }
+            // Each payment confirmed in person with its amount and payee; the payee isn't saved as a recipient, so it
+            // can't receive anything else later without its own prompt.
+            let name = String(service.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(60).map(Character.init))
+            let doing = a.summary + " · \(name)"
+            try confirmAfresh(doing)
+            let digest = try a.typed().parts().digest
+            var r = SignerReply(ok: true)
+            r.signatures = try withKey("evm", reason: doing) { key in [try EVMSigner.sign(digest: digest, privateKey: key)] }
+            r.checks = ["The signer built the x402 authorization itself: a dollar it knows, from this wallet, at most $5, valid an hour."]
+            return r
 
         case .signSponsoredTransfer(let chainId, let nonce, let gasLimit, let token, let to, let amount, let recipients):
             let owner = try address("evm")
@@ -607,6 +660,13 @@ enum Signer {
             } else {
                 let stale = agentOn && AgentStore.load() != nil
                 let type = HLAction.type(action)
+                // A TWAP buys on for hours: started only with a trading key on, the one thing that can stop it unattended
+                // (a stop that fired, a loss grown). The app's word that one is on isn't taken: the signer's own state says.
+                if type == "twapOrder", !stale {
+                    var v = Verdict()
+                    v.problems.append("A TWAP needs the Hyperliquid trading key on: locked or off, nothing could stop it unattended.")
+                    return refused(v)
+                }
                 let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
                     : type == "vaultTransfer" ? "move money between your Hyperliquid account and a vault"
                     : stale ? "sign a Hyperliquid order: the trading key's 7 days are over, and this renews them" : "sign a Hyperliquid order"
@@ -707,7 +767,8 @@ enum Signer {
         return r
     }
 
-    /// Removes a wallet with everything kept for it; signing moves to the first one left.
+    /// Removes a wallet with everything kept for it; signing moves to the first one left that isn't the automation
+    /// wallet, or to none.
     static func remove(_ wallet: SignerWallet) {
         let wasActive = Wallets.active?.id == wallet.id
         SeedStore.delete(id: wallet.id)
@@ -717,7 +778,7 @@ enum Signer {
         defaults.removeObject(forKey: Wallets.scoped("agentActive", wallet.id))
         let rest = Wallets.all.filter { $0.id != wallet.id }
         Wallets.save(rest)
-        if wasActive { Wallets.activate(rest.first) }
+        if wasActive { Wallets.activate(SignerWallet.on(rest, chosen: nil)) }
     }
 
     /// Relay orders this signer checked (relayOrder), by id, until their deadline: a deposit naming any other id isn't
@@ -871,8 +932,20 @@ enum Signer {
         guard !new.isEmpty else { return }
         // The automation wallet signs with no one at the Mac: its prompt closes by itself after a minute.
         let what = calls ? "allow ihatecrypto to call a contract whose call it can't read:\n" : "allow ihatecrypto to send money to a new address:\n"
-        try SeedStore.confirm(what + new.joined(separator: "\n") + "\nfor this move: " + doing, within: Wallets.signing == nil ? nil : 60)
+        let others = knownAddresses()
+        let lines = new.map { a in a + (AddressCheck.lookalike(a, among: others).map { "\n  looks like \($0.name): same start and end, a different middle" } ?? "") }
+        try SeedStore.confirm(what + lines.joined(separator: "\n") + "\nfor this move: " + doing, within: Wallets.signing == nil ? nil : 60)
         try RecipientStore.add(new, to: calls ? RecipientStore.calls : RecipientStore.money)
+    }
+
+    /// What a new address is compared with for a twin, each with the words the prompt names it by: the saved book, this
+    /// wallet, the Mac's other wallets and every address money went to from this wallet — the signer's own lists, not the app's.
+    static func knownAddresses() -> [(name: String, address: String)] {
+        AddressBookStore.all().map { ("«\($0.name)»", $0.address) }
+            + [try? address("solana"), try? address("evm")].compactMap { $0 }.map { ("this wallet", $0) }
+            + Wallets.all.flatMap { w in [w.solana, w.evm].compactMap { $0 }.map { ("one of your wallets", $0) } }
+            + OwnStore.all().map { ("one of your wallets", $0) }
+            + RecipientStore.all().map { ("an address you sent money to", $0) }
     }
 
     /// A NEAR receiver ihatecrypto may pay: a valid account, among the saved addresses the app passed, with a real block hash.

@@ -157,6 +157,19 @@ import Testing
     #expect(ChatRouter.addressesAllowed("buy token \(ai) for 2 USDC", userText: "купи AI на 2$", known: [ai.lowercased()]))
     #expect(!ChatRouter.addressesAllowed("buy token \(other) for 2 USDC", userText: "купи AI на 2$", known: [ai]))
     #expect(ChatRouter.addressesAllowed("long ETH risk $1", userText: "лонг эфир", known: []))
+    // A 0x one only whole: never the first 40 hex of a longer one they wrote, nor a longer one round their 40.
+    let hash = "0x9f2c4e1ab3d57e8f0c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70", sui = "0xa1b2c3d4e5f60718293a4b5c6d7e8f9011223344556677889900aabbccddeeff"
+    #expect(ChatRouter.addresses("tx \(hash)?") == [hash])
+    #expect(!ChatRouter.addressesAllowed("buy token \(hash.prefix(42)) for 2 USDC", userText: "что с транзакцией \(hash)? купи этот токен на 2$", known: []))
+    #expect(!ChatRouter.addressesAllowed("save \(sui.prefix(42))000000000000000000000000 as Bob on sui", userText: "сохрани \(sui) как Bob на sui", known: []))
+    #expect(ChatRouter.addressesAllowed("save \(sui) as Bob on sui", userText: "сохрани \(sui) как Bob на sui", known: []))
+    let vault = "0x1A996cb54bb95462040408C06122D45D6Cdb6096", to = "0x000000000000000000000000" + "aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbb"
+    let said = "call base \(vault) depositForBurn(uint256,uint32,bytes32,address) 1000000 6 \(to) \(other)"
+    #expect(ChatRouter.addressesAllowed(said, userText: said, known: []))
+    #expect(!ChatRouter.addressesAllowed(said.replacingOccurrences(of: "bbbbbbbbbbbbbbbbbbbbbbbb", with: "cccccccccccccccccccccccc"), userText: said, known: []))
+    #expect(!ChatRouter.addressesAllowed("buy token \(ai)a for 2 USDC", userText: "купи \(ai) на 2$", known: []))
+    #expect(!ChatRouter.addressesAllowed("buy token \(ai) for 2 USDC", userText: "купи \(ai)a на 2$", known: []))
+    #expect(ChatRouter.addressesAllowed("buy token \(ai) for 2 USDC", userText: "купи https://basescan.org/token/\(ai)#code на 2$", known: []))
     #expect(try ChatRouter.decode(Data(#"{"route":"command","command":"lend 1 USDC"}"#.utf8)) == .command("lend 1 USDC"))
     #expect(try ChatRouter.decode(Data(#"{"route":"chat","reply":"Hi!"}"#.utf8)) == .chat("Hi!"))
     #expect(try ChatRouter.decode(Data(#"{"route":"question"}"#.utf8)) == .question)   // an older reply still reads

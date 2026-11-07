@@ -11,7 +11,7 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     # The same exact version as Package.swift: both write App/Package.resolved, and differing pins would flip it.
-    exactVersion: 2.10.0
+    exactVersion: 2.10.1
 settings:
   configs:
     # Release is what runs with real money: no get-task-allow, so nothing — not even root with SIP on — can attach a

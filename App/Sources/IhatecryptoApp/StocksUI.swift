@@ -47,8 +47,8 @@ extension Workspace {
         var held: [String: Decimal] = [:], found: [String: TokenLookup.Info] = [:]
         for t in favoriteTokens where t.chain == "robinhood" {
             guard let raw = try? await rpc.read(t.address, try ERC20.balanceOf(me)), let units = ABI.decimal(in: raw, word: 0), units > 0,
-                  let d = ABI.uint(in: (try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) ?? Data(), word: 0) else { continue }
-            let amount = units / Decimal(sign: .plus, exponent: Int(d), significand: 1)
+                  let d = ABI.decimals(try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) else { continue }
+            let amount = units / Decimal(sign: .plus, exponent: d, significand: 1)
             held[t.id] = amount
             if tokenInfo[t.id]?.priceUSD == nil, let info = try? await TokenLookup.lookup(t.address).first(where: { $0.chain == "robinhood" }) {
                 found[t.id] = info

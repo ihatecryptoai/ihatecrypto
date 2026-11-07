@@ -13,8 +13,10 @@ public struct ClaudeCodeSubscription: LLMProvider {
             id: "claude-code", name: "Claude (subscription via Claude Code)", kind: .subscription, defaultModel: "claude-opus-5-5",
             note: "Runs the installed Claude Code with no tools. Anthropic doesn't officially allow third-party sign-in — a gray area.",
             existingLoginLabel: "Use the installed Claude Code",
-            // All answer through `claude -p` (checked 2026-09-30).
-            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-4-5"]
+            // All answer through `claude -p` (checked 2026-09-30). Haiku 5.5 needs Claude Code 2.1.293 or later. Fable isn't in a
+            // Pro plan's limits, Claude bills it as usage credits; a Max plan spends up to half its weekly limit on it first.
+            // Claude Code says which with each answer (LLMUsage.overage), and the context chip counts credits by it.
+            models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"]
         )
     }
 
@@ -37,35 +39,46 @@ struct ClaudeCodeClient: LLMClient {
     /// Headless, no tools, no MCP, no user settings or hooks, nothing saved to session history.
     /// Our system prompt always replaces Claude Code's own, which would answer as a coding agent.
     /// The prompt goes through stdin so it is not visible in the process list.
-    /// `streaming`: one JSON event a line, the answer's words as they come (stream-json with partial messages), the result last.
-    static func arguments(_ r: LLMRequest, streaming: Bool = false) -> [String] {
-        ["-p", "--restricted", "--strict-mcp-config", "--tools", "", "--no-session-persistence"]
-        + (streaming ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"] : ["--output-format", "json"])
+    /// One JSON event a line, the answer's words as they come (stream-json with partial messages), the result last: only
+    /// these events say whether usage credits paid for the answer, so a short request is asked the same way.
+    static func arguments(_ r: LLMRequest) -> [String] {
+        ["-p", "--restricted", "--strict-mcp-config", "--tools", "", "--no-session-persistence",
+         "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
         + ["--model", r.model,
          "--system-prompt", r.system.isEmpty ? "You are an assistant. Answer briefly and to the point." : r.system]
         + (r.thinking ? ["--effort", "high"] : [])
     }
 
     func complete(_ r: LLMRequest) async throws -> String {
-        let prompt = r.dialogue.map(\.text).joined(separator: "\n\n")
-        let output = try await Self.run(path, Self.arguments(r), input: prompt)
-        LLMUsage.report(Self.usage(output))
-        return try Self.result(output)
+        try await stream(r) { _ in }
     }
 
     /// The same answer, its words told to `partial` as Claude Code writes them (text_delta events).
     func stream(_ r: LLMRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
         let prompt = r.dialogue.map(\.text).joined(separator: "\n\n"), text = Accumulator()
-        let output = try await Self.run(path, Self.arguments(r, streaming: true), input: prompt) { line in
+        let output = try await Self.run(path, Self.arguments(r), input: prompt) { line in
             guard let j = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], j["type"] as? String == "stream_event",
                   let event = j["event"] as? [String: Any], event["type"] as? String == "content_block_delta",
                   let delta = event["delta"] as? [String: Any], delta["type"] as? String == "text_delta", let words = delta["text"] as? String else { return }
             partial(text.add(words))
         }
         // The result is the last event; a run that wrote none (an old Claude Code) is read as one JSON answer.
-        let last = output.split(separator: 0x0a).last { (try? JSONSerialization.jsonObject(with: Data($0)) as? [String: Any])?["type"] as? String == "result" }
-        LLMUsage.report(Self.usage(last.map { Data($0) } ?? output))
-        return try Self.result(last.map { Data($0) } ?? output)
+        let lines = output.split(separator: 0x0a)
+        func last(_ type: String) -> Data? {
+            lines.last { (try? JSONSerialization.jsonObject(with: Data($0)) as? [String: Any])?["type"] as? String == type }.map { Data($0) }
+        }
+        let result = last("result") ?? output
+        var usage = Self.usage(result)
+        // Whether usage credits paid for the answer, said just before the result. Not in Anthropic's docs: read from
+        // Claude Code 2.1.318's output (2026-11-05). A run that says it more than once (a helper model's request too)
+        // counts as credits if any one did; a run that doesn't say leaves it nil.
+        let said = lines.compactMap { line -> Bool? in
+            guard let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], event["type"] as? String == "rate_limit_event" else { return nil }
+            return (event["rate_limit_info"] as? [String: Any])?["isUsingOverage"] as? Bool
+        }
+        usage?.overage = said.isEmpty ? nil : said.contains(true)
+        LLMUsage.report(usage)
+        return try Self.result(result)
     }
 
     /// What the run used, from its result object: the tokens of its one answer, the price Claude Code puts on them (a

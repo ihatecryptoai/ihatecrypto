@@ -8,19 +8,27 @@ import WalletCore
 public enum TokenResearch {
     public static func report(_ query: String) async -> String {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let evm = q.firstMatch(of: /0x[0-9a-fA-F]{40}/).map({ String($0.0) }) {
+        if let evm = q.firstMatch(of: /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/).map({ String($0.0) }) {
             return await dex(evm) ?? "DexScreener has no pool for \(evm) on any chain: nothing trades it, or it isn't a token."
         }
+        // Named whole: its first 40 hex in the report would be an address the chat could chart or call.
+        if let long = q.firstMatch(of: /0x[0-9a-fA-F]{41,}/) {
+            return "\(long.0) is no token contract (an EVM one is 0x and 40 hex): a transaction's hash, a Sui address or a bytes32."
+        }
         if let raw = q.firstMatch(of: /[1-9A-HJ-NP-Za-km-z]{30,60}/).map({ String($0.0) }) {
+            var unanswered = false
             for mint in repairs(raw) {
                 let note = mint == raw ? nil : "The pasted «\(raw)» is not a valid Solana address (\(raw.count) characters). Without "
                     + (raw.hasPrefix("2F" + mint) ? "the «2F» in front — a link's %2F («/») copied along —" : "the extra characters")
                     + " it is this token: \(mint)."
                 async let jupiter = jupiter(mint)
                 async let pools = dex(mint)
-                let facts = [note, await jupiter, await pools].compactMap { $0 }
-                if facts.count > (note == nil ? 0 : 1) { return facts.joined(separator: "\n") }
+                var said: String?
+                do { said = try await jupiter } catch { unanswered = true }
+                let facts = [note, said, await pools].compactMap { $0 }
+                if facts.count > (note == nil ? 0 : 1) { return ((unanswered ? [busy] : []) + facts).joined(separator: "\n") }
             }
+            if unanswered { return busy + " DexScreener has no pool for \(raw) either." }
             return valid(raw)
                 ? "Neither Jupiter nor DexScreener knows \(raw) as a token: it may be a wallet address, or a token with no pool yet."
                 : "«\(raw)» is not a valid Solana address, and no near fix of it is a known token. Ask for the address again, copied from the token's page."
@@ -66,12 +74,50 @@ public enum TokenResearch {
         }
     }
 
+    /// What a Token-2022 mint's extensions let its creator do to a holder, from getAccountInfo's jsonParsed answer for the
+    /// mint (research E-8): Jupiter's token list doesn't carry them (checked 2026-11-05). Worst first. A 0 % transfer fee
+    /// and a hook with no program (PYUSD's, Ondo's) do nothing today and aren't named.
+    public static func extensionWarnings(_ account: Any?, russian: Bool = false) -> [String] {
+        let info = (((account as? [String: Any])?["value"] as? [String: Any])?["data"] as? [String: Any]).flatMap { ($0["parsed"] as? [String: Any])?["info"] as? [String: Any] }
+        var state: [String: [String: Any]] = [:]
+        for e in info?["extensions"] as? [[String: Any]] ?? [] { if let name = e["extension"] as? String { state[name] = e["state"] as? [String: Any] ?? [:] } }
+        func set(_ v: Any?) -> Bool { v != nil && !(v is NSNull) }
+        var out: [String] = []
+        if set(state["permanentDelegate"]?["delegate"]) {
+            out.append(russian ? "создатель может забрать или сжечь его в любом кошельке, в твоём тоже (permanent delegate)"
+                               : "its creator can take or burn it in any wallet, yours too (permanent delegate)")
+        }
+        if state["nonTransferable"] != nil { out.append(russian ? "его нельзя перевести, а значит и продать (non-transferable)" : "it can't be transferred, so it can't be sold (non-transferable)") }
+        if state["pausableConfig"]?["paused"] as? Bool == true {
+            out.append(russian ? "переводы сейчас на паузе: продать не получится (pausable)" : "its transfers are paused now, so it can't be sold (pausable)")
+        } else if set(state["pausableConfig"]?["authority"]) {
+            out.append(russian ? "эмитент может поставить все переводы на паузу (pausable)" : "its issuer can pause all transfers (pausable)")
+        }
+        if set(state["transferHook"]?["programId"]) {
+            out.append(russian ? "каждый перевод запускает программу создателя, она может не дать продать (transfer hook)"
+                               : "every transfer runs its creator's program, which can refuse a sale (transfer hook)")
+        }
+        // A fee with a cap of 0 takes nothing.
+        let fee = ["newerTransferFee", "olderTransferFee"].compactMap { key -> Int? in
+            guard let f = state["transferFeeConfig"]?[key] as? [String: Any], (f["maximumFee"] as? NSNumber)?.intValue != 0 else { return nil }
+            return (f["transferFeeBasisPoints"] as? NSNumber)?.intValue
+        }.max() ?? 0
+        if fee > 0 {
+            let p = String(format: "%g%%", Double(fee) / 100)
+            out.append(russian ? "с каждого перевода создатель берёт \(p) (transfer fee)" : "every transfer pays its creator \(p) (transfer fee)")
+        }
+        return out
+    }
+
+    /// Jupiter's token search: keyless on api.jup.ag (lite-api.jup.ag is being retired), 5 requests in 10 s per IP.
+    public static let jupiterSearch = "https://api.jup.ag/tokens/v2/search?query="
+
     /// The Jupiter-verified token trading under a ticker («BONK»; «WIF» finds «$WIF») or named so («SPX6900», whose
     /// ticker is SPX), the most liquid when several do: its mint. Unverified namesakes — the usual fakes — are never picked.
-    public static func solanaMint(symbol: String) async -> String? {
+    /// nil: Jupiter answered and has none. Throws: Jupiter didn't answer (`get`).
+    public static func solanaMint(symbol: String) async throws -> String? {
         let query = symbol.trimmingCharacters(in: CharacterSet(charactersIn: "$")).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? symbol
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(query)") else { return nil }
-        return solanaMint(data, symbol: symbol)
+        return solanaMint(try await get(jupiterSearch + query), symbol: symbol)
     }
 
     static func solanaMint(_ data: Data, symbol: String) -> String? {
@@ -85,9 +131,9 @@ public enum TokenResearch {
         }.max { (dec($0["liquidity"]) ?? 0) < (dec($1["liquidity"]) ?? 0) }?["id"] as? String
     }
 
-    public static func solanaToken(_ mint: String) async -> SolanaToken? {
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(mint)") else { return nil }
-        return solanaToken(data, mint: mint)
+    /// nil: Jupiter answered and doesn't know the mint. Throws: Jupiter didn't answer (`get`).
+    public static func solanaToken(_ mint: String) async throws -> SolanaToken? {
+        solanaToken(try await get(jupiterSearch + mint), mint: mint)
     }
 
     static func solanaToken(_ data: Data, mint: String) -> SolanaToken? {
@@ -96,7 +142,7 @@ public enum TokenResearch {
         let audit = t["audit"] as? [String: Any] ?? [:]
         let tags = t["tags"] as? [String] ?? []
         let verified = t["isVerified"] as? Bool == true || tags.contains("verified")
-        return SolanaToken(name: t["name"] as? String ?? "?", symbol: t["symbol"] as? String ?? "?", decimals: decimals,
+        return SolanaToken(name: Holding.plain(t["name"] as? String ?? "?", max: 32), symbol: Holding.plain(t["symbol"] as? String ?? "?"), decimals: decimals,
                            token2022: t["tokenProgram"] as? String == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" || tags.contains("token-2022"),
                            verified: verified, liquidityUSD: dec(t["liquidity"]), freezable: audit["freezeAuthorityDisabled"] as? Bool == false,
                            mintable: audit["mintAuthorityDisabled"] as? Bool == false, topHolders: dec(audit["topHoldersPercentage"]))
@@ -104,10 +150,12 @@ public enum TokenResearch {
 
     // MARK: Sources
 
-    static func jupiter(_ mint: String) async -> String? {
-        guard let data = try? await get("https://lite-api.jup.ag/tokens/v2/search?query=\(mint)") else { return nil }
-        return jupiterFacts(data, mint: mint)
+    static func jupiter(_ mint: String) async throws -> String? {
+        jupiterFacts(try await get(jupiterSearch + mint), mint: mint)
     }
+
+    /// For the model when Jupiter's search didn't answer: whether a token is the verified one isn't known.
+    static let busy = "Jupiter didn't answer just now, so whether it knows or verified this token isn't known: ask again in a minute."
 
     /// Jupiter's entry for the mint, as lines.
     static func jupiterFacts(_ data: Data, mint: String, now: Date = Date()) -> String? {
@@ -115,7 +163,7 @@ public enum TokenResearch {
         let audit = t["audit"] as? [String: Any] ?? [:]
         let tags = t["tags"] as? [String] ?? []
         let verified = t["isVerified"] as? Bool == true || tags.contains("verified")
-        var lines = ["Solana token \(t["name"] as? String ?? "?") (\(t["symbol"] as? String ?? "?")), mint \(mint), chain id solana. Jupiter: "
+        var lines = ["Solana token \(Holding.plain(t["name"] as? String ?? "?", max: 32)) (\(Holding.plain(t["symbol"] as? String ?? "?"))), mint \(mint), chain id solana. Jupiter: "
                      + (verified ? "verified" : "not verified") + (tags.isEmpty ? "" : ", tags \(tags.joined(separator: ", "))") + "."]
         lines.append("Price \(price(dec(t["usdPrice"]))), market cap \(usd(dec(t["mcap"]))), FDV \(usd(dec(t["fdv"]))), liquidity \(usd(dec(t["liquidity"])))"
                      + ((t["holderCount"] as? NSNumber).map { ", \($0.intValue) holders" } ?? "") + ".")
@@ -173,7 +221,7 @@ public enum TokenResearch {
     static func dexFacts(_ data: Data, address: String, now: Date = Date()) -> String? {
         let chains = TokenLookup.parse(data, address: address)
         guard let top = chains.first, let m = TokenMarket.parse(data, address: address, chain: top.chain) else { return nil }
-        return (["DexScreener: \(m.name) (\(m.symbol)), contract \(top.address), chain id \(top.chain)"
+        return (["DexScreener: \(Holding.plain(m.name, max: 32)) (\(Holding.plain(m.symbol))), contract \(top.address), chain id \(top.chain)"
                  + (chains.count > 1 ? "; also trades on " + chains.dropFirst().map(\.chain).joined(separator: ", ") : "") + "."]
                 + poolFacts(m, now: now)).joined(separator: "\n")
     }
@@ -197,19 +245,25 @@ public enum TokenResearch {
         let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         let data = try? await get("https://api.dexscreener.com/latest/dex/search?q=\(q ?? query)")
         let found = data.flatMap { searchFacts($0, query: query) }
-        if let mint = await verified {
+        // Jupiter not answering is no «not verified»: the deepest pool below may be a copy, and the model is told so.
+        let mint: String?, head: [String]
+        do { (mint, head) = (try await verified, []) } catch {
+            (mint, head) = (nil, ["Jupiter didn't answer just now, so which «\(query)» on Solana is the verified one "
+                                  + "isn't known: the deepest pool below may be a copy. Ask again in a minute before buying by this name."])
+        }
+        if let mint {
             async let jupiter = jupiter(mint)
             async let pools = dex(mint)
             return (["«\(query)» on Solana is the Jupiter-verified token with mint \(mint); use this one. Other tokens under the name are copies."]
-                    + [await jupiter, await pools].compactMap { $0 }
+                    + [try? await jupiter, await pools].compactMap { $0 }
                     + (found.map { ["For comparison, everything DexScreener finds under the name (the copies claim any liquidity):", $0.text] } ?? []))
                 .joined(separator: "\n")
         }
-        guard data != nil else { return "DexScreener didn't answer the search." }
-        guard let (list, top) = found else { return "No token called «\(query)» trades anywhere DexScreener sees." }
+        guard data != nil else { return (head + ["DexScreener didn't answer the search."]).joined(separator: "\n") }
+        guard let (list, top) = found else { return (head + ["No token called «\(query)» trades anywhere DexScreener sees."]).joined(separator: "\n") }
         async let jupiter = top.hasPrefix("0x") ? nil : jupiter(top)
         async let pools = dex(top)
-        return ([list, "The deepest one in full:"] + [await jupiter, await pools].compactMap { $0 }).joined(separator: "\n")
+        return (head + [list, "The deepest one in full:"] + [try? await jupiter, await pools].compactMap { $0 }).joined(separator: "\n")
     }
 
     /// The matches as lines, and the address of the deepest.
@@ -223,7 +277,7 @@ public enum TokenResearch {
             guard liquidity > (best[key]?.liquidity ?? -1) else { continue }
             let opened = (p["pairCreatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
             let change = dec((p["priceChange"] as? [String: Any])?["h24"])
-            best[key] = (liquidity, address, "\(base["symbol"] as? String ?? "?") (\(base["name"] as? String ?? "?")) on chain id \(chain), contract \(address): "
+            best[key] = (liquidity, address, "\(Holding.plain(base["symbol"] as? String ?? "?")) (\(Holding.plain(base["name"] as? String ?? "?", max: 32))) on chain id \(chain), contract \(address): "
                          + "price \(price(dec(p["priceUsd"]))), liquidity \(usd(liquidity))" + (change.map { ", 24h \(pct($0))" } ?? "")
                          + (opened.map { ", pool opened \(age($0, now: now)) ago" } ?? ""))
         }
@@ -235,10 +289,30 @@ public enum TokenResearch {
 
     // MARK: Formatting
 
-    static func get(_ url: String) async throws -> Data {
+    /// The Dev copy's «Jupiter is busy» (`-jupiterBusyTest YES`, read at every call): each Jupiter request is answered
+    /// 429 without going out, for a live run of what the chat says then.
+    nonisolated(unsafe) public static var busyTest: () -> Bool = { false }
+
+    /// A GET whose status is read: a throttle (429) or a server error is asked again 1, 2, 4 and 8 s later (RPCRetry),
+    /// past Jupiter's 10-second window, and then throws. Jupiter's 429 carries a JSON error, which read as data was
+    /// «no such token».
+    public static func get(_ url: String) async throws -> Data {
         var request = URLRequest(url: URL(string: url)!, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return try await URLSession.shared.data(for: request).0
+        let jupiter = request.url?.host?.hasSuffix("jup.ag") == true, busy = jupiter && busyTest()
+        return try await RPCRetry.run {
+            if busy { return (Data(#"{"code":429,"message":"Too many requests"}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: nil)! as URLResponse) }
+            return try await URLSession.shared.data(for: request)
+        } answer: { data, status in try answer(data, status: status, from: jupiter ? "Jupiter" : request.url?.host ?? "The service") }
+    }
+
+    /// Data only with a 2xx. 429 and 5xx are worth asking again; anything else is final. Either way it is no answer.
+    static func answer(_ data: Data, status: Int, from source: String = "Jupiter") throws -> Data {
+        guard (200..<300).contains(status) else {
+            let why = status == 429 ? "too many requests right now" : "HTTP \(status)"
+            throw RPCRetry.Again(status == 429 || status >= 500, WalletError("\(source) didn't answer (\(why)). Nothing was signed — try again in a minute."))
+        }
+        return data
     }
 
     static func dec(_ v: Any?) -> Decimal? { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber).map { $0.decimalValue } }

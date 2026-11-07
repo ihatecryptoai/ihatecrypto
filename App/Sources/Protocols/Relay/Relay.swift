@@ -151,8 +151,15 @@ public enum Relay {
 
     /// The chain's own coin (ETH, POL) in USD, as Relay prices it: what a gas top-up of some wei costs.
     public static func nativePrice(chainId: UInt64) async throws -> Decimal? {
-        let (data, _) = try await URLSession.shared.data(from: URL(string: base + "/currencies/token/price?address=0x0000000000000000000000000000000000000000&chainId=\(chainId)")!)
-        return ((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["price"] as? NSNumber).map { $0.decimalValue }
+        let (data, _) = try await URLSession.shared.data(from: URL(string: base + "/currencies/token/price/v2?address=0x0000000000000000000000000000000000000000&chainId=\(chainId)")!)
+        return try price(in: data)
+    }
+
+    /// v2's `{"price":"2415.813385"}`: a decimal string, never with an exponent (v1's JSON number is retired on
+    /// 2027-01-28, and still reads, through its text as in Holdings.number). nil on `{"error":"Could not get price"}`.
+    static func price(in data: Data) throws -> Decimal? {
+        let v = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["price"]
+        return ((v as? NSNumber)?.stringValue ?? v as? String).flatMap { Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX")) }
     }
 
     /// The approval proxy Relay publishes for a chain (contracts.approvalProxy in /chains): its swaps from an EVM token

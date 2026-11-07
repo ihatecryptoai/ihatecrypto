@@ -1,6 +1,7 @@
 import AppKit
 import EVMChain
 import IhatecryptoCore
+import SolanaChain
 import SwiftUI
 import WalletCore
 
@@ -56,11 +57,12 @@ extension Workspace {
                 reply("DexScreener doesn’t know this contract\(chain.map { " on \($0)" } ?? ""): no pool trades it, so there’s no price to watch.", note: note)
                 return
             }
-            var token = FavoriteToken(chain: info.chain, address: info.address, name: info.name, symbol: info.symbol, image: info.imageURL)
+            // Names as the token's maker wrote them, made plain for the screen and the chat (research E-9).
+            var token = FavoriteToken(chain: info.chain, address: info.address, name: Holding.plain(info.name, max: 32), symbol: Holding.plain(info.symbol), image: info.imageURL)
             // What the contract says about itself wins over any listing.
             if let rpc = token.rpc, let s = ABI.string((try? await rpc.read(address, Data([0x95, 0xd8, 0x9b, 0x41]))) ?? Data()),
                let n = ABI.string((try? await rpc.read(address, Data([0x06, 0xfd, 0xde, 0x03]))) ?? Data()) {
-                token = FavoriteToken(chain: info.chain, address: info.address, name: n, symbol: s, image: info.imageURL)
+                token = FavoriteToken(chain: info.chain, address: info.address, name: Holding.plain(n, max: 32), symbol: Holding.plain(s), image: info.imageURL)
             }
             if !favoriteTokens.contains(where: { $0.id == token.id }) { favoriteTokens.append(token) }
             tokenInfo[token.id] = info
@@ -78,7 +80,9 @@ extension Workspace {
     /// A Solana token named by ticker: the Jupiter-verified one trading under it, then the same checks as by mint.
     func spotToken(_ asset: SpotAsset, note: String?) async -> SpotAsset? {
         guard asset.mint.isEmpty else { return await spotToken(asset.mint, note: note) }
-        guard let mint = await TokenResearch.solanaMint(symbol: asset.symbol) else {
+        let found: String?
+        do { found = try await TokenResearch.solanaMint(symbol: asset.symbol) } catch { jupiterUnanswered(note); return nil }
+        guard let mint = found else {
             reply(say("Jupiter has no verified token called \(asset.symbol) on Solana, so nothing is bought by that name — namesakes are the usual fakes. Name it by its mint instead (with Safe search off).",
                       "У Jupiter нет проверенного токена \(asset.symbol) на Solana, поэтому по имени ничего не покупаю — одноимённые токены обычно подделки. Назови его mint-адресом (с выключенным Safe search)."), note: note)
             return nil
@@ -100,8 +104,16 @@ extension Workspace {
         return asset
     }
 
+    /// Jupiter throttled or down past TokenResearch.get's retries: said as that, never as «no such token».
+    private func jupiterUnanswered(_ note: String?) {
+        reply(say("Jupiter didn't answer just now, so nothing moved. Try again in a minute.",
+                  "Jupiter сейчас не ответил, поэтому ничего не ушло. Попробуй через минуту."), note: note)
+    }
+
     func spotToken(_ mint: String, note: String?) async -> SpotAsset? {
-        guard let t = await TokenResearch.solanaToken(mint) else {
+        let found: TokenResearch.SolanaToken?
+        do { found = try await TokenResearch.solanaToken(mint) } catch { jupiterUnanswered(note); return nil }
+        guard let t = found else {
             reply(say("Jupiter doesn’t know the token \(mint), so there’s no route to trade it — nothing moved.",
                       "Jupiter не знает токен \(mint), поэтому торговать им нельзя — ничего не ушло."), note: note)
             return nil
@@ -112,9 +124,16 @@ extension Workspace {
                       "Включён Safe search, а Jupiter не проверял \(t.name) (\(t.symbol)), поэтому ihatecrypto его не купит. Чтобы торговать непроверенным токеном по mint-адресу, выключи Safe search в Settings › General."), note: note)
             return nil
         }
-        let warnings = t.warnings(russian: modulesRussian)
-        if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: "; ") + ".", note: note) }
-        return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022)
+        // Ondo's own tokens: not the freeze, mint and thin-pool warnings, which an issuer's token always has (its market
+        // makers, not the pools, set the price); its terms go on the buy's card (Canvases, the route's footer).
+        let ondo = t.verified && Ondo.issued(mint)
+        // Token-2022's extensions are read from the mint itself (research E-8). Unread, the buy goes on with Jupiter's facts.
+        let account = ondo || !t.token2022 ? nil : try? await SolanaRPC().call("getAccountInfo", [mint, ["encoding": "jsonParsed", "commitment": "finalized"]])
+        let warnings = ondo ? [] : TokenResearch.extensionWarnings(account, russian: modulesRussian) + t.warnings(russian: modulesRussian)
+        // The card's in English, as cards are.
+        tokenWarnings[mint] = ondo ? nil : TokenResearch.extensionWarnings(account) + t.warnings()
+        if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: ", ") + ".", note: note) }
+        return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022, ondo: ondo)
     }
 
     /// Prices and icons for the favorites, at most once a minute.
@@ -138,8 +157,8 @@ extension Workspace {
         var held: [String: Decimal] = [:]
         for t in favoriteTokens {
             guard let rpc = t.rpc, let raw = try? await rpc.read(t.address, try ERC20.balanceOf(hlAddress)), let units = ABI.decimal(in: raw, word: 0),
-                  let d = ABI.uint(in: (try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) ?? Data(), word: 0) else { continue }
-            held[t.id] = units / Decimal(sign: .plus, exponent: Int(d), significand: 1)
+                  let d = ABI.decimals(try? await rpc.read(t.address, Data([0x31, 0x3c, 0xe5, 0x67]))) else { continue }
+            held[t.id] = units / Decimal(sign: .plus, exponent: d, significand: 1)
         }
         tokenBalances.merge(held) { $1 }
     }

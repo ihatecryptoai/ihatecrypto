@@ -217,17 +217,22 @@ struct StudioView: View {
                     let maxWidth = max(Self.minChat, geo.size.width / 2)
                     let width = min(resizing ?? CGFloat(chatWidth), maxWidth)
                     // Full height, or compact (half the window); the header moves the chat anywhere inside the canvas.
-                    let full = max(200, geo.size.height - 32)
+                    // On the canvas the full chat starts under «Add block», which keeps to the top right corner above it
+                    // (variant A, 2026-10-27): beside the chat the capsule sat on the × of a board in the plan column.
+                    let full = max(200, geo.size.height - 32 - (mode == "plan" ? 48 : 0))
                     let small = min(full, max(260, geo.size.height * 0.5))
                     let height = chatOpen ? full : small
-                    let room = CGSize(width: max(0, geo.size.width - width - 32), height: max(0, geo.size.height - height - 32))
+                    // A full chat on the canvas stays below «Add block»: a place saved while compact can't lift it there.
+                    let room = CGSize(width: max(0, geo.size.width - width - 32),
+                                      height: max(0, geo.size.height - height - 32 - (chatOpen && mode == "plan" ? 48 : 0)))
                     let place = Self.clamp(CGSize(width: chatX + moving.width, height: chatY + moving.height), room: room)
                     // Docked, the canvas keeps clear of the chat; moved away, the chat floats over it.
                     let docked = place.width > -40 && place.height > -40
-                    // «Add block» keeps to the canvas's top right; a chat reaching the top there pushes it to the chat's left.
+                    // «Add block» keeps to the canvas's top right; a chat moved up over it (its 36 pt from 16, and a gap)
+                    // pushes it to the chat's left.
                     let chatLeft = geo.size.width - 16 - width + place.width
                     let chatTop = geo.size.height - 16 - height + place.height
-                    let blocksEdge = chatTop < 70 && chatLeft + width > geo.size.width - 200 ? geo.size.width - chatLeft + 12 : 16
+                    let blocksEdge = chatTop < 60 && chatLeft + width > geo.size.width - 200 ? geo.size.width - chatLeft + 12 : 16
                     ZStack(alignment: .topTrailing) {
                         // A page opened from a board or the chat: beside the docked chat, under the chat when it's moved.
                         if ws.showWeb {
@@ -280,10 +285,13 @@ struct StudioView: View {
                         .padding(16)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         // Over the chat while open: a pick closes it and the chat shows the block's words.
-                        if mode == "plan" {
+                        // While a move waits for Confirm its Cancel and Confirm hold that corner: «Add block» sat on top of them.
+                        if mode == "plan", (ws.pendingAction == nil && ws.pendingText == nil && ws.pendingAllocation == nil) || showBlocks {
                             // «Add block» / «Close blocks» stays at the right; the library itself sits under it or,
                             // moved by its corner button, beside the sidebar, and glides between the two.
                             AddBlockButton(open: $showBlocks)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { ws.addBlockFrame = $0 }
+                                .onDisappear { ws.addBlockFrame = .zero }
                                 .padding(.top, 16).padding(.trailing, blocksEdge)
                             if showBlocks {
                                 BlocksPanel(left: blocksOnLeft, move: { blocksOnLeft.toggle() }) { withAnimation(.snappy) { showBlocks = false } }
@@ -329,7 +337,7 @@ struct StudioView: View {
             }
         }
         .sheet(isPresented: Binding(get: { ws.preparing || ws.prepared != nil || (ws.executionError != nil && !ws.executing) },
-                                    set: { if !$0 { ws.prepared = nil; ws.executionError = nil } })) {
+                                    set: { if !$0 { ws.cancelPreparation() } })) {
             ConfirmSheet().environment(ws)
         }
     }
@@ -517,6 +525,34 @@ struct WindowDragArea: View {
 }
 
 // MARK: Rail
+/// A new version is out (Workspace.updateReady): by the logo until it's installed; a click opens Sparkle's window with
+/// its notes and Install.
+struct UpdateTag: View {
+    let version: String
+    var compact = false
+    /// The folded rail's full width, at its foot by the profile (the owner, 2026-10-26: «лучше расположить вот… и на всю
+    /// ширину»).
+    var wide = false
+
+    var body: some View {
+        Button { Updater.shared.check() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.circle.fill")
+                if !compact { Text(version).lineLimit(1) }
+            }
+            .fixedSize()
+            .font(.ui(wide ? 11.5 : 10, .bold)).foregroundStyle(Brand.accentInk)
+            .padding(.horizontal, compact ? 4 : 6)
+            .frame(maxWidth: wide ? .infinity : nil).frame(height: wide ? 30 : 18)
+            .background(Capsule().fill(Brand.accent.opacity(0.16)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .help("ihatecrypto \(version) is out: see what's new and install it")
+        .accessibilityLabel("Update to ihatecrypto \(version)")
+    }
+}
+
 /// «DEV» by the logo of the development copy (`Flavor`), beside the working one: nobody types into the wrong window.
 struct DevTag: View {
     var body: some View {
@@ -630,6 +666,8 @@ struct StudioRail: View {
                 WhatsNewLogo()
                 Text("ihatecrypto").font(.brand(19)).lineLimit(1).fixedSize()
                 if Flavor.dev { DevTag() }
+                // Beside «DEV» only the arrow fits.
+                if let version = ws.updateReady { UpdateTag(version: version, compact: Flavor.dev) }
                 Spacer(minLength: 0)
                 if fullScreen { collapseButton }
             }
@@ -710,6 +748,7 @@ struct StudioRail: View {
             Button("New canvas") { withAnimation(StudioView.spring) { ws.newCanvas() } }
                 .buttonStyle(RailRound(icon: "plus", title: "New", dashed: true)).help("New canvas").disabled(ws.busy)
             Spacer(minLength: 0)
+            if let version = ws.updateReady { UpdateTag(version: version, wide: true).frame(width: 76) }
             Button("Expand the sidebar") { withAnimation(StudioView.spring) { collapsed = false } }
                 .buttonStyle(RailRound(icon: "sidebar.left", plain: true)).help("Expand the sidebar")
             ProfileMenu(compact: true)
@@ -1360,7 +1399,7 @@ struct StudioCanvas: View {
             if chartAt == .column, let chart = ws.chart, ws.detail != "chart" { ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))") }
             PnLBoard().blockMenu("Profit and loss", radius: 20)
             if ws.showMovers { MoversBoard().blockMenu("Movers") }
-            if ws.showAlerts, !ws.alerts.isEmpty { AlertsBoard().blockMenu("Price alerts") }
+            if ws.showAlerts, !ws.alerts.isEmpty || !ws.loanGuards.isEmpty { AlertsBoard().blockMenu("Alerts") }
             if let yields = ws.yieldOptions ?? ws.heldAnswer?.yields, !yields.isEmpty {
                 YieldBubbles(options: yields).allowsHitTesting(ws.yieldOptions != nil).blockMenu("Rates", radius: nil)
             }
@@ -1386,7 +1425,8 @@ struct StudioCanvas: View {
                         if ws.thinking || ws.busy || ws.executing || ws.preparing || ws.managesPosition,
                            let last = ws.canvases.first(where: { $0.id == ws.canvasID }), !last.bubbles.isEmpty {
                             SavedBoard(canvas: last).blockMenu(ws.readable(last.title), radius: nil)
-                        } else if ws.currentScheduleKey == nil {
+                        } else if ws.currentScheduleKey == nil, !(ws.showAlerts && (!ws.alerts.isEmpty || !ws.loanGuards.isEmpty)) {
+                            // The alerts board is the canvas's answer then: no starter blocks under it.
                             placeholder
                         }
                     }
@@ -1874,7 +1914,8 @@ struct HoldingRow: View {
         // A click opens the token (its board, or the chart of a network's own coin); right-click asks the chat about it or
         // trades it.
         .modifier(RowLink(action: ws.opener(chain: token.chain, contract: token.contract, symbol: token.symbol),
-                          help: "\(token.symbol): details and chart · right-click to ask the chat, buy or sell"))
+                          help: "\(token.symbol): details and chart · right-click to ask the chat, buy or sell",
+                          selected: ws.isOpen(chain: token.chain, contract: token.contract, symbol: token.symbol)))
         .modifier(TokenMenu(chain: token.chain, address: token.native || token.chain == "hyperliquid" ? nil : token.contract,
                             symbol: token.symbol, verified: token.verified))
     }
@@ -1909,15 +1950,17 @@ struct StudioPortfolio: View {
     }
 
     @ViewBuilder private var loaded: some View {
-        // Once per pass: it filters the whole equity history.
-        let series = ws.equitySeries()
+        // Once per pass: it filters the whole equity history. P/L, not value: a top-up isn't a gain.
+        let series = ws.pnlSeries()
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("PORTFOLIO").font(.ui(10, .semibold)).tracking(1.2).foregroundStyle(.secondary)
                     BalanceAmount(font: .ui(20, .heavy))
                     if series.count > 2, let first = series.first, let last = series.last {
-                        Text("\(masked(signed(last.usd - first.usd))) · \(Int((last.at.timeIntervalSince(first.at) / 86_400).rounded(.up))) d")
+                        // Hours until a day is counted: the line starts fresh, and «1 d» over twenty minutes said too much.
+                        let hours = last.at.timeIntervalSince(first.at) / 3_600
+                        Text("\(masked(signed(last.usd - first.usd))) · \(hours < 24 ? "\(max(1, Int(hours.rounded(.up)))) h" : "\(Int((hours / 24).rounded(.up))) d")")
                             .font(.ui(10, .semibold)).monospacedDigit()
                             .foregroundStyle(last.usd >= first.usd ? Brand.profit : Brand.loss)
                     }
@@ -2067,6 +2110,8 @@ struct PlanButtons: View {
             }
         }
         .disabled(ws.busy)
+        // The SIGN card counts the fee approval the first trade asks for.
+        .task(id: ws.hlAddress) { if ws.feeApproved != true { await ws.loadFeeApproval() } }
     }
 }
 
@@ -2163,7 +2208,8 @@ extension Workspace {
                          row("liquidation", "≈ \(Fmt.price(s.liquidationPrice))")]
             }
             // What stops it goes first, in red.
-            if p.status == .blocked, let problem = evaluation.problem ?? p.lines.last { lines.insert(problem, at: 0) }
+            // Unsized, the block's lines are already the problem: once is enough.
+            if p.status == .blocked, let problem = evaluation.problem ?? p.lines.last, !lines.contains(problem) { lines.insert(problem, at: 0) }
             // The size and the leverage are the title: the first thing read.
             steps.append(card("OPEN \(p.long ? "LONG" : "SHORT") · \(name.uppercased())", sizing.map { "\(Fmt.usd($0.notional)) · \(leverage)" } ?? "\(name) \(leverage)",
                               lines, state(p.status), logo: TokenLogo.name(forAsset: intent.asset) ?? "hype", .hyperliquid))
@@ -2175,12 +2221,19 @@ extension Workspace {
                 if let tp = z.takePrice {
                     lines.append(row("take", "\(Fmt.price(tp)) · +\(Fmt.pct((abs(tp - z.entry) / z.entry * 100).rounded(1, .plain)))"))
                 }
-                lines.append("both wait on the exchange")
+                // The trailing stop is Hyperliquid's own: the sheet says so, or the second check reads it as missing.
+                if let t = intent.trailingPct {
+                    lines.append(row("trailing", "\(Fmt.pct(t)) behind the best price" + (intent.entryPx == nil ? "" : ", moved by ihatecrypto while it's open")))
+                }
+                let orders = 1 + (z.takePrice == nil ? 0 : 1) + (intent.trailingPct == nil || intent.entryPx != nil ? 0 : 1)
+                lines.append(orders == 3 ? "all wait on the exchange" : orders == 2 ? "both wait on the exchange" : intent.isHedge ? "guards the margin" : "waits on the exchange")
             }
-            steps.append(card("PROTECT", sizing?.takePrice != nil ? "Stop + take" : "Stop", lines, state(s.status), logo: "hype", .hyperliquid))
+            let title = (["Stop"] + (sizing?.takePrice == nil ? [] : ["take"]) + (intent.trailingPct == nil ? [] : ["trailing"])).joined(separator: " + ")
+            steps.append(card("PROTECT", title, lines, state(s.status), logo: "hype", .hyperliquid))
         }
-        // What Confirm does: the simulation first, then Touch ID for every signature.
-        let signing = nodes.filter { $0.signature != nil }.count
+        // What Confirm does: the simulation first, then Touch ID for every signature — ihatecrypto's fee approval on the
+        // first trade is one of them.
+        let signing = nodes.filter { $0.signature != nil }.count + ((prepared?.asksFee ?? (feeApproved == false)) ? 1 : 0)
         if sizing != nil, signing > 0 {
             steps.append(card(prepared == nil ? "SIMULATION · ON CONFIRM" : "SIMULATION · PASSED", prepared == nil ? "Shows first" : "As planned",
                               prepared.map { Array($0.changes.prefix(3)) } ?? ["every balance, before and after", "nothing is signed before it"],
@@ -2195,8 +2248,7 @@ extension Workspace {
             lines.append(row("fees", "≈ \(Fmt.usd(s.feesUSD)) · ihatecrypto \(Fmt.usd(s.builderFeesUSD))"))
             steps.append(card("RESULT · ESTIMATE", "−\(Fmt.usd(s.lossAtStopUSD))" + (s.profitAtTakeUSD.map { " / +\(Fmt.usd($0))" } ?? ""), lines, "info", .check))
         }
-        let signatures = nodes.filter { $0.signature != nil }.count
-        let footer = "Execute shows the simulation first, then \(signatures) signature\(signatures == 1 ? "" : "s") — nothing is signed before "
+        let footer = "Execute shows the simulation first, then \(signing) signature\(signing == 1 ? "" : "s") — nothing is signed before "
             + (ledgerActive ? "you approve it on your Ledger." : "\(Presence.signName).")
         return (steps, footer)
     }
@@ -2375,14 +2427,19 @@ struct FloatingChat: View {
     @State private var follow = true
 
     var body: some View {
+        // T4: on an attested NEAR AI model the header says the chat is private, with the proof a click away.
+        let tee = ws.teeVerified
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 BrandLogo(size: 30, mood: mood, animated: true)
+                    .overlay(alignment: .bottomTrailing) { if tee != nil { TEELockBadge().offset(x: 5, y: 5) } }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Assistant").font(.ui(14, .semibold))
-                    Text(status).font(.ui(10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(tee == nil ? "Assistant" : "Private assistant").font(.ui(14, .semibold))
+                    Text(tee == nil ? status : "Runs in sealed hardware. The host can't read this chat.")
+                        .font(.ui(10)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 6)
+                if let tee { TEEProofButton(verified: tee, model: ws.model) }
                 Button { withAnimation(StudioView.spring) { ws.newCanvas() } } label: { headerIcon("square.and.pencil") }
                     .buttonStyle(.hoverIcon).help("New canvas").disabled(ws.busy)
                 Button(action: toggleWide) { headerIcon(wide ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") }
@@ -2395,6 +2452,13 @@ struct FloatingChat: View {
                 .onChanged { drag = $0.translation }
                 .onEnded { endDrag($0.translation) })
                 .simultaneousGesture(TapGesture(count: 2).onEnded { dock() }))
+            .background {
+                if tee != nil {
+                    UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous).fill(Brand.tee.opacity(0.08))
+                        .overlay(alignment: .bottom) { Rectangle().fill(Brand.tee.opacity(0.25)).frame(height: 1) }
+                }
+            }
+            .padding(.bottom, tee == nil ? 0 : 6)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -2486,6 +2550,7 @@ struct FloatingChat: View {
         .environment(\.colorScheme, scheme)
         // Liquid Glass, floating over the canvas like the rail.
         .measuredGlass(.regular.tint(Brand.glassTint), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay { if tee != nil { RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Brand.tee.opacity(0.45)).allowsHitTesting(false) } }
     }
 
     private func headerIcon(_ name: String) -> some View {
@@ -2816,7 +2881,11 @@ private struct ChatComposer: View {
     /// The move waiting for Confirm, said in the field's own head; nil when nothing waits.
     private var waiting: String? {
         guard let text = ws.pendingText ?? ws.pendingAllocation.map({ ws.readable($0.summary) }) else { return nil }
-        let shown = ws.withAmounts(text)
+        // «All» with its number, as the card on the canvas says it («Withdraw all 0.034429 SPCX from Kamino»): the wallet
+        // alone can't tell what a protocol holds or what's owed.
+        let drawn: String? = if case .wallet(let c)? = ws.pendingAction, text.contains("all "), let t = ws.route(c)?.title,
+                                t.contains("all "), t.contains(where: \.isNumber) { t } else { nil }
+        let shown = drawn ?? ws.withAmounts(text)
         return shown.prefix(1).uppercased() + shown.dropFirst()
     }
 
@@ -2938,34 +3007,42 @@ private struct ChatComposer: View {
 
     private var field: some View {
         let waiting = waiting
+        // N5: after Confirm, a move through NEAR Intents shows its way where the receipt was.
+        let journey = waiting == nil ? ws.journey : nil
+        // The head's color: orange for a move waiting, violet for a private one (P3), NEAR's green for its journey (N5).
+        let tint: Color? = waiting != nil ? (ws.pendingIsPrivate ? Brand.privacy : Brand.accent) : journey != nil ? Brand.near : nil
         return VStack(spacing: 0) {
-            if let waiting { waitingBar(waiting) }
+            if let waiting { waitingBar(waiting, tint: tint ?? Brand.accent) }
+            else if let journey { JourneyBar(journey: journey) }
             // A signature waiting for the passcode takes the field's place (Passcode.swift).
-            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil) }
+            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil, corner: waiting != nil ? tint?.opacity(0.10) : tint?.opacity(0.06)) }
         }
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         // A glass pill on the glass chat, its rim orange while a move waits for Confirm.
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(waiting == nil ? Brand.glassRim : Brand.accent, lineWidth: waiting == nil ? 1 : 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(tint ?? Brand.glassRim, lineWidth: tint == nil ? 1 : 1.5))
     }
 
     /// Variant E: while a move waits, the field carries it — what it is, Cancel and Confirm in one place, the orange bar
     /// above the field gone. The steps stay on the canvas; the field below still asks about it or changes it.
-    private func waitingBar(_ title: String) -> some View {
+    private func waitingBar(_ title: String, tint: Color) -> some View {
         // Once a second while a priced swap's Confirm counts down its 15 s after the quote, then Refresh asks again
         // (quoteState). Otherwise nothing here changes with the time, and each tick redraws the window.
         Group {
+            // The receipt is read once per change, not on every tick of the countdown.
+            let receipt = ws.executing ? nil : Receipt(ws)
+            let choice = ws.executing ? nil : ws.privacyChoice
             if case .fresh = ws.quoteState(at: Date()) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date)) }
+                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date), receipt: receipt, choice: choice) }
             } else {
-                waitingRow(title, state: ws.quoteState(at: Date()))
+                waitingRow(title, state: ws.quoteState(at: Date()), receipt: receipt, choice: choice)
             }
         }
         .padding(.vertical, 10).padding(.leading, 14).padding(.trailing, 9)
-        .background(Brand.accent.opacity(0.10))
+        .background(tint.opacity(0.10))
     }
 
-    private func waitingRow(_ title: String, state: Workspace.QuoteState) -> some View {
+    private func waitingRow(_ title: String, state: Workspace.QuoteState, receipt: Receipt?, choice: PrivacyChoice?) -> some View {
         let sign = ws.pendingText == nil
         // A swap: what it gets and at what rate, as quoted now; else where its steps are.
         let line: String = {
@@ -3010,13 +3087,78 @@ private struct ChatComposer: View {
             }
         }
         .disabled(ws.busy || ws.executing)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
-            VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+        return Group {
+            if !ws.executing, let receipt {
+                receiptRow(receipt, state: state, choice: choice, buttons: buttons)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
+                    VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+                }
+            }
         }
     }
 
-    private func entry(waiting: Bool) -> some View {
+    /// Variant A «Receipt» (owner, 2026-11-05), for every move: what it is, how much goes where, then what you pay and
+    /// from where, what the blockchain keeps and what arrives — and what runs after it.
+    private func receiptRow(_ r: Receipt, state: Workspace.QuoteState, choice: PrivacyChoice?, buttons: some View) -> some View {
+        func cell(_ c: (label: String, value: String, note: String)) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(c.label).font(.ui(9.5, .semibold)).kerning(0.6).foregroundStyle(.secondary).lineLimit(1)
+                Text(c.value).font(.ui(13, .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+                if !c.note.isEmpty {
+                    Text(c.note).font(.ui(10.5)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
+        }
+        // As short as it reads: the chat above keeps the room for the reply and its cards.
+        return VStack(alignment: .leading, spacing: 8) {
+            // P3: the switch says which way it goes, so no header over it.
+            if choice == nil {
+                Label(r.header, systemImage: r.icon).font(.ui(10.5, .semibold)).kerning(0.6).foregroundStyle(Brand.accentInk).lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let to = r.to {
+                    Text(r.amount).font(.ui(21, .bold)).monospacedDigit()
+                    Text("→").font(.ui(16)).foregroundStyle(.secondary)
+                    Text(to).font(.ui(16, .semibold)).lineLimit(1)
+                } else {
+                    Text(r.amount).font(.ui(16, .bold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                if let chip = r.chip {
+                    Text(chip).font(.ui(11)).foregroundStyle(.secondary).lineLimit(1)
+                        .padding(.horizontal, 8).padding(.vertical, 2).overlay(Capsule().strokeBorder(Brand.cardBorder))
+                }
+            }
+            if let choice {
+                PrivacyChoiceRows(choice: choice)
+            } else {
+                if let line = r.line {
+                    Text(line).font(.ui(11)).foregroundStyle(.secondary).monospacedDigit().lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                if !r.cells.isEmpty {
+                    HStack(alignment: .top, spacing: 6) { ForEach(r.cells.indices, id: \.self) { cell(r.cells[$0]) } }
+                }
+            }
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(r.then, id: \.self) { step in
+                        Label(step, systemImage: "arrow.turn.down.right").font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if choice != nil, r.then.isEmpty, state == .none { Text("Either way it waits for Confirm").font(.ui(11)).foregroundStyle(.secondary).lineLimit(1) }
+                    QuoteClock(state: state)
+                }
+                Spacer(minLength: 6)
+                buttons
+            }
+        }
+    }
+
+    /// `corner`: the head's fill above the field, which its top corners take.
+    private func entry(waiting: Bool, corner: Color?) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             Button { templatesOpen.toggle() } label: {
                 Image(systemName: "square.grid.2x2").font(.system(size: 14, weight: .semibold))
@@ -3083,7 +3225,7 @@ private struct ChatComposer: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         // Under a waiting move, the corners past its rounded top take the move's tint: the frame's own colour showed
         // there as a third one, left and right of the field.
-        .background { if waiting { TopCorners(radius: 22).fill(Brand.accent.opacity(0.10)) } }
+        .background { if let corner { TopCorners(radius: 22).fill(corner) } }
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Brand.glassRim))
     }
 
@@ -3505,6 +3647,8 @@ struct ModelCompany: Identifiable {
         .init(name: "Google", logo: "llm-gemini", tile: 0xFFFFFF, ids: ["gemini-subscription", "gemini"]),
         .init(name: "xAI", logo: "llm-grok", tile: 0x000000, ink: 0xFFFFFF, ids: ["grok-subscription", "xai"]),
         .init(name: "DeepSeek", logo: "llm-deepseek", tile: 0xFFFFFF, ids: ["deepseek"]),
+        // The network's own logo (Logos/near.png) is already its green square: the tile is that same green.
+        .init(name: "NEAR AI Cloud (private)", logo: "near", tile: 0x01EC97, ids: ["nearai"]),
         .init(name: "OpenRouter", logo: "llm-openrouter", tile: 0x6566F1, ink: 0xFFFFFF, ids: ["openrouter"]),
         .init(name: "Ollama", logo: "llm-ollama", tile: 0xFFFFFF, ink: 0x000000, ids: ["ollama"]),
         .init(name: "LM Studio", logo: "llm-lmstudio", tile: 0x4338CA, ink: 0xFFFFFF, ids: ["lmstudio"]),
@@ -3735,7 +3879,10 @@ extension Workspace {
     var hlMargin: Decimal? { hl.map { $0.accountValue + dexBalances.values.reduce(0) { $0 + $1.accountValue } } }
     /// Everything on Hyperliquid: margin and the HLP vault.
     var hlTotal: Decimal? { hlMargin.map { $0 + hlp.equity } }
-    var lendTotal: Decimal { lend.reduce(0) { $0 + $1.usdc } }
+    /// What Jupiter Lend holds of one coin («USDC», «SOL»), in that coin.
+    func lent(_ coin: String) -> Decimal { lendDeposits.amount(of: coin) }
+    /// Jupiter Lend in dollars, each coin at its price, as on the Solana card.
+    var lendUSD: Decimal { lendDeposits.usd(coinPrice) }
 }
 
 /// A card whose right side is an arrow: this step moves money on to the next one.
@@ -3844,7 +3991,9 @@ struct PositionBoard: View {
     var body: some View {
         let long = position.size > 0
         let triggers = ws.orders.filter { $0.coin == position.coin && $0.isTrigger }
-        let stop = triggers.first { ($0.orderType ?? "").contains("Stop") }?.triggerPx
+        // The fixed stop, else the exchange's trailing one.
+        let stop = (triggers.first { ($0.orderType ?? "").contains("Stop") && !($0.orderType ?? "").contains("Trailing") }
+            ?? triggers.first { ($0.orderType ?? "").contains("Stop") })?.triggerPx
         let takes = triggers.filter { ($0.orderType ?? "").contains("Take") }.compactMap(\.triggerPx)
         let mark = ws.markets[position.coin]?.markPx
         VStack(alignment: .leading, spacing: 12) {
@@ -4175,3 +4324,148 @@ struct RailRound: ButtonStyle {
     }
 }
 
+/// How long the price on a card still holds: a ring that empties over `Workspace.quoteLife`, then «price over 15 s old».
+private struct QuoteClock: View {
+    let state: Workspace.QuoteState
+
+    var body: some View {
+        switch state {
+        case .fresh(let left):
+            HStack(spacing: 5) {
+                Circle().stroke(Color.primary.opacity(0.14), lineWidth: 2.2)
+                    .overlay(Circle().trim(from: 0, to: min(1, Double(left) / Workspace.quoteLife)).stroke(Brand.accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round)).rotationEffect(.degrees(-90)))
+                    .frame(width: 13, height: 13)
+                Text("price held \(left) s").monospacedDigit()
+            }
+            .font(.ui(10.5)).foregroundStyle(.secondary)
+        case .stale: Text("price over 15 s old").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .quoting: Text("getting the price…").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .none: EmptyView()
+        }
+    }
+}
+
+/// A move waiting for Confirm, as a receipt (variant A, owner 2026-11-05). A send through NEAR Intents reads its quote;
+/// any other move reads the route its canvas draws: what you pay and from where, what the blockchain keeps (none of it
+/// ours, but for Hyperliquid's builder fee), what arrives where, and the task's steps that run after it.
+struct Receipt {
+    var header: String
+    var icon: String
+    var amount: String
+    var to: String?
+    var chip: String?
+    var cells: [(label: String, value: String, note: String)] = []
+    var then: [String] = []
+    /// The quote's own line where the receipt can't count the fee itself: a swap's rate and its fee warning.
+    var line: String?
+
+    /// The move waiting for Confirm: a wallet command, or a plain transfer to a saved address.
+    @MainActor init?(_ ws: Workspace) {
+        switch ws.pendingAction {
+        case .wallet(let c)?: self.init(ws, c)
+        case .transfer(let entry, let amount)?: self.init(ws, route: ws.transferRoute(entry, amount), command: nil)
+        default: return nil
+        }
+    }
+
+    @MainActor init?(_ ws: Workspace, _ c: WalletCommand) {
+        if let r = ws.acrossReceipt, r.command == c, let sent = Self.across(c) {
+            self.init(across: r, sent: sent, then: Self.after(ws))
+        } else {
+            self.init(ws, route: ws.route(c) ?? ws.fallbackRoute(c), command: c)
+        }
+    }
+
+    /// A send through NEAR Intents, from its quote: what it pays from where, what 1Click and the network keep, when it lands.
+    init(across r: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?),
+         sent: (name: String, amount: Decimal, privately: Bool), then: [String]) {
+        let fee = r.worth.map { r.pays - $0 }.flatMap { $0 > 0 ? $0 : nil }
+        header = sent.privately ? "PRIVATE SEND · NEAR INTENTS" : "SEND · NEAR INTENTS"
+        icon = sent.privately ? "lock.fill" : "arrow.left.arrow.right"
+        amount = "\(Fmt.num(sent.amount)) \(r.symbol)"
+        to = sent.name
+        chip = "on \(WalletCommand.placeName(r.network))"
+        cells = [("YOU PAY", "≈ \(Fmt.num(r.pays)) USDC", "from \(r.from)"),
+                 ("BLOCKCHAIN FEES", fee.map { "≈ \(Fmt.usd($0)) · \(Fmt.num($0 / r.pays * 100, maxFraction: 0))%" } ?? "—", "NEAR Intents + gas, none to us"),
+                 ("ARRIVES", r.seconds.map { $0 >= 120 ? "in ≈ \($0 / 60) min" : "in ≈ \($0) s" } ?? "in a few minutes", r.worth.map { "worth \(Fmt.usd($0))" } ?? "")]
+        self.then = then
+    }
+
+    /// The task's steps after this one, as their cards name them: «REPAY · KAMINO · 0.15 USDC».
+    @MainActor static func after(_ ws: Workspace) -> [String] {
+        ws.chainSteps().map { "\($0.label) · \(ws.readable($0.title))" }
+    }
+
+    /// The networks a wallet pays from: a step «FROM · BASE» is you paying, «FROM · KAMINO LEND» is money coming back.
+    static let networks: Set<String> = ["SOLANA", "BASE", "ARBITRUM", "ETHEREUM", "HYPERLIQUID", "POLYGON", "OPTIMISM", "BNB CHAIN", "BNB",
+                                        "HYPEREVM", "ROBINHOOD", "ROBINHOOD CHAIN", "TEMPO", "NEAR"]
+
+    /// Our builder fee rides on Hyperliquid orders only (HLBuilder): a spot buy or sale, a swap on its book.
+    static func ours(_ c: WalletCommand?) -> Bool {
+        switch c {
+        case .hlSpotBuy?, .hlSpotSell?: true
+        case .swapOn(let place, _, _, _)?: place == "hyperliquid"
+        default: false
+        }
+    }
+
+    /// Any move from the route its canvas draws.
+    @MainActor init?(_ ws: Workspace, route: MoveRoute, command c: WalletCommand?) {
+        then = Self.after(ws)
+        guard let first = route.steps.first else { return nil }
+        let last = route.steps.count > 1 ? route.steps.last : nil
+        let payer = first.label.components(separatedBy: " · ").dropFirst().first ?? ""
+        let fromNetwork = first.label.hasPrefix("FROM") && Self.networks.contains(payer)
+        // The step that names the move («BRIDGE · NEAR INTENTS», «BUY · ON JUPITER»): not the ends, not an approve or the gas
+        // bought on the way; a label that is only a phrase takes its title too.
+        let named = route.steps.first { b in !["FROM", "TO", "APPROVE", "GAS"].contains { b.label.hasPrefix($0) } }
+        header = named.map { $0.label.contains(" · ") ? $0.label : "\($0.label) \(ws.readable($0.title).uppercased())" }
+            ?? (last == nil || !fromNetwork ? first.label : "SEND")
+        icon = Self.icon(header)
+        amount = ws.readable(route.title)
+        func moved(_ b: ActivityBubble) -> String? {
+            b.money?.first.map { "\(WalletCommand.placeName($0.place)) \(Fmt.num($0.was, maxFraction: 4)) → \(Fmt.num($0.after, maxFraction: 4))" }
+        }
+        func note(_ b: ActivityBubble) -> String { moved(b) ?? b.lines.first.map(ws.readable) ?? "" }
+        guard let last else {
+            cells = [(first.label, ws.readable(first.title), note(first))]
+            return
+        }
+        // What leaves: the payer's own balance change, not the card's title (a Base Aave card titles Solana's whole USDC).
+        let out = first.money?.first.flatMap { $0.was > $0.after ? ($0.was - $0.after, $0.symbol) : nil }
+        // Dollars in and dollars out of the same move's two ends: their gap is what the bridge and the network keep.
+        let stables: Set<String> = ["USDC", "USDT", "USDT0", "USDG", "USDC.E"]
+        let paid = out.flatMap { stables.contains($0.1.uppercased()) ? $0.0 : nil }
+        let got = last.label.hasPrefix("TO") ? last.money?.first.flatMap { stables.contains($0.symbol.uppercased()) ? $0.after - $0.was : nil } : nil
+        // What lands as quoted now, when the quote is in dollars too (NEAR Intents' «arrives»): truer than the card's ≈.
+        let quoted = ws.swapQuote.flatMap { c != nil && $0.command == c ? $0.ways.first?.worth : nil }.flatMap { $0 > 0 && got != nil ? $0 : nil }
+        let fee = paid.flatMap { p in (quoted ?? got).flatMap { g in p > g && g > 0 ? p - g : nil } }
+        // A swap's own line says its rate and warns of a fee the receipt can't count from the two ends.
+        line = fee == nil ? c.flatMap { ws.swapLine($0) } : nil
+        cells = [(!first.label.hasPrefix("FROM") ? first.label : fromNetwork ? "YOU PAY" : "FROM \(payer)",
+                  out.map { "\(Fmt.num($0.0, maxFraction: 6)) \($0.1)" } ?? ws.readable(first.title), note(first)),
+                 ("BLOCKCHAIN FEES", fee.map { f in "≈ \(Fmt.usd(f))" + (paid.map { p in " · \(Fmt.num(f / p * 100, maxFraction: 1))%" } ?? "") } ?? "network gas",
+                  Self.ours(c) ? "plus our 0.05% on the order" : "none to us"),
+                 (last.label.hasPrefix("TO") ? "ARRIVES" : last.label, ws.readable(last.title), note(last))]
+    }
+
+    /// A send through NEAR Intents: who gets how much, and whether privately.
+    static func across(_ c: WalletCommand) -> (name: String, amount: Decimal, privately: Bool)? {
+        switch c {
+        case .sendPrivately(let name, _, let x, _): (name, x, true)
+        case .sendToken(let name, _, let x?, _): (name, x, false)
+        default: nil
+        }
+    }
+
+    static func icon(_ header: String) -> String {
+        let h = header.uppercased()
+        if h.hasPrefix("PRIVATE") { return "lock.fill" }
+        if h.hasPrefix("BRIDGE") || h.contains("INTENTS") { return "arrow.left.arrow.right" }
+        if h.hasPrefix("SWAP") || h.hasPrefix("BUY") || h.hasPrefix("SELL") { return "arrow.2.squarepath" }
+        if h.hasPrefix("PAY") { return "creditcard" }
+        if h.hasPrefix("REPAY") || h.hasPrefix("BORROW") || h.hasPrefix("DEPOSIT") || h.hasPrefix("WITHDRAW") { return "building.columns" }
+        if h.hasPrefix("OWNER") || h.hasPrefix("RULES") { return "checkmark.shield" }
+        return "arrow.up.right"
+    }
+}

@@ -65,6 +65,27 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect((try? MPP.challenge(#"Payment id="a", realm="r", method="stripe", intent="charge", request="e30""#).get()) == nil)
 }
 
+/// A task's run on the automation wallet pays a service by itself only up to the price the user Confirmed for that
+/// request on its card (ScheduledTask.prices): none yet, more, or another request waits for the card. A lower price paid
+/// by itself doesn't lower what was Confirmed; the prices are saved with the task, and a task saved before them loads.
+@Test func aTaskPaysByItselfOnlyUpToTheConfirmedPrice() throws {
+    let pay = WalletCommand.pay(method: "GET", url: "https://a.example/price", body: nil)
+    var task = try #require(ScheduledTask.parse("every day at 09:00: pay GET https://a.example/price"))
+    #expect(!task.approves(60_000, for: pay))
+    task.approve(60_000, for: pay)
+    #expect(task.approves(60_000, for: pay) && task.approves(50_000, for: pay) && !task.approves(60_001, for: pay))
+    #expect(!task.approves(1, for: .pay(method: "POST", url: "https://a.example/price", body: "{}")))
+    #expect(!task.approves(1, for: .pay(method: "GET", url: "https://b.example/price", body: nil)))
+    task.approve(50_000, for: pay)
+    #expect(task.approves(60_000, for: pay))
+    task.approve(1, for: .solanaTo("tempo", 2))   // not a paid request: nothing kept
+    #expect(task.prices?.count == 1)
+    let back = try JSONDecoder().decode(ScheduledTask.self, from: JSONEncoder().encode(task))
+    #expect(back.approves(60_000, for: pay) && !back.approves(60_001, for: pay))
+    let old = Data(#"{"id":"6B1E6C8A-3F0B-4C55-9C8E-1D2B3A4F5E6D","steps":["pay GET https://a.example/price"],"next":0}"#.utf8)
+    #expect(try !JSONDecoder().decode(ScheduledTask.self, from: old).approves(1, for: pay))
+}
+
 @Test func everyMonthOnTheFirst() throws {
     var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
     let now = cal.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 10, minute: 30))!
@@ -180,4 +201,61 @@ private func challenge(_ request: String, extra: String = "") -> String {
     #expect(MPP.unpayable(["serviceUrl": "https://mpp.alchemy.com"]))
     #expect(MPP.unpayable(["serviceUrl": "https://stableenrich.dev"]))
     #expect(!MPP.unpayable(["serviceUrl": "https://brave.mpp.paywithlocus.com"]))
+}
+
+/// The chat calls an unlisted service only when the user's message names its host whole: «notevil.com» doesn't name
+/// «evil.com», «x.com» doesn't name «x.co», and «let.me know» doesn't name «t.me».
+@Test func aHostIsNamedOnlyWhole() {
+    #expect(MPP.named("api.exa.ai", in: "найди через api.exa.ai."))
+    #expect(MPP.named("api.exa.ai", in: "pay GET https://api.exa.ai/search?q=1"))
+    #expect(MPP.named("brave.mpp.paywithlocus.com", in: "use https://brave.mpp.paywithlocus.com/web/search"))
+    #expect(MPP.named("httpbin.org", in: "pay GET https://httpbin.org/anything?note=x"))
+    #expect(MPP.named("stableenrich.dev", in: "оплати stableenrich.dev, пожалуйста"))
+    #expect(MPP.named("my-api.io", in: "«my-api.io» — вызови"))
+    #expect(MPP.named("foo.com", in: "[docs](https://foo.com/a)"))
+    #expect(MPP.named("FOO.com", in: "через Foo.COM:443"))
+    #expect(MPP.named("evil.com", in: "coingecko.com@evil.com"))
+    #expect(!MPP.named("evil.com", in: "оплати notevil.com"))
+    #expect(!MPP.named("example.com", in: "оплати api.example.com"))
+    #expect(!MPP.named("example.com", in: "оплати example.com.au"))
+    #expect(!MPP.named("x.co", in: "найди твиты на x.com"))
+    #expect(!MPP.named("i.co", in: "через api.coingecko.com"))
+    #expect(!MPP.named("t.me", in: "let.me know"))
+    #expect(!MPP.named("pal.com", in: "pay through paypal.com"))
+    #expect(!MPP.named("api.io", in: "call https://my_api.io/x") && MPP.named("my_api.io", in: "call https://my_api.io/x"))
+    #expect(!MPP.named("", in: "биткоин - сколько стоит?"))
+}
+
+/// A service on `paid.stub`: /down never answers, /refused answers 500, anything else 200 `{}` — only with the proof.
+private final class PaidStub: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "paid.stub" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        if path == "/down" { return client!.urlProtocol(self, didFailWithError: URLError(.timedOut)) }
+        let status = request.value(forHTTPHeaderField: "Authorization") != "Payment x" ? 401 : path == "/refused" ? 500 : 200
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data((status == 200 ? "{}" : #"{"error":"no"}"#).utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Paid on Tempo, then no answer or a refusal: the error names the payment, the user's only proof for the service.
+@Test func aFailureAfterPayingNamesThePayment() async throws {
+    URLProtocol.registerClass(PaidStub.self)
+    defer { URLProtocol.unregisterClass(PaidStub.self) }
+    let proof = "https://explore.tempo.xyz/tx/0xabc"
+    func paid(_ path: String) async throws -> Data {
+        try await MPP.paid("GET", "https://paid.stub/\(path)", nil, credential: ("Authorization", "Payment x"),
+                           usdc: Decimal(string: "0.06")!, service: "Stub", proof: proof)
+    }
+    for path in ["down", "refused"] {
+        let error = await #expect(throws: (any Error).self) { try await paid(path) }
+        #expect(error?.localizedDescription.hasPrefix("Paid 0.06 USDC, but Stub") == true)
+        #expect(error?.localizedDescription.hasSuffix("The payment is on Tempo: \(proof)") == true)
+        #expect(error?.localizedDescription.contains("..") == false)
+    }
+    #expect(try await paid("ok") == Data("{}".utf8))
 }

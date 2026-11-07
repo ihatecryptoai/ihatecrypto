@@ -29,6 +29,8 @@ struct CallReview {
     let simulation: EVMSimulation
     /// «First time with this contract», «proxy: its owner can change the code»: on the card, above everything.
     let badges: [String]
+    /// Each simulated token's symbol and decimals as the card read them: `recordCall` books the call with these.
+    let tokens: [String: (symbol: String, decimals: Int?)]
     /// «FluidLending» or «0x1a99…6096».
     var contractName: String { trust.implementation ?? trust.name ?? "\(call.contract.prefix(6))…\(call.contract.suffix(4))" }
 }
@@ -60,7 +62,7 @@ extension Workspace {
         let trust = await ContractTrust.check(c.contract, on: net.key)
         if !trust.unknown, !trust.isContract { refuse("\(c.contract) isn't a contract on \(net.name).", "\(c.contract) — не контракт в сети \(net.name)."); return }
         // A protocol outside ihatecrypto's own list (Aave, Morpho, Uniswap, Relay…) must look like one: verified code, a
-        // month old at least, money in it as DefiLlama prices it, on no scam list. Each of these blocks.
+        // month old at least, money in it as DefiLlama prices it, no scam report at GoPlus Security. Each of these blocks.
         let listed = EVMCall.knownSpenders(chainId: net.rpc.chainId).contains(c.contract.lowercased())
         var reputation = ContractReputation()
         if !listed {
@@ -70,13 +72,13 @@ extension Workspace {
                 return
             }
             guard let days = trust.days, days >= ContractReputation.minDays else {
-                refuse("the contract is \(trust.days.map { "\($0) days" } ?? "of unknown age") old; ihatecrypto calls only contracts a month old or more.",
-                       "контракту \(trust.days.map { "\($0) дн." } ?? "неизвестно сколько дней"); ihatecrypto вызывает только контракты старше месяца.")
+                refuse("the contract is \(trust.days.map { "\($0) days" } ?? "of unknown age") old. ihatecrypto calls only contracts a month old or more.",
+                       "контракту \(trust.days.map { "\($0) дн." } ?? "неизвестно сколько дней"), а ihatecrypto вызывает только контракты старше месяца.")
                 return
             }
             agentStep = say("Checking its reputation", "Проверяю репутацию")
             reputation = await ContractReputation.check(c.contract, on: net, me: me)
-            if let why = reputation.scam { refuse("\(why).", "\(why) — это скам-адрес."); return }
+            if let why = reputation.scam { refuse("\(why.en).", "\(why.ru)."); return }
             guard let tvl = reputation.tvlUSD, tvl >= ContractReputation.minTVL else {
                 refuse("DefiLlama \(reputation.tvlUSD.map { "prices only \(Fmt.usd($0)) in it" } ?? "doesn't price it") — ihatecrypto calls only protocols with \(Fmt.usd(ContractReputation.minTVL)) or more in them.",
                        "DefiLlama \(reputation.tvlUSD.map { "оценивает в нём только \(Fmt.usd($0))" } ?? "его не оценивает") — ihatecrypto вызывает только протоколы, где лежит от \(Fmt.usd(ContractReputation.minTVL)).")
@@ -85,13 +87,23 @@ extension Workspace {
         }
         // The zero address («no referrer», «none») gives nobody anything; the network's USDC, the big stablecoins there, the
         // token approved and ihatecrypto's own protocols are known; anything else is checked.
-        let known = Set(([net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address }
-                         + [c.approve?.token].compactMap { $0 }.filter { $0.hasPrefix("0x") }).map { $0.lowercased() })
+        let vouched = Set(([net.usdc] + Stablecoins.top.compactMap { Stablecoins.find($0, on: net.key)?.address }).map { $0.lowercased() })
             .union(EVMCall.knownSpenders(chainId: net.rpc.chainId))
-        for a in c.args where a.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil && !usersOwn(a) && a.lowercased() != c.contract.lowercased()
-            && a.dropFirst(2).contains(where: { $0 != "0" }) && !known.contains(a.lowercased()) {
+        let known = vouched.union([c.approve?.token].compactMap { $0?.lowercased() })
+        func isAddress(_ a: String) -> Bool { a.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil && a.dropFirst(2).contains { $0 != "0" } && a.lowercased() != c.contract.lowercased() }
+        // GoPlus Security is asked about every address among the arguments and the token approved, the user's own typing
+        // too: a drainer's address pasted from a site is what this is for. This Mac's wallets aren't sent.
+        let own = Set(([me] + wallets.compactMap(\.evm)).map { $0.lowercased() })
+        let asked = (c.args + [c.approve?.token].compactMap { $0 }).filter { isAddress($0) && !vouched.contains($0.lowercased()) && !own.contains($0.lowercased()) }
+        let scams = await ScamList.shared.verdicts(asked, chainId: net.rpc.chainId)
+        for a in asked {
+            guard case .reported(let why) = scams[a.lowercased()] else { continue }
+            if c.args.contains(a) { refuse("the argument \(a) — \(why.en).", "аргумент \(a) — \(why.ru).") } else { refuse("the token \(a) — \(why.en).", "токен \(a) — \(why.ru).") }
+            return
+        }
+        reputation.unchecked = reputation.unchecked || scams.values.contains(.unchecked)
+        for a in c.args where isAddress(a) && !known.contains(a.lowercased()) && !usersOwn(a) {
             let t = await ContractTrust.check(a, on: net.key)
-            if let why = await ScamList.shared.names(a) { refuse("the argument \(a): \(why).", "аргумент \(a): \(why)."); return }
             guard t.isContract, t.verified else {
                 refuse("the argument \(a) is neither yours nor a verified contract — money could go there.",
                        "аргумент \(a) — не твой адрес и не проверенный контракт: туда могут уйти деньги.")
@@ -115,7 +127,12 @@ extension Workspace {
                 return
             }
             let meta = await tokenMeta(token, net)
-            approve = .init(token: token, symbol: meta.symbol, amount: a.amount, units: (a.amount * pow(10, meta.decimals)).rounded(0, .down))
+            guard let decimals = meta.decimals else {
+                refuse("\(meta.symbol) (\(token)) on \(net.name) doesn't answer decimals(), so ihatecrypto can't count an exact approve.",
+                       "\(meta.symbol) (\(token)) в \(net.name) не отвечает на decimals(), а без этого ihatecrypto не посчитает точный approve.")
+                return
+            }
+            approve = .init(token: token, symbol: meta.symbol, amount: a.amount, units: (a.amount * pow(10, decimals)).rounded(0, .down))
         }
         // What the calldata does, and what the signer would refuse anyway.
         let decoded = EVMCall.decode(data)
@@ -147,19 +164,22 @@ extension Workspace {
         if !listed {
             let outflows = sim.changes.filter { $0.value < 0 && $0.key != EVMSimulation.native }
             let priced = await ContractReputation.prices(Array(outflows.keys) + (approve.map { [$0.token] } ?? []), on: net)
-            var atRisk: Decimal = 0
+            var leaving: [(token: String, symbol: String, amount: Decimal?)] = []
             for (asset, delta) in outflows {
                 let t = await tokenMeta(asset, net)
-                guard let p = priced[asset.lowercased()] ?? (Stablecoins.dollars.contains(t.symbol.uppercased()) ? 1 : nil) else {
-                    refuse("ihatecrypto can't price the \(t.symbol) that would leave, so it can't keep the call under its cap.",
-                           "ihatecrypto не может оценить уходящий \(t.symbol), а значит не может удержать вызов в лимите.")
-                    return
-                }
-                atRisk += -delta / pow(10, t.decimals) * p
+                leaving.append((asset, t.symbol, t.decimals.map { -delta / pow(10, $0) }))
             }
-            if let a = approve {
-                let p = priced[a.token.lowercased()] ?? (Stablecoins.dollars.contains(a.symbol.uppercased()) ? 1 : 0)
-                atRisk = max(atRisk, a.amount * p)
+            var atRisk: Decimal
+            switch ContractCallGuard.atRisk(leaving: leaving, approve: approve.map { ($0.token, $0.symbol, $0.amount) }, priced: priced) {
+            case .usd(let usd): atRisk = usd
+            case .unpriced(let s):
+                refuse("ihatecrypto can't price the \(s) this call would spend or let the contract take, so it can't keep the call under its cap.",
+                       "ihatecrypto не может оценить \(s), который вызов потратит или разрешит контракту взять, а значит не может удержать вызов в лимите.")
+                return
+            case .uncounted(let s):
+                refuse("ihatecrypto can't read the decimals() of the \(s) that would leave, so it can't keep the call under its cap.",
+                       "у уходящего \(s) не читается decimals(), а значит ihatecrypto не может удержать вызов в лимите.")
+                return
             }
             let coins = Decimal(value) / 1_000_000_000_000_000_000 + max(0, -(sim.changes[EVMSimulation.native] ?? 0) / 1_000_000_000_000_000_000 - Decimal(value) / 1_000_000_000_000_000_000)
             if coins > 0 {
@@ -173,17 +193,27 @@ extension Workspace {
                 return
             }
         }
-        var changes: [String] = []
+        var changes: [String] = [], tokens: [String: (symbol: String, decimals: Int?)] = [:]
         for (asset, delta) in sim.changes.sorted(by: { $0.key < $1.key }) {
             if asset == EVMSimulation.native { changes.insert("\(net.gasCoin): \(Self.delta(delta / 1_000_000_000_000_000_000))", at: 0); continue }
             let t = await tokenMeta(asset, net)
-            changes.append("\(t.symbol): \(Self.delta(sim.nfts.contains(asset) ? delta : delta / pow(10, t.decimals)))")
+            tokens[asset] = t
+            if sim.nfts.contains(asset) { changes.append("\(t.symbol): \(Self.delta(delta))"); continue }
+            guard let decimals = t.decimals else {
+                refuse("\(t.symbol) (\(asset)) doesn't answer decimals(), so the card couldn't show how much of it moves.",
+                       "\(t.symbol) (\(asset)) не отвечает на decimals(), поэтому карточка не может показать, сколько его уходит или приходит.")
+                return
+            }
+            changes.append("\(t.symbol): \(Self.delta(delta / pow(10, decimals)))")
         }
         var warnings: [String] = []
         if !sim.changes.isEmpty, sim.changes.values.allSatisfy({ $0 < 0 }) {
             warnings.append(say("Nothing comes back to this wallet in this transaction.", "В этой транзакции на кошелёк ничего не возвращается."))
         }
-        if reputation.unchecked { warnings.append(say("The scam list didn't load this time; the other checks passed.", "Список скама в этот раз не загрузился; остальные проверки пройдены.")) }
+        if reputation.unchecked {
+            warnings.append(say("The scam check (GoPlus Security) didn't answer this time. The other checks passed.",
+                                "Проверка на скам (GoPlus Security) в этот раз не ответила. Остальные проверки пройдены."))
+        }
         var badges: [String] = []
         if reputation.firstTime { badges.append(say("First time with this contract", "Первый раз с этим контрактом")) }
         if trust.implementation != nil { badges.append(say("Proxy: its owner can change the code", "Прокси: владелец может поменять код")) }
@@ -191,7 +221,7 @@ extension Workspace {
                                                                    "Вне списка ihatecrypto · в нём \(Fmt.usd(tvl)) · лимит \(Fmt.usd(ContractCallGuard.capUSD))")) }
         let review = CallReview(command: command, call: c, net: net, data: data, value: value, approve: approve,
                                 lines: [decoded.summary(chainId: net.rpc.chainId, to: c.contract, value: value)], changes: changes.isEmpty ? [say("None of your balances change.", "Балансы не меняются.")] : changes,
-                                trust: trust, warnings: warnings, calls: calls, simulation: sim, badges: badges)
+                                trust: trust, warnings: warnings, calls: calls, simulation: sim, badges: badges, tokens: tokens)
         callReview = review
         pendingAction = .wallet(command)
         pendingText = c.text
@@ -202,10 +232,13 @@ extension Workspace {
 
     /// What the call did to the wallet's tokens, in its cost basis: the shares it got for the dollars it spent, so the
     /// portfolio shows them (and their P/L) before the explorer lists them; shares it gave back, sold.
-    func recordCall(_ r: CallReview) async {
+    func recordCall(_ r: CallReview) {
         var spent: Decimal = 0, got: [(key: String, amount: Decimal)] = []
         for (asset, delta) in r.simulation.changes where asset != EVMSimulation.native {
-            let t = await tokenMeta(asset, r.net), amount = abs(delta) / pow(10, t.decimals), key = "\(r.net.key):\(asset.lowercased())"
+            // The decimals the card read, not a read after the send that a node's hiccup could miss. None (an NFT): no
+            // amount, the explorer shows the holding itself.
+            guard let t = r.tokens[asset], let decimals = t.decimals else { continue }
+            let amount = abs(delta) / pow(10, decimals), key = "\(r.net.key):\(asset.lowercased())"
             if delta < 0 {
                 if Stablecoins.dollars.contains(t.symbol.uppercased()) { spent += amount } else { costBasis[key]?.sold(amount) }
             } else if !Stablecoins.dollars.contains(t.symbol.uppercased()) {
@@ -226,7 +259,8 @@ extension Workspace {
                   !have.contains(where: { $0.chain == net.key && $0.contract.lowercased() == parts[1] }),
                   let raw = try? await net.rpc.read(parts[1], ERC20.balanceOf(owner)), let units = ABI.decimal(in: raw, word: 0), units > 0 else { continue }
             let t = await tokenMeta(parts[1], net)
-            out.append(Holding(chain: net.key, contract: parts[1], amount: units / pow(10, t.decimals), symbol: t.symbol))
+            guard let decimals = t.decimals else { continue }
+            out.append(Holding(chain: net.key, contract: parts[1], amount: units / pow(10, decimals), symbol: t.symbol))
         }
         var priced: [Holding] = []
         for chain in Set(out.map(\.chain)) { priced += await Holdings.llamaPriced(chain, out.filter { $0.chain == chain }) }
@@ -246,7 +280,7 @@ extension Workspace {
         let done = try await e.contractCall(r.net, to: r.call.contract, data: r.data, value: r.value, approve: r.approve.map { ($0.token, $0.units) },
                                             approveNote: "Approve exactly \(Fmt.num(r.approve?.amount ?? 0, maxFraction: 6)) \(r.approve?.symbol ?? "") to \(r.contractName)",
                                             note: "\(r.call.name) on \(r.contractName) on \(r.net.name)")
-        await recordCall(r)
+        recordCall(r)
         return done
     }
 
@@ -269,16 +303,16 @@ extension Workspace {
 
     /// The node that runs eth_simulateV1 for a network: Arbitrum's own crashes on it (Browser.evmSimulationRPC).
     static func simulator(_ net: EVMNetwork) -> EVMRPC {
-        Browser.evmSimulationRPC[net.rpc.chainId].flatMap(URL.init(string:)).map { EVMRPC(url: $0, chainId: net.rpc.chainId) } ?? net.rpc
+        Browser.evmSimulationRPC[net.rpc.chainId] ?? net.rpc
     }
 
     nonisolated static func delta(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }
 
-    /// A token's symbol and decimals, read from it.
-    func tokenMeta(_ token: String, _ net: EVMNetwork) async -> (symbol: String, decimals: Int) {
+    /// A token's symbol and decimals, read from it. No decimals when decimals() didn't answer, never 18: an approve counted
+    /// in 18 decimals for a 6-decimal token is a trillion times the amount, and the cap would see a trillionth of what leaves.
+    func tokenMeta(_ token: String, _ net: EVMNetwork) async -> (symbol: String, decimals: Int?) {
         let symbol = (try? await net.rpc.read(token, Data([0x95, 0xd8, 0x9b, 0x41]))).flatMap(ABI.string) ?? "\(token.prefix(6))…"
-        let decimals = (try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))).flatMap { ABI.uint(in: $0, word: 0) } ?? 18
-        return (symbol, Int(decimals))
+        return (symbol, ABI.decimals(try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))))
     }
 }
 

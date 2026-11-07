@@ -343,7 +343,7 @@ extension Executor {
         let spendable = nativeIn ? (have > 10_000_000 ? have - 10_000_000 : 0) : have
         let units = requested.map { NSDecimalNumber(decimal: ($0 * scale).rounded(0, .down)).uint64Value } ?? spendable
         guard units > 0, units <= spendable else {
-            throw ExecutionError("You have \(Fmt.num(Decimal(spendable) / scale, maxFraction: 6)) \(from.symbol)\(nativeIn ? " (0.01 SOL is kept for fees)" : ""); need \(Fmt.num(Decimal(units) / scale, maxFraction: 6)).")
+            throw ExecutionError("You have \(Fmt.num(Decimal(spendable) / scale, maxFraction: 6)) \(from.symbol)\(nativeIn ? " (0.01 SOL is kept for fees)" : ""), and the swap needs \(Fmt.num(Decimal(units) / scale, maxFraction: 6)).")
         }
         let inAccount = try SPL.associatedAccount(owner: wallet.solana, mint: from.mint, program: from.token2022 ? SPL.token2022Program : SPL.tokenProgram)
         let outAccount = try SPL.associatedAccount(owner: wallet.solana, mint: to.mint, program: to.token2022 ? SPL.token2022Program : SPL.tokenProgram)
@@ -354,29 +354,66 @@ extension Executor {
         func holdsShown(_ out: UInt64, feeBps: Decimal = 0) throws {
             guard let shown, Decimal(out) < Decimal(shown) * (1 - (100 + feeBps) / 10_000) else { return }
             throw ExecutionError("Jupiter now gives \(Fmt.num(Decimal(out) / outScale, maxFraction: 8)) \(to.symbol), more than 1% under the "
-                                 + "\(Fmt.num(Decimal(shown) / outScale, maxFraction: 8)) the card showed. Nothing was signed; Refresh shows the new price.")
+                                 + "\(Fmt.num(Decimal(shown) / outScale, maxFraction: 8)) the card showed. Nothing was signed. Refresh shows the new price.")
         }
-        // Under the fee floor (USDC came without SOL) Jupiter's own wallet may pay the fee: its gasless swap, checked the same.
-        // Jupiter decides: a wallet that can still pay (a few thousandths of SOL) gets the ordinary swap below. JupiterZ's
-        // market makers are left out: their program isn't on the guard's list.
-        let gasless: (order: Jupiter.Order, sponsor: String)? = if !nativeIn, lamports < TopUpOrder.solanaFeeFloor,
-            let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana, excludeRouters: ["jupiterz"]),
-            order.gasless, let payer = try? SolanaMessage.parse(transaction: order.wire).staticKeys.first, payer != wallet.solana { (order, payer) } else { nil }
-        // Not even the rent of an account the swap opens (the temporary wSOL one, or the coin's own: ≈ 0.00204 SOL) and Jupiter
-        // won't pay: said before a simulation fails on it.
-        if gasless == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000 {
-            throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and Jupiter pays the fee only for a bigger one ($5 and up). Swap more, or add ≈ 0.01 SOL first.")
+        // The swap moves the price past impactCap: asked, not signed. What goes in, in USD: the USDC itself, else what comes
+        // out (Jupiter's own price for it) before the impact.
+        func holdsImpact(_ impact: Decimal, usd: Decimal, out: UInt64) throws {
+            let worth = to == .usdc ? Decimal(out) / 1_000_000 : usd
+            let paid = from == .usdc ? Decimal(units) / 1_000_000 : impact < 1 ? worth / (1 - impact) : 0
+            try Self.checkImpact(impact, paid: paid, amount: Decimal(units) / scale, symbol: from.symbol, venue: "Jupiter")
         }
-        if let (order, sponsor) = gasless {
+        // Jupiter's /order, where someone else pays the fee and signs first, our wallet second: JupiterZ's market makers when
+        // their price beats the pools' (/quote) — big swaps mostly (2M WIF: $362k against $321k, 2026-10-28; on small ones
+        // its fee makes it the worse) — and, under the fee floor (USDC came without SOL), Jupiter's own gasless swap, which
+        // Jupiter grants a wallet that can't pay from $5 (a few thousandths of SOL still gets the ordinary swap below).
+        let lowSOL = !nativeIn && lamports < TopUpOrder.solanaFeeFloor
+        // Jupiter's other routers left out, so its market makers answer a small size: the Dev copy's JupiterZ run, and SOL
+        // for fees bought under Jupiter's $5, which only a maker pays the fee for (from $0.30 at 0.02%, measured 2026-11-05).
+        let makersOnly = Self.jupiterZFirst || buyingGas && units < 5_000_000
+        let order = try? await Jupiter.order(input: from.mint, output: to.mint, amount: units, taker: wallet.solana,
+                                             excludeRouters: makersOnly ? ["metis", "iris", "dflow", "okx"] : [])
+        let payer = order.flatMap { $0.gasless ? try? SolanaMessage.parse(transaction: $0.wire).staticKeys.first : nil }.flatMap { $0 == wallet.solana ? nil : $0 }
+        var sponsored: (order: Jupiter.Order, sponsor: String)? = nil
+        if let order, let payer, Self.sponsorable(router: order.router, wire: order.wire, from: from.mint, to: to.mint) {
+            if lowSOL { sponsored = (order, payer) }
+            else if order.router == "jupiterz",
+                    let pools = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units), order.outAmount > pools.outAmount || Self.jupiterZFirst {
+                sponsored = (order, payer)
+            }
+        }
+        // Not even the rent of an account the swap opens (the temporary wSOL one, or the coin's own: a 165-byte token account,
+        // its minimum read from the network) and a fee, and Jupiter won't pay: said before a simulation fails on it.
+        if sponsored == nil, !nativeIn, nativeOut || outBefore == 0, lamports < 2_100_000,
+           lamports < (try? await rpc.rentMinimum(bytes: 165)).map({ $0 + 60_000 }) ?? 2_100_000 {
+            throw ExecutionError("There's \(Fmt.num(Decimal(lamports) / 1_000_000_000, maxFraction: 6)) SOL for the network fee, too little for this swap, and neither a market maker nor Jupiter (from $5) took its fee. Swap more, or add ≈ 0.01 SOL first.")
+        }
+        if let (order, sponsor) = sponsored {
+            let maker = order.router == "jupiterz"
             try holdsShown(order.outAmount, feeBps: Decimal(order.feeBps))
-            report("\(from.symbol) → \(to.symbol) via Jupiter, its wallet paying the fee: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route).")
-            var rules: [(String, String, Bool, Int64)] = [(inAccount, from.symbol, true, -Int64(units))]
+            try holdsImpact(order.impact, usd: order.usd, out: order.outAmount)
+            report("\(from.symbol) → \(to.symbol) via \(maker ? "JupiterZ, a market maker filling it and paying the fee" : "Jupiter, its wallet paying the fee"): \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(order.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(order.minOut) / outScale, maxFraction: 8)) (\(Fmt.num(Decimal(order.feeBps) / 100, maxFraction: 2))% fee). Route: \(order.route.isEmpty ? order.router : order.route).")
+            var rules: [(String, String, Bool, Int64)] = nativeIn ? [] : [(inAccount, from.symbol, true, -Int64(units))]
             if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(order.minOut))) }
-            // Not a lamport of ours pays: SOL bought arrives whole, at least the minimum.
-            changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
-                                            note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by Jupiter", lamportsAtLeast: nativeOut ? Int64(order.minOut) : 0,
-                                            dryRun: dryRun, sponsor: (sponsor, order.requestId))
-        } else {
+            // Not a lamport of ours pays: SOL in leaves exactly, SOL bought arrives whole, at least the minimum. A maker leaves
+            // the rent of the coin's new account to the wallet (≈ 0.00156 SOL for an Ondo stock's Token-2022 one, 2026-10-29):
+            // only when that account doesn't exist yet, and the guard lets no SOL of the wallet's go to the maker.
+            let outNew = maker && !nativeOut ? try await rpc.balance(outAccount) == 0 : false
+            let rent: Int64 = outNew ? 2_100_000 : 0
+            do {
+                changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
+                                                note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by \(maker ? "JupiterZ's market maker" : "Jupiter")",
+                                                lamportsAtLeast: nativeIn ? -Int64(units) - rent : nativeOut ? Int64(order.minOut) : -rent,
+                                                dryRun: dryRun, sponsor: (sponsor, order.requestId))
+            } catch where maker && !lowSOL && ((error as? GuardStop)?.message.hasPrefix("The guard stopped") == true
+                                                 || (error as? ExecutionError)?.message.hasPrefix("The simulation failed") == true) {
+                // Refused by the app's own checks before the signer was asked (the guard, or a simulation off the quote): the
+                // pools' route below instead. A «no» at the signer's prompt stops here, never asks again for another route.
+                report("JupiterZ's fill didn't pass the checks, nothing was sent: \(error.localizedDescription) Taking the pools' route.")
+                sponsored = nil
+            }
+        }
+        if sponsored == nil {
             // Jupiter's route can fail before anything is signed: its transaction is over Solana's 1232 bytes (HumidiFi → Hadron
             // into a Token-2022 coin), or the simulation ends under its own minimum — 6001, SlippageToleranceExceeded, when a
             // pool quoted more than it gives (Flux → Hadron, TesseraV → Hadron). Up to three routes, each without the failed ones' pools.
@@ -386,6 +423,7 @@ extension Executor {
                 do { quote = try await Jupiter.quote(input: from.mint, output: to.mint, amount: units, excludeDexes: excluded) }
                 catch { throw firstFailure ?? error }
                 try holdsShown(quote.outAmount)
+                try holdsImpact(quote.impact, usd: quote.usd, out: quote.outAmount)
                 report("\(from.symbol) → \(to.symbol) via Jupiter: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(quote.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(quote.minOut) / outScale, maxFraction: 8)). Route: \(quote.route).")
                 let tx = try await Jupiter.swapTransaction(quote, user: wallet.solana)
                 var rules: [(String, String, Bool, Int64)] = []
@@ -411,57 +449,92 @@ extension Executor {
                 guard attempt < 3 else { throw failure }
                 firstFailure = firstFailure ?? failure
                 excluded += quote.dexes.filter { !excluded.contains($0) }
-                report("Route \(quote.route) \(why); nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
+                report("Route \(quote.route) \(why), so nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
             }
         }
         if dryRun { return "Simulation (nothing signed): " + changes.joined(separator: "; ") }
+        if Self.swapTailTest { throw WalletError("Solana RPC getTokenAccountsByOwner: HTTP 429 (swapTailTest)") }
         let outAfter = nativeOut ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: to.mint)
         var line = "Swapped \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) \(from.symbol) → \(to.symbol) +\(Fmt.num(Decimal(Int64(outAfter) - Int64(outBefore)) / outScale, maxFraction: 8))\(nativeOut ? " (net of fees)" : "")."
         swapped?(from, to, Decimal(units) / scale, Decimal(Int64(outAfter) - Int64(outBefore)) / outScale)
-        // Out of a token entirely: its empty account still holds ~0.002 SOL of rent; closing returns it. A Token-2022
-        // account would need that program, which the guard doesn't allow: its rent stays.
-        if !nativeIn, !from.token2022, try await rpc.tokenBalance(owner: wallet.solana, mint: from.mint) == 0 {
-            let close = SolanaInstruction(program: SPL.tokenProgram, accounts: [
+        // Out of a token entirely: its empty account still holds ~0.002 SOL of rent (≈ 0.00156 an Ondo stock's Token-2022
+        // one); closing returns it, under the token's own program. The swap went through either way: a failed close says so.
+        if !nativeIn, try await rpc.tokenBalance(owner: wallet.solana, mint: from.mint) == 0 {
+            let close = SolanaInstruction(program: from.token2022 ? SPL.token2022Program : SPL.tokenProgram, accounts: [
                 .init(pubkey: inAccount, isSigner: false, isWritable: true), .init(pubkey: wallet.solana, isSigner: false, isWritable: true),
                 .init(pubkey: wallet.solana, isSigner: true, isWritable: false),
             ], data: Data([9])) // CloseAccount
-            let (hash, lastValid) = try await rpc.latestBlockhash()
-            let before = try await rpc.balance(wallet.solana)
-            try await signAndSend(SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([close], payer: wallet.solana, blockhash: hash)),
-                                  lastValid: lastValid, owners: [inAccount: wallet.solana], rules: [], note: "close empty \(from.symbol) account",
-                                  lamportsAtLeast: 1_000_000)
-            line += " Empty \(from.symbol) account closed: +\(Fmt.num(Decimal(Int64(try await rpc.balance(wallet.solana)) - Int64(before)) / 1_000_000_000, maxFraction: 6)) SOL of rent returned."
+            do {
+                let (hash, lastValid) = try await rpc.latestBlockhash()
+                let before = try await rpc.balance(wallet.solana)
+                try await signAndSend(SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([close], payer: wallet.solana, blockhash: hash)),
+                                      lastValid: lastValid, owners: [inAccount: wallet.solana], rules: [], note: "close empty \(from.symbol) account",
+                                      lamportsAtLeast: 1_000_000)
+                line += " Empty \(from.symbol) account closed: +\(Fmt.num(Decimal(Int64(try await rpc.balance(wallet.solana)) - Int64(before)) / 1_000_000_000, maxFraction: 6)) SOL of rent returned."
+            } catch {
+                line += " Its empty \(from.symbol) account stays open, with its rent (closing it failed: \(error.localizedDescription))."
+            }
         }
         report(line)
         return line
     }
 
+    /// A JupiterZ order's one fill swaps exactly these mints: its input mint (account 6) and output mint (account 8), read
+    /// from the transaction's own keys. What the guard can't know — what the user asked to swap — the app checks.
+    /// A mint a lookup table names (USDC in the fills for Ondo's stocks, 2026-10-29) is proven by the taker's own account
+    /// for it instead (input 2, output 4): a token account's address derives from its mint.
+    /// Whether a gasless order may be taken: a JupiterZ fill only when it swaps exactly what was asked — on the low-SOL path
+    /// too, since the guard takes the wallet's account for any mint and the simulation watches only the asked two (the
+    /// 2026-10-29 review). Jupiter's own routes are read by the guard.
+    static func sponsorable(router: String, wire: Data, from: String, to: String) -> Bool {
+        router != "jupiterz" || fillSwaps(wire, from: from, to: to)
+    }
+
+    static func fillSwaps(_ wire: Data, from: String, to: String) -> Bool {
+        guard let m = try? SolanaMessage.parse(transaction: wire) else { return false }
+        let fills = m.instructions.filter { $0.programIndex < m.staticKeys.count && m.staticKeys[$0.programIndex] == SolanaGuard.jupiterZ }
+        guard fills.count == 1, let ix = fills.first, ix.accounts.count > 8 else { return false }
+        func key(_ i: Int) -> String? { ix.accounts[i] < m.staticKeys.count ? m.staticKeys[ix.accounts[i]] : nil }
+        func swaps(mint at: Int, account: Int, _ mint: String) -> Bool {
+            if let named = key(at) { return named == mint }
+            guard let taker = key(0), let own = key(account) else { return false }
+            return [SPL.tokenProgram, SPL.token2022Program].contains { (try? SPL.associatedAccount(owner: taker, mint: mint, program: $0)) == own }
+        }
+        return swaps(mint: 6, account: 2, from) && swaps(mint: 8, account: 4, to)
+    }
+
     /// Guard and simulation here, the signer's own guard, then send and wait. `rules`: (account, label, token?, least change).
     /// Returns the simulated change per watched balance; `dryRun` stops before signing. `sponsor`: Jupiter's wallet pays the
-    /// fee and signs first, and the transaction goes back through Jupiter's /execute with its order id.
+    /// fee and signs first, and the transaction goes back through Jupiter's /execute with its order id. `atMost`: the most a
+    /// watched account (the wallet itself for its SOL) may grow by, for a move that brings money in.
     @discardableResult
-    private func signAndSend(_ unsigned: Data, lastValid: UInt64, owners: [String: String], rules: [(String, String, Bool, Int64)], note: String,
-                             lamportsAtLeast: Int64 = -5_000_000, dryRun: Bool = false, sponsor: (key: String, requestId: String)? = nil) async throws -> [String] {
+    func signAndSend(_ unsigned: Data, lastValid: UInt64, owners: [String: String], rules: [(String, String, Bool, Int64)], note: String,
+                             lamportsAtLeast: Int64 = -5_000_000, atMost: [String: Int64] = [:], dryRun: Bool = false,
+                             sponsor: (key: String, requestId: String)? = nil) async throws -> [String] {
         let message = try SolanaMessage.parse(transaction: unsigned)
         let accounts = try await rpc.resolveAccounts(message)
         var verdict = SolanaGuard.check(message, accounts: accounts, policy: SolanaPolicy(owner: wallet.solana, sponsor: sponsor?.key), tokenOwners: owners)
         // A program or an account the guard refuses stops it before the simulation: that answer needs no balances.
         guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         let watch = rules.map(\.0) + [wallet.solana]
-        var before: [String: Int64] = [:]
-        for (account, _, token, _) in rules {
-            if token {
-                let r = try? await rpc.call("getTokenAccountBalance", [account, ["commitment": "confirmed"]]) as? [String: Any]
-                before[account] = ((r?["value"] as? [String: Any])?["amount"] as? String).flatMap(Int64.init) ?? 0
-            }
+        // Every balance before in one read. A node that fails stops the move: a made-up 0 would pass a route that takes
+        // more than approved or pays its output to someone else. An account that isn't there yet holds 0 (the node's null).
+        let now: [String: (lamports: UInt64, token: UInt64?)]
+        do { now = try await rpc.accounts(watch) } catch {
+            throw ExecutionError("Couldn't read the balances before \(note), so nothing was signed: \(error.localizedDescription)")
         }
-        before[wallet.solana] = Int64(try await rpc.balance(wallet.solana))
+        let before: [String: Int64]
+        do { before = try SolanaRPC.before(rules.map { ($0.0, $0.1, $0.2) } + [(wallet.solana, "lamports", false)], now) } catch {
+            throw GuardStop("The guard stopped \(note): \(error.localizedDescription)")
+        }
         let simulation = try await rpc.simulate(unsigned, watch: watch, sigVerify: false)
         // A failed simulation says nothing about balances: stop here rather than quote made-up changes.
         if let error = simulation.error { throw ExecutionError("The simulation failed, so nothing was signed: \(error)") }
         verdict.merge(SolanaGuard.balances(rules.map { account, label, token, least in
-            .init(label: label, before: before[account] ?? 0, after: Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0), atLeast: least)
-        } + [.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: lamportsAtLeast)]))
+            .init(label: label, before: before[account] ?? 0, after: Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0), atLeast: least,
+                  atMost: atMost[account])
+        } + [.init(label: "lamports", before: before[wallet.solana] ?? 0, after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: lamportsAtLeast,
+                   atMost: atMost[wallet.solana])]))
         guard verdict.ok else { throw GuardStop("The guard stopped \(note): " + verdict.problems.joined(separator: " ")) }
         var changes = rules.map { account, label, token, _ in
             let after = Int64(token ? simulation.after[account]?.token ?? 0 : simulation.after[account]?.lamports ?? 0)
@@ -478,13 +551,14 @@ extension Executor {
             }
             let ours = Base58.encode(signed.subdata(in: 65..<129))
             try journal.append(.init(chain: "solana", id: ours, kind: .signed, note: "\(note); Jupiter order \(sponsor.requestId), valid until block \(lastValid)"))
-            do {
-                let landed = try await Jupiter.execute(signed, requestId: sponsor.requestId)
-                try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(landed)"))
-            } catch {
-                try journal.append(.init(chain: "solana", id: ours, kind: .failed, note: "\(error.localizedDescription)"))
-                throw ExecutionError("Jupiter didn't send the swap: \(error.localizedDescription)")
+            let landed: String
+            do { landed = try await Jupiter.execute(signed, requestId: sponsor.requestId) } catch {
+                // No answer, or Jupiter's «Failed», isn't the chain's: an ask before it (RPCRetry asks again after a timeout)
+                // may have sent it. Only the chain says: the transaction with our signature, or its blockhash past use without it.
+                try await settleSponsored(ours, blockhash: message.blockhash, after: simulation.slot, jupiter: error)
+                return changes
             }
+            try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(landed)"))
             return changes
         }
         let signed = try await signer.signSolana(unsigned, accounts: accounts, recipients: [], tokenOwners: owners)
@@ -503,6 +577,32 @@ extension Executor {
             throw ExecutionError("The transaction didn't make it into a block; you can retry.")
         }
         return changes
+    }
+
+    /// A swap with no gas of ours that Jupiter's /execute didn't confirm (`jupiter`: its error, a timeout after its retries):
+    /// journaled as the chain has it (SolanaRPC.waitForCosigned). Found: confirmed, the swap goes on. Failed there, or past
+    /// use without landing: said, so it may be tried again. The chain silent: it stays «signed», so the chat says «sent,
+    /// status unknown» with no «Try again». None of these errors starts as the guard's or the simulation's, after which the
+    /// swap takes the pools' route: a fill that went out would be swapped twice.
+    func settleSponsored(_ ours: String, blockhash: String, after slot: UInt64, jupiter: any Error, timeout: TimeInterval = 120) async throws {
+        let said = jupiter.localizedDescription
+        report("Jupiter didn't confirm the swap (\(said)). Looking for it on chain before saying how it went, up to \(Int(timeout)) s.")
+        let found: (outcome: SolanaRPC.Outcome, transaction: String?)
+        do { found = try await rpc.waitForCosigned(ours, signer: wallet.solana, blockhash: blockhash, after: slot, timeout: timeout) } catch {
+            throw ExecutionError("Jupiter didn't say whether it sent the swap (\(said)), and the chain doesn't show it yet. "
+                                 + "Check https://solscan.io/account/\(wallet.solana) before swapping again.")
+        }
+        switch found.outcome {
+        case .confirmed:
+            try journal.append(.init(chain: "solana", id: ours, kind: .confirmed, note: "transaction \(found.transaction ?? ours)"))
+            report("Found on chain: transaction \(found.transaction ?? ours) went through.")
+        case .failed(let e):
+            try journal.append(.init(chain: "solana", id: ours, kind: .failed, note: e))
+            throw ExecutionError("The swap reached the chain and failed: \(e).")
+        case .expired:
+            try journal.append(.init(chain: "solana", id: ours, kind: .expired, note: said))
+            throw ExecutionError("Jupiter didn't send the swap (\(said)), and now it can't land: nothing moved, you can retry.")
+        }
     }
 
     /// Where «buy NEAR» takes its USDC — the one rule the card shows and the executor signs: Solana when it holds the
@@ -635,7 +735,7 @@ extension Executor {
         guard binding.ok else { throw GuardStop("The guard stopped the deposit: " + binding.problems.joined(separator: " ")) }
         report("NEAR Intents: \(Fmt.num(near, maxFraction: 6)) NEAR → ≈ \(Fmt.num(Decimal(string: quote.amountOutFormatted) ?? 0)) USDC to \(place).")
         let signed = try await signer.signNearIntentDeposit(amount: yocto, depositAddress: deposit, nonce: context.nonce, blockHash: context.blockHash)
-        try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "NEAR→USDC \(Fmt.num(near, maxFraction: 6)) to \(recipient)\(net.map { " on \($0.name)" } ?? "")"))
+        try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "NEAR→USDC \(Fmt.num(near, maxFraction: 6)) to \(recipient) on \(net?.name ?? "Solana")"))
         let hash = try await Near.send(signed)
         try journal.append(.init(chain: "near", id: hash, kind: .confirmed, note: "wNEAR to 1Click \(deposit)"))
         try? await OneClick.submitDeposit(txHash: hash, depositAddress: deposit)
@@ -729,7 +829,7 @@ extension Executor {
         // Aave and Morpho on the EVM networks, USDC only: rates and balances from the pools and vaults themselves.
         let evm = isSOL ? [] : await evmPlaces()
         let total = free + jupiter + kamino + jito + evm.reduce(0) { $0 + $1.supplied }
-        let kaminoRentUSD = Decimal(string: "0.0298")! * solPrice
+        let kaminoRentUSD = await Self.kaminoFirstRent(rpc) * solPrice
         // A vault switched off in Settings › Modules is skipped, with the reason in the notes; so is one they asked to leave out.
         let modules = Modules.current
         func leftOut(_ place: String) -> String? { without.contains { place.lowercased().contains($0) } ? "left out, as asked" : nil }
@@ -868,6 +968,14 @@ extension Executor {
         spreadMoves(slices: slices, idle: idle, onSolana: onSolana).moves.filter { $0.to == "solana" }.map { ($0.from, $0.usdc) }
     }
 
+    /// SOL of rent Kamino's first deposit opens its accounts with: 0.0298 measured 2026-09-27, when an empty account's
+    /// minimum was 650,240 lamports, scaled to today's (rent keeps falling, SIMD-0437). That measure when the node is silent.
+    static func kaminoFirstRent(_ rpc: SolanaRPC) async -> Decimal {
+        let measured = Decimal(string: "0.0298")!
+        guard let now = try? await rpc.rentMinimum() else { return measured }
+        return measured * Decimal(now) / 650_240
+    }
+
     /// SOL spent according to a simulation's change lines (the «SOL: −0.0298» line), as a positive number.
     static func solSpent(_ changes: [String]) -> Decimal {
         guard let line = changes.first(where: { $0.hasPrefix("SOL: ") }) else { return 0 }
@@ -875,6 +983,10 @@ extension Executor {
             .replacingOccurrences(of: "−", with: "-")
         return max(0, -(Decimal(string: number) ?? 0))
     }
+
+    /// The first Kamino deposit's rent and fee from its simulation's change lines: what SOL left beyond `deposited`, the
+    /// SOL that went in itself. A first SOL deposit was read as all rent, and every one was asked about as a loss.
+    static func kaminoRentSpent(_ changes: [String], deposited: Decimal) -> Decimal { max(0, solSpent(changes) - deposited) }
 
     /// What «withdraw all» asks Kamino for, in tokens: the position's dollars at the token's price, 1% over. In dollars it
     /// asked 202 «SOL» for 1.3 SOL, and the guard refused every time.
@@ -890,63 +1002,130 @@ extension Executor {
         return CostlyMove(lost: rent, paid: depositUSD, what: "Kamino", words: "The first Kamino deposit creates your accounts: rent ≈ \(Fmt.num(sol, maxFraction: 4)) SOL (≈ \(Fmt.usd(rent))) on a \(Fmt.usd(depositUSD)) deposit — over 10% of the amount. Jupiter Lend has no rent; Kamino makes sense from ≈ \(Fmt.usd((rent * 10).rounded(0, .up))). Nothing was signed.")
     }
 
-    /// Kamino Lend, main market. `symbol`: USDC, SOL, USDT… `amount` in tokens; withdraw with nil takes the whole
-    /// position (its dollars at the token's price). `dryRun` only simulates: the first deposit's rent shows up here.
-    /// `acceptRent`: the plan showed the first deposit's rent (a rebalance, the CLI's flag), so the 10% rule does not ask.
+    /// Kamino Lend: the main market, and the Backpack market for Backpack's stocks (Kamino.market(for:)) — there a
+    /// deposit is collateral to borrow USDC against. `symbol`: USDC, SOL, USDT, SPCX… `amount` in tokens; withdraw with
+    /// nil takes the whole position (its dollars at the token's price). `dryRun` only simulates: the first deposit's rent
+    /// shows up here. `acceptRent`: the plan showed the first deposit's rent (a rebalance, the CLI's flag), so the 10%
+    /// rule does not ask.
     public func kamino(_ symbol: String, amount requested: Decimal?, deposit: Bool, dryRun: Bool = false, acceptRent: Bool = false) async throws -> String {
-        guard let reserve = try await Kamino.reserves().first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else {
+        let market = Kamino.market(for: symbol), stock = market == Kamino.backpackMarket
+        guard let reserve = try await Kamino.reserves(market: market).first(where: { $0.symbol.uppercased() == symbol.uppercased() }) else {
             throw ExecutionError("Kamino has no \(symbol) market.")
         }
         let native = reserve.mint == "So11111111111111111111111111111111111111112"
         let supply = try await rpc.call("getTokenSupply", [reserve.mint]) as? [String: Any]
         let decimals = ((supply?["value"] as? [String: Any])?["decimals"] as? NSNumber)?.intValue ?? 6
         let scale = Decimal(sign: .plus, exponent: decimals, significand: 1)
-        let position = try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }
+        // On the Backpack market a position is collateral, and a loan may stand on it; on the main market one may too (USDC
+        // borrowed against SOL), so a withdrawal reads it.
+        let loan = stock || !deposit ? try await Kamino.loan(wallet: wallet.solana, market: market) : nil
+        let positionUSD = stock
+            ? loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD
+            : try await Kamino.positions(wallet: wallet.solana).first { $0.reserve == reserve.address }?.valueUSD
+        // The 1.5 line here reads Kamino's API, which lags a borrow by 10–30 s: right after one, its debt may read as none.
+        // A vault (Earn) withdrawal below carries no loan.
+        if !deposit, positionUSD != nil, kaminoBorrowedJustNow(on: market) {
+            throw ExecutionError("A Kamino loan was taken on this market less than a minute ago, and Kamino's numbers lag it: "
+                                 + "say the withdrawal again in a minute, when how much can come out is sure. Nothing was signed.")
+        }
+        if !deposit, let loan, loan.debtUSD > 0, loan.collateral.contains(where: { $0.reserve == reserve.address }) {
+            // Kamino lets collateral out only while what's left still carries the debt at its borrow limit and at a health factor of 1.5.
+            let risk = try await Kamino.risk(reserve: reserve.address)
+            let free = Self.kaminoFreeCollateral(loan, maxLTV: risk.maxLTV, liquidationLTV: risk.liquidationLTV, priceUSD: reserve.priceUSD)
+            if requested.map({ $0 > free }) ?? true {
+                throw ExecutionError("A loan of \(Fmt.usd(loan.debtUSD)) stands on this \(symbol) on Kamino: "
+                                     + (free > 0 ? "up to \(Fmt.num(free, maxFraction: 6)) \(symbol) can come out now. " : "")
+                                     + "Pay it back first — «repay all USDC on kamino\(stock ? "" : " against SOL")» — and the rest comes out. Nothing was signed.")
+            }
+        }
         // A deposit made on kamino.com sits in a Kamino Vault (Earn), not in Lend.
         // ponytail: Lend first when both hold the token; «all» then leaves the vault, say it again for that.
-        if !deposit, position == nil,
+        if !deposit, !stock, positionUSD == nil,
            let v = try await Kamino.vaultPositions(wallet: wallet.solana).first(where: { $0.mint == reserve.mint && $0.shares > 0 }) {
             return try await kaminoVault(v, amount: requested, decimals: decimals, dryRun: dryRun)
         }
         // Everything: ask for 1% over the value — Kamino caps a withdrawal at what is there (checked live), so no dust stays.
         let all = !deposit && requested == nil
-        if all, position != nil, reserve.priceUSD <= 0 { throw ExecutionError("Kamino gave no \(symbol) price just now; say how much to withdraw.") }
-        guard let amount = requested ?? (deposit ? nil : position.map { Self.kaminoAll(valueUSD: $0.valueUSD, priceUSD: reserve.priceUSD) }), amount > 0 else {
+        if all, positionUSD != nil, reserve.priceUSD <= 0 { throw ExecutionError("Kamino gave no \(symbol) price just now; say how much to withdraw.") }
+        guard let amount = requested ?? (deposit ? nil : positionUSD.map { Self.kaminoAll(valueUSD: $0, priceUSD: reserve.priceUSD) }), amount > 0 else {
             throw ExecutionError(deposit ? "How much should go into Kamino?" : "No \(symbol) position in Kamino.")
         }
         let units = NSDecimalNumber(decimal: (amount * scale).rounded(0, .down)).uint64Value
         /// What should come out: the position's value when taking everything, else what was asked.
         let expected = Int64(all ? units * 100 / 101 : units)
-        let myToken = try SPL.associatedAccount(owner: wallet.solana, mint: reserve.mint)
+        // Backpack's stocks are Token-2022 tokens: their account derives from that program.
+        let myToken = try SPL.associatedAccount(owner: wallet.solana, mint: reserve.mint, program: try await tokenProgram(reserve.mint))
+        // SOL put in leaves the wallet the fees of what comes after — a repay, a withdrawal — and the first deposit's rent
+        // (the first move needs gas): `kept` SOL stays in the wallet.
+        let kept = Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+        func shortOfSOL(_ have: UInt64, rent: Decimal) -> ExecutionError {
+            ExecutionError("Putting \(Fmt.num(amount, maxFraction: 6)) SOL into Kamino would leave the wallet under \(Fmt.num(kept, maxFraction: 3)) SOL, too little for the fees "
+                           + "of a repay or a withdrawal later" + (rent > 0 ? " (this first deposit also pays ≈ \(Fmt.num(rent, maxFraction: 4)) SOL of rent for Kamino's accounts)" : "")
+                           + ": up to \(Fmt.num(max(0, Decimal(have) / scale - rent - kept).rounded(4, .down), maxFraction: 4)) SOL can go in now. Nothing was signed.")
+        }
+        let have = deposit ? (native ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)) : 0
         if deposit {
-            let have = native ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)
             guard have >= units else { throw ExecutionError("You have \(Fmt.num(Decimal(have) / scale, maxFraction: 6)) \(symbol); need \(Fmt.num(amount, maxFraction: 6)).") }
         }
         let wire = deposit
-            ? try await Kamino.depositTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount)
-            : try await Kamino.withdrawTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount)
+            ? try await Kamino.depositTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount, market: market)
+            : try await Kamino.withdrawTransaction(wallet: wallet.solana, reserve: reserve.address, amount: amount, market: market)
         let lastValid = try await rpc.latestBlockhash().lastValidBlockHeight
-        // The first deposit pays rent for the user's Kamino accounts and lookup table; later ones only the fee.
-        let firstTime = position == nil && deposit
+        // The first deposit pays rent for the user's Kamino accounts and lookup table; later ones only the fee. On the
+        // Backpack market the position is one for all its stocks.
+        let firstTime = (stock ? loan == nil : positionUSD == nil) && deposit
         var rules: [(String, String, Bool, Int64)] = []
         if !native { rules.append((myToken, symbol, true, deposit ? -Int64(units) : expected * 99 / 100)) }
         let lamports: Int64 = native ? (deposit ? -Int64(units) - (firstTime ? 60_000_000 : 5_000_000) : expected * 99 / 100 - 5_000_000)
                                      : (firstTime ? -60_000_000 : -5_000_000)
-        if firstTime, !dryRun, !acceptRent {
-            // The first deposit pays ~0.03 SOL of rent for Kamino's user accounts and lookup table. Not worth it for
+        if native, deposit, !firstTime, have < units + TopUpOrder.solanaFeeFloor { throw shortOfSOL(have, rent: 0) }
+        // A stock put up on the Backpack market isn't asked about: its position's rent (≈ 0.0176 SOL) comes back when
+        // everything is taken out — Kamino closes the position then (measured live 2026-10-28).
+        if firstTime, !dryRun, native || (!acceptRent && !stock) {
+            // The first deposit pays ~0.03–0.04 SOL of rent for Kamino's user accounts and lookup table. Not worth it for
             // a small amount: simulate first, and when the rent is over a tenth of what goes in, stop and ask (CostlyMove:
             // «Send anyway», or Jupiter Lend, which has no rent). It was refused outright, which stopped a chain of moves
             // at its last step with no way on.
-            let preview = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
+            let preview: [String]
+            do {
+                preview = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
                                                 note: "Kamino \(symbol)", lamportsAtLeast: lamports, dryRun: true)
-            let solPrice = try await Hyperliquid.markets()["SOL"]?.markPx ?? 0
-            let rentSOL = Self.solSpent(preview)
-            let valueUSD = native ? amount * solPrice : amount
-            if let stop = Self.kaminoRent(sol: rentSOL, solPrice: solPrice, depositUSD: valueUSD, accepted: Self.lossAccepted) { throw stop }
+            } catch where native {
+                // Too little SOL for the rent as well: a small deposit's simulation says what the rent is, and so how much fits.
+                if let rent = await kaminoDepositCost(reserve, amount: Decimal(string: "0.001")!, market: market), Decimal(have) / scale < amount + rent + kept {
+                    throw shortOfSOL(have, rent: rent)
+                }
+                throw error
+            }
+            // A SOL deposit's own amount leaves the wallet too: the rent is what left beyond it.
+            let rentSOL = Self.kaminoRentSpent(preview, deposited: native ? amount : 0)
+            if native, Decimal(have) / scale < amount + rentSOL + kept { throw shortOfSOL(have, rent: rentSOL) }
+            if !acceptRent, !stock {
+                let solPrice = try await Hyperliquid.markets()["SOL"]?.markPx ?? 0
+                let valueUSD = native ? amount * solPrice : amount
+                if let stop = Self.kaminoRent(sol: rentSOL, solPrice: solPrice, depositUSD: valueUSD, accepted: Self.lossAccepted) { throw stop }
+            }
         }
+        // A withdrawal brings what was asked, 1% over at most (all: what's there, asked 1% over): more would be collateral
+        // the card didn't say leaves, past the 1.5 line on a loan. SOL also gets back the rent of the accounts Kamino closes
+        // when everything comes out (≈ 0.0176 for the position): 0.03 SOL of room for it, and the wallet's own wrapped SOL,
+        // which Kamino's transaction unwraps as it closes that account.
+        let wrapped = native && !deposit ? Int64(try await rpc.tokenBalance(owner: wallet.solana, mint: reserve.mint)) : 0
+        let most: [String: Int64] = deposit ? [:] : native ? [wallet.solana: Int64(units) * 101 / 100 + 30_000_000 + wrapped] : [myToken: Int64(units) * 101 / 100]
         let changes = try await signAndSend(wire, lastValid: lastValid, owners: [myToken: wallet.solana], rules: rules,
-                                            note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, dryRun: dryRun)
-        let line = (dryRun ? "Kamino simulation (nothing signed): " : "Kamino \(symbol) \(Fmt.num(reserve.supplyAPY.rounded(2, .plain)))% APY: \(deposit ? "deposited \(Fmt.num(amount, maxFraction: 6)) \(symbol)" : all ? "withdrew everything" : "withdrew \(Fmt.num(amount, maxFraction: 6)) \(symbol)"). ")
+                                            note: "Kamino \(deposit ? "deposit" : "withdraw") \(symbol)", lamportsAtLeast: lamports, atMost: most, dryRun: dryRun)
+        if stock, !dryRun {
+            // Read on: the portfolio right after must find the stock under Kamino, not lose it.
+            let was = loan?.collateral.first { $0.reserve == reserve.address }?.valueUSD ?? 0
+            _ = try? await kaminoLoan(market) { l in
+                let v = l?.collateral.first { $0.reserve == reserve.address }?.valueUSD ?? 0
+                return deposit ? v > was : v < was
+            }
+        }
+        let did = deposit ? "deposited \(Fmt.num(amount, maxFraction: 6)) \(symbol)" : all ? "withdrew everything" : "withdrew \(Fmt.num(amount, maxFraction: 6)) \(symbol)"
+        let line = (dryRun ? "Kamino simulation (nothing signed): "
+                    : stock ? "Kamino's Backpack market: \(deposit ? "put up \(Fmt.num(amount, maxFraction: 6)) \(symbol) as collateral" : did). "
+                    : "Kamino \(symbol) \(Fmt.num(reserve.supplyAPY.rounded(2, .plain)))% APY: \(did). ")
             + changes.joined(separator: "; ") + "."
         report(line)
         return line

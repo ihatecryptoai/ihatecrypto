@@ -4,6 +4,7 @@ import IhatecryptoCore
 import SignerAPI
 import SolanaChain
 import SwiftUI
+import TradeExecution
 import TxGuard
 import WalletCore
 import WebKit
@@ -26,9 +27,12 @@ struct TxReview {
     /// Programs outside the built-in list: signed only if the user allows them here.
     let unknownPrograms: [String]
     let programNames: [String]
-    let changes: [String]
-    /// The same changes for the card: the token, its mint, the signed amount.
+    /// The simulated change of each balance for the card: the token, its mint, the signed amount.
     var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+    /// Rows of `deltas` whose token account the transaction closes: all of it leaves, with the account.
+    var closed: Set<Int> = []
+    /// SOL those accounts held as rent, which may come back to the wallet: shown as rent, not as a gain.
+    var rentBack: Decimal = 0
     /// Every program it calls, by name, and whether it is on the list ihatecrypto signs for without asking.
     var programs: [(name: String, known: Bool)] = []
     let checks: [String]
@@ -37,7 +41,46 @@ struct TxReview {
     /// Jev's second opinion on the site and the transaction; it can only ask for an extra confirmation.
     var jev: JevReview?
     var jevNote: String?
+
+    /// The wallet's own SOL row's key: not wrapped SOL's mint, so a wSOL account's row is never taken for it.
+    static let nativeSOL = "native SOL"
+
+    /// The same changes in words, for Jev: «JUP: −1,250 (account closes)».
+    var changes: [String] {
+        deltas.indices.map { i in
+            let d = deltas[i]
+            return "\(d.symbol): \((d.amount > 0 ? "+" : d.amount < 0 ? "−" : "") + Fmt.num(abs(d.amount), maxFraction: 9))"
+                + (closed.contains(i) ? " (account closes)" : "")
+        }
+    }
+
+    /// The wallet's SOL beside a real move that only pays the fee and new accounts' rent, or is the rent of an account it
+    /// closes coming back: shown with that note, never as a send or a gain.
+    func feeLike(_ d: (symbol: String, mint: String, amount: Decimal)) -> Bool {
+        d.mint == Self.nativeSOL && deltas.count > 1 && (d.amount < 0 ? -d.amount < Decimal(string: "0.05")! : d.amount > 0 && d.amount <= rentBack)
+    }
+
+    /// «You send 5 USDC to Kamino Vault»: what leaves, what arrives, and the program it's for — fee-sized SOL left out.
+    var summary: String? {
+        let moved = deltas.filter { !feeLike($0) }
+        let out = moved.filter { $0.amount < 0 }.map { "\(Fmt.num(-$0.amount, maxFraction: 6)) \($0.symbol)" }
+        let into = moved.filter { $0.amount > 0 }.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }
+        let infra: Set<String> = ["System", "Compute Budget", "SPL Token", "Associated Token", "Address Lookup Table"]
+        // Programs of one protocol («Kamino Vault», «Kamino Farms») are that protocol: the money goes to Kamino.
+        let work = programs.map(\.name).filter { !infra.contains($0) && !$0.contains("…") }
+        let brands = Set(work.map { String($0.split(separator: " ").first ?? Substring($0)) })
+        let target = work.count > 1 && brands.count == 1 ? brands.first : work.first
+        let to = target.map { " to \($0)" } ?? ""
+        switch (out.isEmpty, into.isEmpty) {
+        case (false, true): return "You send \(list(out))\(to)"
+        case (false, false): return "You send \(list(out)) and get \(list(into))"
+        case (true, false): return "You get \(list(into))"
+        case (true, true): return deltas.isEmpty ? nil : "Only the network fee"
+        }
+    }
 }
+
+private func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
 
 /// An EVM transaction from a site, decoded and simulated before anything is signed.
 struct EVMReview {
@@ -54,6 +97,10 @@ struct EVMReview {
     let gas: UInt64
     let problems: [String]
     var jev: JevReview?
+    /// The simulation the window shows (nil: none), and how each of its assets reads: «USDC (0x8335…2913)». What's signed
+    /// is simulated again after Sign and held to it.
+    var simulation: EVMSimulation?
+    var names: [String: String] = [:]
 }
 
 @Observable
@@ -74,8 +121,13 @@ final class Browser {
     /// EVM chain a site switched to (Arbitrum by default). Only reading goes to that chain's public RPC.
     private var evmChain: [String: UInt64] = [:]
     static let evmRPC: [UInt64: String] = [1: "https://ethereum-rpc.publicnode.com", 42161: "https://arb1.arbitrum.io/rpc", 8453: "https://mainnet.base.org"]
-    /// arb1 crashes on eth_simulateV1; publicnode runs it but refuses receipts without a token (2026-09-29).
-    static let evmSimulationRPC: [UInt64: String] = [42161: "https://arbitrum-one-rpc.publicnode.com"]
+    /// The nodes that run a site's eth_simulateV1, with spares, since no simulation means no signature (research E-4):
+    /// Ethereum's and Base's shared ones (EVMRPC), and for Arbitrum publicnode, since arb1 crashes on it (publicnode
+    /// refuses receipts without a token, 2026-09-29), with drpc behind it. Each answered it on 2026-11-05.
+    static let evmSimulationRPC: [UInt64: EVMRPC] = [
+        1: .ethereum, 8453: .base,
+        42161: EVMRPC(url: URL(string: "https://arbitrum-one-rpc.publicnode.com")!, chainId: 42161, fallbacks: [URL(string: "https://arbitrum.drpc.org")!]),
+    ]
     static let readOnly: Set<String> = ["eth_call", "eth_blockNumber", "eth_getBalance", "eth_getCode", "eth_getTransactionCount", "eth_getTransactionReceipt",
                                         "eth_getTransactionByHash", "eth_estimateGas", "eth_gasPrice", "eth_feeHistory", "eth_getBlockByNumber",
                                         "eth_getLogs", "eth_maxPriorityFeePerGas", "eth_getStorageAt"]
@@ -172,6 +224,18 @@ final class Browser {
                 review.jevNote = "The second check isn't connected (Settings › Second check). The code checks decide."
             }
             guard await ask(.transaction(review, send: send), origin: origin, site: site), review.problems.isEmpty else { throw SiteError("Transaction declined.") }
+            // Simulated again now (research E-4): the state can change in the seconds between the look and the signature.
+            let again: TxReview
+            do { again = try await self.review(wire, owner: owner) } catch {
+                workspace?.reply("Site \(origin): nothing signed — ihatecrypto couldn't check it again after Sign (\(error.localizedDescription)). Ask the site for it again.", note: "browser")
+                throw SiteError("Nothing signed: ihatecrypto couldn't check it again after Sign.")
+            }
+            func outflows(_ r: TxReview) -> [String: Decimal] { Dictionary(r.deltas.map { ($0.mint, $0.amount) }, uniquingKeysWith: +) }
+            if let why = Self.recheck(again.problems, SimulationDrift.outflowsGrew(shown: outflows(review), now: outflows(again),
+                                                                                   names: Dictionary(again.deltas.map { ($0.mint, $0.symbol) }, uniquingKeysWith: { a, _ in a }))) {
+                workspace?.reply("Site \(origin): nothing signed — \(why) Ask the site for it again.", note: "browser")
+                throw SiteError("Nothing signed: \(why)")
+            }
             let reply = try await SignerClient().send(.signSolana(wire: wire, accounts: review.accounts, recipients: [], tokenOwners: review.tokenOwners,
                                                                   extraPrograms: review.unknownPrograms))
             guard reply.ok, let signed = reply.signedWire else { throw SiteError(XPCTradeSigner.reason(reply)) }
@@ -253,7 +317,7 @@ final class Browser {
             guard let value = Self.quantity(p["value"]) else { throw SiteError("4200|The amount is larger than ihatecrypto will sign.") }
             guard let url = Self.evmRPC[chain].flatMap(URL.init(string:)) else { throw SiteError("4901|No RPC for chain \(chain).") }
             let rpc = EVMRPC(url: url, chainId: chain)
-            var review = await evmReview(to: to, value: value, data: data, from: address, rpc: rpc)
+            var review = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc, simulator: Self.evmSimulationRPC[chain])
             if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
                 review.jev = try? await JevReviewer.site(host: host(origin), title: title, programs: ["EVM \(chain): \(to)"], changes: review.lines + review.changes, apiKey: key)
             }
@@ -261,11 +325,20 @@ final class Browser {
                 if let refusal = review.problems.first { workspace?.reply("Site \(origin): EVM transaction declined — \(refusal)", note: "browser") }
                 throw SiteError("4001|" + (review.problems.first ?? "The user declined."))
             }
+            // Simulated again now (research E-4): what's signed may take no more, pay or allow no one else, give no other right.
+            let again = await Self.evmReview(to: to, value: value, data: data, from: address, rpc: rpc, simulator: Self.evmSimulationRPC[chain])
+            let drift = SimulationDrift.outflowsGrew(shown: review.simulation?.changes ?? [:], now: again.simulation?.changes ?? [:], names: again.names)
+                ?? (again.recipients != review.recipients ? "it would pay or let spend other addresses than the window showed" : nil)
+                ?? (again.simulation?.grants != review.simulation?.grants ? "it would hand out other rights than the window showed" : nil)
+            if let why = Self.recheck(again.problems, drift) {
+                workspace?.reply("Site \(origin): EVM transaction, nothing signed — \(why) Ask the site for it again.", note: "browser")
+                throw SiteError("4001|Nothing signed: \(why)")
+            }
             let nonce = try await rpc.nonce(address)
             let fees = try await rpc.fees()
             let reply = try await SignerClient().send(.signEVMTransaction(chainId: chain, nonce: nonce, maxPriorityFee: fees.maxPriority, maxFee: fees.maxFee,
-                                                                         gasLimit: review.gas, to: to, value: value, data: data,
-                                                                         recipients: review.recipients))
+                                                                         gasLimit: again.gas, to: to, value: value, data: data,
+                                                                         recipients: again.recipients))
             guard reply.ok, let raw = reply.signedRaw else { throw SiteError("4001|" + XPCTradeSigner.reason(reply)) }
             do {
                 let hash = try await rpc.send(raw)
@@ -297,58 +370,92 @@ final class Browser {
         return s == "0x" ? 0 : UInt64(s.dropFirst(2), radix: 16)
     }
 
+    /// Why the second look after Sign stops a site's transaction: a refusal of its own, or how it drifted from the first.
+    static func recheck(_ problems: [String], _ drift: String?) -> String? {
+        problems.first.map { "checked again after Sign: \($0)" } ?? drift.map { "since you looked at it, \($0)." }
+    }
+
     /// Decodes, names the token, simulates the balance changes and estimates gas. Problems mean «do not sign».
-    func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC) async -> EVMReview {
+    /// `simulator`: the node that runs eth_simulateV1 (Browser.evmSimulationRPC), `rpc` when nil.
+    static func evmReview(to: String, value: UInt64, data: Data, from: String, rpc: EVMRPC, simulator: EVMRPC? = nil) async -> EVMReview {
         let call = EVMCall.decode(data)
         var problems = [call.refusal(sender: from, chainId: rpc.chainId), EVMCall.targetRefusal(to: to, data: data, sender: from)].compactMap { $0 }
+        let refusedByCall = !problems.isEmpty
         var lines: [String] = []
         // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
         // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
         if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
-        let recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
+        var recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
+        // The contract and everyone it pays or lets spend, asked of GoPlus Security (SlowMist's and ScamSniffer's data)
+        // while it's simulated. ihatecrypto's own protocols and this wallet aren't asked.
+        let ours = EVMCall.knownSpenders(chainId: rpc.chainId).union([from.lowercased()])
+        let asked = Set([to.lowercased()] + recipients).subtracting(ours)
+        async let scams = ScamList.shared.verdicts(asked, chainId: rpc.chainId)
         let native = rpc.chainId == 42161 || rpc.chainId == 1 || rpc.chainId == 8453 ? "ETH" : "coins"
-        func token(_ to: String) async -> (symbol: String, decimals: Int) {
+        typealias Token = (address: String, symbol: String, decimals: Int?)
+        func token(_ to: String) async -> Token {
+            // The coin itself, as KyberSwap (0xeeee…) and Uniswap v4 (0x0) name it: no contract to ask.
+            let to = to.lowercased()
+            if to == EVMSimulation.native || to == UniswapV4.native { return (to, native, 18) }
             let symbol = (try? await rpc.call("eth_call", [["to": to, "data": "0x95d89b41"], "latest"]) as? String).flatMap { hex -> String? in
                 guard let d = Data(hex: hex), d.count >= 96 else { return nil }
                 let length = Int(d[d.startIndex + 63])
                 return String(data: d.dropFirst(64).prefix(length), encoding: .utf8)
             } ?? "token \(to.prefix(8))…"
-            let decimals = (try? await rpc.call("eth_call", [["to": to, "data": "0x313ce567"], "latest"]) as? String).flatMap { UInt64($0.dropFirst(2), radix: 16) } ?? 18
-            return (symbol, Int(decimals))
+            return (to, symbol, ABI.decimals(try? await rpc.read(to, Data([0x31, 0x3c, 0xe5, 0x67]))))
+        }
+        // A token that doesn't answer decimals() (a revert, a node down, past 36) has no amount to show: 18 was guessed,
+        // and 5,000,000 USDC read «0.000005 USDC». ihatecrypto doesn't sign an amount it can't show.
+        func unknown(_ t: Token) {
+            let why = "\(t.symbol) (\(t.address.prefix(6))…\(t.address.suffix(4))) didn't answer decimals(), so the amount is unknown. "
+                + "ihatecrypto doesn't sign an amount it can't show — if the network was slow, ask the site to send it again."
+            if !problems.contains(why) { problems.append(why) }
         }
         func amount(_ word: Data, _ decimals: Int) -> String {
             let n = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
             return Fmt.num(n / Decimal(sign: .plus, exponent: decimals, significand: 1), maxFraction: 6)
         }
+        /// «5,000,000 USDC», or «an unknown amount of USDC (… of its smallest units)» and the refusal.
+        func shown(_ units: Decimal, _ t: Token) -> String {
+            guard let d = t.decimals else { unknown(t); return "an unknown amount of \(t.symbol) (\(units) of its smallest units)" }
+            return "\(Fmt.num(units / Decimal(sign: .plus, exponent: d, significand: 1), maxFraction: 6)) \(t.symbol)"
+        }
+        func sum(_ word: Data, _ t: Token) -> String { shown(word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }, t) }
         switch call {
         case .plain:
             lines.append("Transfer \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native) to \(to).")
-        case .approve(let spender, let a), .increaseAllowance(let spender, let a):
+        case .approve(let spender, let a):
             let t = await token(to)
-            lines.append("Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol).")
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)).")
+        case .increaseAllowance(let spender, let a):
+            let t = await token(to)
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)) more.")
         case .transfer(let r, let a):
             let t = await token(to)
-            lines.append("Transfer \(amount(a, t.decimals)) \(t.symbol) to \(r).")
+            lines.append("Transfer \(sum(a, t)) to \(r).")
         case .nftTransfer(let f, let r):
             lines.append("Move NFTs of \(to) from \(f.lowercased() == from.lowercased() ? "this wallet" : f) to \(r).")
         case .delegation(let d, let on):
-            lines.append(on ? "Let \(d) borrow against or manage your lending positions." : "Revoke \(d)'s rights over your lending positions.")
+            lines.append(on ? "Let \(d) manage your positions or move your tokens in \(to)." : "Revoke \(d)'s rights in \(to).")
         case .transferFrom(let f, let r, let a):
             let t = await token(to)
-            lines.append("Move \(amount(a, t.decimals)) \(t.symbol) from \(f) to \(r).")
+            lines.append("Move \(sum(a, t)) from \(f) to \(r).")
         case .setApprovalForAll(let op, let on):
             lines.append("\(on ? "Rights to all NFTs" : "Revoke NFT rights") for \(op).")
         case .permit:
             lines.append("Call to permit (permission to spend).")
         case .swap(let r):
             lines.append("Uniswap swap paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
+        case .kyberSwap(let k):
+            let t = await token(k.srcToken)
+            lines.append("KyberSwap swap of \(sum((try? ABI.word(k.amount)) ?? Data(count: 32), t)) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")
         case .borrow(let asset, let a, let owner):
             let t = await token(asset)
-            lines.append("Borrow \(amount(a, t.decimals)) \(t.symbol) from \(to), the debt on \(owner.lowercased() == from.lowercased() ? "this wallet" : owner).")
+            lines.append("Borrow \(sum(a, t)) from \(to), the debt on \(owner.lowercased() == from.lowercased() ? "this wallet" : owner).")
         case .repay(let asset, let a, let owner):
             let t = await token(asset)
-            lines.append("Repay \(a.allSatisfy { $0 == 0xff } ? "all the" : amount(a, t.decimals)) \(t.symbol) debt of \(owner.lowercased() == from.lowercased() ? "this wallet" : owner) to \(to).")
+            lines.append("Repay \(a.allSatisfy { $0 == 0xff } ? "all the \(t.symbol)" : sum(a, t)) debt of \(owner.lowercased() == from.lowercased() ? "this wallet" : owner) to \(to).")
         case .multisigExec:
             lines.append("Carry out a signed move of the multisig \(to): " + call.summary(chainId: rpc.chainId, to: to, value: value) + ".")
         case .cctpBurn(let r, let domain, let a):
@@ -358,11 +465,10 @@ final class Browser {
             lines.append("LayerZero: send \(known ? "\(amount(a, 6)) USDT" : "tokens of \(to)") to \(r.map { $0.lowercased() == from.lowercased() ? "this wallet" : $0 } ?? "an account that can't be read") on \(USDT0.networkName(eid: eid))\(plain ? "" : ", with options or a message of its own").")
         case .v4Swap(let s):
             let (a, b) = (await token(s.currencyIn), await token(s.currencyOut))
-            func n(_ x: Decimal, _ d: Int) -> String { Fmt.num(x / Decimal(sign: .plus, exponent: d, significand: 1), maxFraction: 6) }
-            lines.append("Uniswap v4 swap: \(n(s.amountIn, a.decimals)) \(a.symbol) for at least \(n(s.amountOutMinimum, b.decimals)) \(b.symbol), paid to this wallet.")
+            lines.append("Uniswap v4 swap: \(shown(s.amountIn, a)) for at least \(shown(s.amountOutMinimum, b)), paid to this wallet.")
         case .permit2Approve(let contract, let spender, let a, let expiration):
             let t = await token(contract)
-            lines.append("Allow \(spender) to spend up to \(amount(a, t.decimals)) \(t.symbol) through Permit2, until \(Fmt.date(Date(timeIntervalSince1970: TimeInterval(expiration)))).")
+            lines.append("Allow \(spender) to spend up to \(sum(a, t)) through Permit2, until \(Fmt.date(Date(timeIntervalSince1970: TimeInterval(expiration)))).")
         case .vault(let r, let owner):
             lines.append("Vault \(owner == nil ? "deposit" : "withdrawal") crediting \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
         case .lending(let b):
@@ -372,30 +478,68 @@ final class Browser {
         case .wrap:
             lines.append("Wrap \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native) into its token at \(to)\((EVMCall.wrap.payees(to: to, value: value, chainId: rpc.chainId).isEmpty ? ", the network's own WETH" : " — not this network's WETH")).")
         case .unwrap(let a):
-            lines.append("Unwrap \(amount(a, 18)) of the token at \(to) into \(native).")
+            // withdraw(uint256) on any other contract is in its own units, not WETH's 18 decimals.
+            lines.append(to.lowercased() == UniswapV2.on(rpc.chainId)?.weth ? "Unwrap \(amount(a, 18)) W\(native) into \(native)."
+                         : "Call withdraw(uint256) on \(to) with \(a.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }) of its units — not this network's WETH.")
         case .contract(let selector):
             lines.append("Contract call \(to), function \(selector)\(value > 0 ? ", with \(Fmt.num(Decimal(value) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native)" : "").")
         }
         var changes: [String] = []
-        let simulator = Self.evmSimulationRPC[rpc.chainId].flatMap(URL.init(string:)).map { EVMRPC(url: $0, chainId: rpc.chainId) } ?? rpc
+        // Coins and tokens, never dollars: Fmt.usd showed 0.004 WBTC as «$0.00».
+        func moved(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 8) }
+        var simulation: EVMSimulation?, names = [EVMSimulation.native: native]
         do {
-            let sim = try await simulator.simulate(from: from, to: to, value: value, data: data)
+            let sim = try await (simulator ?? rpc).simulate(from: from, to: to, value: value, data: data)
+            simulation = sim
             if let revert = sim.revert { problems.append("Simulation: the call would revert — \(revert)") }
             for (asset, delta) in sim.changes.sorted(by: { $0.key < $1.key }) {
-                if asset == EVMSimulation.native { changes.insert("\(native): \(signed(delta / 1_000_000_000_000_000_000))", at: 0); continue }
+                if asset == EVMSimulation.native { changes.insert("\(native): \(moved(delta / 1_000_000_000_000_000_000))", at: 0); continue }
                 let t = await token(asset)
-                let name = "\(t.symbol)\(sim.nfts.contains(asset) ? " NFT" : "") (\(asset.prefix(6))…\(asset.suffix(4)))"
-                changes.append("\(name): \(signed(sim.nfts.contains(asset) ? delta : delta / Decimal(sign: .plus, exponent: t.decimals, significand: 1)))")
+                let nft = sim.nfts.contains(asset)
+                let name = "\(t.symbol)\(nft ? " NFT" : "") (\(asset.prefix(6))…\(asset.suffix(4)))"
+                names[asset] = name
+                // An NFT counts pieces; a token without decimals() moves an amount nobody can show.
+                if nft { changes.append("\(name): \(moved(delta))") }
+                else if let d = t.decimals { changes.append("\(name): \(moved(delta / Decimal(sign: .plus, exponent: d, significand: 1)))") }
+                else { changes.append("\(name): \(delta < 0 ? "loses" : "gains") \(shown(abs(delta), t))") }
             }
             if sim.revert == nil, changes.isEmpty { changes.append("None of your balances change.") }
+            // Rights the call hands out that only its events show (research E-3). Only the contract the wallet calls itself
+            // can log a new right of the wallet's: everywhere else the wallet isn't msg.sender, and an Approval of its there
+            // is what's left of an old allowance after a transferFrom (OpenZeppelin before 5 logs it). Rights over everything,
+            // credit, ownership and anything unlimited are refused. A limited approve to an address the calldata didn't name
+            // becomes a recipient: allowed here by the tick and in person by Touch ID, which names it.
+            let known = EVMCall.knownSpenders(chainId: rpc.chainId)
+            let rights = ["approve": "spending", "nft": "an NFT", "all": "all NFTs", "permit2": "Permit2 spending", "operator": "operator",
+                          "authorization": "authorization", "credit": "borrowing", "ownership": "ownership"]
+            for g in sim.grants where g.asset == to.lowercased() && g.to.lowercased() != from.lowercased() {
+                let who = g.to.lowercased()
+                let asset = if let n = names[g.asset] { n } else { "\(await token(g.asset).symbol) (\(g.asset.prefix(6))…\(g.asset.suffix(4)))" }
+                if g.unlimited || ["all", "operator", "authorization", "credit", "ownership"].contains(g.kind) {
+                    // A call refused by its calldata already says so: the events would only repeat it.
+                    let why = "The simulation shows it gives \(who) \(g.unlimited && ["approve", "permit2", "credit"].contains(g.kind) ? "unlimited " : "")\(rights[g.kind] ?? g.kind) rights over your \(asset). Refused."
+                    if !refusedByCall, !problems.contains(why) { problems.append(why) }
+                } else if !known.contains(who), !recipients.contains(who) {
+                    lines.append("Allow \(who) to spend from \(asset) (\(g.kind)): seen in the simulation, not in the call.")
+                    recipients.append(who)
+                }
+            }
         } catch {
-            // The node can't simulate: at least check that the call doesn't revert.
-            changes.append("Unavailable: \(error.localizedDescription)")
-            let tx: [String: Any] = ["from": from, "to": to, "value": "0x" + String(value, radix: 16), "data": "0x" + data.hex]
-            do { _ = try await rpc.call("eth_call", [tx, "latest"]) } catch {
-                problems.append("Simulation: the call would revert — \(error.localizedDescription)")
+            // No simulation, no signature (research E-4): the chat refuses the same way. Short of gas is said as it is
+            // (EVMRPC.shortOfGas), with what to do: asking again in a minute wouldn't help.
+            changes.append("Not simulated.")
+            if error.localizedDescription.hasPrefix("Not enough") { problems.append(error.localizedDescription) } else {
+            problems.append("\(EVMRPC.names[rpc.chainId] ?? "Network \(rpc.chainId)")'s node couldn't simulate it (\(error.localizedDescription)), "
+                            + "and ihatecrypto signs nothing it hasn't simulated. Ask the site to send it again in a minute.")
             }
         }
+        // A report blocks, a silence is said: GoPlus doesn't know every drainer, so nothing here says «clean».
+        var verdicts = await scams
+        verdicts.merge(await ScamList.shared.verdicts(Set(recipients).subtracting(asked).subtracting(ours), chainId: rpc.chainId)) { $1 }
+        for (a, v) in verdicts.sorted(by: { $0.key < $1.key }) {
+            if case .reported(let why) = v { problems.append("\(a): \(why.en). ihatecrypto doesn't sign for it.") }
+        }
+        if verdicts.values.contains(.unchecked) { lines.append("Scam check: GoPlus Security didn't answer this time.") }
         var gas: UInt64 = 0
         if problems.isEmpty {
             do {
@@ -407,7 +551,8 @@ final class Browser {
                 problems.append("Couldn't estimate gas: \(error.localizedDescription)")
             }
         }
-        return EVMReview(chain: rpc.chainId, to: to, value: value, data: data, lines: lines, changes: changes, recipients: recipients, gas: gas, problems: problems)
+        return EVMReview(chain: rpc.chainId, to: to, value: value, data: data, lines: lines, changes: changes, recipients: recipients, gas: gas,
+                         problems: problems, simulation: simulation, names: names)
     }
 
     private func ask(_ kind: SiteRequest.Kind, origin: String, site: SiteCheck.Verdict) async -> Bool {
@@ -447,26 +592,26 @@ final class Browser {
         let unknown = programs.filter { SolanaGuard.knownPrograms[$0] == nil }.sorted()
         var allowed = SolanaGuard.knownPrograms
         for p in unknown { allowed[p] = "unknown program \(p.prefix(6))…" }
-        let tokens = try await tokenAccounts(owner)
+        let (tokens, rights) = try await tokenAccounts(owner)
         let touched = tokens.filter { accounts.contains($0.key) }
         let owners = touched.mapValues { _ in owner }
         let verdict = SolanaGuard.check(message, accounts: accounts,
                                         policy: SolanaPolicy(owner: owner, programs: allowed, trustLookupTables: false), tokenOwners: owners)
         let solBefore = try await rpc.balance(owner)
-        let simulation = try await rpc.simulate(wire, watch: [owner] + touched.keys, sigVerify: false)
+        // Every other account it may write too: one it opens as the wallet's token account is checked for rights like ours.
+        var watch = [owner] + touched.keys.sorted()
+        for a in message.writable(accounts) where !watch.contains(a) { watch.append(a) }
+        let simulation = try await rpc.simulate(wire, watch: watch, sigVerify: false)
         var problems = verdict.problems
-        var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+        var balances = Balances()
         if let error = simulation.error {
             problems.append("Simulation failed: \(error).")
         } else {
-            let solAfter = simulation.after[owner]?.lamports ?? solBefore
-            deltas.append(("SOL", SpotAsset.all[0].mint, Decimal(Int64(solAfter) - Int64(solBefore)) / 1_000_000_000))
-            for (address, t) in touched.sorted(by: { $0.key < $1.key }) {
-                let after = simulation.after[address]?.token ?? t.amount
-                let scale = Decimal(sign: .plus, exponent: t.decimals, significand: 1)
-                let delta = Decimal(Int64(after) - Int64(t.amount)) / scale
-                if delta != 0 { deltas.append((symbol(t.mint), t.mint, delta)) }
-            }
+            balances = Self.balances(owner: owner, solBefore: solBefore, touched: touched, after: simulation.after)
+            problems += balances.problems
+            // Rights no balance shows (research E-1): the wallet handed to a program, a token account's new owner or delegate.
+            problems += SolanaGuard.rightsProblems(owner: owner, before: rights.filter { touched[$0.key] != nil }, after: simulation.rights,
+                                                   names: touched.mapValues { Self.symbol($0.mint) })
         }
         // Programs ihatecrypto knows by name but doesn't sign for without asking are named, still marked as not on its list.
         let named = programs.sorted().map { p in
@@ -476,37 +621,74 @@ final class Browser {
         var seen = Set<String>()
         var review = TxReview(wire: wire, accounts: accounts, tokenOwners: owners, unknownPrograms: unknown,
                               programNames: named.map { $0.known ? $0.name : "\($0.name) (not on ihatecrypto's list)" },
-                              changes: deltas.map { "\($0.symbol): \(signed($0.amount))" }, checks: verdict.checks.filter { seen.insert($0).inserted },
-                              problems: problems)
-        review.deltas = deltas
+                              checks: verdict.checks.filter { seen.insert($0).inserted }, problems: problems)
+        review.deltas = balances.deltas
+        review.closed = balances.closed
+        review.rentBack = balances.rentBack
         review.programs = named
         return review
     }
 
-    private func signed(_ d: Decimal) -> String { (d > 0 ? "+" : d < 0 ? "−" : "") + Fmt.num(abs(d), maxFraction: 9) }
+    struct Balances {
+        var deltas: [(symbol: String, mint: String, amount: Decimal)] = []
+        var closed: Set<Int> = []
+        var rentBack: Decimal = 0
+        var problems: [String] = []
+    }
 
-    private func symbol(_ mint: String) -> String {
+    /// Each balance of ours after the simulation against before. The node answers null for an account the transaction
+    /// closes: it holds nothing, so all its tokens leave, and the rent it held may come back as SOL. An account missing
+    /// from the answer is a refusal: what happens to it isn't known, and guessing «unchanged» hid a drain.
+    static func balances(owner: String, solBefore: UInt64, touched: [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)],
+                         after: [String: (lamports: UInt64, token: UInt64?)]) -> Balances {
+        var b = Balances()
+        func unknown(_ coin: String) -> String { "The simulation didn't return the balance of \(coin): ihatecrypto can't show what this transaction does to it." }
+        if let sol = after[owner] {
+            b.deltas.append(("SOL", TxReview.nativeSOL, (Decimal(sol.lamports) - Decimal(solBefore)) / 1_000_000_000))
+        } else {
+            b.problems.append(unknown("SOL"))
+        }
+        for (address, t) in touched.sorted(by: { $0.key < $1.key }) {
+            guard let now = after[address] else { b.problems.append(unknown(symbol(t.mint))); continue }
+            // No lamports left: closed. Lamports but no token amount (not readable as a token account): emptied, never «closes».
+            let closes = now.token == nil && now.lamports == 0
+            // A wSOL account's lamports are its wrapped SOL plus the rent: only the rent is rent.
+            if closes { b.rentBack += Decimal(t.lamports - (t.mint == SpotAsset.all[0].mint ? min(t.amount, t.lamports) : 0)) / 1_000_000_000 }
+            let delta = (Decimal(now.token ?? 0) - Decimal(t.amount)) / Decimal(sign: .plus, exponent: t.decimals, significand: 1)
+            guard delta != 0 else { continue }
+            if closes { b.closed.insert(b.deltas.count) }
+            b.deltas.append((symbol(t.mint), t.mint, delta))
+        }
+        return b
+    }
+
+    private static func symbol(_ mint: String) -> String {
         if mint == "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" { return "USDC" }
+        if mint == SpotAsset.all[0].mint { return "wSOL" }
         if let a = SpotAsset.all.first(where: { $0.mint == mint }) { return a.symbol }
         return "token \(mint.prefix(6))…"
     }
 
     /// Our token accounts, classic SPL and Token-2022 alike (the guard lets both run, so a drain through either shows):
-    /// address → mint, raw amount, decimals.
-    private func tokenAccounts(_ owner: String) async throws -> [String: (mint: String, amount: UInt64, decimals: Int)] {
+    /// address → mint, raw amount, decimals, the lamports it holds as rent; and who has a say over each before the move.
+    private func tokenAccounts(_ owner: String) async throws
+        -> (accounts: [String: (mint: String, amount: UInt64, decimals: Int, lamports: UInt64)], rights: [String: SolanaAccountRights]) {
         var items: [[String: Any]] = []
         for program in [SPL.tokenProgram, SPL.token2022Program] {
-            let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "confirmed"]]) as? [String: Any]
+            let r = try await rpc.call("getTokenAccountsByOwner", [owner, ["programId": program], ["encoding": "jsonParsed", "commitment": "finalized"]]) as? [String: Any]
             items += r?["value"] as? [[String: Any]] ?? []
         }
-        var out: [String: (String, UInt64, Int)] = [:]
+        var out: [String: (String, UInt64, Int, UInt64)] = [:]
+        var rights: [String: SolanaAccountRights] = [:]
         for item in items {
-            guard let address = item["pubkey"] as? String,
-                  let info = ((((item["account"] as? [String: Any])?["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
+            guard let address = item["pubkey"] as? String, let account = item["account"] as? [String: Any],
+                  let info = (((account["data"] as? [String: Any])?["parsed"] as? [String: Any])?["info"] as? [String: Any]),
                   let mint = info["mint"] as? String, let amount = info["tokenAmount"] as? [String: Any] else { continue }
-            out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0)
+            out[address] = (mint, UInt64(amount["amount"] as? String ?? "0") ?? 0, (amount["decimals"] as? NSNumber)?.intValue ?? 0,
+                            (account["lamports"] as? NSNumber)?.uint64Value ?? 0)
+            rights[address] = SolanaRPC.rights(account)
         }
-        return out
+        return (out, rights)
     }
 
     /// WebKit's side: page messages in, answers out as the promise's value or error.
@@ -690,8 +872,8 @@ struct ApprovalSheet: View {
                 ScrollView { Text(text).font(.system(.callout, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 140)
                 note("Signing text doesn't move money. The signer rejects the “text” if it's a hidden transaction.")
             case .transaction(let r, let send):
-                if let lead = summary(r) { Text(lead).font(.ui(16, .semibold)).fixedSize(horizontal: false, vertical: true) }
-                if !r.deltas.isEmpty { card(title: "Your balances (simulated)") { ForEach(r.deltas.indices, id: \.self) { delta(r.deltas[$0], in: r) } } }
+                if let lead = r.summary { Text(lead).font(.ui(16, .semibold)).fixedSize(horizontal: false, vertical: true) }
+                if !r.deltas.isEmpty { card(title: "Your balances (simulated)") { ForEach(r.deltas.indices, id: \.self) { delta($0, in: r) } } }
                 calls(r.programs)
                 checks(r.checks.filter { !$0.hasPrefix("Calls unknown program") })
                 secondCheck(r.jev, r.jevNote)
@@ -759,43 +941,31 @@ struct ApprovalSheet: View {
         }
     }
 
-    /// «You send 5 USDC to Kamino Vault»: what leaves, what arrives, and the program it's for — fee-sized SOL left out.
-    private func summary(_ r: TxReview) -> String? {
-        let moved = r.deltas.filter { !feeLike($0, in: r) }
-        let out = moved.filter { $0.amount < 0 }.map { "\(Fmt.num(-$0.amount, maxFraction: 6)) \($0.symbol)" }
-        let into = moved.filter { $0.amount > 0 }.map { "\(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" }
-        let infra: Set<String> = ["System", "Compute Budget", "SPL Token", "Associated Token", "Address Lookup Table"]
-        // Programs of one protocol («Kamino Vault», «Kamino Farms») are that protocol: the money goes to Kamino.
-        let work = r.programs.map(\.name).filter { !infra.contains($0) && !$0.contains("…") }
-        let brands = Set(work.map { String($0.split(separator: " ").first ?? Substring($0)) })
-        let target = work.count > 1 && brands.count == 1 ? brands.first : work.first
-        let to = target.map { " to \($0)" } ?? ""
-        switch (out.isEmpty, into.isEmpty) {
-        case (false, true): return "You send \(list(out))\(to)"
-        case (false, false): return "You send \(list(out)) and get \(list(into))"
-        case (true, false): return "You get \(list(into))"
-        case (true, true): return r.deltas.isEmpty ? nil : "Only the network fee"
-        }
+    /// The grey line under a row: that a token's account closes with all of it, or what fee-sized SOL pays or brings back.
+    private func rowNote(_ i: Int, in r: TxReview) -> String? {
+        let d = r.deltas[i]
+        if r.closed.contains(i) { return "all of it — the account closes" }
+        guard r.feeLike(d) else { return nil }
+        if d.amount < 0 { return "network fee and rent for new accounts" }
+        let names = r.closed.sorted().map { r.deltas[$0].symbol }
+        return names.isEmpty ? "rent back from a closed token account, less the fee"
+            : "rent back from the closed \(list(names)) account\(names.count > 1 ? "s" : ""), less the fee"
     }
 
-    /// SOL that only pays the fee and rent beside a real move: shown with that note, not as a send.
-    private func feeLike(_ d: (symbol: String, mint: String, amount: Decimal), in r: TxReview) -> Bool {
-        d.symbol == "SOL" && d.amount < 0 && -d.amount < Decimal(string: "0.05")! && r.deltas.count > 1
-    }
-
-    private func delta(_ d: (symbol: String, mint: String, amount: Decimal), in r: TxReview) -> some View {
+    private func delta(_ i: Int, in r: TxReview) -> some View {
+        let d = r.deltas[i], sol = d.symbol == "SOL" || d.symbol == "wSOL"
         let price: Decimal? = Stablecoins.isDollar(d.symbol) ? 1
-            : d.symbol == "SOL" ? ws.markets["SOL"]?.markPx : ws.holdings.first { $0.contract == d.mint }?.price
+            : sol ? ws.markets["SOL"]?.markPx : ws.holdings.first { $0.contract == d.mint }?.price
         return HStack(spacing: 10) {
-            TokenLogo(name: d.symbol.lowercased(), size: 26)
+            TokenLogo(name: sol ? "sol" : d.symbol.lowercased(), size: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(d.symbol).font(.ui(13, .semibold))
-                if feeLike(d, in: r) { Text("network fee and rent for new accounts").font(.ui(10)).foregroundStyle(.secondary) }
+                if let note = rowNote(i, in: r) { Text(note).font(.ui(10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
                 Text((d.amount > 0 ? "+" : "−") + Fmt.num(abs(d.amount), maxFraction: 6)).font(.ui(14, .bold)).monospacedDigit()
-                    .foregroundStyle(d.amount > 0 ? Brand.profit : feeLike(d, in: r) ? Color.primary : Brand.loss)
+                    .foregroundStyle(r.feeLike(d) ? Color.primary : d.amount > 0 ? Brand.profit : Brand.loss)
                 if let price { Text("≈ \(Fmt.usd(abs(d.amount) * price))").font(.ui(10)).foregroundStyle(.secondary).monospacedDigit() }
             }
         }
@@ -892,7 +1062,6 @@ struct ApprovalSheet: View {
 
     private func line(_ text: String) -> some View { Text(text).fixedSize(horizontal: false, vertical: true) }
     private func note(_ text: String) -> some View { Text(text).font(.ui(10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-    private func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
 
     /// The domain without «www.», the part a phishing copy changes.
     private var host: String {

@@ -28,8 +28,7 @@ enum Wallets {
 
     static var active: SignerWallet? {
         if let signing { return signing }
-        let list = all
-        return list.first { $0.id == defaults.string(forKey: "activeWallet") } ?? list.first
+        return SignerWallet.on(all, chosen: defaults.string(forKey: "activeWallet"))
     }
 
     static var activeID: String { active?.id ?? SignerWallet.firstID }
@@ -39,6 +38,8 @@ enum Wallets {
 
     /// Signing moves to `wallet` (nil: none left): its addresses become «ours», and the next signature asks for Touch ID.
     static func activate(_ wallet: SignerWallet?) {
+        // Never the automation wallet, whoever asks (an `.asWallet` request would make it `active`): none instead.
+        let wallet = wallet?.isAutomation == true ? nil : wallet
         defaults.set(wallet?.id, forKey: "activeWallet")
         for (key, value) in [("solana", wallet?.solana), ("evm", wallet?.evm), ("near", wallet?.near)] {
             if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }

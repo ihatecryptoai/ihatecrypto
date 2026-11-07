@@ -103,8 +103,16 @@ public enum MegaFuel {
     }
 
     /// Sends the signed zero-fee transaction; MegaFuel bundles it with its own that pays the gas. Returns the hash.
-    public static func send(_ raw: Data) async throws -> String {
-        guard let hash = try await call("eth_sendRawTransaction", ["0x" + raw.hex]) as? String else { throw WalletError("MegaFuel gave no transaction hash.") }
-        return hash
+    /// A lost answer is asked again (RPCRetry), and the second ask can meet the first one already in: «nonce too low»
+    /// once it's mined (seen 2026-10-29), unknown words while it waits. So an error is held against MegaFuel's own count,
+    /// not read by its words: past `nonce`, the transfer is in, and the receipt decides.
+    public static func send(_ raw: Data, nonce: UInt64, from: String) async throws -> String {
+        do {
+            guard let hash = try await call("eth_sendRawTransaction", ["0x" + raw.hex]) as? String else { throw WalletError("MegaFuel gave no transaction hash.") }
+            return hash
+        } catch {
+            guard let now = try? await Self.nonce(from), now > nonce else { throw error }
+            return "0x" + Keccak.hash256(raw).hex
+        }
     }
 }

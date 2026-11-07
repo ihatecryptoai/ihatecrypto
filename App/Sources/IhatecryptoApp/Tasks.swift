@@ -10,13 +10,16 @@ import WalletCore
 /// a Confirm pressed meanwhile in the window is another task and still signs with the active wallet.
 nonisolated enum TaskRun {
     @TaskLocal static var automation: SignerWallet?
+    /// The task that run is of, for the prices Confirmed in it (ScheduledTask.prices): set only on the automation wallet.
+    @TaskLocal static var task: UUID?
     /// «Run now» pressed: these go at once, even with the user at the window.
     @MainActor static var now: Set<String> = []
     /// The next run a repeating item had when «Run now» made its run an extra one: it gets it back after that run, so
     /// «every month on the 1st» run by hand on the 14th still runs on the 1st (it moved to the 14th).
     @MainActor static var kept: [String: Date] = [:]
     /// Below this the automation wallet can't pay Solana's fee plus a new account's rent (a Jupiter Lend deposit failed
-    /// with 0.00198 SOL on 2026-10-06; rent-exempt minimum 0.00089 + a token account 0.00204 + fees).
+    /// with 0.00198 SOL on 2026-10-06; the rent minimum, read from the network, then 0.00089 + a token account's 0.00204
+    /// + fees, 0.00065 + 0.00149 in Nov 2026 and falling).
     static let solFloor = Decimal(string: "0.005")!
 }
 
@@ -137,7 +140,9 @@ extension Workspace {
         checkQuiet = false
         // One made through the debug API runs as if it came through it again: nothing in it signs or sets up a recurring buy.
         await SignerClient.$untrusted.withValue(task.untrusted == true) {
-            await TaskRun.$automation.withValue(automation) { await runSteps(task.steps, confirmed: automation != nil) }
+            await TaskRun.$automation.withValue(automation) {
+                await TaskRun.$task.withValue(automation == nil ? nil : task.id) { await runSteps(task.steps, confirmed: automation != nil) }
+            }
         }
         let failed = finishedAction?.outcome.ok == false
         // Short of SOL, it fails the same way every run: said with what to do, and the way to do it as a card.
@@ -302,8 +307,10 @@ extension Workspace {
                 reply(say("ihatecrypto can’t do “\(step)” — the steps stop here.", "ihatecrypto не умеет «\(step)» — на этом шаги останавливаются."))
                 break
             }
-            // A contract call is never carried out on a chain's Confirm: its own card, simulated, waits for its own.
-            if confirmed, pendingAction != nil || pendingAllocation != nil, ContractCall.parse(step) == nil, AgentCheck.parse(step) == nil {
+            // A contract call is never carried out on a chain's Confirm: its own card, simulated, waits for its own. So
+            // does a paid request whose price the user hasn't seen (paysUnseen).
+            if confirmed, pendingAction != nil || pendingAllocation != nil, ContractCall.parse(step) == nil, AgentCheck.parse(step) == nil,
+               !paysUnseen(command) {
                 finishedAction = nil
                 if let p = pendingAction {
                     pendingAction = nil
@@ -456,7 +463,7 @@ extension Workspace {
     /// Where a step takes its money from: what it spends on, or the place a bridge leg leaves; nil when it names none.
     static func source(_ c: WalletCommand) -> String? {
         switch c {
-        case .bridge(let from, _, _), .cctp(let from, _, _), .evmToSolana(let from, _), .usdt(let from, _, _, _): from
+        case .bridge(let from, _, _), .cctp(let from, _, _), .intents(let from, _, _), .evmToSolana(let from, _), .usdt(let from, _, _, _): from
         case .baseToSolana: "base"
         case .arbitrumToSolana: "arbitrum"
         case .robinhoodToSolana: "robinhood"
@@ -470,6 +477,7 @@ extension Workspace {
         switch c {
         case .lendDeposit("USDC", let a), .kamino(deposit: true, symbol: "USDC", amount: let a), .hlp(deposit: true, amount: let a), .buy(_, usdc: let a),
              .allocate("USDC", maxShare: _, amount: let a, without: _, from: "solana"), .solanaTo(_, let a), .jupiterDCA(_, let a, _, _): a
+        case .intents(from: "solana", to: _, let a): a
         default: nil
         }
     }
@@ -567,5 +575,12 @@ enum ScheduleCanvas {
         return s.prefix(1).uppercased() + s.dropFirst()
     }
 
-    static func period(_ days: Int) -> String { days == 1 ? "day" : days == 7 ? "week" : days == 30 ? "month" : "\(days) days" }
+    /// A recurring buy's period, «day», «2 weeks», «month», «45 days», as its command says it; a stored 0 runs daily.
+    static func period(_ days: Int) -> String { WalletCommand.everyText(max(days, 1) * 86_400) }
+
+    /// The same after «раз в»: «день», «неделю», «месяц», «2 нед.», «3 мес.», «10 дн.».
+    static func periodRU(_ days: Int) -> String {
+        days <= 1 ? "день" : days == 7 ? "неделю" : days == 30 ? "месяц"
+            : days % 30 == 0 ? "\(days / 30) мес." : days % 7 == 0 ? "\(days / 7) нед." : "\(days) дн."
+    }
 }

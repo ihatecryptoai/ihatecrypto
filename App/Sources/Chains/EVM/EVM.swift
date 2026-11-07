@@ -245,7 +245,7 @@ public enum ABI {
     /// Word `i` of a return value as an address.
     public static func address(in data: Data, word i: Int) -> String? {
         let data = Data(data)   // a slice keeps its parent's indices
-        return data.count >= (i + 1) * 32 ? "0x" + data.subdata(in: (i * 32 + 12)..<((i + 1) * 32)).hex : nil
+        return (0..<data.count / 32).contains(i) ? "0x" + data.subdata(in: (i * 32 + 12)..<((i + 1) * 32)).hex : nil
     }
 
     /// A `bytes[]` argument whose offset sits at byte `at` of the arguments; nil when any part runs out of the data.
@@ -267,17 +267,24 @@ public enum ABI {
         return out
     }
 
-    /// Word `i` as a number, nil when it doesn't fit 64 bits.
+    /// Word `i` as a number, nil when it doesn't fit 64 bits. `i` is often read from someone's data (an offset / 32): it's
+    /// held to the words there before any arithmetic, since (i + 1) * 32 of a huge one would overflow and stop the app.
     public static func uint(in data: Data, word i: Int) -> UInt64? {
         let data = Data(data)   // a slice keeps its parent's indices
-        guard data.count >= (i + 1) * 32, data.subdata(in: (i * 32)..<(i * 32 + 24)).allSatisfy({ $0 == 0 }) else { return nil }
+        guard (0..<data.count / 32).contains(i), data.subdata(in: (i * 32)..<(i * 32 + 24)).allSatisfy({ $0 == 0 }) else { return nil }
         return data.subdata(in: (i * 32 + 24)..<((i + 1) * 32)).reduce(0) { $0 << 8 | UInt64($1) }
+    }
+
+    /// decimals()'s answer as a token can have it; nil when it didn't answer (a revert, a node down, an EOA's «0x») or
+    /// answered past 36 (no real token; 10^37 units overflow the amounts' Decimal). Never guessed.
+    public static func decimals(_ answer: Data?) -> Int? {
+        answer.flatMap { uint(in: $0, word: 0) }.flatMap { $0 <= 36 ? Int($0) : nil }
     }
 
     /// Word `i` as a Decimal (for 256-bit values such as Aave's ray rates).
     public static func decimal(in data: Data, word i: Int) -> Decimal? {
         let data = Data(data)   // a slice keeps its parent's indices
-        guard data.count >= (i + 1) * 32 else { return nil }
+        guard (0..<data.count / 32).contains(i) else { return nil }
         return data.subdata(in: (i * 32)..<((i + 1) * 32)).reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
     }
 }
@@ -344,11 +351,12 @@ public struct EVMRPC: Sendable {
                                          fallbacks: [URL(string: "https://robinhood.drpc.org")!], followsSettings: true)
     /// USDG (Global Dollar), Robinhood Chain's dollar, 6 decimals — docs.robinhood.com/chain/contracts.
     public static let robinhoodUSDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
-    /// mainnet.base.org rate-limits after a few calls and publicnode refuses receipts without a token;
-    /// drpc served calls, estimates and receipts in a burst test (2026-09-26).
-    /// Coinbase's own node takes over while drpc throttles (it limits too, so it isn't the first).
-    public static let base = EVMRPC(url: URL(string: "https://base.drpc.org")!, chainId: 8453,
-                                    fallbacks: [URL(string: "https://mainnet.base.org")!, URL(string: "https://base.gateway.tenderly.co")!],
+    /// Coinbase's own node first: base.drpc.org answers 429 «Public endpoint rate limit» to every call after a short
+    /// burst, so each read lost a second's retry on it. mainnet.base.org served calls, receipts, eth_simulateV1 and
+    /// estimates with an override and 120 calls in bursts of 30 without an error — it queues a burst instead (30 at once:
+    /// p50 5.5 s), one at a time ≈ 0.2 s (2026-11-05). Tenderly refuses eth_simulateV1 («rate limit exceeded»).
+    public static let base = EVMRPC(url: URL(string: "https://mainnet.base.org")!, chainId: 8453,
+                                    fallbacks: [URL(string: "https://base.gateway.tenderly.co")!, URL(string: "https://base.drpc.org")!],
                                     followsSettings: true)
     /// Circle's native USDC on Base (6 decimals).
     public static let baseUSDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
@@ -379,16 +387,19 @@ public struct EVMRPC: Sendable {
     /// Circle's native USDC on HyperEVM, 6 decimals: the one Relay delivers (its /chains, 2026-10-06).
     public static let hyperevmUSDC = "0xb88339cb7199b77e23db6e890353e22632ba630f"
 
-    /// Optimism (OP Mainnet), gas in ETH at ≈ 0.001 gwei plus its L1 data fee; drpc, then Optimism's own node (2026-10-06).
-    public static let optimism = EVMRPC(url: URL(string: "https://optimism.drpc.org")!, chainId: 10,
-                                        fallbacks: [URL(string: "https://mainnet.optimism.io")!], followsSettings: true)
+    /// Optimism (OP Mainnet), gas in ETH at ≈ 0.001 gwei plus its L1 data fee: Optimism's own node, then drpc, which
+    /// answered 429 to every call on 2026-11-05 (the official one served calls, receipts, eth_simulateV1, estimates with
+    /// an override and 120 calls in bursts of 30). publicnode refuses receipts («Archive requests require a personal token»).
+    public static let optimism = EVMRPC(url: URL(string: "https://mainnet.optimism.io")!, chainId: 10,
+                                        fallbacks: [URL(string: "https://optimism.drpc.org")!], followsSettings: true)
     /// Circle's native USDC on Optimism, the one Relay delivers.
     public static let optimismUSDC = "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
 
-    /// BNB Chain (BSC), gas in BNB at 0.05 gwei: drpc, then publicnode and BNB Chain's own seed node (each answered
-    /// chain id 56 and fees, 2026-10-08).
-    public static let bnb = EVMRPC(url: URL(string: "https://bsc.drpc.org")!, chainId: 56,
-                                   fallbacks: [URL(string: "https://bsc-rpc.publicnode.com")!, URL(string: "https://bsc-dataseed.bnbchain.org")!],
+    /// BNB Chain (BSC), gas in BNB at 0.05 gwei: BNB Chain's own seed node, then publicnode, then drpc, which answered 429
+    /// to every call on 2026-11-05 (the other two served calls, receipts, eth_simulateV1, estimates with an override and
+    /// 120 calls in bursts of 30).
+    public static let bnb = EVMRPC(url: URL(string: "https://bsc-dataseed.bnbchain.org")!, chainId: 56,
+                                   fallbacks: [URL(string: "https://bsc-rpc.publicnode.com")!, URL(string: "https://bsc.drpc.org")!],
                                    followsSettings: true)
     /// Binance-Peg USDC on BNB Chain, the one Relay delivers — 18 decimals, not 6 (its decimals(), 2026-10-08).
     public static let bnbUSDC = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
@@ -455,7 +466,14 @@ public struct EVMRPC: Sendable {
         return n
     }
 
-    public func balance(_ address: String) async throws -> UInt64 { try await quantity("eth_getBalance", [address, "latest"]) }
+    /// The coin at `address`, in wei. 2⁶⁴ wei is 18.45 coins: 20 ETH (0x1158e460913d00000) was «not a number» as UInt64.
+    public func balance(_ address: String) async throws -> UInt128 {
+        let answer = try await call("eth_getBalance", [address, "latest"])
+        guard let wei = Self.wei(answer) else { throw WalletError("EVM RPC eth_getBalance: not a number (\(String(String(describing: answer).prefix(60))))") }
+        return wei
+    }
+    /// A JSON-RPC quantity up to 128 bits; nil for anything else.
+    static func wei(_ answer: Any) -> UInt128? { (answer as? String).flatMap { $0.hasPrefix("0x") ? UInt128($0.dropFirst(2), radix: 16) : nil } }
     public func nonce(_ address: String) async throws -> UInt64 { try await quantity("eth_getTransactionCount", [address, "pending"]) }
 
     public func tokenBalance(_ token: String, owner: String) async throws -> UInt64 {
@@ -516,6 +534,9 @@ public struct EVMRPC: Sendable {
 }
 
 extension Decimal {
+    /// Wei as a Decimal: exact for any UInt128 (its mantissa is 128 bits; Decimal(exactly: UInt128.max) checked).
+    public init(_ value: UInt128) { self = Decimal(exactly: value)! }
+
     /// Rounded down to a whole number.
     public var whole: Decimal {
         var x = self, out = Decimal()
@@ -529,6 +550,9 @@ extension Decimal {
 /// logs (plus WETH9's Deposit/Withdrawal, which emit none) — a contract can log anything, so a token is shown by its address.
 public struct EVMSimulation: Equatable, Sendable {
     public static let native = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    /// EIP-7708 (Glamsterdam): the chain itself logs every coin move as a Transfer from SYSTEM_ADDRESS, and geth turns
+    /// traceTransfers off once it's live. Read as `native`; a node that sends both is counted once, by 0xeeee.
+    static let system = "0xfffffffffffffffffffffffffffffffffffffffe"
     /// WETH9 on Ethereum and Base; Arbitrum's WETH logs a Transfer on wrap.
     /// WETH on Ethereum and the OP chains, WHYPE on HyperEVM, WBNB on BNB Chain (the same WETH9 code).
     static let weth9: Set<String> = ["0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "0x4200000000000000000000000000000000000006",
@@ -577,8 +601,14 @@ public struct EVMSimulation: Equatable, Sendable {
             return
         }
         let me = owner.lowercased().dropFirst(2)
-        for log in calls.flatMap({ $0["logs"] as? [[String: Any]] ?? [] }) {
-            guard let asset = (log["address"] as? String)?.lowercased(), let topics = log["topics"] as? [String], let event = topics.first else { continue }
+        let logs = calls.flatMap { $0["logs"] as? [[String: Any]] ?? [] }
+        let traced = logs.contains { ($0["address"] as? String)?.lowercased() == Self.native }
+        for log in logs {
+            guard var asset = (log["address"] as? String)?.lowercased(), let topics = log["topics"] as? [String], let event = topics.first else { continue }
+            if asset == Self.system {
+                if traced { continue }
+                asset = Self.native
+            }
             if let g = Self.grant(asset: asset, topics: topics.map { $0.lowercased() }, data: Data(hex: log["data"] as? String ?? "0x") ?? Data(), me: String(me)) {
                 grants.append(g)
             }
@@ -601,6 +631,8 @@ public struct EVMSimulation: Equatable, Sendable {
     static func grant(asset: String, topics: [String], data: Data, me: String) -> Grant? {
         guard let e = grantEvents.first(where: { $0.topic == topics.first }), topics.count > max(e.owner, e.to), topics[e.owner].hasSuffix(me) else { return nil }
         let to = "0x" + topics[e.to].suffix(40)
+        // Nobody: the zero address clears an approval (older ERC-721s log Approval(owner, 0, id) on every transfer).
+        guard to != "0x" + String(repeating: "0", count: 40) else { return nil }
         // An ERC-721 approve carries its token id as a fourth topic: one NFT, no amount in the data.
         if e.kind == "approve", topics.count == 4 { return Grant(kind: "nft", asset: asset, to: to, unlimited: false) }
         if e.kind == "ownership" { return Grant(kind: e.kind, asset: asset, to: to, unlimited: true) }
@@ -636,9 +668,12 @@ public enum EVMCall: Equatable, Sendable {
     case permit2Approve(token: String, spender: String, amount: Data, expiration: UInt64)
     /// The Universal Router's v4 swap in exactly this app's shape (UniswapV4.decodeExecute): it pays the caller.
     case v4Swap(UniswapV4.Swap)
+    /// KyberSwap's router swap (KyberSwap.decode): who gets what comes out, and who else takes a fee.
+    case kyberSwap(KyberSwap.Swap)
     /// ERC-721 or ERC-1155 safeTransferFrom / safeBatchTransferFrom: NFTs (or game items) from `from` to `to`.
     case nftTransfer(from: String, to: String)
-    /// Aave's approveDelegation or Morpho Blue's setAuthorization: `to` may borrow against, or manage, this wallet's positions.
+    /// Aave's approveDelegation, Morpho Blue's setAuthorization, Compound III's allow, ERC-6909's setOperator: `to` may
+    /// borrow against or manage this wallet's positions, or move its tokens in that contract.
     case delegation(to: String, granted: Bool)
     /// WETH9.deposit(): the coins sent with it come back to the sender as the wrapped token.
     case wrap
@@ -673,7 +708,8 @@ public enum EVMCall: Equatable, Sendable {
         }
         switch selector {
         case "095ea7b3": if let s = address(0), let a = word(1) { return .approve(spender: s, amount: a) }
-        case "39509351": if let s = address(0), let a = word(1) { return .increaseAllowance(spender: s, amount: a) }
+        // increaseAllowance, and increaseApproval of older tokens (WBTC, LINK, OpenZeppelin before 2.0).
+        case "39509351", "d73dd623": if let s = address(0), let a = word(1) { return .increaseAllowance(spender: s, amount: a) }
         // Tempo's transferWithMemo pays like transfer: the same recipient check applies.
         case "a9059cbb", "95777d59": if let t = address(0), let a = word(1) { return .transfer(to: t, amount: a) }
         case "23b872dd": if let f = address(0), let t = address(1), let a = word(2) { return .transferFrom(from: f, to: t, amount: a) }
@@ -707,9 +743,11 @@ public enum EVMCall: Equatable, Sendable {
         case "87517c45": if let t = address(0), let s = address(1), let a = word(2), let e = ABI.uint(in: Data(args), word: 3) { return .permit2Approve(token: t, spender: s, amount: a, expiration: e) }
         // Any other Universal Router call stays a plain contract call (a site's own swap), read as before.
         case "3593564c": if let swap = UniswapV4.decodeExecute(data) { return .v4Swap(swap) }
+        case "e21fd0e9": if let swap = KyberSwap.decode(data) { return .kyberSwap(swap) }
         case "42842e0e", "b88d4fde", "f242432a", "2eb2c2d6": if let f = address(0), let t = address(1) { return .nftTransfer(from: f, to: t) }
         case "c04a8a10": if let d = address(0), let a = word(1) { return .delegation(to: d, granted: a.contains { $0 != 0 }) }
-        case "eecea000": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
+        // Morpho Blue's setAuthorization, Compound III's allow and ERC-6909's setOperator: (address, bool).
+        case "eecea000", "110496e5", "558a7297": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
         case "d0e30db0": return .wrap
         case "2e1a7d4d": if let a = word(0) { return .unwrap(amount: a) }
         case "8e0250ee", "779b432d": if let b = CCTP.readBurn(data) { return .cctpBurn(recipient: b.recipient, domain: b.domain, amount: b.amount) }
@@ -762,14 +800,18 @@ public enum EVMCall: Equatable, Sendable {
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:
     /// «send 0.185357 USDC to 0x060b…9Ff0 on Tempo». Read from the calldata by the signer itself, never from the app's
     /// description of it; a token or contract it doesn't know is named by its address.
-    public func summary(chainId: UInt64, to: String, value: UInt64) -> String {
+    public func summary(chainId: UInt64, to: String, value: UInt64) -> String { summary(chainId: chainId, to: to, wei: ABI.uint(value)) }
+
+    /// `wei` as a 32-byte word: a multisig's move carries a uint256, past the 18.4 coins a UInt64 holds.
+    private func summary(chainId: UInt64, to: String, wei: Data) -> String {
+        let paid = wei.contains { $0 != 0 }
         let net = "on " + (EVMRPC.names[chainId] ?? "network \(chainId)")
         func short(_ a: String) -> String { a.count > 12 ? "\(a.prefix(6))…\(a.suffix(4))" : a }
         func units(_ word: Data, _ decimals: Int16) -> String {
             let whole = word.reduce(Decimal(0)) { $0 * 256 + Decimal($1) }
             return NSDecimalNumber(decimal: whole / pow(10, Int(decimals))).stringValue
         }
-        let coins = "\(units(ABI.uint(value), 18)) \(EVMRPC.coin(chainId))"
+        let coins = "\(units(wei, 18)) \(EVMRPC.coin(chainId))"
         if case .plain = self { return "send \(coins) to \(short(to)) \(net)" }
         // A token the signer can't name shows its raw units: an amount on the prompt, never none.
         func amount(_ word: Data, of token: String) -> String {
@@ -778,7 +820,7 @@ public enum EVMCall: Equatable, Sendable {
         // Coins that go into a wrap or a native swap are its input, not a payment: said once, in the sentence.
         switch self {
         case .wrap: return "wrap \(coins) into W\(EVMRPC.coin(chainId)) \(net)"
-        case .v4Swap where value > 0: return "swap \(coins) on Uniswap v4 \(net), paying this wallet"
+        case .v4Swap where paid: return "swap \(coins) on Uniswap v4 \(net), paying this wallet"
         default: break
         }
         let what = switch self {
@@ -787,6 +829,8 @@ public enum EVMCall: Equatable, Sendable {
         case .increaseAllowance(let spender, let a): "let \(short(spender)) spend \(amount(a, of: to)) more \(net)"
         case .swap: "swap on Uniswap \(net), paying this wallet"
         case .v4Swap: "swap on Uniswap v4 \(net), paying this wallet"
+        case .kyberSwap(let k): "swap \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), of: k.srcToken)) on KyberSwap \(net) for at least "
+            + "\(amount((try? ABI.word(k.minReturn)) ?? Data(count: 32), of: k.dstToken)), paying this wallet"
         case .permit2Approve(let token, let spender, let a, _): "let \(short(spender)) spend exactly \(amount(a, of: token)) through Permit2 \(net)"
         case .unwrap(let a): "unwrap \(units(a, 18)) W\(EVMRPC.coin(chainId)) of \(short(to)) into \(EVMRPC.coin(chainId)) \(net)"
         case .vault(_, let owner): "\(owner == nil ? "deposit into" : "withdraw from") the vault \(short(to)) \(net)"
@@ -800,12 +844,12 @@ public enum EVMCall: Equatable, Sendable {
         case .repay(let asset, let a, _): a.allSatisfy({ $0 == 0xff }) ? "repay all of this wallet's \(EVMRPC.dollars[asset.lowercased()] ?? short(asset)) debt to \(short(to)) \(net)"
             : "repay \(amount(a, of: asset)) of this wallet's debt to \(short(to)) \(net)"
         case .multisigExec(let target, let v, let d, _):
-            "carry out the multisig \(short(to))'s signed move: " + EVMCall.decode(d).summary(chainId: chainId, to: target, value: ABI.uint(in: v, word: 0) ?? .max)
+            "carry out the multisig \(short(to))'s signed move: " + EVMCall.decode(d).summary(chainId: chainId, to: target, wei: v)
         case .contract where to.lowercased() == Tempo.feeManager: "pay Tempo's fees in USDC from now on"
         case .contract where to.lowercased() == Tempo.exchange: "swap dollars on Tempo's exchange, paying this wallet"
         default: "call the contract \(short(to)) \(net)"
         }
-        return value > 0 ? what + ", paying \(coins)" : what
+        return paid ? what + ", paying \(coins)" : what
     }
 
     /// An allowance none of ihatecrypto's own approvals reaches: ≥ 2⁹⁶ units (79 billion tokens of 18 decimals). Drainers
@@ -828,6 +872,7 @@ public enum EVMCall: Equatable, Sendable {
         if let v2 = UniswapV2.on(chainId) { s.append(v2.router) }
         if chainId == EVMRPC.robinhood.chainId { s.append(UniswapV3.robinhoodRouter) }
         if let v4 = UniswapV4.on(chainId) { s += [v4.router, UniswapV4.permit2] }
+        if KyberSwap.chains[chainId] != nil { s.append(KyberSwap.router) }
         return Set(s.map { $0.lowercased() })
     }
 
@@ -845,7 +890,7 @@ public enum EVMCall: Equatable, Sendable {
         // A protocol's call read by its selector alone (a swap, a vault, a claim…) is that protocol's only at its own
         // contract: at another, the selector is the contract's word for whatever it does — asked about like an unread call.
         let byProtocol = switch self {
-        case .swap, .v4Swap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
+        case .swap, .v4Swap, .kyberSwap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
         default: false
         }
         if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
@@ -863,6 +908,10 @@ public enum EVMCall: Equatable, Sendable {
     /// naming this wallet as the depositor (depositNative, depositErc20 with or without an amount), and a Safe's
     /// execTransaction must be a plain payout (Safe.execRefusal) — the 2026-10-24 review.
     public static func targetRefusal(to: String, data: Data, sender: String) -> String? {
+        // KyberSwap's router gets only the swap the signer reads (an exact approve to it goes to the token, not here).
+        if to.lowercased() == KyberSwap.router, KyberSwap.decode(data) == nil {
+            return "A call to KyberSwap's router that isn't the swap ihatecrypto reads. ihatecrypto only swaps there."
+        }
         if to.lowercased() == RelayMulticallPermit.depository {
             let selector = data.prefix(4).hex
             guard relayDeposits.contains(selector) else { return "A call to Relay's depository that isn't a deposit. ihatecrypto only deposits there." }
@@ -939,6 +988,7 @@ public enum EVMCall: Equatable, Sendable {
             return "The lending pool would credit \(beneficiary), not this wallet."
         }
         if case .v4Swap(let swap) = self, let why = UniswapV4.refusal(swap, chainId: chainId) { return why }
+        if case .kyberSwap(let swap) = self, let why = KyberSwap.refusal(swap, sender: sender) { return why }
         if case .multisigExec(_, _, _, let operation) = self, operation != 0 {
             return "A multisig move by DELEGATECALL runs another contract's code as the multisig. Refused."
         }
@@ -964,7 +1014,7 @@ public enum EVMCall: Equatable, Sendable {
         case .setApprovalForAll(_, true):
             "Rights to all your NFTs in this contract (setApprovalForAll) — an NFT drainer trick. Refused."
         case .delegation(let to, true):
-            "Lets \(to) borrow against or manage your lending positions (Aave credit delegation, Morpho authorization). Refused."
+            "Lets \(to) manage your positions or move your tokens in this contract (credit delegation, an authorization, an operator). Refused."
         case .permit:
             "A permit call grants approval to spend your tokens. Refused."
         case .transferFrom(let from, _, _) where from.lowercased() == sender.lowercased():

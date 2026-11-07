@@ -311,6 +311,71 @@ private struct StubModel: LLMClient {
     #expect(Guardian.step(&s, size: -1, stop: 2060, mark: 1900) == .stopTo(1938))         // short trails from below
 }
 
+/// Breakeven is done when the exchange shows it, never on the guardian's say-so before the try: a failed move is asked
+/// for again, not while the price is under breakeven, and a stop moved by hand counts.
+@Test func guardianAsksForBreakevenUntilTheExchangeHasIt() {
+    var r = ExitRules(openedSize: d("0.012"), entry: 2000, long: true, breakevenAfterPartial: true, trailingPct: nil)
+    #expect(Guardian.step(&r, size: d("0.006"), stop: 1940, mark: 2020) == .stopToBreakeven)
+    #expect(!r.movedToBreakeven)                                                              // not until it's on the exchange
+    #expect(Guardian.step(&r, size: d("0.006"), stop: 1940, mark: 2020) == .stopToBreakeven) // the move failed: asked again
+    #expect(Guardian.step(&r, size: d("0.006"), stop: 1940, mark: 2003) == nil)             // under 2003.8 it would fire at once
+    #expect(Guardian.step(&r, size: d("0.006"), stop: 1940, mark: 1990) == nil)
+    #expect(Guardian.step(&r, size: d("0.006"), stop: d("2003.8"), mark: 2020) == nil && r.movedToBreakeven)
+    var s = ExitRules(openedSize: -1, entry: 2000, long: false, breakevenAfterPartial: true, trailingPct: nil)
+    #expect(Guardian.step(&s, size: d("-0.5"), stop: 1999, mark: 1980) == nil && s.movedToBreakeven) // moved by hand earlier
+    var t = ExitRules(openedSize: -1, entry: 2000, long: false, breakevenAfterPartial: true, trailingPct: nil)
+    #expect(Guardian.step(&t, size: d("-0.5"), stop: 2060, mark: 1998) == nil)              // a short: over 1996.2 it would fire
+    #expect(Guardian.step(&t, size: d("-0.5"), stop: 2060, mark: 1990) == .stopToBreakeven && !t.movedToBreakeven)
+    #expect(Guardian.breakeven(entry: 2000, long: true) == d("2003.8") && Guardian.breakeven(entry: 2000, long: false) == d("1996.2"))
+    // Breakeven waiting under its price still lets the trailing stop tighten.
+    var u = ExitRules(openedSize: d("0.012"), entry: 2000, long: true, breakevenAfterPartial: true, trailingPct: 2)
+    #expect(Guardian.step(&u, size: d("0.012"), stop: 1900, mark: 2040) == .stopTo(d("1999.2")))
+    #expect(Guardian.step(&u, size: d("0.006"), stop: 1900, mark: 2003) == .stopTo(d("1999.2")) && !u.movedToBreakeven)
+    #expect([1, 2, 4, 5, 9].map(Guardian.retryDelay) == [60, 120, 480, 900, 900])
+}
+
+/// A failed stop move is said once, then tried again quietly after a growing pause; one that lands ends the series.
+@Test func stopMoveTriesSayTheFirstFailureOnly() throws {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    var r = Guardian.afterStopTry(.init(), ok: false, now: now)
+    #expect(r.tell && r.tries == .init(failures: 1, next: now + 60))
+    r = Guardian.afterStopTry(try #require(r.tries), ok: false, now: now)
+    #expect(!r.tell && r.tries == .init(failures: 2, next: now + 120))
+    r = Guardian.afterStopTry(try #require(r.tries), ok: true, now: now)
+    #expect(!r.tell && r.tries == nil)
+}
+
+/// The half at 1R after a limit fills: the pending flag goes only once it's on; a failure goes again in 1, then 2
+/// minutes, and the third one, or a declined signature, ends it. The chat hears the first failure and the end.
+@Test func partialTakeTriesThreeTimesAndSaysTheFirstAndTheLast() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    // Waiting for the full fill: the flag stays, nothing said, no failure counted.
+    var r = Guardian.afterPartialTry(.init(), placed: false, now: now)
+    #expect(r.pending && !r.tell && r.tries == .init())
+    r = Guardian.afterPartialTry(.init(), placed: nil, now: now)
+    #expect(r.pending && r.tell && r.tries == .init(failures: 1, next: now + 60))
+    // Waiting in between keeps the count: reads that lag and fail by turns still come to an end.
+    let between = Guardian.afterPartialTry(r.tries, placed: false, now: now)
+    #expect(between.pending && !between.tell && between.tries.failures == 1)
+    r = Guardian.afterPartialTry(between.tries, placed: nil, now: now)
+    #expect(r.pending && !r.tell && r.tries == .init(failures: 2, next: now + 120))
+    r = Guardian.afterPartialTry(r.tries, placed: nil, now: now)
+    #expect(!r.pending && r.tell)
+    // A declined signature ends it at once.
+    r = Guardian.afterPartialTry(.init(), placed: nil, refused: true, now: now)
+    #expect(!r.pending && r.tell)
+    // On after a failure: the flag goes, nothing more said here (the executor's own line tells it).
+    r = Guardian.afterPartialTry(.init(failures: 1, next: now), placed: true, now: now)
+    #expect(!r.pending && !r.tell)
+}
+
+/// A limit «in parts» is what leaves the half at 1R to the guardian (partialOrderPending), in both languages.
+@Test(arguments: ["long ETH risk $10 stop 3% limit 1960 take in parts", "лонг ETH риск $10 стоп 3% лимит 1960 частями"])
+func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
+    let i = try #require(IntentParser.apply(phrase, to: TradeIntent(), markets: ["ETH"]))
+    #expect(i.entryPx == 1960 && i.partialTake == true && i.side == .long)
+}
+
 @Test func spotCommandsUseVerifiedMints() {
     #expect(WalletCommand.parse("купи SOL на 2 USDC") == .buy(SpotAsset.all[0], usdc: 2))
     #expect(WalletCommand.parse("купи биткоин на $5") == .buy(SpotAsset.all[1], usdc: 5))

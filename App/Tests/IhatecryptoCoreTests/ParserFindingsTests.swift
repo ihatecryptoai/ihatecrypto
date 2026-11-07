@@ -54,6 +54,47 @@ private let sol = SpotAsset.all[0]
     #expect(IntentParser.apply("short ETH risk $5", to: TradeIntent(), markets: m)?.side == .short)
 }
 
+@Test func aNamedCountIsNeverAll() {
+    let c = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", m = "B5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6"
+    let m7 = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"   // a mint that starts with a digit
+    // A bare count is the count, English and Russian: without «tokens» the sale was all of it.
+    #expect(WalletCommand.parse("sell 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 1,5 \(c)") == .sellStock(symbol: c, amount: d("1.5")))
+    #expect(WalletCommand.parse("sell 1,000 \(c)") == .sellStock(symbol: c, amount: 1000))
+    #expect(WalletCommand.parse("sell .5 \(c)") == .sellStock(symbol: c, amount: d("0.5")))
+    #expect(WalletCommand.parse("sell my 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("dump 100 \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("sell 1500 \(m)") == .sell(.byMint(m), amount: 1500))
+    #expect(WalletCommand.parse("продай 1500 \(m)") == .sell(.byMint(m), amount: 1500))
+    #expect(WalletCommand.parse("sell 3 \(m7)") == .sell(.byMint(m7), amount: 3))
+    #expect(WalletCommand.parse("продай 2 теслы") == .sellStock(symbol: "TSLA", amount: 2))
+    // The forms the chat writes keep reading the same.
+    #expect(WalletCommand.parse("sell 100 tokens \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("продай 100 штук \(c)") == .sellStock(symbol: c, amount: 100))
+    #expect(WalletCommand.parse("sell 1500 tokens \(m)") == .sell(.byMint(m), amount: 1500))
+    // A number or a share it can't place: refused, never «all».
+    for t in ["sell \(c) 100", "sell 50% of \(c)", "продай половину \(c)", "sell half of \(m)", "sell 1k \(c)", "продай \(m) 3",
+              "sell \(m7) 3", "sell \(c) for 10 USDC", "sell $10 of \(c)",
+              // Dollars after a space, numbers it would read in part, percents and shares in words, numbers in words.
+              "sell 100 $ of \(c)", "продай 100 $ \(c)", "sell 100 $ worth of \(m)", "sell 100 $ of tesla stock",
+              "продай 1 000 \(c)", "продай 1\u{a0}000 \(c)", "sell 1 000 tokens \(c)", "sell 1 500 TSLA stock",
+              "продай 5 тысяч \(c)", "sell 1 million \(c)", "продай 2 млн \(m)", "sell 1/2 of \(c)",
+              "sell 50 percent of \(c)", "продай 50 процентов \(c)", "продай 50 процентов теслы",
+              "sell a quarter of \(c)", "sell a third of \(m)", "продай треть \(c)", "продай четверть \(m)", "продай часть \(c)",
+              "sell ten \(c)", "продай десять \(c)"] {
+        #expect(WalletCommand.parse(t) == nil, "\(t)")
+    }
+    // «All» said, or no number at all: still all.
+    #expect(WalletCommand.parse("sell \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("sell all \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("продай весь \(c)") == .sellStock(symbol: c, amount: nil))
+    #expect(WalletCommand.parse("sell all \(m)") == .sell(.byMint(m), amount: nil))
+    #expect(WalletCommand.parse("sell tokens \(m)") == .sell(.byMint(m), amount: nil))
+    #expect(WalletCommand.parse("sell \(m7)") == .sell(.byMint(m7), amount: nil))
+    #expect(WalletCommand.parse("sell TSLA stock") == .sellStock(symbol: "TSLA", amount: nil))
+}
+
 @Test func hiddenAmountsAreDotsButPercentagesStay() {
     #expect(Fmt.dots("$1,234.56") == "•••")
     #expect(Fmt.dots("−$1.20 · +4.2%") == "••• · +4.2%")
@@ -175,6 +216,68 @@ private let sol = SpotAsset.all[0]
     #expect(s.next == start.addingTimeInterval(86_400))
 }
 
+/// A recurring buy's period is read whole — weeks and months with their count, a month as 30 days like Jupiter's DCA —
+/// and what it doesn't know is refused, never a buy every week.
+@Test func recurringBuyPeriods() {
+    for (text, days) in [
+        ("buy SOL for 10 USDC every month", 30), ("buy SOL for 10 USDC each month", 30), ("buy SOL for 10 USDC every 1 month", 30),
+        ("buy SOL for 10 USDC monthly", 30), ("buy SOL for 10 USDC every 2 weeks", 14), ("buy SOL for 10 USDC every two weeks", 14),
+        ("buy SOL for 10 USDC every other week", 14), ("buy SOL for 10 USDC biweekly", 14), ("buy SOL for 10 USDC every 2 months", 60),
+        ("buy SOL for 10 USDC every other month", 60), ("buy SOL for 10 USDC every six months", 180), ("buy SOL for 10 USDC every quarter", 90),
+        ("buy SOL for 10 USDC quarterly", 90), ("buy SOL for 10 USDC every week for 2 months", 7), ("buy SOL for 10 USDC every week", 7),
+        ("buy SOL for 10 USDC every day", 1), ("buy SOL for 10 USDC every 3 days", 3), ("buy SOL for 10 USDC every monday", 7),
+        ("покупай SOL на 10 USDC каждые 2 недели", 14), ("покупай SOL на 10 USDC каждые две недели", 14),
+        ("покупай SOL на 10 USDC раз в 2 недели", 14), ("покупай SOL на 10 USDC каждую вторую неделю", 14),
+        ("покупай SOL на 10 USDC каждый месяц", 30), ("покупай SOL на 10 USDC раз в месяц", 30), ("покупай SOL на 10 USDC ежемесячно", 30),
+        ("купи SOL на 10 USDC ежемесячно", 30), ("купи SOL на 10 USDC еженедельно", 7), ("покупай SOL на 10 USDC каждые 2 месяца", 60),
+        ("купи ETH на 10 USDC раз в два месяца", 60), ("покупай SOL на 10 USDC раз в три месяца", 90),
+        ("покупай SOL на 10 USDC каждый второй месяц", 60), ("покупай SOL на 10 USDC раз в полгода", 180),
+        ("покупай SOL на 10 USDC каждые 3 дня", 3), ("покупай SOL на 10 USDC каждый день", 1), ("покупай SOL на 10 USDC каждую неделю", 7),
+        ("покупай SOL на 10 USDC каждую неделю в течение 2 месяцев", 7), ("покупай SOL на 10 USDC каждый понедельник", 7),
+        ("покупай SOL на 10 USDC частями", 7),
+        // The window's own Russian labels, a day only as the period, years and half-years, «каждое …», «once a …».
+        ("покупай SOL на 10 USDC раз в 2 нед.", 14), ("покупай SOL на 10 USDC раз в 3 мес.", 90), ("покупай SOL на 10 USDC раз в день", 1),
+        ("покупай SOL на 10 USDC каждые сутки", 1), ("покупай SOL на 10 USDC в первый день каждого месяца", 30),
+        ("покупай SOL на 10 USDC каждый месяц в первый день", 30), ("покупай SOL на 10 USDC каждое 1-е число", 30),
+        ("buy SOL for 10 USDC on the first day of every month", 30), ("buy SOL for 10 USDC every half year", 180),
+        ("buy SOL for 10 USDC semi-annually", 180), ("buy SOL for 10 USDC every year", 365), ("buy SOL for 10 USDC every 2 years", 730),
+        ("покупай SOL на 10 USDC раз в 2 года", 730), ("купи SOL на 10 USDC каждое воскресенье", 7), ("buy SOL for 10 USDC once a month", 30),
+        ("buy SOL for 10 USDC once a day", 1), ("покупай SOL на $10 раз в месяц", 30), ("покупай SOL на $10 раз в неделю", 7),
+        ("покупай SOL на 10 USDC каждый месяц в день зарплаты", 30), ("покупай SOL на 10 USDC раз в месяц в день зарплаты", 30),
+        ("buy SOL for 10 USDC every week, starting in a day", 7), ("покупай SOL на 10 USDC каждый рабочий день", 1),
+        ("покупай SOL на 10 USDC каждый божий день", 1), ("buy SOL for 10 USDC per day", 1), ("buy SOL for 10 USDC annually", 365),
+    ] {
+        let asset = text.contains("ETH") ? SpotAsset.all[2] : sol
+        #expect(WalletCommand.parse(text) == .schedule(asset, usdc: 10, days: days), "\(text)")
+    }
+    // Hours, minutes and «every 0 …» are refused: never a week, never a one-off buy.
+    for text in ["buy SOL for 10 USDC every 4 hours", "buy SOL for 10 USDC every hour", "buy SOL for 10 USDC hourly",
+                 "buy SOL for 10 USDC every 30 minutes", "покупай SOL на 10 USDC каждый час", "покупай SOL на 10 USDC каждые 4 часа",
+                 "buy SOL for 10 USDC every 0 weeks", "покупай SOL на 10 USDC каждые 0 месяцев", "buy SOL for 10 USDC every 12h",
+                 "buy SOL for 10 USDC every 2 h", "buy SOL for 10 USDC every 30 seconds", "buy SOL for 10 USDC twice a week",
+                 "покупай SOL на 10 USDC 2 раза в день", "покупай SOL на 10 USDC два раза в неделю",
+                 // A count past ten years is refused, not an overflow.
+                 "buy SOL for 10 USDC every 999999999999999999 months", "buy SOL for 10 USDC every 400000000000000 days",
+                 "buy SOL for 10 USDC every 11 years", "buy SOL for 10 USDC 3 times a week"] {
+        #expect(WalletCommand.parse(text) == nil, "\(text)")
+    }
+    // Stopping is never a new schedule, and a word that only sounds periodic doesn't make one.
+    for text in ["отмени ежемесячные покупки SOL на 10 USDC", "останови еженедельную покупку SOL на 10 USDC", "stop monthly buys"] {
+        #expect(WalletCommand.parse(text) == .stopSchedules, "\(text)")
+    }
+    for text in ["купи SOL на 10 USDC, ежедневный лимит 50 USDC", "buy SOL for 10 USDC, what's the annual return",
+                 "купи SOL на 10 USDC на каждом кошельке", "buy SOL for 10 USDC once a dip comes"] {
+        if case .schedule? = WalletCommand.parse(text) { Issue.record("\(text) became a schedule") }
+    }
+    // The card's command is the summary: it reads back as the same schedule, its period in weeks or months when whole.
+    for d in [1, 2, 3, 7, 10, 14, 21, 28, 30, 45, 60, 90, 180, 210, 365] {
+        let c = WalletCommand.schedule(sol, usdc: 10, days: d)
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+    #expect(WalletCommand.schedule(sol, usdc: 10, days: 14).summary == "buy SOL for 10 USDC every 2 weeks")
+    #expect(WalletCommand.schedule(sol, usdc: 10, days: 30).summary == "buy SOL for 10 USDC every month")
+}
+
 @Test func aBareAmountDoesNotSwitchTheLanguage() {   // R9
     #expect(ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "1 sol"]))
     #expect(ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "10 usdc"]))
@@ -182,4 +285,21 @@ private let sol = SpotAsset.all[0]
     #expect(ChatLanguage.auto.name(recentUserMessages: ["застейкай сол", "$5"]) == "Russian")
     #expect(!ChatLanguage.auto.isRussian(recentUserMessages: ["deposit USDC to jupiter", "1 sol"]))
     #expect(!ChatLanguage.auto.isRussian(recentUserMessages: ["положи USDC в jupiter", "buy 5 SOL"]))
+}
+
+/// «Продай 2 акции теслы» sells 2: the form the model writes has a place for the count, and no count is all of it.
+@Test func aStockSaleKeepsItsCount() {
+    #expect(ChatRouter.forms.contains("sell [N] <TICKER> stock"))
+    #expect(WalletCommand.parse("sell 2 TSLA stock") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("sell 0.5 SPCX stock") == .sellStock(symbol: "SPCX", amount: d("0.5")))
+    #expect(WalletCommand.parse("sell 2 Tesla shares") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("продай 2 акции теслы") == .sellStock(symbol: "TSLA", amount: 2))
+    #expect(WalletCommand.parse("продай 0,5 акции SpaceX") == .sellStock(symbol: "SPCX", amount: d("0.5")))
+    #expect(WalletCommand.parse("sell TSLA stock") == .sellStock(symbol: "TSLA", amount: nil))
+    #expect(WalletCommand.parse("продай все акции теслы") == .sellStock(symbol: "TSLA", amount: nil))
+    // A sale in dollars has no form: never read as that many tokens, which the cap at what's held made all of them.
+    for t in ["sell $50 of TSLA stock", "sell $50 worth of TSLA stock", "sell 50 worth of Tesla shares", "продай акции теслы на $50",
+              "продай на 50 долларов акций теслы", "sell 100 worth of 0x742d35Cc6634C0532925a3b844Bc454e4438f44e"] {
+        #expect(WalletCommand.parse(t) == nil, "\(t)")
+    }
 }

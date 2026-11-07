@@ -1,4 +1,4 @@
-import EVMChain
+@testable import EVMChain
 import Foundation
 import Testing
 @testable import TradeExecution
@@ -172,6 +172,22 @@ import WalletCore
     let reverted = try EVMSimulation([["calls": [["status": "0x0", "logs": [], "error": ["message": "execution reverted: ERC20: transfer amount exceeds balance"]]]]], owner: me)
     #expect(reverted.revert == "execution reverted: ERC20: transfer amount exceeds balance")
     #expect(throws: (any Error).self) { try EVMSimulation(["nope"], owner: me) }
+}
+
+/// EIP-7708 (Glamsterdam): the coin's moves are Transfer logs from SYSTEM_ADDRESS and geth's traceTransfers is off, so
+/// they're the coin, not a token without decimals(); a node that still traces too is counted once.
+@Test func simulationReadsEIP7708CoinLogsAsTheCoin() throws {
+    let me = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", pad = "0x000000000000000000000000"
+    let t = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    let other = pad + "1111111111111111111111111111111111111111", mine = pad + me.dropFirst(2)
+    func log(_ address: String, _ from: String, _ to: String, _ wei: UInt64) -> [String: Any] {
+        ["address": address, "topics": [t, from, to], "data": "0x" + ABI.uint(wei).hex]
+    }
+    let system = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
+    let after = try EVMSimulation([["calls": [["status": "0x1", "logs": [log(system, mine, other, 3_000), log(system, other, mine, 500)]]]]], owner: me)
+    #expect(after.changes == [EVMSimulation.native: -2_500])
+    let both = try EVMSimulation([["calls": [["status": "0x1", "logs": [log(system, mine, other, 3_000), log(EVMSimulation.native, mine, other, 3_000)]]]]], owner: me)
+    #expect(both.changes == [EVMSimulation.native: -3_000])
 }
 
 @Test func bigTokenAmountsAndUniswapPaths() throws {
@@ -398,6 +414,43 @@ import WalletCore
     #expect(!login.prompt.contains("\u{202E}") && login.prompt.split(separator: "\n").count == 4)
     #expect(login.prompt.split(separator: "\n")[1].hasPrefix("ihatecrypto can't tell what this signature allows"))
     #expect(login.prompt.hasPrefix("sign Login for «Examplemoc.evil»"))
+    // A value cut to fit ends in «…», so the prompt never passes off part of it as the whole.
+    let long = try typed("Example", "Login", [("contents", "string", "\"\(String(repeating: "a", count: 100))\"")])
+    #expect(long.prompt.split(separator: "\n").last == "contents: \(String(repeating: "a", count: 70))…")
+    #expect(login.prompt.split(separator: "\n").last == "nonce: 1")
+}
+
+// The Touch ID prompt for a site's text (personal_sign, Solana signMessage) shows 160 characters; a longer text says
+// its whole length on our own first line, before any of the site's text, and ends in «…» where it was cut.
+@Test func textPromptSaysItWasCut() {
+    let fits = String(repeating: "a", count: 160)
+    #expect(PersonalMessage.prompt(fits) == "sign text for a site:\n" + fits)
+    let over = PersonalMessage.prompt(fits + "b")
+    #expect(over == "sign text for a site (161 characters, the first 160 shown):\n" + fits + "…")
+
+    let siwe = """
+    app.example.com wants you to sign in with your Ethereum account:
+    0x14dC79964da2C08b23698B3D3cc7Ca32193d9955
+
+    I accept the Terms of Service: https://app.example.com/tos and confirm this sign-in will not trigger a transaction.
+
+    URI: https://app.example.com/login
+    Version: 1
+    Chain ID: 1
+    Nonce: 32891756
+    Issued At: 2026-11-02T10:00:00Z
+    """
+    let prompt = PersonalMessage.prompt(siwe)
+    #expect(prompt.hasPrefix("sign text for a site (\(siwe.count) characters, the first 160 shown):\n"))
+    #expect(prompt.hasSuffix("…") && !prompt.contains("URI:"))
+
+    // Characters as a person counts them: a family emoji is one, not its 5 scalars or 8 UTF-16 units.
+    let family = String(repeating: "👨‍👩‍👧", count: 200)
+    #expect(PersonalMessage.prompt(family).hasPrefix("sign text for a site (200 characters, the first 160 shown):\n"))
+
+    // A site's right-to-left override lands after our line break: our line comes first and whole, a bidi paragraph of its own.
+    let rtl = PersonalMessage.prompt("\u{202E}" + String(repeating: "x", count: 200))
+    #expect(rtl.split(separator: "\n").first == "sign text for a site (201 characters, the first 160 shown):")
 }
 
 // 54.56 AI of 18 decimals is past 64 bits: the quote and the swap carry it as a whole 256-bit word.
@@ -478,6 +531,42 @@ import WalletCore
     #expect(stop.localizedDescription.contains("Jupiter Lend has no rent") && stop.localizedDescription.hasSuffix("Nothing was signed."))
     #expect(Executor.kaminoRent(sol: rent, solPrice: sol, depositUSD: 50, accepted: 0) == nil)
     #expect(Executor.kaminoRent(sol: rent, solPrice: sol, depositUSD: 3, accepted: stop.lost * Decimal(string: "1.25")! + Decimal(string: "0.05")!) == nil)
+}
+
+/// A swap that moves the price past 2% stops before anything is signed and asks (2026-10-24: someone lost $340k selling
+/// a memecoin in one go; Jupiter quoted 2M WIF at once 12.4% under the market on 2026-10-28): the loss in dollars, and
+/// the part that moves it about 1%. A small or deep swap goes; so does the same one once «Send anyway» took that impact —
+/// which leaves the dollar caps on bridges and gas as they were.
+@Test func aSwapPastThePriceImpactCapIsAsked() throws {
+    let d = { Decimal(string: $0)! }
+    let stop = try #require(throws: CostlyMove.self) {
+        try Executor.checkImpact(d("0.124"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    }
+    #expect(stop.lost == d("45260") && stop.paid == 365_000 && stop.impact == d("0.124"))
+    #expect(stop.part?.amount == 161_290 && stop.part?.symbol == "WIF")
+    #expect(stop.localizedDescription == "At once, this moves Jupiter's price by 12.4%: ≈ $45,260.00 of $365,000.00 lost to the thin market. "
+            + "161,290 WIF at a time moves it about 1%. Nothing was signed.")
+    // Under the cap, or under a dollar however far it moves: no question.
+    try Executor.checkImpact(d("0.015"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    try Executor.checkImpact(d("0.3"), paid: 3, amount: 3, symbol: "USDC", venue: "Uniswap v3")
+    // A coin's part keeps its fractions: 1 BTCB on BNB Chain's Uniswap moved it 8.6% (2026-10-28).
+    let btc = try #require(throws: CostlyMove.self) { try Executor.checkImpact(d("0.086"), paid: 81_000, amount: 1, symbol: "BTCB", venue: "Uniswap v3") }
+    #expect(btc.part?.amount == d("0.116279"))
+    // Nobody prices the token: the impact alone stops it.
+    let unpriced = try #require(throws: CostlyMove.self) { try Executor.checkImpact(d("0.05"), paid: 0, amount: 100, symbol: "XYZ", venue: "Uniswap v4") }
+    #expect(unpriced.lost == 0 && unpriced.localizedDescription.contains("nobody prices XYZ"))
+    // After a bridge or gas went: a plain refusal that says where the money waits, never «Nothing was signed».
+    let late = try #require(throws: ExecutionError.self) {
+        try Executor.checkImpact(d("0.05"), paid: 1_000, amount: 1_000, symbol: "USDC", venue: "Uniswap v3", signed: "The USDC waits on Base.")
+    }
+    #expect(late.message.hasSuffix("The USDC waits on Base.") && !late.message.contains("Nothing was signed"))
+    // «Send anyway» takes the impact, not dollars: a dollar loss accepted elsewhere doesn't let it through.
+    #expect(throws: CostlyMove.self) {
+        try Executor.$lossAccepted.withValue(1_000_000) { try Executor.checkImpact(d("0.124"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter") }
+    }
+    try Executor.$impactAccepted.withValue(d("0.124") * d("1.25") + d("0.005")) {
+        try Executor.checkImpact(d("0.13"), paid: 365_000, amount: 2_000_000, symbol: "WIF", venue: "Jupiter")
+    }
 }
 
 /// A gateway's error page never reaches the chat as markup (2026-10-11: Jupiter's nginx 503 was printed as raw HTML);
@@ -630,4 +719,164 @@ import WalletCore
     var refund = try pay.exec([(me, sig)])
     refund.replaceSubrange((4 + 6 * 32)..<(4 + 7 * 32), with: ABI.uint(1))   // gasPrice 1
     #expect(Safe.execRefusal(refund, safe: safe) != nil)
+    #expect(Safe.execRefusal(try ERC20.transfer(to: me, amount: 5), safe: safe) == nil)
+    // An execTransaction the signer can't read is refused, not let through: Safe 1.4.1 (ABI coder v1) runs a data offset
+    // one byte off (0x141), which readExec doesn't read — on a Base fork it added a key to the multisig (2026-10-29).
+    let exec = try selfCall.exec([(me, sig)])
+    var skewed = exec
+    func bump(_ word: Int) { skewed.replaceSubrange((4 + word * 32)..<(4 + (word + 1) * 32), with: ABI.uint(ABI.uint(in: Data(exec.dropFirst(4)), word: word)! + 1)) }
+    bump(2)   // data
+    bump(9)   // signatures
+    skewed.insert(0, at: 4 + 10 * 32)
+    #expect(Safe.readExec(skewed) == nil)
+    #expect(Safe.execRefusal(skewed, safe: safe) != nil)
+    #expect(EVMCall.targetRefusal(to: safe, data: skewed, sender: me) != nil)
+    #expect(!Batch7702.problems([.init(to: safe, data: skewed)], owner: me, chainId: 8453).isEmpty)
+    // Nine head words, a data offset past the end, an operation word with stray bits (0x0101): unread, so refused.
+    #expect(Safe.execRefusal(Data(exec.prefix(4 + 9 * 32)), safe: safe) != nil)
+    var pastEnd = exec
+    pastEnd.replaceSubrange((4 + 2 * 32)..<(4 + 3 * 32), with: ABI.uint(UInt64(exec.count - 4)))
+    #expect(Safe.execRefusal(pastEnd, safe: safe) != nil)
+    var dirtyOp = try pay.exec([(me, sig)])
+    dirtyOp.replaceSubrange((4 + 3 * 32)..<(4 + 4 * 32), with: ABI.uint(0x0101))
+    #expect(Safe.readExec(dirtyOp) == nil && Safe.execRefusal(dirtyOp, safe: safe) != nil)
+    // A data offset or length near 2⁶⁴ reads as nothing, not an overflow that would stop the app and the signing process.
+    for (word, n) in [(2, UInt64.max - 31), (10, UInt64.max)] {
+        var huge = exec
+        huge.replaceSubrange((4 + word * 32)..<(4 + (word + 1) * 32), with: ABI.uint(n))
+        #expect(Safe.readExec(huge) == nil)
+    }
+    // A move the signer reads is still only a payout: a coin, or a token's plain transfer without coins. Not a vault's
+    // withdrawal to someone else, NFT rights, credit delegation: rules no one checks on the multisig's behalf.
+    func move(_ to: String, _ value: UInt64, _ data: Data) throws -> Data {
+        try Safe.Move(chainId: 8453, safe: safe, to: to, value: value, data: data, nonce: 0).exec([(me, sig)])
+    }
+    #expect(Safe.execRefusal(try move(thief, 1, Data()), safe: safe) == nil)
+    #expect(Safe.execRefusal(try move(usdc, 1, pay.data), safe: safe) != nil)
+    #expect(Safe.execRefusal(try move(thief, 0, Data(hex: "a22cb465")! + (try word(thief)) + ABI.uint(1)), safe: safe) != nil)
+    let withdraw = Data(hex: "b460af94")! + ABI.uint(5) + (try word(thief)) + (try word(safe))   // withdraw(assets, receiver, owner)
+    if case .vault = EVMCall.decode(withdraw) { #expect(Safe.execRefusal(try move(thief, 0, withdraw), safe: safe) != nil) } else { Issue.record("withdraw not read as a vault call") }
+    // approveHash(bytes32) to any address: the owner's own transaction approving a move ahead of time, which anyone may then run.
+    let approveHash = Data(hex: "d4d9bdcd")! + Data(repeating: 7, count: 32)
+    #expect(EVMCall.targetRefusal(to: safe, data: approveHash, sender: me) != nil)
+    #expect(EVMCall.targetRefusal(to: thief, data: approveHash, sender: me) != nil)
+}
+
+/// «Send all ETH» on Base and Optimism asks the fee oracle's getL1FeeUpperBound(uint256) (Send.swift l1FeeBound); its
+/// selector, checked against the OP-stack predeploy on Base mainnet 2026-10-26.
+@Test func l1FeeUpperBoundSelector() {
+    #expect(Keccak.hash256(Data("getL1FeeUpperBound(uint256)".utf8)).prefix(4).hex == "f1c7a58b")
+}
+
+/// KyberSwap's router call in its API's shape (1 USDC → AERO on Base, built 2026-10-28), read by the signer itself: a swap
+/// paying only this wallet, no fee to anyone and no permit with it; anything else to the router is refused, and a call
+/// whose offsets aren't aligned isn't read as a swap at all.
+@Test func aKyberSwapPaysOnlyThisWallet() throws {
+    let me = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", evil = "0x3333333333333333333333333333333333333333"
+    let usdc = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", aero = "0x940181a94a35a4569e4529a3cdfb74e38fd98631"
+    let executor = "0x8f10b468b06c6fd214b65f87778827f7d113f996"
+    func call(receiver: String = me, fees: [String] = [], permit: Bool = false, misaligned: Bool = false, minReturn: Decimal = 1_425_956_540_186_467_126) throws -> Data {
+        func w(_ n: Int) -> Data { ABI.uint(UInt64(n)) }
+        // The descriptor's eleven words, then its arrays: srcReceivers, srcAmounts, feeReceivers, feeAmounts, permit.
+        let arrays = 352, feesAt = arrays + 128, feeAmountsAt = feesAt + 32 + 32 * fees.count, permitAt = feeAmountsAt + 32 + 32 * fees.count
+        var desc = try ABI.address(usdc) + ABI.address(aero) + w(arrays) + w(arrays + 64) + w(feesAt) + w(feeAmountsAt)
+        desc += try ABI.address(receiver) + w(1_000_000) + ABI.word(minReturn) + w(512) + w(permitAt)
+        desc += try w(1) + ABI.address(executor) + w(1) + w(1_000_000)
+        desc += try w(fees.count) + fees.map(ABI.address).reduce(Data(), +) + w(fees.count) + fees.map { _ in w(1) }.reduce(Data(), +)
+        desc += permit ? w(32) + Data(count: 32) : w(0)
+        // SwapExecutionParams: callTarget, approveTarget, targetData (empty, at 160), desc (at 192), clientData (empty).
+        let params = try ABI.address(executor) + w(0) + w(160) + w(misaligned ? 200 : 192) + w(192 + desc.count) + w(0) + desc + w(0)
+        return Data([0xe2, 0x1f, 0xd0, 0xe9]) + w(32) + params
+    }
+    let swap = try #require(KyberSwap.decode(call()))
+    #expect(swap.srcToken == usdc && swap.dstToken == aero && swap.dstReceiver == me && swap.amount == 1_000_000)
+    #expect(swap.minReturn == 1_425_956_540_186_467_126 && swap.feeReceivers.isEmpty && !swap.permit)
+    let read = EVMCall.decode(try call())
+    #expect(read.refusal(sender: me, chainId: 8453) == nil && read.payees(to: KyberSwap.router, value: 0, chainId: 8453).isEmpty)
+    #expect(read.unreadTarget(to: KyberSwap.router, value: 0, chainId: 8453) == nil)
+    #expect(read.summary(chainId: 8453, to: KyberSwap.router, value: 0)
+            == "swap 1 USDC on KyberSwap on Base for at least 1425956540186467126 units of the token 0x9401…8631, paying this wallet")
+    // Paying someone else, a fee to someone, a permit riding along: refused.
+    #expect(EVMCall.decode(try call(receiver: evil)).refusal(sender: me, chainId: 8453)?.contains(evil) == true)
+    #expect(EVMCall.decode(try call(fees: [evil])).refusal(sender: me, chainId: 8453)?.contains(evil) == true)
+    #expect(EVMCall.decode(try call(permit: true)).refusal(sender: me, chainId: 8453) != nil)
+    // No least amount to come out: any price would do, so it isn't signed.
+    #expect(EVMCall.decode(try call(minReturn: 0)).refusal(sender: me, chainId: 8453)?.contains("least") == true)
+    // The exact approve to the router names nobody to allow: it's a known spender where KyberSwap serves.
+    let approve = Data([0x09, 0x5e, 0xa7, 0xb3]) + (try ABI.address(KyberSwap.router)) + ABI.uint(1_000_000)
+    #expect(EVMCall.decode(approve).payees(to: usdc, value: 0, chainId: 8453).isEmpty)
+    // Anything but that swap to the router, or a swap with crafted offsets: refused, never read as a swap.
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: try call(), sender: me) == nil)
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: Data([0x8a, 0xf0, 0x33, 0xfb]) + Data(count: 64), sender: me) != nil)
+    #expect(KyberSwap.decode(try call(misaligned: true)) == nil)
+    #expect(EVMCall.targetRefusal(to: KyberSwap.router, data: try call(misaligned: true), sender: me) != nil)
+}
+
+/// eth_getBalance past 64 bits (2026-10-29): 20 ETH is 2·10¹⁹ wei — as UInt64 it threw and every move on the network stopped.
+@Test func coinBalancePast64Bits() {
+    #expect(EVMRPC.wei("0x1158e460913d00000") == 20_000_000_000_000_000_000)
+    #expect(EVMRPC.wei("0x0") == 0 && EVMRPC.wei("0xffffffffffffffff") == UInt128(UInt64.max))
+    #expect(EVMRPC.wei("0x" + String(repeating: "f", count: 32)) == .max && EVMRPC.wei("0x" + String(repeating: "f", count: 33)) == nil)
+    #expect(EVMRPC.wei("0x") == nil && EVMRPC.wei("1158e460913d00000") == nil && EVMRPC.wei("0xzz") == nil && EVMRPC.wei(NSNull()) == nil)
+    #expect(Decimal(UInt128(20_000_000_000_000_000_000)) / 1e18 == 20 && "\(Decimal(UInt128.max))" == "\(UInt128.max)")
+}
+
+/// IHATECRYPTO_NET=1, reads only: each network's wrapped coin contract holds more than 2⁶⁴ wei of the coin, and the
+/// balance reads whole.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+func liveCoinBalancesPast64Bits() async throws {
+    let wrapped: [(EVMRPC, String)] = [(.base, "0x4200000000000000000000000000000000000006"), (.optimism, "0x4200000000000000000000000000000000000006"),
+                                       (.ethereum, "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), (.arbitrum, "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"),
+                                       (.polygon, "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"), (.bnb, "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+                                       (.hyperevm, "0x5555555555555555555555555555555555555555")]
+    for (rpc, address) in wrapped {
+        let wei = try await rpc.balance(address)
+        print("chain \(rpc.chainId): \(Decimal(wei) / 1e18) coins at \(address)")
+        #expect(wei > UInt128(UInt64.max), "chain \(rpc.chainId)")
+    }
+}
+
+/// Research E-2 and E-3 (2026-11-05): Morpho's and Compound's Authorization as typed data (an address and a bool, no
+/// amount), increaseApproval (WBTC, LINK, old OpenZeppelin) and the operator calls allow and setOperator. The signer
+/// reads the same rules, so a site's request is refused there too. A revoke and a login still sign.
+@Test func authorizationsAndIncreaseApprovalAreReadNotSignedBlind() throws {
+    let me = "0x1111111111111111111111111111111111111111", stranger = "0x000000000000000000000000000000000000dead"
+    func typed(_ fields: [(String, String, String)]) throws -> TypedData {
+        let types = fields.map { #"{"name":"\#($0.0)","type":"\#($0.1)"}"# }.joined(separator: ",")
+        let message = fields.map { #""\#($0.0)":\#($0.2)"# }.joined(separator: ",")
+        return try TypedData.parse(Data(#"{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"chainId","type":"uint256"}],"Authorization":[\#(types)]},"primaryType":"Authorization","domain":{"name":"Morpho","chainId":1},"message":{\#(message)}}"#.utf8))
+    }
+    func morpho(_ on: String) throws -> TypedData {
+        try typed([("authorizer", "address", #""\#(me)""#), ("authorized", "address", #""\#(stranger)""#), ("isAuthorized", "bool", on),
+                   ("nonce", "uint256", "0"), ("deadline", "uint256", "99999999999")])
+    }
+    func comet(_ on: String) throws -> TypedData {
+        try typed([("owner", "address", #""\#(me)""#), ("manager", "address", #""\#(stranger)""#), ("isAllowed", "bool", on),
+                   ("nonce", "uint256", "0"), ("expiry", "uint256", "99999999999")])
+    }
+    #expect(try morpho("true").refusal(owner: me)?.contains(stranger) == true)
+    #expect(try comet("true").refusal(owner: me) != nil)
+    #expect(try comet(#""true""#).refusal(owner: me) != nil)
+    #expect(try morpho("false").refusal(owner: me) == nil)
+    #expect(try comet("false").refusal(owner: me) == nil)
+    // WalletCheck's test page login (Wallet/Check/LocalSigner.swift) names no one else.
+    let login = #"{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"}],"Login":[{"name":"contents","type":"string"},{"name":"nonce","type":"uint256"}]},"primaryType":"Login","domain":{"name":"ihatecrypto test","version":"1","chainId":42161},"message":{"contents":"Sign in to the ihatecrypto test page","nonce":1}}"#
+    #expect(try TypedData.parse(Data(login.utf8)).refusal(owner: me) == nil)
+
+    func word(_ hex: String) -> String { String(repeating: "0", count: 64 - hex.count) + hex }
+    func call(_ signature: String, _ args: [String]) throws -> Data {
+        try #require(Data(hex: Keccak.hash256(Data(signature.utf8)).prefix(4).hex + args.map(word).joined()))
+    }
+    let x = String(stranger.dropFirst(2)), wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599"
+    #expect(try call("increaseApproval(address,uint256)", []).hex == "d73dd623")
+    #expect(EVMCall.decode(try call("increaseApproval(address,uint256)", [x, String(repeating: "f", count: 64)])).refusal(sender: me)?.contains("Unlimited") == true)
+    let one = EVMCall.decode(try call("increaseApproval(address,uint256)", [x, "1"]))
+    #expect(one.refusal(sender: me) == nil)
+    #expect(one.payees(to: wbtc, value: 0, chainId: 1) == [stranger])
+    #expect(one.summary(chainId: 1, to: wbtc, value: 0) == "let 0x0000…dead spend 1 units of the token 0x2260…c599 more on Ethereum")
+    for f in ["allow(address,bool)", "setOperator(address,bool)"] {
+        #expect(EVMCall.decode(try call(f, [x, "1"])).refusal(sender: me)?.contains(stranger) == true, "\(f)")
+        #expect(EVMCall.decode(try call(f, [x, "0"])).refusal(sender: me) == nil, "\(f)")
+    }
+    #expect(try ["allow(address,bool)", "setOperator(address,bool)"].map { try call($0, []).hex } == ["110496e5", "558a7297"])
 }

@@ -211,6 +211,15 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(ChatRouter.pastedAddress("расскажи про 2FB5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6") == "2FB5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6")
     #expect(ChatRouter.pastedAddress("купи 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18 на $2") == "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18")
     #expect(ChatRouter.pastedAddress("what is the difference between staking and lending") == nil)
+    // A transaction's hash is no token: its first 40 hex aren't looked up as one.
+    let hash = "0x9f2c4e1ab3d57e8f0c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70"
+    #expect(ChatRouter.pastedAddress("что с транзакцией \(hash)?") == nil)
+    #expect(ChatRouter.pastedAddress("tx \(hash) bought 0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18") == "0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18")
+    // Nor when the model looks it up: the report names the hash whole, so a chart or a call can't take its first 40 hex.
+    let report = await TokenResearch.report(hash)
+    #expect(ChatRouter.addresses(report) == [hash])
+    #expect(!ChatRouter.addressesAllowed("chart token \(hash.prefix(42)) on base", userText: "что за токен \(hash)?", known: [],
+                                        found: ChatRouter.addresses(report), displays: { $0.hasPrefix("chart") }, markets: []))
     let model = Script([#"{"route":"chat","reply":"POKEMON, hot."}"#])
     let reading = try await ChatRouter.route("что за токен B5ANwoWkptDv1QszdPHXjCF2gTWdo27FGLffdfXzzoe6", context: .init(), client: model, model: "m") { l in
         "facts about \(l.arg)"
@@ -254,6 +263,21 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(WalletCommand.parse("buy token \(aero) for 3 USDC") == .buyStock(symbol: aero, usdc: 3))
     #expect(WalletCommand.parse("move 2 USDC from Solana to Base") == .solanaTo("base", 2))
     #expect(ChatRouter.forms.contains("buy <TICKER> on <base|arbitrum|polygon|ethereum|optimism|bnb|hyperevm> for N USDC") && ChatRouter.forms.contains("buy <TICKER> on solana for N USDC"))
+}
+
+/// Ondo's tokenized stocks and USDY are Solana tokens by ticker (2026-10-29): the model writes them in this form, English
+/// or Russian, and a stock with no «Ondo» stays Robinhood's.
+@Test func ondoStocksAndUSDYAreSolanaTokens() {
+    #expect(WalletCommand.parse("buy NVDAon on solana for 5 USDC") == .buy(.bySymbol("NVDAon"), usdc: 5))
+    #expect(WalletCommand.parse("купи SPYon на солане на 5$") == .buy(.bySymbol("SPYon"), usdc: 5))
+    #expect(WalletCommand.parse("sell all TSLAon on solana") == .sell(.bySymbol("TSLAon"), amount: nil))
+    #expect(WalletCommand.parse("продай 0.01 NVDAon на солане") == .sell(.bySymbol("NVDAon"), amount: Decimal(string: "0.01")!))
+    #expect(WalletCommand.parse("buy USDY on solana for 10 USDC") == .buy(.bySymbol("USDY"), usdc: 10))
+    #expect(WalletCommand.parse("купи USDY на солане на 10 usdc") == .buy(.bySymbol("USDY"), usdc: 10))
+    #expect(WalletCommand.parse("buy Nvidia stock for 5 USDC") == .buyStock(symbol: "NVDA", usdc: 5))
+    #expect(ChatRouter.forms.contains("«купи акции Nvidia от Ondo на 5$» = buy NVDAon on solana for 5 USDC"))
+    // Ondo's own mints (its stocks end in «ondo») get its terms on the card; USDC doesn't.
+    #expect(Ondo.issued("gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo") && Ondo.issued(Ondo.usdy) && !Ondo.issued(SpotAsset.usdc.mint))
 }
 
 @Test func aTickerFindsJupitersVerifiedTokenNotItsNamesakes() throws {
@@ -675,6 +699,8 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(WalletCommand.parse("swap 0.1 SOL on Solana for ETH on Arbitrum") == .crossSwap(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!))
     #expect(WalletCommand.parse("обменяй 0.1 SOL на ETH в арбитруме") == .crossSwap(from: "SOL", on: "solana", to: "ETH", at: "arbitrum", amount: Decimal(string: "0.1")!))
     #expect(WalletCommand.parse("swap all AERO on base for SOL on solana") == .crossSwap(from: "AERO", on: "base", to: "SOL", at: "solana", amount: nil))
+    #expect(WalletCommand.parse("swap all USDC on solana for ETH on arbitrum") == .crossSwap(from: "USDC", on: "solana", to: "ETH", at: "arbitrum", amount: nil))
+    #expect(WalletCommand.parse("обменяй весь USDC с соланы на ETH в арбитруме") == .crossSwap(from: "USDC", on: "solana", to: "ETH", at: "arbitrum", amount: nil))
     #expect(WalletCommand.parse("поменяй 5 AERO с бейса на ARB в арбитруме") == .crossSwap(from: "AERO", on: "base", to: "ARB", at: "arbitrum", amount: 5))
     // One network is a swap there; USDC for USDC is a bridge; ETH with no network named stays the swap on that network.
     #expect(WalletCommand.parse("swap 0.01 ETH for AERO on base") == .swapOn("base", from: "ETH", to: "AERO", amount: Decimal(string: "0.01")!))
@@ -693,6 +719,9 @@ private final class Script: LLMClient, @unchecked Sendable {
 }
 
 @Test func sendsToNetworksOnlyNearIntentsReachesAreParsed() {
+    // «All» of a network's own coin: everything but the fee (Send.swift), no number needed.
+    #expect(WalletCommand.parse("send all SOL to Bybit") == .sendToken(name: "Bybit", token: "SOL", amount: nil, network: nil))
+    #expect(WalletCommand.parse("переведи весь ETH на base на Bybit") == .sendToken(name: "Bybit", token: "ETH", amount: nil, network: "base"))
     #expect(WalletCommand.parse("send 0.0005 BTC to Binance") == .sendToken(name: "Binance", token: "BTC", amount: Decimal(string: "0.0005")!, network: nil))
     #expect(WalletCommand.parse("send 20 USDT on tron to Binance") == .sendToken(name: "Binance", token: "USDT", amount: 20, network: "tron"))
     #expect(WalletCommand.parse("send 20 USDC on sui to Sui wallet") == .sendToken(name: "Sui wallet", token: "USDC", amount: 20, network: "sui"))
@@ -717,6 +746,8 @@ private final class Script: LLMClient, @unchecked Sendable {
     // Our own networks keep their forms.
     #expect(WalletCommand.parse("bring 5 USDC from base to solana") != .receiveAcross(network: "base", token: "USDC", amount: 5))
     #expect(WalletCommand.parse("how do I top up") == .receive)
+    #expect(WalletCommand.parse("top up") == .receive)
+    #expect(WalletCommand.parse("пополни кошелёк") == .receive)
     for c in [WalletCommand.receiveAcross(network: "sui", token: "USDC", amount: 50), .receiveAcross(network: "xrp", token: "XRP", amount: 30),
               .receiveAcross(network: "dogecoin", token: "DOGE", amount: 100)] {
         #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
@@ -752,6 +783,67 @@ private final class Script: LLMClient, @unchecked Sendable {
     #expect(WalletCommand.parse("lend 10 USDC on aave") == .aave(deposit: true, amount: 10, network: "base"))
     for c in [WalletCommand.aaveBorrow(5, network: "base"), .aaveRepay(nil, network: "arbitrum"), .aaveRepay(2, network: "base"),
               .aaveCollateral(Decimal(string: "0.02")!, network: "base")] {
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+}
+
+/// Kamino's main market: USDC borrowed against SOL, Kamino named or not, in English and Russian; the SOL put up first when
+/// a number of it is said. Aave keeps its own loans, and a SOL deposit or withdrawal stays one.
+@Test func kaminoBorrowingAgainstSOLIsParsed() {
+    let half = Decimal(string: "0.5")!
+    #expect(WalletCommand.parse("займи 50 USDC под SOL") == .kaminoBorrow(50, against: "SOL"))
+    #expect(WalletCommand.parse("займи 50 USDC под 0.5 SOL") == .kaminoBorrow(50, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("займи 1 под 0,5 SOL на камино") == .kaminoBorrow(1, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("возьми в долг 20 долларов под залог моих SOL") == .kaminoBorrow(20, against: "SOL"))
+    #expect(WalletCommand.parse("borrow 50 USDC against my SOL") == .kaminoBorrow(50, against: "SOL"))
+    #expect(WalletCommand.parse("borrow 50 USDC on kamino against 0.5 SOL") == .kaminoBorrow(50, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("borrow 10 USDC using 0.5 SOL as collateral") == .kaminoBorrow(10, against: "SOL", adding: half))
+    #expect(WalletCommand.parse("займи 3 USDC под мои соланы") == .kaminoBorrow(3, against: "SOL"))
+    #expect(WalletCommand.kaminoBorrow(nil, against: "SOL").amountQuestion == "How many USDC to borrow on Kamino against SOL?")
+    // «на солане» is the network, and a count of SOL beside a stock isn't the stock's.
+    #expect(WalletCommand.parse("займи 5 USDC под залог в камино на солане") == .kaminoBorrow(5))
+    #expect(WalletCommand.parse("borrow 5 USDC on kamino against SPCX, keep 0.1 SOL") == .kaminoBorrow(5, against: "SPCX"))
+    // Not a loan against SOL: Aave's, a SOL deposit and its way back, a repay.
+    #expect(WalletCommand.parse("borrow 10 USDC on aave") == .aaveBorrow(10, network: "base"))
+    #expect(WalletCommand.parse("deposit 0.5 SOL to kamino") == .kamino(deposit: true, symbol: "SOL", amount: half))
+    #expect(WalletCommand.parse("выведи SOL из камино") == .kamino(deposit: false, symbol: "SOL", amount: nil))
+    #expect(WalletCommand.parse("погаси долг на камино") == .kaminoRepay(nil))
+    for c in [WalletCommand.kaminoBorrow(50, against: "SOL", adding: half), .kaminoBorrow(5, against: "SOL")] {
+        #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
+    }
+}
+
+/// Kamino's Backpack market: USDC borrowed against Backpack's tokenized stocks without selling them, paid back, the
+/// stock put up and taken back — in English and Russian, by ticker or company. Aave keeps its own words.
+@Test func kaminoBorrowingAgainstStocksIsParsed() {
+    let five = Decimal(string: "0.05")!
+    #expect(WalletCommand.parse("borrow 2 USDC on kamino against 0.05 SPCX") == .kaminoBorrow(2, against: "SPCX", adding: five))
+    #expect(WalletCommand.parse("borrow 2 USDC on kamino against SPCX") == .kaminoBorrow(2, against: "SPCX"))
+    #expect(WalletCommand.parse("borrow 1 USDC on kamino") == .kaminoBorrow(1))
+    #expect(WalletCommand.parse("займи 2 USDC под 0.05 SPCX на камино") == .kaminoBorrow(2, against: "SPCX", adding: five))
+    #expect(WalletCommand.parse("займи 3 доллара под мои акции SpaceX, не продавая") == .kaminoBorrow(3, against: "SPCX"))
+    #expect(WalletCommand.parse("borrow 4 USDC against my Micron shares") == .kaminoBorrow(4, against: "MU"))
+    #expect(WalletCommand.parse("займи 2 под 0.01 MU") == .kaminoBorrow(2, against: "MU", adding: Decimal(string: "0.01")!))
+    #expect(WalletCommand.parse("repay all USDC on kamino") == .kaminoRepay(nil))
+    #expect(WalletCommand.parse("погаси долг на камино") == .kaminoRepay(nil))
+    #expect(WalletCommand.parse("repay 1.5 USDC on kamino") == .kaminoRepay(Decimal(string: "1.5")!))
+    // Two loans: the one to pay back by what it stands on — SOL is the main market, a stock the Backpack one.
+    #expect(WalletCommand.parse("repay all USDC on kamino against SOL") == .kaminoRepay(nil, against: "SOL"))
+    #expect(WalletCommand.parse("погаси долг под SOL на камино") == .kaminoRepay(nil, against: "SOL"))
+    #expect(WalletCommand.parse("погаси 0.5 USDC долга под SPCX на камино") == .kaminoRepay(Decimal(string: "0.5")!, against: "SPCX"))
+    #expect(WalletCommand.kaminoRepay(nil, against: "SOL").summary == "repay all USDC on kamino against SOL")
+    #expect(WalletCommand.parse("deposit 0.05 SPCX to kamino") == .kamino(deposit: true, symbol: "SPCX", amount: five))
+    #expect(WalletCommand.parse("withdraw SPCX from kamino") == .kamino(deposit: false, symbol: "SPCX", amount: nil))
+    #expect(WalletCommand.parse("выведи 0.02 SNDK из камино") == .kamino(deposit: false, symbol: "SNDK", amount: Decimal(string: "0.02")!))
+    #expect(WalletCommand.parse("займи 1 USDC под 0.05 спейса на камино") == .kaminoBorrow(1, against: "SPCX", adding: five))
+    // «займёт» is time, not a loan.
+    #expect(WalletCommand.parse("сколько займёт покупка акций SpaceX?") != .kaminoBorrow(nil, against: "SPCX"))
+    // Aave's loans and Kamino's USDC stay what they were.
+    #expect(WalletCommand.parse("borrow 10 USDC on aave") == .aaveBorrow(10, network: "base"))
+    #expect(WalletCommand.parse("deposit 5 USDC to kamino") == .kamino(deposit: true, symbol: "USDC", amount: 5))
+    #expect(WalletCommand.kaminoBorrow(nil, against: "SPCX").amountQuestion == "How many USDC to borrow on Kamino against SPCX?")
+    for c in [WalletCommand.kaminoBorrow(2, against: "SPCX", adding: five), .kaminoBorrow(1), .kaminoBorrow(3, against: "MU"),
+              .kaminoRepay(nil), .kaminoRepay(2)] {
         #expect(WalletCommand.parse(c.summary) == c, "\(c.summary)")
     }
 }

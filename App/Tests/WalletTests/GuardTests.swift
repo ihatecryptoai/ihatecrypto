@@ -3,6 +3,7 @@ import HyperliquidSigning
 @testable import SolanaChain
 import Testing
 import TxGuard
+@testable import TradeExecution
 import WalletCore
 
 private let me = "2EUrWmf5xMmWER9BtDbXbGbZjoL7R3eTDMXYR6H6cKPj"
@@ -222,6 +223,20 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!SolanaGuard.check(approve, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
 }
 
+/// «Send all» of a token closes our account after the transfer; the guard lets the rent come back only to us.
+@Test func sendingAllOfATokenClosesOurAccountIntoThisWallet() throws {
+    let mint = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"
+    let wire = try SPL.transferMessage(payer: me, to: deposit, mint: mint, amount: 1_000_000, decimals: 6, blockhash: me, close: true)
+    let m = try SolanaMessage.parse(message: wire)
+    let mine = try SPL.associatedAccount(owner: me, mint: mint), theirs = try SPL.associatedAccount(owner: deposit, mint: mint)
+    let v = SolanaGuard.check(m, accounts: m.staticKeys, policy: policy, tokenOwners: [mine: me, theirs: deposit])
+    #expect(v.ok, "\(v.problems)")
+    #expect(v.checks.contains { $0.hasPrefix("Temporary account closes") })
+    // The same close with the rent going to someone else is refused.
+    let (steal, accounts) = try message([me, mine, scam, SPL.tokenProgram], [(3, [1, 2, 0], [9])])
+    #expect(!SolanaGuard.check(steal, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
+}
+
 @Test func jupiterSwapsPayOnlyThisWalletsOwnAccount() throws {
     let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     let source = try SPL.associatedAccount(owner: me, mint: usdcMint), out = try SPL.associatedAccount(owner: me, mint: wsol)
@@ -316,6 +331,116 @@ private let jupiterLendDeposit = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 private let jupiterLendWithdraw = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkT8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPccj71J70/rvu0J/yTO1674UGxqeljWsbxMzyBLGGTIhUDS8nxGHynp/roauKzTlJapxlsK5ipxPwH5QamTv1XtZfXf/XyEr3Wopfe9zqFiLis6v4f8U6hxuQhWGjqLG95uxTRcaS26p8mN5qM4XiYgYQGzhBlklxtkIakhwHV1nAIRE+8/cf8FyV6ejOFzFvFRe8v54cSEIbvrhfgwTQQYeXyzPK1sDIBzsh2kxDdkBYXtOfawRnLIelHWBYy3JvqgC5ZIwUW4+UWatmCd5Vc8UzUhP8EscD1FvC2CJQgA1veA4oganO3BaPj9y3TzLqfiwk9dDCxaIuRcmdJ+MiQSBDEN4MUqaL/buRQj3/nOWgSj23k04ooSfCTii9x91BEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEcn8RD5rZyCj3b2Rq49ZiVsmScRvvn3bU9qhBHACBPVR6mnvvwFsKRZEO8A58f97e1/yRiQ5ahJERwinC6lqslJomRsm5Gr9y9W+wdHAcnDKneVfnQTMTEQq+wdbs8IgIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEK/huRLkhelf0V6yk33/xLN6MW0KY4Ev8Cukm0xsGNHgr+HpfkVsu5LmQqJbULpjlv8kgWS8p0aWOoRZKs1szDBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKmXNQm9Ur4PKo8EBMUD3U1E8ZHbXvOOAjdI/QFJYEEJLgEQEgAEAgsBDwYFCAwHCQMRDRIOChC3EkaclG2hIkBCDwAAAAAA"
 private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAgN8DYnYkanW53jNJ7UKxXiMvZRj8IPX81PHWToH5vSWPdA0vJ8Rh8p6f66Gris05SWqcZbCuYqcT8B+UGpk79V7Yq3C3dSmy6SMXmaC86a+QNB8cM57M8nvXfavvug7xwr4nQ/DK+NdbsMGe0wCTT41rh+ExTnoFi4Cj6ruTycByXsYF21KZtx/G85tfoFGdt2xIhsqTLuddL1Tk70GQ1aUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGm4hX/quBhPtof2NGGMA12sQ53BrrO1WYoPAAAAAAAQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FmwdagGY3nKb+NwN/8MKNVUpuTWNtnoUYz+brrpP1I2/rUn1F1kDj7BX2FdWw4jpUqWuD8Lggv3BjXyQ0rGQMwExvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFZnavCXYB4DeVN4DdHU86ACyRfTVP8tOOh1oPI9Z1GlQQGAAUCAAAAAAYACQNADQMAAAAAAAkGAAEADAUIAQELDQQAAAwHAQMCBQgJCgsrjncrbaI0C7EyNdtqAAAAAADh9QUAAAAAgPD6AgAAAACAUQEAAAAAAAAAAA=="
 
+/// JupiterZ's fill (a market maker pays the fee, signs first and swaps at its quote; 2026-10-28): passes only with this
+/// wallet as the taker and what it gets landing in its own account, or as SOL straight to it (the output account left
+/// as the program's id, Anchor's «none»). Accounts as its IDL has them: taker, maker, taker's and maker's input, taker's
+/// and maker's output, input mint and program, output mint and program, System.
+@Test func jupiterZFillsPayOnlyThisWallet() throws {
+    let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let maker = deposit, z = SolanaGuard.jupiterZ
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myWSOL = try SPL.associatedAccount(owner: me, mint: wsol)
+    let makerUSDC = try SPL.associatedAccount(owner: maker, mint: usdcMint), makerWSOL = try SPL.associatedAccount(owner: maker, mint: wsol)
+    // fill(input_amount 15 USDC, output_amount 0.148288542 SOL, expire_at) and the five bytes the program ignores.
+    func le(_ n: UInt64) -> [UInt8] { withUnsafeBytes(of: n.littleEndian, Array.init) }
+    let fill: [UInt8] = [0xa8, 0x60, 0xb7, 0xa3, 0x5c, 0x0a, 0x28, 0xa0] + le(15_000_000) + le(148_288_542) + le(1_793_192_203) + [0, 0, 0, 0, 0]
+    let keys = [maker, me, myUSDC, makerUSDC, z, makerWSOL, SolanaGuard.system, usdcMint, SPL.tokenProgram, wsol, myWSOL]
+    let sponsored = SolanaPolicy(owner: me, sponsor: maker)
+    func check(_ accounts: [Int], data: [UInt8] = fill, policy: SolanaPolicy = sponsored, twice: Bool = false) throws -> Verdict {
+        let (m, list) = try message(keys, [(4, accounts, data)] + (twice ? [(4, accounts, data)] : []), signers: 2)
+        return SolanaGuard.check(m, accounts: list, policy: policy, tokenOwners: [:])
+    }
+    // USDC in, SOL out as lamports: the output account is the program's id.
+    let sol = try check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6])
+    #expect(sol.ok, "\(sol.problems)")
+    #expect(sol.checks.contains("JupiterZ fill: 15 USDC for 0.148288542 SOL → your wallet, as SOL. The balance simulation checks it."))
+    // The maker only swaps: no SOL of the wallet's goes to it, so the signer doesn't keep it as an address money may go to.
+    let (m, list) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], fill)], signers: 2)
+    #expect(!SolanaGuard.refundsSponsor(m, accounts: list, owner: me, sponsor: maker))
+    let (refund, refundList) = try message([maker, me, SolanaGuard.system], [(2, [1, 0], solTransfer(2_039_280))], signers: 2)
+    #expect(SolanaGuard.refundsSponsor(refund, accounts: refundList, owner: me, sponsor: maker))
+    // Into this wallet's own wSOL account: fine too.
+    #expect(try check([1, 0, 2, 3, 10, 5, 7, 8, 9, 8, 6]).ok)
+    // The output to the maker's account, «none» for a mint that isn't SOL, someone else as the taker, or another
+    // instruction of the program: refused.
+    #expect(try !check([1, 0, 2, 3, 5, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 9, 8, 7, 8, 6]).ok)
+    #expect(try !check([0, 1, 3, 2, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], data: [0, 1, 2, 3, 4, 5, 6, 7] + [UInt8](repeating: 1, count: 29)).ok)
+    // What it gives drawn on another account of the wallet (its wSOL for a USDC fill), «none» for an input that isn't SOL,
+    // or a second fill riding along: refused — the app's simulation watches only the swap's own accounts.
+    #expect(try !check([1, 0, 10, 3, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 4, 3, 4, 5, 7, 8, 9, 8, 6]).ok)
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], twice: true).ok)
+    // Without the maker as the named fee payer the two signatures are refused, as for any transaction.
+    #expect(try !check([1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], policy: SolanaPolicy(owner: me)).ok)
+}
+
+/// A JupiterZ order for Ondo's NVDAon, as lite-api.jup.ag/swap/v2/order built it on 2026-10-29 (3 USDC in), its taker and
+/// the taker's two accounts put on `me`: beside the fill the maker has Ondo mint the stock against a signed price, inside a
+/// Jupiter program's pair of calls, and USDC's mint comes from a lookup table.
+private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAIABhCWmpufqjVYZfnyuFyDIYJfGWS2mAfjxKCUSfgP6ocw/xJPu1CG1eT0myNTijJn+XIY+eWIRKQHl7jC8aQ1uVa2CeMxq5qhwAgmIW0MF4dLMwkxIHrBvr5c08/crA4Q6T4KDKkOmBBVt2cJe1e58QIGFNB0ELCh8y9LyeeJjoR4CihDMtHUfShf/Oa+osQ679KsykqKYBb4lOUWiWQGOHeiS8S88QqamOrvVmZOo1uOpWQDtUp3ZTx3MrWCN4rX5LRfSm4AXB93lixCTAA65IyZL1CfDcROhO+FoE99e2FdSYSAR+QmNK7fLerYNxa0XtOC1dfBbrPRu3kH56B66UwkzRhwOQPjN/vIpl7Xium7Iy3jagX5rfmT/XPNgYLV8+5Y/FEh+eXX45qjIynXZgTkY7cIE4pMYcB9TX1GrxEDaAMGRm/lIRcy/+ytunLDm+e8jOW7xfcSayxDmzpAAAAABMb8IPBQzPBVhNchHJ+M9Z7BR4W7FmoeKDDoEiAAAAAH8GPXUx0J5M4QhSMGkyrDXnCjhql+ffCiasaQs5lcKgr+HsLLby6mG8NIKPJ3FF1seUNQjRv5tY9hZNnovtSxSlhJ+3Kju+kf3FsOalf2PFoctFsgZ6btDKzTY5XIoQKMlyWPTiSJ8bs9ECkUjg2DC1oTmdr/EIQEjnvY2+n4WWEZw4aLgkz9+/ZC/96Me/cEcyrZNeKZHt0ZqF4FpEKRCAoACQMtDgAAAAAAAAoABQLAJwkADQ4AFRglEBkfFiEeHA8aGxBnE04Y8AmHP8DGLQAAAAAACwCBAQEgAAMMAANhACAAA/8tBPYALBDrpwKtr+L0PKxZlsR3sxtpnTz2K4pXv/Z97/PhqjZLzNF7QixOsnC+EoqocPwaNqtDy+2GtaTvWO+DHOYtxTEvldatk/POSSeVTe99NgEs4WarmsuZQRz+8QNnk3bNdj6uHSFTC6z1d1yZ2brP4QwZAAMiBwQCBggmHRoPHCQSFyUYERMjFBsgDDCAHIWtR465zhub09K8oEa6oMM1Kc3sCEPb9kYiMgAAAIRh1AAAAAAAtk7iagAAAAAPBgEJAQMaHQEBDgsBAAUYCQYlHAMdGiWoYLejXAoooMDGLQAAAAAAhGHUAAAAAAC0TuJqAAAAAAoAAAAADQ4AFRglEBkfFiEeHA8aGxDVL5mJVPNe6MDGLQAAAAAAATvS46ffe5EJgS8syMCyEUfC+/dSXfa1UwnJq4WTjUwjCg4KFh0UDBEXHBANBQQGBwEPFQ0SEwsJGw=="
+
+@Test func jupiterZMakersSourceOndoStocksOnlyOnTheirOwnAccounts() throws {
+    let usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", nvda = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo"
+    let maker = "B8ttfFCJRyJivDLn19Q6uvndVCssTwkokLAgz22vyo1Q"
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myNVDA = try SPL.associatedAccount(owner: me, mint: nvda, program: SPL.token2022Program)
+    let wire = try #require(Data(base64Encoded: ondoFill))
+    let m = try SolanaMessage.parse(transaction: wire)
+    // As the signer sees it: the lookup tables' entries unread.
+    let accounts = m.staticKeys + m.lookups.flatMap { $0.writable + $0.readonly }.map { "entry \($0)" }
+    func check(_ policy: SolanaPolicy) -> Verdict { SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [myUSDC: me, myNVDA: me]) }
+    let v = check(SolanaPolicy(owner: me, trustLookupTables: false, sponsor: maker))
+    #expect(v.ok, "\(v.problems)")
+    #expect(v.checks.contains { $0.hasPrefix("The market maker sources the coin itself") })
+    // The prompt names the input by the wallet's own account for it, not by the lookup table's unread entry.
+    #expect(v.checks.contains { $0.hasPrefix("JupiterZ fill: 3 USDC for 13918596 units of gEGtLT") }, "\(v.checks)")
+    // The app's own check of what the fill swaps: USDC, named by a lookup table, proven by the taker's own account for it.
+    #expect(Executor.fillSwaps(wire, from: usdcMint, to: nvda) && !Executor.fillSwaps(wire, from: nvda, to: usdcMint))
+    #expect(!Executor.fillSwaps(wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    // The low-SOL path takes a gasless order without comparing prices: a JupiterZ fill still has to swap what was asked.
+    #expect(Executor.sponsorable(router: "jupiterz", wire: wire, from: usdcMint, to: nvda))
+    #expect(!Executor.sponsorable(router: "jupiterz", wire: wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    #expect(Executor.sponsorable(router: "metis", wire: wire, from: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", to: nvda))
+    // A maker's step given the wallet, or one with no fill beside it: refused.
+    let ondo = "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm", sponsored = SolanaPolicy(owner: me, sponsor: deposit)
+    let (given, givenList) = try message([deposit, me, ondo], [(2, [0, 1], [1])], signers: 2)
+    #expect(SolanaGuard.check(given, accounts: givenList, policy: sponsored, tokenOwners: [:]).problems.first?.contains("given your wallet") == true)
+    let (alone, aloneList) = try message([deposit, me, ondo], [(2, [0], [1])], signers: 2)
+    #expect(SolanaGuard.check(alone, accounts: aloneList, policy: sponsored, tokenOwners: [:]).problems == ["A market maker's steps come without its one JupiterZ fill."])
+    // With the wallet paying its own fee there's no maker: the same step is a program off the list.
+    let (own, ownList) = try message([me, ondo], [(1, [], [1])])
+    #expect(SolanaGuard.check(own, accounts: ownList, policy: SolanaPolicy(owner: me), tokenOwners: [:]).problems
+        == ["Instruction 1: program \(ondo) is not on the allowed list."])
+}
+
+/// The maker's own steps beside a hand-made fill (accounts as jupiterZFillsPayOnlyThisWallet has them, USDC in, SOL out):
+/// they pass on the maker's accounts only — never the fill's taker side, a token account the wallet holds, a second fill,
+/// or SOL «back» to the maker from the wallet.
+@Test func jupiterZMakerStepsKeepOffTheWallet() throws {
+    let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let maker = deposit, z = SolanaGuard.jupiterZ, ondo = "XzTT4XB8m7sLD2xi6snefSasaswsKCxx5Tifjondogm"
+    let myUSDC = try SPL.associatedAccount(owner: me, mint: usdcMint), myWSOL = try SPL.associatedAccount(owner: me, mint: wsol)
+    let makerUSDC = try SPL.associatedAccount(owner: maker, mint: usdcMint), makerWSOL = try SPL.associatedAccount(owner: maker, mint: wsol)
+    func le(_ n: UInt64) -> [UInt8] { withUnsafeBytes(of: n.littleEndian, Array.init) }
+    let fill: [UInt8] = [0xa8, 0x60, 0xb7, 0xa3, 0x5c, 0x0a, 0x28, 0xa0] + le(15_000_000) + le(148_288_542) + le(1_793_192_203)
+    let keys = [maker, me, myUSDC, makerUSDC, z, makerWSOL, SolanaGuard.system, usdcMint, SPL.tokenProgram, wsol, myWSOL, ondo]
+    let fillIx = (program: 4, accounts: [1, 0, 2, 3, 4, 5, 7, 8, 9, 8, 6], data: fill)
+    func check(_ ixs: [(program: Int, accounts: [Int], data: [UInt8])], owners: [String: String] = [:]) throws -> Verdict {
+        let (m, list) = try message(keys, ixs, signers: 2)
+        return SolanaGuard.check(m, accounts: list, policy: SolanaPolicy(owner: me, sponsor: maker), tokenOwners: owners)
+    }
+    // On the maker's own USDC account: passes.
+    let ok = try check([(11, [0, 3], [1]), fillIx])
+    #expect(ok.ok, "\(ok.problems)")
+    // The fill's source account, though the app claimed nothing about it; a wSOL account the app says is the wallet's.
+    #expect(try check([(11, [0, 2], [1]), fillIx]).problems.first?.contains("given your wallet") == true)
+    #expect(try check([(11, [0, 10], [1]), fillIx], owners: [myWSOL: me]).problems.first?.contains("given your wallet") == true)
+    // Two fills: the second is refused, and the maker's steps have no one fill to stand beside.
+    #expect(try check([(11, [0, 3], [1]), fillIx, fillIx]).problems.contains("A market maker's steps come without its one JupiterZ fill."))
+    // SOL from the wallet to the maker beside a fill: the maker fronted no rent, so it's a skim.
+    #expect(try check([(6, [1, 0], solTransfer(2_039_280)), fillIx]).problems.contains { $0.contains("a JupiterZ fill takes no SOL from your wallet") })
+}
+
 @Test func jupiterLendAndDCAPayOnlyTheSignersOwnAccounts() throws {
     let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
     func verdict(_ wire: Data) throws -> Verdict {
@@ -335,4 +460,160 @@ private let jupiterDCAOrder = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         wire.replaceSubrange(at, with: Data(repeating: 9, count: 32))
         #expect(try !verdict(wire).ok)
     }
+}
+
+/// A borrow and a repay on Kamino — the Backpack market's stocks, the main market's SOL — pass only on the owner's own
+/// position there, the one the guard derives itself; the same instruction on anyone else's position, on the owner's
+/// position on a market ihatecrypto doesn't use, or with an instruction ihatecrypto doesn't use, is refused.
+@Test func kaminoLoansRunOnlyOnTheOwnersPosition() throws {
+    let owner = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+    #expect(SolanaGuard.kaminoObligation(owner: owner, market: SolanaGuard.kaminoBackpackMarket) != SolanaGuard.kaminoObligation(owner: owner))
+    let borrowV2: [UInt8] = [0xa1, 0x80, 0x8f, 0xf5, 0xab, 0xc7, 0xc2, 0x06], repayV2: [UInt8] = [0x74, 0xae, 0xd5, 0x4c, 0xb4, 0x35, 0xd2, 0x90]
+    let repay: [UInt8] = [0x91, 0xb2, 0x0d, 0xe1, 0x4c, 0xf0, 0x93, 0x48], withdrawV2: [UInt8] = [0xeb, 0x34, 0x77, 0x98, 0x95, 0xc5, 0x14, 0x07]
+    // A borrow pays account 8, a withdrawal account 9: the owner's own USDC account here, its amount after the discriminator.
+    let usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    let myUSDC = try SPL.associatedAccount(owner: owner, mint: usdc), theirUSDC = try SPL.associatedAccount(owner: me, mint: usdc)
+    func verdict(_ discriminator: [UInt8], obligation: String, market: String, amount: UInt64 = 1_500_000, payTo: String? = nil) throws -> Verdict {
+        let pays: Int? = discriminator == borrowV2 ? 8 : discriminator == withdrawV2 ? 9 : nil
+        let filler = (3..<(pays ?? 3)).map { _ in SolanaInstruction.Account(pubkey: SolanaGuard.kaminoLend, isSigner: false, isWritable: false) }
+        let ix = SolanaInstruction(program: SolanaGuard.kaminoLend, accounts: [
+            .init(pubkey: owner, isSigner: true, isWritable: false), .init(pubkey: obligation, isSigner: false, isWritable: true),
+            .init(pubkey: market, isSigner: false, isWritable: false),
+        ] + filler + (pays == nil ? [] : [.init(pubkey: payTo ?? myUSDC, isSigner: false, isWritable: true)]),
+        data: Data(discriminator) + withUnsafeBytes(of: amount.littleEndian) { Data($0) })
+        let wire = SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([ix], payer: owner, blockhash: deposit))
+        let m = try SolanaMessage.parse(transaction: wire)
+        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: owner, trustLookupTables: false),
+                                 tokenOwners: [myUSDC: owner, theirUSDC: me])
+    }
+    // Kamino's «Jito» market: a real one, not ihatecrypto's.
+    let elsewhere = try #require(SolanaGuard.kaminoObligation(owner: owner, market: "H6rHXmXoCQvq8Ue81MqNh7ow5ysPa1dSozwW3PU1dDH6"))
+    for market in SolanaGuard.kaminoMarkets {
+        let mine = try #require(SolanaGuard.kaminoObligation(owner: owner, market: market))
+        for d in [borrowV2, repayV2, repay] {
+            let ok = try verdict(d, obligation: mine, market: market)
+            #expect(ok.ok, "\(ok.problems)")
+            // Someone else's debt, or another wallet's position: refused.
+            let other = try #require(SolanaGuard.kaminoObligation(owner: me, market: market))
+            #expect(try !verdict(d, obligation: other, market: market).ok)
+            #expect(try !verdict(d, obligation: elsewhere, market: market).ok)
+        }
+        // A flash loan on the same position: not an instruction ihatecrypto uses.
+        #expect(try !verdict([0x87, 0xe7, 0x34, 0xa7, 0x07, 0x34, 0xd4, 0xc1], obligation: mine, market: market).ok)
+        // The prompt says how much a borrow or a withdrawal pays, read from the instruction, and it pays only the owner.
+        let borrowed = try verdict(borrowV2, obligation: mine, market: market)
+        #expect(borrowed.checks.contains("Kamino lends 1.5 USDC → your account, owed back to Kamino."), "\(borrowed.checks)")
+        let out = try verdict(withdrawV2, obligation: mine, market: market, amount: 2_000_000)
+        #expect(out.ok, "\(out.problems)")
+        #expect(out.checks.contains { $0.hasPrefix("Kamino withdrawal: up to 2 USDC") })
+        for d in [borrowV2, withdrawV2] { #expect(try !verdict(d, obligation: mine, market: market, payTo: theirUSDC).ok) }
+    }
+}
+
+/// Research E-1 (2026-11-05): a program outside the list can hand the wallet to itself (Assign) or give it data (Allocate),
+/// and make someone else the owner, delegate or close authority of a token account, while no balance moves (SlowMist,
+/// December 2025). The simulation's jsonParsed accounts show it. A spam account's stranger close authority from before is
+/// not a change, a smaller allowance for the same delegate isn't either, and an account that closes has no rights left.
+@Test func rightsTheSimulationShowsChangingAreRefused() throws {
+    let usdc = deposit
+    func wallet(program: String = SolanaGuard.system, data: Int = 0, space: Bool = true) -> Any {
+        var a: [String: Any] = ["lamports": 1_000_000_000, "owner": program, "executable": false,
+                                "data": [Data(count: data).base64EncodedString(), "base64"]]
+        if space { a["space"] = data }
+        return a
+    }
+    func token(owner: String = me, delegate: String? = nil, delegated: String = "0", close: String? = nil) -> Any {
+        var info: [String: Any] = ["mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "owner": owner, "state": "initialized", "isNative": false,
+                                   "tokenAmount": ["amount": "5000000", "decimals": 6, "uiAmountString": "5"]]
+        if let delegate { info["delegate"] = delegate; info["delegatedAmount"] = ["amount": delegated, "decimals": 6, "uiAmountString": delegated] }
+        if let close { info["closeAuthority"] = close }
+        return ["lamports": 2_039_280, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "space": 165,
+                "data": ["program": "spl-token", "space": 165, "parsed": ["type": "account", "info": info]]]
+    }
+    func problems(wallet w: Any = wallet(), before: Any = token(), after: Any = token()) throws -> [String] {
+        var now: [String: SolanaAccountRights] = [:]
+        now[me] = SolanaRPC.rights(w)
+        now[usdc] = SolanaRPC.rights(after)
+        return SolanaGuard.rightsProblems(owner: me, before: [usdc: try #require(SolanaRPC.rights(before))], after: now, names: [usdc: "USDC"])
+    }
+    #expect(try problems().isEmpty)
+    // The wallet: handed to a program, or given data (read from the data itself when the node doesn't say «space»).
+    #expect(try problems(wallet: wallet(program: unknownProgram)) == ["Your wallet would be handed to the program \(unknownProgram): from then on that program, not your key, decides what leaves it."])
+    #expect(try problems(wallet: wallet(data: 8)) == ["Your wallet would get 8 bytes of data and could no longer pay Solana's fee."])
+    #expect(try problems(wallet: wallet(data: 8, space: false)).count == 1)
+    // A token account: a new delegate, a bigger allowance, another owner, a new close authority.
+    #expect(try problems(after: token(delegate: scam, delegated: "1000000")) == ["\(scam) could spend your USDC."])
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token(delegate: scam, delegated: "9")).count == 1)
+    #expect(try problems(before: token(delegate: me, delegated: "5"), after: token(delegate: scam, delegated: "5")).count == 1)
+    #expect(try problems(after: token(owner: scam)) == ["Your USDC account would belong to \(scam)."])
+    #expect(try problems(after: token(close: scam)) == ["\(scam) could close your USDC account and take its rent."])
+    // Not a change: the same delegate with less left, a revoke, a stranger's close authority from the start, the
+    // wallet's own authority, an account the transaction closes (the node answers null).
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token(delegate: scam, delegated: "3")).isEmpty)
+    #expect(try problems(before: token(delegate: scam, delegated: "5"), after: token()).isEmpty)
+    #expect(try problems(before: token(close: scam), after: token(close: scam)).isEmpty)
+    #expect(try problems(after: token(close: me)).isEmpty)
+    #expect(try problems(after: NSNull()).isEmpty)
+    // A token account the transaction opens for the wallet starts with no one else's rights: a delegate or a close
+    // authority on it would take every later deposit. Opened plainly, it passes.
+    let opened = "NewTokenAccount11111111111111111111111111111"
+    func open(_ account: Any) -> [String] {
+        SolanaGuard.rightsProblems(owner: me, before: [:], after: [me: SolanaRPC.rights(wallet())!, opened: SolanaRPC.rights(account)!], names: [:])
+    }
+    #expect(open(token()).isEmpty)
+    #expect(open(token(delegate: scam, delegated: "18446744073709551615")) == ["\(scam) could spend your tokens in NewT…1111."])
+    #expect(open(token(close: scam)).count == 1)
+    #expect(open(token(owner: scam, delegate: scam, delegated: "1")).isEmpty)   // someone else's account: not the wallet's rights
+
+    // What the browser watches: the accounts the transaction may write, by the header's readonly counts and the lookup
+    // tables' writable entries. A read-only one can't change.
+    let ix = SolanaInstruction(program: SPL.tokenProgram, accounts: [.init(pubkey: me, isSigner: true, isWritable: true),
+                                                                     .init(pubkey: usdc, isSigner: false, isWritable: true),
+                                                                     .init(pubkey: SolanaGuard.system, isSigner: false, isWritable: false)], data: Data())
+    let m = try SolanaMessage.parse(transaction: SolanaTransaction.unsigned(try SolanaTransaction.compileMessage([ix], payer: me, blockhash: usdc)))
+    #expect(Set(m.writable(m.staticKeys)) == [me, usdc])
+}
+
+/// Research E-4: what's signed is simulated again after Sign. More than 1 % more of anything leaving, or something leaving
+/// that didn't, stops it; less leaving, or less arriving (the transaction's own minimum holds that), doesn't.
+@Test func aSecondSimulationMayNotTakeMoreThanTheWindowShowed() {
+    let shown: [String: Decimal] = ["usdc": -5, "sol": Decimal(string: "-0.001")!, "jup": 10]
+    let names = ["usdc": "USDC"]
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: shown) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": Decimal(string: "-5.04")!, "sol": Decimal(string: "-0.001")!, "jup": 9]) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -4, "sol": Decimal(string: "-0.001")!]) == nil)
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": Decimal(string: "-5.1")!], names: names) == "more USDC would leave than the window showed")
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "bonk": -1]) == "bonk would leave too, which the window didn't show")
+    #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "jup": -1]) != nil)
+}
+
+/// An MPP service's deposit through NEAR Intents: bound by 1Click to the service's recipient, exact amount and refund
+/// address, and never more than 1Click's own quote takes (the rest would go back to the service as a refund).
+@Test func anMPPChargeDepositIsBoundAndAtOneClicksPrice() {
+    let refund = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", base = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near"
+    let bound = ["recipient": "merchant.near", "refundTo": refund.lowercased(), "originAsset": base, "destinationAsset": "nep141:usdc.near",
+                 "amount": "1000000", "swapType": "EXACT_OUTPUT", "quoteAmountIn": "1005000"]
+    func check(_ b: [String: String], deposit: UInt64 = 1_010_000, destination: String? = "nep141:usdc.near") -> Verdict {
+        DepositGuard.charge(bound: b, recipient: "merchant.near", refundTo: refund, origin: base, destination: destination, amountOut: "1000000", deposit: deposit)
+    }
+    #expect(check(bound).ok)
+    #expect(check(bound, destination: nil).ok)
+    #expect(!check(bound, deposit: 2_000_000).ok)                         // padded: the extra goes back to the service
+    #expect(!check(bound.merging(["recipient": "attacker.near"]) { $1 }).ok)
+    #expect(!check(bound.merging(["amount": "900000"]) { $1 }).ok)
+    #expect(!check(bound.merging(["swapType": "EXACT_INPUT"]) { $1 }).ok)
+    #expect(!check(bound.merging(["destinationAsset": "nep141:other.near"]) { $1 }).ok)
+    var unpriced = bound
+    unpriced["quoteAmountIn"] = nil
+    #expect(!check(unpriced).ok)
+    // Under 1Click's minimum, or after its quote ran out, it would only be refunded — to the service.
+    #expect(!check(bound.merging(["quoteMinAmountIn": "1015000"]) { $1 }).ok)
+    #expect(check(bound.merging(["quoteMinAmountIn": "1004000", "deadline": "2099-01-01T00:00:00.000Z"]) { $1 }).ok)
+    #expect(!check(bound.merging(["deadline": "2020-01-01T00:00:00.000Z"]) { $1 }).ok)
+}
+
+@Test func aPrivateMoveGoesOnlyWhereOneClickHoldsItConfidential() {
+    #expect(DepositGuard.confidential(bound: ["confidentiality": "basic"]).ok)
+    #expect(!DepositGuard.confidential(bound: ["confidentiality": "public"]).ok)
+    #expect(!DepositGuard.confidential(bound: [:]).ok)
 }

@@ -1,3 +1,4 @@
+import DeFiKamino
 import EVMChain
 import Foundation
 import IhatecryptoCore
@@ -432,6 +433,7 @@ extension Workspace {
         // What the rail opened belongs to the canvas it was opened on; the next one starts clean, scrolled to its start at
         // the zoom the user set (zooming is theirs: the buttons and the pinch, never a canvas switch).
         detail = nil
+        tokenCard = nil
         showReceive = false
         showMovers = false
         serviceAnswer = nil
@@ -1109,7 +1111,7 @@ struct ScheduleBoard: View {
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Brand.cardBorder))
     }
 
-    private var period: String { schedule.days == 1 ? "day" : schedule.days == 7 ? "week" : schedule.days == 30 ? "month" : "\(schedule.days) days" }
+    private var period: String { ScheduleCanvas.period(schedule.days) }
 }
 
 /// The running Jupiter DCA orders: how much each has spent and bought, the swap size and interval, and Cancel. The
@@ -1195,7 +1197,7 @@ extension Workspace {
         let richest = ([solana?.usdc] + EVMNetwork.searched.map { usdc(on: $0.key) }).compactMap { $0 }.max() ?? 0
         let available = max(0, richest - Decimal(string: "0.1")!) + (hl.map { $0.withdrawable + (m.dex.flatMap { dexBalances[$0]?.withdrawable } ?? 0) } ?? 0)
         let key = FixKey(intent: intent, market: m, equity: equity, policy: policy,
-                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders), available: available)
+                         openRisk: HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: shortsCovered), available: available)
         if fixMemo?.key != key { fixMemo = (key, Plan.fix(key.intent, market: m, equity: key.equity, policy: key.policy, openRisk: key.openRisk, available: available)) }
         guard let f = fixMemo?.fix else { return nil }
         // Said as what changes in the trade, not as a sum: «Risk $0.33» read like something to pay.
@@ -1282,6 +1284,9 @@ struct MoveRoute {
     }
 }
 
+/// A Hyperliquid send's recipient there: a new account keeps 1 USDC of the first transfer to it (Executor.sendUSDC).
+enum HLRecipient: String { case checking, open, new, unknown }
+
 /// A route step's color, by place; kept by name, so a saved route draws the same.
 nonisolated enum RouteFill: String, Codable, Hashable, Sendable {
     case solana, relay, hyperliquid, hlp, jupiter, kamino, jito, aave, morpho, base, arbitrum, robinhood, near, tempo, hyperevm
@@ -1320,7 +1325,47 @@ extension Workspace {
     /// The route of a money move waiting for «do it»: a withdrawal to Solana, USDC into Aave on Base, a stock token,
     /// a way back to Solana, or any move between the user's own places. nil for commands that aren't drawn as one.
     /// `ahead`: for a step of a chain, the USDC the steps before it add to a network (or take off it), see `chainSteps`.
+    /// The move's card, with what the research's E-7 and E-8 found on top of its own warning: the user decides, Confirm
+    /// stays (variant B, 2026-11-05).
     func route(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
+        guard var r = drawnRoute(command, ahead: ahead) else { return nil }
+        let extra = [Self.delegationWarning(command, foreignDelegates), boughtTokenWarning(command)].compactMap { $0 }
+        if !extra.isEmpty { r.warning = ([r.warning].compactMap { $0 } + extra).joined(separator: " ") }
+        return r
+    }
+
+    /// The EVM network a move leaves money on at this wallet's own address; nil for any other move.
+    static func lands(_ c: WalletCommand) -> String? {
+        switch c {
+        case .bridge(_, let to, _), .cctp(_, let to, _), .usdt(_, let to, _, _), .solanaTo(let to, _): to
+        case .buyOn(let n, _, _, _), .swapOn(let n, _, _, _), .gas(let n, _), .crossSwap(_, _, _, let n, _): n
+        // Aave's and Morpho's deposits pass through the address and leave their receipt tokens on it; a loan pays out to it.
+        case .aave(_, _, let n), .morpho(_, _, let n), .aaveBorrow(_, let n), .aaveCollateral(_, let n), .sellOn(let n, _, _, _): n
+        case .buyStock, .sellStock: "robinhood"
+        case .sellNear(_, let to?): to
+        default: nil
+        }
+    }
+
+    /// Money a move brings to an address of ours that runs someone else's EIP-7702 contract there (readDelegations).
+    static func delegationWarning(_ c: WalletCommand, _ delegates: [String: String]) -> String? {
+        guard let net = lands(c), let delegate = delegates[net] else { return nil }
+        return "Your \(EVMNetwork.named(net)?.name ?? net) address runs someone else's contract (\(delegate.prefix(6))…\(delegate.suffix(4))), set up outside ihatecrypto. "
+            + "Money arriving there can be taken by it. Confirm only if you set it up yourself, in MetaMask for example."
+    }
+
+    /// A Solana token's risks (TokenResearch.SolanaToken.warnings, Token-2022's extensions among them) on its buy's card.
+    func boughtTokenWarning(_ c: WalletCommand) -> String? {
+        let asset: SpotAsset? = switch c {
+        case .buy(let a, _), .jupiterDCA(let a, _, _, _): a
+        case .swapOn("solana", _, let to, _), .crossSwap(_, _, let to, "solana", _): spotAssets[to]
+        default: nil
+        }
+        guard let asset, let w = tokenWarnings[asset.mint], !w.isEmpty else { return nil }
+        return "\(asset.symbol): " + w.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }.joined(separator: " ")
+    }
+
+    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
         switch command {
         case .withdrawToSolana(let asked): withdrawRoute(asked)
         case .aave(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, network: net)
@@ -1337,6 +1382,7 @@ extension Workspace {
         case .sellOn(let place, let token, let amount, let keep): swapRoute(place, token, usdc: nil, sell: amount, keep: keep)
         case .swapOn(let place, let from, let to, let amount): pairRoute(place, from, to, amount)
         case .crossSwap(let a, let from, let b, let to, let amount): crossRoute(a, from, b, to, amount)
+        case .swapPrivately(let a, let from, let b, let to, let amount): privateSwapRoute(command, a, from, b, to, amount)
         case .sweepDust(let under): dustRoute(under)
         case .revokeApproval(let place, let token, let spender, let permit2): revokeRoute(place, token, spender, permit2)
         case .hlSpotBuy(let symbol, let usdc?): hlSpotRoute(symbol, usdc: usdc, sell: nil)
@@ -1349,28 +1395,104 @@ extension Workspace {
         case .sendToken(let name, let token, let amount, let network):
             if let r = try? acrossRecipient(name, token: token, network: network) { acrossRoute(command, r, amount) }
             else { tokenOutRoute(to: name, token: token, amount: amount, network: network) }
+        case .agentCreate, .agentFund, .agentSend, .agentFreeze: agentRoute(command)
+        case .sendPrivately(let name, let token, let amount, let network):
+            (try? privateRecipient(name, token: token, network: network)).map { acrossRoute(command, ($0.entry, $0.symbol, $0.address), amount, privateOn: $0.network) }
         case .pay: payRoute(command)
         case .contractCall: callRoute(command)
         case .multisigCreate, .multisigSend: multisigRoute(command)
         case .bridge(let from, let to, let amount): bridgeRoute(from, to, amount)
         case .cctp(let from, let to, let amount): bridgeRoute(from, to, amount, cctp: true)
+        case .intents(let from, let to, let amount): intentsRoute(from, to, amount)
         case .usdt(let from, let to, let amount, let layerZero): usdtRoute(command, from, to, amount, layerZero: layerZero)
         case .aaveBorrow(let x?, let net), .aaveCollateral(let x?, let net): aaveDebtRoute(command, x, net)
         case .aaveRepay(let x, let net): aaveDebtRoute(command, x, net)
+        case .kaminoBorrow(let x?, let stock, let adding): kaminoDebtRoute(command, x, stock, adding)
+        case .kaminoRepay(let x, _): kaminoDebtRoute(command, x, nil, nil)
         case .gas(let place, let usd): gasRoute(place, usd ?? 1)
         case .claimRewards, .sweepRewards: claimRoute()
         default: ends(command).map { from, to in
             let footer = if case .sellStock = command {
                 "Two Robinhood Chain transactions: an exact approve and the Uniswap swap, which may only pay this wallet. Press Confirm; Cancel or “cancel” drops it."
+            } else if case .buy(let a, _) = command, a.ondo {
+                "One Solana signature, checked and simulated before it’s signed. " + Ondo.terms(russian: false) + " Press Confirm; Cancel or “cancel” drops it."
             } else {
                 "One Solana signature, checked and simulated before it’s signed. Press Confirm; Cancel or “cancel” drops it."
             }
             // «Sell all USDT» reads as the amount its first step found held: «Sell 0.999604 USDT».
-            let held = from.title.hasPrefix("all") ? nil : from.title.split(separator: " ").last.map { "all \($0)" }
+            // «all 0.034429 SPCX» (all, with its number) replaces it too: «all» alone never stands on a card.
+            let held = from.title.hasPrefix("all") && !from.title.contains(where: \.isNumber) ? nil : from.title.split(separator: " ").last.map { "all \($0)" }
             let title = readable(command.summary.prefix(1).uppercased() + command.summary.dropFirst())
             return MoveRoute(title: held.map { title.replacingOccurrences(of: $0, with: from.title) } ?? title, footer: footer, steps: around(command, [from, to]))
         }
         }
+    }
+
+    /// A Backpack stock's bundled logo, else Kamino's.
+    private func stockLogo(_ stock: String?) -> String {
+        stock.map { TokenLogo.image($0.lowercased()) != nil ? $0.lowercased() : "kamino" } ?? "kamino"
+    }
+
+    /// Borrowing USDC on Kamino against a stock — put up first when the command brings it — or paying it back: the
+    /// collateral, the loan with the health factor before and after (quoted while the card waits), where the USDC ends.
+    private func kaminoDebtRoute(_ command: WalletCommand, _ amount: Decimal?, _ stock: String?, _ adding: Decimal?) -> MoveRoute {
+        let q = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
+        func line(_ way: String) -> String? { q?.first(where: { $0.way == way }).map(\.gets) }
+        let what = amount.map { Fmt.num($0, maxFraction: 6) } ?? "all"
+        let free = solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? ""
+        if case .kaminoRepay = command {
+            // «All» is what's owed, not all the wallet's USDC: the debt as quoted, a tenth of a percent over.
+            let out = amount ?? q?.first { $0.way == "debt" }.map { ($0.worth * Decimal(string: "1.001")!).rounded(6, .up) }
+            return MoveRoute(title: "Repay \(amount == nil ? out.map { "all ≈ \(Fmt.num($0, maxFraction: 6))" } ?? "all" : what) USDC on Kamino",
+                             footer: "One transaction: the USDC goes back to Kamino against this wallet's own loan, never anyone else's, and Kamino takes no more than is owed. "
+                                + "The collateral stays until you withdraw it. Press Confirm.",
+                             steps: [step("usdc", "FROM · SOLANA", out.map { "\(amount == nil ? "all ≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "all owed · reading…", free, .solana,
+                                          money: out.map { moneyMove("USDC", on: "solana", by: -$0) } ?? []),
+                                     step("kamino", "REPAY · KAMINO", line("debt").map { "debt \($0)" } ?? "\(what) USDC",
+                                          (line("market").map { "\($0) · " } ?? "") + "the debt goes down, the collateral stays", .kamino)])
+        }
+        let logo = stockLogo(stock)
+        // SOL stands on Kamino's main market, a Backpack stock on its own one.
+        let sol = stock == "SOL", position = kaminoPosition(stock)
+        // What Kamino holds of the collateral and what the wallet owes there now, and after: the cards' was → after boxes.
+        let up = position?.collateral.first { $0.symbol == stock }?.tokens ?? 0, owed = position?.debts.first { $0.symbol == "USDC" }?.tokens ?? 0
+        var steps: [ActivityBubble] = []
+        if let stock, let adding {
+            steps.append(step(logo, "FROM · SOLANA", "\(Fmt.num(adding, maxFraction: 6)) \(stock)", "", .solana, money: moneyMove(stock, on: "solana", by: -adding)))
+        }
+        // On the main market every deposit is collateral: savings there (USDC) hold the loan too, and count in the total.
+        let savings = sol && position?.collateral.contains { $0.symbol != "SOL" && $0.valueUSD > 0 } == true
+        let held = stock == nil ? "what you put up on Kamino" : savings ? "Kamino Lend · your savings there count as collateral too"
+            : sol ? "Kamino Lend · not sold" : "Backpack market · not sold"
+        steps += [step(logo, "COLLATERAL · KAMINO", line("collateral") ?? "reading…", held, .kamino,
+                       money: stock.map { vaultMove("Kamino", $0, was: up, by: adding ?? 0) } ?? []),
+                  step("kamino", "BORROW · KAMINO", "\(what) USDC", line("health").map { "health factor \($0)" } ?? "health factor: reading…", .kamino,
+                       money: vaultMove("Kamino debt", "USDC", was: owed, by: amount)),
+                  step("usdc", "TO · SOLANA", "\(what) USDC", line("rate").map { "your wallet · \($0)" } ?? "your wallet", .solana,
+                       money: amount.map { moneyMove("USDC", on: "solana", by: $0) } ?? [])]
+        // A loan the executor would refuse says so on the card, with how much it would take.
+        let health = q?.first { $0.way == "health" }?.worth, available = q?.first { $0.way == "available" }?.worth
+        let rent = q?.first { $0.way == "rent" }?.worth, back = q?.first { $0.way == "rentBack" }?.worth
+        let kept = Decimal(TopUpOrder.solanaFeeFloor) / 1_000_000_000
+        let refused: String? = if let amount, let available, amount > available {
+            "Kamino lends at most \(Fmt.usd(available)) against this collateral: ihatecrypto won't sign \(what) USDC. Borrow less, or put more up."
+        } else if let health, health > 0, health < Executor.minimumHealth {
+            "That leaves a health factor of \(Fmt.num(health, maxFraction: 2)), under ihatecrypto's 1.5: it won't sign this. Borrow less, or put more up."
+        } else if sol, let adding, let have = solana?.sol, adding + (rent ?? 0) + kept > have {
+            // SOL put up leaves the wallet its fees and the first deposit's rent: the move refuses what doesn't fit.
+            "The wallet has \(Fmt.num(have, maxFraction: 4)) SOL: \(Fmt.num(adding, maxFraction: 6)) SOL put up" + (rent.map { ", ≈ \(Fmt.num($0, maxFraction: 4)) of Kamino's rent" } ?? "")
+                + " and \(Fmt.num(kept, maxFraction: 3)) SOL for later fees don't all fit. Put up at most \(Fmt.num(max(0, have - (rent ?? 0) - kept).rounded(4, .down), maxFraction: 4)) SOL."
+        } else { nil }
+        // A first deposit opens the wallet's Kamino accounts: SOL's rent as simulated now, and what comes back.
+        let rentWords = !sol ? " (the first time ≈ 0.023 SOL of rent, most of it back when all comes out)"
+            : rent.map { r in " (the first time ≈ \(Fmt.num(r, maxFraction: 4)) SOL of rent and fee" + (back.map { ", ≈ \(Fmt.num($0, maxFraction: 4)) of it back when all comes out" } ?? "") + ")" }
+            ?? (up > 0 ? "" : " (the first time's rent: reading…)")
+        let first = stock.flatMap { s in adding.map { _ in "Two transactions: the \(s) goes in as collateral, then Kamino lends \(what) USDC against it, nothing sold\(rentWords). " } }
+        return MoveRoute(title: "Borrow \(what) USDC on Kamino" + (stock.map { " against \($0)" } ?? ""),
+                         footer: (first ?? "Kamino lends \(what) USDC against what's up there, nothing sold. ")
+                            + "ihatecrypto stops at a health factor of 1.5. " + (stock != nil && !sol ? "Stock prices stand still while US markets are closed. " : "") + "Press Confirm.",
+                         steps: steps,
+                         warning: refused ?? line("liquidation").flatMap { $0.isEmpty ? nil : "Liquidation if \($0): Kamino sells your \(stock ?? "collateral") at a penalty. Keep an eye on it, or borrow less." })
     }
 
     private func step(_ logo: String, _ label: String, _ title: String, _ line: String, _ fill: RouteFill, money: [MoneyMove] = []) -> ActivityBubble {
@@ -1381,6 +1503,13 @@ extension Workspace {
             return ActivityBubble(kind: "step", label: label, title: "\(Fmt.num(x, maxFraction: 8)) \(symbol)", lines: [all], logo: logo, fill: fill, money: money)
         }
         return ActivityBubble(kind: "step", label: label, title: title, lines: [line], logo: logo, fill: fill, money: money)
+    }
+
+    /// A Solana buy's coin now → after, by the quote the card shows; none until it's quoted.
+    private func boughtMove(_ c: WalletCommand, _ a: SpotAsset) -> [MoneyMove] {
+        guard let shown = jupiterShown, shown.command == c, a.resolved else { return [] }
+        let was = holdings.first { $0.chain == "solana" && $0.contract == a.mint }?.amount ?? 0
+        return [MoneyMove(place: "Solana", symbol: a.symbol, was: was, after: was + Decimal(shown.out) / pow(10, a.decimals), approx: true)]
     }
 
     /// A balance a step changes, read now: `symbol` on `place` and what `delta` makes of it (nil delta: all of it
@@ -1418,7 +1547,7 @@ extension Workspace {
     func deposited(in place: String) -> Decimal? {
         let n = place.lowercased()
         if n.contains("kamino") { return kamino }
-        if n.contains("jupiter") { return lendTotal }
+        if n.contains("jupiter") { return lent("USDC") }
         if n.contains("hlp") { return hlp.equity }
         for name in ["Aave", "Morpho"] where n.contains(name.lowercased()) {
             if n.contains("base") || !n.contains("·") && !n.contains(" on ") { return name == "Aave" ? base?.aave : base?.morpho }
@@ -1564,27 +1693,49 @@ extension Workspace {
     func transferRoute(_ entry: SavedAddress, _ amount: Decimal) -> MoveRoute {
         let net = entry.network, ends = AddressCheck.ends(entry.address), fill = RouteFill(rawValue: net.rawValue) ?? .check
         let free = usdc(on: net.rawValue)
+        // What a new Hyperliquid account keeps goes on top, and the card says it before Confirm, as the signature will.
+        let hl = Self.hlOpening(amount, to: entry.name, net == .hyperliquid ? hlRecipients[entry.address.lowercased()] : nil)
+        let goes = amount + hl.extra
         // Solana comes up only when the money there is short: a plain transfer is a plain transfer. Hyperliquid too: the
         // card said «no bridge» over $3.96 for a 150 send, and the move failed at the signature (2026-10-22).
-        let line = free.map { $0 < amount && net != .solana ? "\(Fmt.num(amount - $0)) USDC short: it comes from Solana first"
-            : net == .hyperliquid ? "perp balance · no bridge, no gas" : "free: \(Fmt.num($0)) USDC" } ?? ""
+        let line = free.map { $0 < goes && net != .solana ? "\(Fmt.num(goes - $0)) USDC short: it comes from Solana first"
+            : net == .hyperliquid ? hl.line ?? "perp balance · no bridge, no gas" : "free: \(Fmt.num($0)) USDC" } ?? ""
         // What Solana gives for it, the bridge fee on top.
-        let short = max(0, amount - (free ?? amount))
+        let short = max(0, goes - (free ?? goes))
         let bridged = net != .solana && short > 0 && (solana?.usdc ?? 0) >= short ? moneyMove("USDC", on: "solana", by: -short, approx: true) : []
         let saved = addressBook.first { $0.id == entry.id }
         let warnings = [
+            hl.warning,
             saved.flatMap { $0.network != net ? "Saved for \($0.network.title), sent on \(net.title) to the same address. Your own wallet has it there too; an exchange's deposit address may not — check that it takes \(net.title)." : nil },
             firstSendWarning(entry),
         ].compactMap { $0 }
         return MoveRoute(title: "Send \(Fmt.num(amount)) USDC to \(entry.name)",
                          footer: (isOwnWallet(entry.address) ? "To your own wallet «\(entry.name)», one transfer on \(net.title)."
-                                  : "Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(amount)) USDC leaving.")
+                                  : "Only this saved address may receive the money: the guard and the signer check it, the simulation must show exactly \(Fmt.num(goes)) USDC leaving.")
                             + (net == .ethereum ? " Ethereum mainnet: the fee is in ETH and can be dollars; it's bought for you if the wallet has none there." : "")
-                            + " Press Confirm.",
+                            + hl.footer + " Press Confirm.",
                          steps: [
-            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(amount)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -amount)),
-            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", fill),
+            step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(goes)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -goes)),
+            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)" + hl.to, fill),
         ], warning: warnings.isEmpty ? nil : warnings.joined(separator: " "))
+    }
+
+    /// What a Hyperliquid send card adds for its recipient: the dollar a new account keeps on top, or that Hyperliquid
+    /// didn't say (Confirm asks again, and sends nothing without an answer). Open, or still asking: nothing.
+    static func hlOpening(_ amount: Decimal, to name: String, _ state: HLRecipient?)
+        -> (extra: Decimal, line: String?, to: String, warning: String?, footer: String) {
+        let asked = Fmt.num(amount)
+        switch state {
+        case .new?:
+            return (1, "\(asked) arrive · 1 opens \(name)’s account, once", " · new on Hyperliquid",
+                    "\(name)’s Hyperliquid account is new: Hyperliquid keeps 1 USDC of the first transfer to it, so 1 more goes and the \(asked) asked arrive.",
+                    " The signature is for \(Fmt.num(amount + 1)) USDC: \(asked) for \(name) and 1 that Hyperliquid keeps once.")
+        case .unknown?:
+            return (0, nil, "", "Couldn’t ask Hyperliquid whether \(name)’s account is new; a new one keeps 1 USDC of the first transfer. "
+                    + "It’s asked again at Confirm, and with no answer then, nothing is sent.", "")
+        case .open?, .checking?, nil:
+            return (0, nil, "", nil, "")
+        }
     }
 
     /// SOL to a saved Solana address.
@@ -1608,8 +1759,11 @@ extension Workspace {
         let held = holdings.first { $0.chain == net && ($0.symbol.lowercased() == token.lowercased() || $0.contract.lowercased() == token.lowercased()) }
         // All of it reads as the number held, «all available» under it.
         let what = amount.map { "\(Fmt.num($0, maxFraction: 9)) \(held?.symbol ?? token)" } ?? held.map { "\(Fmt.num($0.amount, maxFraction: 9)) \($0.symbol)" } ?? "all \(token)"
+        // All of a network's own coin: everything but the fee; on Solana the empty token accounts close and their rent goes too.
+        let coin = token.uppercased() == (net == "solana" ? "SOL" : EVMNetwork.named(net)?.gasCoin)
+        let all = amount == nil && coin ? " All of it but the fee" + (net == "solana" ? "; the wallet's empty token accounts close and their rent goes too." : ".") : ""
         return MoveRoute(title: "Send \(what) to \(entry.name)",
-                         footer: "One transfer on \(place?.title ?? net), the token as it is: only this saved address may receive it. Press Confirm.",
+                         footer: "One transfer on \(place?.title ?? net), the token as it is: only this saved address may receive it.\(all) Press Confirm.",
                          steps: [
             step(logo, "FROM · \((place?.title ?? net).uppercased())", what, amount == nil ? (held == nil ? "" : "all available") : held.map { "held: \(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" } ?? "", fill,
                  money: held.map { h in [MoneyMove(place: WalletCommand.placeName(net), symbol: h.symbol, was: h.amount, after: max(0, h.amount - (amount ?? h.amount)))] }
@@ -1671,12 +1825,24 @@ extension Workspace {
             let a = x ?? heldForAll(s, fill: .solana)?.0
             return (step(s == "SOL" ? "sol" : "usdc", "FROM · SOLANA", "\(n(x)) \(s)", s == "SOL" ? solSOL : solUSDC, .solana, money: moneyMove(s, on: "solana", by: a.map { -$0 })),
                     step("jup", "INTO · JUPITER LEND", "\(n(x)) \(s)", "earns the vault rate · withdraw any time", .jupiter,
-                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lendTotal, by: a) : []))
+                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lent("USDC"), by: a) : []))
         case .lendWithdraw(let s, let x):
-            let x = x ?? (s == "USDC" && lendTotal > 0 ? lendTotal : nil)
-            return (step("jup", "FROM · JUPITER LEND", "\(n(x)) \(s)", lendTotal > 0 ? "in the vault: \(Fmt.num(lendTotal)) USDC" : "", .jupiter,
-                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: lendTotal, by: x.map { -$0 }) : []),
+            let held = lent(s), x = x ?? (held > 0 ? held : nil)
+            return (step("jup", "FROM · JUPITER LEND", "\(n(x)) \(s)", held > 0 ? "in the vault: \(Fmt.num(held, maxFraction: 6)) \(s)" : "", .jupiter,
+                         money: s == "USDC" ? vaultMove("Jupiter Lend", s, was: held, by: x.map { -$0 }) : []),
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))
+        // Backpack's stocks: collateral on Kamino's Backpack market, out of the wallet and back.
+        case .kamino(let into, let s, let x) where WalletCommand.kaminoStockMints[s] != nil:
+            // «All» with its number (the owner: «надо писать алл и кол-во»): what the wallet holds, or what Kamino does.
+            let all = x == nil ? into ? heldOnSolana(s) : kaminoLoan?.collateral.first { $0.symbol == s }?.tokens : nil
+            let what = x.map { "\(n($0)) \(s)" } ?? all.map { "all \(Fmt.num($0, maxFraction: 6)) \(s)" } ?? "all \(s) · reading…"
+            let moved = x ?? all
+            let wallet = step(stockLogo(s), into ? "FROM · SOLANA" : "TO · SOLANA", what, into ? "" : "your wallet", .solana,
+                              money: moved.map { moneyMove(s, on: "solana", by: into ? -$0 : $0) } ?? [])
+            let kamino = step("kamino", into ? "COLLATERAL · KAMINO" : "FROM · KAMINO", what,
+                              into ? "Backpack market · earns nothing · borrow USDC against it" : "the collateral back; a loan on it is paid first", .kamino,
+                              money: moved.map { vaultMove("Kamino", s, was: kaminoLoan?.collateral.first { c in c.symbol == s }?.tokens ?? 0, by: into ? $0 : -$0) } ?? [])
+            return into ? (wallet, kamino) : (kamino, wallet)
         case .kamino(true, let s, let x):
             let a = x ?? heldForAll(s, fill: .solana)?.0
             return (step(s == "SOL" ? "sol" : "usdc", "FROM · SOLANA", "\(n(x)) \(s)", s == "SOL" ? solSOL : solUSDC, .solana, money: moneyMove(s, on: "solana", by: a.map { -$0 })),
@@ -1684,7 +1850,10 @@ extension Workspace {
                          money: s == "USDC" ? vaultMove("Kamino Lend", s, was: kamino, by: a) : []))
         case .kamino(false, let s, let x):
             let vault = kaminoVault(s)
-            let x = x ?? vault?.tokens ?? (s == "USDC" && kamino > 0 ? kamino : nil)
+            // All of a coin on the main market reads as what Kamino holds of it, never the wallet's: «all SOL» read 0.108
+            // in the wallet while 0.05 was up there.
+            // `kamino` is every main-market deposit's dollars (SOL up as collateral too): only a fallback for USDC.
+            let x = x ?? vault?.tokens ?? kaminoMainLoan?.collateral.first { $0.symbol == s }?.tokens ?? (s == "USDC" && kamino > 0 ? kamino : nil)
             return (step("kamino", vault == nil ? "FROM · KAMINO LEND" : "FROM · KAMINO EARN", "\(n(x)) \(s)", vault.map { "\($0.name): \($0.amount ?? "")" } ?? "", .kamino,
                          money: vault == nil && s == "USDC" ? vaultMove("Kamino Lend", s, was: kamino, by: x.map { -$0 }) : []),
                     step(s == "SOL" ? "sol" : "usdc", "TO · SOLANA", "\(n(x)) \(s)", "your wallet", .solana, money: x.map { moneyMove(s, on: "solana", by: $0) } ?? []))
@@ -1706,7 +1875,8 @@ extension Workspace {
         case .buy(let a, let u):
             return (step("usdc", "FROM · SOLANA", "\(n(u)) USDC", solUSDC, .solana, money: moneyMove("USDC", on: "solana", by: u.map { -$0 })),
                     step(TokenLogo.name(forAsset: a.symbol) ?? "usdc", "BUY · JUPITER", a.symbol,
-                         quotedGets(c).map { "≈ \($0) · simulated first" } ?? "best route, simulated first", .jupiter))
+                         quotedGets(c).map { ($0.components(separatedBy: " · ").dropFirst() + ["simulated first"]).joined(separator: " · ") } ?? "best route, simulated first",
+                         .jupiter, money: boughtMove(c, a)))
         case .jupiterDCA(let a, let u, let o, let e):
             let orders = o ?? u.map(WalletCommand.jupiterDCAOrders) ?? 2
             return (step("usdc", "FROM · SOLANA", "\(n(u)) USDC", solUSDC + (solUSDC.isEmpty ? "" : " · ") + "all goes in now", .solana,
@@ -1836,7 +2006,7 @@ extension Workspace {
         var ahead: [String: Decimal] = [:]
         func count(_ c: WalletCommand) {
             let sent: Decimal?? = switch c {
-            case .bridge(_, _, let a), .cctp(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
+            case .bridge(_, _, let a), .cctp(_, _, let a), .intents(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
                  .arbitrumToSolana(let a), .robinhoodToSolana(let a), .withdrawToSolana(let a): a
             default: nil
             }
@@ -1888,6 +2058,7 @@ extension Workspace {
     static func arrives(_ c: WalletCommand) -> String? {
         switch c {
         case .bridge(_, let to, _): to == "hyperliquid" ? nil : to
+        case .intents(_, let to, _): to
         case .evmToSolana, .baseToSolana, .arbitrumToSolana, .robinhoodToSolana, .withdrawToSolana, .sellNear: "solana"
         case .solanaTo(let to, _): to
         default: nil
@@ -1900,6 +2071,7 @@ extension Workspace {
         case .aave(true, _, let n), .morpho(true, _, let n), .buyOn(let n, _, _, _): n
         case .lendDeposit, .kamino(true, _, _), .buy, .hlp(true, _), .allocate(_, _, _, _, from: "solana"), .solanaTo, .jupiterDCA: "solana"
         case .buyStock: "robinhood"
+        case .intents(from: "solana", _, _): "solana"
         default: nil
         }
     }
@@ -1963,7 +2135,7 @@ extension Workspace {
 
     /// A token on an EVM network: bought with the USDC already there (or brought from the network `from` names), else
     /// with USDC from Solana; sold back to Solana, or for USDC that stays there (`keep`). Solana's way (Relay's swap, or
-    /// Relay's bridge and Uniswap) is chosen when it runs, by what leaves more after gas.
+    /// Relay's bridge and the best exchange there) is chosen when it runs, by what leaves more after gas.
     private func swapRoute(_ place: String, _ token: String, usdc: Decimal?, sell: Decimal?, from: String? = nil, keep: Bool = false,
                            ahead: [String: Decimal] = [:]) -> MoveRoute {
         let name = WalletCommand.placeName(place)
@@ -1981,10 +2153,13 @@ extension Workspace {
         }
         let src = (from ?? auto).flatMap { $0 == "solana" || $0 == place ? nil : $0 }
         // A source the user named is the card's, never Solana's ways: if it can't pay, the move is refused, not swapped.
-        let here = keep || ((from ?? auto) != nil && (from ?? auto) != "solana") || (usdc.map { u in quoted?.first.map { $0.way == "here" }
+        let here = keep || ((from ?? auto) != nil && (from ?? auto) != "solana") || (usdc.map { u in quoted?.first.map { $0.way.hasPrefix("here") }
             ?? (from != "solana" && (self.usdc(on: place) ?? 0) >= u) } ?? false)
         if here {
-            let gets = quoted?.first { $0.way == "here" }?.gets
+            let gets = quoted?.first { $0.way.hasPrefix("here") }?.gets
+            // The way on the network that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
+            let venue = quoted?.first { $0.way.hasPrefix("here:") }.map { String($0.way.dropFirst(5)) } ?? "Uniswap"
+            let venueLogo = Self.venueLogo(venue), venueName = Self.venueName(venue)
             let moving = usdc.map { "\(Fmt.num($0)) USDC" } ?? "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)"
             let start: [ActivityBubble] = if let src {
                 [step(ModuleNetwork(place: src)?.logo ?? src, "FROM · \(WalletCommand.placeName(src).uppercased())", moving,
@@ -1999,32 +2174,35 @@ extension Workspace {
                       money: moneyMove(label, on: place, by: sell.map { -$0 }))]
             }
             let footer = (src.map { "First Relay moves the USDC from \(WalletCommand.placeName($0)) to \(name): an exact approve and its deposit. Then two" } ?? "Two")
-                + " \(name) transactions: an exact approve and the Uniswap swap, which may only pay this wallet"
+                + " \(name) transactions: an exact approve and the swap on \(venueName), which may only pay this wallet"
                 + (usdc == nil ? "; the USDC stays on \(name)." : ".") + " Press Confirm."
             if let usdc {
                 return MoveRoute(title: "Buy \(label) · \(Fmt.num(usdc)) USDC on \(name)", footer: footer, steps: start + [
-                    approve("\(Fmt.num(usdc)) USDC", for: "Uniswap", logo: "uni", fill, line: src == nil ? nil : "what arrives · only Uniswap may take it"),
-                    step(logo, "BUY · UNISWAP ON \(name.uppercased())", label, gets.map { "≈ \($0)" } ?? "at the pool price", fill,
+                    approve("\(Fmt.num(usdc)) USDC", for: venueName, logo: venueLogo, fill, line: src == nil ? nil : "what arrives · only \(venueName) may take it"),
+                    step(logo, "BUY · \(venueName.uppercased()) ON \(name.uppercased())", label, gets.map { "≈ \($0)" } ?? "at the best price there", fill,
                          money: Self.quotedAmount(gets).map { tokenMove(label, on: place, by: $0) } ?? []),
                 ], warning: token.hasPrefix("0x") ? "A token by its contract is anyone’s coin: its price can halve in a day and nobody vouches for it. Put in only what you can lose." : nil)
             }
             return MoveRoute(title: "Sell \(amountOrAll(sell, label, on: place)) on \(name) → USDC on \(name)", footer: footer, steps: start + [
-                approve(moving, for: "Uniswap", logo: "uni", fill),
+                approve(moving, for: venueName, logo: venueLogo, fill),
                 step("usdc", "TO · USDC ON \(name.uppercased())", gets.map { "≈ \($0)" } ?? "USDC", "stays on \(name) · your own address ✓", fill,
                      money: Self.quotedAmount(gets).map { moneyMove("USDC", on: place, by: $0, approx: true) } ?? []),
             ])
         }
+        // The exchange the bridge's way ends on, as quoted (Executor.swapQuotes «bridge:KyberSwap»): Uniswap or KyberSwap.
+        let bridgeVenue = quoted?.first { $0.way.hasPrefix("bridge:") }.map { Self.venueName(String($0.way.dropFirst(7))) }
+        let exchange = bridgeVenue ?? "the best exchange"
         // The way picked in the step's details, else the one that leaves more now (quoted while the card waits).
         let way = switch routeWays[Self.wayKey(place, token)] {
         case "relay": step("relay", "RELAY SWAP", "one step", usdc != nil ? "Relay swaps on the way · one Solana signature" : "Relay swaps it back to USDC on Solana", .relay)
-        case "uniswap": step("relay", "RELAY + UNISWAP", usdc != nil ? "bridge, then Uniswap" : "Uniswap, then bridge",
-                             usdc != nil ? "USDC to \(name), then Uniswap with an exact approve" : "Uniswap on \(name), then Relay's bridge to Solana", .relay)
-        default: bestWay(swapQuote.flatMap { q in q.command == command ? q.ways : nil })
+        case "bridge": step("relay", "RELAY + \((bridgeVenue ?? "exchange").uppercased())", usdc != nil ? "bridge, then \(exchange)" : "\(exchange), then bridge",
+                            usdc != nil ? "USDC to \(name), then \(exchange) with an exact approve" : "\(exchange) on \(name), then Relay's bridge to Solana", .relay)
+        default: bestWay(quoted)
         }
-        // Relay + Uniswap approves exactly what it swaps: shown once that's the way (picked, or leaving more now).
-        let viaUniswap = (routeWays[Self.wayKey(place, token)] ?? swapQuote.flatMap { q in q.command == command ? q.ways.first?.way : nil }) == "uniswap"
-        let footer = (usdc != nil ? "Relay’s swap is one Solana signature; the other way bridges USDC over Relay and swaps on Uniswap with an exact approve, the swap paying only this wallet. "
-                                  : "Relay’s swap is an exact approve and its deposit on \(name); the other way swaps on Uniswap with an exact approve, then bridges the USDC over Relay, paying only this wallet. ")
+        // The bridge's way approves exactly what it swaps: shown once that's the way (picked, or leaving more now).
+        let viaBridge = (routeWays[Self.wayKey(place, token)] ?? quoted?.first?.way)?.hasPrefix("bridge") == true
+        let footer = (usdc != nil ? "Relay’s swap, or Relay’s bridge and then Uniswap or KyberSwap: whichever leaves more, paying only this wallet. "
+                                  : "Relay’s swap, or Uniswap or KyberSwap and then Relay’s bridge: whichever leaves more, paying only this wallet. ")
             + (token.hasPrefix("0x") ? "A token by its contract must trade on \(name) with $50k+ of liquidity. " : "The ticker is taken from Uniswap’s token list, its contract checked on-chain. ")
             + "Press Confirm."
         if let usdc {
@@ -2032,7 +2210,8 @@ extension Workspace {
                 step("sol", "FROM · SOLANA", "\(Fmt.num(usdc)) USDC", solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? "", .solana,
                      money: moneyMove("USDC", on: "solana", by: -usdc)),
                 way,
-            ] + (viaUniswap ? [approve("≈ \(Fmt.num(usdc)) USDC", for: "Uniswap", logo: "uni", fill, line: "exactly what arrives · only Uniswap may take it")] : []) + [
+            ] + (viaBridge ? [approve("≈ \(Fmt.num(usdc)) USDC", for: exchange, logo: bridgeVenue.map(Self.venueLogo) ?? "uni", fill,
+                                      line: "exactly what arrives · only \(exchange) may take it")] : []) + [
                 step(logo, "BUY · ON \(name.uppercased())", label, quotedGets(command).map { "≈ \($0) arrives" } ?? "at the best price found", fill,
                      money: Self.quotedAmount(quotedGets(command)).map { tokenMove(label, on: place, by: $0) } ?? []),
             ], warning: token.hasPrefix("0x") ? "A token by its contract is anyone’s coin: its price can halve in a day and nobody vouches for it. Put in only what you can lose." : nil)
@@ -2040,7 +2219,7 @@ extension Workspace {
         return MoveRoute(title: "Sell \(amountOrAll(sell, label, on: place)) on \(name) → Solana", footer: footer, steps: [
             step(logo, "FROM · \(name.uppercased())", "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", "\(EVMNetwork.named(place)?.gasCoin ?? "ETH") for gas comes along when there’s none", fill,
                  money: moneyMove(label, on: place, by: sell.map { -$0 })),
-        ] + (viaUniswap ? [approve("\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", for: "Uniswap", logo: "uni", fill)] : []) + [
+        ] + (viaBridge ? [approve("\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label)", for: exchange, logo: bridgeVenue.map(Self.venueLogo) ?? "uni", fill)] : []) + [
             way,
             step("sol", "TO · SOLANA", "USDC", quotedGets(command).map { "≈ \($0) · your wallet" } ?? "your wallet", .solana,
                  money: Self.quotedAmount(quotedGets(command)).map { moneyMove("USDC", on: "solana", by: $0, approx: true) } ?? []),
@@ -2065,7 +2244,7 @@ extension Workspace {
         let logo = TokenLogo.name(forAsset: symbol) ?? "hyperliquid"
         if let usdc {
             return MoveRoute(title: "Buy \(symbol) · \(Fmt.num(usdc)) USDC on Hyperliquid spot",
-                             footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC. Press Confirm.",
+                             footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid, less Hyperliquid's \(Fmt.pct(RiskCalc.spotTakerFee * 100)) fee; the spot USDC comes from your perp balance first when short (one more signature of yours). The exchange takes orders from 10 USDC. Press Confirm.",
                              steps: [step("hyperliquid", "FROM · HYPERLIQUID", "\(Fmt.num(usdc)) USDC", "spot balance · perp tops it up when short", .hyperliquid),
                                      step(logo, "BUY · SPOT ORDER", symbol,
                                           quotedGets(.hlSpotBuy(symbol: symbol, usdc: usdc)).map { "≈ \($0) · at most 1% over the mid" } ?? "IOC · at most 1% over the mid", .hyperliquid),
@@ -2073,7 +2252,7 @@ extension Workspace {
                                           money: Self.quotedAmount(quotedGets(.hlSpotBuy(symbol: symbol, usdc: usdc))).map { tokenMove(symbol, on: "hyperliquid", by: $0) } ?? [])])
         }
         return MoveRoute(title: "Sell \(amountOrAll(sell, symbol, on: "hyperliquid")) on Hyperliquid spot",
-                         footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the USDC lands on your spot balance. The exchange takes orders from 10 USDC. Press Confirm.",
+                         footer: "One spot order on Hyperliquid's book, IOC within 1% of the mid; the USDC lands on your spot balance, less Hyperliquid's \(Fmt.pct(RiskCalc.spotTakerFee * 100)) and ihatecrypto's \(Fmt.pct(RiskCalc.builderFee * 100)). The exchange takes orders from 10 USDC. Press Confirm.",
                          steps: [step(logo, "FROM · SPOT BALANCE", "\(sell.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(symbol)", "on Hyperliquid", .hyperliquid,
                                       money: moneyMove(symbol, on: "hyperliquid", by: sell.map { -$0 })),
                                  step(logo, "SELL · SPOT ORDER", "→ USDC",
@@ -2172,12 +2351,14 @@ extension Workspace {
         let moving = "\(amount.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label(from))"
         var steps = [step(logo, "FROM · \(name.uppercased())", moving, coinIn ? "your \(coin) · its fees stay" : "on \(name)", fill,
                           money: moneyMove(label(from), on: place, by: amount.map { -$0 }))]
-        if !coinIn { steps.append(approve(moving, for: "Uniswap", logo: "uni", fill)) }
-        // The network's logo with Uniswap's badge, as a buy on Uniswap there.
-        steps.append(step(logo, "SWAP · \((quoted?.way ?? "Uniswap").uppercased()) ON \(name.uppercased())", label(to),
-                          quoted.map { "≈ \($0.gets)" } ?? "the best of v2, v3 and v4", fill,
+        // The way that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
+        let way = quoted?.way ?? "Uniswap"
+        if !coinIn { steps.append(approve(moving, for: Self.venueName(way), logo: Self.venueLogo(way), fill)) }
+        // The network's logo with the way's badge, as a buy there.
+        steps.append(step(logo, "SWAP · \(Self.venueName(way).uppercased())", label(to),
+                          quoted.map { "≈ \($0.gets)" } ?? "the best of Uniswap, Relay and KyberSwap", fill,
                           money: Self.quotedAmount(quoted?.gets).map { tokenMove(label(to), on: place, by: $0) } ?? []))
-        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap v2, v3 and v4, at most 0.5–3% under its quote by the price impact, paying only this wallet."
+        let footer = "One swap on \(name), no USDC in the middle: the best of Uniswap, Relay and KyberSwap after gas, paying only this wallet."
             + (coinIn ? " \(coin) goes in as itself into a v4 pool of it, else wrapped into W\(coin) first (one more transaction)." : " An exact approve first.")
             + (coinOut ? " \(coin) comes out as itself, or is unwrapped after." : "") + " Press Confirm."
         return MoveRoute(title: "Swap \(moving) → \(label(to)) on \(name)", footer: footer, steps: steps,
@@ -2221,25 +2402,85 @@ extension Workspace {
         return MoveRoute(title: "Swap \(moving) on \(fromName) → \(label(b)) on \(toName)", footer: footer, steps: steps)
     }
 
+    /// A private swap: one deposit to the 1Click address bound to the quote, refused unless 1Click holds it as
+    /// confidential, and what arrives at this wallet's own address on the other side. On chain the two can't be matched.
+    private func privateSwapRoute(_ command: WalletCommand, _ a: String, _ from: String, _ b: String, _ to: String, _ amount: Decimal) -> MoveRoute {
+        let fromName = WalletCommand.placeName(from), toName = WalletCommand.placeName(to)
+        func fill(_ p: String) -> RouteFill { RouteFill(rawValue: p) ?? .check }
+        func logo(_ p: String) -> String { ModuleNetwork(place: p)?.logo ?? p }
+        func label(_ t: String) -> String { t.hasPrefix("0x") ? tokenSymbol(t) ?? "\(t.prefix(6))…\(t.suffix(4))" : t.uppercased() }
+        let quote = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
+        let moving = "\(Fmt.num(amount, maxFraction: 8)) \(label(a))"
+        let out = from == "near" && a.uppercased() == "NEAR" ? nearMove(by: -amount) : moneyMove(label(a), on: from, by: -amount)
+        let lands = Self.quotedAmount(quote?.first?.gets)
+        let into = lands.map { x in to == "near" && b.uppercased() == "NEAR" ? nearMove(by: x, approx: true) : tokenMove(label(b), on: to, by: x) } ?? []
+        return MoveRoute(title: "Swap \(moving) privately → \(label(b))\(from == to ? "" : " on \(toName)")",
+                         footer: "Through NEAR Intents' Confidential Intents: one deposit on \(fromName) to the 1Click address bound to this quote, checked with 1Click before signing and refused unless 1Click holds it as private. That address needs \(Presence.name) the first time. \(label(b)) comes to your own address on \(toName), and on chain the deposit and the payout can't be matched. A refund comes back to \(fromName). Press Confirm.",
+                         steps: [step(logo(from), "FROM · \(fromName.uppercased())", moving, "your own address there", fill(from), money: out),
+                                 step("near", "PRIVATE SWAP · CONFIDENTIAL INTENTS", label(b),
+                                      quote.map { $0.first.map { "≈ \($0.gets)" } ?? "no quote now · asked again every 30 s" } ?? "quoting…", .near),
+                                 step(logo(to), "TO · \(toName.uppercased())", label(b), "your own address there", fill(to), money: into)])
+    }
+
     /// A coin to a saved address on a network only NEAR Intents reaches: the USDC it costs and where from (once quoted),
     /// 1Click's swap for exactly that much, and the saved address.
-    private func acrossRoute(_ command: WalletCommand, _ r: (entry: SavedAddress, symbol: String, address: String), _ amount: Decimal?) -> MoveRoute {
-        let ends = AddressCheck.ends(r.entry.address), title = r.entry.network.title
+    /// The agent wallet on NEAR Intents: the rules the owner's NEAR key signs, money into it, or money out by its rules.
+    private func agentRoute(_ command: WalletCommand) -> MoveRoute {
+        let a = agentWallet, rules = a.map { "at most $\(Fmt.num($0.dailyUSD)) a day · your own and saved addresses only" } ?? "no agent wallet yet"
+        switch command {
+        case .agentCreate(let daily):
+            return MoveRoute(title: "Create an agent wallet · $\(Fmt.num(daily)) a day",
+                             footer: "NEAR Intents' Agent API keeps the agent wallet; your NEAR key signs its rules on this Mac (\(Presence.name)). Tasks then spend from it without your key, and NEAR Intents refuses anything the rules don't allow. Press Confirm.",
+                             steps: [step("near", "OWNER · YOUR NEAR KEY", "Signs the rules", "NEP-366, sent on chain by NEAR Intents", .near),
+                                     step("near", "RULES", "$\(Fmt.num(daily)) a day", "USDC only · to your own and saved addresses", .check),
+                                     step("near", "GRANT · THIS MAC", "Acts within them", "30 days · NEP-413, revocable", .check)])
+        case .agentFund(let usdc):
+            return MoveRoute(title: "Fund the agent wallet with \(Fmt.num(usdc)) USDC",
+                             footer: "The USDC goes from Solana to the deposit address the Agent API gives — 1Click's, checked to be bound to the agent wallet's own account before anything is sent. Press Confirm.",
+                             steps: [step("sol", "FROM · SOLANA", "\(Fmt.num(usdc)) USDC", "your wallet", .solana, money: moneyMove("USDC", on: "solana", by: -usdc)),
+                                     step("near", "TO · AGENT WALLET", "\(Fmt.num(usdc)) USDC", rules, .near)])
+        case .agentSend(let usdc, let name):
+            return MoveRoute(title: "Agent wallet: send \(Fmt.num(usdc)) USDC to \(name)",
+                             footer: "The agent wallet sends it by its own grant, without your key: NEAR Intents checks it against the rules you signed (\(rules)) and refuses what they don't allow. Press Confirm.",
+                             steps: [step("near", "FROM · AGENT WALLET", "\(Fmt.num(usdc)) USDC", rules, .near),
+                                     step("near", "RULES CHECKED BY", "NEAR Intents", "not by this app", .check),
+                                     (try? agentPayee(name)).map { p in
+                                         step(p.chain == "sol" ? "sol" : "base", "TO · \(p.label?.uppercased() ?? "SAVED ADDRESS")", p.name,
+                                              "\(AddressCheck.ends(p.address).start) … \(AddressCheck.ends(p.address).end) · \(p.chain == "sol" ? "Solana" : "Base")", .check)
+                                     } ?? step("usdc", "TO", name, "not a saved Solana or Base address", .check)])
+        default:
+            let on = { if case .agentFreeze(let on) = command { return on }; return true }()
+            return MoveRoute(title: on ? "Freeze the agent wallet" : "Unfreeze the agent wallet",
+                             footer: (on ? "Nothing moves from the agent wallet until you unfreeze it." : "The agent wallet acts again, within its rules.") + " Your NEAR key signs it (\(Presence.name)). Press Confirm.",
+                             steps: [step("near", "OWNER · YOUR NEAR KEY", on ? "Freeze" : "Unfreeze", rules, .near)])
+        }
+    }
+
+    /// `privateOn`: a private send through Confidential Intents, paid on that network.
+    private func acrossRoute(_ command: WalletCommand, _ r: (entry: SavedAddress, symbol: String, address: String), _ amount: Decimal?,
+                             privateOn: String? = nil) -> MoveRoute {
+        let ends = AddressCheck.ends(r.entry.address), title = privateOn.map(WalletCommand.placeName) ?? r.entry.network.title
         let quote = swapQuote.flatMap { $0.command == command ? $0.ways : nil }
         let what = "\(amount.map { Fmt.num($0, maxFraction: 9) } ?? "?") \(r.symbol)"
         let from = quote?.first?.way ?? "Solana"
         let steps = [
             step(from == "Solana" ? "sol" : ModuleNetwork(place: from.lowercased())?.logo ?? "usdc", "FROM · \(from.uppercased())", "USDC",
-                 quote.map { $0.first.map { "\($0.gets) · the rest comes back" } ?? "no quote now · asked again every 30 s" } ?? "quoting…", RouteFill(rawValue: from.lowercased()) ?? .solana,
+                 quote.map { $0.first.map(\.gets) ?? "no quote now · asked again every 30 s" } ?? "quoting…", RouteFill(rawValue: from.lowercased()) ?? .solana,
                  money: Self.quotedAmount(quote?.first?.gets).map { moneyMove("USDC", on: from.lowercased(), by: -$0, approx: true) } ?? []),
-            step("near", "SWAP · NEAR INTENTS", what, "exactly this much arrives", .check),
-            step(r.entry.network.logo, "TO · \(r.entry.label?.uppercased() ?? "SAVED ADDRESS")", r.entry.name, "\(ends.start) … \(ends.end) · \(title)", .check),
+            privateOn == nil ? step("near", "SWAP · NEAR INTENTS", what, "exactly this much arrives", .check)
+                : step("near", "PRIVATE · CONFIDENTIAL INTENTS", what, "exactly this much arrives · not linkable to your deposit", .check,
+                       // What goes through the private hop: the payout itself, exactly (the rest of the USDC comes back).
+                       money: amount.map { [MoneyMove(place: "Pays out", symbol: r.symbol, was: 0, after: $0)] } ?? []),
+            step(privateOn.flatMap { ModuleNetwork(place: $0)?.logo } ?? r.entry.network.logo, "TO · \(r.entry.label?.uppercased() ?? "SAVED ADDRESS")", r.entry.name,
+                 "\(ends.start) … \(ends.end) · \(title)", .check),
         ]
         let warning = r.entry.network == .xrp && r.entry.memo.isEmpty
             ? "An exchange's XRP address needs its destination tag: without it the exchange can't credit you. Save the tag as this address's memo first."
             : firstSendWarning(r.entry)
-        return MoveRoute(title: "Send \(what) to \(r.entry.name)",
-                         footer: "NEAR Intents' 1Click turns USDC into \(r.symbol) on \(title) and pays this saved address exactly \(what); what's left of the USDC comes back. "
+        return MoveRoute(title: "Send \(what) \(privateOn == nil ? "" : "privately ")to \(r.entry.name)",
+                         footer: (privateOn == nil
+                            ? "NEAR Intents' 1Click turns USDC into \(r.symbol) on \(title) and pays this saved address exactly \(what); what's left of the USDC comes back. "
+                            : "NEAR Intents' Confidential Intents pays this saved address exactly \(what) on \(title). On chain your deposit and that payout can't be matched to each other; what's left of the USDC comes back. ")
                             + "Its deposit address is fresh: it needs \(Presence.name) before anything is sent. Press Confirm.",
                          steps: steps, warning: warning)
     }
@@ -2254,10 +2495,15 @@ extension Workspace {
         let what = amount.map { Fmt.num($0, maxFraction: 6) } ?? "all"
         switch command {
         case .aaveRepay:
-            return MoveRoute(title: "Repay \(what) USDC on Aave · \(name)",
+            // «All» is the debt as Aave counts it now, with its number; never the wallet's whole USDC.
+            let owed = q?.first { $0.way == "debt" }?.worth
+            let out = amount ?? owed.map { ($0 * Decimal(string: "1.001")!).rounded(6, .up) }
+            let shown = out.map { "\(amount == nil ? "all ≈ " : "")\(Fmt.num($0, maxFraction: 6)) USDC" } ?? "all owed · reading…"
+            return MoveRoute(title: "Repay \(amount == nil ? out.map { "all ≈ \(Fmt.num($0, maxFraction: 6))" } ?? "all" : what) USDC on Aave · \(name)",
                              footer: "An approve of what's owed (a tenth of a percent over, for the interest of the next blocks), then the repay — of this wallet's own debt only. Press Confirm.",
-                             steps: [step(logo, "FROM · \(name.uppercased())", "\(what) USDC", "USDC on \(name)", fill, money: moneyMove("USDC", on: net, by: amount.map { -$0 })),
-                                     approve("\(what) USDC", for: "Aave", logo: "aave", .aave),
+                             steps: [step(logo, "FROM · \(name.uppercased())", shown, "USDC on \(name)", fill,
+                                          money: out.map { moneyMove("USDC", on: net, by: -$0) } ?? []),
+                                     approve(shown, for: "Aave", logo: "aave", .aave),
                                      step("aave", "REPAY · AAVE", "\(what) USDC", "the debt goes down, the collateral stays", .aave)])
         case .aaveCollateral:
             return MoveRoute(title: "\(what) ETH as collateral on Aave · \(name)",
@@ -2276,7 +2522,13 @@ extension Workspace {
         }
     }
 
-    static func wayName(_ way: String) -> String { way == "relay" ? "Relay swap" : "Relay + Uniswap" }
+    /// «Relay swap», or the bridge and the exchange it ends on («bridge:KyberSwap» → «Relay + KyberSwap»).
+    static func wayName(_ way: String) -> String {
+        way == "relay" ? "Relay swap" : way.hasPrefix("bridge:") ? "Relay + " + venueName(String(way.dropFirst(7))) : "Relay + an exchange"
+    }
+    /// An exchange as a card names it: «Uniswap v3» → «Uniswap», «Relay's swap» → «Relay».
+    static func venueName(_ venue: String) -> String { venue.hasPrefix("Uniswap") ? "Uniswap" : venue == "Relay's swap" ? "Relay" : venue }
+    static func venueLogo(_ venue: String) -> String { venue.hasPrefix("Uniswap") ? "uni" : venue == "KyberSwap" ? "kyber" : "relay" }
     static func stockWayName(_ way: String) -> String { way == "v4" ? "Uniswap v4" : way == "v3" ? "Uniswap v3" : "Relay swap" }
 
     /// The BUY step of a Robinhood Chain buy: the way that gives the most now, marked best, and what the others give.
@@ -2294,17 +2546,28 @@ extension Workspace {
     /// it, not only the chat. nil until quoted, and on a board shown as it was.
     func quotedGets(_ c: WalletCommand) -> String? { swapQuote.flatMap { $0.command == c ? $0.ways.first?.gets : nil } }
 
+    /// The way the card showed for the move (Executor.holdsShownWay): the one picked on the route's step as quoted, else
+    /// the best one; nil while unquoted.
+    func shownWay(_ c: WalletCommand, prefer: String?) -> String? {
+        guard let ways = swapQuote.flatMap({ $0.command == c ? $0.ways : nil }) else { return nil }
+        guard let prefer else { return ways.first?.way }
+        return ways.first { $0.way == prefer || $0.way.hasPrefix(prefer + ":") }?.way
+    }
+
     private func bestWay(_ ways: [(way: String, gets: String, worth: Decimal)]?) -> ActivityBubble {
-        guard let ways else { return step("relay", "RELAY OR UNISWAP · COMPARING", "comparing…", "Relay swap vs Relay + Uniswap", .relay) }
-        guard let best = ways.first else { return step("relay", "RELAY OR UNISWAP · COMPARING", "no quote now", "asking again every 30 s", .relay) }
-        let other = Self.wayName(best.way == "relay" ? "uniswap" : "relay")
+        guard let ways else { return step("relay", "RELAY OR BRIDGE · COMPARING", "comparing…", "Relay swap vs Relay + Uniswap or KyberSwap", .relay) }
+        guard let best = ways.first else { return step("relay", "RELAY OR BRIDGE · COMPARING", "no quote now", "asking again every 30 s", .relay) }
+        let other = ways.dropFirst().first.map { Self.wayName($0.way) } ?? (best.way == "relay" ? "Relay + an exchange" : "Relay swap")
         let margin = ways.dropFirst().first.map { best.worth - $0.worth }
         let line = switch margin {
         case nil: "\(other) doesn't quote it now"
         case let m? where m < Decimal(string: "0.01")!: "about the same as \(other)"
         case let m?: "\(Fmt.usd(m)) more than \(other)"
         }
-        return step("relay", "\(Self.wayName(best.way).uppercased()) · BEST NOW", "≈ \(best.gets)", line, .relay)
+        // The bridge's way says «RELAY + KYBERSWAP» alone: with «· BEST NOW» after it the name was cut («RELAY + UNISW…»),
+        // and its line says it leaves more. It starts with RELAY: that's what makes it the step whose way can be picked.
+        let bridged = best.way.hasPrefix("bridge:")
+        return step("relay", "\(Self.wayName(best.way).uppercased())\(bridged ? "" : " · BEST NOW")", "≈ \(best.gets)", line, .relay)
     }
 
     /// A swap's price while its card waits for Confirm: quoted once (both ways of a Base or Arbitrum trade, the better
@@ -2339,6 +2602,7 @@ extension Workspace {
             return
         case .swapOn(let p, let a, let b, let x): await quotePair(command, p, a, b, x); return
         case .crossSwap(let a, let from, let b, let to, let x): await quoteCross(command, a, from, b, to, x); return
+        case .swapPrivately(let a, let from, let b, let to, let x): await quotePrivateSwap(command, a, from, b, to, x); return
         // A move between networks: what each bridge lands, costs and takes, the one it goes by first. Not a priced swap:
         // Confirm doesn't wait for it, and the executor asks them all again before signing.
         case .usdt(let from, let to, let x, let layerZero):
@@ -2367,8 +2631,58 @@ extension Workspace {
                 try? await Task.sleep(for: .seconds(30))
             }
             return
+        case .kaminoBorrow(let x?, let stock, let adding):
+            // The health factor after the borrow, the stock's price that would liquidate it and the rate, every 30 s.
+            guard let wallet = previewWallet else { return }
+            while !Task.isCancelled {
+                let p = try? await executor(wallet).kaminoBorrowPreview(usdc: x, against: stock, adding: adding)
+                guard !Task.isCancelled else { return }
+                if let p {
+                    let now = p.healthNow.map { Fmt.num($0, maxFraction: 2) } ?? "∞", after = p.healthAfter.map { Fmt.num($0, maxFraction: 2) } ?? "∞"
+                    swapQuote = (command, [("health", "\(now) → \(after)", p.healthAfter ?? 0),
+                                           ("liquidation", p.liquidationPrice.map { "\(p.stock ?? "the collateral") ≤ \(Fmt.usd($0))" } ?? "", 0),
+                                           ("collateral", p.stock.map { "\(Fmt.num(p.stockTokens, maxFraction: 6)) \($0) · \(Fmt.usd(p.collateralUSD))" } ?? Fmt.usd(p.collateralUSD), p.collateralUSD),
+                                           ("rate", "\(Fmt.num(p.borrowAPY.rounded(2, .plain)))% a year", p.borrowAPY),
+                                           ("available", Fmt.usd(p.availableUSD), p.availableUSD)]
+                                          + (p.firstRentSOL.map { [("rent", "≈ \(Fmt.num($0, maxFraction: 4)) SOL", $0)] } ?? [])
+                                          + (p.rentBackSOL.map { [("rentBack", "≈ \(Fmt.num($0, maxFraction: 4)) SOL", $0)] } ?? []))
+                }
+                try? await Task.sleep(for: .seconds(30))
+            }
+            return
+        case .aaveRepay(nil, let net):
+            // «Repay all»: the debt now, for the card's number.
+            guard let wallet = previewWallet, let m = AaveV3.markets.first(where: { $0.chain == net }),
+                  let a = try? await executor(wallet).aaveAccount(m), !Task.isCancelled else { return }
+            swapQuote = (command, [("debt", Fmt.usd(a.debt), a.debt)])
+            return
+        case .kaminoRepay(_, let against):
+            // What is owed now, on the market that holds the loan.
+            let owner = solanaAddress
+            for m in Kamino.markets(against: against) {
+                if let loan = try? await Kamino.loan(wallet: owner, market: m), loan.debtUSD > 0 {
+                    guard !Task.isCancelled else { return }
+                    swapQuote = (command, [("debt", Fmt.usd(loan.debtUSD), loan.debtUSD),
+                                           ("market", m == Kamino.backpackMarket ? "Backpack market" : "main market", 0)])
+                    return
+                }
+            }
+            return
         case .sendToken(let name, let token, let x?, let network):
             if let r = try? acrossRecipient(name, token: token, network: network) { await quoteAcross(command, r.symbol, x, r.entry.network.rawValue, r.address) }
+            return
+        case .sendPrivately(let name, let token, let x, let network):
+            if let r = try? privateRecipient(name, token: token, network: network) { await quoteAcross(command, r.symbol, x, r.network, r.address, confidential: true) }
+            return
+        case .intents(let from, let to, let x):
+            // What lands, every 30 s while the card waits: the executor holds the move to it (within 1%).
+            guard let wallet = previewWallet, let amount = x ?? (from == "solana" ? solana?.usdc : self.usdc(on: from)), amount > 0 else { return }
+            while !Task.isCancelled {
+                let q = await executor(wallet).intentsQuote(from: from, to: to, usdc: amount)
+                guard !Task.isCancelled else { return }
+                if let q { swapQuote = (command, [("arrives", "\(Fmt.num(q.out, maxFraction: 4)) USDC on \(WalletCommand.placeName(to))" + (q.seconds.map { " · ≈ \($0) s" } ?? ""), q.out)]) }
+                try? await Task.sleep(for: .seconds(30))
+            }
             return
         default: return
         }
@@ -2404,12 +2718,19 @@ extension Workspace {
         guard units > 0 else { return }
         pricedCommand = command
         while !Task.isCancelled {
-            let q = try? await Jupiter.quote(input: from.mint, output: to.mint, amount: units)
+            // The pools' route and JupiterZ's market makers, the better of the two: what the swap takes (Executor.convert).
+            async let pools = try? Jupiter.quote(input: from.mint, output: to.mint, amount: units)
+            async let makers = try? Jupiter.orderQuote(input: from.mint, output: to.mint, amount: units)
+            let (p, z) = await (pools, makers)
             guard !Task.isCancelled else { return }
+            let q: (out: UInt64, impact: Decimal, way: String)? = if let z, z.router == "jupiterz", z.out > p?.outAmount ?? 0 { (z.out, z.impact, "JupiterZ") }
+                else { p.map { ($0.outAmount, $0.impact, "Jupiter") } }
             if let q {
-                let out = Decimal(q.outAmount) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
-                jupiterShown = (command, q.outAmount)
-                swapQuote = (command, [("Jupiter", "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)", 0)])
+                let out = Decimal(q.out) / Decimal(sign: .plus, exponent: to.decimals, significand: 1)
+                jupiterShown = (command, q.out)
+                // As Uniswap's cards say it (UniRoute.impactText): from a tenth of a percent up.
+                let impact = q.impact >= Decimal(string: "0.001")! ? " · price impact \(Fmt.num((q.impact * 100).rounded(q.impact < Decimal(string: "0.1")! ? 2 : 1, .plain)))%" : ""
+                swapQuote = (command, [(q.way, "\(Fmt.num(out, maxFraction: 6)) \(to.symbol)\(impact)", 0)])
                 return
             }
             if swapQuote?.command != command { swapQuote = (command, []) }
@@ -2440,6 +2761,15 @@ extension Workspace {
     func swapLine(_ c: WalletCommand) -> String? {
         guard let q = swapQuote, q.command == c, let best = q.ways.first else { return nil }
         if case .sendToken = c { return best.gets }   // a coin bought on the way: its cost in USDC, the fees, the time
+        if case .sendPrivately = c { return best.gets }
+        // A loan's card is quoted with its health and debt, not with a coin it gets: «You get ≈ ∞ → 3.82» was the health.
+        switch c {
+        case .kaminoBorrow, .aaveBorrow, .aaveCollateral:
+            if let h = q.ways.first(where: { $0.way == "health" }) { return "Health factor \(h.gets)" }
+        case .kaminoRepay, .aaveRepay:
+            if let d = q.ways.first(where: { $0.way == "debt" }) { return "Owed \(d.gets)" }
+        default: break
+        }
         guard let m = best.gets.firstMatch(of: /([\d,]+(?:\.\d+)?)\s+([^\s·≈(]+)/),
               let out = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: "")), out > 0 else { return "You get ≈ \(best.gets)" }
         let got = String(m.2)
@@ -2448,7 +2778,7 @@ extension Workspace {
         case .sell(let a, let x?): (x, a.symbol)
         case .sellOn(_, let t, let x?, _): (x, tokenSymbol(t) ?? (t.hasPrefix("0x") ? "\(t.prefix(6))…" : t))
         case .sellStock(let s, let x?): (x, s)
-        case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?): (x, a)
+        case .swapOn(_, let a, _, let x?), .crossSwap(let a, _, _, _, let x?), .swapPrivately(let a, _, _, _, let x): (x, a)
         default: nil
         }
         var line = "You get ≈ \(Fmt.num(out, maxFraction: 6)) \(got)"
@@ -2480,20 +2810,35 @@ extension Workspace {
 
     /// A coin to an address on a network only NEAR Intents reaches: what it costs in USDC and where that comes from, again
     /// every 30 s.
-    private func quoteAcross(_ command: WalletCommand, _ symbol: String, _ amount: Decimal, _ network: String, _ address: String) async {
+    private func quoteAcross(_ command: WalletCommand, _ symbol: String, _ amount: Decimal, _ network: String, _ address: String,
+                             confidential: Bool = false) async {
         guard let wallet = previewWallet else { return }
         pricedCommand = command
         while !Task.isCancelled {
-            let q = try? await executor(wallet).acrossQuote(symbol, amount: amount, network: network, to: address)
+            let q = try? await executor(wallet).acrossQuote(symbol, amount: amount, network: network, to: address, confidential: confidential)
             guard !Task.isCancelled else { return }
             if let q {
                 // What it's worth there, and what 1Click and the network keep: a small BTC send loses a fifth to fees.
                 let cost = Decimal(string: q.quote.amountInFormatted) ?? 0, worth = q.quote.amountOutUSD
                 let fees = worth.map { cost - $0 }.map { $0 > 0 ? " · fees ≈ \(Fmt.usd($0)) (\(Fmt.num($0 / cost * 100, maxFraction: 0))%)" : "" } ?? ""
                 let time = q.quote.timeEstimate.map { $0 >= 120 ? " · ≈ \($0 / 60) min" : " · ≈ \($0) s" } ?? ""
+                acrossReceipt = (command, symbol.uppercased(), network, cost, q.source?.name ?? "Solana", worth, q.quote.timeEstimate)
                 swapQuote = (command, [(q.source?.name ?? "Solana", "≈ \(Fmt.num(cost)) USDC for \(worth.map(Fmt.usd) ?? "?") of it\(fees)\(time)", 0)])
                 return
             }
+            if swapQuote?.command != command { swapQuote = (command, []) }
+            try? await Task.sleep(for: .seconds(15))
+        }
+    }
+
+    /// A private swap: Confidential Intents' quote, asked again until it answers.
+    private func quotePrivateSwap(_ command: WalletCommand, _ a: String, _ from: String, _ b: String, _ to: String, _ amount: Decimal) async {
+        guard let wallet = previewWallet else { return }
+        pricedCommand = command
+        while !Task.isCancelled {
+            let q = try? await executor(wallet).intentQuoteText(a, on: from, for: b, on: to, amount: amount, near: nearAddress, confidential: true)
+            guard !Task.isCancelled else { return }
+            if let q { swapQuote = (command, [(q.way, q.gets, 0)]); return }
             if swapQuote?.command != command { swapQuote = (command, []) }
             try? await Task.sleep(for: .seconds(15))
         }
@@ -2558,10 +2903,12 @@ extension Workspace {
             || EVMNetwork.source(arrive: short, onSolana: solana?.usdc ?? 0, target: net, held: { self.usdc(on: $0) }) != nil)
     }
 
-    private func fundingLegs(_ short: Decimal, _ net: String) -> [String]? {
+    /// `intents`: every leg through NEAR Intents (a loan guard's top-up).
+    func fundingLegs(_ short: Decimal, _ net: String, intents: Bool = false) -> [String]? {
         let evm = EVMNetwork.searched.map { FundingPlan.Place(key: $0.key, name: $0.name, usdc: usdc(on: $0.key) ?? 0) }
         return FundingPlan.legs(short: short, target: net, targetName: WalletCommand.placeName(net), solana: solana?.usdc ?? 0, evm: evm,
-                                hyperliquid: hl?.withdrawable ?? 0, near: near, nearPrice: markets["NEAR"]?.markPx)
+                                hyperliquid: hl?.withdrawable ?? 0, near: near, nearPrice: markets["NEAR"]?.markPx,
+                                intents: intents ? Set(["base", "arbitrum", "ethereum"]) : nil)   // OneClick.Asset.usdc(onEVM:)
     }
 
     /// A move asking for more than its place holds, as the person said it: what there is in a line, and the ways on as
@@ -2728,6 +3075,25 @@ extension Workspace {
                  : bridgeStep(quoted, title: "\(shown) USDC", fallback: ("relay", "BRIDGE · RELAY", "≈ $0.03 · a few seconds · no stop on Solana")),
             step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", bridgeLands(quoted) ?? "≈ \(shown) \(stable)", "your own address ✓", fill(to),
                  money: moving.map { moneyMove(stable, on: to, by: $0, approx: true) } ?? []),
+        ])
+    }
+
+    /// «move N USDC from A to B via NEAR Intents»: 1Click's deposit address, checked against what 1Click bound to it.
+    private func intentsRoute(_ from: String, _ to: String, _ amount: Decimal?) -> MoveRoute {
+        let a = WalletCommand.placeName(from), b = WalletCommand.placeName(to)
+        // The amount asked is the amount signed (a step before it in a chain may bring it); all of it = what's there now.
+        let moving = amount ?? usdc(on: from)
+        let shown = moving.map { Fmt.num($0) } ?? "all"
+        func fill(_ place: String) -> RouteFill { RouteFill(rawValue: place) ?? .relay }
+        return MoveRoute(title: "Move \(shown) USDC · \(a) → \(b) · NEAR Intents",
+                         footer: "NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays "
+                            + "your own address on \(b) and refunds to \(a). Its solvers deliver in about a minute. Press Confirm.",
+                         steps: [
+            step(ModuleNetwork(place: from)?.logo ?? "eth", "FROM · \(a.uppercased())", "\(shown) USDC", "USDC on \(a)", fill(from),
+                 money: moneyMove("USDC", on: from, by: moving.map { -$0 })),
+            step("near", "BRIDGE · NEAR INTENTS", "\(shown) USDC", "1Click · ≈ a minute · deposit checked first", .near),
+            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", "≈ \(shown) USDC", "your own address ✓", fill(to),
+                 money: moving.map { moneyMove("USDC", on: to, by: $0, approx: true) } ?? []),
         ])
     }
 
@@ -3003,8 +3369,12 @@ struct WithdrawBoard: View {
             board(ws.route(command) ?? ws.fallbackRoute(command), command)
                 // Again on Refresh (quoteRound).
                 .task(id: QuoteRun(command: command, round: ws.quoteRound)) { await ws.quoteSwap(command) }
+                // P3: what a swap through NEAR Intents would get privately, for the switch over Confirm.
+                .task(id: command.summary) { await ws.quotePrivateTwin() }
         case .transfer(let entry, let amount)?:
             board(ws.transferRoute(entry, amount), nil)
+                // P3: what the same send would cost privately, for the switch over Confirm.
+                .task(id: "\(entry.id) \(amount)") { await ws.quotePrivateTwin() }
         default:
             EmptyView()
         }
@@ -3085,6 +3455,10 @@ extension Workspace {
                       "Твои адреса на холсте\(sol.map { " — \($0) для USDC и SOL (рекомендую)" } ?? ""), и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через 30 с, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter»."), note: note)
             return
         }
+        if case .sendPrivately(let name, let token, _, let network) = command {
+            do { _ = try privateRecipient(name, token: token, network: network) } catch { reply(error.localizedDescription, note: note); return }
+        }
+        if let why = privateSwapRefusal(command) { reply(why, note: note); return }
         if case .sendToken(let name, let token, let amount, let network) = command {
             do {
                 if try acrossRecipient(name, token: token, network: network) != nil {
@@ -3167,8 +3541,7 @@ extension Workspace {
     /// Buying over time, the two ways as cards: Jupiter's DCA on-chain (a budget in rounds of at least 50, runs with the
     /// app closed) or the app's own recurring buys (the money stays in the wallet, no minimum, the app must run).
     private func offerDCAChoice(_ asset: SpotAsset, usdc: Decimal, days: Int, note: String?) {
-        let period = days == 1 ? "day" : days == 7 ? "week" : days == 30 ? "month" : "\(days) days"
-        let periodRU = days == 1 ? "день" : days == 7 ? "неделю" : days == 30 ? "месяц" : "\(days) дн."
+        let period = ScheduleCanvas.period(days), periodRU = ScheduleCanvas.periodRU(days)
         // Jupiter takes a budget: four rounds of this amount, or its least (2 × 50) when the amount is under a round.
         let (total, rounds) = usdc >= WalletCommand.jupiterDCAMinimum / 2 ? (usdc * 4, 4) : (WalletCommand.jupiterDCAMinimum, 2)
         let jupiter = WalletCommand.jupiterDCA(asset, usdc: total, orders: rounds, every: days * 86400)

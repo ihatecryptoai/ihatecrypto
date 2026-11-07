@@ -21,7 +21,10 @@ public enum PositionCommand: Equatable, Sendable {
         if IntentParser.isQuestion(text) || q.contains(/(?:^|[^\p{L}'’])(?:не|нельзя|don['’]?t|dont|do\s+not|never|not)(?![\p{L}'’])|should\s+(?:i|we)\b|стоит\s+ли|(?:а|что)\s+если/) {
             return nil
         }
-        if q.contains(/отмени\w*\s+(?:лимит|ордер|заявк)|сними\w*\s+(?:лимит|ордер|заявк)|cancel\s+(?:the\s+|my\s+)?(?:limit|order)|remove\s+(?:the\s+)?(?:limit|order)/) { return .cancelOrders }
+        // A TWAP still buying is an entry waiting too: «cancel the TWAP», «останови твап».
+        if q.contains(/(?:отмени|сними|останови|прекрати)\w*\s+(?:лимит|ордер|заявк|twap|твап)|(?:cancel|stop)\s+(?:the\s+|my\s+)?twap|cancel\s+(?:the\s+|my\s+)?(?:limit|order)|remove\s+(?:the\s+)?(?:limit|order)/) {
+            return .cancelOrders
+        }
         if q.contains(/безубыт|стоп\w*\s+(?:в|на)\s+(?:ноль|бу\b|вход)|break\s*-?\s*even|stop\s+(?:to|at)\s+entry/) { return .stopToBreakeven }
         if let m = q.firstMatch(of: /(?:(?:перенес\w*|передвин\w*|подвин\w*|постав\w*)?\s*стоп\w*\s+(?:на|в)|(?:move|set|put)?\s*(?:the\s+)?stop(?:[- ]?loss)?\s+(?:to|at))\s+\$?(\d+(?:[.,]\d+)?)(?!\s*%|\d|[.,]\d)/),
            let v = Decimal(string: m.1.replacingOccurrences(of: ",", with: ".")) {
@@ -55,9 +58,11 @@ public struct SpotAsset: Equatable, Sendable {
     public let decimals: Int
     /// A Token-2022 mint: its accounts derive from that program, not the classic one.
     public var token2022 = false
+    /// Ondo's own token, as Jupiter's verified list vouches for it (Ondo.issued alone is a mint suffix anyone can grind).
+    public var ondo = false
 
-    public init(symbol: String, mint: String, decimals: Int, token2022: Bool = false) {
-        self.symbol = symbol; self.mint = mint; self.decimals = decimals; self.token2022 = token2022
+    public init(symbol: String, mint: String, decimals: Int, token2022: Bool = false, ondo: Bool = false) {
+        self.symbol = symbol; self.mint = mint; self.decimals = decimals; self.token2022 = token2022; self.ondo = ondo
     }
 
     /// A token named by its mint only, until the app looks it up.
@@ -122,8 +127,16 @@ public enum WalletCommand: Equatable, Sendable {
     case lendDeposit(String, Decimal?)
     /// nil = the whole vault position.
     case lendWithdraw(String, Decimal?)
-    /// Kamino Lend, main market.
+    /// Kamino Lend: the main market, and the Backpack market for Backpack's stocks (`kaminoStocks`), where a deposit is
+    /// collateral to borrow against.
     case kamino(deposit: Bool, symbol: String, amount: Decimal?)
+    /// USDC borrowed on Kamino — on the Backpack market against Backpack's tokenized stocks, or on the main market against
+    /// SOL and the deposits there — and paid back (nil = all of it). `against`: what the loan stands on («SPCX», «SOL»);
+    /// `adding`: that many of its tokens put up as collateral first (nil = what's there already).
+    case kaminoBorrow(Decimal?, against: String? = nil, adding: Decimal? = nil)
+    /// `against`: the loan to pay back by what it stands on («SOL»: the main market, a stock: the Backpack one); nil =
+    /// the Backpack market's first, then the main one's.
+    case kaminoRepay(Decimal?, against: String? = nil)
     /// SOL into JitoSOL (liquid staking) and back; nil = all.
     case stake(Decimal?)
     case unstake(Decimal?)
@@ -170,6 +183,20 @@ public enum WalletCommand: Equatable, Sendable {
     /// tokens, Morpho's, Aave's and Jupiter Lend's shares, a network's own coin (ETH, POL: with a number). nil amount =
     /// all of it; `network` nil = where the entry is saved.
     case sendToken(name: String, token: String, amount: Decimal?, network: String? = nil)
+    /// «send 5 USDC privately to Mom», «отправь приватно 0.001 BTC на Binance»: through NEAR Intents' Confidential Intents,
+    /// so the deposit and the payout can't be matched on chain. USDC from Solana or an EVM network, paid as USDC on
+    /// Solana, Base, Arbitrum or Ethereum, or as a coin on a network only NEAR Intents reaches; always with an amount.
+    case sendPrivately(name: String, token: String, amount: Decimal, network: String? = nil)
+    /// An agent wallet on NEAR Intents (Agent API) owned by this wallet's NEAR key: «create an agent wallet with $20 a
+    /// day» — it may send USDC only to this wallet's own addresses and the saved ones, at most `dailyUSD` a day.
+    case agentCreate(dailyUSD: Decimal)
+    /// USDC from Solana into the agent wallet.
+    case agentFund(usdc: Decimal)
+    /// USDC out of the agent wallet to a saved address (or this wallet's own), by the agent's grant alone: NEAR Intents
+    /// checks it against the policy the owner signed, and refuses what it doesn't allow.
+    case agentSend(usdc: Decimal, name: String)
+    /// Freezes the agent wallet (nothing moves), or lets it act again.
+    case agentFreeze(Bool)
     /// «задепозить», «пополнить», «my address»: money coming in from outside — show where to send it.
     case receive
     /// A Robinhood Stock Token (SPCX, TSLA…) bought on Robinhood Chain for USDC from Solana; `symbol` as the user named
@@ -188,6 +215,10 @@ public enum WalletCommand: Equatable, Sendable {
     /// A token on one network for a token on another through Relay, one signature: «swap 0.1 SOL on Solana for ETH on
     /// Arbitrum». Places are «solana» or an EVM network's key; nil amount = all of a token.
     case crossSwap(from: String, on: String, to: String, at: String, amount: Decimal?)
+    /// A swap through NEAR Intents' Confidential Intents (asked for privately): the deposit and what arrives can't be
+    /// matched on chain. Places as in `crossSwap`, «near» for the NEAR account; always an amount, always this wallet's own
+    /// addresses on both sides. «buy NEAR for 5 USDC privately» = USDC on Solana → NEAR on NEAR.
+    case swapPrivately(from: String, on: String, to: String, at: String, amount: Decimal)
     /// Money coming in from a network ihatecrypto has no wallet on — «receive 50 USDC from Sui», «получи 0.01 BTC с
     /// биткоина»: 1Click's deposit address there, what arrives swapped into USDC on Solana. `network` is the address
     /// book's («sui», «bitcoin», «tron», «xrp», «dogecoin», «zcash»); nil amount = ask.
@@ -203,6 +234,9 @@ public enum WalletCommand: Equatable, Sendable {
     case bridge(from: String, to: String, Decimal?)
     /// The same move through Circle's CCTP, asked for by name («… via CCTP»): Ethereum, Arbitrum, Base, Polygon.
     case cctp(from: String, to: String, Decimal?)
+    /// USDC through NEAR Intents' 1Click, asked for by name («… via NEAR Intents»), whatever Relay would land: between
+    /// Solana («solana»), Base, Arbitrum and Ethereum, at our own addresses.
+    case intents(from: String, to: String, Decimal?)
     /// USDT between two of USDT0's networks (Stablecoins.usdt0Networks) at our own address: Relay's swap of it, seconds —
     /// or, asked for by name («… via LayerZero»), Tether's own bridge: the same amount on the other side for cents of
     /// gas, in minutes to hours. nil = all the USDT on `from`.
@@ -251,8 +285,97 @@ public enum WalletCommand: Equatable, Sendable {
     }
 
     private static let parsed = Mutex<[String: WalletCommand?]>([:])
+    /// «create an agent wallet with $20 a day», «fund the agent wallet with 5 USDC», «send 1 USDC from the agent wallet
+    /// to Mom», «freeze the agent wallet»; «создай кошелёк агента с лимитом 20$ в день», «пополни кошелёк агента на 5
+    /// USDC», «переведи 1 USDC с кошелька агента на Маму», «заморозь кошелёк агента».
+    /// A payee that is the wallet itself — «me», «my wallet», «Main», «себе», «мой кошелёк» — or the active wallet's
+    /// own name: the agent wallet's rules allow its own addresses from the start, no saved entry needed.
+    public static func isOwnWallet(_ name: String, label: String?) -> Bool {
+        let n = name.lowercased().replacingOccurrences(of: "ё", with: "е").trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if let label, !label.isEmpty, n == label.lowercased() { return true }
+        return n.wholeMatch(of: /me|myself|main|my(?:\s+own)?(?:\s+main)?\s+(?:wallet|account|address)|себе|мне|основно\w*(?:\s+кошел\w*)?|(?:мой|мо\w+)\s+(?:основно\w*\s+)?(?:кошел\w*|счет\w*|адрес\w*)/) != nil
+    }
+
+    static func agent(_ text: String) -> WalletCommand? {
+        let q = IntentParser.plainNumbers(text).lowercased()
+        guard q.contains(agentWallet) else { return nil }
+        func number(_ m: Regex<(Substring, Substring)>) -> Decimal? {
+            q.firstMatch(of: m).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+        }
+        // A send out of it first: a payee named «Binance deposit» or «Frozen Yogurt» is a name, not another command.
+        if let m = text.firstMatch(of: /(?i)(?:send|transfer|pay|отправь\w*|переведи|скинь)\s+(\d+(?:[.,]\d+)?)\s*(?:usdc|\$|долл\w*|бакс\w*)?\s+(?:from|с|со|из)\s+(?:the\s+|my\s+)?(?:agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел\w*)\s+(?:to|на|для)\s+[«"“]?(.+?)[»"”]?\s*[.!]?$/),
+           let usdc = Decimal(string: String(m.1).replacingOccurrences(of: ",", with: ".")), usdc > 0 {
+            return .agentSend(usdc: usdc, name: String(m.2).trimmingCharacters(in: .whitespaces))
+        }
+        if q.contains(/\bunfreeze|разморо\w*/) { return .agentFreeze(false) }
+        if q.contains(/\bfreeze|замороз\w*|заморож\w*/) { return .agentFreeze(true) }
+        if q.contains(/\b(?:create|make|open|set\s+up)\b|созда\w*|заведи|открой/) {
+            guard let daily = number(/\$?\s*(\d+(?:[.,]\d+)?)\s*(?:\$|usd\w*|долл\w*|бакс\w*)?\s*(?:a|per|в|за)\s*(?:day|день|сутки)/) else { return nil }
+            return daily > 0 ? .agentCreate(dailyUSD: daily) : nil
+        }
+        // Money coming OUT of the agent wallet is never a deposit into it («положи 1 USDC с кошелька агента маме»).
+        let outOf = q.contains(/(?:\bfrom|\bс|\bсо|\bиз)\s+(?:the\s+|my\s+)?(?:agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел)/)
+        if !outOf, q.contains(/\b(?:fund|top\s+up|deposit)\b|пополн\w*|закин\w*|положи/), let usdc = number(/(\d+(?:[.,]\d+)?)\s*(?:usdc|\$|долл\w*|бакс\w*)/) {
+            return usdc > 0 ? .agentFund(usdc: usdc) : nil
+        }
+        return nil
+    }
+
+    nonisolated(unsafe) static let agentWallet = /agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел/
+
+    /// A word asking for a private send. Whole adverbs only: «Приватный кошелёк» or «Тайный» is a name, not a request.
+    nonisolated(unsafe) static let privacyWord = /(?i)\b(?:privately|confidentially|anonymously|secretly|приватно|анонимно|конфиденциально|тайно|втайне|скрытно|втихую)\b/
+
+    /// Whether the user's own words ask for privacy: a send the chat model wrote without «privately» is then not run.
+    public static func asksPrivacy(_ text: String) -> Bool { text.contains(privacyWord) }
+
+    /// A send that could go privately but doesn't, in a step of a chain or after a schedule's or alert's «…:»: those
+    /// are read again later without the user's words. A lone send isn't one: runCanonical makes it private itself.
+    public static func hasPublicSend(_ canonical: String) -> Bool {
+        let steps = ChatRouter.steps(canonical)
+        guard steps != nil || canonical.contains(":") else { return false }
+        let parts = (steps ?? [canonical]).flatMap { step in
+            [step] + (step.firstIndex(of: ":").map { [String(step[step.index(after: $0)...]).trimmingCharacters(in: .whitespaces)] } ?? [])
+        }
+        return parts.contains { p in
+            guard let c = parse(p), let made = c.madePrivate else { return false }
+            return made != c
+        }
+    }
+
+    /// This send or NEAR Intents swap made private (`sendPrivately`, `swapPrivately`), when it has an amount; nil for
+    /// anything else.
+    public var madePrivate: WalletCommand? {
+        switch self {
+        case .sendToken(let name, let token, let amount?, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
+        case .sendTo(let name, let amount, let net): .sendPrivately(name: name, token: "USDC", amount: amount, network: net)
+        case .sendPrivately, .swapPrivately: self
+        case .buyNear(let x?): .swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: x)
+        case .sellNear(let x?, let to): .swapPrivately(from: "NEAR", on: "near", to: "USDC", at: to ?? "solana", amount: x)
+        case .swapOn("near", let a, let b, let x?): .swapPrivately(from: a, on: "near", to: b, at: "near", amount: x)
+        case .crossSwap(let a, let from, let b, let to, let x?): .swapPrivately(from: a, on: from, to: b, at: to, amount: x)
+        default: nil
+        }
+    }
+
+    /// A private swap as the same swap in the open: what the switch over Confirm offers beside it.
+    public var madePublic: WalletCommand? {
+        guard case .swapPrivately(let a, let from, let b, let to, let x) = self else { return nil }
+        if a.uppercased() == "USDC", from == "solana", b.uppercased() == "NEAR", to == "near" { return .buyNear(usdc: x) }
+        if a.uppercased() == "NEAR", from == "near", b.uppercased() == "USDC" { return .sellNear(amount: x, to: to == "solana" ? nil : to) }
+        if from == "near", to == "near" { return .swapOn("near", from: a, to: b, amount: x) }
+        return .crossSwap(from: a, on: from, to: b, at: to, amount: x)
+    }
 
     private static func read(_ text: String) -> WalletCommand? {
+        // Anything about the agent wallet is its own command or nothing: never another form's money move.
+        if text.lowercased().contains(agentWallet) { return agent(text) }
+        // «send 5 USDC privately to Mom», «переведи приватно 20 USDC маме»: the same send without the word, made private.
+        // A request for privacy that isn't such a send reads as nothing, never as a public move (the multisig's too).
+        if let w = text.firstMatch(of: privacyWord) {
+            let plain = String(text[..<w.range.lowerBound] + text[w.range.upperBound...]).replacing(/\s{2,}/, with: " ")
+            return read(plain)?.madePrivate
+        }
         if let call = ContractCall.parse(text) { return .contractCall(call) }
         if let multisig = multisig(text) { return multisig }
         // «pay POST https://… {"q": 1}»: the URL and the body kept as written.
@@ -431,9 +554,9 @@ public enum WalletCommand: Equatable, Sendable {
         // Any token by its contract («купи 0x… токен на $2»): bought on Robinhood Chain, where ihatecrypto trades by contract.
         if let contract = text.firstMatch(of: /0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/).map({ String($0.0) }) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                let tokens = q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                // A sale in dollars has no count of tokens to sell: not «all of it».
-                if tokens == nil, amount != nil { return nil }
+                let tokens = Self.soldCount(q)
+                // A sale in dollars, or a number or a share it can't place, is not «all of it».
+                if tokens == nil, Self.namesOtherCount(q.replacingOccurrences(of: contract.lowercased(), with: " ")) { return nil }
                 return .sellStock(symbol: contract, amount: tokens)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buyStock(symbol: contract, usdc: amount) }
@@ -442,21 +565,39 @@ public enum WalletCommand: Equatable, Sendable {
         if let mint = AddressBookCommand.address(in: text), !mint.hasPrefix("0x"), !mint.hasSuffix(".near"), mint.count >= 32,
            SpotAsset.all.allSatisfy({ $0.mint != mint }) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                let tokens = q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                if tokens == nil, amount != nil { return nil }
+                let tokens = Self.soldCount(q)
+                if tokens == nil, Self.namesOtherCount(q.replacingOccurrences(of: mint.lowercased(), with: " ")) { return nil }
                 return .sell(.byMint(mint), amount: tokens)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buy(.byMint(mint), usdc: amount) }
         }
-        // Robinhood Stock Tokens: a stock word or a company ihatecrypto knows, with buy or sell.
-        if let symbol = StockNames.symbol(in: text), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
+        // Robinhood Stock Tokens: a stock word or a company ihatecrypto knows, with buy or sell. A loan against stocks
+        // isn't one: «займи под акции SpaceX, не продавая» was read as their sale.
+        if let symbol = StockNames.symbol(in: text), !q.contains(Self.borrowWords), q.contains(/\bstocks?\b|\bshares?\b|акци\w*|токен\w*|robinhood|робинхуд|спейс|spacex|\btesla\b|тесл|нвид|nvidia/) {
             if q.contains(/\bsell\b|прода\w*|\bdump\b/) {
-                // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it».
-                let shares = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
-                if shares == nil, amount != nil { return nil }
+                // «sell 2 TSLA stock for 10 USDC» sells 2; «sell TSLA stock for 10 USDC» names no count: not «all of it»; «sell $50
+                // of TSLA stock» and «50 worth of» are dollars, not 50 tokens (capped at what's held, that sold them all).
+                let shares = q.contains(Self.spacedNumber) ? nil
+                    : q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:shares?|акци\w*|tokens?|токен\w*|(?!usd|bucks|of\b|worth\b)[a-z]{2,5}\b)/).flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+                        ?? Self.soldCount(q)   // «продай 2 теслы»
+                if shares == nil, Self.namesOtherCount(q) { return nil }
                 return .sellStock(symbol: symbol, amount: shares)
             }
             if q.contains(/\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в/) { return .buyStock(symbol: symbol, usdc: amount) }
+        }
+        // «move 2 USDC from Base to Solana via NEAR Intents», «переведи 2 USDC с бейза на солану через NEAR Intents»: 1Click,
+        // asked for by name. Only USDC, and only where 1Click pays it at our own address.
+        if q.contains(Self.intentsWords), q.contains(/usdc|юсдс|юсдц/), !q.contains(/\baave\b|ааве|morpho|морфо|kamino|камино/),
+           let m = q.firstMatch(of: /(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)((?:[^.]|\.(?=\d))*?)(?:\bto\b|\binto\b|\bв\b|\bна\b)\s+(?:the\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)/) {
+            func place(_ w: Substring) -> String? { w.hasPrefix("sol") || w.hasPrefix("сол") ? "solana" : Self.network(String(w)) }
+            // Only where 1Click pays USDC at our own address; elsewhere nothing, so the chat asks rather than Relay moving it.
+            let served: Set<String> = ["solana", "base", "arbitrum", "ethereum"]
+            // Between the two networks only words about the wallet itself: «с бейза маме на солане» names a person, and
+            // this move pays only our own address — the chat asks instead.
+            let gap = m.2.split(whereSeparator: { $0.isWhitespace || $0 == "," }).map(String.init)
+            guard gap.allSatisfy({ $0.contains(/^(?:my|the|wallet|account|network|chain|over|мо\w*|кошел\w*|аккаунт\w*|сет\w*|сеть)$/) }) else { return nil }
+            guard let from = place(m.1), let to = place(m.3), from != to, served.contains(from), served.contains(to) else { return nil }
+            return .intents(from: from, to: to, amount)
         }
         // Money leaving Solana («move 5 USDC to Base from Solana»): never a move back to it, whatever network is named.
         let fromSolana = q.contains(/(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(?:solana|солан)/)
@@ -513,12 +654,31 @@ public enum WalletCommand: Equatable, Sendable {
         }
         // The network the lending command names; Base when it names none.
         let lendingNetwork = Self.network(in: q) ?? "base"
+        // Borrowing on Kamino and paying it back: «borrow 2 USDC on kamino against 0.05 SPCX», «займи 2 USDC под SPCX на
+        // камино», «repay all USDC on kamino», «погаси долг на камино». A Backpack stock named is Kamino, not Aave, and so
+        // is a loan against SOL (Kamino's main market): «займи 50 USDC под 1 SOL», «borrow 50 USDC against my SOL».
+        let stock = Self.kaminoStock(in: q)
+        // «солана» is the coin only right after «под»/«залог» («под мои соланы»): further on, «на солане» is the network.
+        let againstSOL = stock == nil
+            && q.contains(/(?:\bagainst\b|\bпод\b|залог\w*|collateral)\s+(?:[\w.,]+\s+){0,3}?(?:\bsol\b|\bсол[аы]?\b)|(?:\bпод\b|залог\w*)\s+(?:мо\w+\s+)?солан\w*|(?:\bsol\b|\bсол[аы]?\b)\s+(?:as\s+collateral|в\s+залог)/)
+        if q.contains(/kamino|камино/) || ((stock != nil || (againstSOL && q.contains(Self.borrowWords))) && !q.contains(/\baave\b|ааве|\bаав/)) {
+            if q.contains(Self.borrowWords), !q.contains(Self.repayWords) {
+                let adding = (stock == nil
+                    ? againstSOL ? q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:\bsol\b|\bсол[аы]?\b|солан\w*)/) : nil
+                    : q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:shares?\s+of\s+|акци\w*\s+)?(?:spcx|sndk|skhy|\bmu\b|space\s*x|спейс\w*|micron|микрон\w*|hynix|хайникс\w*|sandisk|сандиск\w*)/))
+                    .flatMap { Decimal(string: String($0.1).replacingOccurrences(of: ",", with: ".")) }
+                return .kaminoBorrow(amount ?? (bare == adding ? nil : bare), against: stock ?? (againstSOL ? "SOL" : nil), adding: adding)
+            }
+            if q.contains(Self.repayWords) {
+                return .kaminoRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare, against: stock ?? (againstSOL ? "SOL" : nil))
+            }
+        }
         // Borrowing on Aave and paying it back, and ETH as its collateral: «borrow 10 USDC on aave», «займи 10 USDC в aave»,
         // «repay all USDC on aave», «погаси долг на aave», «supply 0.01 ETH as collateral on aave», «положи 0.01 ETH в залог».
-        if q.contains(/\bborrow\w*|\bзайм\w*|\bзайми\b|занять|\bв\s+долг\b|\bloan\b/), !q.contains(/\brepay\w*|погас\w*|верн\w*/) {
+        if q.contains(Self.borrowWords), !q.contains(/\brepay\w*|погас\w*|верн\w*/) {
             return .aaveBorrow(amount ?? bare, network: lendingNetwork)
         }
-        if q.contains(/\brepay\w*|погас\w*|(?:верни|вернуть|закрой|закрыть)\s+(?:весь\s+|мой\s+)?долг/) {
+        if q.contains(Self.repayWords) {
             return .aaveRepay(q.contains(/\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полност/) ? nil : amount ?? bare, network: lendingNetwork)
         }
         if q.contains(/collateral|залог/), let m = q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:eth|эфир)/) {
@@ -534,19 +694,42 @@ public enum WalletCommand: Equatable, Sendable {
             if into || q.contains(/\blend\b|\bsupply\b|\bdeposit\b|депозит|полож|одолж/) { return .morpho(deposit: true, amount: coins ?? amount ?? bare, network: lendingNetwork) }
         }
         if q.contains(/kamino|камино/) {
-            if outOf { return .kamino(deposit: false, symbol: symbol, amount: coins ?? amount ?? bare) }
-            if into { return .kamino(deposit: true, symbol: symbol, amount: coins ?? amount ?? bare) }
+            // A Backpack stock goes in and out by its count of tokens: «deposit 0.05 SPCX to kamino».
+            let tokens = stock == nil ? coins : bare
+            if outOf { return .kamino(deposit: false, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
+            if into { return .kamino(deposit: true, symbol: stock ?? symbol, amount: tokens ?? amount ?? bare) }
         }
-        if q.contains(/(?:останов|отмен|прекрат|стоп)\w*\s+(?:регулярн\w*\s+)?(?:покупк|dca|расписан)|(?:stop|cancel|end)\s+(?:the\s+|all\s+)?(?:recurring|regular|scheduled)?\s*(?:buys|purchases|dca|schedules?)/) { return .stopSchedules }
-        if q.contains(/покупай|каждый|каждую|каждые|раз\s+в\s+|регулярн|\bdca\b|\bevery\b|\beach\b|weekly|daily|monthly|recurring/), q.contains(/куп|dca|\bbuy/), let asset = SpotAsset.find(q), let amount {
+        if q.contains(/(?:останов|отмен|прекрат|стоп)\w*\s+(?:(?:регулярн|еже)\w*\s+)?(?:покупк|dca|расписан)|(?:stop|cancel|end)\s+(?:the\s+|all\s+)?(?:recurring|regular|scheduled|daily|weekly|monthly)?\s*(?:buys|purchases|dca|schedules?)/) { return .stopSchedules }
+        if q.contains(/покупай|кажд(?:ый|ую|ые|ое)\b|каждого\s+(?:месяц|года|квартал)|каждой\s+недел|раз\s+в\s+|регулярн|\bdca\b|\bevery\b|\beach\b|once\s+(?:a|per|every)\s+(?:day|week|month|year|quarter|fortnight)|twice|times\s+(?:a|an|per)\b|per\s+day|weekly|daily|monthly|recurring|еже(?:часно|дневно|недельно|месячно|квартально|годно)|hourly|quarterly|yearly|annually|semi-?annual|fortnight/), q.contains(/куп|dca|\bbuy/), let asset = SpotAsset.find(q), let amount {
+            // «every 2 weeks», «каждые 3 месяца», «раз в две недели», «каждую вторую неделю»: a count and its unit. A month is
+            // 30 days, as Jupiter's DCA and the «≈ a month» line count it. Hours and minutes aren't a recurring buy's (it runs
+            // in days): nil, never a week. The count goes first, then day, week, month: «каждую неделю в течение 2 месяцев» is weekly.
+            let counts = ["other": 2, "second": 2, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "вторую": 2, "второй": 2,
+                          "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6]
+            let units = ["дн": 1, "де": 1, "су": 1, "da": 1, "не": 7, "we": 7, "ме": 30, "mo": 30, "го": 365, "ye": 365]
+            // A few buys a day or a week is no period in days: «twice a week», «2 раза в день».
+            if q.contains(/twice|thrice|(?:\b\d+|two|three)\s*(?:times|x)\s+(?:a|an|per|every|each)\b|(?:^|\s)(?:[2-9]|\d\d+|два|две|три|четыре|пять|шесть)\s+раза?\s+в\b/) { return nil }
             let days: Int
-            if q.contains(/день|сутки|ежедневн|daily|every\s+day|each\s+day/) && !q.contains(/каждые\s+\d|every\s+\d/) { days = 1 }
-            else if let m = q.firstMatch(of: /(?:каждые|every)\s+(\d+)\s*(?:дн|день|сут|days?)/), let n = Int(m.1) {
-                // «every 0 days» never gets past now and buys without end; ScheduledTask.parse refuses it too.
-                guard n > 0 else { return nil }
-                days = n
+            if let m = q.firstMatch(of: /(?:кажд\w*|every|each|раз\s+в)\s+(\d+|other|second|two|three|four|five|six|вторую|второй|два|две|три|четыре|пять|шесть)\s*(дн|день|сут|days?|нед|weeks?|мес|months?|год|years?|час|hours?|hrs?|h\b|ч\b|мин|min|sec|сек)/),
+               let n = Int(m.1) ?? counts[String(m.1)] {
+                // «every 0 days» never gets past now and buys without end; ScheduledTask.parse refuses it too. Over ten
+                // years is no schedule either, and a count that long would overflow.
+                guard (1...3650).contains(n), let unit = units[String(m.2.prefix(2))],
+                      n * unit <= 3650 else { return nil }
+                days = n * unit
             }
-            else if q.contains(/месяц|monthly/) { days = 30 }
+            else if q.contains(/bi-?weekly|fortnight/) { days = 14 }
+            // The period word right after «каждый / раз в / every» goes before the loose words: «каждый месяц в день зарплаты»
+            // and «в первый день каждого месяца» are monthly, «каждый рабочий день» daily.
+            else if let m = q.firstMatch(of: /(?:кажд\w*|раз\s+в|every|each|once\s+(?:a|per)|per)\s+(?:\w+\s+)??(день|сутки|day\b|недел|week|месяц|month)/),
+                    let d = units[String(m.1.prefix(2))] { days = d }
+            else if q.contains(/\bв\s+(?:день|сутки)|сутк|ежедневн|daily|\ba\s+day\b/) { days = 1 }
+            else if q.contains(/недел|week/) { days = 7 }
+            else if q.contains(/квартал|quarter/) { days = 90 }
+            else if q.contains(/полгода|пол\s+года|half[\s-]?(?:a\s+)?year|semi-?annual/) { days = 180 }
+            else if q.contains(/месяц|месяч|month|числ/) { days = 30 }
+            else if q.contains(/(?:каждый|раз\s+в)\s+год|ежегодн|\byear|annual/) { days = 365 }
+            else if q.contains(/\bhours?\b|hourly|\bчас(?:а|ов)?\b|ежечас|\bminutes?\b|минут/) { return nil }
             else { days = 7 }
             return .schedule(asset, usdc: amount, days: days)
         }
@@ -663,6 +846,25 @@ public enum WalletCommand: Equatable, Sendable {
     nonisolated(unsafe) static let depositWords = try! Regex("полож\\w*|внес\\w*|закин\\w*|вкин\\w*|кинь|засун\\w*|влож\\w*|задепозит\\w*|депозитн\\w*|депни|пополн\\w*|инвест\\w*|\\bdeposit\\w*|\\bdepo\\b|\\bput\\b|\\badd\\b|\\bplace\\b|\\bsupply\\b|\\bstash\\b|\\bpark\\b|\\binvest\\w*|\\btop\\s+up\\b")
     nonisolated(unsafe) static let withdrawWords = try! Regex("сним\\w*|выв[её]д\\w*|забер\\w*|верн\\w*|\\bwithdraw\\w*|take\\s+out|\\bremove\\b|\\bpull\\b|\\bredeem\\w*")
     /// «в камино», «into the vault», «из хранилища»: compiled once, not on every message.
+    /// «займёт» is time («сколько займёт покупка»), not a loan.
+    nonisolated(unsafe) static let borrowWords = /\bborrow\w*|\bзайм(?![её]т)\w*|\bзайми\b|занять|\bв\s+долг\b|\bloan\b/
+    nonisolated(unsafe) static let repayWords = /\brepay\w*|погас\w*|(?:верни|вернуть|закрой|закрыть)\s+(?:весь\s+|мой\s+)?долг/
+
+    /// Backpack's tokenized stocks Kamino's Backpack market takes as collateral, by ticker: their Token-2022 mints
+    /// (Kamino.backpackStocks has the same four).
+    public static let kaminoStockMints = ["SPCX": "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb", "MU": "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
+                                          "SKHY": "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3", "SNDK": "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH"]
+    public static let kaminoStocks = ["SPCX", "MU", "SKHY", "SNDK"]
+
+    /// The Backpack stock a request names, by ticker or company, in English or Russian.
+    static func kaminoStock(in q: String) -> String? {
+        if q.contains(/\bspcx\b|space\s*x|спейс\w*/) { return "SPCX" }
+        if q.contains(/\bsndk\b|sandisk|сандиск/) { return "SNDK" }
+        if q.contains(/\bskhy\b|hynix|хайникс|хиникс/) { return "SKHY" }
+        if q.contains(/\bmu\b|micron|микрон/) { return "MU" }
+        return nil
+    }
+
     static let places = #"(?:the\s+|my\s+|мо[йеюи]\s+)?(?:vault|хранилищ|jupiter|jupyter|джупитер|юпитер|kamino|камино|aave|ааве|hlp|хлп|лендинг|lend)"#
     nonisolated(unsafe) static let intoPlace = try! Regex(#"(?:\bв\b|\bво\b|into|\bto\b|\bin\b)\s+"# + places)
     nonisolated(unsafe) static let outOfPlace = try! Regex(#"(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b|out\s+of)\s+"# + places)
@@ -695,6 +897,7 @@ public struct Schedule: Codable, Equatable, Sendable {
 
 extension WalletCommand {
     /// «jupiter dca …», «dca on jupiter», «дса через юпитер».
+    nonisolated(unsafe) static let intentsWords = /near\s*intents|(?:ниар|неар|нир)\s*интент\w*|\b1\s*click\b/
     nonisolated(unsafe) static let jupiterDCAWords = /(?:jupiter|jupyter|джупитер\w*|юпитер\w*)\s*(?:dca|дса|дца)|(?:dca|дса|дца)\s+(?:on|via|through|with|at|через|на|в|с)\s+(?:jupiter|jupyter|джупитер\w*|юпитер\w*)/
 
     /// «jupiter dca 100 USDC into SOL in 2 orders every day», «… over 4 weeks», «cancel jupiter dca SOL», «show jupiter dca».
@@ -773,6 +976,7 @@ extension WalletCommand {
         case .solanaTo(let place, nil): "How many USDC should I move from Solana to \(Self.placeName(place))?"
         case .receiveAcross(let net, let t, nil): "How much \(t) will you send from \(AddressCheck.Network(rawValue: net)?.title ?? net)?"
         case .aaveBorrow(nil, let net): "How many USDC to borrow on Aave on \(Self.placeName(net))?"
+        case .kaminoBorrow(nil, let s, _): "How many USDC to borrow on Kamino" + (s.map { " against \($0)" } ?? "") + "?"
         case .aaveCollateral(nil, let net): "How much ETH as collateral on Aave on \(Self.placeName(net))?"
         default: nil
         }
@@ -803,12 +1007,15 @@ extension WalletCommand {
         case .solanaTo(let place, _): .solanaTo(place, amount)
         case .receiveAcross(let net, let t, _): .receiveAcross(network: net, token: t, amount: amount)
         case .aaveBorrow(_, let net): .aaveBorrow(amount, network: net)
+        case .kaminoBorrow(_, let s, let add): .kaminoBorrow(amount, against: s, adding: add)
         case .aaveCollateral(_, let net): .aaveCollateral(amount, network: net)
         case .sell(let a, _): .sell(a, amount: amount)
         case .sellOn(let place, let t, _, let keep): .sellOn(place, token: t, amount: amount, keep: keep)
         case .swapOn(let place, let from, let to, _): .swapOn(place, from: from, to: to, amount: amount)
         case .sendToken(let name, let token, _, let net): .sendToken(name: name, token: token, amount: amount, network: net)
+        case .sendPrivately(let name, let token, _, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
         case .crossSwap(let from, let on, let to, let at, _): .crossSwap(from: from, on: on, to: to, at: at, amount: amount)
+        case .swapPrivately(let from, let on, let to, let at, _): .swapPrivately(from: from, on: on, to: to, at: at, amount: amount)
         default: self
         }
     }
@@ -816,6 +1023,26 @@ extension WalletCommand {
     /// A network's own coin, the one its fees are paid in: on its network it is swapped for USDC, never bought from a token list.
     static func ownCoin(_ place: String) -> Set<String> {
         place == "polygon" ? ["POL", "MATIC"] : place == "hyperevm" ? ["HYPE"] : place == "bnb" ? ["BNB"] : ["ETH"]
+    }
+
+    /// How many tokens a sale names: the number right after «sell»/«продай» («sell 100 0x…», «продай 1,5 B5AN…»), as
+    /// «sell 100 AERO on base» reads it, or one before «tokens»/«токенов»/«шт» anywhere. Dollars and percents aren't a count,
+    /// and neither is the «0» of «0x…» or the digit a mint starts with. A number it would read only in part («1 000»,
+    /// «5 тысяч», «1/2») is none either: the sale is then refused, not made smaller.
+    static func soldCount(_ q: String) -> Decimal? {
+        if q.contains(spacedNumber) { return nil }
+        let n = q.firstMatch(of: /(?:\bsell|\bdump|прода\w*)\s+(?:the\s+|my\s+)?(\d+(?:[.,]\d+)?)(?![\w.,%$\/])(?!\s*(?:\$|%|usd|долл|бакс|bucks|dollars?|worth|percent|процент|тыс|thousand|млн|million|миллион|млрд|billion))/)?.1
+            ?? q.firstMatch(of: /(?:^|\s)(\d+(?:[.,]\d+)?)\s*(?:tokens?|токен\w*|шт)/)?.1
+        return n.flatMap { Decimal(string: String($0).replacingOccurrences(of: ",", with: ".")) }
+    }
+
+    /// «1 000», «2 500 tokens»: thousands split by a space, which every reader here takes in part («500 tokens»).
+    nonisolated(unsafe) static let spacedNumber = /\d\s\d{3}(?!\w)/
+
+    /// A sale that names a number or a share soldCount didn't read («sell 0x… 100», «sell 50% of …», «продай половину»,
+    /// «продай треть», «sell ten», «… for 10 USDC»): never «all of it».
+    static func namesOtherCount(_ q: String) -> Bool {
+        ChatWords.mayChange(q) || q.contains(/\bthird|\bpart|част[ьи]|частичн|\bsome\b|немного|несколько/)
     }
 
     /// The multisig's three forms, as the chat writes them in English.
@@ -912,7 +1139,7 @@ extension WalletCommand {
         case .buyNear(let u): return "buy native NEAR for \(n(u)) USDC (to your NEAR account)"
         case .sellNear(let x, let to): return "sell \(n(x)) NEAR from your NEAR account for USDC on \(to.map(Self.placeName) ?? "Solana")"
         case .sell(let a, let x): return "sell \(n(x)) \(a.symbol)"
-        case .schedule(let a, let u, let d): return "buy \(a.symbol) for \(Fmt.num(u)) USDC every \(d == 1 ? "day" : d == 7 ? "week" : "\(d) days")"
+        case .schedule(let a, let u, let d): return "buy \(a.symbol) for \(Fmt.num(u)) USDC every \(Self.everyText(d * 86_400))"
         case .stopSchedules: return "stop recurring buys"
         // The canonical form: it parses back to the same order.
         case .jupiterDCA(let a, let u, let o, let e):
@@ -946,6 +1173,12 @@ extension WalletCommand {
         // The amount without grouping («1973.719299», not «1,973.72»): the text parses back to the same transfer.
         case .sendToken(let name, let token, let x, let net):
             return "send \(x.map { NSDecimalNumber(decimal: $0).stringValue } ?? "all") \(token)\(net.map { " on \($0)" } ?? "") to \(name)"
+        case .sendPrivately(let name, let token, let x, let net):
+            return "send \(NSDecimalNumber(decimal: x).stringValue) \(token) privately\(net.map { " on \($0)" } ?? "") to \(name)"
+        case .agentCreate(let d): return "create an agent wallet with $\(NSDecimalNumber(decimal: d).stringValue) a day"
+        case .agentFund(let x): return "fund the agent wallet with \(NSDecimalNumber(decimal: x).stringValue) USDC"
+        case .agentSend(let x, let name): return "send \(NSDecimalNumber(decimal: x).stringValue) USDC from the agent wallet to \(name)"
+        case .agentFreeze(let on): return on ? "freeze the agent wallet" : "unfreeze the agent wallet"
         case .receive: return "show where to top up"
         case .buyStock(let s, let u): return "buy \(s.hasPrefix("0x") ? "the token \(s)" : "\(s) stock tokens") for \(n(u)) USDC on Robinhood Chain"
         case .sellStock(let s, let x): return "sell \(n(x)) \(s.hasPrefix("0x") ? "of the token \(s)" : "\(s) stock tokens") on Robinhood Chain"
@@ -963,15 +1196,24 @@ extension WalletCommand {
         case .crossSwap(let a, let from, let b, let to, let x):
             func name(_ t: String) -> String { t.hasPrefix("0x") || t.count >= 32 ? t : t.uppercased() }   // a mint keeps its case
             return "swap \(x.map { NSDecimalNumber(decimal: $0).stringValue } ?? "all") \(name(a)) on \(Self.placeName(from)) for \(name(b)) on \(Self.placeName(to))"
+        // Both places on NEAR read back as a swap there; across networks, as a swap across.
+        case .swapPrivately(let a, let from, let b, let to, let x):
+            func name(_ t: String) -> String { t.hasPrefix("0x") || t.count >= 32 ? t : t.uppercased() }
+            let amount = NSDecimalNumber(decimal: x).stringValue
+            return from == to ? "swap \(amount) \(name(a)) privately for \(name(b)) on \(Self.placeName(to))"
+                : "swap \(amount) \(name(a)) on \(Self.placeName(from)) privately for \(name(b)) on \(Self.placeName(to))"
         case .solanaTo(let place, let x): return "move \(n(x)) USDC from Solana to \(Self.placeName(place))"
         case .pay(let method, let url, _): return "pay for \(method) \(url) in USDC on Tempo"
         case .contractCall(let c): return "call \(c.name) on \(c.contract.prefix(6))…\(c.contract.suffix(4)) on \(Self.placeName(c.network))"
         case .gas(let place, let usd): return "add ≈ \(Fmt.usd(usd ?? 1)) of gas on \(Self.placeName(place))"
         case .bridge(let from, let to, let x): return "move \(n(x)) USDC from \(Self.placeName(from)) to \(Self.placeName(to))" + (to == "robinhood" ? " (arrives as USDG)" : "")
         case .cctp(let from, let to, let x): return "move \(n(x)) USDC from \(Self.placeName(from)) to \(Self.placeName(to)) via CCTP"
+        case .intents(let from, let to, let x): return "move \(n(x)) USDC from \(Self.placeName(from)) to \(Self.placeName(to)) via NEAR Intents"
         case .usdt(let from, let to, let x, let layerZero):
             return "move \(n(x)) USDT from \(Self.placeName(from)) to \(Self.placeName(to))" + (layerZero ? " via LayerZero" : "")
         case .aaveBorrow(let x, let net): return "borrow \(n(x)) USDC on Aave on \(Self.placeName(net))"
+        case .kaminoBorrow(let x, let s, let add): return "borrow \(n(x)) USDC on kamino" + (s.map { " against " + (add.map { "\(n($0)) " } ?? "") + $0 } ?? "")
+        case .kaminoRepay(let x, let s): return (x == nil ? "repay all USDC on kamino" : "repay \(n(x)) USDC on kamino") + (s.map { " against \($0)" } ?? "")
         case .aaveRepay(let x, let net): return x == nil ? "repay all USDC on Aave on \(Self.placeName(net))" : "repay \(n(x)) USDC on Aave on \(Self.placeName(net))"
         case .aaveCollateral(let x, let net): return "supply \(n(x)) ETH as collateral on Aave on \(Self.placeName(net))"
         case .claimRewards: return "claim rewards on Merkl"

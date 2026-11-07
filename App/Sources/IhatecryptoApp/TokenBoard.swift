@@ -11,6 +11,12 @@ extension Workspace {
         UserDefaults.standard.set("plan", forKey: "canvasMode")
     }
 
+    /// What `opener` opens is open on the canvas now: the token's board, or the chart of that network's own coin.
+    func isOpen(chain: String, contract: String, symbol: String) -> Bool {
+        if contract != "native", chain != "hyperliquid" { return detail == TokenBoard.place(chain: chain, address: contract) }
+        return detail == "chart" && chart?.coin == symbol.uppercased() && chart?.network == chain
+    }
+
     /// What a click on a held token opens: the board of a token with a contract; the market's chart for a network's own
     /// coin (SOL, ETH, NEAR) or a Hyperliquid spot token that trades as a perp; nil when there's nothing to open. Both
     /// open in the same place on the canvas, each replacing the last.
@@ -92,7 +98,7 @@ extension Workspace {
     func askAbout(symbol: String, chain: String, address: String?) {
         let network = ModuleNetwork(rawValue: chain)?.name ?? chain.capitalized
         let held = address.flatMap { a in holdings.first { $0.chain == chain && $0.contract.lowercased() == a.lowercased() } }
-        let stock = address.flatMap { a in robinhood?.stocks.first { $0.address.lowercased() == a.lowercased() } }
+        let stock = chain == "robinhood" ? address.flatMap { a in robinhood?.stocks.first { $0.address.lowercased() == a.lowercased() } } : nil
         var facts = ["\(symbol) on \(network)"] + (address.map { ["contract \($0)"] } ?? [])
         if let amount = stock?.amount ?? held?.amount {
             facts.append("the wallet holds \(Fmt.num(amount, maxFraction: 6))" + ((stock?.usd ?? held?.usd).map { " ≈ \(Fmt.usd($0))" } ?? ""))
@@ -154,7 +160,7 @@ struct TokenBoard: View {
         return parts.count == 3 && parts[0] == "token" ? (String(parts[1]), String(parts[2])) : nil
     }
 
-    private var holding: StockHolding? { ws.robinhood?.stocks.first { $0.address.lowercased() == address.lowercased() } }
+    private var holding: StockHolding? { chain == "robinhood" ? ws.robinhood?.stocks.first { $0.address.lowercased() == address.lowercased() } : nil }
     /// The token as the wallet holds it on any other network (Holdings).
     private var heldToken: Holding? { ws.holdings.first { $0.chain == chain && $0.contract.lowercased() == address.lowercased() } }
     private var favorite: FavoriteToken? { ws.favoriteTokens.first { $0.chain == chain && $0.address.lowercased() == address.lowercased() } }
@@ -195,8 +201,10 @@ struct TokenBoard: View {
         .task(id: address) {
             market = try? await TokenMarket.info(address, chain: chain)
             if market == nil { error = "No pool trades this token on \(chainTitle)." }
-            if chain == "solana" { verified = await TokenResearch.solanaToken(address).map { ("Jupiter", $0.verified) } }
-            else if holding != nil || isStock { verified = ("Robinhood's registry", true) }
+            if chain == "solana" { verified = (try? await TokenResearch.solanaToken(address))?.map { ("Jupiter", $0.verified) } }
+            else if chain == "robinhood", let registry = try? await RobinhoodStocks.registry() {
+                verified = RobinhoodStocks.listed(address, symbol: symbol, chain: chain, in: registry).map { ("Robinhood's registry", $0) }
+            }
             tell()
         }
         .task(id: "\(market?.pool ?? "")·\(range)") {

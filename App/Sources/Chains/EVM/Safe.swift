@@ -19,6 +19,7 @@ public enum Safe {
 
     static func selector(_ signature: String) -> Data { Data(Keccak.hash256(Data(signature.utf8)).prefix(4)) }
     static let execSelector = selector("execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)")
+    static let approveHashCall = selector("approveHash(bytes32)")
     /// nonce(), getOwners(), getThreshold(): what a multisig says of itself.
     public static let nonceCall = selector("nonce()")
     public static let ownersCall = selector("getOwners()")
@@ -125,24 +126,40 @@ public enum Safe {
         guard c.count >= 4 + 10 * 32, c.prefix(4) == execSelector else { return nil }
         let args = Data(c.dropFirst(4))
         guard let to = ABI.address(in: args, word: 0), let offset = ABI.uint(in: args, word: 2), let op = ABI.uint(in: args, word: 3), op <= 255,
-              offset % 32 == 0, offset + 32 <= UInt64(args.count), let length = ABI.uint(in: args, word: Int(offset / 32)),
-              offset + 32 + length <= UInt64(args.count) else { return nil }
+              // Subtracted, not added: an offset or length near 2⁶⁴ would overflow and stop the process.
+              offset % 32 == 0, offset <= UInt64(args.count) - 32, let length = ABI.uint(in: args, word: Int(offset / 32)),
+              length <= UInt64(args.count) - 32 - offset else { return nil }
         let start = Int(offset) + 32
         return (to, Data(args.subdata(in: 32..<64)), Data(args.subdata(in: start..<(start + Int(length)))), UInt8(op))
     }
 
     /// An execTransaction this wallet sends itself (signEVMTransaction, not signSafeMove), held to the same rules: no call
-    /// into the multisig (its keys, modules, guard), no contract call the signer can't read, and no gas refund paid out of
-    /// it (gasPrice 0) — a refund goes to a receiver the move doesn't name. nil: not an execTransaction, or a plain payout.
+    /// into the multisig (its keys, modules, guard), only a payout — a coin, or a token's plain transfer — and no gas refund
+    /// paid out of it (gasPrice 0) — a refund goes to a receiver the move doesn't name. An execTransaction readExec can't read is refused
+    /// too: Safe 1.4.1 (solc 0.7.6, ABI coder v1) runs calldata off its canonical layout, a data offset one byte off for one,
+    /// and the sender's own v=1 signature counts as an owner's (a Base fork added a key that way, 2026-10-29). approveHash,
+    /// the same owner's approval written on chain for anyone to run, is never signed. nil: neither call, or a plain payout.
     public static func execRefusal(_ calldata: Data, safe: String) -> String? {
-        guard let e = readExec(calldata) else { return nil }
-        let args = Data(Data(calldata).dropFirst(4))
+        let c = Data(calldata)   // a slice keeps its parent's indices
+        if c.prefix(4) == approveHashCall {
+            return "The call approves a multisig move ahead of time (Safe's approveHash): anyone could then carry it out. ihatecrypto doesn't sign that."
+        }
+        guard c.prefix(4) == execSelector else { return nil }
+        guard let e = readExec(c) else {
+            return "A multisig move ihatecrypto can't read: its parts aren't where Safe's own encoding puts them. ihatecrypto doesn't sign that."
+        }
+        let args = Data(c.dropFirst(4))
         if args.count >= 7 * 32, args.subdata(in: 192..<224).contains(where: { $0 != 0 }) {
             return "The multisig move pays a gas refund to an address it doesn't show. ihatecrypto doesn't sign that."
         }
         if e.to.lowercased() == safe.lowercased() { return "The move changes the multisig itself (its keys, modules or guard). ihatecrypto doesn't sign that." }
-        if case .contract = EVMCall.decode(e.data) { return "The multisig move calls a contract ihatecrypto can't read. It signs only the multisig's payouts." }
-        return nil
+        // As in refusal(_:approved:): a vault, lending or NFT call the decoder reads is held to rules for this wallet,
+        // not for the multisig, so only a payout passes.
+        switch EVMCall.decode(e.data) {
+        case .plain where e.data.isEmpty: return nil
+        case .transfer where e.value.allSatisfy({ $0 == 0 }): return nil
+        default: return "A multisig move ihatecrypto signs is a plain payment of a coin or a token; this one calls the contract \(e.to)."
+        }
     }
 
     /// getOwners()'s answer: a dynamic address array.

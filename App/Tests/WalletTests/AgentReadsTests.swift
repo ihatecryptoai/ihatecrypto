@@ -1,3 +1,4 @@
+import EVMChain
 import Foundation
 import Testing
 @testable import TradeExecution
@@ -17,6 +18,18 @@ import WalletCore
     #expect(AgentReads.decode(["address", "bool"], Data(count: 12) + Data(hex: owner)! + Data(count: 31) + [1]) == [owner, "true"])
 }
 
+/// A contract's answer is someone else's data: an offset or a length near 2⁶⁴ reads as «?», never stops the app.
+@Test func hostileAnswersReadAsNothing() {
+    let words = Data(count: 64)
+    for i in [-1, 2, Int.max / 32, Int.max] {
+        #expect(ABI.uint(in: words, word: i) == nil && ABI.address(in: words, word: i) == nil && ABI.decimal(in: words, word: i) == nil)
+    }
+    let farOffset = Data(count: 24) + [0x80] + Data(count: 7)   // 2⁶³: word 2⁵⁸, whose end overflowed Int
+    let longLength = Data(count: 31) + [0x20] + Data(count: 24) + Data(repeating: 0xff, count: 8)   // 2⁶⁴ − 1 bytes
+    #expect(AgentReads.decode(["string"], farOffset + words) == ["?"])
+    #expect(AgentReads.decode(["bytes"], longLength) == ["?"])
+}
+
 @Test func agentReadsKeepOnlyMatchingItemsAndHideTheUsersAddress() {
     let pools = #"{"status":"ok","data":[{"project":"fluid-lending","chain":"Arbitrum","symbol":"USDC"},{"project":"aave-v3","chain":"Base","symbol":"USDC"}]}"#
     let out = AgentReads.shaped(Data(pools.utf8), find: ["fluid", "arbitrum"])
@@ -26,4 +39,14 @@ import WalletCore
     #expect(AgentReads.split("https://x.io/a find Morpho base") == ("https://x.io/a", ["morpho", "base"]))
     let me = AgentReads.Me(evm: "0xAbCdEf0000000000000000000000000000000001", solana: nil)
     #expect(AgentReads.masked("from 0xabcdef0000000000000000000000000000000001 to 0x2", me) == "from me to 0x2")
+}
+
+/// A call's address argument is encoded only as 0x and 40 hex digits: written without the 0x it slipped past the chat's
+/// checks of the addresses in a call (GoPlus, «yours or verified code»), which find them that way.
+@Test func aCallsAddressArgumentNeedsItsPrefix() throws {
+    let me = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    #expect(throws: (any Error).self) { try AgentReads.calldata("supplyFor(address,uint256)", ["012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me) }
+    #expect(throws: (any Error).self) { try AgentReads.calldata("supplyFor(address,uint256)", ["0X012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me) }
+    #expect(try AgentReads.calldata("supplyFor(address,uint256)", ["0x012f89ff307568f8409bbe379ca92ed41bc4d386", "100"], me: me).count == 68)
+    #expect(try AgentReads.calldata("deposit(uint256,address)", ["100", "me"], me: me).count == 68)
 }

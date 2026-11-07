@@ -61,6 +61,32 @@ public struct Journal: Sendable {
         return order.compactMap { latest[$0] }.filter { $0.kind == .signed }
     }
 
+    /// What went through: confirmed, or settled where it landed — each with the note and the time it was signed with, and
+    /// the id an explorer knows it by (a swap with no gas of ours landed under the sponsor's signature). In file order.
+    /// Steps that move no money aren't counted, so a refusal after one of them is still a refusal the user may try again:
+    /// an approve, a Permit2 allowance, a cleared allowance or a revoke on its own (an EIP-7702 batch «Approve … + …»
+    /// moves its call's money), and on Hyperliquid anything but a fill or a transfer — leverage, fee approval, referral
+    /// code, a cancel, a stop resting on the book.
+    public func wentThrough() throws -> [Entry] {
+        var latest: [String: Entry] = [:], signed: [String: Entry] = [:]
+        var order: [String] = []
+        for entry in try entries() {
+            let key = "\(entry.chain)|\(entry.id)"
+            if latest[key] == nil { order.append(key) }
+            latest[key] = entry
+            if entry.kind == .signed { signed[key] = entry }
+        }
+        return order.compactMap { key in
+            guard let e = latest[key], e.kind == .confirmed || e.kind == .settled else { return nil }
+            let s = signed[key] ?? e, note = s.note.lowercased()
+            if ["approve", "permit2:", "clear ", "revoke"].contains(where: note.hasPrefix), !note.contains(" + ") { return nil }
+            if e.chain == "hyperliquid", !e.note.hasPrefix("filled"),
+               !["sendasset", "usdclasstransfer", "send ", "hlp "].contains(where: note.hasPrefix) { return nil }
+            let landed = e.chain == "solana" && e.note.hasPrefix("transaction ") ? String(e.note.dropFirst(12)) : e.id
+            return Entry(at: s.at, chain: e.chain, id: landed, kind: e.kind, note: s.note)
+        }
+    }
+
     /// Money on its way between networks: a bridge order (Relay's, 1Click's, a CCTP burn, a USDT0 send on LayerZero)
     /// signed within `within` and not yet settled, refunded or failed. The newest first.
     public func inTransit(within: TimeInterval = 86_400, now: Date = Date()) throws -> [Entry] {

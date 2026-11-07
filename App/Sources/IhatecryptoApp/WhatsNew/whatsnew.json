@@ -1,5 +1,149 @@
 [
   {
+    "version": "0.8.2",
+    "date": "2026-11-07",
+    "stories": [
+      {
+        "title": "Send and swap privately",
+        "text": "«send 20 USDC privately to Mom» or «buy NEAR for 5 USDC privately» goes through NEAR Intents' Confidential Intents: on chain the deposit and what arrives can't be matched. A USDC send to a saved address offers Regular or Private right over Confirm, with each way's fees and time.",
+        "symbol": "lock.fill",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "A private assistant",
+        "text": "Pick NEAR AI Cloud and the chat runs in sealed hardware. Before every message ihatecrypto checks the enclave down to Intel and NVIDIA, and each reply's bytes against the model's own key. The header says «Private assistant», and Proof shows what was checked.",
+        "symbol": "lock.shield.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Won't let you get liquidated",
+        "text": "«guard my loan on kamino» watches a Kamino or Aave loan and, under its line, prepares the repay, with the USDC it lacks brought through NEAR Intents, for one Confirm. You can also borrow USDC against SOL on Kamino's main market.",
+        "symbol": "shield.checkered",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "Pay any API, run an agent wallet",
+        "text": "A paid API answers after you Confirm: x402 by a signature on Base, MPP on Tempo or through NEAR Intents from the USDC you hold. An agent wallet on NEAR Intents spends within the daily limit your NEAR key signed, and you can freeze it.",
+        "symbol": "creditcard.fill",
+        "color": "0A84FF"
+      },
+      {
+        "title": "TWAP and trailing stops",
+        "text": "«buy ETH for $2000 over 2 hours» is one TWAP on Hyperliquid, its stop and take covering the whole position from the first part. «trailing 2%» puts Hyperliquid's own trailing stop on the exchange.",
+        "symbol": "chart.line.uptrend.xyaxis",
+        "color": "30B0C7"
+      },
+      {
+        "title": "See where your money goes",
+        "text": "Every move waiting for Confirm reads as a receipt: what you pay and from where, the blockchain's fees, what arrives. A move through NEAR Intents shows its way after Confirm. Lookalike addresses, scam addresses from GoPlus and sites asking for more than they show are called out before you sign.",
+        "symbol": "doc.text.magnifyingglass",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
+    "version": "0.8.1",
+    "date": "2026-10-29",
+    "stories": [
+      {
+        "title": "No silent loss to price impact",
+        "text": "A swap that would move the price more than 2% stops before anything is signed and offers a smaller part now, the whole anyway with the loss in dollars, or nothing. Selling a thin memecoin in one go no longer eats a chunk of it unseen.",
+        "symbol": "exclamationmark.shield.fill",
+        "color": "FF453A"
+      },
+      {
+        "title": "The best way to swap",
+        "text": "On Solana JupiterZ's market makers fill a swap when they pay more than the pools. On EVM networks Uniswap, KyberSwap and Relay are compared by what's left after gas. From Solana to another network, Relay's swap is weighed against Relay's bridge plus the best exchange there, and the card names the one you sign.",
+        "symbol": "arrow.triangle.branch",
+        "color": "0A84FF"
+      },
+      {
+        "title": "Stocks from Ondo",
+        "text": "Buy US stocks and ETFs from Ondo on Solana («buy $5 of Nvidia from Ondo») at the market makers' price, and keep dollars in Ondo's USDY. Ondo's residency limits show before you confirm.",
+        "symbol": "building.columns.fill",
+        "color": "30B0C7"
+      },
+      {
+        "title": "Borrow against your stocks",
+        "text": "Kamino's Backpack market lends USDC against tokenized stocks such as SPCX or MU, so you get dollars without selling them. Every card says «all» with its number.",
+        "symbol": "banknote.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Hedge what you hold",
+        "text": "Say «hedge my SOL» and ihatecrypto opens a short on Hyperliquid the size of the coins you hold, with no take-profit, so a fall is covered; the risk rules count it net of your coins.",
+        "symbol": "shield.lefthalf.filled",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "Smoother canvas, safer chat",
+        "text": "Two-finger pans move the canvas once a frame, smoothly. The second check reads every chat message and says why it stopped one in your language. Help › Report a Problem opens a GitHub issue with your version filled in.",
+        "symbol": "hand.draw.fill",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
+    "version": "0.8.0",
+    "date": "2026-10-27",
+    "stories": [
+      {
+        "title": "Your P/L, not your top-ups",
+        "text": "The portfolio's line shows what prices did to what you hold. Money you add or send, swaps and bridges don't move it, so a top-up no longer looks like a gain. And the line is a smooth curve now.",
+        "symbol": "chart.line.uptrend.xyaxis",
+        "color": "34C759"
+      },
+      {
+        "title": "Deposits you can read",
+        "text": "Every deposit is one tile: the protocol, the coin you put in, its rate a year, the dollars, what it brings a day and a month, and what Jupiter Lend has earned you so far.",
+        "symbol": "banknote.fill",
+        "color": "30B0C7"
+      },
+      {
+        "title": "Protocols in their own colors",
+        "text": "The top 50 DeFi protocols on DefiLlama each have their logo and colors on their deposit tile.",
+        "symbol": "paintpalette.fill",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
+    "version": "0.7.9",
+    "date": "2026-10-26",
+    "stories": [
+      {
+        "title": "A new version you can see",
+        "text": "When a new ihatecrypto is out, «↓ its version» sits by the logo until you install it, and the app menu and the menu bar's coin offer it too. A click shows what's new with Install; nothing downloads by itself.",
+        "symbol": "arrow.down.circle.fill",
+        "color": "0A84FF"
+      }
+    ]
+  },
+  {
+    "version": "0.7.8",
+    "date": "2026-10-26",
+    "stories": [
+      {
+        "title": "Send all of anything",
+        "text": "«Send all» works for every coin now: all your SOL, the rent of the empty token accounts with it; ETH, POL or BNB less only the fee; all of Tempo's USDC with a speck left, not a cent. Sending all of a token closes its account and its rent comes back. A token named by its contract is no longer taken for the address it goes to.",
+        "symbol": "paperplane.fill",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "Price alerts on the Schedule",
+        "text": "Your price alerts sit on the Schedule beside the tasks: the level, how far the price is, a switch to pause one and a page of its own. A row gets its orange edge only while it's open, not under the pointer.",
+        "symbol": "bell.badge.fill",
+        "color": "BF5AF2"
+      },
+      {
+        "title": "Every fee counted",
+        "text": "A Hyperliquid spot quote takes off the exchange's 0.07% and, on a sale, ihatecrypto's 0.05%. On your first trade the signing card counts the fee approval as the signature it is.",
+        "symbol": "percent",
+        "color": "64D2FF"
+      }
+    ]
+  },
+  {
     "version": "0.7.7",
     "date": "2026-10-24",
     "stories": [

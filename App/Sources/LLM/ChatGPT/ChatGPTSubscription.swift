@@ -22,7 +22,9 @@ public struct ChatGPTSubscription: LLMProvider {
             signInLabel: "Sign in with ChatGPT", existingLoginLabel: "Use the Codex CLI login",
             // All answer through this sign-in (checked 2026-09-30). 6.1 Sol read 1,000 test messages as well as 6 Sol, as fast.
             // Without a paid plan Codex lists only gpt-6-luna and 5.6 (2026-10-08): Workspace.model stands in with those.
-            models: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
+            // GPT-6.1 Terra (2026-10-26) by Codex's models page (Codex CLI 0.159.0+), not run here: the live list replaces
+            // these once signed in.
+            models: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
         )
     }
 

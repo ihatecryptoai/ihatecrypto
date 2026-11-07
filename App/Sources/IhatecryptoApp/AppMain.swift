@@ -1,6 +1,8 @@
 import AppKit
 import GuardJev
+import JupiterSwap
 import TxGuard
+import TradeExecution
 import IhatecryptoCore
 import LLMCatalog
 import LLMCore
@@ -22,6 +24,15 @@ struct AppMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     /// The main window's title; DebugAPI and the window test find the window by it.
     static let mainTitle = "ihatecrypto"
+    /// Help › Report a Problem: the public repo's new-issue page, its body an empty template and this copy's version.
+    static var problemReport: URL {
+        let info = Bundle.main.infoDictionary, os = ProcessInfo.processInfo.operatingSystemVersion
+        let version = "ihatecrypto \(info?["CFBundleShortVersionString"] as? String ?? "?") (build \(info?["CFBundleVersion"] as? String ?? "?")), "
+            + "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        var url = URLComponents(string: "https://github.com/ihatecryptoai/ihatecrypto/issues/new")!
+        url.queryItems = [URLQueryItem(name: "body", value: "### What happened\n\n\n### What you expected\n\n\n---\n\(version)\n")]
+        return url.url!
+    }
     /// Created once with the app, so the watch loop below outlives the window.
     private let workspace = Workspace()
 
@@ -121,7 +132,15 @@ struct AppMain: App {
             }
             // Only in the copy from the site: a local build has no feed.
             CommandGroup(after: .appInfo) {
+                if let version = workspace.updateReady { Button("Install ihatecrypto \(version)…") { Updater.shared.check() } }
                 if Updater.shared.available { Button("Check for Updates…") { Updater.shared.check() } }
+            }
+            // A new issue on GitHub with only the version and macOS filled in: no logs, addresses or amounts, and
+            // nothing is sent until the user submits it there.
+            CommandGroup(after: .help) {
+                Button(WelcomeLanguage.system.pick("Report a Problem…", "Informar de un problema…", "Сообщить о проблеме…")) {
+                    NSWorkspace.shared.open(Self.problemReport)
+                }
             }
         }
 
@@ -242,6 +261,31 @@ struct AppMain: App {
 }
 
 /// With the window closed, ihatecrypto keeps watching from the menu bar (S13): positions, exit rules, regular purchases.
+/// The menu bar popover's «new version» card: tinted, with the accent edge, a click opens Sparkle's window.
+struct UpdateCard: View {
+    let version: String
+
+    var body: some View {
+        Button { Updater.shared.check() } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill").font(.system(size: 22)).foregroundStyle(Brand.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("ihatecrypto \(version) is out").font(.ui(12.5, .bold))
+                    Text("See what's new and install it").font(.ui(10.5)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 6)
+                Text("Install").font(.ui(12, .bold)).foregroundStyle(Brand.accentInk)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Brand.accent.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Brand.accent.opacity(0.6), lineWidth: 1.2))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .accessibilityLabel("ihatecrypto \(version) is out: install it")
+    }
+}
+
 struct MenuBarContent: View {
     @Environment(Workspace.self) private var ws
 
@@ -267,6 +311,9 @@ struct MenuBarContent: View {
                     }
                 }
             }
+            // A new version is out, first under the header and set apart as its own card (the owner, 2026-10-26: «вот
+            // это как-то надо выделить»): its notes and Install in Sparkle's window.
+            if let version = ws.updateReady { UpdateCard(version: version) }
             ForEach(ws.positions, id: \.coin) { PositionChip(position: $0) }
             ForEach(ws.exitRules.keys.sorted(), id: \.self) { coin in
                 Label("ihatecrypto manages the stop: \(IntentParser.pretty(coin))", systemImage: "shield.lefthalf.filled").font(.ui(10))
@@ -355,6 +402,21 @@ struct ContentView: View {
             StatusItem.shared.install(ws)
             #if DEBUG_API
             if UserDefaults.standard.bool(forKey: "debugAPI") { DebugAPI.shared.start(ws) }
+            // Live runs on the Dev test wallet of what its few dollars never reach: JupiterZ's signed path
+            // (`-jupiterZFirst YES`), the price-impact stop's cards (`-impactStopTest YES`), a limit that fills at once
+            // without its stop confirmed (`-limitFillTest YES`), a swap whose balance read after it fails (`-swapTailTest YES`),
+            // a gasless or JupiterZ swap whose /execute answer doesn't come in time (`-jupiterExecuteTimeout 0.02`:
+            // RPCRetry asks again, and Jupiter answers a repeat in well under a second), the guardian's stop moves failing
+            // (`-stopMoveFailTest 2`: the first two fail before anything is sent), Jupiter throttling every request
+            // (`jupiterBusyTest`, read at each call so a scenario's `defaults write` takes without a relaunch).
+            Executor.jupiterZFirst = UserDefaults.standard.bool(forKey: "jupiterZFirst")
+            Executor.impactStopTest = UserDefaults.standard.bool(forKey: "impactStopTest")
+            Executor.limitFillTest = UserDefaults.standard.bool(forKey: "limitFillTest")
+            Executor.swapTailTest = UserDefaults.standard.bool(forKey: "swapTailTest")
+            Executor.stopMoveFailTest = UserDefaults.standard.integer(forKey: "stopMoveFailTest")
+            TokenResearch.busyTest = { UserDefaults.standard.bool(forKey: "jupiterBusyTest") }
+            let executeTimeout = UserDefaults.standard.double(forKey: "jupiterExecuteTimeout")
+            if executeTimeout > 0 { Jupiter.executeTimeout = executeTimeout }
             #endif
             // The development copy says so in the Dock, beside the working one's same icon.
             if Flavor.dev { NSApp.dockTile.badgeLabel = Flavor.tag }
@@ -405,6 +467,8 @@ struct ContentView: View {
             }
             // `-openPlace kamino`: opens that place's card from the rail, to check the canvas layout in a screenshot;
             // `history` and `favorites` open the boards of the rail's buttons, `settings` Settings (the tab: `-settingsTab modules`). Only shows cards, so it stays in Release builds.
+            // `-fakeUpdate 0.7.9` in the Dev copy: the update tag and menu items, to see them; the Dev copy has no feed.
+            if Flavor.dev, let version = UserDefaults.standard.string(forKey: "fakeUpdate") { ws.updateReady = version }
             switch UserDefaults.standard.string(forKey: "openPlace") {
             case "history": ws.showHistory = true
             case "favorites": ws.showFavorites = true

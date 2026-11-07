@@ -6,15 +6,21 @@ public struct LLMUsage: Sendable, Equatable {
     public var input: Int
     /// The part of `input` read from the service's cache, billed lower.
     public var cached: Int
+    /// The part of `input` written to the service's cache (Anthropic bills it at 1.25× the input price).
+    public var written: Int
     public var output: Int
     /// The model's context window, when the service says it (Claude Code, the Codex backend, Ollama).
     public var window: Int?
     /// The service's own price for the answer in dollars, when it sends one (OpenRouter, Claude Code).
     public var cost: Double?
+    /// Claude Code said the answer went past the plan's limits and usage credits paid for it (its rate_limit_event's
+    /// isUsingOverage); nil when it didn't say.
+    public var overage: Bool?
 
-    public init(input: Int, cached: Int = 0, output: Int, window: Int? = nil, cost: Double? = nil) {
+    public init(input: Int, cached: Int = 0, written: Int = 0, output: Int, window: Int? = nil, cost: Double? = nil) {
         self.input = input
         self.cached = cached
+        self.written = written
         self.output = output
         self.window = window
         self.cost = cost
@@ -27,7 +33,7 @@ public struct LLMUsage: Sendable, Equatable {
         guard let usage, let read = Self.int(usage["prompt_tokens"] ?? usage["input_tokens"]) else { return nil }
         let details = (usage["prompt_tokens_details"] ?? usage["input_tokens_details"]) as? [String: Any]
         let written = Self.int(usage["cache_creation_input_tokens"]) ?? 0, hit = Self.int(usage["cache_read_input_tokens"])
-        self.init(input: read + written + (hit ?? 0), cached: hit ?? Self.int(details?["cached_tokens"]) ?? 0,
+        self.init(input: read + written + (hit ?? 0), cached: hit ?? Self.int(details?["cached_tokens"]) ?? 0, written: written,
                   output: Self.int(usage["completion_tokens"] ?? usage["output_tokens"]) ?? 0,
                   cost: (usage["cost"] as? NSNumber)?.doubleValue)
     }
@@ -78,20 +84,29 @@ public final class ModelWindows: @unchecked Sendable {
 /// the services themselves publish prices only as web pages.
 public struct ModelFacts: Sendable, Equatable {
     public var window: Int
-    /// Dollars a token: read, read from the cache, written.
+    /// Dollars a token: read, read from the cache, written as the answer.
     public var input: Double, cached: Double, output: Double
+    /// Dollars a token written to the cache: the read price where the list names none.
+    public var written: Double
+    /// A prompt of more tokens than this is billed at these prices, every token of it: 0 for the base prices.
+    public var over = 0
+    /// The model's dearer prices for long prompts, by size (`pricing.overrides`): Haiku 5.5 costs 5× past 100k tokens,
+    /// GPT-6.1 Sol and Terra 2× the input and 1.5× the output past 272k (2026-11-05).
+    public var longer: [ModelFacts] = []
 
-    public init(window: Int, input: Double, cached: Double, output: Double) {
+    public init(window: Int, input: Double, cached: Double, output: Double, written: Double? = nil) {
         self.window = window
         self.input = input
         self.cached = cached
         self.output = output
+        self.written = written ?? input
     }
 
-    // ponytail: the base list price. A service's dearer tier for prompts over 200–272k tokens and DeepSeek's hours of
-    // the day aren't applied: the chat sends a few thousand tokens. Read `pricing.overrides` if that changes.
+    // ponytail: DeepSeek's cheaper hours of the day aren't applied (OpenRouter's list doesn't carry them).
     public func cost(_ usage: LLMUsage) -> Double {
-        Double(usage.input - usage.cached) * input + Double(usage.cached) * cached + Double(usage.output) * output
+        let p = longer.last { usage.input > $0.over } ?? self
+        return Double(usage.input - usage.cached - usage.written) * p.input + Double(usage.cached) * p.cached + Double(usage.written) * p.written
+            + Double(usage.output) * p.output
     }
 
     public static let source = "https://openrouter.ai/api/v1/models"
@@ -111,10 +126,23 @@ public struct ModelFacts: Sendable, Equatable {
         for row in rows {
             guard let id = row["id"] as? String, let window = LLMUsage.int(row["context_length"]), window > 0,
                   table[key(id)] == nil else { continue }
-            let prices = row["pricing"] as? [String: Any] ?? [:]
-            func price(_ name: String) -> Double? { (prices[name] as? String).flatMap(Double.init) ?? (prices[name] as? NSNumber)?.doubleValue }
-            let input = price("prompt") ?? 0
-            table[key(id)] = ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0)
+            let base = row["pricing"] as? [String: Any] ?? [:]
+            func facts(_ prices: [String: Any]) -> ModelFacts {
+                func price(_ name: String) -> Double? { (prices[name] as? String).flatMap(Double.init) ?? (prices[name] as? NSNumber)?.doubleValue }
+                let input = price("prompt") ?? 0
+                return ModelFacts(window: window, input: input, cached: price("input_cache_read") ?? input, output: price("completion") ?? 0,
+                                  written: price("input_cache_write"))
+            }
+            var model = facts(base)
+            // A tier names only what changes: the rest is the base price.
+            model.longer = (base["overrides"] as? [[String: Any]] ?? []).compactMap { tier in
+                // A number in the list (2026-11-05), read as a string too, as its prices are.
+                guard let over = LLMUsage.int(tier["min_prompt_tokens"]) ?? (tier["min_prompt_tokens"] as? String).flatMap(Int.init) else { return nil }
+                var long = facts(base.merging(tier) { _, new in new })
+                long.over = over
+                return long
+            }.sorted { $0.over < $1.over }
+            table[key(id)] = model
         }
         return table
     }

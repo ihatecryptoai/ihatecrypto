@@ -177,13 +177,13 @@ extension Executor {
     /// At least `want` USDC and some ETH for gas on the network: what is missing comes from Solana over Relay.
     /// `gas`: a floor and a top-up for calls heavier than a supply (a Morpho vault deposit is ≈ 450k gas);
     /// the top-up must land above the floor, or the wait below runs out.
-    func ensureEVM(_ net: EVMNetwork, usdc want: UInt64, gas heavier: (floor: UInt64, topupUSD: Decimal)? = nil) async throws {
+    func ensureEVM(_ net: EVMNetwork, usdc want: UInt64, gas heavier: (floor: UInt128, topupUSD: Decimal)? = nil) async throws {
         let me = wallet.evm
         func show(_ u: UInt64) -> String { Fmt.num(Decimal(u) / 1_000_000, maxFraction: 6) }
-        let floor = max(net.gasFloor, heavier?.floor ?? 0), topupUSD = max(net.topupUSD, heavier?.topupUSD ?? 0)
+        let floor = max(UInt128(net.gasFloor), heavier?.floor ?? 0), topupUSD = max(net.topupUSD, heavier?.topupUSD ?? 0)
         // Where fees come out of the stablecoin, the fees ride on the USDC wanted and there's no coin to read.
         let want = want + net.feeReserve
-        func gasThere() async throws -> UInt64 { net.feeToken == nil ? try await net.rpc.balance(me) : floor }
+        func gasThere() async throws -> UInt128 { net.feeToken == nil ? try await net.rpc.balance(me) : floor }
         var there = try await net.usdcBalance(me)
         var gas = try await gasThere()
         guard there < want || gas < floor else { return }
@@ -479,7 +479,7 @@ extension Executor {
         let raw = try await signer.signSponsoredTransfer(transfer, recipients: [deposit])
         let hash = "0x" + Keccak.hash256(raw).hex, note = "\(net.name) USDC→\(there) \(show(amount)), BNB Chain paying the gas"
         try journal.append(.init(chain: net.key, id: hash, kind: .signed, note: note))
-        _ = try await MegaFuel.send(raw)
+        _ = try await MegaFuel.send(raw, nonce: transfer.nonce, from: me)
         guard try await net.rpc.waitForReceipt(hash) else {
             try journal.append(.init(chain: net.key, id: hash, kind: .failed, note: note))
             throw ExecutionError("The transfer to Relay failed on \(net.name): \(net.explorer)/tx/\(hash)")
@@ -556,19 +556,24 @@ extension Executor {
 
     /// An exact approve and the call that spends it. Where they can batch (`canBatch`) they go as one transaction under one
     /// Touch ID, dry-run together first, so a call that would fail stops before anything is signed; elsewhere the approve,
-    /// its wait, then the call, as before.
+    /// its wait, then the call, as before. `value`: wei of the network's coin sent with the call. A batch carries none
+    /// (Batch7702.Call), so then the approve goes on its own first and the call with its coins after it.
     func approveAndSend(_ rpc: EVMRPC, token: String, spender: String, units: Decimal, approveNote: String,
-                        to: String, data: Data, note: String, recipients: [String] = []) async throws -> String {
-        if canBatch(rpc) {
+                        to: String, data: Data, note: String, recipients: [String] = [], value: UInt64 = 0) async throws -> String {
+        if value == 0, canBatch(rpc) {
             let allowance = ABI.decimal(in: try await rpc.read(token, try ERC20.allowance(owner: wallet.evm, spender: spender)), word: 0) ?? 0
             if allowance < units {
                 let calls = [Batch7702.Call(to: token, data: try ERC20.approve(spender: spender, units: units)), Batch7702.Call(to: to, data: data)]
                 return try await sendEVM(rpc, to: wallet.evm, data: Data(), note: "\(approveNote) + \(note)", recipients: recipients, batch: calls)
             }
         } else {
+            // sendEVM's own rule for coins, before the approve: on a network paying fees in a token it would sign for nothing.
+            guard value == 0 || EVMNetwork.of(chainId: rpc.chainId)?.feeToken == nil else {
+                throw ExecutionError("Coins go only with a single call on a network that pays its fees in them. Nothing was signed.")
+            }
             try await approve(rpc, token: token, spender: spender, units: units, note: approveNote, recipients: recipients)
         }
-        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients)
+        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients, value: value)
     }
 
     /// One EVM transaction: dry run by eth_estimateGas (a call that would revert stops here), the fee within the ETH
@@ -598,10 +603,11 @@ extension Executor {
             }
         } else {
             // Short of gas is never a dead end: a top-up of three times what this call may cost comes over first. Coins sent
-            // with the call are the user's amount: when they and the fee don't fit, it's said, not topped up.
+            // with the call are the user's amount: when they and the fee don't fit, it's said, not topped up — of this call
+            // only, since an approve may already have gone before it (approveAndSend with coins).
             let fee = gasLimit * maxFee
-            if value > 0, fee + value > (try await rpc.balance(wallet.evm)) {
-                throw ExecutionError("\(Fmt.num(Decimal(value) / 1e18, maxFraction: 8)) \(net.gasCoin) and the fee don't both fit in the \(net.gasCoin) on \(net.name): \(note). Nothing was signed.")
+            if value > 0, UInt128(fee) + UInt128(value) > (try await rpc.balance(wallet.evm)) {
+                throw ExecutionError("\(Fmt.num(Decimal(value) / 1e18, maxFraction: 8)) \(net.gasCoin) and the fee don't both fit in the \(net.gasCoin) on \(net.name): \(note) wasn't signed.")
             }
             if fee > (try await rpc.balance(wallet.evm)) {
                 // A top-up that itself runs short (Relay's swap for gas with none there) stops instead of looping.
@@ -670,7 +676,7 @@ extension Executor {
         let solanaUSDC = Decimal(try await self.rpc.tokenBalance(owner: wallet.solana, mint: Relay.Currency.solanaUSDC)) / 1_000_000
         let dollars = NSDecimalNumber(decimal: ((usd + 1) * 1_000_000).rounded(0, .up)).uint64Value
         if solanaUSDC >= usd + 1 {
-            try await ensureEVM(net, usdc: 0, gas: (floor: before + expected, topupUSD: usd))
+            try await ensureEVM(net, usdc: 0, gas: (floor: before + UInt128(expected), topupUSD: usd))
         } else if try await Hyperliquid.balance(user: me).withdrawable >= usd.rounded(2, .up) + 1 {
             // Hyperliquid's balance brings it with no gas anywhere: the way for BNB Chain and HyperEVM, whose dollars can't pay
             // by signature.
@@ -685,12 +691,26 @@ extension Executor {
                 }
                 report(try await bridgeWithoutGas(net, to: nil, amount: dollars))
             }
-            try await ensureEVM(net, usdc: 0, gas: (floor: before + expected, topupUSD: usd))
+            try await ensureEVM(net, usdc: 0, gas: (floor: before + UInt128(expected), topupUSD: usd))
         } else {
             try await swapForGas(net, usd: usd)
         }
-        let after = try await rpc.balance(me)
-        return "Topped up gas on \(net.name): \(Fmt.num(Decimal(before) / 1e18, maxFraction: 8)) → \(Fmt.num(Decimal(after) / 1e18, maxFraction: 8)) \(net.gasCoin) (≈ \(Fmt.usd(usd)))."
+        return Self.gasLine(net, before: before, after: try await rpc.balance(me), usd: usd)
+    }
+
+    /// A top-up is said done only when the coin grew. Not grown, it's said, not thrown: the money went, and «Try again» would
+    /// buy the gas a second time. The same as before: not seen yet (a node behind). Less: only the swap on the chain spends
+    /// gas here, so its fees took more than it brought, and another one would too.
+    static func gasLine(_ net: EVMNetwork, before: UInt128, after: UInt128, usd: Decimal) -> String {
+        func coin(_ wei: UInt128) -> String { Fmt.num(Decimal(wei) / 1e18, maxFraction: 8) }
+        if after > before { return "Topped up gas on \(net.name): \(coin(before)) → \(coin(after)) \(net.gasCoin) (≈ \(Fmt.usd(usd)))." }
+        if after == before {
+            return "The gas on \(net.name) hasn't shown up yet: still \(coin(before)) \(net.gasCoin), though ≈ \(Fmt.usd(usd)) went to the top-up. "
+                + "Check the balance in a minute before topping up again."
+        }
+        return "The gas on \(net.name) didn't grow: \(coin(before)) → \(coin(after)) \(net.gasCoin), though ≈ \(Fmt.usd(usd)) went to the top-up: "
+            + "\(net.name)'s fees for the swap took more than it brought, and another swap this size would too. With \(Fmt.usd(usd + 1)) of USDC "
+            + "on Solana or Hyperliquid the gas comes from there, with no fee on \(net.name)."
     }
 
     /// Most of the wei `usd` buys at `price`: a top-up's wait ends when 80% of it is there. Rounded first: a quotient's

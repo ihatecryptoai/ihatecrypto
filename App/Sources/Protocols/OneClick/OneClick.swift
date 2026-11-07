@@ -90,6 +90,14 @@ public enum OneClick {
             }
         }
 
+        /// What a private send can pay on `network`: the coins of a network ihatecrypto has no wallet on (`across`), or
+        /// USDC on Solana and on the EVM networks 1Click takes it on.
+        public static func payout(_ symbol: String, on network: String) -> (symbol: String, id: String, decimals: Int)? {
+            if let a = across[network]?.first(where: { $0.symbol == symbol.uppercased() }) { return a }
+            guard symbol.uppercased() == "USDC", let id = network == "solana" ? solanaUSDC : usdc(onEVM: network) else { return nil }
+            return ("USDC", id, 6)
+        }
+
         /// What 1Click pays out on networks ihatecrypto has no wallet on, by the address book's network (/v0/tokens,
         /// 2026-10-06): the asset, its ticker and decimals.
         public static let across: [String: [(symbol: String, id: String, decimals: Int)]] = [
@@ -123,15 +131,22 @@ public enum OneClick {
         refundTo: String, recipient: String, slippageBps: Int = 100,
         // A deposit someone else sends (`receiveAcross`): any amount from the quote's minimum, a longer deadline, and the
         // refund to a NEAR Intents account when there's no address of ours on the origin network.
-        flexible: Bool = false, refundToIntents: Bool = false, minutes: Double = 30
+        flexible: Bool = false, refundToIntents: Bool = false, minutes: Double = 30,
+        // Confidential Intents: the deposit and the payout can't be matched to each other on chain. Needs the partner key.
+        confidential: Bool = false
     ) async throws -> Quote {
         let deadline = ISO8601DateFormatter().string(from: Date().addingTimeInterval(minutes * 60))
-        let data = try await post("/quote", [
+        var body: [String: Any] = [
             "dry": dry, "swapType": flexible ? "FLEX_INPUT" : exactOutput ? "EXACT_OUTPUT" : "EXACT_INPUT", "slippageTolerance": slippageBps,
             "originAsset": origin, "depositType": "ORIGIN_CHAIN", "destinationAsset": destination, "amount": amount,
             "refundTo": refundTo, "refundType": refundToIntents ? "INTENTS" : "ORIGIN_CHAIN", "recipient": recipient, "recipientType": "DESTINATION_CHAIN",
             "deadline": deadline, "quoteWaitingTimeMs": 3000,
-        ])
+        ]
+        if confidential {
+            guard key != nil else { throw OneClickError(message: "A private send needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.") }
+            body["confidentiality"] = "basic"
+        }
+        let data = try await post("/quote", body)
         guard let q = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["quote"] as? [String: Any],
               let amountIn = q["amountIn"] as? String else { throw OneClickError(data) }
         return Quote(
@@ -151,8 +166,13 @@ public enum OneClick {
         guard let quote = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["quoteResponse"] as? [String: Any],
               let request = quote["quoteRequest"] as? [String: Any] else { throw OneClickError(data) }
         var out: [String: String] = [:]
-        for key in ["recipient", "refundTo", "originAsset", "destinationAsset", "amount"] { out[key] = request[key] as? String }
+        for key in ["recipient", "refundTo", "originAsset", "destinationAsset", "amount", "confidentiality", "swapType"] { out[key] = request[key] as? String }
         out["depositAddress"] = (quote["quote"] as? [String: Any])?["depositAddress"] as? String
+        // What 1Click's own quote takes for this deposit: an MPP service's challenge may not ask more (DepositGuard.charge).
+        let q = quote["quote"] as? [String: Any]
+        out["quoteAmountIn"] = q?["amountIn"] as? String
+        out["quoteMinAmountIn"] = q?["minAmountIn"] as? String
+        out["deadline"] = q?["deadline"] as? String
         return out
     }
 
@@ -207,9 +227,17 @@ public enum OneClick {
         }
     }
 
-    public static func settled(depositAddress: String) async throws -> Settled? {
-        let (data, _) = try await URLSession.shared.data(for: request(URL(string: "\(base)/status?depositAddress=\(depositAddress)")!))
-        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]).flatMap(Settled.init)
+    /// nil: 1Click answered and the swap isn't a success, or it doesn't know the address (its own 404). Throws when it
+    /// didn't answer — an error code (sent as JSON), a page, JSON without a status — so a cost isn't counted without the
+    /// swap; a throttle (429) or a server error is asked again first (RPCRetry).
+    public static func settled(depositAddress: String, delays: [Duration] = RPCRetry.delays) async throws -> Settled? {
+        let r = request(URL(string: "\(base)/status?depositAddress=\(depositAddress)")!)
+        return try await RPCRetry.run(delays: delays, { try await URLSession.shared.data(for: r) }) { data, code in
+            let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            if code == 404, j?["statusCode"] as? Int == 404 { return nil }   // not a gateway's 404 page
+            guard (200..<300).contains(code), let j, j["status"] is String else { throw RPCRetry.Again(code == 429 || code >= 500, OneClickError(data)) }
+            return Settled(j)
+        }
     }
 
     static func post(_ path: String, _ body: [String: Any]) async throws -> Data {
@@ -226,5 +254,6 @@ public enum OneClick {
 public struct OneClickError: LocalizedError {
     public let message: String
     init(_ data: Data) { message = RPCRetry.said(data) }
+    init(message: String) { self.message = message }
     public var errorDescription: String? { "1Click: \(message)" }
 }

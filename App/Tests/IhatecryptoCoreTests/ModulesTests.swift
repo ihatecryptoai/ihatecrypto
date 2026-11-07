@@ -79,6 +79,20 @@ import Testing
     #expect(m.refusal(.hlSpotSell(symbol: "HYPE", amount: nil)) == "Hyperliquid is off in Settings › Modules.")
 }
 
+/// One token for another on an EVM network takes whichever of Uniswap, KyberSwap and Relay's swap is on there
+/// (2026-10-28): with Uniswap off it still swaps; with all three off it's refused, in Uniswap's words.
+@Test func aSwapOnANetworkNeedsOneOfItsWays() {
+    var m = Modules()
+    let swap = WalletCommand.swapOn("base", from: "DEGEN", to: "AERO", amount: 1)
+    m.set(.uniswap, false)
+    #expect(m.refusal(swap) == nil)
+    m.set(.kyberswap, false)
+    m.set(.relay, false)
+    #expect(m.refusal(swap) == "Uniswap is off in Settings › Modules.")
+    m.set(.kyberswap, true)
+    #expect(m.refusal(swap) == nil)
+}
+
 @Test func aModuleNewToThisMacStaysOffUntilAnswered() {
     let known = Set(Modules.allIDs.filter { $0 != "network.bnb" })
     var m = Modules(known: known)
