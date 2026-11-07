@@ -536,7 +536,7 @@ function alertsCard() {
   const alerts = ui.state.alerts;
   if (!alerts.length) return null;
   return h("div", { class: "pf-alerts" },
-    h("div", { class: "pf-alerts-title" }, icon("bell", 12), t("Price alerts", "Ценовые оповещения")),
+    h("div", { class: "pf-alerts-title" }, icon("bell", 12), alerts.some((a) => a.coin === "kamino" || a.coin === "aave") ? t("Alerts", "Оповещения") : t("Price alerts", "Ценовые оповещения")),
     // Each alert with how far its price is now, as the Mac's alerts card («22.4% away»).
     alerts.map((a) => h("div", { class: "pf-row" }, h("span", { class: "pf-alert-text one-line" }, a.text),
       a.now?.includes(" · ") ? h("span", { class: "secondary small num" }, " · " + a.now.split(" · ").pop()) : null, h("span", { class: "spacer" }),

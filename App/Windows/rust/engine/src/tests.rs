@@ -413,7 +413,7 @@ fn sample_snapshot() -> Snapshot {
         trading: TradingView { policy: Default::default(), styles: trading_styles(), safe_search: true, batches: false, contract_cap: 50.0,
                                key: TradingKeyView { address: None, active: false, paused: false, ledger: false, fee_approved: None, fee_rate: "0.05%".into(),
                                                      referral: "IHATECRYPTO".into(), possible: true } },
-        nodes: NodesView { nodes: vec![], one_click_key: false },
+        nodes: NodesView { nodes: vec![], one_click_key: false, agent_key: false, agent_host: "api.demo.agentsonintents.com".into() },
         step_edit: Some(Edit { board: "B1".into(), amount: Some("5".into()), unit: "USDC".into(), ways: false, stock: false, way: None, quotes: None }),
         schedule_paused: false, schedule_runs: vec![], multisig_held: HashMap::from([("0xsafe".into(), vec![MultisigNetHolding { network: "base".into(), coins: None, usd: None }])]),
         schedule_key: Some("task:T".into()), moves: vec![MoveRow { at: at(), kind: "send".into(), text: "t".into(), amount: Some(Decimal::ONE), symbol: None, to: None,
@@ -430,11 +430,14 @@ fn sample_snapshot() -> Snapshot {
         recently_closed: vec![ClosedTrade { coin: "ETH".into(), name: "Ethereum".into(), long: true, closed: at(), realized: Decimal::ONE }],
         address_extras: HashMap::new(), plan_alert_example: Some("alert".into()), chips_position: Some("ETH".into()), last_balance: Some(Decimal::from(100)),
         build: Some("20261106.1200".into()), update_ready: Some("0.9.0".into()),
+        journey: Some(crate::journey::Journey::new("2 USDC → Mom".into(), "solana", "base", true, Some(30), 1)),
+        privacy: Some(crate::journey::PrivacyChoice { is_private: true, rows: vec![] }),
+        tee: Some(crate::journey::TeeView { model: "m".into(), gateway_key: "k".into(), at: 1, reply: None, why: None }),
     }
 }
 
 /// Every key Swift's Snapshot writes, in its order: what App/Windows/app/ui/*.js reads.
-const SNAPSHOT_KEYS: [&str; 83] = [
+const SNAPSHOT_KEYS: [&str; 86] = [
     "signer", "wallets", "active", "addresses", "phrase", "portfolio", "positions", "chat", "sent", "thinking", "draft", "card", "site", "options",
     "running", "plan", "model", "providers", "modelChoices", "secondCheck", "jevOpenRouter", "language", "russian", "book", "history", "alerts", "tasks",
     "recurring", "jupiterDCA", "automation", "skills", "memory", "favorites", "canvases", "folders", "canvas", "boards", "runningBoard", "multisigs",
@@ -442,7 +445,7 @@ const SNAPSHOT_KEYS: [&str; 83] = [
     "context", "modelRunning", "agentStep", "optionsMessage", "retryBoard", "quote", "models", "lock", "modules", "trading", "nodes", "stepEdit",
     "schedulePaused", "scheduleRuns", "multisigHeld", "scheduleKey", "moves", "movesDay", "recentRequests", "automationBudget", "stuck", "places",
     "notices", "openAtLogin", "topUp", "appLanguage", "localSetup", "recentlyClosed", "addressExtras", "planAlertExample", "chipsPosition",
-    "lastBalance", "build", "updateReady",
+    "lastBalance", "build", "updateReady", "journey", "privacy", "tee",
 ];
 
 #[test]
@@ -480,8 +483,9 @@ fn the_state_has_the_keys_the_window_reads_and_leaves_out_what_is_nil() {
     (empty.automation_usd, empty.positions_pnl, empty.limit_waiting, empty.context, empty.agent_step, empty.options_message) = (None, None, None, None, None, None);
     (empty.retry_board, empty.quote, empty.step_edit, empty.schedule_key, empty.moves_day, empty.automation_budget) = (None, None, None, None, None, None);
     (empty.top_up, empty.plan_alert_example, empty.chips_position, empty.last_balance, empty.build, empty.update_ready) = (None, None, None, None, None, None);
+    (empty.journey, empty.privacy, empty.tee) = (None, None, None);
     let lean: Value = serde_json::from_slice(&wire::window(&empty).unwrap()).unwrap();
-    assert_eq!(keys(&lean).len(), 83 - 30);
+    assert_eq!(keys(&lean).len(), 86 - 33);
 }
 
 #[test]

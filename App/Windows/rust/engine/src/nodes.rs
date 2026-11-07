@@ -1,12 +1,13 @@
-//! Settings › General › Your own nodes and the NEAR Intents key, as on the Mac (Nodes.swift). A node's address carries
-//! the provider's key and the 1Click key is a partner token, so both are kept encrypted to the Windows user (DPAPI, as
-//! the model keys, nodes.bin), put to use at launch, and only a node's host ever goes to the window.
+//! Settings › General › Your own nodes, the NEAR Intents key and the agent wallet's Agent API key, as on the Mac
+//! (Nodes.swift, AgentWallet.swift). A node's address carries the provider's key and the 1Click and Agent API keys are
+//! partner tokens, so all are kept encrypted to the Windows user (DPAPI, as the model keys, nodes.bin), put to use at
+//! launch, and only a node's host ever goes to the window.
 
 use std::collections::HashMap;
 
 use net::evm_rpc::{self, EvmRpc};
 use net::solana_rpc::{self, SolanaRpc};
-use protocols::one_click;
+use protocols::{agent_api, one_click};
 use serde::Serialize;
 use wallet::{Result, WalletError};
 use zeroize::Zeroizing;
@@ -78,12 +79,15 @@ impl NodeNetwork {
     }
 }
 
-/// What Settings draws: each network's own node by its host, and whether a 1Click key is kept.
+/// What Settings draws: each network's own node by its host, whether a 1Click key and an Agent API key are kept, and the
+/// Agent API's host.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodesView {
     pub nodes: Vec<NodeView>,
     pub one_click_key: bool,
+    pub agent_key: bool,
+    pub agent_host: String,
 }
 
 /// `NodesView.Node`.
@@ -102,7 +106,8 @@ pub struct NodeView {
 /// An address's host, as `URL(string:)?.host` reads it.
 pub fn host(url: &str) -> Option<String> { reqwest::Url::parse(url).ok()?.host_str().map(str::to_string) }
 
-/// The secrets, one DPAPI blob: «solana», «base»… → a node's address; «1click» → the partner key.
+/// The secrets, one DPAPI blob: «solana», «base»… → a node's address; «1click», «agentapi» → the partner keys;
+/// «agenthost» → the Agent API's host; «agentgrant» → this PC's grant for the agent wallet.
 pub fn node_secrets() -> HashMap<String, String> {
     let Some(plain) = std::fs::read(store::url("nodes.bin")).ok().and_then(|blob| store::unprotect(&blob)) else { return HashMap::new() };
     serde_json::from_slice(&plain).unwrap_or_default()
@@ -120,6 +125,8 @@ pub fn apply_nodes() {
     let all = node_secrets();
     for net in NodeNetwork::ALL { net.use_node(all.get(net.raw()).filter(|u| host(u).is_some()).cloned()) }
     one_click::set_key(all.get("1click").cloned());
+    agent_api::set_key(all.get("agentapi").cloned());
+    if let Some(h) = all.get("agenthost") { agent_api::set_host(h) }
 }
 
 impl Engine {
@@ -131,6 +138,8 @@ impl Engine {
                            example: example.into(), host: n.custom().and_then(|u| host(&u)) }
             }).collect(),
             one_click_key: one_click::key().is_some(),
+            agent_key: agent_api::key().is_some(),
+            agent_host: agent_api::host(),
         }
     }
 
@@ -164,6 +173,30 @@ impl Engine {
         if let Some(problem) = one_click::problem_with_key(&token).await { return Err(WalletError(problem)) }
         set_node_secret(Some(token.clone()), "1click");
         one_click::set_key(Some(token));
+        Ok(())
+    }
+
+    /// NEAR Intents' Agent API partner key (naa_…), checked with the API first (GET /v1/whoami); empty removes it.
+    pub async fn set_agent_key(&self, key: Option<&str>) -> Result<()> {
+        let token = key.unwrap_or("").trim().to_string();
+        if token.is_empty() {
+            set_node_secret(None, "agentapi");
+            agent_api::set_key(None);
+            return Ok(());
+        }
+        if let Some(problem) = agent_api::problem_with_key(&token).await { return Err(WalletError(problem)) }
+        set_node_secret(Some(token.clone()), "agentapi");
+        agent_api::set_key(Some(token));
+        Ok(())
+    }
+
+    /// The Agent API's host: the demo one (its partner keys are temporary) or production. Both move real money.
+    pub fn set_agent_host(&self, host: Option<&str>) -> Result<()> {
+        let Some(host) = host.filter(|h| agent_api::HOSTS.contains(h)) else {
+            return Err(WalletError(format!("Unknown Agent API host «{}».", host.unwrap_or(""))));
+        };
+        set_node_secret(Some(host.into()), "agenthost");
+        agent_api::set_host(host);
         Ok(())
     }
 }

@@ -381,3 +381,86 @@
 .chat-panel .chat-voice-failed { display: flex; align-items: flex-start; gap: 6px; padding: 0 6px; color: var(--accent-ink); line-height: 1.35; }
 .chat-panel .chat-voice-failed .icon { flex: none; margin-top: 1px; }
 .chat-panel .chat-plan-hint { padding: 0 6px; line-height: 1.35; }
+
+/* N5 · P3 · T4 (journey.rs): NEAR's green for a move through NEAR Intents, privacy's violet for a private one, the sealed
+   hardware's green for the private assistant (the Mac's IntentsJourney.swift and TEEChip.swift). */
+.chat-panel { --near: #00ec97; --near-ink: #00875a; --privacy: #b9a6ff; --privacy-ink: #5b3aa8; --privacy-fill: #efeaff; --tee: #7fd6a0; --tee-ink: #1c7a48; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chat-panel { --near-ink: #00ec97; --privacy-ink: #b9a6ff; --privacy-fill: #2f2846; --tee-ink: #7fd6a0; } }
+:root[data-theme="dark"] .chat-panel { --near-ink: #00ec97; --privacy-ink: #b9a6ff; --privacy-fill: #2f2846; --tee-ink: #7fd6a0; }
+.chat-panel .chat-field.chat-private { border-color: var(--privacy); }
+.chat-panel .chat-field.chat-journeying { border: 1.5px solid var(--near); }
+.chat-panel .chat-waiting-bar.chat-private-bar { background: rgba(185, 166, 255, 0.12); }
+.chat-panel .chat-private-bar .chat-wait-dot { background: var(--privacy); }
+.chat-panel .journey-bar { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; background: rgba(0, 236, 151, 0.06); }
+.chat-panel .journey-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.chat-panel .journey-head b { font-size: 15px; font-weight: 700; min-width: 0; }
+.chat-panel .journey-lock { color: var(--privacy-ink); display: inline-flex; }
+.chat-panel .journey-clock { font-size: 11.5px; color: var(--secondary); white-space: nowrap; }
+.chat-panel .journey-clock.journey-warn { color: #e8730c; }
+.chat-panel .journey-places { display: flex; align-items: flex-start; }
+.chat-panel .journey-place { width: 86px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; opacity: 0.45; }
+.chat-panel .journey-place.current, .chat-panel .journey-place.done, .chat-panel .journey-place.failed { opacity: 1; }
+.chat-panel .journey-logo { position: relative; padding: 3px; border-radius: 50%; box-shadow: inset 0 0 0 2.5px transparent; }
+.chat-panel .journey-place.current .journey-logo { box-shadow: inset 0 0 0 2.5px var(--near); }
+.chat-panel .journey-logo .logo { border-radius: 50%; }
+.chat-panel .journey-mark { position: absolute; right: -2px; bottom: -2px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; color: #1d1b19;
+  background: var(--tee); box-shadow: 0 0 0 1.5px var(--card); }
+.chat-panel .journey-place.failed .journey-mark { background: #ff9f43; }
+.chat-panel .journey-mark .ico { stroke-width: 3.2; }
+.chat-panel .journey-place-title { font-size: 11px; font-weight: 600; line-height: 1.25; }
+.chat-panel .journey-place:not(.current):not(.done) .journey-place-title { color: var(--secondary); }
+.chat-panel .journey-place-line { font-size: 10px; color: var(--secondary); white-space: nowrap; }
+.chat-panel .journey-place-line.journey-ink { color: var(--near-ink); }
+.chat-panel .journey-link { flex: 1; height: 0; margin-top: 21px; border-top: 3px solid var(--fill-strong); border-radius: 2px; }
+.chat-panel .journey-link.lit { border-top-color: var(--near); }
+.chat-panel .journey-link.dashed:not(.lit) { border-top-style: dashed; }
+.chat-panel .journey-track { height: 6px; border-radius: 999px; background: var(--fill-strong); overflow: hidden; }
+.chat-panel .journey-fill { display: block; height: 100%; border-radius: 999px; background: var(--near); transition: width 0.9s linear; }
+.chat-panel .journey-fill.journey-warn-fill { background: #ff9f43; }
+.chat-panel .journey-foot { display: flex; align-items: baseline; gap: 8px; }
+.chat-panel .journey-foot .small { line-height: 1.3; }
+.chat-panel .journey-track-link a { font-size: 11px; font-weight: 600; color: var(--near-ink); white-space: nowrap; text-decoration: none; }
+.chat-panel .privacy-choice { flex: 1 1 100%; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.chat-panel .privacy-switch { display: flex; gap: 4px; padding: 3px; border-radius: 13px; background: var(--fill); }
+.chat-panel .privacy-option { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 9px; border-radius: 10px;
+  border: 1px solid transparent; background: none; text-align: left; cursor: pointer; }
+.chat-panel .privacy-option.on { background: var(--glass-selected); border-color: var(--card-border); cursor: default; }
+.chat-panel .privacy-option.private.on { background: var(--privacy-fill); border-color: var(--privacy); }
+.chat-panel .privacy-option:disabled:not(.on) { opacity: 0.5; cursor: default; }
+.chat-panel .privacy-option-title { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--secondary); }
+.chat-panel .privacy-option.on .privacy-option-title { color: var(--text); }
+.chat-panel .privacy-option-title .ico { color: var(--privacy-ink); stroke-width: 2.4; }
+.chat-panel .privacy-option-line { font-size: 10.5px; color: var(--secondary); max-width: 100%; }
+.chat-panel .privacy-rows { display: flex; flex-direction: column; gap: 5px; }
+.chat-panel .privacy-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.chat-panel .privacy-label { width: 96px; flex: none; font-size: 11.5px; }
+.chat-panel .privacy-value { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.chat-panel .privacy-note { margin-left: auto; font-size: 11px; min-width: 0; text-align: right; }
+.chat-panel .chat-head.chat-head-tee { background: rgba(127, 214, 160, 0.08); border-bottom: 1px solid rgba(127, 214, 160, 0.25); margin-bottom: 6px; border-radius: 26px 26px 0 0; }
+.chat-panel .chat-head-tee .chat-status { white-space: normal; line-height: 1.25; }
+.chat-panel .chat-tee-coin { position: relative; display: inline-flex; flex: none; }
+.chat-panel .chat-tee-badge { position: absolute; right: -5px; bottom: -5px; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--tee); color: #1d1b19; box-shadow: 0 0 0 1.5px var(--card); }
+.chat-panel .chat-tee-badge .ico { stroke-width: 2.6; }
+.chat-panel .chat-tee-proof { height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid rgba(127, 214, 160, 0.55); background: none; color: var(--tee-ink);
+  font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; flex: none; }
+.chat-panel .chat-tee-proof:hover { background: rgba(127, 214, 160, 0.18); }
+.chat-panel .chat-tee-proof.chat-tee-warn { color: #e8730c; }
+.tee-proof { width: 300px; padding: 16px; display: flex; flex-direction: column; gap: 9px; }
+.tee-proof .tee-kicker { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; }
+.tee-proof .tee-title { font-size: 20px; font-weight: 700; }
+.tee-proof .tee-row { display: flex; align-items: baseline; gap: 8px; }
+.tee-proof .tee-row b { font-size: 12px; }
+.tee-proof .tee-about { border-top: 1px solid var(--separator); padding-top: 9px; line-height: 1.35; }
+/* The receipt over Confirm (variant A, owner 2026-11-05): the header, the amount, three cells, what runs after. */
+.chat-panel .chat-waiting-bar.chat-receipt { align-items: flex-end; }
+.chat-panel .receipt-head { flex: 1 1 100%; display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; color: var(--accent-ink); min-width: 0; }
+.chat-panel .chat-private-bar .receipt-head { color: var(--privacy-ink); }
+.chat-panel .receipt-amount { font-size: 16px; font-weight: 700; }
+.chat-panel .receipt-cells { flex: 1 1 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
+.chat-panel .receipt-cell { padding: 6px 10px; border-radius: 10px; background: var(--fill); min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.chat-panel .receipt-label { font-size: 9.5px; font-weight: 600; letter-spacing: 0.6px; color: var(--secondary); }
+.chat-panel .receipt-value { font-size: 13px; font-weight: 600; }
+.chat-panel .receipt-note { font-size: 10.5px; color: var(--secondary); line-height: 1.3; }
+.chat-panel .receipt-then { flex: 1 1 100%; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--secondary); }
+.chat-panel .receipt-then > div { display: flex; align-items: center; gap: 5px; }

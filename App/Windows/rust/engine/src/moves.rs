@@ -136,6 +136,7 @@ impl Engine {
                 self.changed();
             }
             Told::Line(text) => {
+                self.journey_read(&text);
                 let board = {
                     let mut st = self.st_mut();
                     if let Some(r) = st.running.as_mut() { r.lines.push(text.clone()) }
@@ -297,6 +298,9 @@ impl Engine {
             }
             // The USDC comes from Solana, or from the EVM network holding it when Solana is short.
             W::SendPrivately { .. } => vec!["solana".into()],
+            // The agent wallet's owner is this wallet's NEAR key; its funding leaves Solana.
+            W::AgentFund { .. } => vec!["solana".into(), "near".into()],
+            W::AgentCreate { .. } | W::AgentSend { .. } | W::AgentFreeze(_) => vec!["near".into()],
             // Spot, vaults, staking, sends: all on Solana.
             _ => vec!["solana".into()],
         };
@@ -363,6 +367,9 @@ impl Engine {
                 self.said(&self.say("A private swap needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.",
                                     "Для приватного обмена нужен партнёрский ключ NEAR Intents: добавь его в Настройках › Общие › Ключ NEAR Intents."), note);
                 return;
+            }
+            W::AgentCreate { .. } | W::AgentFund { .. } | W::AgentSend { .. } | W::AgentFreeze(_) => {
+                if let Some(short) = self.agent_before_card(&command) { self.said(&short, note); return }
             }
             W::SendToken { name, token, amount, network } => {
                 let checked = match self.across_recipient(name, token, network.as_deref()) {
@@ -1269,6 +1276,15 @@ impl Engine {
     // trade::Error is the executor's own, large or not: its variants are what Confirm reads.
     #[allow(clippy::result_large_err)]
     pub async fn r#move(&self, command: &WalletCommand) -> trade::Result<()> {
+        // N5: a move through NEAR Intents shows its way in the chat's field while it runs, and as it ended after.
+        let journeying = self.start_journey(command);
+        let done = Box::pin(self.run_move(command)).await;
+        if journeying { self.end_journey(done.is_ok()) }
+        done
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn run_move(&self, command: &WalletCommand) -> trade::Result<()> {
         use WalletCommand as W;
         let ru = self.st().russian();
         if let Some(off) = trade::modules().refusal_command(command, ru) { return trade::fail(off) }
@@ -1334,6 +1350,9 @@ impl Engine {
                 // What the card showed landing holds the move (within 1%); a chain's step without a card goes by its quote.
                 let shown = self.quotes(command).and_then(|w| w.first().and_then(|w| Self::quoted_amount(Some(&w.gets))));
                 reply(e.intents_bridge(from, to, *amount, shown).await?, &format!("NEAR Intents · {} → {}", W::place_name(from), W::place_name(to)));
+            }
+            W::AgentCreate { .. } | W::AgentFund { .. } | W::AgentSend { .. } | W::AgentFreeze(_) => {
+                reply(Box::pin(self.agent_move(command, &e)).await?, "NEAR Intents · Agent API");
             }
             W::SendToken { name, token, amount, network } => {
                 let (entry, place) = self.token_recipient(name, network.as_deref())?;
@@ -1419,7 +1438,10 @@ impl Engine {
                 reply(e.cancel_jupiter_dca(asset.as_ref(), false).await?, "Jupiter DCA");
                 self.refresh_jupiter_dca(false).await;
             }
-            W::Pay { .. } => reply(self.pay(command, &e).await?, "MPP · Tempo"),
+            W::Pay { .. } => {
+                let via = self.st().payment.as_ref().map_or("MPP · Tempo", |q| q.way());
+                reply(self.pay(command, &e).await?, via);
+            }
             W::Allocate { symbol, max_share, amount, without, from } => {
                 let share = max_share.unwrap_or(Decimal::from(50));
                 reply(e.allocate(symbol, share, *amount, without, from.as_deref(), true).await?.0, "DeFi");

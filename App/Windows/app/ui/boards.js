@@ -1645,11 +1645,13 @@ function serviceBlock(b, sv) {
     : (a.items || []).length ? (a.items || []).map(row)
     : (a.facts || []).length ? (a.facts || []).map((f) => h("div", { class: "route-service-fact" }, h("span", { class: "secondary" }, f.key), h("b", { class: "selectable" }, f.value)))
     : [h("div", { class: "selectable" }, a.text || t("The service sent nothing back.", "Сервис ничего не вернул."))];
+  // Where it was paid, from the proof's own link (the Mac's ServiceAnswerBoard): NEAR Intents' explorer, Base's or Tempo's.
+  const paidOn = /near-intents/.test(sv.proof || "") ? "NEAR Intents" : /basescan/.test(sv.proof || "") ? "Base" : "Tempo";
   return blockFrame(b, sv.service, h("div", { class: "route-result" },
-    h("span", { class: "secondary small" }, sv.usdc !== null && sv.usdc !== undefined ? t(`paid ${sv.usdc} USDC on Tempo`, `оплачено ${sv.usdc} USDC в Tempo`) : t("free answer", "бесплатный ответ")),
+    h("span", { class: "secondary small" }, sv.usdc !== null && sv.usdc !== undefined ? t(`paid ${sv.usdc} USDC on ${paidOn}`, `оплачено ${sv.usdc} USDC в ${paidOn}`) : t("free answer", "бесплатный ответ")),
     h("div", { class: "route-service" }, body)),
   { width: 520, extra: h("span", { class: "route-pnl-tools" },
-    sv.proof ? h("button", { class: "link-btn", title: t("The payment on Tempo's explorer", "Оплата в обозревателе Tempo"), onclick: () => openUrl(sv.proof) }, "Tempo", icon("arrow.up.right", 11)) : null,
+    sv.proof ? h("button", { class: "link-btn", title: t(`The payment on ${paidOn}'s explorer`, `Оплата в обозревателе ${paidOn}`), onclick: () => openUrl(sv.proof) }, paidOn, icon("arrow.up.right", 11)) : null,
     h("button", { class: "icon-btn", title: t("Copy the whole answer", "Скопировать весь ответ"), onclick: () => copy(sv.raw) }, icon("copy", 14))) });
 }
 

@@ -184,6 +184,15 @@ pub struct Snapshot {
     /// A newer version the updater found (notices.rs updateReady): Settings › About offers Install without a check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_ready: Option<String>,
+    /// N5: a NEAR Intents move after Confirm, in the chat's field (journey.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journey: Option<crate::journey::Journey>,
+    /// P3: Regular | Private over Confirm, with the rows of the one waiting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privacy: Option<crate::journey::PrivacyChoice>,
+    /// T4: the private assistant's last enclave check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tee: Option<crate::journey::TeeView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -419,7 +428,7 @@ impl Engine {
             }
         }).collect();
         let plan_alert = self.plan_alert().map(|a| a.id);
-        let alerts = alerts.iter().filter(|a| Some(a.id) != plan_alert).map(|a| self.alert_view(a)).collect();
+        let alerts = alerts.iter().filter(|a| Some(a.id) != plan_alert).map(|a| self.alert_view(a)).chain(self.loan_guard_views()).collect();
         // Swift's Dictionary(_:uniquingKeysWith:) keeping the first.
         let mut model_choices = HashMap::new();
         for p in catalog::all() {
@@ -443,6 +452,7 @@ impl Engine {
             top_up: TopUpPage::view(), app_language, local_setup: self.local_setup_view(),
             recently_closed, address_extras: self.address_extras(), plan_alert_example: self.plan_alert_example(), chips_position: self.chips_position(),
             last_balance: self.last_full_balance(), build: crate::engine::build(), update_ready,
+            journey: self.st().journey.clone(), privacy: if self.st().running_board.is_some() { None } else { self.privacy_choice() }, tee: self.tee_view(),
         }
     }
 }

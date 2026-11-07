@@ -56,7 +56,7 @@ export const liveKinds = ["receive", "addresses", "history", "favorites", "alert
 export function liveTitle(kind) {
   return {
     receive: t("Receive", "Получить"), addresses: t("Address book", "Адресная книга"), history: t("History · latest", "История · последнее"),
-    favorites: t("Favorites", "Избранное"), alerts: t("Price alerts", "Ценовые оповещения"), schedule: t("Schedule", "Расписание"),
+    favorites: t("Favorites", "Избранное"), alerts: ui.state?.alerts?.some(loanGuard) ? t("Alerts", "Оповещения") : t("Price alerts", "Ценовые оповещения"), schedule: t("Schedule", "Расписание"),
     positions: t("Open positions", "Открытые позиции"), multisig: t("Multisig", "Мультисиг"), ledger: "Ledger",
     scheduleItem: t("Scheduled task", "Задача по расписанию"), recurring: t("Recurring buy", "Регулярная покупка"),
   }[kind] || kind;
@@ -881,6 +881,9 @@ function drawFavAdd() {
 
 // MARK: Price alerts
 
+/** A loan guard on the alerts block (loan_guards.rs): its coin is the loan's protocol. */
+const loanGuard = (a) => a.coin === "kamino" || a.coin === "aave";
+
 function alertsBody() {
   const alerts = ui.state.alerts;
   if (!alerts.length) return note(t("No alerts: «tell me when BTC is above 120000».", "Оповещений нет: «скажи, когда BTC выше 120000»."));
@@ -892,7 +895,7 @@ function alertsBody() {
       return h("div", { class: "live-alert-chain" },
         h("div", { class: "live-alert-step first" },
           h("span", { class: "live-alert-badge" }, coin ? logo(coin, 32) : icon("bell", 15)),
-          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, t("WHEN · PRICE", "КОГДА · ЦЕНА")), h("b", {}, a.when || a.text),
+          h("span", { class: "live-alert-text" }, h("span", { class: "live-alert-label" }, loanGuard(a) ? t("WHEN · LOAN HEALTH", "КОГДА · ЗДОРОВЬЕ ЗАЙМА") : t("WHEN · PRICE", "КОГДА · ЦЕНА")), h("b", {}, a.when || a.text),
             a.now ? h("span", { class: "secondary small num" }, a.now) : null),
           h("button", { class: "icon-btn", title: t("Remove the alert", "Убрать оповещение"), onclick: () => act("removeAlert", { wallet: a.id }) }, icon("trash", 14))),
         // What it does when the price gets there, each step its own block.

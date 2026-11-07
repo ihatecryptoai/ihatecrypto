@@ -289,11 +289,14 @@ impl Engine {
                 || EvmNetwork::source(short, solana, net, |k| self.usdc_free(k)).is_some())
     }
 
-    fn funding_legs(&self, short: Decimal, net: &str) -> Option<Vec<String>> {
+    fn funding_legs(&self, short: Decimal, net: &str) -> Option<Vec<String>> { self.funding_legs_via(short, net, None) }
+
+    /// `intents`: every leg through NEAR Intents, from these EVM networks only (a loan guard's top-up, loan_guards.rs).
+    pub(crate) fn funding_legs_via(&self, short: Decimal, net: &str, intents: Option<&[&str]>) -> Option<Vec<String>> {
         let evm: Vec<Place> = EvmNetwork::searched().into_iter().map(|n| Place::new(n.key, n.name, self.usdc_free(n.key).unwrap_or_default())).collect();
         let near_price = self.st().markets.get("NEAR").map(|m| m.mark_px);
         funding_plan::legs(short, net, &W::place_name(net), self.usdc_free("solana").unwrap_or_default(), &evm,
-                           self.usdc_free("hyperliquid").unwrap_or_default(), self.held_there("NEAR", "near").unwrap_or_default(), near_price, None)
+                           self.usdc_free("hyperliquid").unwrap_or_default(), self.held_there("NEAR", "near").unwrap_or_default(), near_price, intents)
     }
 
     /// All the wallet's free money together can't pay the move: said before a card that would fail.

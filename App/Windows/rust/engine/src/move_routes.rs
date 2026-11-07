@@ -470,6 +470,7 @@ impl Engine {
             WalletCommand::CrossSwap { from, on, to, at, amount } => Some(self.cross(c, from, on, to, at, *amount)),
             WalletCommand::SwapPrivately { from, on, to, at, amount } => Some(self.private_swap(c, from, on, to, at, *amount)),
             WalletCommand::Intents { from, to, amount } => Some(self.intents_route(from, to, *amount)),
+            WalletCommand::AgentCreate { .. } | WalletCommand::AgentFund { .. } | WalletCommand::AgentSend { .. } | WalletCommand::AgentFreeze(_) => self.agent_steps(c),
             WalletCommand::RevokeApproval { place, token, spender, permit2 } => {
                 let (symbol, short) = (self.token_name(token, place), short(spender, 6, 4));
                 let who = EvmNetwork::named(place).and_then(|n| Executor::spender_name(spender, n.rpc.chain_id)).map_or_else(|| short.clone(), str::to_string);
@@ -925,6 +926,39 @@ impl Engine {
         let usdc = ch.usdc();
         let host = reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| ch.realm().into());
         let price = Fmt::num(usdc, 6);
+        let to = say("TO · ", "КУДА · ") + &q.service.to_uppercase();
+        let answer = say("the answer comes here", "ответ придёт сюда");
+        let brought = |b: Decimal, to: &str| self.step(&(say("FROM · SOLANA → ", "ОТКУДА · SOLANA → ") + &to.to_uppercase()), &format!("{} USDC", Fmt::num(b, 2)),
+                                                       &say("through NEAR Intents · 1Click", "через NEAR Intents · 1Click"), self.moved("USDC", "solana", Some(-b), false));
+        // x402: USDC on Base (brought from Solana through NEAR Intents when short) → a signature → the service.
+        if q.x402.is_some() {
+            let first = match Engine::x402_top_up(usdc, self.usdc_free("base").unwrap_or_default()) {
+                Some(b) => brought(b, "Base"),
+                None => self.step(&self.label_from("base"), &format!("{price} USDC"), &say("your USDC on Base", "твои USDC в Base"), self.moved("USDC", "base", Some(-usdc), false)),
+            };
+            return Some(vec![first, self.step(&say("PAY · X402", "ОПЛАТА · X402"), &format!("{price} USDC"), &say("EIP-3009 signature · no gas", "подпись EIP-3009 · без газа"), None),
+                             self.step(&to, &answer, &host, None)]);
+        }
+        // MPP through NEAR Intents: USDC on the network the service wants (brought there first when short, and gas for the
+        // transfer when there's none) → the 1Click deposit → what the service receives.
+        if let Some(n) = &ch.near {
+            let origin = Engine::near_origin(n).unwrap_or("solana");
+            let name = WalletCommand::place_name(origin);
+            let mut steps = vec![match Engine::x402_top_up(usdc, self.usdc_free(origin).unwrap_or_default()).filter(|_| origin != "solana") {
+                Some(b) => brought(b, &name),
+                None => self.step(&self.label_from(origin), &format!("{price} USDC"), &say(&format!("your USDC on {name}"), &format!("твои USDC в {name}")),
+                                  self.moved("USDC", origin, Some(-usdc), false)),
+            }];
+            if let Some(coin) = self.charge_gas_short(origin) {
+                steps.push(self.step(&say("GAS · RELAY", "ГАЗ · RELAY"), &say(&format!("+ {coin} on {name}"), &format!("+ {coin} в {name}")),
+                                     &say("≈ 0.5 USDC from Solana · for the transfer's gas", "≈ 0.5 USDC с Solana · на газ перевода"),
+                                     self.moved("USDC", "solana", Some(Decimal::new(-5, 1)), true)));
+            }
+            steps.push(self.step(&say("PAY · NEAR INTENTS", "ОПЛАТА · NEAR INTENTS"), &format!("{price} USDC"),
+                                 &say("1Click deposit, checked before signing", "депозит 1Click, проверен до подписи"), None));
+            steps.push(self.step(&to, q.receives.as_ref().map_or(&answer, |r| &r.0), &n.destination_recipient, None));
+            return Some(steps);
+        }
         let there = self.tempo_usdc();
         let float = Decimal::from(Executor::TEMPO_FLOAT) / Decimal::from(1_000_000);
         let first = if let Some(need) = self.tempo_need(usdc) {
@@ -944,6 +978,14 @@ impl Engine {
         };
         Some(vec![first, self.step(&say("PAY · MPP", "ОПЛАТА · MPP"), &format!("{price} USDC"), &ch.purpose().map_or_else(|| say("one request", "один запрос"), str::to_string), None),
                   self.step(&(say("TO · ", "КУДА · ") + &q.service.to_uppercase()), &say("the answer comes here", "ответ придёт сюда"), &host, None)])
+    }
+
+    /// The coin a NEAR Intents charge's transfer on an EVM network pays gas in, when that network holds less of it than its
+    /// floor: ensure_evm brings some over Relay first. Unread claims nothing.
+    fn charge_gas_short(&self, origin: &str) -> Option<&'static str> {
+        let net = EvmNetwork::named(origin)?;
+        let floor = Decimal::from(net.gas_floor) / Decimal::from(1_000_000_000_000_000_000u64);
+        self.held_there(net.gas_coin, origin).is_some_and(|h| h < floor).then_some(net.gas_coin)
     }
 
     /// A multisig made: its keys checked, then one Safe per network at the same address.
@@ -1225,6 +1267,7 @@ impl Engine {
                 Some(say(&format!("NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays your own address on {b} and refunds to {a}. Its solvers deliver in about a minute."),
                          &format!("1Click от NEAR Intents: USDC уходит на адрес депозита из его котировки, после того как 1Click подтвердит, что этот адрес платит на твой же адрес в {b} и возвращает в {a}. Решатели доставляют примерно за минуту.")) + &confirm)
             }
+            WalletCommand::AgentCreate { .. } | WalletCommand::AgentFund { .. } | WalletCommand::AgentSend { .. } | WalletCommand::AgentFreeze(_) => self.agent_note(c),
             WalletCommand::SendToken { name: who, token, amount: Some(x), network } => {
                 let (entry, symbol, _) = self.across_recipient(who, token, network.as_deref()).ok().flatten()?;
                 let (place, what) = (net_title(&entry.network), format!("{} {symbol}", Fmt::num(*x, 8)));
@@ -1236,6 +1279,36 @@ impl Engine {
                 let ch = &q.challenge;
                 let host = reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| ch.realm().into());
                 let (price, (start, end), need) = (Fmt::num(ch.usdc(), 6), address_check::ends(&ch.payee), self.tempo_need(ch.usdc()));
+                // What comes from Solana through NEAR Intents first when the network paid on is short.
+                let first = |net: &str, there: Decimal| Engine::x402_top_up(ch.usdc(), there).map_or_else(String::new, |b| {
+                    let (b, there) = (Fmt::num(b, 2), Fmt::num(there, 2));
+                    say(&format!("{net} has {there} USDC, so {b} USDC come from Solana through NEAR Intents first. "),
+                        &format!("В {net} {there} USDC, поэтому сначала {b} USDC придут с Solana через NEAR Intents. "))
+                });
+                if q.x402.is_some() {
+                    return Some(say(&format!("x402: a signature that lets {host}'s facilitator move exactly {price} USDC from your Base address to {start} … {end}. It's valid 10 minutes at most, and the facilitator pays the network fee. "),
+                                    &format!("x402: подпись, по которой посредник {host} переведёт ровно {price} USDC с твоего адреса в Base на {start} … {end}. Она действует не дольше 10 минут, а комиссию сети платит посредник. "))
+                        + &first("Base", self.usdc_free("base").unwrap_or_default())
+                        + &say("Then the request goes again with it.", "Потом запрос уходит снова с ней.") + &confirm);
+                }
+                if let Some(n) = &ch.near {
+                    let origin = Engine::near_origin(n).unwrap_or("solana");
+                    let net = WalletCommand::place_name(origin);
+                    let (r, gets) = (&n.destination_recipient, q.receives.as_ref().map_or_else(|| say("the amount it asked", "сумму, которую он просит"), |r| r.0.clone()));
+                    let refund = if self.near_refund_is_ours(n, origin) { say("your own address", "твой же адрес") } else {
+                        let (s, e) = address_check::ends(&n.refund_to);
+                        say(&format!("the service's address {s} … {e}, not yours"), &format!("адрес сервиса {s} … {e}, а не твой"))
+                    };
+                    let gas = self.charge_gas_short(origin).map_or_else(String::new, |coin| say(
+                        &format!("{net} has no {coin} for the transfer's gas, so ≈ 0.5 USDC from Solana brings some over Relay first. "),
+                        &format!("В {net} нет {coin} на газ перевода, поэтому сначала ≈ 0.5 USDC с Solana принесут его через Relay. ")));
+                    return Some(say(&format!("MPP through NEAR Intents: exactly {price} USDC on {net} to the 1Click deposit address {host} named ({start} … {end}). Before signing, 1Click itself must hold that address for {r}, {gets} and the refund address, at no more than 1Click's own price. "),
+                                    &format!("MPP через NEAR Intents: ровно {price} USDC в {net} на адрес депозита 1Click, который назвал {host} ({start} … {end}). До подписи сам 1Click должен держать этот адрес за {r}, {gets} и адресом возврата, не дороже собственной цены 1Click. "))
+                        + &if origin == "solana" { String::new() } else { first(&net, self.usdc_free(origin).unwrap_or_default()) } + &gas
+                        + &say(&format!("If it doesn't settle, 1Click refunds the USDC to {refund}. Then the request goes again with the deposit's hash."),
+                               &format!("Если оплата не пройдёт, 1Click вернёт USDC на {refund}. Потом запрос уходит снова с хешем депозита."))
+                        + &confirm);
+                }
                 let src = need.and_then(|n| self.tempo_source(n)).map_or("Solana", |(n, _)| n.name);
                 Some(say(&format!("One Tempo transfer of {price} USDC to the address {host} named ({start} … {end}). "), &format!("Один перевод в Tempo на {price} USDC по адресу, который назвал {host} ({start} … {end}). "))
                     + &if need.is_some() { say(&format!("What's short comes from {src} over Relay first. "), &format!("Недостающее сначала придёт из {src} через Relay. ")) } else { String::new() }

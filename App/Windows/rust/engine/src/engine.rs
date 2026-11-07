@@ -402,6 +402,8 @@ pub struct State {
     pub model_facts: HashMap<String, ModelFacts>,
     pub model_facts_asked: Date,
     pub running: Option<Running>,
+    /// N5: a NEAR Intents move after Confirm, in the chat's field until the next message (journey.rs).
+    pub journey: Option<crate::journey::Journey>,
     /// The block of the move that runs now.
     pub running_board: Option<String>,
     /// The block the message being read is about.
@@ -457,6 +459,10 @@ pub struct State {
     pub traded_plan: Option<TradeIntent>,
     /// Price alerts (alerts.json, `set_alerts`), checked against Hyperliquid's marks at every refresh.
     pub alerts: Vec<PriceAlert>,
+    /// Loans whose health factor is read with every refresh (loanguards.json, `set_loan_guards`, loan_guards.rs), and
+    /// each one's last read for the alerts block: no entry before the first read, None without a debt.
+    pub loan_guards: Vec<ihatecrypto_core::loan_guard::LoanGuard>,
+    pub guard_health: HashMap<Uuid, Option<Decimal>>,
     /// Scheduled tasks and recurring buys, run by the minute: the wallet that's on has its own, loaded with each word
     /// from the signer (loadWalletState; `set_tasks` seals them).
     pub tasks: Vec<ScheduledTask>,
@@ -546,7 +552,7 @@ impl State {
             options_message: None, retry: None, quoted_at: None, quote_round: 0, also_attached: vec![],
             live_models: store::load("live-models.json").unwrap_or_default(),
             local_servers: HashMap::new(), local_setup: LocalSetup::default(), model_sizes: HashMap::new(), model_downloads: HashMap::new(),
-            model_facts: HashMap::new(), model_facts_asked: distant_past(), running: None, running_board: None, attached: None,
+            model_facts: HashMap::new(), model_facts_asked: distant_past(), running: None, journey: None, running_board: None, attached: None,
             sites: ConnectedSites::default(),
             multisigs: store::load("multisigs.json").unwrap_or_default(),
             multisig_draft: None, multisig_payment: None, agent_goal: None, quiet_check: false, last_move: None, call_review: None,
@@ -556,6 +562,7 @@ impl State {
             jupiter_dca: None, ledger_agent: None, fee_approved: None, costly: None, in_transit: vec![], intent: TradeIntent::default(),
             plan_board: None, traded_plan: None,
             alerts: store::load("alerts.json").unwrap_or_default(),
+            loan_guards: store::load("loanguards.json").unwrap_or_default(), guard_health: HashMap::new(),
             tasks: task_seal::load(task_seal::TASKS, task_seal::KEY).0,
             schedule_runs: store::load("schedule-runs.json").unwrap_or_default(),
             multisig_held: HashMap::new(), automation_budget: None, lock: LockView::default(), lock_heard_signer: false,

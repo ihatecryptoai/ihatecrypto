@@ -166,6 +166,7 @@ function general(s) {
         h("span", { class: "secondary" }, t("Keeps it in the tray", "Оставляет в трее"))))),
     s.nodes ? nodesSection(s.nodes) : null,
     s.nodes ? oneClickSection(s.nodes) : null,
+    s.nodes ? agentKeySection(s.nodes) : null,
     section("arrow.down.circle", t("About", "О приложении"), t("An update installs only when its signature matches ihatecrypto's key, and only when you press Install.", "Обновление ставится, только если его подпись совпадает с ключом ihatecrypto, и только когда ты нажмёшь «Установить»."),
       group(aboutRow())),
   ];
@@ -306,6 +307,32 @@ function oneClickSection(v) {
          t("In the Partner Dashboard, create an API key and copy the token (a long JWT: eyJ…).", "В Partner Dashboard создай API-ключ и скопируй токен (длинный JWT: eyJ…)."),
          t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
         ["https://partners.near-intents.org", t("Open partners.near-intents.org", "Открыть partners.near-intents.org")], "eyJ…", save, true) : null));
+}
+
+// The agent wallet's Agent API key and server (AgentWallet.swift's AgentKeySection): the key is checked by the engine
+// before it's kept, and never comes back.
+function agentKeySection(v) {
+  const save = () => saveSecret("agentKey", { key: secretForm.text });
+  const hosts = [["api.demo.agentsonintents.com", t("Demo", "Демо")], ["api.agentsonintents.com", t("Production", "Рабочий")]];
+  return section("key", t("Agent wallet key", "Ключ кошелька агента"), t("An agent wallet on NEAR Intents: tasks spend within rules you sign.", "Кошелёк агента на NEAR Intents: задачи тратят в рамках правил, которые ты подписал."),
+    group(row({ label: v.agentKey ? t("Agent API: your partner key", "Agent API: твой партнёрский ключ") : t("Agent API: no key", "Agent API: ключа нет"), mark: logo("near", 26),
+      about: t("NEAR Intents keeps an agent wallet under a policy your NEAR key signs — what it may do, how much a day, to which addresses — and refuses anything else. The partner key only lets this app talk to that service. It can't move money.",
+        "NEAR Intents держит кошелёк агента по правилам, которые подписывает твой ключ NEAR, — что можно делать, сколько в день и на какие адреса, — и отклоняет всё остальное. Партнёрский ключ только даёт приложению говорить с этим сервисом. Двигать деньги он не может.") },
+      v.agentKey ? h("button", { class: "btn small", onclick: () => saveSecret("agentKey", { key: "" }) }, t("Remove", "Убрать")) : null,
+      h("button", { class: "btn small", onclick: () => openSecret("agentapi") }, v.agentKey ? t("Change…", "Изменить…") : t("Add your key…", "Добавить ключ…"))),
+      row({ label: t("Agent API server", "Сервер Agent API"), ico: "server",
+        about: t("The demo server's partner keys are temporary. Both servers move real money on NEAR mainnet. A key works only on the server it was made for.",
+          "Партнёрские ключи демо-сервера временные. Оба сервера двигают настоящие деньги в основной сети NEAR. Ключ работает только на том сервере, для которого он сделан.") },
+        h("select", { id: "set-agent-host", onchange: (e) => act("agentHost", { text: e.target.value }) },
+          hosts.map(([value, label]) => h("option", { value, selected: v.agentHost === value }, label)))),
+      secretForm.open === "agentapi" ? secretPanel("agentapi",
+        [t("The key lets this app create and run agent wallets on NEAR Intents. It can't move money or sign anything: every rule is signed by your own NEAR key, after Confirm and Windows Hello.",
+          "Ключ позволяет приложению создавать кошельки агента на NEAR Intents и управлять ими. Двигать деньги или что-то подписывать он не может: каждое правило подписывает твой собственный ключ NEAR, после «Подтвердить» и Windows Hello."),
+         t("It's kept encrypted for your Windows user.", "Он хранится зашифрованным для твоего пользователя Windows.")],
+        [t("Open the partner dashboard and sign in.", "Открой панель партнёра и войди."),
+         t("Create an API key and copy it (it starts with naa_).", "Создай API-ключ и скопируй его (он начинается с naa_)."),
+         t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
+        ["https://partners.demo.agentsonintents.com/dashboard", t("Open the partner dashboard", "Открыть панель партнёра")], "naa_…", save, true) : null));
 }
 
 /** Settings › About › Check for updates, and the chat's «check for updates» (the engine's `checkUpdates` event): it needs

@@ -170,11 +170,15 @@ export function chatPanel() {
   if (cardsShownFor !== undefined && cardsFor && cardsFor !== cardsShownFor) queueMicrotask(() => replyInView(cardsFor));
   cardsShownFor = cardsFor;
   const mood = moodNow();
-  const head = h("div", { class: "chat-head", title: t("Drag to move · double-click: back to its corner", "Перетащи, чтобы подвинуть · двойной клик — на место"),
+  const head = h("div", { class: "chat-head" + (s.tee ? " chat-head-tee" : ""), title: t("Drag to move · double-click: back to its corner", "Перетащи, чтобы подвинуть · двойной клик — на место"),
       onpointerdown: (e) => moveBy(e, panel), ondblclick: (e) => { if (!e.target.closest("button")) dock(); } },
-    mascot(30, mood),
-    h("div", { class: "chat-title" }, h("b", {}, t("Assistant", "Ассистент")), h("span", { class: "chat-status one-line" }, statusLine(mood))),
+    // T4: on an attested NEAR AI model the header says the chat is private, with the proof a click away (journey.rs).
+    s.tee ? h("span", { class: "chat-tee-coin" }, mascot(30, mood), h("span", { class: "chat-tee-badge", "aria-hidden": "true" }, icon("lock", 9))) : mascot(30, mood),
+    s.tee ? h("div", { class: "chat-title" }, h("b", {}, t("Private assistant", "Приватный ассистент")),
+      h("span", { class: "chat-status" }, t("Runs in sealed hardware. The host can't read this chat.", "Работает в запечатанном железе. Хост не может прочитать этот чат.")))
+      : h("div", { class: "chat-title" }, h("b", {}, t("Assistant", "Ассистент")), h("span", { class: "chat-status one-line" }, statusLine(mood))),
     h("span", { class: "spacer" }),
+    s.tee ? teeProofButton(s.tee) : null,
     h("button", { class: "icon-btn", title: t("New canvas", "Новый холст"), onclick: () => act("newCanvas") }, icon("square.and.pencil", 15)),
     h("button", { class: "icon-btn", title: wide() ? t("Narrow chat", "Узкий чат") : t("Chat on half the window", "Чат на половину окна"), onclick: toggleWide },
       icon(wide() ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", 15)),
@@ -791,9 +795,12 @@ function composer(s) {
     h("div", { id: "chat-helper", class: "chat-helper-slot" }),
     // Without a model the bar says how to get one; plain commands still work in the field under it.
     s.model.connected || listening ? null : connectBar(s),
-    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting || site ? " chat-waiting" : "") },
+    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting || site ? " chat-waiting" : "") + (waiting && s.privacy?.isPrivate ? " chat-private" : "")
+        + (!waiting && s.journey ? " chat-journeying" : "") },
       site ? siteBar(site) : null,
       waiting ? waitingBar(waiting) : null,
+      // N5: after Confirm, a move through NEAR Intents shows its way where the move waited.
+      !waiting && s.journey ? journeyBar(s.journey) : null,
       h("div", { class: "chat-entry" },
         h("button", { class: "chat-round-btn chat-glassy", title: t("Plan templates", "Шаблоны планов"), onclick: (e) => templatesMenu(e.currentTarget) }, icon("square.grid", 15)),
         // «$SOL» drawn as its token on a layer under the field (the Mac's ComposerField): the textarea keeps the typing,
@@ -848,11 +855,202 @@ function waitingBar(card) {
     : card.ticks?.length ? h("button", { class: "chat-pill-outline", title: t("Tick the second check's warning on its block first", "Сначала отметь предупреждение второй проверки на блоке"),
       onclick: () => { ui.view = "canvas"; render(); goHome(); } }, icon("eye", 13), t("Review on the canvas", "Посмотреть на холсте"))
     : h("button", { class: "chat-pill-accent", disabled: busy, title: title, onclick: () => act("confirm", { board: card.id }) }, icon("check", 13), card.confirm);
-  return h("div", { class: "chat-waiting-bar" },
-    h("div", { class: "chat-waiting-what" }, h("span", { class: "chat-wait-dot" }),
-      h("div", {}, h("div", { class: "chat-waiting-title" }, title), h("div", { id: "chat-quote-line", class: "chat-waiting-line num" }, line))),
+  const choice = s.runningBoard ? null : s.privacy;
+  // Variant A «Receipt» (owner, 2026-11-05): what you pay and from where, what the blockchain keeps, what arrives.
+  const r = s.runningBoard ? null : receipt(s.boards.find((b) => b.id === card.id));
+  return h("div", { class: "chat-waiting-bar" + (choice?.isPrivate ? " chat-private-bar" : "") + (r ? " chat-receipt" : "") },
+    // P3: the switch says which way it goes, so no header over it.
+    r && !choice ? h("div", { class: "receipt-head" }, icon(r.icon, 11), h("span", { class: "one-line" }, r.header)) : null,
+    h("div", { class: "chat-waiting-what" }, r ? null : h("span", { class: "chat-wait-dot" }),
+      h("div", {}, h("div", { class: "chat-waiting-title" + (r ? " receipt-amount" : "") }, title), h("div", { id: "chat-quote-line", class: "chat-waiting-line num" }, line))),
+    choice ? privacyRows(choice, busy)
+      : r?.cells.length ? h("div", { class: "receipt-cells" }, r.cells.map(([label, value, note]) => h("div", { class: "receipt-cell" },
+        h("div", { class: "receipt-label one-line" }, label), h("div", { class: "receipt-value num one-line" }, value), note ? h("div", { class: "receipt-note" }, note) : null))) : null,
+    r?.then.length ? h("div", { class: "receipt-then" }, r.then.map((x) => h("div", { class: "one-line" }, icon("arrow.down.right", 11), x))) : null,
     h("div", { class: "chat-waiting-buttons" },
       h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel", { board: card.id }) }, t("Cancel", "Отмена")), confirm));
+}
+
+// MARK: The receipt
+
+const STABLES = new Set(["USDC", "USDT", "USDT0", "USDG", "USDC.E"]);
+const NETWORKS = new Set(["SOLANA", "BASE", "ARBITRUM", "ETHEREUM", "HYPERLIQUID", "POLYGON", "OPTIMISM", "BNB CHAIN", "BNB", "HYPEREVM", "ROBINHOOD",
+  "ROBINHOOD CHAIN", "TEMPO", "NEAR"]);
+const starts = (label, ...words) => words.some((w) => label.startsWith(w));
+const isFrom = (l) => starts(l, "FROM", "ОТКУДА"), isTo = (l) => starts(l, "TO", "КУДА");
+const amountOf = (text) => Number(String(text || "").replace("≈ ", "").replace(/,/g, ""));
+
+/** The move waiting for Confirm as a receipt, from the steps its card draws (the Mac's Receipt); null without steps. */
+function receipt(board) {
+  const own = (board?.steps || []).filter((b) => !b.status);
+  const then = (board?.steps || []).filter((b) => b.status).map((b) => stepLabel(b.label) + " · " + b.title);
+  const first = own[0];
+  if (!first) return null;
+  const last = own.length > 1 ? own[own.length - 1] : null;
+  const payer = first.label.split(" · ")[1] || "";
+  const fromNetwork = isFrom(first.label) && NETWORKS.has(payer);
+  // The step that names the move («BRIDGE · NEAR INTENTS», «BUY · ON JUPITER»): not the ends, an approve or the gas.
+  const named = own.find((b) => !isFrom(b.label) && !isTo(b.label) && !starts(b.label, "APPROVE", "РАЗРЕШЕНИЕ", "GAS", "ГАЗ"));
+  const header = named ? (named.label.includes(" · ") ? named.label : named.label + " " + named.title.toUpperCase())
+    : !last || !fromNetwork ? first.label : t("SEND", "ПЕРЕВОД");
+  const up = header.toUpperCase();
+  const icn = starts(up, "PRIVATE", "ПРИВАТ") ? "lock"
+    : up.includes("INTENTS") || starts(up, "BRIDGE", "МОСТ", "SWAP", "BUY", "SELL", "ОБМЕН", "ПОКУПКА", "ПРОДАЖА") ? "arrow.left.arrow.right"
+    : starts(up, "PAY", "ОПЛАТА") ? "creditcard"
+    : starts(up, "REPAY", "BORROW", "DEPOSIT", "WITHDRAW", "ПОГАШ", "ЗАЁМ", "ВКЛАД", "ВЫВОД") ? "building.columns"
+    : starts(up, "OWNER", "RULES") ? "shield" : "arrow.up.right";
+  const note = (b) => (b.money ? `${b.money.place} ${b.money.was} → ${b.money.after}` : b.lines?.[0] || "");
+  if (!last) return { header, icon: icn, cells: [[first.label, first.title, note(first)]], then };
+  // What leaves: the payer's own balance change, not the card's title.
+  const m = first.money, outN = m ? amountOf(m.was) - amountOf(m.after) : 0;
+  const out = m && outN > 0 ? [outN, m.symbol] : null;
+  // Dollars in and dollars out of the same move's two ends: their gap is what the bridge and the network keep.
+  const paid = out && STABLES.has(out[1].toUpperCase()) ? out[0] : null;
+  const got = isTo(last.label) && last.money && STABLES.has(last.money.symbol.toUpperCase()) ? amountOf(last.money.after) - amountOf(last.money.was) : null;
+  const fee = paid && got && paid > got && got > 0 ? paid - got : null;
+  const ours = up.includes("SPOT") || up.includes("СПОТ");
+  return { header, icon: icn, then, cells: [
+    [!isFrom(first.label) ? first.label : fromNetwork ? t("YOU PAY", "ПЛАТИШЬ") : t("FROM ", "ИЗ ") + payer,
+      out ? `${+out[0].toFixed(6)} ${out[1]}` : first.title, note(first)],
+    [t("BLOCKCHAIN FEES", "КОМИССИИ СЕТЕЙ"), fee ? `≈ $${fee.toFixed(2)} · ${+(fee / paid * 100).toFixed(1)}%` : t("network gas", "газ сети"),
+      ours ? t("plus our 0.05% on the order", "плюс наши 0,05% с ордера") : t("none to us", "нам — ничего")],
+    [isTo(last.label) ? t("ARRIVES", "ПРИДЁТ") : last.label, last.title, note(last)],
+  ] };
+}
+
+// MARK: N5 · P3 · T4 (journey.rs)
+
+/** A place's logo and name as the chat writes them. */
+const PLACE_LOGO = { solana: "sol", ethereum: "eth", arbitrum: "arb", base: "base", near: "near", bitcoin: "btc", zcash: "zec", tron: "trx", xrp: "xrp",
+  dogecoin: "doge", sui: "sui", polygon: "pol", optimism: "op", bnb: "bnb", hyperevm: "hyperevm", robinhood: "robinhood", tempo: "tempo" };
+const PLACE_NAME = { bnb: "BNB Chain", hyperevm: "HyperEVM", xrp: "XRP Ledger", robinhood: "Robinhood Chain", near: "NEAR" };
+const placeName = (p) => PLACE_NAME[p] || p.charAt(0).toUpperCase() + p.slice(1);
+let journeyTimer = null;
+
+function seconds(s) {
+  const n = Math.max(0, Math.round(s));
+  return n < 120 ? `${n} ${t("s", "с")}` : `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}`;
+}
+
+/** Top right: how long is left, or how it ended (the Mac's IntentsJourney.clock). */
+function journeyClock(j, now) {
+  if (j.stage === "landed") return t("landed in ", "дошло за ") + seconds(((j.endedAt || now) - j.started) / 1000);
+  if (j.stage === "refunded") return j.refunded ? t("refunded", "возвращено") : t("failed", "не прошло");
+  if (j.stage === "paying") return t("signing", "подпись");
+  if (j.stuck) return t("still on its way", "ещё в пути");
+  if (!j.estimate || !j.paidAt) return seconds((now - j.started) / 1000);
+  const left = j.estimate - Math.floor((now - j.paidAt) / 1000);
+  return left > 0 ? "≈ " + seconds(left) + t(" left", " осталось") : t("any moment now", "вот-вот");
+}
+
+function journeyProgress(j, now) {
+  if (j.stage === "paying") return 0.06;
+  if (j.stage === "landed" || j.stage === "refunded") return 1;
+  if (!j.estimate || !j.paidAt) return 0.5;
+  return 0.2 + 0.75 * Math.min(1, (now - j.paidAt) / 1000 / Math.max(j.estimate, 1));
+}
+
+/** N5 in the chat's field: the three places the money passes, the time left, NEAR Intents' explorer for this move. It
+ *  stays after the money lands until the next message. */
+function journeyBar(j) {
+  const failed = j.stage === "refunded" || j.stuck;
+  const at = (x) => (x ? seconds((x - j.started) / 1000) : "");
+  const paid = j.stage !== "paying";
+  const solver = { paying: t("Solver", "Решатель"), paid: t("Deposit reaching NEAR", "Депозит идёт в NEAR"), filling: t("Solver filling it", "Решатель исполняет"),
+    landed: t("Filled on NEAR", "Исполнено в NEAR"), refunded: t("No fill", "Не исполнено") }[j.stage];
+  const solverLine = j.stage === "paying" ? t("on NEAR", "в NEAR") : j.stage === "landed" ? (j.privately ? t("unlinkable", "не связать") : t("by a solver", "решателем"))
+    : j.stage === "refunded" ? (j.refunded ? t("money went back", "деньги вернулись") : t("failed", "не прошло"))
+    : j.stuck ? t("settles on its own", "завершится само") : t("now · on NEAR", "сейчас · в NEAR");
+  const note = j.stage === "landed" ? (j.privately ? t("Delivered privately: nobody can link it to your deposit.", "Доставлено приватно: никто не свяжет это с твоим депозитом.")
+      : t("Delivered through NEAR Intents.", "Доставлено через NEAR Intents."))
+    : j.stage === "refunded" ? (j.refunded ? t(`No solver filled it, so the USDC went back to ${placeName(j.from)}.`, `Никто не исполнил, и USDC вернулись в ${placeName(j.from)}.`)
+      : t("NEAR Intents says it failed. The chat says where the money is.", "NEAR Intents говорит, что не прошло. Где деньги — в чате."))
+    : j.stuck ? t("NEAR Intents settles or refunds it on its own. Don't send it again.", "NEAR Intents сам завершит или вернёт. Не отправляй повторно.")
+    : t("If no solver fills it, your USDC comes back.", "Если никто не исполнит, твои USDC вернутся.");
+  const place = (key, cls, title, line, ink) => h("div", { class: "journey-place " + cls },
+    h("span", { class: "journey-logo" }, logo(key, 34), cls.includes("done") || cls.includes("failed") ? h("span", { class: "journey-mark" }, icon(cls.includes("failed") ? "xmark" : "check", 9)) : null),
+    h("div", { class: "journey-place-title" }, title), h("div", { class: "journey-place-line num" + (ink ? " journey-ink" : "") }, line));
+  const now = Date.now();
+  const bar = h("div", { class: "journey-bar" },
+    h("div", { class: "journey-head" },
+      j.privately ? h("span", { class: "journey-lock" }, icon("lock", 11)) : null,
+      h("b", { class: "one-line num" }, j.title), h("span", { class: "spacer" }),
+      h("span", { class: "journey-clock num" + (failed ? " journey-warn" : "") }, journeyClock(j, now))),
+    h("div", { class: "journey-places" },
+      place(PLACE_LOGO[j.from] || j.from, j.stage === "paying" ? "current" : "done",
+        paid ? t(`Paid on ${placeName(j.from)}`, `Оплачено в ${placeName(j.from)}`) : t(`Paying on ${placeName(j.from)}`, `Оплата в ${placeName(j.from)}`), paid ? at(j.paidAt) : t("now", "сейчас")),
+      h("span", { class: "journey-link" + (paid ? " lit" : "") }),
+      place("near", j.stage === "landed" ? "done" : j.stage === "refunded" ? "failed" : paid ? "current" : "", solver, solverLine, paid && j.stage !== "landed"),
+      h("span", { class: "journey-link" + (j.stage === "landed" ? " lit" : " dashed") }),
+      place(PLACE_LOGO[j.to] || j.to, j.stage === "landed" ? "done" : "", t(`On ${placeName(j.to)}`, `В ${placeName(j.to)}`),
+        j.stage === "landed" ? at(j.endedAt) : j.stage === "refunded" ? t("didn't go", "не ушло") : t("next", "дальше"))),
+    h("div", { class: "journey-track" }, h("span", { class: "journey-fill" + (failed ? " journey-warn-fill" : ""), style: `width:${(journeyProgress(j, now) * 100).toFixed(1)}%` })),
+    h("div", { class: "journey-foot" }, h("span", { class: "small secondary" }, note), h("span", { class: "spacer" }),
+      j.deposit ? h("span", { class: "journey-track-link", title: t("This move on NEAR Intents' explorer", "Это действие в обозревателе NEAR Intents") },
+        link(`https://explorer.near-intents.org/transactions/${j.deposit}`, t("Track on NEAR ↗", "Смотреть в NEAR ↗"))) : null));
+  clearInterval(journeyTimer);
+  if (!j.endedAt) {
+    journeyTimer = setInterval(() => {
+      if (!bar.isConnected) { clearInterval(journeyTimer); return; }
+      const n = Date.now();
+      bar.querySelector(".journey-clock").textContent = journeyClock(j, n);
+      bar.querySelector(".journey-fill").style.width = (journeyProgress(j, n) * 100).toFixed(1) + "%";
+    }, 1000);
+  }
+  return bar;
+}
+
+/** P3 over Confirm: Regular | Private, then the rows of the one picked. A pick redraws the card the other way; it
+ *  still waits for Confirm. */
+function privacyRows(choice, busy) {
+  const option = (priv, title, line) => {
+    const on = choice.isPrivate === priv;
+    return h("button", { class: "privacy-option" + (on ? " on" : "") + (priv ? " private" : ""), disabled: busy || on, "aria-pressed": on ? "true" : "false",
+      title: on ? "" : priv ? t("Send it through NEAR Intents' Confidential Intents instead: the card changes, it still waits for Confirm",
+                               "Отправить через Confidential Intents от NEAR Intents: карточка сменится и так же будет ждать «Подтвердить»")
+        : t("Send it as a plain transfer instead: the card changes, it still waits for Confirm", "Отправить обычным переводом: карточка сменится и так же будет ждать «Подтвердить»"),
+      onclick: () => act("switchPrivacy") },
+      h("span", { class: "privacy-option-title" }, priv ? icon("lock", 11) : null, title), h("span", { class: "privacy-option-line one-line" }, line));
+  };
+  return h("div", { class: "privacy-choice" },
+    h("div", { class: "privacy-switch", role: "group", "aria-label": t("How to send", "Как отправить") },
+      option(false, t("Regular", "Обычно"), t("anyone can see it's from you", "любой увидит, что от тебя")),
+      option(true, t("Private", "Приватно"), t("nobody can link it to you", "никто не свяжет с тобой"))),
+    h("div", { class: "privacy-rows" }, choice.rows.map((r) => h("div", { class: "privacy-row" },
+      h("span", { class: "privacy-label secondary" }, r.label),
+      h("span", { class: "privacy-value num" }, r.logo ? logo(PLACE_LOGO[r.logo] || r.logo, 14) : null, r.value),
+      h("span", { class: "privacy-note secondary one-line" }, r.note)))));
+}
+
+/** «Proof» in the private assistant's header: what was checked before the last message went, and whether the reply's own
+ *  bytes were signed by the attested model key (the Mac's TEEProofButton). */
+function teeProofButton(tee) {
+  const signed = !tee.reply || tee.reply === "model";
+  const row = (name, detail, ok = true) => h("div", { class: "tee-row" }, icon(ok ? "check" : "exclamationmark.triangle", 11),
+    h("div", {}, h("b", {}, name), h("div", { class: "small secondary" }, detail)));
+  const key = tee.gatewayKey.length > 16 ? tee.gatewayKey.slice(0, 8) + "…" + tee.gatewayKey.slice(-8) : tee.gatewayKey;
+  const when = new Date(tee.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const details = () => h("div", { class: "tee-proof" },
+    h("div", { class: "tee-kicker secondary" }, t("PRIVATE MODEL", "ПРИВАТНАЯ МОДЕЛЬ")),
+    h("div", { class: "tee-title" }, t("Enclave attested", "Анклав проверен")),
+    h("div", { class: "small secondary one-line" }, tee.model),
+    row("Intel TDX", t("The enclave's quote, signed down to Intel's root certificate", "Отчёт анклава, подписанный вплоть до корневого сертификата Intel")),
+    row("NVIDIA GPU", t("NVIDIA's attestation service passed the GPUs", "Сервис аттестации NVIDIA подтвердил видеокарты")),
+    row(t("Fresh", "Свежая"), t(`Answers a random number from this PC, checked ${when}`, `Отвечает на случайное число с этого ПК, проверено в ${when}`)),
+    row(t("Enclave key", "Ключ анклава"), key),
+    tee.reply === "model" ? row(t("Reply", "Ответ"), t("Its exact bytes signed by this model's enclave key", "Его точные байты подписаны ключом анклава этой модели"))
+      : tee.reply === "gateway" ? row(t("Reply", "Ответ"), t("Signed by NEAR AI's attested gateway, not by the model's own key", "Подписан проверенным шлюзом NEAR AI, а не ключом самой модели"), false)
+      : tee.reply === "unverified" ? row(t("Reply", "Ответ"), t("Not verified: ", "Не проверен: ") + (tee.why || ""), false) : null,
+    h("div", { class: "small secondary tee-about" }, t("NEAR AI runs this model inside hardware enclaves. ihatecrypto checks their evidence itself before every message, at most ten minutes old. When a check fails, nothing is sent and the header turns back to the plain assistant. Each reply's signature is checked against the enclave's key.",
+      "NEAR AI запускает эту модель в аппаратных анклавах. ihatecrypto сам проверяет их подтверждение перед каждым сообщением, не старше десяти минут. Если проверка не прошла, ничего не отправляется, и заголовок снова становится обычным ассистентом. Подпись каждого ответа сверяется с ключом анклава.")));
+  return h("button", { class: "chat-tee-proof" + (signed ? "" : " chat-tee-warn"), "data-pop": "tee",
+    title: signed ? t("NEAR AI's hardware enclaves for this model were attested before your message went, and the reply came signed by the model's own key. Click for what was checked.",
+                      "Аппаратные анклавы NEAR AI для этой модели проверены до отправки сообщения, а ответ подписан ключом самой модели. Нажми, чтобы увидеть, что проверено.")
+      : t("The enclaves were attested, but the last reply wasn't signed by the model's own key. Click for what was checked.",
+          "Анклавы проверены, но последний ответ не подписан ключом самой модели. Нажми, чтобы увидеть, что проверено."),
+    "aria-label": t("Proof that the model runs in a sealed enclave", "Доказательство, что модель работает в запечатанном анклаве"),
+    onclick: (e) => { e.stopPropagation(); popover(e.currentTarget, details(), "down"); } },
+    signed ? null : icon("exclamationmark.triangle", 10), t("Proof", "Проверка"));
 }
 
 /** A site's request waiting, apart from the person's own card (the Mac's sheet for it): answered by its own id. With a
@@ -1309,6 +1507,8 @@ const companies = [
   { name: "Google", logo: "llm-gemini", tile: "#FFFFFF", ids: ["gemini-subscription", "gemini"] },
   { name: "xAI", logo: "llm-grok", tile: "#000000", ink: true, ids: ["grok-subscription", "xai"] },
   { name: "DeepSeek", logo: "llm-deepseek", tile: "#FFFFFF", ids: ["deepseek"] },
+  // The network's own logo (logos/near.png) is already its green square: the tile is that same green.
+  { name: "NEAR AI Cloud (private)", logo: "near", tile: "#01EC97", ids: ["nearai"] },
   { name: "OpenRouter", logo: "llm-openrouter", tile: "#6566F1", ink: true, ids: ["openrouter"] },
   { name: "Ollama", logo: "llm-ollama", tile: "#FFFFFF", ids: ["ollama"], local: true },
   { name: "LM Studio", logo: "llm-lmstudio", tile: "#4338CA", ink: true, ids: ["lmstudio"], local: true },

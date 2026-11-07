@@ -51,6 +51,7 @@ pub mod store;
 
 // One module per Swift file of Desktop/Engine.
 pub mod agent;
+pub mod agent_wallet;
 pub mod alerts;
 pub mod automation;
 pub mod blocks;
@@ -73,7 +74,9 @@ pub mod hidden_tokens;
 pub mod history_moves;
 pub mod history_tabs;
 pub mod imports;
+pub mod journey;
 pub mod ledger;
+pub mod loan_guards;
 pub mod local_models;
 pub mod lock;
 pub mod models;

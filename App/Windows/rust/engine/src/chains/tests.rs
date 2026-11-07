@@ -183,7 +183,8 @@ async fn a_chains_paid_first_step_names_its_price() {
         let pay = WalletCommand::Pay { method: "GET".into(), url: "https://api.example.com/answer".into(), body: None };
         assert_eq!(e.chain_line(&ChainStep::Wallet(pay.clone())), pay.summary());
         let challenge = MppChallenge { params: HashMap::new(), amount: 10_000, payee: PHONE.into(), memo: None, expires: None, method: "tempo".into(), near: None };
-        e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: "the answer".into(), service: "Example".into(), probed: false, task: None });
+        e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: "the answer".into(), service: "Example".into(), probed: false, task: None,
+                                                 x402: None, receives: None });
         assert_eq!(e.chain_line(&ChainStep::Wallet(pay)), "pay 0.01 USDC to Example");
         assert_eq!(e.chain_line(&ChainStep::Transfer(mom(), Decimal::from(5))), "send 5 USDC to Mom");
         assert_eq!(e.chain_line(&ChainStep::Said("chart SOL".into())), "chart SOL");

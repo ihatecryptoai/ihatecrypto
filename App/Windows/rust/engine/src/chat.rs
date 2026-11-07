@@ -13,6 +13,7 @@ use guard::jev::{self, JevClassifier, Post, Posted, reviewer};
 use ihatecrypto_core::address_book_command::AddressBookCommand;
 use ihatecrypto_core::agent_commands::{AgentCheck, JournalCommand, MemoryCommand, StudyNote};
 use ihatecrypto_core::alerts::AlertCommand;
+use ihatecrypto_core::loan_guard::LoanGuardCommand;
 use ihatecrypto_core::chat_language::ChatWords;
 use ihatecrypto_core::charts::ChartCommand;
 use ihatecrypto_core::folders::FolderCommand;
@@ -149,6 +150,7 @@ impl Engine {
         // A block the person pointed at (right-click › Ask in chat): its words go to the model with the message.
         let attached = about.and_then(|id| self.st().boards().iter().find(|b| b.id == id).cloned());
         self.st_mut().attached = attached.clone();
+        self.clear_ended_journey();
         let mut said = Message::new(true, shown.unwrap_or(&text), None);
         said.context = attached.as_ref().map(|b| self.block_facts(b));
         said.contexts = self.sent_contexts();
@@ -194,6 +196,7 @@ impl Engine {
         if let Some(command) = TokenCommand::parse(text) { Box::pin(self.token_command(command, None)).await; return }
         if let Some(command) = FolderCommand::parse(text) { self.folder_command(command, None); return }
         if let Some(command) = AddressBookCommand::parse(text) { Box::pin(self.address_book(&command, text)).await; return }
+        if let Some(command) = LoanGuardCommand::parse(text) { Box::pin(self.loan_guard(command, None)).await; return }
         if let Some(command) = AlertCommand::parse(text, &markets) { Box::pin(self.alert(command, None)).await; return }
         if let Some(WalletCommand::SendTo { name, amount, network }) = WalletCommand::parse(text) {
             self.prepare_transfer(amount, &name, network.as_deref(), None);
@@ -432,6 +435,10 @@ impl Engine {
             _ => {}
         }
         if TakeStyle::asks_for_choice(canonical) && Box::pin(self.ask_take_choices(canonical, note)).await { return true }
+        if let Some(command) = LoanGuardCommand::parse(canonical) {
+            Box::pin(self.loan_guard(command, note)).await;
+            return true;
+        }
         if let Some(command) = AlertCommand::parse(canonical, &markets) {
             Box::pin(self.alert(command, note)).await;
             return true;

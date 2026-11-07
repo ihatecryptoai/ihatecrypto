@@ -115,7 +115,8 @@ fn board(e: &Engine, id: &str) -> Board { e.st().boards().iter().find(|b| b.id =
 fn payment(e: &Engine) -> WalletCommand {
     let pay = WalletCommand::Pay { method: "GET".into(), url: "https://svc.example/price".into(), body: None };
     let challenge = MppChallenge { params: HashMap::from([("realm".into(), "svc.example".into())]), amount: 10_000, payee: PHONE.into(), memo: None, expires: None, method: "tempo".into(), near: None };
-    e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: String::new(), service: "Example".into(), probed: false, task: None });
+    e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, x402: None, ask: String::new(), service: "Example".into(), probed: false, task: None,
+                                                     receives: None });
     pay
 }
 
@@ -578,5 +579,75 @@ fn a_paid_request_names_the_network_its_dollars_come_from() {
         assert_eq!(e.card_route(&pay).unwrap()[0].label, "FROM · SOLANA → TEMPO");
         assert!(e.route_note(&pay).unwrap().contains("from Solana over Relay"));
         assert_eq!(e.tempo_need(d("0.01")), Some(d("1.01")));
+    });
+}
+
+/// Svc.example's price by x402 (`x402: true`) or MPP's NEAR Intents charge in USDC on `origin` (CAIP-2), to Hardhat's
+/// account #1, refunded to `refund`.
+fn charged(e: &Engine, x402: bool, origin: &str, token: &str, refund: &str) -> WalletCommand {
+    use ihatecrypto_core::mpp::NearCharge;
+    let pay = WalletCommand::Pay { method: "GET".into(), url: "https://svc.example/price".into(), body: None };
+    let near = (!x402).then(|| NearCharge {
+        origin_network: origin.into(), currency: format!("{origin}/erc20:{token}"), destination_network: "near:mainnet".into(),
+        destination_asset: "near:mainnet/nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1".into(), destination_recipient: "merchant.near".into(),
+        amount_out: "1000000".into(), min_amount_in: 1_005_000, refund_to: refund.into(), time_estimate: None });
+    let amount = if x402 { 1000 } else { 1_010_000 };
+    let challenge = MppChallenge { params: HashMap::new(), amount, payee: PHONE.into(), memo: None, expires: None, method: if x402 { "x402" } else { "nearintents" }.into(), near };
+    let offer = x402.then(|| ihatecrypto_core::x402::Offer { accepted: "{}".into(), resource: None, extensions: None, chain_id: 8453, asset: BASE_USDC.to_lowercase(),
+                                                              pay_to: PHONE.into(), amount, max_timeout_seconds: 300 });
+    e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, x402: offer, ask: String::new(), service: "Example".into(), probed: false, task: None,
+                                             receives: (!x402).then(|| ("1 USDC".into(), "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1".into())) });
+    pay
+}
+
+/// x402: USDC on Base (from Solana through NEAR Intents first when short) → a signature → the service, and its footer.
+#[test]
+fn an_x402_payment_signs_for_usdc_on_base() {
+    let _turn = NOTES.lock().unwrap_or_else(|e| e.into_inner());
+    with_engine(|e| {
+        wallet(e, vec![("solana", vec![usdc("50")]), ("base", vec![usdc("0")])]);
+        let pay = charged(e, true, "", "", "");
+        assert_eq!(labels(e, &pay), ["FROM · SOLANA → BASE", "PAY · X402", "TO · EXAMPLE"]);
+        let note = e.route_note(&pay).unwrap();
+        let (start, end) = address_check::ends(PHONE);
+        assert!(note.starts_with(&format!("x402: a signature that lets svc.example's facilitator move exactly 0.001 USDC from your Base address to {start} … {end}.")), "{note}");
+        assert!(note.contains("Base has 0 USDC, so 1 USDC come from Solana through NEAR Intents first.") && !note.contains(';'), "{note}");
+        wallet(e, vec![("base", vec![usdc("5")])]);
+        assert_eq!(labels(e, &pay), ["FROM · BASE", "PAY · X402", "TO · EXAMPLE"]);
+        assert_eq!(step(e, &pay, "FROM · BASE").and_then(|s| s.money).map(|m| (m.was, m.after)), Some(("5".into(), "5".into())));
+        assert!(!e.route_note(&pay).unwrap().contains("from Solana"));
+    });
+}
+
+/// MPP through NEAR Intents: USDC on the network the service wants (brought there first when short, with gas when there's
+/// none) → the 1Click deposit → what the service receives, and where a refund goes.
+#[test]
+fn a_near_intents_charge_pays_where_the_service_wants_and_says_where_a_refund_goes() {
+    let _turn = NOTES.lock().unwrap_or_else(|e| e.into_inner());
+    with_engine(|e| {
+        wallet(e, vec![("solana", vec![usdc("50")]), ("base", vec![usdc("0"), row("ETH", "0", Some("0"), Some("native"))])]);
+        e.st_mut().status = Some(SignerReply { ok: true, has_wallet: Some(true), evm_address: Some(ME.into()), ..Default::default() });
+        let pay = charged(e, false, "eip155:8453", BASE_USDC, ME);
+        assert_eq!(labels(e, &pay), ["FROM · SOLANA → BASE", "GAS · RELAY", "PAY · NEAR INTENTS", "TO · EXAMPLE"]);
+        let to = e.card_route(&pay).unwrap().pop().unwrap();
+        assert_eq!((to.title.as_str(), to.lines[0].as_str()), ("1 USDC", "merchant.near"));
+        let note = e.route_note(&pay).unwrap();
+        assert!(note.starts_with("MPP through NEAR Intents: exactly 1.01 USDC on Base to the 1Click deposit address svc.example named"), "{note}");
+        assert!(note.contains("1Click itself must hold that address for merchant.near, 1 USDC and the refund address"), "{note}");
+        assert!(note.contains("so 1.05 USDC come from Solana through NEAR Intents first.") && note.contains("Base has no ETH for the transfer's gas"), "{note}");
+        assert!(note.contains("1Click refunds the USDC to your own address.") && !note.contains(';'), "{note}");
+        // Base has the USDC and the gas: paid from there. A refund the service sends to its own address is said so.
+        wallet(e, vec![("base", vec![usdc("5"), row("ETH", "0.01", Some("30"), Some("native"))])]);
+        e.st_mut().status = Some(SignerReply { ok: true, has_wallet: Some(true), evm_address: Some(MOM.into()), ..Default::default() });
+        assert_eq!(labels(e, &pay), ["FROM · BASE", "PAY · NEAR INTENTS", "TO · EXAMPLE"]);
+        let (start, end) = address_check::ends(ME);
+        let note = e.route_note(&pay).unwrap();
+        assert!(note.contains(&format!("1Click refunds the USDC to the service's address {start} … {end}, not yours.")) && !note.contains("from Solana"), "{note}");
+        // USDC on Solana: from Solana itself, nothing brought.
+        let sol = ihatecrypto_core::mpp::NearCharge::SOLANA_MAINNET;
+        let pay = charged(e, false, sol, "", ME);
+        e.st_mut().payment.as_mut().unwrap().challenge.near.as_mut().unwrap().currency = format!("{sol}/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+        wallet(e, vec![("solana", vec![usdc("50")])]);
+        assert_eq!(labels(e, &pay), ["FROM · SOLANA", "PAY · NEAR INTENTS", "TO · EXAMPLE"]);
     });
 }

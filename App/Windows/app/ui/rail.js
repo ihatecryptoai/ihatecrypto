@@ -863,6 +863,8 @@ const companies = [
   { name: "Google", logo: "llm-gemini", tile: "#FFFFFF", ids: ["gemini-subscription", "gemini"] },
   { name: "xAI", logo: "llm-grok", tile: "#000000", ink: "#ffffff", ids: ["grok-subscription", "xai"] },
   { name: "DeepSeek", logo: "llm-deepseek", tile: "#FFFFFF", ids: ["deepseek"] },
+  // The network's own logo (logos/near.png) is already its green square: the tile is that same green.
+  { name: "NEAR AI Cloud (private)", logo: "near", tile: "#01EC97", ids: ["nearai"] },
   { name: "OpenRouter", logo: "llm-openrouter", tile: "#6566F1", ink: "#ffffff", ids: ["openrouter"] },
   { name: "Ollama", logo: "llm-ollama", tile: "#FFFFFF", ink: "#000000", ids: ["ollama"] },
   { name: "LM Studio", logo: "llm-lmstudio", tile: "#4338CA", ink: "#ffffff", ids: ["lmstudio"] },

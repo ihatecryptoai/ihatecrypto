@@ -95,6 +95,7 @@ impl Engine {
             "stopModel" => self.stop_model(),
             "retry" => boxed(|| self.retry_move()).await,
             "requote" => self.requote(),
+            "switchPrivacy" => boxed(|| self.switch_privacy()).await,
             "refreshModels" => boxed(|| self.refresh_models()).await,
             "downloadModel" => {
                 let (me, model) = (self.rc(), r.model.clone().unwrap_or_default());
@@ -144,7 +145,11 @@ impl Engine {
             }
             "saveAddress" => boxed(|| self.save_address(self.address_of(r))).await?,
             "removeAddress" => boxed(|| self.delete_address(name, network)).await?,
-            "removeAlert" => self.set_alerts(|a| a.retain(|x| r.wallet.as_ref() != Some(&x.id.to_string()))),
+            "removeAlert" => {
+                self.set_alerts(|a| a.retain(|x| r.wallet.as_ref() != Some(&x.id.to_string())));
+                // A loan guard is on the alerts block too (loan_guards.rs).
+                self.set_loan_guards(|g| g.retain(|x| r.wallet.as_ref() != Some(&x.id.to_string())));
+            }
             "removeTask" => self.set_tasks(|t| t.retain(|x| r.wallet.as_ref() != Some(&x.id.to_string()))),
             "taskOn" => self.set_task(wallet, on),
             "onboarding" => self.st_mut().onboarding = on,
@@ -231,6 +236,8 @@ impl Engine {
             "readFee" => boxed(|| self.read_fee_approval()).await,
             "node" => boxed(|| self.set_node(r.network.as_deref(), r.address.as_deref())).await?,
             "oneClickKey" => boxed(|| self.set_one_click_key(r.key.as_deref())).await?,
+            "agentKey" => boxed(|| self.set_agent_key(r.key.as_deref())).await?,
+            "agentHost" => self.set_agent_host(r.text.as_deref())?,
             "watch" => self.watch(r.solana.as_deref(), r.evm.as_deref())?,
             // From the window's browser, which read the origin from the webview itself.
             "dapp" => {
@@ -313,6 +320,8 @@ impl Engine {
                 me.refresh().await;
                 // After the read, as the Mac's watch(): a stop's Windows Hello never holds a refresh.
                 me.guard_positions().await;
+                // The guarded loans' health, after the read too (loan_guards.rs).
+                me.check_loan_guards().await;
                 me.offer_trading_key();
                 me.refresh_live().await;
                 me.read_closed().await;
