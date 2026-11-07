@@ -122,10 +122,18 @@ to `windows` and keeps the installer as an artifact for two weeks.
 - **Updates**: the Tauri updater checks
   `https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/latest.json` and installs only an
   archive signed with the key whose public half is in `tauri.conf.json`. The private key and its password are in the
-  release Mac's Keychain (`ihatecrypto-windows-updater`, `ihatecrypto-windows-updater-password`); given as
-  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `build.ps1` makes the signed update archive.
-  A release puts the installer, the archive and `latest.json` on a `windows-v<version>` release and `latest.json` on
-  the rolling `windows-latest` one.
+  release Mac's Keychain (`ihatecrypto-windows-updater`, `ihatecrypto-windows-updater-password`), and the key stays
+  there: the installers are signed on that Mac.
+- **A release** (0.9.0, 2026-11-07, the first one): the version in `tauri.conf.json` and the window's `Cargo.toml`, the
+  PC's own What's New in `whatsnew.py`, a push to `windows` (CI builds the x64 installer as an artifact) and
+  `build.ps1` on a Windows on ARM machine for the ARM64 one. On the Mac, `npx @tauri-apps/cli@2.12.4 signer sign <installer>`
+  with the key from the Keychain in `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` writes each
+  `.sig`; `latest.json` names both (`windows-x86_64`, `windows-aarch64`) with their `.sig` text and their URLs on the
+  versioned release. Both releases are pre-releases, so the repository's «Latest» stays the Mac's: `windows-v<version>`
+  holds the installers, their signatures, `latest.json` and SHA256SUMS; the rolling `windows-latest` holds `latest.json`
+  and the installers again under fixed names (`ihatecrypto-windows-x64-setup.exe`, `-arm64-`), which the landing links.
+  The installer doesn't remove files an older version left in `bin\`: a PC that had a Swift build keeps its DLLs there,
+  unused.
 
 ## What the Windows app has, and what it doesn't yet
 
