@@ -14,7 +14,8 @@ rust_decimal.workspace = true
 base64.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
+# The Agent API's wait between asks that got no answer.
+tokio.workspace = true
 
 [dev-dependencies]
 evm.workspace = true
-tokio.workspace = true

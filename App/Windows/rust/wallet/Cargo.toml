@@ -21,3 +21,5 @@ serde_json.workspace = true
 base64.workspace = true
 zeroize.workspace = true
 getrandom.workspace = true
+# An Agent API grant's expires_at (ISO 8601) and the date its prompt names.
+chrono.workspace = true

@@ -24,7 +24,7 @@ fn every_request_and_reply_matches_swift() {
         };
         assert_eq!(&back, swift, "{name}");
     }
-    assert_eq!(requests, 43); // 42 cases, signSolana twice (with and without a sponsor)
+    assert_eq!(requests, 47); // 45 cases, signSolana and signAgentDelegate twice (with and without a sponsor, a policy)
 }
 
 #[test]

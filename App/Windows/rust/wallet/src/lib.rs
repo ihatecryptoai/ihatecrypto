@@ -2,10 +2,12 @@
 //! for the same input (the tests carry its vectors), same words in its errors, since the window shows them.
 
 pub mod address_check;
+pub mod agent_owner;
 pub mod evm;
 pub mod keys;
 pub mod mnemonic;
 pub mod near;
+pub mod near_owner;
 pub mod typed_data;
 
 /// An error the person reads: `WalletError` in Swift.

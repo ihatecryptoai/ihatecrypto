@@ -259,6 +259,26 @@
       "seconds" : 300
     }
   },
+  "signAgentDelegate" : {
+    "signAgentDelegate" : {
+      "maxBlockHeight" : 190000000,
+      "nonce" : 7,
+      "payload" : "eyJyZWNlaXZlcklkIjoib3V0bGF5ZXIubmVhciJ9",
+      "policy" : "eyJmcm96ZW4iOmZhbHNlfQ=="
+    }
+  },
+  "signAgentDelegate_noPolicy" : {
+    "signAgentDelegate" : {
+      "maxBlockHeight" : 190000000,
+      "nonce" : 7,
+      "payload" : "+\/8="
+    }
+  },
+  "signAgentMessage" : {
+    "signAgentMessage" : {
+      "payload" : "eyJtZXNzYWdlIjoie30iLCJub25jZSI6IkFRPT0iLCJyZWNpcGllbnQiOiJhcGkuZGVtby5hZ2VudHNvbmludGVudHMuY29tIn0="
+    }
+  },
   "signEVMBatch" : {
     "signEVMBatch" : {
       "calls" : [
@@ -562,6 +582,17 @@
   "signTypedData" : {
     "signTypedData" : {
       "json" : "e30="
+    }
+  },
+  "signX402" : {
+    "signX402" : {
+      "chainId" : 8453,
+      "nonce" : "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+      "service" : "StableEnrich",
+      "to" : "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "token" : "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "validBefore" : 1800000300,
+      "value" : 10000
     }
   },
   "status" : {

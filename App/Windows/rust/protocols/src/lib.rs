@@ -1,7 +1,8 @@
-//! Relay, NEAR Intents' 1Click and Jupiter (`App/Sources/Protocols`): quotes asked, answers read, what they hand back
+//! Relay, NEAR Intents' 1Click and Agent API, and Jupiter (`App/Sources/Protocols`): quotes asked, answers read, what they hand back
 //! to sign. Every call goes through `net` (one client, the same retries); what each answer means is read here and
 //! tested offline. Hyperliquid's signing is its own crate.
 
+pub mod agent_api;
 pub mod jupiter;
 pub mod one_click;
 pub mod recurring;

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::{jupiter, one_click, recurring, relay};
+use crate::{agent_api, jupiter, one_click, recurring, relay};
 
 fn d(s: &str) -> Decimal { Decimal::from_str(s).unwrap() }
 
@@ -375,4 +375,56 @@ fn one_click_private_quotes_and_the_binding_they_are_checked_by() {
     assert_eq!(asset::payout("BTC", "bitcoin").map(|a| a.0), Some("BTC"));
     assert_eq!(asset::payout("USDC", "polygon"), None);
     assert_eq!(asset::payout("ETH", "base"), None);
+}
+
+// MARK: Agent API
+
+/// generate-intent's answer for an agent_create (the shape of a live one, 2026-11-04): the payload kept byte for byte to
+/// be signed and spliced back into submit-intent, the preview's policy under the hash the API names; status and errors.
+#[test]
+fn agent_api_answers_are_read() {
+    let answer = br#"{"correlation_id":"c-1","type":"agent_create","agent_id":"ab12","intent":{"standard":"nep366","payload":{"receiverId":"outlayer.near", "actions":[]}},"signer":{"account_id":"owner.near"},"expires_at":"2026-11-07T12:00:00Z","preview":{"policy":{"frozen":false,"budget":{"daily_usd":"20"}},"policy_hash":"00"}}"#;
+    let g = agent_api::parse_generated(answer).unwrap();
+    assert_eq!((g.correlation_id.as_str(), g.ty.as_str(), g.standard.as_str(), g.agent_id.as_deref()), ("c-1", "agent_create", "nep366", Some("ab12")));
+    assert_eq!(g.payload, br#"{"receiverId":"outlayer.near", "actions":[]}"#);
+    assert_eq!((g.signer_account.as_deref(), g.preview_hash.as_deref()), (Some("owner.near"), Some("00")));
+    assert_eq!(agent_api::policy_hash(g.preview_policy.as_ref().unwrap()), agent_api::policy_hash(br#"{ "budget": {"daily_usd": "20"}, "frozen": false }"#));
+    assert_eq!(String::from_utf8(agent_api::submit_body(&g, br#"{"standard":"nep366","payload":{"b":1, "a":2}}"#)).unwrap(),
+               r#"{"correlation_id":"c-1","type":"agent_create","signed_data":{"standard":"nep366","payload":{"b":1, "a":2}}}"#);
+    assert_eq!(agent_api::parse_generated(br#"{"correlation_id":"c-1","intent":{"payload":{}}}"#).unwrap_err().code, "http_200");
+
+    let s = agent_api::parse_status(br#"{"status":"SUCCESS","details":{"policy_hash":"ab"}}"#).unwrap();
+    assert!(s.is_final() && s.ok() && s.details.as_deref() == Some(&br#"{"policy_hash":"ab"}"#[..]));
+    assert!(!agent_api::parse_status(br#"{"status":"UNCERTAIN"}"#).unwrap().is_final());
+    assert!(agent_api::parse_status(br#"{"status":"NEEDS_REVIEW"}"#).unwrap().is_final());
+    assert_eq!(agent_api::parse_status(b"[]").unwrap().status, "UNKNOWN");
+
+    let f = agent_api::Failure::new(422, br#"{"errors":[{"code":"policy_violation","title":"Not allowed","detail":"over the daily cap"}]}"#);
+    assert_eq!(f.to_string(), "Agent API: Not allowed: over the daily cap (policy_violation)");
+    assert_eq!(agent_api::Failure::new(502, b"<html>bad gateway</html>").to_string(), "Agent API: <html>bad gateway</html> (http_502)");
+}
+
+/// Calls against a stand-in: none without a key, the API's own error, no answer told apart (status 0), and a status
+/// asked until it's final — again after no answer while there's time.
+#[tokio::test]
+async fn agent_api_calls_and_waits_until_final() {
+    agent_api::set_key(None);
+    assert_eq!(agent_api::call_at("http://127.0.0.1:9", "GET", "/v1/whoami", None, None, None).await.unwrap_err().code, "no_key");
+    agent_api::set_key(Some("naa_test".into()));
+    let (url, seen) = server(vec![(403, r#"{"errors":[{"code":"grant_expired","title":"Grant expired"}]}"#.into())]).await;
+    let e = agent_api::call_at(&url, "POST", "/v1/agents/a/withdraw", Some(b"{}"), Some("g"), Some("withdraw-1")).await.unwrap_err();
+    assert_eq!((e.status, e.code.as_str(), e.is_no_answer()), (403, "grant_expired", false));
+    assert_eq!(seen.lock().unwrap()[0], "POST /v1/agents/a/withdraw HTTP/1.1");
+
+    let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let nobody = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    assert!(agent_api::call_at(&nobody, "GET", "/v1/whoami", None, None, None).await.unwrap_err().is_no_answer());
+    let e = agent_api::until_final_at(&nobody, "c-1", Duration::from_millis(30), Duration::from_millis(5)).await.unwrap_err();
+    assert!(e.is_no_answer());
+
+    let (url, seen) = server(vec![(200, r#"{"status":"UNCERTAIN"}"#.into()), (200, r#"{"status":"SUCCESS"}"#.into())]).await;
+    assert!(agent_api::until_final_at(&url, "c-1", Duration::from_secs(5), Duration::from_millis(5)).await.unwrap().ok());
+    assert_eq!(*seen.lock().unwrap(), ["GET /v1/status?correlation_id=c-1&wait_ms=30000 HTTP/1.1"; 2]);
+    agent_api::set_key(None);
 }

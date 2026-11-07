@@ -22,7 +22,7 @@ use wallet::evm::{personal, sign};
 use wallet::keys::{self, base58, path};
 use wallet::near::{self, Action};
 use wallet::typed_data::TypedData;
-use wallet::{Result, WalletError, mnemonic};
+use wallet::{Result, WalletError, agent_owner, mnemonic, near_owner};
 use zeroize::Zeroizing;
 
 use crate::trusted::{Pref, prefs};
@@ -383,6 +383,31 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             Ok(SignerReply { signed_raw: Some(raw), checks: vec![format!("NEAR account {}… deleted into {beneficiary}", &account[..8.min(account.len())])], ..reply() })
         }
 
+        R::SignAgentMessage { payload } => {
+            let m = agent_owner::message(&payload)?;
+            confirm_afresh(&m.doing)?;
+            let raw = with_near_key(&m.doing, |secret, _| near_owner::nep413(&m.message, &m.nonce, &m.recipient, secret))?;
+            Ok(SignerReply { signed_raw: Some(raw), checks: vec![format!("NEP-413 to {}: {}", m.recipient, m.doing)], ..reply() })
+        }
+
+        R::SignAgentDelegate { payload, nonce, max_block_height, policy } => {
+            let d = agent_owner::delegate(&payload, &agent_owner::METHODS)?;
+            // The rules in words from the signer's own reading: only addresses it knows, the owner being this wallet.
+            let rules = match &policy {
+                Some(json) => {
+                    let owner = address("near")?;
+                    let mut known = recipients::all(recipients::List::Money);
+                    known.extend(book::all().into_iter().map(|a| a.address));
+                    Some(agent_owner::policy(json, &owner, &own::all(), &known)?)
+                }
+                None => None,
+            };
+            let doing = format!("agent wallet on NEAR Intents: {}{}", d.doing, rules.map_or(String::new(), |r| format!(" — {r}")));
+            confirm_afresh(&doing)?;
+            let raw = with_near_key(&doing, |secret, _| near_owner::sign_delegate(&d.receiver, &d.actions, nonce, max_block_height, secret))?;
+            Ok(SignerReply { signed_raw: Some(raw), checks: vec![format!("NEP-366 to {}: {}", d.receiver, d.doing)], ..reply() })
+        }
+
         R::Forget {} => {
             let Some(wallet) = wallets::active() else { return Ok(reply()) };
             confirm_in_person(&format!("remove the wallet «{}» from ihatecrypto", wallet.label))?;
@@ -537,6 +562,21 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::SignReceiveAuthorization { .. } => {
             // Relay's v3 proxy alone: nothing this signature covers names the order. Off (the owner, 2026-10-24).
             Ok(refused(problem("A payment by signature that names no Relay order: whom it pays can't be checked, so ihatecrypto doesn't sign it.")))
+        }
+
+        R::SignX402 { chain_id, token, to, value, valid_before, nonce, service } => {
+            let owner = address("evm")?;
+            let a = x402::Authorization { chain_id, token, from: owner.clone(), to, value, valid_before, nonce };
+            if let Some(r) = a.refusal(&owner, now()) { return Ok(refused(problem(&r))) }
+            // Each payment confirmed in person with its amount and payee: the payee isn't saved as a recipient, so it can't
+            // receive anything else later without its own prompt.
+            let name: String = service.chars().filter(|&c| !address_check::hidden(c)).take(60).collect();
+            let doing = format!("{} · {name}", a.summary());
+            confirm_afresh(&doing)?;
+            let digest = a.typed()?.parts()?.digest();
+            let signature = with_key("evm", &doing, |k| sign(&digest, k))?;
+            Ok(SignerReply { signatures: Some(vec![signature]),
+                             checks: vec!["The signer built the x402 authorization itself: a dollar it knows, from this wallet, at most $5, valid an hour.".into()], ..reply() })
         }
 
         R::SignSponsoredTransfer { chain_id, nonce, gas_limit, token, to, amount, recipients } => {
@@ -726,6 +766,96 @@ pub mod relay_orders {
     pub fn order(id: &[u8]) -> Option<RelayOrder> { HELD.lock().expect("relay").get(id).filter(|o| o.deadline > now()).cloned() }
 
     pub fn require(id: &[u8]) -> Result<RelayOrder> { order(id).ok_or_else(|| WalletError(UNCHECKED.into())) }
+}
+
+/// A paid API's price by x402, the `exact` scheme on EVM (`X402Authorization`, Chains/EVM/Permit3009.swift): EIP-3009
+/// TransferWithAuthorization of a dollar the signer knows by its own domain (Permit3009's tokens), from this wallet to the
+/// service's `payTo`, which the service's facilitator sends and pays the fee for. The signer builds the typed data itself
+/// and refuses more than `CAP` or longer than an hour.
+pub mod x402 {
+    use evm::U256;
+    use wallet::evm::eip712::{Field, Typed, Value};
+
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Authorization {
+        pub chain_id: u64,
+        pub token: String,
+        pub from: String,
+        pub to: String,
+        pub value: u64,
+        pub valid_before: u64,
+        pub nonce: Vec<u8>,
+    }
+
+    /// At most 5 dollars a payment: x402 prices an API call, not a transfer.
+    pub const CAP: u64 = 5_000_000;
+
+    fn dollars(units: u64) -> String { evm::units(&U256::from(units), 6) }
+
+    impl Authorization {
+        fn known(&self) -> Option<(&'static str, &'static str, &'static str)> { Permit3009::token_info(self.chain_id, &self.token) }
+
+        /// Why the signer won't sign it, or None. `now`: Unix seconds.
+        pub fn refusal(&self, owner: &str, now: u64) -> Option<String> {
+            if self.known().is_none() || self.chain_id != 8453 {
+                return Some(format!("{} on network {} isn't a dollar ihatecrypto pays an API with (USDC on Base only).", self.token, self.chain_id));
+            }
+            if self.from.to_lowercase() != owner.to_lowercase() { return Some("The payment isn't from this wallet.".into()) }
+            let address = self.to.len() == 42 && self.to.starts_with("0x") && self.to[2..].bytes().all(|b| b.is_ascii_hexdigit());
+            if !address || self.to.to_lowercase() == owner.to_lowercase() { return Some(format!("Not a service's address: {}.", self.to)) }
+            if self.value == 0 || self.value > CAP {
+                return Some(format!("An API payment is at most {} dollars. This one asks {}.", dollars(CAP), dollars(self.value)));
+            }
+            if self.nonce.len() != 32 { return Some("The payment by signature is incomplete.".into()) }
+            if self.valid_before <= now || self.valid_before > now + 3600 { return Some("The signature would stay valid for more than an hour, or has run out.".into()) }
+            None
+        }
+
+        pub fn typed(&self) -> Result<Typed> {
+            let Some((name, version, _)) = self.known() else { return fail(format!("Unknown dollar token {} on network {}.", self.token, self.chain_id)) };
+            Ok(Typed {
+                domain: vec![Field::new("name", "string", Value::String(name.into())), Field::new("version", "string", Value::String(version.into())),
+                             Field::new("chainId", "uint256", Value::Uint(self.chain_id)), Field::new("verifyingContract", "address", Value::Address(self.token.clone()))],
+                ty: "TransferWithAuthorization".into(),
+                message: vec![Field::new("from", "address", Value::Address(self.from.clone())), Field::new("to", "address", Value::Address(self.to.clone())),
+                              Field::new("value", "uint256", Value::Uint(self.value)), Field::new("validAfter", "uint256", Value::Uint(0)),
+                              Field::new("validBefore", "uint256", Value::Uint(self.valid_before)), Field::new("nonce", "bytes32", Value::Bytes32(self.nonce.clone()))],
+            })
+        }
+
+        pub fn summary(&self) -> String {
+            format!("pay {} {} on {} to {} for an API (x402, its facilitator pays the fee)", dollars(self.value), self.known().map_or("dollars", |k| k.2),
+                    network_name(self.chain_id), self.to)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn only_small_payments_from_this_wallet() {
+            let (me, service, usdc) = ("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913");
+            let now = 1_800_000_000;
+            let a = |to: &str, value: u64, before: u64, from: &str, token: &str| Authorization {
+                chain_id: 8453, token: token.into(), from: from.into(), to: to.into(), value, valid_before: before, nonce: vec![1; 32] };
+            let ok = a(service, 1000, 1_800_000_300, me, usdc);
+            assert_eq!(ok.refusal(me, now), None);
+            assert!(a(service, 5_000_001, 1_800_000_300, me, usdc).refusal(me, now).unwrap().ends_with("This one asks 5.000001."));
+            assert!(a(service, 1000, now + 7200, me, usdc).refusal(me, now).is_some());
+            assert!(a(service, 1000, 1_800_000_300, service, usdc).refusal(me, now).is_some());
+            assert!(a(me, 1000, 1_800_000_300, me, usdc).refusal(me, now).is_some());
+            assert!(a(service, 1000, 1_800_000_300, me, "0x0000000000000000000000000000000000000001").refusal(me, now).is_some());
+            assert!(Authorization { chain_id: 42161, token: "0xaf88d065e77c8cc2239327c5edb3a432268e5831".into(), ..ok.clone() }.refusal(me, now).is_some());
+            assert_eq!(ok.summary(), format!("pay 0.001 USDC on Base to {service} for an API (x402, its facilitator pays the fee)"));
+            // The digest the signer signs is EIP-3009's TransferWithAuthorization under USDC's own domain on Base.
+            let parts = ok.typed().unwrap().parts().unwrap();
+            assert_ne!(parts.digest(), Permit3009 { chain_id: 8453, token: usdc.into(), from: me.into(), to: service.into(), value: 1000,
+                                                    valid_before: 1_800_000_300, nonce: vec![1; 32] }.typed().unwrap().parts().unwrap().digest());
+        }
+    }
 }
 
 /// Where a Ledger's trading key is kept: by its account, which must be an EVM address.

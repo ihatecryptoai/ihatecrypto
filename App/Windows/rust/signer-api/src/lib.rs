@@ -90,6 +90,10 @@ pub enum SignerRequest {
     RelayOrder { #[serde(with = "b64")] order: Vec<u8> },
     /// EIP-3009 ReceiveWithAuthorization for Relay's approval proxy. Reply: signature.
     SignReceiveAuthorization { chain_id: u64, token: String, to: String, value: u64, valid_before: u64, #[serde(with = "b64")] nonce: Vec<u8> },
+    /// A paid API's price by x402: EIP-3009 TransferWithAuthorization the signer builds itself (`x402::Authorization`) —
+    /// a dollar it knows, from this wallet to `to`, at most 5 dollars, valid an hour at most, with `service` named on the
+    /// prompt. Reply: signatures[0].
+    SignX402 { chain_id: u64, token: String, to: String, value: u64, valid_before: u64, #[serde(with = "b64")] nonce: Vec<u8>, service: String },
     /// Relay's v3.2 MulticallAuthorization and its EIP-3009 authorization. Reply: signatures, the MulticallAuthorization's first.
     SignRelayMulticallPermit {
         chain_id: u64, token: String, value: u64, valid_before: u64, relayer: String, refund_to: String,
@@ -120,6 +124,20 @@ pub enum SignerRequest {
     SignNearTransfer { amount: String, receiver: String, recipients: Vec<String>, nonce: u64, #[serde(with = "b64")] block_hash: Vec<u8> },
     /// DeleteAccount of the wallet's NEAR account into `beneficiary` (one of `recipients`).
     SignNearDeleteAccount { beneficiary: String, recipients: Vec<String>, nonce: u64, #[serde(with = "b64")] block_hash: Vec<u8> },
+    /// NEAR Intents' Agent API, as an agent wallet's owner (this wallet's NEAR key): a NEP-413 message the signer reads
+    /// itself (`agent_owner::message`): only to the Agent API's host, only owner requests it can say, confirmed in person
+    /// each time. Reply: signedRaw = the 64-byte ed25519 signature.
+    SignAgentMessage { #[serde(with = "b64")] payload: Vec<u8> },
+    /// The same owner's NEP-366 delegate action to the agent wallets' custody contract (`agent_owner::delegate`: create,
+    /// freeze, a policy change), which the API's sponsor sends on chain. `nonce`, `max_block_height`: from the owner's
+    /// access key. `policy`: the complete policy the call carries (or hashes), checked by the signer itself
+    /// (`agent_owner::policy`). Reply: signedRaw = the borsh SignedDelegateAction.
+    SignAgentDelegate {
+        #[serde(with = "b64")] payload: Vec<u8>,
+        nonce: u64,
+        max_block_height: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "b64opt")] policy: Option<Vec<u8>>,
+    },
     /// A new automation wallet (one at most), signing without a prompt for scheduled tasks' budget.
     CreateAutomationWallet {},
     /// A 6-digit passcode (`passcode::problem` must pass), confirmed in person first.
