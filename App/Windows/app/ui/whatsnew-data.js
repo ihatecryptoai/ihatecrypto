@@ -2,6 +2,24 @@
 // App/Windows/whatsnew.py at release; edit the Mac's file, not this one.
 export const releases = [
  {
+  "version": "0.9.0",
+  "date": "2026-11-07",
+  "stories": [
+   {
+    "title": "Rebuilt in Rust",
+    "symbol": "wrench.and.screwdriver.fill",
+    "color": "FF9F0A",
+    "text": "The engine and the signer are Rust programs now, each part checked against the Mac's code with its own tests. A plain chat command is answered in about 8 ms instead of 120, the app starts faster, and what's installed is two programs of 20 MB instead of 38 files of 155 MB."
+   },
+   {
+    "title": "Windows Hello as Windows draws it",
+    "symbol": "checkmark.shield.fill",
+    "color": "30D158",
+    "text": "Confirm, the lock screen and a site's request show the PIN keypad Windows Hello asks with. Every move still asks Windows Hello before it's signed, and the app's passcode only opens the window."
+   }
+  ]
+ },
+ {
   "version": "0.7.7",
   "date": "2026-10-24",
   "stories": [

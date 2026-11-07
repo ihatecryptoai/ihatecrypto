@@ -41,7 +41,20 @@ def said(text):
     return text
 
 releases = json.load(open(src, encoding="utf-8"))
-for r in releases:
+# The PC's own releases, newest first, before the Mac's: what only the Windows app changed.
+PC_ONLY = [
+    {"version": "0.9.0", "date": "2026-11-07", "stories": [
+        {"title": "Rebuilt in Rust", "symbol": "wrench.and.screwdriver.fill", "color": "FF9F0A",
+         "text": "The engine and the signer are Rust programs now, each part checked against the Mac's code with its own tests. "
+                 "A plain chat command is answered in about 8 ms instead of 120, the app starts faster, and what's installed is "
+                 "two programs of 20 MB instead of 38 files of 155 MB."},
+        {"title": "Windows Hello as Windows draws it", "symbol": "checkmark.shield.fill", "color": "30D158",
+         "text": "Confirm, the lock screen and a site's request show the PIN keypad Windows Hello asks with. Every move still "
+                 "asks Windows Hello before it's signed, and the app's passcode only opens the window."},
+    ]},
+]
+releases = PC_ONLY + releases
+for r in releases[len(PC_ONLY):]:
     for s in r["stories"]:
         for k in ("title", "text", "try"):
             if isinstance(s.get(k), str): s[k] = said(s[k])
