@@ -23,8 +23,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Every crate's tests even after one fails, so a run shows all that Windows breaks.
       - name: Test
-        run: cargo test --locked --manifest-path Windows/rust/Cargo.toml
+        run: cargo test --locked --no-fail-fast --manifest-path Windows/rust/Cargo.toml
 
   # The installer, from the same commit: the engine and the signer in release, the window, NSIS.
   # Unsigned until the repository has a code-signing certificate (Windows/build.ps1 signs when WINDOWS_PFX is set).

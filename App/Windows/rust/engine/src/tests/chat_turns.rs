@@ -355,17 +355,20 @@ async fn the_meter_counts_what_the_chat_read_and_what_a_key_paid() {
 #[tokio::test]
 async fn the_model_menu_knows_what_fits_this_pc() {
     on_engine(async |e| {
-        // Off Windows the PC is a 16 GB stand-in.
+        // Off Windows the PC is a 16 GB stand-in; on Windows it is the machine's own memory (a CI runner may have 7 GB).
+        #[cfg(not(windows))]
         assert!(Engine::fits(8.0) && !Engine::fits(12.0));
+        let gb = Engine::memory_gb();
+        assert!(Engine::fits(gb / 2.0) && !Engine::fits(gb));
         let ollama = e.provider("ollama").unwrap().info();
         let view = e.models_view();
         assert_eq!(view.recommended["ollama"], ollama.default_model);
         assert_eq!(view.memory_gb, Engine::memory_gb().round() as i64);
         assert!(view.refusals.is_empty() && !view.installed);
         // Sizes read: the biggest suggested model that fits.
-        for m in &ollama.models { e.st_mut().model_sizes.insert(m.clone(), 40.0); }
+        for m in &ollama.models { e.st_mut().model_sizes.insert(m.clone(), gb); }
         let small = ollama.models.last().unwrap().clone();
-        e.st_mut().model_sizes.insert(small.clone(), 7.5);
+        e.st_mut().model_sizes.insert(small.clone(), gb / 2.0);
         assert_eq!(e.local_pick().as_deref(), Some(small.as_str()));
         assert_eq!(e.models_view().recommended["ollama"], small);
         e.get_ollama();

@@ -347,6 +347,7 @@ fn the_guardian_runs_after_the_read_not_inside_it() {
     assert!(!read_once.contains("guard_positions("));
     assert!(read_once.contains("self.read_closed().await"));
     // The loop runs it once its read has landed, as the Mac's watch() (Execution.swift:1076-1078).
-    let looped = fancy_regex::Regex::new(r"me\.refresh\(\)\.await;\n(\s*//[^\n]*\n)*\s*me\.guard_positions\(\)\.await;").unwrap();
+    // `\r?`: a Windows checkout ends its lines in CRLF.
+    let looped = fancy_regex::Regex::new(r"me\.refresh\(\)\.await;\r?\n(\s*//[^\n]*\n)*\s*me\.guard_positions\(\)\.await;").unwrap();
     assert!(looped.is_match(include_str!("../dispatch.rs")).unwrap());
 }
