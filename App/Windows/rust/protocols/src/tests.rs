@@ -355,3 +355,24 @@ async fn live_quotes_answer() {
     let q = jupiter::quote(jupiter::USDC_MINT, jupiter::SOL_MINT, 1_000_000, 50, &[]).await.unwrap();
     assert!(q.out_amount > 0 && !q.dexes.is_empty());
 }
+
+/// A private quote asks 1Click for Confidential Intents; the binding read back carries what the guard checks for it
+/// and for an MPP charge; a private send pays USDC on Solana and the EVM networks 1Click takes it on, and coins across.
+#[test]
+fn one_click_private_quotes_and_the_binding_they_are_checked_by() {
+    use crate::one_click::{Ask, asset, parse_bound};
+    let ask = Ask::new(true, asset::SOLANA_USDC, "nep141:btc.omft.near", "1000", "me", "you");
+    assert!(ask.body().get("confidentiality").is_none());
+    assert_eq!(Ask { confidential: true, ..ask }.body()["confidentiality"], "basic");
+    let bound = parse_bound(br#"{"quoteResponse":{"quoteRequest":{"recipient":"r","refundTo":"f","originAsset":"o","destinationAsset":"d","amount":"1000000",
+        "confidentiality":"basic","swapType":"EXACT_OUTPUT"},"quote":{"depositAddress":"0xdep","amountIn":"1020228","minAmountIn":"1010125","deadline":"2099-01-01T00:00:00.000Z"}}}"#).unwrap();
+    for (k, v) in [("confidentiality", "basic"), ("swapType", "EXACT_OUTPUT"), ("depositAddress", "0xdep"), ("quoteAmountIn", "1020228"),
+                   ("quoteMinAmountIn", "1010125"), ("deadline", "2099-01-01T00:00:00.000Z")] {
+        assert_eq!(bound.get(k).map(String::as_str), Some(v), "{k}");
+    }
+    assert_eq!(asset::payout("usdc", "base").map(|a| a.1), asset::usdc_on_evm("base"));
+    assert_eq!(asset::payout("USDC", "solana").map(|a| a.1), Some(asset::SOLANA_USDC));
+    assert_eq!(asset::payout("BTC", "bitcoin").map(|a| a.0), Some("BTC"));
+    assert_eq!(asset::payout("USDC", "polygon"), None);
+    assert_eq!(asset::payout("ETH", "base"), None);
+}

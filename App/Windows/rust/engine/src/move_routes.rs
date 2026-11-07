@@ -321,7 +321,7 @@ impl Engine {
             }
             WalletCommand::SendToken { name, token, amount: Some(x), network } => {
                 let (entry, symbol, address) = self.across_recipient(name, token, network.as_deref()).ok().flatten()?;
-                let (q, _, _, source) = e.across_quote(&symbol, *x, &entry.network, &address).await.ok()?;
+                let (q, _, _, source) = e.across_quote(&symbol, *x, &entry.network, &address, false).await.ok()?;
                 // What it's worth there, and what 1Click and the network keep: a small BTC send loses a fifth to fees.
                 let cost = foundation::decimal(&q.amount_in_formatted).unwrap_or_default();
                 let worth = q.amount_out_usd;

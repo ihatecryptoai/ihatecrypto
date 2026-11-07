@@ -745,3 +745,39 @@ fn screen_says_why_as_data() {
     assert_eq!(screen(note, Some(&says("payment_redirect", 0.91))).stops, [Stop::Redirects(91)]);
     assert!(screen("лонг ETH", Some(&says("data", 0.9))).stops.is_empty());
 }
+
+/// An MPP service's deposit through NEAR Intents: bound by 1Click to the service's recipient, exact amount and refund
+/// address, never more than 1Click's own quote takes, never under its minimum or past its deadline (main's GuardTests).
+#[test]
+fn an_mpp_charge_deposit_is_bound_and_at_one_clicks_price() {
+    let refund = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    let base = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near";
+    let bound = map(&[("recipient", "merchant.near"), ("refundTo", &refund.to_lowercase()), ("originAsset", base), ("destinationAsset", "nep141:usdc.near"),
+                      ("amount", "1000000"), ("swapType", "EXACT_OUTPUT"), ("quoteAmountIn", "1005000")]);
+    let now = 1_800_000_000;
+    let check = |b: &HashMap<String, String>, deposit: u64, destination: Option<&str>| {
+        deposit_charge(b, "merchant.near", refund, base, destination, "1000000", deposit, now)
+    };
+    let with = |k: &str, v: &str| { let mut b = bound.clone(); b.insert(k.into(), v.into()); b };
+    assert!(check(&bound, 1_010_000, Some("nep141:usdc.near")).ok());
+    assert!(check(&bound, 1_010_000, None).ok());
+    assert!(!check(&bound, 2_000_000, None).ok());   // padded: the extra goes back to the service
+    assert!(!check(&with("recipient", "attacker.near"), 1_010_000, None).ok());
+    assert!(!check(&with("amount", "900000"), 1_010_000, None).ok());
+    assert!(!check(&with("swapType", "EXACT_INPUT"), 1_010_000, None).ok());
+    assert!(!check(&with("destinationAsset", "nep141:other.near"), 1_010_000, Some("nep141:usdc.near")).ok());
+    let mut unpriced = bound.clone();
+    unpriced.remove("quoteAmountIn");
+    assert!(!check(&unpriced, 1_010_000, None).ok());
+    // Under 1Click's minimum, or after its quote ran out, it would only be refunded — to the service.
+    assert!(!check(&with("quoteMinAmountIn", "1015000"), 1_010_000, None).ok());
+    assert!(check(&with("deadline", "2099-01-01T00:00:00.000Z"), 1_010_000, None).ok());
+    assert!(!check(&with("deadline", "2020-01-01T00:00:00.000Z"), 1_010_000, None).ok());
+}
+
+#[test]
+fn a_private_move_goes_only_where_one_click_holds_it_confidential() {
+    assert!(deposit_confidential(&map(&[("confidentiality", "basic")])).ok());
+    assert!(!deposit_confidential(&map(&[("confidentiality", "public")])).ok());
+    assert!(!deposit_confidential(&map(&[])).ok());
+}

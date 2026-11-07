@@ -161,6 +161,6 @@ fn swaps_run_on_any_thread(e: &Executor, net: &EvmNetwork) {
     send(e.stock_quotes("TSLA", None, None));
     send(e.cross_swap("SOL", "solana", "ETH", "base", None, None));
     send(e.cross_quote_text("SOL", "solana", "ETH", "base", None, None));
-    send(e.intent_swap("NEAR", "near", "USDC", "solana", None, None));
+    send(e.intent_swap("NEAR", "near", "USDC", "solana", None, None, false));
     send(e.tempo_swap("USDC", "USDT0", None));
 }

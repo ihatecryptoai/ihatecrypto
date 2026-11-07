@@ -143,14 +143,14 @@ impl Executor {
     pub async fn cross_quote_text(&self, a: &str, from: &str, b: &str, to: &str, amount: Option<Decimal>, near: Option<&str>) -> Result<(String, String)> {
         if from == "near" || to == "near" {
             let Some(amount) = amount else { return fail(format!("Say how much {}.", a.to_uppercase())) };
-            return self.intent_quote_text(a, from, b, to, amount, near).await;
+            return self.intent_quote_text(a, from, b, to, amount, near, false).await;
         }
         match self.cross_quote(a, from, b, to, amount, false).await {
             Ok(q) => Ok((format!("{} {} ≈ {}", Fmt::num(dec(&q.quote.amount_out_formatted), 8), q.destination.symbol, Fmt::usd(dec(&q.quote.amount_out_usd))),
                          format!("≈ {} s", q.quote.seconds.max(1)))),
             Err(error) if Self::intents_may_take(&error) => {
                 let Some(amount) = amount else { return Err(error) };
-                self.intent_quote_text(a, from, b, to, amount, near).await.or(Err(error))
+                self.intent_quote_text(a, from, b, to, amount, near, false).await.or(Err(error))
             }
             Err(error) => Err(error),
         }
@@ -160,15 +160,15 @@ impl Executor {
     /// landed. NEAR's side goes through NEAR Intents, and so does a pair Relay has no route for when 1Click lists both
     /// tokens. A stop by the guard or the signer on Relay's quote reaches the user as it is, never taken to NEAR Intents.
     pub async fn cross_swap(&self, a: &str, from: &str, b: &str, to: &str, amount: Option<Decimal>, near: Option<&str>) -> Result<String> {
-        if from == "near" || to == "near" { return self.intent_swap(a, from, b, to, amount, near).await }
+        if from == "near" || to == "near" { return self.intent_swap(a, from, b, to, amount, near, false).await }
         if let Some(why) = modules().refusal(ModuleProtocol::Relay, &[], false) { return fail(why) }
         let quoted = match self.cross_quote(a, from, b, to, amount, true).await {
             Ok(q) => q,
             Err(error) if Self::intents_may_take(&error) => {
                 let Some(amount) = amount else { return Err(error) };
-                if self.intent_quote(a, from, b, to, amount, near, true).await.is_err() { return Err(error) }
+                if self.intent_quote(a, from, b, to, amount, near, true, false).await.is_err() { return Err(error) }
                 self.report(&format!("Relay: {error} NEAR Intents has a route: taking it."));
-                return self.intent_swap(a, from, b, to, Some(amount), near).await;
+                return self.intent_swap(a, from, b, to, Some(amount), near, false).await;
             }
             Err(error) => return Err(error),
         };

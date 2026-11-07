@@ -99,6 +99,16 @@ pub mod asset {
             _ => &[],
         }
     }
+
+    /// What a private send can pay on `network`: the coins of a network ihatecrypto has no wallet on (`across`), or USDC
+    /// on Solana and on the EVM networks 1Click takes it on: (ticker, asset, decimals).
+    pub fn payout(symbol: &str, network: &str) -> Option<(&'static str, &'static str, u32)> {
+        let up = symbol.to_uppercase();
+        if let Some(a) = across(network).iter().find(|a| a.0 == up) { return Some(*a) }
+        if up != "USDC" { return None }
+        let id = if network == "solana" { Some(SOLANA_USDC) } else { usdc_on_evm(network) }?;
+        Some(("USDC", id, 6))
+    }
 }
 
 /// ISO 8601 UTC, whole seconds: what ISO8601DateFormatter writes.
@@ -159,26 +169,35 @@ pub struct Ask {
     pub flexible: bool,
     pub refund_to_intents: bool,
     pub minutes: f64,
+    /// Confidential Intents: the deposit and the payout can't be matched to each other on chain. Needs the partner key.
+    pub confidential: bool,
 }
 
 impl Ask {
     /// The Swift defaults: 1% slippage, an exact input, 30 minutes.
     pub fn new(dry: bool, origin: &str, destination: &str, amount: &str, refund_to: &str, recipient: &str) -> Self {
         Ask { dry, exact_output: false, origin: origin.into(), destination: destination.into(), amount: amount.into(), refund_to: refund_to.into(),
-              recipient: recipient.into(), slippage_bps: 100, flexible: false, refund_to_intents: false, minutes: 30.0 }
+              recipient: recipient.into(), slippage_bps: 100, flexible: false, refund_to_intents: false, minutes: 30.0, confidential: false }
     }
 
     pub fn body(&self) -> Value {
-        json!({
+        let mut body = json!({
             "dry": self.dry, "swapType": if self.flexible { "FLEX_INPUT" } else if self.exact_output { "EXACT_OUTPUT" } else { "EXACT_INPUT" },
             "slippageTolerance": self.slippage_bps, "originAsset": self.origin, "depositType": "ORIGIN_CHAIN", "destinationAsset": self.destination,
             "amount": self.amount, "refundTo": self.refund_to, "refundType": if self.refund_to_intents { "INTENTS" } else { "ORIGIN_CHAIN" },
             "recipient": self.recipient, "recipientType": "DESTINATION_CHAIN", "deadline": deadline(self.minutes), "quoteWaitingTimeMs": 3000,
-        })
+        });
+        if self.confidential { body["confidentiality"] = json!("basic") }
+        body
     }
 }
 
-pub async fn quote(ask: &Ask) -> Result<Quote> { parse_quote(&post_json("/quote", &ask.body()).await?) }
+pub async fn quote(ask: &Ask) -> Result<Quote> {
+    if ask.confidential && key().is_none() {
+        return Err(WalletError("A private send needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.".into()));
+    }
+    parse_quote(&post_json("/quote", &ask.body()).await?)
+}
 
 pub fn parse_quote(data: &[u8]) -> Result<Quote> {
     let j: Option<Value> = serde_json::from_slice(data).ok();
@@ -205,9 +224,14 @@ pub fn parse_bound(data: &[u8]) -> Result<HashMap<String, String>> {
     let j: Option<Value> = serde_json::from_slice(data).ok();
     let Some(quote) = j.as_ref().and_then(|j| j.get("quoteResponse")).filter(|q| q.is_object()) else { return Err(error(data)) };
     let Some(request) = quote.get("quoteRequest").filter(|r| r.is_object()) else { return Err(error(data)) };
-    let mut out: HashMap<String, String> = ["recipient", "refundTo", "originAsset", "destinationAsset", "amount"].iter()
+    let mut out: HashMap<String, String> = ["recipient", "refundTo", "originAsset", "destinationAsset", "amount", "confidentiality", "swapType"].iter()
         .filter_map(|k| Some((k.to_string(), s(request, k)?.to_string()))).collect();
-    if let Some(a) = quote.get("quote").and_then(|q| s(q, "depositAddress")) { out.insert("depositAddress".into(), a.into()); }
+    let q = quote.get("quote");
+    // What 1Click's own quote takes for this deposit and until when: an MPP service's challenge may not ask more
+    // (DepositGuard::charge).
+    for (key, field) in [("depositAddress", "depositAddress"), ("quoteAmountIn", "amountIn"), ("quoteMinAmountIn", "minAmountIn"), ("deadline", "deadline")] {
+        if let Some(v) = q.and_then(|q| s(q, field)) { out.insert(key.into(), v.into()); }
+    }
     Ok(out)
 }
 

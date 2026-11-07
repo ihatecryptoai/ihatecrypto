@@ -1266,7 +1266,7 @@ impl Engine {
             }
             W::SendToken { name, token, amount: Some(amount), network } if matches!(self.across_recipient(name, token, network.as_deref()), Ok(Some(_))) => {
                 if let Some((entry, symbol, address)) = self.across_recipient(name, token, network.as_deref())? {
-                    reply(e.send_across(&symbol, *amount, &entry.network, &address, &entry.name).await?, "NEAR Intents");
+                    reply(e.send_across(&symbol, *amount, &entry.network, &address, &entry.name, false).await?, "NEAR Intents");
                 }
             }
             W::SendToken { name, token, amount, network } => {
@@ -1318,7 +1318,7 @@ impl Engine {
             }
             W::SwapOn { place, from, to, amount } if place == "near" => {
                 let account = near_account().await?;
-                reply(e.intent_swap(from, "near", to, "near", *amount, Some(&account)).await?, "NEAR Intents · 1Click");
+                reply(e.intent_swap(from, "near", to, "near", *amount, Some(&account), false).await?, "NEAR Intents · 1Click");
             }
             W::SwapOn { place, from, to, amount } if place == "hyperliquid" => reply(e.hl_spot_swap(from, to, *amount).await?, "Hyperliquid · spot"),
             W::SwapOn { place, from, to, amount } => reply(e.swap_on(net(place)?, from, to, *amount).await?, "Uniswap"),

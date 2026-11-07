@@ -255,5 +255,52 @@ pub fn deposit_check(bound: &HashMap<String, String>, recipient: &str, refund_to
     v
 }
 
+/// A private move goes only where 1Click itself holds the deposit as confidential (Confidential Intents): else it would
+/// go in the open.
+pub fn deposit_confidential(bound: &HashMap<String, String>) -> Verdict {
+    let mut v = Verdict::default();
+    if bound.get("confidentiality").is_some_and(|c| c.eq_ignore_ascii_case("basic")) {
+        v.checks.push("1Click holds the deposit as confidential.".into());
+    } else {
+        v.problems.push(format!("1Click didn't take it as private (Confidential Intents): it says «{}».", bound.get("confidentiality").map_or("nothing", String::as_str)));
+    }
+    v
+}
+
+/// A deposit an MPP service asks for through NEAR Intents (its quote, not ours): 1Click itself must hold the address for
+/// an exact-output quote paying the service's recipient exactly `amount_out`, refunding to the address the service named,
+/// taking USDC from the network paid on and, when it's known, paying the asset the card shows. And the deposit can't be
+/// more than 1Click's quote takes plus its slippage, under its minimum, or after its quote runs out: all of those would
+/// only come back as a refund — to the service. `bound` as one_click::bound_request reads it; `now` in Unix seconds.
+#[allow(clippy::too_many_arguments)]
+pub fn deposit_charge(bound: &HashMap<String, String>, recipient: &str, refund_to: &str, origin: &str, destination: Option<&str>,
+                      amount_out: &str, deposit: u64, now: i64) -> Verdict {
+    let mut v = Verdict::default();
+    if bound.get("swapType").map(String::as_str) != Some("EXACT_OUTPUT") {
+        v.problems.push(format!("1Click holds it as {} quote, not one paying an exact amount.", bound.get("swapType").map_or("an unknown", String::as_str)));
+    }
+    let mut expected = vec![("amount", amount_out), ("originAsset", origin), ("recipient", recipient), ("refundTo", refund_to)];
+    if let Some(d) = destination { expected.push(("destinationAsset", d)) }
+    expected.sort_by_key(|e| e.0);
+    for (field, value) in expected {
+        if bound.get(field).map(|b| b.to_lowercase()) == Some(value.to_lowercase()) { continue }
+        v.problems.push(format!("The deposit address is bound to a different {field}: {} instead of {value}.", bound.get(field).map_or("none", String::as_str)));
+    }
+    match bound.get("quoteAmountIn").and_then(|a| a.parse::<u64>().ok()) {
+        // 1Click's own price for this deposit, plus 1% for its slippage and rounding.
+        Some(asked) if deposit > asked + asked / 100 + 1 => v.problems.push(format!("The service asks {deposit} units, more than the {asked} 1Click takes for it.")),
+        Some(_) => {}
+        None => v.problems.push("1Click didn't say what this deposit costs.".into()),
+    }
+    if let Some(least) = bound.get("quoteMinAmountIn").and_then(|a| a.parse::<u64>().ok()) && deposit < least {
+        v.problems.push(format!("The deposit is under the {least} units 1Click needs for it."));
+    }
+    if let Some(d) = bound.get("deadline") && let Ok(t) = chrono::DateTime::parse_from_rfc3339(d) && t.timestamp() < now + 120 {
+        v.problems.push(format!("1Click's quote for this deposit runs out at {d}"));
+    }
+    if v.ok() { v.checks.push("1Click holds the deposit for the service's recipient, its exact amount and its refund address, at 1Click's own price.".into()) }
+    v
+}
+
 #[cfg(test)]
 mod tests;

@@ -10,6 +10,8 @@ wallet.workspace = true
 hyperliquid.workspace = true
 solana.workspace = true
 rust_decimal.workspace = true
+# A 1Click quote's deadline (deposit_charge).
+chrono.workspace = true
 # Swift's Regex has lookahead; the regex crate doesn't.
 fancy-regex = "0.20"
 # Jev's request and answer (jev.rs); its HTTP is the engine's.

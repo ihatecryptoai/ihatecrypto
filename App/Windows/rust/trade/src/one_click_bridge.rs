@@ -103,6 +103,115 @@ impl Executor {
         Ok(s.amount_out_formatted.as_deref().and_then(decimal).or_else(|| decimal(&quote.amount_out_formatted)).unwrap_or_default())
     }
 
+    /// What `usdc` from `from` lands on `to` through 1Click now («solana» or an EVM network 1Click pays USDC on), for the
+    /// card; None when it doesn't quote. Nothing is issued.
+    pub async fn intents_quote(&self, from: &str, to: &str, usdc: Decimal) -> Option<(Decimal, Option<i64>)> {
+        let units = rounded(num(Num::of(usdc) * Decimal::from(1_000_000)).ok()?, 0, Rounding::Down).to_string().parse::<u64>().ok()?;
+        let place = |p: &str| (p != "solana").then(|| p.to_string());
+        if units == 0 { return None }
+        let q = self.one_click_quote(place(from).as_deref(), place(to).as_deref(), units).await?;
+        Some((decimal(&q.amount_out_formatted)?, q.time_estimate))
+    }
+
+    /// USDC through 1Click asked for by name («… via NEAR Intents»), whatever Relay would land: `from` and `to` are
+    /// «solana» or an EVM network 1Click pays USDC on. None `usdc` = all of it on `from`. `shown`: what the card said
+    /// arrives; the move stops when 1Click now lands more than 1% under it.
+    pub async fn intents_bridge(&self, from: &str, to: &str, usdc: Option<Decimal>, shown: Option<Decimal>) -> Result<String> {
+        let src = (from != "solana").then_some(from);
+        let dst = (to != "solana").then_some(to);
+        let (a, b) = (WalletCommand::place_name(from), WalletCommand::place_name(to));
+        if src == dst || src.is_some_and(|s| asset::usdc_on_evm(s).is_none()) || dst.is_some_and(|d| asset::usdc_on_evm(d).is_none()) {
+            return fail(format!("NEAR Intents doesn't move USDC from {a} to {b}. Nothing was signed."));
+        }
+        let held = match src.and_then(EvmNetwork::named) {
+            Some(net) => net.usdc_balance(&self.wallet.evm).await?,
+            None => self.rpc.token_balance(&self.wallet.solana, relay::currency::SOLANA_USDC).await?,
+        };
+        let units = match usdc {
+            Some(x) => rounded(num(Num::of(x) * Decimal::from(1_000_000))?, 0, Rounding::Down).to_string().parse::<u64>().unwrap_or(0),
+            None => held,
+        };
+        if units == 0 || units > held { return fail(format!("{} USDC on {a}. Nothing was signed.", Fmt::num(millionths(held), 2))) }
+        let Some(q) = self.one_click_quote(src, dst, units).await else {
+            return fail(format!("NEAR Intents didn't quote USDC from {a} to {b} now. Nothing was signed."));
+        };
+        let out = decimal(&q.amount_out_formatted).unwrap_or_default();
+        let sent = Fmt::num(millionths(units), 2);
+        self.report(&format!("NEAR Intents' 1Click: {sent} USDC from {a} → ≈ {} on {b}{}.", Fmt::num(out, 4), q.time_estimate.map_or(String::new(), |t| format!(" in ≈ {t} s"))));
+        let started = Instant::now();
+        let got = self.one_click_move(src, dst, units, shown.unwrap_or(out), &format!("{sent} USDC")).await?;
+        Ok(format!("Moved {sent} USDC from {a} to {b} through NEAR Intents' 1Click in {} s: {} USDC arrived.", started.elapsed().as_secs(), Fmt::num(got, 2)))
+    }
+
+    /// USDC from Solana to an EVM network's own USDC through NEAR Intents' 1Click, as `bridge` does it: for a payment
+    /// there that its USDC can't cover. What arrived.
+    pub async fn usdc_by_intents(&self, network: &str, usdc: Decimal) -> Result<Decimal> {
+        let units = rounded(num(Num::of(usdc) * Decimal::from(1_000_000))?, 0, Rounding::Up).to_string().parse::<u64>().unwrap_or(0);
+        let Some(q) = self.one_click_quote(None, Some(network), units).await else {
+            return fail(format!("NEAR Intents doesn't quote USDC from Solana to {network} now. Nothing was sent."));
+        };
+        let out = decimal(&q.amount_out_formatted).unwrap_or_default();
+        self.one_click_move(None, Some(network), units, out, &format!("USDC to {network} through NEAR Intents")).await
+    }
+
+    /// USDC from Solana into an agent wallet on NEAR Intents (Agent API). The deposit address the API gave must be
+    /// 1Click's, bound by 1Click itself to the agent's own NEAR Intents account, to Solana USDC on both sides, to exactly
+    /// this amount and to a refund back to the agent, before anything is sent. Returns the transaction.
+    pub async fn fund_agent(&self, units: u64, deposit_address: &str, agent_account: &str) -> Result<String> {
+        let bound = one_click::bound_request(deposit_address).await?;
+        let said = |k: &str| bound.get(k).map_or("nothing", String::as_str).to_string();
+        if bound.get("recipient").map(String::as_str) != Some(agent_account) {
+            return stop(format!("The guard stopped the deposit: 1Click has it paying «{}», not the agent wallet. Nothing was sent.", said("recipient")));
+        }
+        if bound.get("originAsset").map(String::as_str) != Some(asset::SOLANA_USDC) {
+            return stop("The guard stopped the deposit: it doesn't take USDC on Solana. Nothing was sent.");
+        }
+        // And it stays USDC: the deposit address is the Agent API's, and a swap into another token would be at its rate.
+        if bound.get("destinationAsset").map(String::as_str) != Some(asset::SOLANA_USDC) {
+            return stop(format!("The guard stopped the deposit: 1Click would turn the USDC into «{}» for the agent wallet. Nothing was sent.", said("destinationAsset")));
+        }
+        // Exactly this amount, and a refund back to the agent itself: a short deposit can't be refunded elsewhere.
+        if bound.get("amount") != Some(&units.to_string()) {
+            return stop(format!("The guard stopped the deposit: 1Click expects {}, not {units}. Nothing was sent.", said("amount")));
+        }
+        if bound.get("refundTo").map(String::as_str) != Some(agent_account) {
+            return stop(format!("The guard stopped the deposit: a refund would go to «{}», not the agent wallet. Nothing was sent.", said("refundTo")));
+        }
+        self.report(&format!("NEAR Intents: {} USDC from Solana into the agent wallet.", Fmt::num(millionths(units), 6)));
+        let tx = last_part(&self.send_solana_usdc(units, deposit_address, "the agent wallet's deposit").await?);
+        self.record("1click", deposit_address, Kind::Signed, "Solana USDC → agent wallet")?;
+        if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, deposit_address).await; }
+        Ok(tx)
+    }
+
+    /// An MPP charge through NEAR Intents (paymentauth.org draft-nearintents-charge-01): `units` of USDC on `from` (None =
+    /// Solana) to the 1Click deposit address the service's 402 named. Gas and USDC there first (ensure_evm); then, right
+    /// before the signature, 1Click itself must hold that address for the service's recipient, its refund address,
+    /// exactly `amount_out` and, when known, the asset it receives, at no more than 1Click's own price, at or above its
+    /// minimum and before its quote runs out (guard::deposit_charge). Returns the deposit's transaction hash: the proof.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn pay_intents_charge(&self, from: Option<&str>, units: u64, deposit: &str, recipient: &str, refund_to: &str, amount_out: &str,
+                                    destination: Option<&str>, service: &str) -> Result<String> {
+        let Some(origin) = Self::one_click_usdc(from) else {
+            return fail(format!("NEAR Intents doesn't take USDC on {}. Nothing was paid.", from.unwrap_or("solana")));
+        };
+        if let Some(net) = from.and_then(EvmNetwork::named) { self.ensure_evm(net, units, None).await?; }
+        let verdict = guard::deposit_charge(&one_click::bound_request(deposit).await?, recipient, refund_to, origin, destination, amount_out, units,
+                                            Utc::now().timestamp());
+        if !verdict.ok() { return stop(format!("The guard stopped the payment: {} Nothing was paid.", verdict.problems.join(" "))) }
+        let name = from.map_or_else(|| "Solana".to_string(), WalletCommand::place_name);
+        let usdc = Fmt::num(millionths(units), 6);
+        self.report(&format!("NEAR Intents: {usdc} USDC from {name} to the 1Click deposit {service}'s payment names."));
+        let tx = match from.and_then(EvmNetwork::named) {
+            Some(net) => self.send_evm(&net.rpc, net.usdc, &erc20::transfer(deposit, U256::from(units))?, &format!("Pay {usdc} USDC to {service} through NEAR Intents"),
+                                       &[deposit.to_string()], None, 0).await?,
+            None => last_part(&self.send_solana_usdc(units, deposit, &format!("{service}'s 1Click deposit")).await?),
+        };
+        self.record("1click", deposit, Kind::Signed, &format!("MPP {service} · {usdc} USDC from {name}"))?;
+        if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, deposit).await; }
+        Ok(tx)
+    }
+
     /// Whether 1Click is worth taking over Relay for this move: it must land more than Relay's `relay_out` by at least
     /// `one_click_edge` — its fresh deposit address is one more address to allow in person, and it takes ≈ 20–30 s
     /// against Relay's few (live 2026-10-05: 1Click landed 1–3 cents more on 5 to 200 USDC). Said either way on the card.
@@ -126,14 +235,16 @@ impl Executor {
     /// What sending `amount` of `symbol` on a network ihatecrypto has no wallet on costs in USDC, and where that USDC
     /// comes from: Solana, or an EVM network 1Click takes USDC from when Solana is short (near_source). Dry: nothing is
     /// issued. Returns the quote, 1Click's asset, the amount in its units and the EVM network that pays (None: Solana).
-    pub async fn across_quote(&self, symbol: &str, amount: Decimal, network: &str, recipient: &str)
+    /// `confidential`: through Confidential Intents (a private send), where USDC on Solana and the EVM networks is paid too.
+    pub async fn across_quote(&self, symbol: &str, amount: Decimal, network: &str, recipient: &str, confidential: bool)
         -> Result<(Quote, &'static str, Decimal, Option<&'static EvmNetwork>)> {
-        let Some((ticker, id, decimals)) = across(symbol, network) else {
+        let found = if confidential { asset::payout(symbol, network) } else { across(symbol, network) };
+        let Some((ticker, id, decimals)) = found else {
             return fail(format!("NEAR Intents doesn't pay out {} on {}.", symbol.to_uppercase(), title(network)));
         };
         let units = whole_units(amount, decimals)?;
         if units <= Decimal::ZERO { return fail(format!("{} {ticker} is less than its smallest unit.", Fmt::num(amount, 2))) }
-        let ask = |origin: &str, refund_to: &str| Ask { exact_output: true, ..Ask::new(true, origin, id, &text(units), refund_to, recipient) };
+        let ask = |origin: &str, refund_to: &str| Ask { exact_output: true, confidential, ..Ask::new(true, origin, id, &text(units), refund_to, recipient) };
         let solana_quote = one_click::quote(&ask(asset::SOLANA_USDC, &self.wallet.solana)).await?;
         let cost = decimal(&solana_quote.amount_in_formatted).unwrap_or_default();
         let on_solana = millionths(self.rpc.token_balance(&self.wallet.solana, relay::currency::SOLANA_USDC).await?);
@@ -159,12 +270,13 @@ impl Executor {
     /// what's left of the USDC sent. The live quote must stay within 1% of the one compared, and 1Click itself must have
     /// the deposit address bound to this recipient, our refund address, the assets and the amount before anything is
     /// sent. The USDC goes to 1Click's fresh deposit address, which the signer asks to allow in person.
-    pub async fn send_across(&self, symbol: &str, amount: Decimal, network: &str, recipient: &str, label: &str) -> Result<String> {
-        let (shown, id, units, src) = self.across_quote(symbol, amount, network, recipient).await?;
+    /// `confidential`: a private send through Confidential Intents — the deposit and the payout can't be matched on chain.
+    pub async fn send_across(&self, symbol: &str, amount: Decimal, network: &str, recipient: &str, label: &str, confidential: bool) -> Result<String> {
+        let (shown, id, units, src) = self.across_quote(symbol, amount, network, recipient, confidential).await?;
         let origin = src.and_then(|s| asset::usdc_on_evm(s.key)).unwrap_or(asset::SOLANA_USDC);
         let refund_to = if src.is_none() { &self.wallet.solana } else { &self.wallet.evm };
         let wanted = text(units);
-        let quote = one_click::quote(&Ask { exact_output: true, ..Ask::new(false, origin, id, &wanted, refund_to, recipient) }).await?;
+        let quote = one_click::quote(&Ask { exact_output: true, confidential, ..Ask::new(false, origin, id, &wanted, refund_to, recipient) }).await?;
         let (Some(deposit), Some(send_units)) = (quote.deposit_address.clone(), quote.amount_in.parse::<u64>().ok().filter(|u| *u > 0)) else {
             return fail("1Click gave no deposit address. Nothing was sent.");
         };
@@ -172,11 +284,17 @@ impl Executor {
         if (Num::of(shown_cost) * Decimal::new(101, 2) + Decimal::new(1, 2)).0.is_some_and(|most| cost > most) {
             return fail(format!("1Click now wants {} USDC, more than the {} quoted. Nothing was sent.", Fmt::num(cost, 2), Fmt::num(shown_cost, 2)));
         }
-        let binding = guard::deposit_check(&one_click::bound_request(&deposit).await?, recipient, refund_to, origin, id, &wanted);
+        let bound = one_click::bound_request(&deposit).await?;
+        let binding = guard::deposit_check(&bound, recipient, refund_to, origin, id, &wanted);
         if !binding.ok() { return stop(format!("The guard stopped the deposit: {}", binding.problems.join(" "))) }
+        // A private send only when 1Click itself holds this deposit as confidential: else it would go in the open.
+        if confidential && let v = guard::deposit_confidential(&bound) && !v.ok() {
+            return stop(format!("The guard stopped the deposit: {} Nothing was sent.", v.problems.join(" ")));
+        }
         let from = src.map_or("Solana", |s| s.name);
         let what = format!("{} {}", Fmt::num(amount, 9), symbol.to_uppercase());
-        self.report(&format!("NEAR Intents: {} USDC from {from} → {what} to «{label}». What isn't used comes back.", Fmt::num(cost, 2)));
+        let private = if confidential { " (private)" } else { "" };
+        self.report(&format!("NEAR Intents{private}: {} USDC from {from} → {what} to «{label}». What isn't used comes back.", Fmt::num(cost, 2)));
         let tx = match src {
             Some(src) => {
                 self.ensure_evm(src, send_units, None).await?;
@@ -185,11 +303,12 @@ impl Executor {
             }
             None => last_part(&self.send_solana_usdc(send_units, &deposit, "the 1Click deposit").await?),
         };
-        self.record("1click", &deposit, Kind::Signed, &format!("{from} USDC→{what} to {label}"))?;
+        self.record("1click", &deposit, Kind::Signed, &format!("{from} USDC→{what} to {label}{private}"))?;
         if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, &deposit).await; }
         let started = Instant::now();
         let s = self.one_click_settled(&deposit, &format!("USDC went back to {from}"), quote.time_estimate).await?;
-        Ok(format!("Sent {} {} to «{label}» for {} USDC from {from}, through NEAR Intents, in {} s.",
+        let unlinked = if confidential { "' Confidential Intents: the deposit and the payout can't be matched on chain" } else { "" };
+        Ok(format!("Sent {} {} to «{label}» for {} USDC from {from}, through NEAR Intents{unlinked}, in {} s.",
                    Fmt::num(s.amount_out_formatted.as_deref().and_then(decimal).unwrap_or(amount), 9), symbol.to_uppercase(), Fmt::num(cost, 2),
                    started.elapsed().as_secs()))
     }

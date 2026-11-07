@@ -72,7 +72,9 @@ impl Executor {
 
     /// 1Click's quote for the swap: `dry` for the card, else with a deposit address bound to it.
     #[allow(clippy::too_many_arguments)]
-    pub async fn intent_quote(&self, a: &str, from: &str, b: &str, to: &str, amount: Decimal, near: Option<&str>, dry: bool) -> Result<IntentQuote> {
+    /// `confidential`: through Confidential Intents, where the deposit and the payout can't be matched on chain (the partner
+    /// key's).
+    pub async fn intent_quote(&self, a: &str, from: &str, b: &str, to: &str, amount: Decimal, near: Option<&str>, dry: bool, confidential: bool) -> Result<IntentQuote> {
         let (origin, destination) = tokio::join!(self.intent_side(a, from), self.intent_side(b, to));
         let (origin, destination) = (origin?, destination?);
         if origin.asset == destination.asset { return fail("That's the same token on both sides. Nothing to swap.") }
@@ -88,24 +90,26 @@ impl Executor {
         let near = if dry { Some(near.unwrap_or(&zero)) } else { near };
         let recipient = self.intent_address(to, near)?;
         let refund = self.intent_address(from, near)?;
-        let quote = one_click::quote(&one_click::Ask::new(dry, &origin.asset, &destination.asset, &units, &refund, &recipient)).await?;
+        let quote = one_click::quote(&one_click::Ask { confidential, ..one_click::Ask::new(dry, &origin.asset, &destination.asset, &units, &refund, &recipient) }).await?;
         Ok(IntentQuote { quote, origin, destination, units, recipient, refund })
     }
 
     /// What the swap gets, for the card: «≈ 12.4 AURORA ≈ $1.98», and the way.
-    pub async fn intent_quote_text(&self, a: &str, from: &str, b: &str, to: &str, amount: Decimal, near: Option<&str>) -> Result<(String, String)> {
-        let q = self.intent_quote(a, from, b, to, amount, near, true).await?;
+    pub async fn intent_quote_text(&self, a: &str, from: &str, b: &str, to: &str, amount: Decimal, near: Option<&str>, confidential: bool) -> Result<(String, String)> {
+        let q = self.intent_quote(a, from, b, to, amount, near, true, confidential).await?;
         let usd = q.quote.amount_out_usd.map_or_else(String::new, |u| format!(" ≈ {}", Fmt::usd(u)));
         let time = q.quote.time_estimate.map_or_else(String::new, |t| format!(" · ≈ {t} s"));
-        Ok((format!("{} {}{usd}", Fmt::num(dec(&q.quote.amount_out_formatted), 6), q.destination.symbol), format!("NEAR Intents{time}")))
+        Ok((format!("{} {}{usd}", Fmt::num(dec(&q.quote.amount_out_formatted), 6), q.destination.symbol), format!("{}{time}", if confidential { "Confidential Intents" } else { "NEAR Intents" })))
     }
 
     /// The swap itself: quoted again with a deposit address, checked, the deposit sent, 1Click followed until it pays.
-    pub async fn intent_swap(&self, a: &str, from: &str, b: &str, to: &str, amount: Option<Decimal>, near: Option<&str>) -> Result<String> {
+    /// `confidential`: a private swap — refused before anything is sent unless 1Click itself holds the deposit as
+    /// confidential, so it never goes in the open.
+    pub async fn intent_swap(&self, a: &str, from: &str, b: &str, to: &str, amount: Option<Decimal>, near: Option<&str>, confidential: bool) -> Result<String> {
         let Some(amount) = amount else { return fail(format!("Say how much {}: NEAR Intents swaps the amount said. Nothing was signed.", a.to_uppercase())) };
-        let shown = self.intent_quote(a, from, b, to, amount, near, true).await?;
+        let shown = self.intent_quote(a, from, b, to, amount, near, true, confidential).await?;
         let mut envelope = Envelope::approve_default(amount, dec(&shown.quote.amount_out_formatted), Utc::now());
-        let live = self.intent_quote(a, from, b, to, amount, near, false).await?;
+        let live = self.intent_quote(a, from, b, to, amount, near, false, confidential).await?;
         let Some(deposit) = live.quote.deposit_address.clone() else { return fail("1Click gave no deposit address. Nothing was signed.") };
         envelope.destination = Some(deposit.clone());
         let problems = envelope.violations(decimal(&live.quote.amount_in_formatted).unwrap_or(Decimal::MAX), dec(&live.quote.amount_out_formatted), Some(&deposit),
@@ -114,11 +118,14 @@ impl Executor {
         // No price for either side stops here too: Relay's refusal of an unpriced swap brings it to this way.
         Self::holds_cross_loss(live.quote.amount_in_usd.unwrap_or_default(), live.quote.amount_out_usd.unwrap_or_default(),
                                &format!("1Click doesn't price {} for {}", live.origin.symbol, live.destination.symbol), "NEAR Intents", true)?;
-        let binding = guard::deposit_check(&one_click::bound_request(&deposit).await?, &live.recipient, &live.refund, &live.origin.asset, &live.destination.asset,
-                                           &live.units);
+        let bound = one_click::bound_request(&deposit).await?;
+        let binding = guard::deposit_check(&bound, &live.recipient, &live.refund, &live.origin.asset, &live.destination.asset, &live.units);
         if !binding.ok() { return stop(format!("The guard stopped the deposit: {}", binding.problems.join(" "))) }
+        if confidential && let v = guard::deposit_confidential(&bound) && !v.ok() {
+            return stop(format!("The guard stopped the deposit: {} Nothing was sent.", v.problems.join(" ")));
+        }
         let gets = dec(&live.quote.amount_out_formatted);
-        self.report(&format!("NEAR Intents: {} {} on {} → ≈ {} {} on {}.", Fmt::num(amount, 8), live.origin.symbol, place_name(from), Fmt::num(gets, 6),
+        self.report(&format!("NEAR Intents{}: {} {} on {} → ≈ {} {} on {}.", if confidential { " (private)" } else { "" }, Fmt::num(amount, 8), live.origin.symbol, place_name(from), Fmt::num(gets, 6),
                              live.destination.symbol, place_name(to)));
         // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.
         let tx = if from == "near" {
@@ -144,7 +151,8 @@ impl Executor {
         if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, &deposit).await; }
         let started = Instant::now();
         let s = self.one_click_settled(&deposit, &format!("{} went back to {}", live.origin.symbol, place_name(from)), live.quote.time_estimate).await?;
-        let line = format!("Swapped {} {} on {} for {} {} on {} through NEAR Intents in {} s — at your own address there.", Fmt::num(amount, 8), live.origin.symbol,
+        let unlinked = if confidential { "' Confidential Intents: the deposit and the payout can't be matched on chain," } else { "" };
+        let line = format!("Swapped {} {} on {} for {} {} on {} through NEAR Intents{unlinked} in {} s — at your own address there.", Fmt::num(amount, 8), live.origin.symbol,
                            place_name(from), Fmt::num(s.amount_out_formatted.as_deref().and_then(decimal).unwrap_or(gets), 6), live.destination.symbol,
                            place_name(to), started.elapsed().as_secs());
         self.report(&line);
