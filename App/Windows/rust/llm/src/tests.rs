@@ -702,3 +702,120 @@ fn model_facts_read_open_routers_list_and_price_an_answer() {
     assert_eq!(ModelFacts::table(partial.as_bytes())[&ModelFacts::key("m")].cost(&Usage::new(6, 1)), 20.0);
     assert_eq!((catalog::window("ollama"), catalog::window("openai")), (Some(16_384), None));
 }
+
+// MARK: NEAR AI Cloud and its enclave check (NearAttestationTests.swift)
+
+/// A real report NEAR AI Cloud answered on 2026-11-01 (Qwen/Qwen3.8-27B, ed25519) with the nonce it was asked with.
+/// The GPU verdict is NVIDIA's network service, so it's stubbed here; everything else is checked offline.
+fn near_fixture() -> (&'static [u8], String) {
+    (include_bytes!("../tests/near-attestation-qwen.json"), include_str!("../tests/near-attestation-qwen.nonce").trim().to_string())
+}
+
+const QWEN: &str = "Qwen/Qwen3.8-27B";
+
+#[tokio::test]
+async fn near_attestation_checks_the_enclaves_down_to_intel() {
+    let (report, nonce) = near_fixture();
+    let v = near_attestation::verify(report, &nonce, QWEN, async |_: String| Ok(true)).await.unwrap();
+    assert!(v.gateway_key.len() == 64 && !v.model_keys.is_empty() && v.model_keys.iter().all(|k| k.len() == 64));
+    assert_eq!(v.model, QWEN);
+}
+
+#[tokio::test]
+async fn near_attestation_refuses_what_doesnt_bind() {
+    let (report, nonce) = near_fixture();
+    let refusal = async |report: &[u8], nonce: &str, model: &str, passes: bool| {
+        near_attestation::verify(report, nonce, model, async move |_: String| Ok(passes)).await.unwrap_err().message().to_string()
+    };
+    // Another nonce: evidence made for someone else's check, or replayed.
+    let other: String = nonce.chars().rev().collect();
+    assert_eq!(refusal(report, &other, QWEN, true).await, "NEAR AI's gateway: the report answers another check.");
+    // A model it gave no evidence for, and GPUs NVIDIA doesn't pass.
+    assert_eq!(refusal(report, &nonce, "z-ai/glm-5.3", true).await, "NEAR AI sent no enclave evidence for z-ai/glm-5.3.");
+    assert_eq!(refusal(report, &nonce, QWEN, false).await, "NVIDIA didn't pass Qwen/Qwen3.8-27B's GPUs.");
+    // One byte of the model's quote changed: in its measurements, then in Intel's QE report.
+    let root: Value = serde_json::from_slice(report).unwrap();
+    for (at, why) in [(48 + 136, "the quote's signature doesn't verify."),
+                      (48 + 584 + 4 + 128 + 6 + 10, "the QE report isn't signed by the platform's Intel certificate.")] {
+        let mut bytes = near_attestation::bytes(root["model_attestations"][0]["intel_quote"].as_str().unwrap()).unwrap();
+        bytes[at] ^= 1;
+        let mut tampered = root.clone();
+        tampered["model_attestations"][0]["intel_quote"] = json!(near_attestation::hex(&bytes));
+        assert_eq!(refusal(&serde_json::to_vec(&tampered).unwrap(), &nonce, QWEN, true).await, format!("{QWEN}: {why}"));
+    }
+    // One letter of the PCK certificate's own name (its CN's «P»): the platform CA's signature no longer covers it.
+    let mut bytes = near_attestation::bytes(root["model_attestations"][0]["intel_quote"].as_str().unwrap()).unwrap();
+    let begin = b"-----BEGIN CERTIFICATE-----";
+    let at = bytes.windows(begin.len()).position(|w| w == begin).unwrap() + begin.len() + 293;
+    assert_eq!(bytes[at], b'U');
+    bytes[at] = b'A';
+    let mut tampered = root.clone();
+    tampered["model_attestations"][0]["intel_quote"] = json!(near_attestation::hex(&bytes));
+    assert_eq!(refusal(&serde_json::to_vec(&tampered).unwrap(), &nonce, QWEN, true).await,
+               format!("{QWEN}: the Intel certificate chain doesn't verify."));
+}
+
+fn near_signed(key: &ed25519_dalek::SigningKey, text: &str, kind: &str) -> Value {
+    use ed25519_dalek::Signer;
+    json!({"text": text, "signature": near_attestation::hex(&key.sign(text.as_bytes()).to_bytes()),
+           "signing_address": near_attestation::hex(key.verifying_key().as_bytes()), "signing_algo": "ed25519", "signature_kind": kind})
+}
+
+fn near_hashes(request: &[u8], response: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{}:{}", near_attestation::hex(&Sha256::digest(request)), near_attestation::hex(&Sha256::digest(response)))
+}
+
+#[test]
+fn a_reply_counts_only_when_its_own_bytes_are_signed_by_the_attested_key() {
+    use near_ai::{ReplyProof, check};
+    let [model, gateway, stranger] = [1u8, 2, 3].map(|n| ed25519_dalek::SigningKey::from_bytes(&[n; 32]));
+    let v = near_attestation::Verified { model: "m/x".into(), gateway_key: near_attestation::hex(gateway.verifying_key().as_bytes()),
+                                         model_keys: vec![near_attestation::hex(model.verifying_key().as_bytes())], at: now() };
+    let (request, response) = (br#"{"model":"m/x"}"#.as_slice(), br#"{"id":"chatcmpl-1"}"#.as_slice());
+    let hashes = near_hashes(request, response);
+    assert_eq!(check(&near_signed(&model, &format!("m/x:{hashes}"), "provider_tee"), "m/x", request, response, &v), ReplyProof::Model);
+    assert_eq!(check(&near_signed(&gateway, &hashes, "gateway"), "m/x", request, response, &v), ReplyProof::Gateway);
+    // Other bytes, a key the attestation never saw, a forged signature: not verified.
+    assert_eq!(check(&near_signed(&model, &format!("m/x:{hashes}"), "provider_tee"), "m/x", request, b"{}", &v),
+               ReplyProof::Unverified("the signature is for other bytes".into()));
+    assert_eq!(check(&near_signed(&stranger, &format!("m/x:{hashes}"), "provider_tee"), "m/x", request, response, &v),
+               ReplyProof::Unverified("signed by a key the attestation didn't verify".into()));
+    let mut forged = near_signed(&model, &format!("m/x:{hashes}"), "provider_tee");
+    forged["text"] = json!(format!("m/x:{}", hashes.replace('a', "b")));
+    assert_eq!(check(&forged, "m/x", request, response, &v), ReplyProof::Unverified("the reply's signature doesn't check out".into()));
+}
+
+/// The chat end to end on a model whose enclaves checked out a minute ago: the exact bytes it sent and was answered with
+/// are what the model's signature has to cover.
+#[tokio::test]
+async fn near_ai_sends_whole_and_checks_the_reply_it_got() {
+    let p = catalog::provider("nearai").unwrap();
+    assert!(p.info().kind == Kind::ApiKey && p.info().takes_key && !p.info().note.contains(';'));
+    assert_eq!(catalog::all().last().unwrap().info().id, "nearai");
+    assert_eq!(p.client(None, save_nothing()).err().unwrap().message(), "NEAR AI Cloud (private): add a key in Settings.");
+
+    let model = "m/near-e2e";
+    let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let v = near_attestation::Verified { model: model.into(), gateway_key: "00".repeat(32),
+                                         model_keys: vec![near_attestation::hex(key.verifying_key().as_bytes())], at: now() - 60.0 };
+    near_ai::CHECKS.lock().unwrap().insert(model.into(), v);
+    let mut r = req(model, vec![msg(Role::User, "hi")]);
+    r.wants_json = true;
+    let request = serde_json::to_vec(&near_ai::body(&r)).unwrap();
+    let answer = r#"{"id":"chatcmpl-1","choices":[{"message":{"content":"{\"ok\":1}"}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#;
+    let signature = near_signed(&key, &format!("{model}:{}", near_hashes(&request, answer.as_bytes())), "provider_tee");
+    let (url, seen) = server(vec![(200, answer.into()), (200, signature.to_string())]).await;
+    let client = Client::new(Inner::NearAi(near_ai::NearAiClient { key: "k".into(), base: url }));
+    let told = Mutex::new(String::new());
+    fn sendable<T: Send>(t: T) -> T { t }
+    let text = sendable(client.stream(&r, &|t| *told.lock().unwrap() = t.into())).await.unwrap();
+    assert_eq!((text.as_str(), told.lock().unwrap().as_str()), (r#"{"ok":1}"#, r#"{"ok":1}"#));
+    assert_eq!(near_ai::last_reply(model), Some(near_ai::ReplyProof::Model));
+    let a = seen.lock().unwrap().clone();
+    assert_eq!((a[0].path.as_str(), a[0].body.as_bytes()), ("/chat/completions", request.as_slice()));
+    assert_eq!(a[0].json()["response_format"], json!({"type": "json_object"}));
+    assert!(a[0].json().get("stream").is_none());
+    for (k, v) in [("authorization", "Bearer k"), ("x-no-aliasing", "true"), ("accept-encoding", "identity")] { assert_eq!(a[0].headers[k], v) }
+    assert_eq!(a[1].path, format!("/signature/chatcmpl-1?model={model}&signing_algo=ed25519"));
+}

@@ -3,7 +3,7 @@ name = "llm"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-description = "Model access for the engine: the Rust port of App/Sources/LLM (Core, APIKey, Anthropic, OpenRouter, ChatGPT, ClaudeCode, Catalog)"
+description = "Model access for the engine: the Rust port of App/Sources/LLM (Core, APIKey, Anthropic, OpenRouter, ChatGPT, ClaudeCode, NearAI, Catalog)"
 
 [dependencies]
 net.workspace = true
@@ -14,3 +14,6 @@ serde_json.workspace = true
 sha2.workspace = true
 base64.workspace = true
 getrandom.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
+chrono.workspace = true

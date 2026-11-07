@@ -26,11 +26,17 @@ pub async fn send(request: reqwest::RequestBuilder, seconds: u64) -> Result<reqw
     idle(seconds, request.timeout(Duration::from_secs(3600)).send()).await
 }
 
-/// The whole body, `seconds` at most between its bytes, then checked.
-async fn body(mut response: reqwest::Response, seconds: u64) -> Result<Vec<u8>> {
+/// The status and the whole body, `seconds` at most between its bytes, for a caller that reads a refusal itself.
+pub(crate) async fn read(mut response: reqwest::Response, seconds: u64) -> Result<(u16, Vec<u8>)> {
     let status = response.status().as_u16();
     let mut out = Vec::new();
     while let Some(chunk) = idle(seconds, response.chunk()).await? { out.extend_from_slice(&chunk) }
+    Ok((status, out))
+}
+
+/// The whole body, `seconds` at most between its bytes, then checked.
+async fn body(response: reqwest::Response, seconds: u64) -> Result<Vec<u8>> {
+    let (status, out) = read(response, seconds).await?;
     check(status, &out)?;
     Ok(out)
 }

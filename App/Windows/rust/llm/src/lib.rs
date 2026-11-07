@@ -1,5 +1,5 @@
 //! Model access for the engine (`App/Sources/LLM`): the chat's request, a ready client to one model service, and every
-//! way in — API keys (`api_key`, `anthropic`, `open_router`), subscriptions (`chatgpt`, `claude_code`) and local servers —
+//! way in — API keys (`api_key`, `anthropic`, `open_router`, `near_ai` with its enclave check), subscriptions (`chatgpt`, `claude_code`) and local servers —
 //! listed in `catalog`. Logins aren't kept here: the caller hands a `Credential` in and is handed refreshed ones back
 //! (`Save`), and keeps them itself (the engine's DPAPI file, in the Swift `Credential`'s own JSON).
 
@@ -9,6 +9,8 @@ pub mod catalog;
 pub mod chatgpt;
 pub mod claude_code;
 pub mod http;
+pub mod near_ai;
+pub mod near_attestation;
 pub mod oauth;
 pub mod open_router;
 pub mod usage;
@@ -118,6 +120,7 @@ pub(crate) enum Inner {
     Anthropic(anthropic::AnthropicClient),
     ChatGpt(chatgpt::ChatGptClient),
     ClaudeCode(claude_code::ClaudeCodeClient),
+    NearAi(near_ai::NearAiClient),
 }
 
 /// A ready connection to one model service. The engine talks only to this.
@@ -160,6 +163,12 @@ impl Client {
             (Inner::Anthropic(c), p) => c.stream(&r, p.unwrap_or(&none), &report).await,
             (Inner::ChatGpt(c), p) => c.stream(&r, p.unwrap_or(&none), &report).await,
             (Inner::ClaudeCode(c), p) => c.stream(&r, p.unwrap_or(&none), &report).await,
+            // Not streamed (a streamed answer proves less): told once, at the end.
+            (Inner::NearAi(c), p) => {
+                let text = c.complete(&r, &report).await?;
+                if let Some(p) = p { p(&text) }
+                Ok(text)
+            }
         }
     }
 }

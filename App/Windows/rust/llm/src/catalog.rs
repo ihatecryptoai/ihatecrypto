@@ -3,7 +3,7 @@
 
 use crate::anthropic::{self, AnthropicClient};
 use crate::api_key::{self, Compatible, OllamaChatClient};
-use crate::{Client, Credential, Inner, Result, Save, chatgpt, claude_code, fail, open_router};
+use crate::{Client, Credential, Inner, Result, Save, chatgpt, claude_code, fail, near_ai, open_router};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind { Subscription, ApiKey, Local }
@@ -51,6 +51,8 @@ pub enum Provider {
     OpenRouter,
     Compatible(Compatible),
     Anthropic,
+    /// NEAR AI Cloud's private models, each chat after its enclaves check out.
+    NearAi,
 }
 
 impl Provider {
@@ -62,6 +64,7 @@ impl Provider {
             Provider::OpenRouter => open_router::info(),
             Provider::Compatible(c) => c.info.clone(),
             Provider::Anthropic => anthropic::info(),
+            Provider::NearAi => near_ai::info(),
         }
     }
 
@@ -98,6 +101,7 @@ impl Provider {
                 Some(k) => Inner::Anthropic(AnthropicClient::new(k)),
                 None => return fail("Anthropic API: add a key in Settings."),
             },
+            Provider::NearAi => Inner::NearAi(near_ai::client(credential)?),
         }))
     }
 
@@ -117,7 +121,7 @@ impl Provider {
     }
 }
 
-/// Every way in, in Settings' order: an Anthropic key keeps its place after OpenAI's.
+/// Every way in, in Settings' order: an Anthropic key keeps its place after OpenAI's, NEAR AI comes last.
 pub fn all() -> Vec<Provider> {
     let unavailable = |id: &str, name: &str, why: &str| {
         let mut info = Info::new(id, name, Kind::Subscription, "", "");
@@ -138,6 +142,7 @@ pub fn all() -> Vec<Provider> {
         list.push(Provider::Compatible(p));
         if openai { list.push(Provider::Anthropic) }
     }
+    list.push(Provider::NearAi);
     list
 }
 
