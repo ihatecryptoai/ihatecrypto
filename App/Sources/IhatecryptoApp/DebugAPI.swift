@@ -1,7 +1,10 @@
+import AgentAPIKit
 import AppKit
 import EVMChain
 import GuardJev
 import IhatecryptoCore
+import LLMCatalog
+import LLMNearAI
 import Network
 import SignerAPI
 import SwiftUI
@@ -55,6 +58,8 @@ final class DebugAPI {
     }
     /// /reset opened a fresh canvas: the first /send's canvas is a test canvas.
     private var freshCanvas = false
+    /// The user's own chat provider while a test canvas talks to another one (/reset {"provider"}).
+    private var providerBefore: String?
     /// Folders a scenario made («write to folder …»): /restore removes them with the test canvases.
     private var testFolders: Set<String> = []
     /// Scheduled tasks a test message made («every month on the 1st: …»): /reset and /restore cancel them, or they'd
@@ -144,10 +149,35 @@ final class DebugAPI {
             guard testCanvas || (ws.pendingAction == nil && ws.pendingAllocation == nil) else {
                 return (409, "text/plain", Data("a move waits for Confirm on the user's canvas\n".utf8))
             }
+            // {"provider":"nearai"}: the test canvas talks to that provider (each canvas keeps its own); the user's own
+            // provider comes back with the next /reset or /restore, so a test never changes it for good.
+            let asked = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["provider"] as? String
+            if let asked, LLMCatalog.provider(id: asked) == nil { return (404, "text/plain", Data("no such provider\n".utf8)) }
+            if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.deleteCanvas(id) } else { ws.newCanvas() }
+            if let asked, asked != ws.providerID { providerBefore = ws.providerID; ws.providerID = asked }
+            // A trade's signing sheet left open (a failed preparation) would sit over every scenario after it.
+            ws.prepared = nil
+            ws.executionError = nil
             freshCanvas = true
             dropTestTasks(ws)
             return (200, "application/json", json(state(ws, since: ws.messages.count)))
+        case ("POST", "/agentapi"):
+            // A read of NEAR Intents' Agent API with the partner key from the Keychain, for live checks from a terminal:
+            // {"method":"GET","path":"/v1/network"}; {"method":"POST","path":"/v1/generate-intent","body":{…}} only
+            // asks what an owner would sign. Nothing here signs or submits: submit-intent and agent actions are refused.
+            let o = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:]
+            let method = (o["method"] as? String ?? "GET").uppercased(), path = o["path"] as? String ?? ""
+            guard path.hasPrefix("/v1/"), method == "GET" || (method == "POST" && path == "/v1/generate-intent") else {
+                return (403, "text/plain", Data("only GET reads and generate-intent\n".utf8))
+            }
+            do {
+                try NodeStore.agentAPIReady()
+                let body = o["body"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                return (200, "application/json", try await AgentAPI.call(method, path, body: body))
+            } catch let e as AgentAPI.Failure {
+                return (e.status, "text/plain", Data((e.errorDescription ?? "") .utf8))
+            } catch { return (502, "text/plain", Data(error.localizedDescription.utf8)) }
         case ("POST", "/pick"):
             let index = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["index"] as? Int) ?? 0
             guard !ws.busy else { return (409, "text/plain", Data("busy\n".utf8)) }
@@ -176,6 +206,7 @@ final class DebugAPI {
         case ("POST", "/restore"):
             guard !ws.busy, !ws.executing else { return (409, "text/plain", Data("busy\n".utf8)) }
             let back = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["canvas"] as? String).flatMap(UUID.init(uuidString:))
+            if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.newCanvas() }
             for id in testCanvases { ws.deleteCanvas(id) }
             testCanvases = []
@@ -327,6 +358,12 @@ final class DebugAPI {
     }
 
     private func dropTestTasks(_ ws: Workspace) {
+        // A loan guard a test message set (every one sent here is untrusted) would watch the Dev wallet's loan for real.
+        let tests = ws.loanGuards.filter { $0.untrusted == true }
+        if !tests.isEmpty {
+            ws.tasks.removeAll { t in tests.contains { $0.fired == t.id } }
+            ws.loanGuards.removeAll { $0.untrusted == true }
+        }
         guard !testTasks.isEmpty else { return }
         ws.tasks.removeAll { testTasks.contains($0.id) }
         testTasks = []
@@ -341,6 +378,15 @@ final class DebugAPI {
             "executing": ws.executing,
             "model": ws.model,
             "provider": ws.provider.info.name,
+            // On NEAR AI Cloud: the enclave check that let the last message go, as the chat's TEE chip shows it.
+            "tee": ws.teeVerified != nil,
+            // What the last NEAR AI reply proved: "model" (its bytes signed by the attested model key), "gateway", or why not.
+            "teeReply": ws.providerID == NearAI().info.id ? NearAI.lastReply(ws.model).map { "\($0)" } ?? NSNull() : NSNull(),
+            // P3: the send waiting for Confirm offered both ways, and which one it is now.
+            "privacy": ws.privacyChoice.map { c in ["private": c.isPrivate, "rows": c.rows.map { "\($0.label): \($0.value) · \($0.note)" }] as [String: Any] } ?? NSNull(),
+            // N5: a NEAR Intents move after Confirm, as the chat's field shows it.
+            "journey": ws.journey.map { j in ["stage": "\(j.stage)", "from": j.from, "to": j.to, "private": j.privately, "stuck": j.stuck,
+                                              "deposit": j.deposit ?? NSNull(), "ended": j.endedAt != nil] as [String: Any] } ?? NSNull(),
             "boards": boards(ws, canvas),
             "outcome": canvas?.outcome.map { $0.ok ? "executed" : "failed" } ?? NSNull(),
             "pending": ws.pendingText ?? NSNull(),

@@ -675,4 +675,45 @@ public enum DepositGuard {
         if v.ok { v.checks.append("The deposit address is bound to a quote with your recipient, refund address and amount.") }
         return v
     }
+
+    /// A private move goes only where 1Click itself holds the deposit as confidential (Confidential Intents): else it
+    /// would go in the open.
+    public static func confidential(bound: [String: String]) -> Verdict {
+        var v = Verdict()
+        if bound["confidentiality"]?.lowercased() == "basic" { v.checks.append("1Click holds the deposit as confidential.") }
+        else { v.problems.append("1Click didn't take it as private (Confidential Intents): it says «\(bound["confidentiality"] ?? "nothing")».") }
+        return v
+    }
+
+    /// A deposit an MPP service asks for through NEAR Intents (its quote, not ours): 1Click itself must hold the address
+    /// for an exact-output quote paying the service's recipient exactly `amountOut`, refunding to the address the service
+    /// named, taking USDC from the network paid on and, when it's known, paying the asset the card shows. And the deposit
+    /// can't be more than 1Click's quote takes plus its slippage: the rest would only come back as a refund — to the
+    /// service. `bound` as OneClick.boundRequest reads it.
+    public static func charge(bound: [String: String], recipient: String, refundTo: String, origin: String, destination: String?,
+                              amountOut: String, deposit: UInt64, now: Date = Date()) -> Verdict {
+        var v = Verdict()
+        if bound["swapType"] != "EXACT_OUTPUT" { v.problems.append("1Click holds it as \(bound["swapType"] ?? "an unknown") quote, not one paying an exact amount.") }
+        var expected = ["recipient": recipient, "refundTo": refundTo, "originAsset": origin, "amount": amountOut]
+        if let destination { expected["destinationAsset"] = destination }
+        for (field, value) in expected.sorted(by: { $0.key < $1.key }) where bound[field]?.lowercased() != value.lowercased() {
+            v.problems.append("The deposit address is bound to a different \(field): \(bound[field] ?? "none") instead of \(value).")
+        }
+        if let asked = bound["quoteAmountIn"].flatMap({ UInt64($0) }) {
+            // 1Click's own price for this deposit, plus 1% for its slippage and rounding.
+            if deposit > asked + asked / 100 + 1 { v.problems.append("The service asks \(deposit) units, more than the \(asked) 1Click takes for it.") }
+        } else {
+            v.problems.append("1Click didn't say what this deposit costs.")
+        }
+        // Under 1Click's minimum, or after its quote runs out, the deposit only comes back — to the service's refund address.
+        if let least = bound["quoteMinAmountIn"].flatMap({ UInt64($0) }), deposit < least {
+            v.problems.append("The deposit is under the \(least) units 1Click needs for it.")
+        }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let deadline = bound["deadline"].flatMap { f.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+        if let deadline, deadline < now.addingTimeInterval(120) { v.problems.append("1Click's quote for this deposit runs out at \(bound["deadline"] ?? "")") }
+        if v.ok { v.checks.append("1Click holds the deposit for the service's recipient, its exact amount and its refund address, at 1Click's own price.") }
+        return v
+    }
 }

@@ -128,20 +128,21 @@ struct AlertsBoard: View {
     }
 
     var body: some View {
-        if ws.alerts.contains(where: { $0.id != ws.planAlert?.id }) { board }
+        if ws.alerts.contains(where: { $0.id != ws.planAlert?.id }) || !ws.loanGuards.isEmpty { board }
     }
 
     private var board: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
-                Text("Price alerts").font(.ui(15, .bold))
+                Text(ws.loanGuards.isEmpty ? "Price alerts" : "Alerts").font(.ui(15, .bold))
                 Spacer()
                 Button { withAnimation(StudioView.spring) { ws.showAlerts = false } } label: { Image(systemName: "xmark") }
                     .buttonStyle(.hoverIcon).help("Hide the board; the alerts stay")
             }
             // One tied to this canvas's plan is drawn as that plan's first step instead.
             ForEach(ws.alerts.filter { $0.id != ws.planAlert?.id }) { chain(blocks($0)) }
+            ForEach(ws.loanGuards) { chain(blocks($0)) }
             Text("Checked every 10 s while ihatecrypto is open or in the menu bar. Nothing moves until you confirm it.")
                 .font(.ui(10)).foregroundStyle(.tertiary)
         }
@@ -166,12 +167,29 @@ struct AlertsBoard: View {
             }
             return Block(id: "\(a.id)-\(k)", icon: "bolt.fill", label: "THEN", title: ScheduleCanvas.readable(step))
         }
-        return [Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
-                      line: now) { withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } } }]
-            + steps
+        // A plain alert only tells you: said on its own card, not as a second «A notification» card under it.
+        let when = Block(id: "\(a.id)-when", coin: a.coin, label: "WHEN · PRICE", title: "\(name) \(a.above ? "above" : "below") \(Fmt.price(a.price))",
+                         line: steps.isEmpty ? (now.map { $0 + " · then a notification" } ?? "then a notification") : now) {
+            withAnimation(.snappy) { ws.alerts.removeAll { $0.id == a.id } }
+        }
+        guard !steps.isEmpty else { return [when] }
+        return [when] + steps
             + [Block(id: "\(a.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
-                     title: steps.isEmpty ? "A notification" : "A notification, then your Confirm",
-                     line: steps.isEmpty ? nil : "Prepared on its own canvas; nothing moves without \(Presence.name).")]
+                     title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
+    }
+
+    /// A guarded loan: its line, the repay it prepares, and the Confirm it waits for (LoanGuards.swift).
+    private func blocks(_ g: LoanGuard) -> [Block] {
+        let now = ws.guardHealth[g.id].map { $0.map { "now \(Fmt.num($0, maxFraction: 2)) · liquidation at 1" } ?? "no loan yet · watching" } ?? "reading…"
+        return [Block(id: "\(g.id)-when", icon: "shield.lefthalf.filled", label: "WHEN · LOAN HEALTH",
+                      title: "\(ws.guardName(g)) loan under \(Fmt.num(g.below))", line: now + (g.armed ? "" : " · repay prepared")) {
+                    withAnimation(.snappy) { ws.loanGuards.removeAll { $0.id == g.id } }
+                },
+                Block(id: "\(g.id)-then", icon: "arrow.uturn.backward", label: "THEN · REPAY",
+                      title: "USDC back to health \(Fmt.num(g.target))",
+                      line: "USDC it lacks comes through NEAR Intents"),
+                Block(id: "\(g.id)-you", icon: "bell.and.waves.left.and.right", label: "YOU · NOTIFICATION",
+                      title: "A notification, then your Confirm", line: "Prepared on its own canvas. Nothing moves without \(Presence.name).")]
     }
 
     private func chain(_ blocks: [Block]) -> some View {

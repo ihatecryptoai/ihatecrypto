@@ -88,6 +88,12 @@ def check(expect, state, replies):
     for key, want in expect.items():
         if key == "pending_kind" and (pending or {}).get("kind") != want:
             why.append(f"pending {text(pending) or 'none'}, expected a {want} card")
+        elif key == "tee" and state.get("tee") != want:
+            why.append("no enclave check on the chat (TEE chip)" if want else "a TEE chip where none belongs")
+        elif key == "tee_reply" and state.get("teeReply") != want:
+            why.append(f"the last reply's signature proved {state.get('teeReply')!r}, expected {want!r}")
+        elif key == "privacy" and (state.get("privacy") or {}).get("private") != (want == "private"):
+            why.append(f"the send offers {text(state.get('privacy')) or 'no Regular | Private choice'}, expected it {want}")
         elif key == "drawn_route" and (pending or {}).get("drawnRoute") != want:
             why.append("the card has no drawn route (fallback card)")
         elif key == "steps":
@@ -209,7 +215,8 @@ def main():
             old = settings(s.get("defaults") or {})
             # Put back even when a scenario raises: a «jupiterBusyTest» left on refuses every buy in Dev.
             atexit.register(restore_settings, old)
-            call("POST", "/reset")
+            # "provider": the test canvas talks to that model provider (each canvas keeps its own).
+            call("POST", "/reset", {"provider": s["provider"]} if s.get("provider") else None)
             why = []
             for k, turn in enumerate(s.get("turns") or [{"send": s["send"], "expect": s["expect"]}]):
                 replies, state = [], None
@@ -244,7 +251,13 @@ def main():
                 time.sleep(2 + len((state["boards"].get("pending") or {}).get("steps") or []))
                 # /screenshot comes out blank (glass chrome): screencapture needs the terminal's Screen Recording right.
                 shot = os.path.join(SHOTS, f"{n:02d} {re.sub(r'[/:]', '-', s['name'])[:80]}.png")
-                subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])
+                taken = subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot], capture_output=True)
+                # A window on another desktop can't be pictured. SHOW_DEV=1 (only when the owner allowed showing Dev)
+                # brings Dev's window to this desktop and tries once more; without it the window is never raised.
+                if taken.returncode != 0 and os.environ.get("SHOW_DEV") == "1" and not WORK:
+                    subprocess.run(["osascript", "-e", 'tell application id "app.ihatecrypto.mac.dev" to activate'], capture_output=True)
+                    time.sleep(2)
+                    subprocess.run(["screencapture", "-x", "-o", "-l", str(state["windowID"]), shot])
             if state["boards"].get("pending"):
                 call("POST", "/cancel")
             restore_settings(old)

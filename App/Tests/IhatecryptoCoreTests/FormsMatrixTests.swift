@@ -15,7 +15,7 @@ private let markets = Set(("BTC,ETH,ATOM,DYDX,SOL,AVAX,BNB,APE,OP,LTC,ARB,DOGE,I
 /// What the app does with a command.
 indirect enum Read: Equatable {
     case cancelTasks, task(ScheduledTask.Every?, [Read]), steps([Read]), app(String)
-    case token(TokenCommand), chart(ChartCommand), pnl(PnLCommand), takeChoice, alert(AlertCommand), folder(FolderCommand)
+    case token(TokenCommand), chart(ChartCommand), pnl(PnLCommand), takeChoice, loanGuard(LoanGuardCommand), alert(AlertCommand), folder(FolderCommand)
     case book(AddressBookCommand), wallet(WalletCommand), position(PositionCommand), plan(TradeIntent), none
 
     var shown: String {
@@ -42,6 +42,7 @@ func read(_ c: String, plan: TradeIntent = TradeIntent(), positionOpen: Bool = f
     if let x = ChartCommand.parse(c, markets: markets) { return .chart(x) }
     if let x = PnLCommand.parse(c, markets: markets) { return .pnl(x) }
     if TakeStyle.asksForChoice(c), plan != TradeIntent() { return .takeChoice }
+    if let x = LoanGuardCommand.parse(c) { return .loanGuard(x) }
     if let x = AlertCommand.parse(c, markets: markets) { return .alert(x) }
     if let x = AddressBookCommand.parse(c) { return .book(x) }
     if let x = WalletCommand.parse(c) { return .wallet(x) }

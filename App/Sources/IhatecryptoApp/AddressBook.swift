@@ -1159,6 +1159,32 @@ extension Workspace {
         return (entry, asset.symbol, address)
     }
 
+    /// A private send's saved address, what NEAR Intents pays there (OneClick.Asset.payout) and the network it pays on:
+    /// the one named, else the entry's own. Throws why it can't, before any card is drawn.
+    func privateRecipient(_ name: String, token: String, network: String?) throws -> (entry: SavedAddress, symbol: String, address: String, network: String) {
+        guard let entry = savedEntry(name, network: network) else { throw ExecutionError("There’s no “\(name)” in Addresses.") }
+        let net = network ?? entry.network.rawValue, saved = entry.network.rawValue
+        // USDC on an EVM network goes to a 0x entry saved on any of them; everything else only to the network it's saved on.
+        let evm: Set<String> = ["base", "arbitrum", "ethereum", "polygon", "optimism", "bnb", "hyperevm", "robinhood", "tempo"]
+        guard net == saved || (evm.contains(net) && evm.contains(saved)) else {
+            throw ExecutionError("“\(entry.name)” is a \(entry.network.title) address, so it can't be paid on \(WalletCommand.placeName(net)).")
+        }
+        guard let asset = OneClick.Asset.payout(token, on: net) else {
+            throw ExecutionError("A private send pays USDC on Solana, Base, Arbitrum or Ethereum, or a coin on a network only NEAR Intents reaches (BTC, ZEC, TRX, USDT on TRON, XRP, DOGE, SUI) — not \(token.uppercased()) on \(WalletCommand.placeName(net)).")
+        }
+        var address = entry.address
+        if !entry.memo.isEmpty {
+            guard entry.network == .xrp, let tag = UInt32(entry.memo.trimmingCharacters(in: .whitespaces)), let x = AddressCheck.xAddress(entry.address, tag: tag) else {
+                throw ExecutionError("“\(entry.name)” needs a memo, and NEAR Intents can't add one on \(entry.network.title).")
+            }
+            address = x
+        }
+        if let off = Modules.current.refusal(.oneClick, ru: modulesRussian) { throw ExecutionError(off) }
+        guard OneClick.key != nil else { throw ExecutionError("A private send needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.") }
+        try requireConfirmed(entry)
+        return (entry, asset.symbol, address, net)
+    }
+
     /// The entry a name means. One name can be saved on several networks («Automation» on Solana and on Base): the one
     /// that can receive on the network named comes first; a 0x address on one EVM network is the same on another.
     func savedEntry(_ name: String, network: String?) -> SavedAddress? {
@@ -1223,7 +1249,11 @@ extension Workspace {
         reply(say("The transfer is on the canvas: \(Fmt.num(amount)) USDC to “\(entry.name)” on \(entry.network.title), \(ends.start) … \(ends.end). Sign it",
                   "Перевод на холсте: \(Fmt.num(amount)) USDC на «\(entry.name)» в \(entry.network.title), \(ends.start) … \(ends.end). Подпиши",
                   "La transferencia está en el lienzo: \(Fmt.num(amount)) USDC a «\(entry.name)» en \(entry.network.title), \(ends.start) … \(ends.end). Fírmala")
-              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar.")), note: note)
+              + orCancel(say(", or say anything else to cancel.", " или напиши что-нибудь другое, чтобы отменить.", ", o di otra cosa para cancelar."))
+              // P3: the private way is one click over Confirm.
+              + (privacyTwin() == nil ? "" : say(" It can also go privately through NEAR Intents, so nobody can link it to you: pick Private over Confirm.",
+                                                 " Можно отправить и приватно, через NEAR Intents, чтобы никто не связал перевод с тобой: выбери Private над Confirm.",
+                                                 " También puede ir en privado por NEAR Intents, sin que nadie lo vincule contigo: elige Private sobre Confirm.")), note: note)
     }
 
     /// A send no balance can cover is said at once, not a card whose Confirm could only fail («send 100 USDC to Automation

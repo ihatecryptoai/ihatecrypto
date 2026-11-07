@@ -4,6 +4,7 @@ import LLMApple
 import LLMChatGPT
 import LLMClaudeCode
 import LLMCore
+import LLMNearAI
 import LLMOpenRouter
 
 /// Every way the app can reach a model. Adding a provider: a module under Sources/LLM plus one line here.
@@ -21,7 +22,7 @@ public enum LLMCatalog {
         )),
         OpenRouter(),
         // An Anthropic key keeps its place in the list, after OpenAI's.
-    ] + OpenAICompatible.presets.flatMap { p -> [any LLMProvider] in p.info.id == "openai" ? [p, AnthropicAPI()] : [p] } + [AppleIntelligence()]
+    ] + OpenAICompatible.presets.flatMap { p -> [any LLMProvider] in p.info.id == "openai" ? [p, AnthropicAPI()] : [p] } + [NearAI(), AppleIntelligence()]
 
     public static func provider(id: String) -> (any LLMProvider)? {
         all.first { $0.info.id == id }

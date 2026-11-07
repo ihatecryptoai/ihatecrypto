@@ -1513,5 +1513,142 @@
       "pending_kind": "wallet",
       "reply_lacks": "knows no verified"
     }
+  },
+  {
+    "name": "guard my loan → the guard is on the alerts board, nothing waits for Confirm",
+    "send": "следи за займом на камино, не дай его ликвидировать",
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "Kamino",
+      "reply_cyrillic": true
+    }
+  },
+  {
+    "name": "chat on NEAR AI Cloud → the enclave checked before the message, the reply signed by the attested model key, the private assistant header on, a send drawn for Confirm",
+    "provider": "nearai",
+    "send": [
+      "переведи 1 USDC на Automation в base"
+    ],
+    "expect": {
+      "tee": true,
+      "tee_reply": "model",
+      "pending_kind": "transfer"
+    }
+  },
+  {
+    "name": "send USDC privately → a NEAR Intents Confidential Intents card to the saved address, quoted, Private picked over Confirm",
+    "send": [
+      "переведи приватно 1 USDC на Automation в base"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "CONFIDENTIAL INTENTS"
+      ],
+      "title_contains": "privately",
+      "footer_contains": "can't be matched",
+      "privacy": "private"
+    },
+    "only_if": {
+      "wallet": "test"
+    }
+  },
+  {
+    "name": "send USDC on Base → a plain transfer card with Regular | Private over Confirm, Regular picked",
+    "send": [
+      "переведи 1 USDC на Automation в base"
+    ],
+    "expect": {
+      "pending_kind": "transfer",
+      "privacy": "regular",
+      "reply_contains": "Private"
+    }
+  },
+  {
+    "name": "swap privately → a Confidential Intents card from Solana USDC to the NEAR account, quoted, Private picked over Confirm",
+    "send": [
+      "купи приватно NEAR на 0.3 USDC"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "PRIVATE SWAP · CONFIDENTIAL INTENTS"
+      ],
+      "title_contains": "privately",
+      "footer_contains": "can't be matched",
+      "privacy": "private"
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 0.3
+    }
+  },
+  {
+    "name": "buy NEAR in the open → its card offers Regular | Private over Confirm, Regular picked",
+    "send": [
+      "купи NEAR на 0.3 USDC"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "steps": [
+        "NEAR INTENTS"
+      ],
+      "privacy": "regular"
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 0.3
+    }
+  },
+  {
+    "name": "create an agent wallet → the rules the NEAR key signs drawn as a card, waiting for Confirm",
+    "send": [
+      "создай кошелёк агента с лимитом 20$ в день"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "agent wallet",
+      "steps": [
+        "YOUR NEAR KEY",
+        "RULES",
+        "GRANT"
+      ],
+      "footer_contains": "refuses"
+    }
+  },
+  {
+    "name": "pay an x402 API → a card paying USDC on Base by signature, the facilitator paying the fee, waiting for Confirm",
+    "send": [
+      "pay GET https://api.402rates.com/v1/ping"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "api.402rates.com",
+      "steps": [
+        "X402",
+        "TO"
+      ],
+      "footer_contains": "x402"
+    }
+  },
+  {
+    "name": "move USDC via NEAR Intents → a 1Click card from Base to Solana at our own address, waiting for Confirm",
+    "send": [
+      "переведи 1 USDC с бейза на солану через NEAR Intents"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "title_contains": "NEAR Intents",
+      "steps": [
+        "FROM",
+        "NEAR INTENTS",
+        "TO"
+      ],
+      "footer_contains": "1Click"
+    }
   }
 ]

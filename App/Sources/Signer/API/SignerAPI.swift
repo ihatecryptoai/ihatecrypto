@@ -77,6 +77,10 @@ public enum SignerRequest: Codable, Sendable {
     /// (EVMChain's Permit3009): only USDC or USDG it knows by their own domain, from this wallet, to Relay's proxy, valid
     /// an hour at most. Reply: signature.
     case signReceiveAuthorization(chainId: UInt64, token: String, to: String, value: UInt64, validBefore: UInt64, nonce: Data)
+    /// A paid API's price by x402: EIP-3009 TransferWithAuthorization the signer builds itself (EVMChain's
+    /// X402Authorization) — a dollar it knows, from this wallet to `to`, at most 5 dollars, valid an hour at most; `to`
+    /// passes the new-recipient rule, with `service` named on the prompt. Reply: signatures[0], 65 bytes.
+    case signX402(chainId: UInt64, token: String, to: String, value: UInt64, validBefore: UInt64, nonce: Data, service: String)
     /// The same on Relay's v3.2 approval proxy: a MulticallAuthorization over the calls the proxy runs with the dollar, and
     /// the EIP-3009 authorization whose nonce is its digest. The signer checks the calls itself (one deposit through Relay's
     /// router into its depository, for this wallet: EVMChain's RelayMulticallPermit), computes the digest and signs both.
@@ -124,6 +128,15 @@ public enum SignerRequest: Codable, Sendable {
     /// DeleteAccount of the wallet's NEAR account into `beneficiary` (one of `recipients`), after a Touch ID prompt that
     /// says so in plain words.
     case signNearDeleteAccount(beneficiary: String, recipients: [String], nonce: UInt64, blockHash: Data)
+    /// NEAR Intents' Agent API, as an agent wallet's owner (this wallet's NEAR key): a NEP-413 message. The signer reads
+    /// `payload` itself (AgentOwner.message): only to the Agent API's host, only owner requests it can say, confirmed in
+    /// person each time. Reply: `signedRaw` = the 64-byte ed25519 signature.
+    case signAgentMessage(payload: Data)
+    /// The same owner's NEP-366 delegate action to the agent wallets' custody contract (AgentOwner.delegate: create,
+    /// freeze, a policy change), which the API's sponsor sends on chain. `nonce`, `maxBlockHeight`: from the owner's
+    /// access key. Reply: `signedRaw` = the borsh SignedDelegateAction.
+    /// `policy`: the complete policy the call carries (or hashes), checked by the signer itself (AgentOwner.policy).
+    case signAgentDelegate(payload: Data, nonce: UInt64, maxBlockHeight: UInt64, policy: Data?)
     /// A new automation wallet (one at most, next to a Touch ID one): a phrase made here that signs without Touch ID,
     /// for the budget of scheduled tasks. Asks for Touch ID first; the wallet that signs stays the same.
     case createAutomationWallet
@@ -346,7 +359,7 @@ public final class SignerClient: @unchecked Sendable {
             case .status, .nearAddress, .endSession, .ledgerAgent(_, false), .addressBook: break
             case .signSolana, .signEVMTransaction, .signEVMBatch, .signHyperliquidL1, .signHyperliquidUser, .signRelayNonceMapping,
                  .signReceiveAuthorization, .signRelayMulticallPermit, .signSponsoredTransfer, .signNearIntentDeposit, .signNearTransfer,
-                 .signNearDeleteAccount:
+                 .signNearDeleteAccount, .signAgentMessage, .signAgentDelegate, .signX402:
                 let status = try await Self.$untrusted.withValue(false) { try await send(.status) }
                 guard status.wallets?.first(where: { $0.id == status.activeWallet })?.isTest == true else {
                     throw WalletError("Nothing is signed from the debug API while a wallet that asks for \(Presence.name) signs: confirm money moves in ihatecrypto’s window, or switch to a test wallet.")

@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "IhatecryptoKit", targets: [
             "IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
             "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
+            "LLMNearAI", "AgentAPIKit",
         ]),
         .library(name: "IhatecryptoSignerKit", targets: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"]),
     ],
@@ -30,12 +31,13 @@ let package = Package(
         .target(name: "LLMClaudeCode", dependencies: ["LLMCore"], path: "Sources/LLM/ClaudeCode"),
         .target(name: "LLMAnthropic", dependencies: ["LLMCore"], path: "Sources/LLM/Anthropic"),
         .target(name: "LLMApple", dependencies: ["LLMCore"], path: "Sources/LLM/Apple"),
+        .target(name: "LLMNearAI", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/NearAI"),
         .target(
             name: "LLMCatalog",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple"],
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMNearAI"],
             path: "Sources/LLM/Catalog"
         ),
-        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
+        .executableTarget(name: "LLMCheck", dependencies: ["LLMCatalog", "LLMCore", "LLMNearAI", "IhatecryptoCore", "TradeExecution"], path: "Sources/LLM/Check"),
 
         // Keys and signatures: BIP-39, derivation, Keccak, EIP-712. Knows nothing about protocols or UI.
         .target(name: "WalletCore", dependencies: [.product(name: "P256K", package: "swift-secp256k1"),
@@ -48,6 +50,7 @@ let package = Package(
         .target(name: "ExecutionCore", path: "Sources/Execution", exclude: ["Trade"]),
         .target(name: "JupiterSwap", dependencies: ["WalletCore"], path: "Sources/Protocols/Jupiter"),
         .target(name: "OneClickKit", dependencies: ["WalletCore"], path: "Sources/Protocols/OneClick"),
+        .target(name: "AgentAPIKit", dependencies: ["WalletCore"], path: "Sources/Protocols/AgentAPI"),
         .target(name: "RelayBridge", dependencies: ["SolanaChain", "WalletCore"], path: "Sources/Protocols/Relay"),
         // DeFi: one folder per protocol. Jupiter Lend Earn first.
         .target(name: "DeFiJupiterLend", dependencies: ["WalletCore"], path: "Sources/DeFi/JupiterLend"),
@@ -80,7 +83,7 @@ let package = Package(
         .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge", "HyperliquidSigning"]),
         .executableTarget(
             name: "IhatecryptoApp",
-            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
+            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "LLMNearAI", "AgentAPIKit", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
                            "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
                            .product(name: "Sparkle", package: "Sparkle")],
             // Logos, sounds and the stories are bundled by the Xcode project; `swift run` shows lettered circles instead.
@@ -97,7 +100,8 @@ let package = Package(
         .testTarget(name: "WalletTests", dependencies: ["WalletCore", "HyperliquidSigning", "SolanaChain", "ExecutionCore", "TxGuard", "EVMChain", "TradeExecution", "SignerAPI", "Ledger", "OneClickKit", "RelayBridge", "IhatecryptoCore", "GuardJev", "JupiterSwap", "DeFiKamino"]),
         .testTarget(
             name: "LLMTests",
-            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMCatalog"]
+            dependencies: ["LLMCore", "LLMAPIKey", "LLMOpenRouter", "LLMChatGPT", "LLMClaudeCode", "LLMAnthropic", "LLMApple", "LLMCatalog", "LLMNearAI"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

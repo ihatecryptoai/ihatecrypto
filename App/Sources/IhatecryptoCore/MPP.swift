@@ -21,11 +21,34 @@ public enum MPP {
         public let memo: Data?
         public let expires: Date?
 
+        /// «tempo», or «nearintents» (paid through NEAR Intents: `payee` is 1Click's deposit address there).
+        public var method = "tempo"
+        public var near: NearCharge?
+
         public var realm: String { params["realm"] ?? "" }
         public var purpose: String? { params["description"] }
         /// «Payment-Authorization» when the service keeps Authorization for its own login.
         public var field: String { params["header"] ?? "Authorization" }
         public var usdc: Decimal { Decimal(amount) / 1_000_000 }
+    }
+
+    /// A charge paid through NEAR Intents (paymentauth.org draft-nearintents-charge-01): the payer sends `amount` of
+    /// `currency` on `originNetwork` to 1Click's deposit address; 1Click delivers exactly `amountOut` of `destinationAsset`
+    /// to `destinationRecipient`. A deposit that doesn't settle is refunded to `refundTo`, which the service sets.
+    public struct NearCharge: Equatable, Sendable {
+        /// CAIP-2 («eip155:8453», «solana:5eykt4…») and CAIP-19 («eip155:8453/erc20:0x…»).
+        public let originNetwork: String, currency: String
+        public let destinationNetwork: String, destinationAsset: String, destinationRecipient: String
+        public let amountOut: String
+        public let minAmountIn: UInt64
+        public let refundTo: String
+        public let timeEstimate: Int?
+
+        public static let solanaMainnet = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+        public var evmChain: UInt64? { originNetwork.hasPrefix("eip155:") ? UInt64(originNetwork.dropFirst(7)) : nil }
+        public var onSolana: Bool { originNetwork == Self.solanaMainnet }
+        /// The token `currency` names: an ERC-20 contract or a Solana mint.
+        public var token: String { currency.split(separator: ":").last.map(String.init) ?? currency }
     }
 
     /// The Payment challenges in a WWW-Authenticate value, each as its auth-params (a value may list several schemes).
@@ -47,14 +70,75 @@ public enum MPP {
         return out
     }
 
-    /// The challenge ihatecrypto can pay, or why none: USDC on Tempo, a charge of more than zero, push mode allowed.
-    public static func challenge(_ header: String, now: Date = Date()) -> Result<Challenge, Refusal> {
+    /// The challenge ihatecrypto can pay, or why none: USDC on Tempo first, else a NEAR Intents charge in a token the
+    /// wallet pays (`pays`: USDC on a network it has, as the app knows them). Without `pays`, Tempo only: a caller that
+    /// pays on Tempo never gets a NEAR Intents deposit address back.
+    public static func challenge(_ header: String, now: Date = Date(), pays: (NearCharge) -> Bool = { _ in false }) -> Result<Challenge, Refusal> {
         let all = challenges(header)
-        guard let p = all.first(where: { $0["method"] == "tempo" && $0["intent"] == "charge" }) else {
-            let offered = all.map { "\($0["method"] ?? "?") \($0["intent"] ?? "?")" }.joined(separator: ", ")
-            return .failure(Refusal(offered.isEmpty ? "The service asked for payment without an MPP challenge." :
-                "The service takes \(offered); ihatecrypto pays only a one-time charge in USDC on Tempo."))
+        let tempo = all.first(where: { $0["method"] == "tempo" && $0["intent"] == "charge" }).map { tempoChallenge($0, now: now) }
+        if case .success? = tempo { return tempo! }
+        var near: Result<Challenge, Refusal>?
+        for p in all where p["method"] == "nearintents" && p["intent"] == "charge" {
+            let r = nearChallenge(p, now: now)
+            if case .success(let c) = r, let n = c.near, !pays(n) {
+                near = .failure(Refusal("The service wants \(n.currency) on \(n.originNetwork) through NEAR Intents. ihatecrypto pays such a charge in USDC on Solana, Base, Arbitrum or Ethereum."))
+                continue
+            }
+            if case .success = r { return r }
+            near = r
         }
+        if let tempo { return tempo }
+        if let near { return near }
+        let offered = all.map { "\($0["method"] ?? "?") \($0["intent"] ?? "?")" }.joined(separator: ", ")
+        return .failure(Refusal(offered.isEmpty ? "The service asked for payment without an MPP challenge." :
+            "The service takes \(offered). ihatecrypto pays a one-time charge in USDC on Tempo or through NEAR Intents."))
+    }
+
+    /// A NEAR Intents charge as the draft asks the payer to check it before depositing: the amount and the token on the
+    /// network the deposit goes on, the destination leg in full, a plain transfer with no memo, proven by its hash.
+    static func nearChallenge(_ p: [String: String], now: Date) -> Result<Challenge, Refusal> {
+        guard let id = p["id"], !id.isEmpty, p["realm"] != nil, let encoded = p["request"],
+              let raw = base64url(encoded), let request = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let d = request["methodDetails"] as? [String: Any] else {
+            return .failure(Refusal("The service's NEAR Intents payment request can't be read."))
+        }
+        func text(_ key: String) -> String? { (d[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+        guard let amount = (request["amount"] as? String).flatMap({ UInt64($0) }), amount > 0 else {
+            return .failure(Refusal("The service asks for an amount that can't be read. ihatecrypto only pays real charges."))
+        }
+        guard let origin = text("originNetwork"), let currency = request["currency"] as? String, currency.hasPrefix(origin + "/") else {
+            return .failure(Refusal("The service's token isn't on the network its deposit goes on."))
+        }
+        guard let deposit = request["recipient"] as? String, !deposit.isEmpty, !deposit.contains(where: \.isWhitespace) else {
+            return .failure(Refusal("The service's deposit address can't be read."))
+        }
+        guard let network = text("destinationNetwork"), let asset = text("destinationAsset"), let payee = text("destinationRecipient"),
+              let out = text("amountOut"), let refund = text("refundTo"), let minimum = text("minAmountIn").flatMap({ UInt64($0) }) else {
+            return .failure(Refusal("The service doesn't say what it receives, where, or where a refund goes."))
+        }
+        // What the card and the chat print: an address or an account name, never the service's own words.
+        let account = /[A-Za-z0-9][A-Za-z0-9._:-]{1,99}/
+        guard payee.wholeMatch(of: account) != nil, refund.wholeMatch(of: account) != nil, deposit.wholeMatch(of: account) != nil,
+              UInt64(out) != nil else {
+            return .failure(Refusal("The service's receiver, refund address or amount isn't an address or a number."))
+        }
+        // Less than the minimum only comes back as a refund, and the service picks where a refund goes.
+        guard minimum <= amount else { return .failure(Refusal("The service asks for less than its own minimum deposit.")) }
+        if let memo = d["depositMemo"], !(memo is NSNull) {
+            return .failure(Refusal("The service's deposit needs a memo, and ihatecrypto pays with a plain transfer."))
+        }
+        if let kinds = d["credentialTypes"] as? [String], !kinds.contains("hash") {
+            return .failure(Refusal("The service takes a proof other than the transaction's hash."))
+        }
+        let expires = p["expires"].flatMap(date)
+        if let expires, expires <= now { return .failure(Refusal("The service's price quote has expired. Ask again.")) }
+        let charge = NearCharge(originNetwork: origin, currency: currency, destinationNetwork: network, destinationAsset: asset,
+                                destinationRecipient: payee, amountOut: out, minAmountIn: minimum, refundTo: refund,
+                                timeEstimate: (d["timeEstimate"] as? NSNumber)?.intValue)
+        return .success(Challenge(params: p, amount: amount, payee: deposit, memo: nil, expires: expires, method: "nearintents", near: charge))
+    }
+
+    static func tempoChallenge(_ p: [String: String], now: Date) -> Result<Challenge, Refusal> {
         guard let id = p["id"], !id.isEmpty, p["realm"] != nil, let encoded = p["request"],
               let raw = base64url(encoded), let request = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             return .failure(Refusal("The service's payment request can't be read."))
@@ -104,7 +188,8 @@ public enum MPP {
     /// hash and the payer as a did:pkh.
     public static func credential(_ c: Challenge, hash: String, payer: String) -> String {
         let echoed = c.params.filter { ["id", "realm", "method", "intent", "request", "description", "opaque", "digest", "expires", "header"].contains($0.key) }
-        let body: [String: Any] = ["challenge": echoed, "payload": ["type": "hash", "hash": hash], "source": "did:pkh:eip155:\(chainId):\(payer)"]
+        let network = c.near?.originNetwork ?? "eip155:\(chainId)"
+        let body: [String: Any] = ["challenge": echoed, "payload": ["type": "hash", "hash": hash], "source": "did:pkh:\(network):\(payer)"]
         let json = (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
         return "Payment " + json.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
@@ -125,9 +210,11 @@ public enum MPP {
     }
 
     /// The request as the service documents it; `credential` goes in the field its challenge named.
-    public static func call(_ method: String, _ url: String, _ body: String?, credential: (field: String, value: String)? = nil) async throws -> (Int, [String: String], Data) {
+    /// `timeout`: a NEAR Intents charge answers only once 1Click has settled the deposit, a minute or two.
+    public static func call(_ method: String, _ url: String, _ body: String?, credential: (field: String, value: String)? = nil,
+                            timeout: TimeInterval = 60) async throws -> (Int, [String: String], Data) {
         guard let u = URL(string: url), u.scheme == "https" else { throw URLError(.unsupportedURL) }
-        var request = URLRequest(url: u, timeoutInterval: 60)
+        var request = URLRequest(url: u, timeoutInterval: timeout)
         request.httpMethod = method
         if let body {
             request.httpBody = Data(body.utf8)
@@ -143,16 +230,16 @@ public enum MPP {
     /// The request again with the payment's proof. The money is gone by now: whatever goes wrong — no answer, a refusal —
     /// names the payment, so the user can show it to the service.
     public static func paid(_ method: String, _ url: String, _ body: String?, credential: (field: String, value: String),
-                            usdc: Decimal, service: String, proof: String) async throws -> Data {
+                            usdc: Decimal, service: String, proof: String, on place: String = "Tempo", timeout: TimeInterval = 60) async throws -> Data {
         let paid = "Paid \(Fmt.num(usdc, maxFraction: 6)) USDC, but \(service)"
         let status: Int, data: Data
         do {
-            (status, _, data) = try await call(method, url, body, credential: credential)
+            (status, _, data) = try await call(method, url, body, credential: credential, timeout: timeout)
         } catch {
-            throw Refusal("\(paid) didn't answer: \(error.localizedDescription.trimmingCharacters(in: [".", " "])). The payment is on Tempo: \(proof)")
+            throw Refusal("\(paid) didn't answer: \(error.localizedDescription.trimmingCharacters(in: [".", " "])). The payment is on \(place): \(proof)")
         }
         guard (200..<300).contains(status) else {
-            throw Refusal("\(paid) answered \(status): \(shown(data, limit: 300)). The payment is on Tempo: \(proof)")
+            throw Refusal("\(paid) answered \(status): \(shown(data, limit: 300)). The payment is on \(place): \(proof)")
         }
         return data
     }

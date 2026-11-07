@@ -398,6 +398,16 @@ final class Workspace {
     var alerts: [PriceAlert] = LocalStore.load("alerts.json") ?? [] {
         didSet { LocalStore.save(alerts, "alerts.json") }
     }
+    /// Loans whose health factor is read with every refresh (LoanGuards.swift).
+    /// The agent wallet on NEAR Intents this wallet's NEAR key owns (AgentWallet.swift).
+    var agentWallet: AgentWalletRecord? = LocalStore.load("agentwallet.json") {
+        didSet { LocalStore.save(agentWallet, "agentwallet.json") }
+    }
+    var loanGuards: [LoanGuard] = LocalStore.load("loanguards.json") ?? [] {
+        didSet { LocalStore.save(loanGuards, "loanguards.json") }
+    }
+    /// Each guarded loan's last health read, for the alerts board: no entry before the first read, nil without a debt.
+    var guardHealth: [UUID: Decimal?] = [:]
     /// Saved addresses — exchanges, other wallets — entered by hand in the address book only (AddressBook.swift).
     var addressBook: [SavedAddress] = LocalStore.load("addressbook.json") ?? [] {
         didSet { LocalStore.save(addressBook, "addressbook.json") }
@@ -440,6 +450,13 @@ final class Workspace {
     }
     /// When the swap waiting for Confirm was quoted: its Confirm holds `quoteLife` after that, then Refresh asks again.
     var swapQuotedAt: Date?
+    /// A send through NEAR Intents waiting for Confirm, as its quote reads: the receipt over Cancel and Confirm
+    /// (Studio's receiptRow) — what it pays and from where, what 1Click and the network keep, how long it takes.
+    var acrossReceipt: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?)?
+    /// P3: the private twin of the regular send waiting for Confirm, quoted dry: what NEAR Intents keeps, how long it takes.
+    var privateTwin: (command: WalletCommand, fee: Decimal?, seconds: Int?, gets: String?)?
+    /// N5: a move through NEAR Intents after Confirm, as 1Click reports it (IntentsJourney), until the next message.
+    var journey: IntentsJourney?
     /// The swap whose card shows a price (Workspace.quoteSwap): the one Confirm waits on a fresh quote for.
     var pricedCommand: WalletCommand?
     /// A Solana swap's output as its card showed it, in the token's units: the swap won't go for 1% less (Executor.convert).
@@ -1114,6 +1131,7 @@ final class Workspace {
         defer { heldAnswer = nil }
         // Cleared only when set: a tuple and NextSteps aren't Equatable, so even nil over nil redraws what reads them.
         if finishedAction != nil { finishedAction = nil }
+        if journey?.endedAt != nil { journey = nil }
         // The cards of the last answer go with any new message; the model still knows them («да», «второй»).
         let offered = liveSteps?.options ?? []
         if nextSteps != nil { nextSteps = nil }
@@ -1345,6 +1363,10 @@ final class Workspace {
         if let command = FolderCommand.parse(text) { folderCommand(command); return }
         if let command = AddressBookCommand.parse(text) {
             await addressBookCommand(command)
+            return
+        }
+        if let command = LoanGuardCommand.parse(text) {
+            await loanGuardCommand(command)
             return
         }
         if let command = AlertCommand.parse(text, markets: Set(markets.keys)) {
@@ -1857,6 +1879,13 @@ final class Workspace {
     func runCanonical(_ canonical: String, userText text: String, before: TradeIntent, inChain: Bool = false) async -> Bool {
         if !inChain { updateActivity { $0.understood = canonical } }
         let note = "understood as “\(readable(canonical))” · \(model)"
+        // Asked for privacy: a send in a chain, a schedule or an alert must be the private one too — those steps are read
+        // again later without the user's words, so the check below would never see them.
+        if WalletCommand.asksPrivacy(text), !inChain, WalletCommand.hasPublicSend(canonical) {
+            reply(say("You asked for privacy, but a step here would send in the open. Say the send itself privately — “send 20 USDC privately to Mom”. Nothing was prepared.",
+                      "Ты просил приватно, но один из шагов отправил бы открыто. Скажи сам перевод приватно — «переведи приватно 20 USDC маме». Ничего не подготовлено."), note: note)
+            return true
+        }
         if ScheduledTask.cancelsAll(canonical) { cancelTasks(note: note); return true }
         if let task = ScheduledTask.parse(canonical) { schedule(task, note: note); return true }
         // A paid request before any other reading: its body is free text, where a contract, «then» or «chart» belongs to
@@ -1916,6 +1945,10 @@ final class Workspace {
                       "На холсте три способа взять прибыль. Стоп остаётся прежним; выбери один."), note: note)
             return true
         }
+        if let command = LoanGuardCommand.parse(canonical) {
+            await loanGuardCommand(command, note: note)
+            return true
+        }
         if let command = AlertCommand.parse(canonical, markets: Set(markets.keys)) {
             alertCommand(command, note: note)
             return true
@@ -1924,6 +1957,16 @@ final class Workspace {
             // The model only rewords: an address it wrote must be in the user's own message, character for character.
             if case .save(let address, _, _) = command, !text.contains(address) { return false }
             await addressBookCommand(command, note: note)
+            return true
+        }
+        // The user asked for privacy and the form left it out: the same send made private, or nothing in the open.
+        if WalletCommand.asksPrivacy(text), let command = WalletCommand.parse(canonical) {
+            guard let made = command.madePrivate else {
+                reply(say("You asked for privacy: only a send with an amount goes privately — “send 20 USDC privately to Mom”. Nothing was prepared.",
+                          "Ты просил приватно: приватным бывает только перевод с суммой — «переведи приватно 20 USDC маме». Ничего не подготовлено."), note: note)
+                return true
+            }
+            await handleWallet(made, note: note, quiet: inChain)
             return true
         }
         if case .sendTo(let name, let amount, let net)? = WalletCommand.parse(canonical) {

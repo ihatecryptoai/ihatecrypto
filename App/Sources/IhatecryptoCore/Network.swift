@@ -314,6 +314,19 @@ public enum Near {
         return (nonce + 1, try Base58.decode(hash), balance, storage, gasPrice)
     }
 
+    /// What a NEP-366 delegate action from the implicit `account` needs: its key's next nonce, and the last block it may
+    /// land in (120 blocks ahead, ≈ 1–2 min, so it's signed right before it's sent).
+    public static func delegateContext(account: String) async throws -> (nonce: UInt64, maxBlockHeight: UInt64) {
+        guard let raw = Data(hex: account), raw.count == 32 else { throw NetError(message: "Not a NEAR implicit account: \(account).") }
+        let data = try await HTTP.post(rpc, json: ["jsonrpc": "2.0", "id": 1, "method": "query", "params": [
+            "request_type": "view_access_key", "finality": "final", "account_id": account, "public_key": "ed25519:" + Base58.encode(raw)]])
+        guard let key = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["result"] as? [String: Any],
+              let nonce = (key["nonce"] as? NSNumber)?.uint64Value, let height = (key["block_height"] as? NSNumber)?.uint64Value else {
+            throw NetError(message: "This NEAR account has no key on chain yet: NEAR opens it with the first NEAR it receives.")
+        }
+        return (nonce + 1, height + 120)
+    }
+
     /// NEAR's «NotEnoughBalance» (the fee) or «LackBalanceForState» (what the account must keep for its storage) in words,
     /// with what to do; nil for anything else.
     static func shortOfNEAR(_ error: String) -> String? {

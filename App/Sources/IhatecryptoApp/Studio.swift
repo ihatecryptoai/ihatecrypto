@@ -285,7 +285,8 @@ struct StudioView: View {
                         .padding(16)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         // Over the chat while open: a pick closes it and the chat shows the block's words.
-                        if mode == "plan" {
+                        // While a move waits for Confirm its Cancel and Confirm hold that corner: «Add block» sat on top of them.
+                        if mode == "plan", (ws.pendingAction == nil && ws.pendingText == nil && ws.pendingAllocation == nil) || showBlocks {
                             // «Add block» / «Close blocks» stays at the right; the library itself sits under it or,
                             // moved by its corner button, beside the sidebar, and glides between the two.
                             AddBlockButton(open: $showBlocks)
@@ -1398,7 +1399,7 @@ struct StudioCanvas: View {
             if chartAt == .column, let chart = ws.chart, ws.detail != "chart" { ChartBoard(state: chart).blockMenu("Chart · \(IntentParser.pretty(chart.coin))") }
             PnLBoard().blockMenu("Profit and loss", radius: 20)
             if ws.showMovers { MoversBoard().blockMenu("Movers") }
-            if ws.showAlerts, !ws.alerts.isEmpty { AlertsBoard().blockMenu("Price alerts") }
+            if ws.showAlerts, !ws.alerts.isEmpty || !ws.loanGuards.isEmpty { AlertsBoard().blockMenu("Alerts") }
             if let yields = ws.yieldOptions ?? ws.heldAnswer?.yields, !yields.isEmpty {
                 YieldBubbles(options: yields).allowsHitTesting(ws.yieldOptions != nil).blockMenu("Rates", radius: nil)
             }
@@ -1424,7 +1425,8 @@ struct StudioCanvas: View {
                         if ws.thinking || ws.busy || ws.executing || ws.preparing || ws.managesPosition,
                            let last = ws.canvases.first(where: { $0.id == ws.canvasID }), !last.bubbles.isEmpty {
                             SavedBoard(canvas: last).blockMenu(ws.readable(last.title), radius: nil)
-                        } else if ws.currentScheduleKey == nil {
+                        } else if ws.currentScheduleKey == nil, !(ws.showAlerts && (!ws.alerts.isEmpty || !ws.loanGuards.isEmpty)) {
+                            // The alerts board is the canvas's answer then: no starter blocks under it.
                             placeholder
                         }
                     }
@@ -2425,14 +2427,19 @@ struct FloatingChat: View {
     @State private var follow = true
 
     var body: some View {
+        // T4: on an attested NEAR AI model the header says the chat is private, with the proof a click away.
+        let tee = ws.teeVerified
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 BrandLogo(size: 30, mood: mood, animated: true)
+                    .overlay(alignment: .bottomTrailing) { if tee != nil { TEELockBadge().offset(x: 5, y: 5) } }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Assistant").font(.ui(14, .semibold))
-                    Text(status).font(.ui(10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(tee == nil ? "Assistant" : "Private assistant").font(.ui(14, .semibold))
+                    Text(tee == nil ? status : "Runs in sealed hardware. The host can't read this chat.")
+                        .font(.ui(10)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 6)
+                if let tee { TEEProofButton(verified: tee, model: ws.model) }
                 Button { withAnimation(StudioView.spring) { ws.newCanvas() } } label: { headerIcon("square.and.pencil") }
                     .buttonStyle(.hoverIcon).help("New canvas").disabled(ws.busy)
                 Button(action: toggleWide) { headerIcon(wide ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") }
@@ -2445,6 +2452,13 @@ struct FloatingChat: View {
                 .onChanged { drag = $0.translation }
                 .onEnded { endDrag($0.translation) })
                 .simultaneousGesture(TapGesture(count: 2).onEnded { dock() }))
+            .background {
+                if tee != nil {
+                    UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26, style: .continuous).fill(Brand.tee.opacity(0.08))
+                        .overlay(alignment: .bottom) { Rectangle().fill(Brand.tee.opacity(0.25)).frame(height: 1) }
+                }
+            }
+            .padding(.bottom, tee == nil ? 0 : 6)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -2536,6 +2550,7 @@ struct FloatingChat: View {
         .environment(\.colorScheme, scheme)
         // Liquid Glass, floating over the canvas like the rail.
         .measuredGlass(.regular.tint(Brand.glassTint), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay { if tee != nil { RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Brand.tee.opacity(0.45)).allowsHitTesting(false) } }
     }
 
     private func headerIcon(_ name: String) -> some View {
@@ -2992,34 +3007,42 @@ private struct ChatComposer: View {
 
     private var field: some View {
         let waiting = waiting
+        // N5: after Confirm, a move through NEAR Intents shows its way where the receipt was.
+        let journey = waiting == nil ? ws.journey : nil
+        // The head's color: orange for a move waiting, violet for a private one (P3), NEAR's green for its journey (N5).
+        let tint: Color? = waiting != nil ? (ws.pendingIsPrivate ? Brand.privacy : Brand.accent) : journey != nil ? Brand.near : nil
         return VStack(spacing: 0) {
-            if let waiting { waitingBar(waiting) }
+            if let waiting { waitingBar(waiting, tint: tint ?? Brand.accent) }
+            else if let journey { JourneyBar(journey: journey) }
             // A signature waiting for the passcode takes the field's place (Passcode.swift).
-            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil) }
+            if let ask = CodePrompt.shared.pending { CodeEntryRow(ask: ask) } else { entry(waiting: waiting != nil, corner: waiting != nil ? tint?.opacity(0.10) : tint?.opacity(0.06)) }
         }
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         // A glass pill on the glass chat, its rim orange while a move waits for Confirm.
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(waiting == nil ? Brand.glassRim : Brand.accent, lineWidth: waiting == nil ? 1 : 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(tint ?? Brand.glassRim, lineWidth: tint == nil ? 1 : 1.5))
     }
 
     /// Variant E: while a move waits, the field carries it — what it is, Cancel and Confirm in one place, the orange bar
     /// above the field gone. The steps stay on the canvas; the field below still asks about it or changes it.
-    private func waitingBar(_ title: String) -> some View {
+    private func waitingBar(_ title: String, tint: Color) -> some View {
         // Once a second while a priced swap's Confirm counts down its 15 s after the quote, then Refresh asks again
         // (quoteState). Otherwise nothing here changes with the time, and each tick redraws the window.
         Group {
+            // The receipt is read once per change, not on every tick of the countdown.
+            let receipt = ws.executing ? nil : Receipt(ws)
+            let choice = ws.executing ? nil : ws.privacyChoice
             if case .fresh = ws.quoteState(at: Date()) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date)) }
+                TimelineView(.periodic(from: .now, by: 1)) { context in waitingRow(title, state: ws.quoteState(at: context.date), receipt: receipt, choice: choice) }
             } else {
-                waitingRow(title, state: ws.quoteState(at: Date()))
+                waitingRow(title, state: ws.quoteState(at: Date()), receipt: receipt, choice: choice)
             }
         }
         .padding(.vertical, 10).padding(.leading, 14).padding(.trailing, 9)
-        .background(Brand.accent.opacity(0.10))
+        .background(tint.opacity(0.10))
     }
 
-    private func waitingRow(_ title: String, state: Workspace.QuoteState) -> some View {
+    private func waitingRow(_ title: String, state: Workspace.QuoteState, receipt: Receipt?, choice: PrivacyChoice?) -> some View {
         let sign = ws.pendingText == nil
         // A swap: what it gets and at what rate, as quoted now; else where its steps are.
         let line: String = {
@@ -3064,13 +3087,78 @@ private struct ChatComposer: View {
             }
         }
         .disabled(ws.busy || ws.executing)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
-            VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+        return Group {
+            if !ws.executing, let receipt {
+                receiptRow(receipt, state: state, choice: choice, buttons: buttons)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { what; Spacer(minLength: 6); buttons }
+                    VStack(alignment: .leading, spacing: 8) { what; HStack { Spacer(); buttons } }
+                }
+            }
         }
     }
 
-    private func entry(waiting: Bool) -> some View {
+    /// Variant A «Receipt» (owner, 2026-11-05), for every move: what it is, how much goes where, then what you pay and
+    /// from where, what the blockchain keeps and what arrives — and what runs after it.
+    private func receiptRow(_ r: Receipt, state: Workspace.QuoteState, choice: PrivacyChoice?, buttons: some View) -> some View {
+        func cell(_ c: (label: String, value: String, note: String)) -> some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(c.label).font(.ui(9.5, .semibold)).kerning(0.6).foregroundStyle(.secondary).lineLimit(1)
+                Text(c.value).font(.ui(13, .semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+                if !c.note.isEmpty {
+                    Text(c.note).font(.ui(10.5)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
+        }
+        // As short as it reads: the chat above keeps the room for the reply and its cards.
+        return VStack(alignment: .leading, spacing: 8) {
+            // P3: the switch says which way it goes, so no header over it.
+            if choice == nil {
+                Label(r.header, systemImage: r.icon).font(.ui(10.5, .semibold)).kerning(0.6).foregroundStyle(Brand.accentInk).lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let to = r.to {
+                    Text(r.amount).font(.ui(21, .bold)).monospacedDigit()
+                    Text("→").font(.ui(16)).foregroundStyle(.secondary)
+                    Text(to).font(.ui(16, .semibold)).lineLimit(1)
+                } else {
+                    Text(r.amount).font(.ui(16, .bold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                if let chip = r.chip {
+                    Text(chip).font(.ui(11)).foregroundStyle(.secondary).lineLimit(1)
+                        .padding(.horizontal, 8).padding(.vertical, 2).overlay(Capsule().strokeBorder(Brand.cardBorder))
+                }
+            }
+            if let choice {
+                PrivacyChoiceRows(choice: choice)
+            } else {
+                if let line = r.line {
+                    Text(line).font(.ui(11)).foregroundStyle(.secondary).monospacedDigit().lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                if !r.cells.isEmpty {
+                    HStack(alignment: .top, spacing: 6) { ForEach(r.cells.indices, id: \.self) { cell(r.cells[$0]) } }
+                }
+            }
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(r.then, id: \.self) { step in
+                        Label(step, systemImage: "arrow.turn.down.right").font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if choice != nil, r.then.isEmpty, state == .none { Text("Either way it waits for Confirm").font(.ui(11)).foregroundStyle(.secondary).lineLimit(1) }
+                    QuoteClock(state: state)
+                }
+                Spacer(minLength: 6)
+                buttons
+            }
+        }
+    }
+
+    /// `corner`: the head's fill above the field, which its top corners take.
+    private func entry(waiting: Bool, corner: Color?) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             Button { templatesOpen.toggle() } label: {
                 Image(systemName: "square.grid.2x2").font(.system(size: 14, weight: .semibold))
@@ -3137,7 +3225,7 @@ private struct ChatComposer: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Brand.glassFill))
         // Under a waiting move, the corners past its rounded top take the move's tint: the frame's own colour showed
         // there as a third one, left and right of the field.
-        .background { if waiting { TopCorners(radius: 22).fill(Brand.accent.opacity(0.10)) } }
+        .background { if let corner { TopCorners(radius: 22).fill(corner) } }
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Brand.glassRim))
     }
 
@@ -3559,6 +3647,8 @@ struct ModelCompany: Identifiable {
         .init(name: "Google", logo: "llm-gemini", tile: 0xFFFFFF, ids: ["gemini-subscription", "gemini"]),
         .init(name: "xAI", logo: "llm-grok", tile: 0x000000, ink: 0xFFFFFF, ids: ["grok-subscription", "xai"]),
         .init(name: "DeepSeek", logo: "llm-deepseek", tile: 0xFFFFFF, ids: ["deepseek"]),
+        // The network's own logo (Logos/near.png) is already its green square: the tile is that same green.
+        .init(name: "NEAR AI Cloud (private)", logo: "near", tile: 0x01EC97, ids: ["nearai"]),
         .init(name: "OpenRouter", logo: "llm-openrouter", tile: 0x6566F1, ink: 0xFFFFFF, ids: ["openrouter"]),
         .init(name: "Ollama", logo: "llm-ollama", tile: 0xFFFFFF, ink: 0x000000, ids: ["ollama"]),
         .init(name: "LM Studio", logo: "llm-lmstudio", tile: 0x4338CA, ink: 0xFFFFFF, ids: ["lmstudio"]),
@@ -4234,3 +4324,148 @@ struct RailRound: ButtonStyle {
     }
 }
 
+/// How long the price on a card still holds: a ring that empties over `Workspace.quoteLife`, then «price over 15 s old».
+private struct QuoteClock: View {
+    let state: Workspace.QuoteState
+
+    var body: some View {
+        switch state {
+        case .fresh(let left):
+            HStack(spacing: 5) {
+                Circle().stroke(Color.primary.opacity(0.14), lineWidth: 2.2)
+                    .overlay(Circle().trim(from: 0, to: min(1, Double(left) / Workspace.quoteLife)).stroke(Brand.accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round)).rotationEffect(.degrees(-90)))
+                    .frame(width: 13, height: 13)
+                Text("price held \(left) s").monospacedDigit()
+            }
+            .font(.ui(10.5)).foregroundStyle(.secondary)
+        case .stale: Text("price over 15 s old").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .quoting: Text("getting the price…").font(.ui(10.5)).foregroundStyle(.secondary)
+        case .none: EmptyView()
+        }
+    }
+}
+
+/// A move waiting for Confirm, as a receipt (variant A, owner 2026-11-05). A send through NEAR Intents reads its quote;
+/// any other move reads the route its canvas draws: what you pay and from where, what the blockchain keeps (none of it
+/// ours, but for Hyperliquid's builder fee), what arrives where, and the task's steps that run after it.
+struct Receipt {
+    var header: String
+    var icon: String
+    var amount: String
+    var to: String?
+    var chip: String?
+    var cells: [(label: String, value: String, note: String)] = []
+    var then: [String] = []
+    /// The quote's own line where the receipt can't count the fee itself: a swap's rate and its fee warning.
+    var line: String?
+
+    /// The move waiting for Confirm: a wallet command, or a plain transfer to a saved address.
+    @MainActor init?(_ ws: Workspace) {
+        switch ws.pendingAction {
+        case .wallet(let c)?: self.init(ws, c)
+        case .transfer(let entry, let amount)?: self.init(ws, route: ws.transferRoute(entry, amount), command: nil)
+        default: return nil
+        }
+    }
+
+    @MainActor init?(_ ws: Workspace, _ c: WalletCommand) {
+        if let r = ws.acrossReceipt, r.command == c, let sent = Self.across(c) {
+            self.init(across: r, sent: sent, then: Self.after(ws))
+        } else {
+            self.init(ws, route: ws.route(c) ?? ws.fallbackRoute(c), command: c)
+        }
+    }
+
+    /// A send through NEAR Intents, from its quote: what it pays from where, what 1Click and the network keep, when it lands.
+    init(across r: (command: WalletCommand, symbol: String, network: String, pays: Decimal, from: String, worth: Decimal?, seconds: Int?),
+         sent: (name: String, amount: Decimal, privately: Bool), then: [String]) {
+        let fee = r.worth.map { r.pays - $0 }.flatMap { $0 > 0 ? $0 : nil }
+        header = sent.privately ? "PRIVATE SEND · NEAR INTENTS" : "SEND · NEAR INTENTS"
+        icon = sent.privately ? "lock.fill" : "arrow.left.arrow.right"
+        amount = "\(Fmt.num(sent.amount)) \(r.symbol)"
+        to = sent.name
+        chip = "on \(WalletCommand.placeName(r.network))"
+        cells = [("YOU PAY", "≈ \(Fmt.num(r.pays)) USDC", "from \(r.from)"),
+                 ("BLOCKCHAIN FEES", fee.map { "≈ \(Fmt.usd($0)) · \(Fmt.num($0 / r.pays * 100, maxFraction: 0))%" } ?? "—", "NEAR Intents + gas, none to us"),
+                 ("ARRIVES", r.seconds.map { $0 >= 120 ? "in ≈ \($0 / 60) min" : "in ≈ \($0) s" } ?? "in a few minutes", r.worth.map { "worth \(Fmt.usd($0))" } ?? "")]
+        self.then = then
+    }
+
+    /// The task's steps after this one, as their cards name them: «REPAY · KAMINO · 0.15 USDC».
+    @MainActor static func after(_ ws: Workspace) -> [String] {
+        ws.chainSteps().map { "\($0.label) · \(ws.readable($0.title))" }
+    }
+
+    /// The networks a wallet pays from: a step «FROM · BASE» is you paying, «FROM · KAMINO LEND» is money coming back.
+    static let networks: Set<String> = ["SOLANA", "BASE", "ARBITRUM", "ETHEREUM", "HYPERLIQUID", "POLYGON", "OPTIMISM", "BNB CHAIN", "BNB",
+                                        "HYPEREVM", "ROBINHOOD", "ROBINHOOD CHAIN", "TEMPO", "NEAR"]
+
+    /// Our builder fee rides on Hyperliquid orders only (HLBuilder): a spot buy or sale, a swap on its book.
+    static func ours(_ c: WalletCommand?) -> Bool {
+        switch c {
+        case .hlSpotBuy?, .hlSpotSell?: true
+        case .swapOn(let place, _, _, _)?: place == "hyperliquid"
+        default: false
+        }
+    }
+
+    /// Any move from the route its canvas draws.
+    @MainActor init?(_ ws: Workspace, route: MoveRoute, command c: WalletCommand?) {
+        then = Self.after(ws)
+        guard let first = route.steps.first else { return nil }
+        let last = route.steps.count > 1 ? route.steps.last : nil
+        let payer = first.label.components(separatedBy: " · ").dropFirst().first ?? ""
+        let fromNetwork = first.label.hasPrefix("FROM") && Self.networks.contains(payer)
+        // The step that names the move («BRIDGE · NEAR INTENTS», «BUY · ON JUPITER»): not the ends, not an approve or the gas
+        // bought on the way; a label that is only a phrase takes its title too.
+        let named = route.steps.first { b in !["FROM", "TO", "APPROVE", "GAS"].contains { b.label.hasPrefix($0) } }
+        header = named.map { $0.label.contains(" · ") ? $0.label : "\($0.label) \(ws.readable($0.title).uppercased())" }
+            ?? (last == nil || !fromNetwork ? first.label : "SEND")
+        icon = Self.icon(header)
+        amount = ws.readable(route.title)
+        func moved(_ b: ActivityBubble) -> String? {
+            b.money?.first.map { "\(WalletCommand.placeName($0.place)) \(Fmt.num($0.was, maxFraction: 4)) → \(Fmt.num($0.after, maxFraction: 4))" }
+        }
+        func note(_ b: ActivityBubble) -> String { moved(b) ?? b.lines.first.map(ws.readable) ?? "" }
+        guard let last else {
+            cells = [(first.label, ws.readable(first.title), note(first))]
+            return
+        }
+        // What leaves: the payer's own balance change, not the card's title (a Base Aave card titles Solana's whole USDC).
+        let out = first.money?.first.flatMap { $0.was > $0.after ? ($0.was - $0.after, $0.symbol) : nil }
+        // Dollars in and dollars out of the same move's two ends: their gap is what the bridge and the network keep.
+        let stables: Set<String> = ["USDC", "USDT", "USDT0", "USDG", "USDC.E"]
+        let paid = out.flatMap { stables.contains($0.1.uppercased()) ? $0.0 : nil }
+        let got = last.label.hasPrefix("TO") ? last.money?.first.flatMap { stables.contains($0.symbol.uppercased()) ? $0.after - $0.was : nil } : nil
+        // What lands as quoted now, when the quote is in dollars too (NEAR Intents' «arrives»): truer than the card's ≈.
+        let quoted = ws.swapQuote.flatMap { c != nil && $0.command == c ? $0.ways.first?.worth : nil }.flatMap { $0 > 0 && got != nil ? $0 : nil }
+        let fee = paid.flatMap { p in (quoted ?? got).flatMap { g in p > g && g > 0 ? p - g : nil } }
+        // A swap's own line says its rate and warns of a fee the receipt can't count from the two ends.
+        line = fee == nil ? c.flatMap { ws.swapLine($0) } : nil
+        cells = [(!first.label.hasPrefix("FROM") ? first.label : fromNetwork ? "YOU PAY" : "FROM \(payer)",
+                  out.map { "\(Fmt.num($0.0, maxFraction: 6)) \($0.1)" } ?? ws.readable(first.title), note(first)),
+                 ("BLOCKCHAIN FEES", fee.map { f in "≈ \(Fmt.usd(f))" + (paid.map { p in " · \(Fmt.num(f / p * 100, maxFraction: 1))%" } ?? "") } ?? "network gas",
+                  Self.ours(c) ? "plus our 0.05% on the order" : "none to us"),
+                 (last.label.hasPrefix("TO") ? "ARRIVES" : last.label, ws.readable(last.title), note(last))]
+    }
+
+    /// A send through NEAR Intents: who gets how much, and whether privately.
+    static func across(_ c: WalletCommand) -> (name: String, amount: Decimal, privately: Bool)? {
+        switch c {
+        case .sendPrivately(let name, _, let x, _): (name, x, true)
+        case .sendToken(let name, _, let x?, _): (name, x, false)
+        default: nil
+        }
+    }
+
+    static func icon(_ header: String) -> String {
+        let h = header.uppercased()
+        if h.hasPrefix("PRIVATE") { return "lock.fill" }
+        if h.hasPrefix("BRIDGE") || h.contains("INTENTS") { return "arrow.left.arrow.right" }
+        if h.hasPrefix("SWAP") || h.hasPrefix("BUY") || h.hasPrefix("SELL") { return "arrow.2.squarepath" }
+        if h.hasPrefix("PAY") { return "creditcard" }
+        if h.hasPrefix("REPAY") || h.hasPrefix("BORROW") || h.hasPrefix("DEPOSIT") || h.hasPrefix("WITHDRAW") { return "building.columns" }
+        if h.hasPrefix("OWNER") || h.hasPrefix("RULES") { return "checkmark.shield" }
+        return "arrow.up.right"
+    }
+}

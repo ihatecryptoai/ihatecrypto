@@ -150,6 +150,27 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         return raw
     }
 
+    /// An x402 payment's EIP-3009 authorization, built and checked by the signer: the 65-byte signature.
+    func signX402(chainId: UInt64, token: String, to: String, value: UInt64, validBefore: UInt64, nonce: Data, service: String) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signX402(chainId: chainId, token: token, to: to, value: value, validBefore: validBefore, nonce: nonce, service: service)) }
+        guard reply.ok, let sig = reply.signatures?.first else { throw GuardStop(Self.reason(reply)) }
+        // r ‖ s ‖ v: the 65 bytes x402 sends.
+        return sig.r + sig.s + Data([UInt8(sig.v)])
+    }
+
+    /// An agent wallet's owner request (NEAR Intents' Agent API), signed by this wallet's NEAR key after the signer
+    /// read and confirmed it: a NEP-413 signature, or a borsh SignedDelegateAction.
+    func signAgentMessage(payload: Data) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signAgentMessage(payload: payload)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
+        return raw
+    }
+    func signAgentDelegate(payload: Data, nonce: UInt64, maxBlockHeight: UInt64, policy: Data?) async throws -> Data {
+        let reply = try await Self.signing { try await send(.signAgentDelegate(payload: payload, nonce: nonce, maxBlockHeight: maxBlockHeight, policy: policy)) }
+        guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
+        return raw
+    }
+
     func signNearDeleteAccount(beneficiary: String, recipients: [String], nonce: UInt64, blockHash: Data) async throws -> Data {
         let reply = try await Self.signing { try await send(.signNearDeleteAccount(beneficiary: beneficiary, recipients: recipients, nonce: nonce, blockHash: blockHash)) }
         guard reply.ok, let raw = reply.signedRaw else { throw GuardStop(Self.reason(reply)) }
@@ -214,6 +235,7 @@ extension Workspace {
         case "near": "https://nearblocks.io/txns/\(e.id)"
         case "relay": "Relay order \(e.id)"
         case "1click": "1Click deposit \(e.id)"
+        case "x402": "x402 payment to \(e.note), signed and maybe still settling (authorization \(e.id.prefix(10))…)"
         case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
         case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
         case "hyperliquid": "Hyperliquid «\(e.note)»"
@@ -232,6 +254,7 @@ extension Workspace {
             Task { @MainActor in
                 self?.reply(text, note: "execution")
                 self?.runningAction?.lines.append(text)
+                self?.journeyRead(text)
             }
         } swapped: { [weak self] from, to, spent, received in
             // Bought with USDC: its cost; sold for USDC: that share of the cost goes. Other swaps (SOL ⇄ JitoSOL) have no dollar side.
@@ -535,6 +558,7 @@ extension Workspace {
                 runningAction = nil
             }
             finishedAction = (confirmedRoute?.title ?? readable(Self.canvasTitle(command)), CanvasOutcome(at: Date(), ok: ok, unknown: unknown ? true : nil), steps)
+            journey = journey?.ended(ok: ok, unknown: unknown)
             retryCommand = ok || unknown ? nil : (canvasID, command)
             // The outcome board comes from the saved canvas: save now, not after the balance refresh that follows,
             // or the canvas stays blank for those seconds.
@@ -542,17 +566,23 @@ extension Workspace {
             notify(.moves, confirmedRoute?.title ?? readable(Self.canvasTitle(command)),
                    ok ? say("Done — checked, signed and confirmed.", "Готово — проверено, подписано и подтверждено сетью.")
                       : unknown ? say("Sent, status unknown — check the links in the chat before doing it again.", "Отправлено, статус неизвестен — проверь ссылки в чате, прежде чем повторять.")
-                      : say("It didn’t go through; the chat says why.", "Не прошло — причина в чате."), record: false, failed: !ok)
+                      : say("It didn’t go through. The chat says why.", "Не прошло. Причина в чате."), record: false, failed: !ok)
         }
         if ownsBoard {
             withAnimation(StudioView.spring) {
                 runningAction = (confirmedRoute?.title ?? readable(Self.canvasTitle(command)), confirmedRoute?.steps ?? [], [], Date())
             }
+            // N5: a move through NEAR Intents shows its way in the chat's field while it runs (carryOut runs it after
+            // Confirm without `confirmed`, which only a spread's two steps use). A chain's next step that isn't one
+            // leaves the last journey as it ended, until the next message.
+            if let j = IntentsJourney(self, command) { journey = j }
         }
         if ownsExecuting { executing = true }
         // The board first: `executing` going false starts a chain's next step (continueTask), which lays its own board.
         defer {
             if ownsBoard { runningAction = nil }
+            // A path that left without finish(): no journey is left running in the field.
+            if ownsBoard, journey?.endedAt == nil { journey = nil }
             if ownsExecuting { executing = false }
         }
         let started = Date()
@@ -602,6 +632,15 @@ extension Workspace {
                 guard let r = try acrossRecipient(name, token: token, network: network) else { break }
                 reply(try await e.sendAcross(r.symbol, amount: amount, network: r.entry.network.rawValue, to: r.address, label: r.entry.name),
                       note: "NEAR Intents · \(r.entry.network.title)")
+                markSent(r.entry)
+            case .agentCreate(let daily): reply(try await agentCreate(dailyUSD: daily), note: "NEAR Intents · Agent API")
+            case .agentFund(let usdc): reply(try await agentFund(usdc), note: "NEAR Intents · Agent API")
+            case .agentSend(let usdc, let name): reply(try await agentSend(usdc, to: name), note: "NEAR Intents · Agent API")
+            case .agentFreeze(let on): reply(try await agentFreeze(on), note: "NEAR Intents · Agent API")
+            case .sendPrivately(let name, let token, let amount, let network):
+                let r = try privateRecipient(name, token: token, network: network)
+                reply(try await e.sendAcross(r.symbol, amount: amount, network: r.network, to: r.address, label: r.entry.name, confidential: true),
+                      note: "NEAR Intents · private · \(WalletCommand.placeName(r.network))")
                 markSent(r.entry)
             case .sendToken(let name, let token, let amount, let network):
                 let (entry, net) = try tokenRecipient(name, network: network)
@@ -662,6 +701,11 @@ extension Workspace {
             case .swapOn(let place, let from, let to, let amount):
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't swap on \(place).") }
                 reply(try await e.swapOn(net, from: from, to: to, amount: amount), note: "\(net.name) · Uniswap")
+            case .intents(let from, let to, let amount):
+                // What the card showed landing holds the move (a step of a chain had no card of its own: its quote does).
+                let shown = swapQuote.flatMap { $0.command == command ? $0.ways.first?.worth : nil }
+                reply(try await e.intentsBridge(from: from, to: to, usdc: amount, shown: shown),
+                      note: "NEAR Intents · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
             case .cctp(let from, let to, let amount):
                 guard let a = EVMNetwork.named(from), let b = EVMNetwork.named(to) else { throw ExecutionError("Circle's CCTP moves USDC between Ethereum, Arbitrum, Base and Polygon.") }
                 reply(try await e.cctpBridge(from: a, to: b, usdc: amount), note: "Circle's CCTP · \(a.name) → \(b.name)")
@@ -689,6 +733,14 @@ extension Workspace {
                 }
                 reply(try await e.crossSwap(a, on: from, for: b, on: to, amount: amount, near: near),
                       note: "Relay · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
+            case .swapPrivately(let a, let from, let b, let to, let amount):
+                var near = nearAddress
+                if from == "near" || to == "near" {
+                    near = try await SignerClient().send(.nearAddress).nearAddress
+                    nearAddress = near
+                }
+                reply(try await e.intentSwap(a, on: from, for: b, on: to, amount: amount, near: near, confidential: true),
+                      note: "NEAR Intents · private · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
             case .solanaTo("hyperliquid", let amount):
                 reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
@@ -697,7 +749,9 @@ extension Workspace {
                 guard let net = EVMNetwork.named(place) else { throw ExecutionError("ihatecrypto doesn't move money to \(place).") }
                 reply(try await e.solanaToEVM(net, usdc: amount ?? 0), note: "Relay · Solana → \(net.name)")
             case .sendTo(let name, let amount, let net): prepareTransfer(amount, to: name, network: net)
-            case .pay: reply(try await pay(command, e), note: "MPP · Tempo")
+            case .pay:
+                let via = payment?.x402 != nil ? "x402 · Base" : payment?.challenge?.near != nil ? "MPP · NEAR Intents" : "MPP · Tempo"
+                reply(try await pay(command, e), note: via)
             case .contractCall(let c): reply(try await runContractCall(command, e), note: "\(WalletCommand.placeName(c.network)) · contract call")
             case .multisigCreate: reply(try await runMultisigCreate(e), note: "Safe · multisig")
             case .multisigSend: reply(try await runMultisigSend(command, e), note: "Safe · multisig")
@@ -870,7 +924,7 @@ extension Workspace {
             return
         }
         let place: String? = switch command {
-        case .evmToSolana(let n, _), .bridge(from: let n, to: _, _), .cctp(from: let n, to: _, _): n
+        case .evmToSolana(let n, _), .bridge(from: let n, to: _, _), .cctp(from: let n, to: _, _), .intents(from: let n, to: _, _): n
         case .buyOn(_, _, _, let from?): from
         default: nil
         }
@@ -936,6 +990,13 @@ extension Workspace {
         // Not inside a chain: a step before it may have just brought the money, and those balances load after the refresh.
         case .evmToSolana(let net, let asked) where !inChain, .bridge(from: let net, to: _, let asked) where !inChain:
             return lacks(usdc(on: net), asked, WalletCommand.placeName(net), net == "robinhood" ? "USDG" : "USDC")
+        case .intents(let from, _, let asked) where !inChain:
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        // A private swap pays its USDC from the network named, its NEAR from the NEAR account: said before the card.
+        case .swapPrivately(let a, let from, _, _, let asked) where !inChain && a.uppercased() == "USDC":
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        case .swapPrivately("NEAR", "near", _, _, let asked) where !inChain:
+            return lacks(near, asked, "NEAR", "NEAR")
         case .usdt(let net, _, let asked, _) where !inChain:
             return lacks(heldUSDT(net), asked, WalletCommand.placeName(net), "USDT")
         // A buy that names where its money comes from («с арбитрума») pays from there or not at all: said before the card.
@@ -1221,9 +1282,10 @@ extension Workspace {
     /// stop does not lag a minute behind the price.
     func watch() async {
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(exitRules.isEmpty && alerts.isEmpty ? 30 : 10))
+            try? await Task.sleep(for: .seconds(exitRules.isEmpty && alerts.isEmpty && loanGuards.isEmpty ? 30 : 10))
             await refresh()
             checkAlerts()
+            await checkLoanGuards()
             await guardPositions()
             // A scheduled buy can wait on Touch ID with no one at the Mac: it runs beside the loop, so refreshes and alerts
             // go on meanwhile (the 2026-10-22 review). While it signs, `executing` keeps other moves from starting.
@@ -1548,12 +1610,17 @@ extension Workspace {
 struct ConfirmSheet: View {
     @Environment(Workspace.self) private var ws
     @State private var acknowledged = false
+    /// The steps, the balances and the checks under «How ›».
+    @State private var details = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.ui(22, .heavy))
+                    if ws.prepared != nil, ws.signerWallet != nil {
+                        Text("Look it over, then sign with \(Presence.name).").font(.ui(13)).foregroundStyle(.secondary)
+                    }
                     if let p = ws.prepared {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             Text("numbers refreshed \(Int(context.date.timeIntervalSince(p.preparedAt))) s ago · after 45 s they are recalculated")
@@ -1575,33 +1642,56 @@ struct ConfirmSheet: View {
                 }
             }
             if let p = ws.prepared {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("WHAT WILL BE SIGNED · \(p.steps.count) \(p.steps.count == 1 ? "ACTION" : "ACTIONS")")
-                        .font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                    ForEach(Array(p.steps.enumerated()), id: \.offset) { n, step in
-                        HStack(spacing: 12) {
-                            icon(for: step, asset: p.market.name)
-                            Text(step).fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            Text("\(n + 1)").font(.ui(10, .bold)).foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.fill.quaternary))
-                    }
+                // Variant W2 «You give, they get» (owner, 2026-11-05): the margin that goes in and the position it buys,
+                // as coins; the risk in plain lines; the checks in one line, their details a click away.
+                giveGet(p)
+                VStack(alignment: .leading, spacing: 9) {
+                    line("shield.lefthalf.filled", "If the stop hits", "−\(Fmt.usd(p.sizing.lossAtStopUSD))", Brand.loss)
+                    if let take = p.sizing.profitAtTakeUSD { line("arrow.up.forward", "If the take hits", "+\(Fmt.usd(take))", Brand.profit) }
+                    line("dollarsign", "Fees, in and out at the stop", "\(Fmt.usd(p.sizing.feesUSD)) · ours \(Fmt.usd(p.sizing.builderFeesUSD))", nil)
+                    if let b = p.bridge { line("arrow.left.arrow.right", "First from Solana", "\(Fmt.num(b.spend)) USDC · fees \(b.feesUSD)", nil) }
                 }
-                HStack(alignment: .top, spacing: 12) {
-                    box("WHAT CHANGES") { ForEach(p.changes, id: \.self) { Text($0).fixedSize(horizontal: false, vertical: true) } }
-                    box("CHECKS") {
-                        Label("Recipients are yours only, programs are on the list, the simulation matches the plan.", systemImage: "checkmark.shield")
-                        ForEach([ws.planReview, ws.txReview].compactMap { $0 }, id: \.text) { r in
-                            Label(r.text, systemImage: r.concern ? "exclamationmark.triangle.fill" : "checkmark.seal")
-                                .foregroundStyle(r.concern ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                Button { withAnimation(.snappy) { details.toggle() } } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: concern ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.system(size: 17)).foregroundStyle(concern ? Color.orange : Brand.profit)
+                        Text(concern ? "The second check has a doubt: read it before you sign" : "We checked it matches what you asked")
+                        Spacer(minLength: 6)
+                        Text(details ? "Hide" : "How ›").foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
+                    .background(RoundedRectangle(cornerRadius: 14).fill((concern ? Color.orange : Brand.profit).opacity(0.08)))
+                }
+                .buttonStyle(.plain).pointerStyle(.link)
+                if details || concern {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("WHAT WILL BE SIGNED · \(p.steps.count) \(p.steps.count == 1 ? "ACTION" : "ACTIONS")")
+                            .font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                        ForEach(Array(p.steps.enumerated()), id: \.offset) { n, step in
+                            HStack(spacing: 12) {
+                                icon(for: step, asset: p.market.name)
+                                Text(step).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                                Text("\(n + 1)").font(.ui(10, .bold)).foregroundStyle(.secondary).monospacedDigit()
+                            }
+                            .padding(10)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(.fill.quaternary))
                         }
-                        if ws.preparing {
-                            HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(refreshing ? "Numbers older than 45 s: recalculating them…" : "The second check is reading the signatures…") }
-                                .foregroundStyle(.secondary)
+                    }
+                    HStack(alignment: .top, spacing: 12) {
+                        box("WHAT CHANGES") { ForEach(p.changes, id: \.self) { Text($0).fixedSize(horizontal: false, vertical: true) } }
+                        box("CHECKS") {
+                            Label("Recipients are yours only, programs are on the list, the simulation matches the plan.", systemImage: "checkmark.shield")
+                            ForEach([ws.planReview, ws.txReview].compactMap { $0 }, id: \.text) { r in
+                                Label(r.text, systemImage: r.concern ? "exclamationmark.triangle.fill" : "checkmark.seal")
+                                    .foregroundStyle(r.concern ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                            }
+                            if let note = ws.jevNote { Label(note, systemImage: "info.circle").foregroundStyle(.secondary) }
+                            if ws.preparing {
+                                HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(refreshing ? "Numbers older than 45 s: recalculating them…" : "The second check is reading the signatures…") }
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        if let note = ws.jevNote { Label(note, systemImage: "info.circle").foregroundStyle(.secondary) }
                     }
                 }
                 if concern {
@@ -1656,7 +1746,7 @@ struct ConfirmSheet: View {
         }
         .font(.ui(13))
         .padding(26)
-        .frame(width: 680)
+        .frame(width: 600)
         // A failed preparation is a short note, not a tall empty sheet.
         .frame(minHeight: ws.prepared == nil ? 0 : 460)
         // A stale plan is prepared again under the open sheet: a tick given to the old warning mustn't pass a new one.
@@ -1680,6 +1770,54 @@ struct ConfirmSheet: View {
         else if step.hasPrefix("Stop") { Image(systemName: "shield.lefthalf.filled").font(.system(size: 16)).frame(width: 28, height: 28).foregroundStyle(Brand.profit) }
         else if step.hasPrefix("Trailing") { Image(systemName: "arrow.up.forward").frame(width: 28, height: 28).foregroundStyle(Brand.jevCursor) }
         else { Image(systemName: "checkmark.circle").frame(width: 28, height: 28).foregroundStyle(.secondary) }
+    }
+
+    /// You give the margin, from where it is; you get the position. Coins with their network, the mascot between.
+    private func giveGet(_ p: Executor.Prepared) -> some View {
+        let from: (logo: String, name: String) = p.bridge != nil || p.openVia1Click != nil ? ("sol", "Solana")
+            : p.fundFrom.map { ($0.net.key, $0.net.name) } ?? ("hype", "Hyperliquid")
+        let long = p.intent.side == .long
+        func coin(_ face: some View, badge: some View) -> some View {
+            face.frame(width: 58, height: 58).overlay(alignment: .bottomTrailing) { badge.offset(x: 5, y: 5) }
+        }
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(spacing: 7) {
+                Text("YOU GIVE").font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                coin(TokenLogo(name: "usdc", size: 58), badge: TokenLogo(name: from.logo, size: 24, round: true))
+                Text(Fmt.usd(p.sizing.margin)).font(.ui(26, .bold)).monospacedDigit()
+                Text("USDC margin from \(from.name)").font(.ui(12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 16).padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 20).fill(.fill.quaternary))
+            VStack(spacing: 6) {
+                BrandLogo(size: 46, mood: .waiting)
+                Image(systemName: "arrow.right").font(.system(size: 16, weight: .semibold)).foregroundStyle(Brand.accentInk)
+                Text("×\(p.leverage)").font(.ui(11, .semibold)).foregroundStyle(Brand.accentInk)
+            }
+            .frame(width: 58)
+            VStack(spacing: 7) {
+                Text("YOU GET").font(.ui(11, .semibold)).tracking(0.8).foregroundStyle(Brand.accentInk)
+                coin(AssetBadge(coin: p.market.name, size: 58, dark: true),
+                     badge: Text(long ? "LONG" : "SHORT").font(.ui(9, .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 2).background(Capsule().fill(long ? Brand.profit : Brand.loss)))
+                Text(Fmt.usd(p.sizing.notional)).font(.ui(26, .bold)).monospacedDigit()
+                Text("\(long ? "a long" : "a short") on \(IntentParser.pretty(p.market.name).components(separatedBy: " (").first ?? p.market.name) · \(Fmt.num(p.sizing.size, maxFraction: 6))")
+                    .font(.ui(12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 16).padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 20).fill(Brand.accent.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Brand.accent.opacity(0.35)))
+        }
+    }
+
+    /// One plain line: an icon, what it is, and its number.
+    private func line(_ icon: String, _ what: String, _ value: String, _ tint: Color?) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).frame(width: 22).foregroundStyle(tint ?? .secondary)
+            Text(what)
+            Spacer(minLength: 6)
+            Text(value).font(.ui(13, .semibold)).monospacedDigit().foregroundStyle(tint ?? .primary)
+        }
     }
 
     private func box(_ title: String, @ViewBuilder content: () -> some View) -> some View {

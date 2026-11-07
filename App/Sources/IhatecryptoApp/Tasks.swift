@@ -463,7 +463,7 @@ extension Workspace {
     /// Where a step takes its money from: what it spends on, or the place a bridge leg leaves; nil when it names none.
     static func source(_ c: WalletCommand) -> String? {
         switch c {
-        case .bridge(let from, _, _), .cctp(let from, _, _), .evmToSolana(let from, _), .usdt(let from, _, _, _): from
+        case .bridge(let from, _, _), .cctp(let from, _, _), .intents(let from, _, _), .evmToSolana(let from, _), .usdt(let from, _, _, _): from
         case .baseToSolana: "base"
         case .arbitrumToSolana: "arbitrum"
         case .robinhoodToSolana: "robinhood"
@@ -477,6 +477,7 @@ extension Workspace {
         switch c {
         case .lendDeposit("USDC", let a), .kamino(deposit: true, symbol: "USDC", amount: let a), .hlp(deposit: true, amount: let a), .buy(_, usdc: let a),
              .allocate("USDC", maxShare: _, amount: let a, without: _, from: "solana"), .solanaTo(_, let a), .jupiterDCA(_, let a, _, _): a
+        case .intents(from: "solana", to: _, let a): a
         default: nil
         }
     }

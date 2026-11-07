@@ -586,3 +586,34 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "bonk": -1]) == "bonk would leave too, which the window didn't show")
     #expect(SimulationDrift.outflowsGrew(shown: shown, now: ["usdc": -5, "jup": -1]) != nil)
 }
+
+/// An MPP service's deposit through NEAR Intents: bound by 1Click to the service's recipient, exact amount and refund
+/// address, and never more than 1Click's own quote takes (the rest would go back to the service as a refund).
+@Test func anMPPChargeDepositIsBoundAndAtOneClicksPrice() {
+    let refund = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", base = "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near"
+    let bound = ["recipient": "merchant.near", "refundTo": refund.lowercased(), "originAsset": base, "destinationAsset": "nep141:usdc.near",
+                 "amount": "1000000", "swapType": "EXACT_OUTPUT", "quoteAmountIn": "1005000"]
+    func check(_ b: [String: String], deposit: UInt64 = 1_010_000, destination: String? = "nep141:usdc.near") -> Verdict {
+        DepositGuard.charge(bound: b, recipient: "merchant.near", refundTo: refund, origin: base, destination: destination, amountOut: "1000000", deposit: deposit)
+    }
+    #expect(check(bound).ok)
+    #expect(check(bound, destination: nil).ok)
+    #expect(!check(bound, deposit: 2_000_000).ok)                         // padded: the extra goes back to the service
+    #expect(!check(bound.merging(["recipient": "attacker.near"]) { $1 }).ok)
+    #expect(!check(bound.merging(["amount": "900000"]) { $1 }).ok)
+    #expect(!check(bound.merging(["swapType": "EXACT_INPUT"]) { $1 }).ok)
+    #expect(!check(bound.merging(["destinationAsset": "nep141:other.near"]) { $1 }).ok)
+    var unpriced = bound
+    unpriced["quoteAmountIn"] = nil
+    #expect(!check(unpriced).ok)
+    // Under 1Click's minimum, or after its quote ran out, it would only be refunded — to the service.
+    #expect(!check(bound.merging(["quoteMinAmountIn": "1015000"]) { $1 }).ok)
+    #expect(check(bound.merging(["quoteMinAmountIn": "1004000", "deadline": "2099-01-01T00:00:00.000Z"]) { $1 }).ok)
+    #expect(!check(bound.merging(["deadline": "2020-01-01T00:00:00.000Z"]) { $1 }).ok)
+}
+
+@Test func aPrivateMoveGoesOnlyWhereOneClickHoldsItConfidential() {
+    #expect(DepositGuard.confidential(bound: ["confidentiality": "basic"]).ok)
+    #expect(!DepositGuard.confidential(bound: ["confidentiality": "public"]).ok)
+    #expect(!DepositGuard.confidential(bound: [:]).ok)
+}

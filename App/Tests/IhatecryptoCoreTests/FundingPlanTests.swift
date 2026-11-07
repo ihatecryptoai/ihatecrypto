@@ -49,3 +49,49 @@ private let base = FundingPlan.Place(key: "base", name: "Base", usdc: 100)
     #expect(FundingPlan.legs(short: 5, target: "robinhood", targetName: "Robinhood", solana: Decimal(string: "1.2")!, evm: [base], hyperliquid: 0, near: 0, nearPrice: nil)
         == ["move 6 USDC from Base to Robinhood"])
 }
+
+/// A loan guard's top-up goes through NEAR Intents only: no Hyperliquid leg, no network NEAR Intents doesn't pay on, and
+/// every leg reads back as a NEAR Intents move.
+@Test func aGuardsTopUpGoesThroughNEARIntentsOnly() throws {
+    let intents: Set<String> = ["base", "arbitrum", "ethereum"]
+    let polygon = FundingPlan.Place(key: "polygon", name: "Polygon", usdc: 100)
+    let toSolana = try #require(FundingPlan.legs(short: d("0.3"), target: "solana", targetName: "Solana", solana: 0, evm: [polygon, base],
+                                                 hyperliquid: 250, near: 0, nearPrice: nil, intents: intents))
+    #expect(toSolana == ["move 1.3 USDC from Base to Solana via NEAR Intents"])
+    #expect(WalletCommand.parse(toSolana[0]) == .intents(from: "base", to: "solana", d("1.3")))
+    // Only Hyperliquid has it: not through NEAR Intents, so no plan.
+    #expect(FundingPlan.legs(short: 5, target: "solana", targetName: "Solana", solana: 0, evm: [], hyperliquid: 250, near: 0, nearPrice: nil, intents: intents) == nil)
+    // An Aave loan on Base: Solana's USDC crosses through NEAR Intents too.
+    let toBase = try #require(FundingPlan.legs(short: 5, target: "base", targetName: "Base", solana: 20, evm: [], hyperliquid: 0, near: 0, nearPrice: nil, intents: intents))
+    #expect(toBase == ["move 6 USDC from Solana to Base via NEAR Intents"])
+    #expect(WalletCommand.parse(toBase[0]) == .intents(from: "solana", to: "base", 6))
+}
+
+@Test func aMoveViaNEARIntentsIsReadInEnglishAndRussian() {
+    #expect(WalletCommand.parse("move 2 USDC from Base to Solana via NEAR Intents") == .intents(from: "base", to: "solana", 2))
+    #expect(WalletCommand.parse("переведи 2 USDC с бейза на солану через NEAR Intents") == .intents(from: "base", to: "solana", 2))
+    #expect(WalletCommand.parse("перекинь 3 USDC из соланы в арбитрум через неар интентс") == .intents(from: "solana", to: "arbitrum", 3))
+    #expect(WalletCommand.parse("move 2 USDC from Base to Solana via NEAR Intents")?.summary == "move 2 USDC from Base to Solana via NEAR Intents")
+    // Without the name it's the usual move, whichever bridge lands more.
+    #expect(WalletCommand.parse("move 2 USDC from Base to Solana") != .intents(from: "base", to: "solana", 2))
+}
+
+@Test func viaNEARIntentsOnlyWhere1ClickPaysUSDC() {
+    // Polygon isn't one of them: asked about, never quietly sent over Relay.
+    #expect(WalletCommand.parse("move 2 USDC from Polygon to Solana via NEAR Intents") == nil)
+    // A deposit into Aave there isn't a bare move.
+    #expect(WalletCommand.parse("переведи 5 USDC с бейза в aave на арбитрум через NEAR Intents") != .intents(from: "base", to: "arbitrum", 5))
+    // The last leg into an EVM target sends the whole pool, so what arrives still covers the repay after 1Click's cents.
+    let legs = FundingPlan.legs(short: 5, target: "base", targetName: "Base", solana: 20, evm: [], hyperliquid: 0, near: 0, nearPrice: nil,
+                                intents: ["base", "arbitrum", "ethereum"])
+    #expect(legs == ["move 6 USDC from Solana to Base via NEAR Intents"])
+}
+
+/// A person between the two networks makes it a send to them, which a move «via NEAR Intents» never is (it pays our
+/// own address): nothing is read, and the chat asks.
+@Test func aPersonBetweenTheNetworksIsNotAMoveToOurselves() {
+    #expect(WalletCommand.parse("отправь 5 USDC с бейза маме на солане через NEAR Intents") == nil)
+    #expect(WalletCommand.parse("send 5 USDC from Base to Mom on Solana via NEAR Intents") != .intents(from: "base", to: "solana", 5))
+    #expect(WalletCommand.parse("move 5 USDC from my Base wallet to Solana via NEAR Intents") == .intents(from: "base", to: "solana", 5))
+    #expect(WalletCommand.parse("переведи 5 USDC с бейза на солану через NEAR Intents") == .intents(from: "base", to: "solana", 5))
+}
