@@ -174,11 +174,10 @@ export function chatPanel() {
       onpointerdown: (e) => moveBy(e, panel), ondblclick: (e) => { if (!e.target.closest("button")) dock(); } },
     // T4: on an attested NEAR AI model the header says the chat is private, with the proof a click away (journey.rs).
     s.tee ? h("span", { class: "chat-tee-coin" }, mascot(30, mood), h("span", { class: "chat-tee-badge", "aria-hidden": "true" }, icon("lock", 9))) : mascot(30, mood),
-    s.tee ? h("div", { class: "chat-title" }, h("b", {}, t("Private assistant", "Приватный ассистент")),
+    s.tee ? h("div", { class: "chat-title" }, h("div", { class: "chat-tee-row" }, h("b", {}, t("Private assistant", "Приватный ассистент")), teeProofButton(s.tee)),
       h("span", { class: "chat-status" }, t("Runs in sealed hardware. The host can't read this chat.", "Работает в запечатанном железе. Хост не может прочитать этот чат.")))
       : h("div", { class: "chat-title" }, h("b", {}, t("Assistant", "Ассистент")), h("span", { class: "chat-status one-line" }, statusLine(mood))),
     h("span", { class: "spacer" }),
-    s.tee ? teeProofButton(s.tee) : null,
     h("button", { class: "icon-btn", title: t("New canvas", "Новый холст"), onclick: () => act("newCanvas") }, icon("square.and.pencil", 15)),
     h("button", { class: "icon-btn", title: wide() ? t("Narrow chat", "Узкий чат") : t("Chat on half the window", "Чат на половину окна"), onclick: toggleWide },
       icon(wide() ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", 15)),
@@ -865,7 +864,7 @@ function waitingBar(card) {
       h("div", {}, h("div", { class: "chat-waiting-title" + (r ? " receipt-amount" : "") }, title), h("div", { id: "chat-quote-line", class: "chat-waiting-line num" }, line))),
     choice ? privacyRows(choice, busy)
       : r?.cells.length ? h("div", { class: "receipt-cells" }, r.cells.map(([label, value, note]) => h("div", { class: "receipt-cell" },
-        h("div", { class: "receipt-label one-line" }, label), h("div", { class: "receipt-value num one-line" }, value), note ? h("div", { class: "receipt-note" }, note) : null))) : null,
+        h("div", { class: "receipt-label" }, label), h("div", { class: "receipt-value num" }, value), note ? h("div", { class: "receipt-note" }, note) : null))) : null,
     r?.then.length ? h("div", { class: "receipt-then" }, r.then.map((x) => h("div", { class: "one-line" }, icon("arrow.down.right", 11), x))) : null,
     h("div", { class: "chat-waiting-buttons" },
       h("button", { class: "chat-pill-outline", disabled: busy, onclick: () => act("cancel", { board: card.id }) }, t("Cancel", "Отмена")), confirm));
