@@ -222,3 +222,34 @@ fn the_policy_keeps_swifts_shape() {
     assert_eq!(serde_json::from_str::<RiskPolicy>(&json).unwrap(), policy());
     assert!(serde_json::from_str::<RiskPolicy>(r#"{"maxRiskPct":2}"#).is_err());
 }
+
+/// Every rule's line has its Russian, with the same numbers and no «;» (the Windows engine's checklist in a Russian chat).
+#[test]
+fn every_rules_line_has_its_russian() {
+    let numbers = |t: &str| {
+        let mut out: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        for c in t.chars().chain([' ']) {
+            if c.is_ascii_digit() || (!cur.is_empty() && ".,:%$×−+".contains(c)) { cur.push(c) } else if !cur.is_empty() {
+                out.push(cur.trim_end_matches(['.', ',', ':']).to_string());
+                cur.clear();
+            }
+        }
+        out.sort();
+        out
+    };
+    let i = TradeIntent { risk_usd: Some(d("10")), stop_pct: Some(d("0.5")), take_pct: Some(d("0.5")), leverage: Some(d("10")), ..TradeIntent::default() };
+    let pumped = Market { prev_day_px: Some(d("2000")), funding: Some(d("0.0001")), atr_pct: Some(d("1.2")), ..Market::new("ETH", d("2140"), 4, 25) };
+    let s = Plan::evaluate(&i, Some(&pumped)).sizing.unwrap();
+    let mut all = RiskRules::check(&i, &s, &pumped, Some(d("200")), &policy(), Some(d("5")));
+    all.extend(RiskRules::check(&i, &s, &pumped, None, &policy(), None));
+    all.extend(RiskRules::check(&i, &s, &pumped, Some(d("100000")), &policy(), Some(Decimal::ZERO)));
+    assert!(all.len() >= 10, "{all:?}");
+    for a in &all {
+        assert!(!a.ru.is_empty() && !a.ru.contains(';') && a.ru.chars().any(|c| ('а'..='я').contains(&c)), "{a:?}");
+        assert_eq!(numbers(&a.ru), numbers(&a.text), "{a:?}");
+    }
+    let fine = RiskRules::check(&TradeIntent { stop_pct: Some(d("3")), take_pct: Some(d("3")), leverage: Some(d("2")), ..i.clone() }, &s, &pumped,
+                                Some(d("1000")), &policy(), Some(Decimal::ZERO));
+    assert!(fine.iter().any(|a| a.ru.starts_with("Прибыль к риску 1:") && a.ru.contains("тейк слишком близко. Обычный минимум — 1:")), "{fine:?}");
+}

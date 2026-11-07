@@ -12,6 +12,8 @@ use crate::risk::RiskPolicy;
 /// A plan whose numbers are past what the arithmetic holds (NaN or an overflow in Swift): refused instead.
 // ponytail: no Swift words for it, since Swift's Decimal goes on with NaN or 38 digits.
 pub const OUT_OF_RANGE: &str = "The plan's numbers are out of range: check the price, the risk and the stop.";
+/// `OUT_OF_RANGE` in Russian, for a risk check shown in a Russian chat.
+pub const OUT_OF_RANGE_RU: &str = "Числа плана вне допустимого диапазона: проверь цену, риск и стоп.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Market {

@@ -56,10 +56,12 @@ pub enum Level {
 pub struct Advice {
     pub level: Level,
     pub text: String,
+    /// The same in Russian, for a chat in Russian (the Windows engine's plan checklist).
+    pub ru: String,
 }
 
 impl Advice {
-    pub fn new(level: Level, text: impl Into<String>) -> Self { Self { level, text: text.into() } }
+    pub fn new(level: Level, text: impl Into<String>, ru: impl Into<String>) -> Self { Self { level, text: text.into(), ru: ru.into() } }
 }
 
 pub struct RiskRules;
@@ -69,7 +71,7 @@ impl RiskRules {
     /// what the positions already open lose at their stops; None when a position has no stop (Swift's default is 0).
     /// Numbers past range (NaN or an overflow in Swift) are one `Block`.
     pub fn check(i: &TradeIntent, s: &Sizing, m: &Market, equity: Option<Decimal>, p: &RiskPolicy, open_risk: Option<Decimal>) -> Vec<Advice> {
-        Self::advice(i, s, m, equity, p, open_risk).unwrap_or_else(|| vec![Advice::new(Level::Block, OUT_OF_RANGE)])
+        Self::advice(i, s, m, equity, p, open_risk).unwrap_or_else(|| vec![Advice::new(Level::Block, OUT_OF_RANGE, crate::plan::OUT_OF_RANGE_RU)])
     }
 
     fn advice(i: &TradeIntent, s: &Sizing, m: &Market, equity: Option<Decimal>, p: &RiskPolicy, open_risk: Option<Decimal>) -> Option<Vec<Advice>> {
@@ -84,16 +86,17 @@ impl RiskRules {
                 let at_stops = (Num::of(open) + loss).0?;
                 let total = (Num::of(at_stops) / equity * 100).0?;
                 if open > zero && total > p.max_open_risk_pct {
-                    out.push(Advice::new(Level::Block, format!(
-                        "With open positions, −{} at the stops: {} of capital. Rule: all positions together at most {}.", Fmt::usd(at_stops),
-                        Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct)
-                    )));
+                    let (stops, share, limit) = (Fmt::usd(at_stops), Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct));
+                    out.push(Advice::new(Level::Block,
+                        format!("With open positions, −{stops} at the stops: {share} of capital. Rule: all positions together at most {limit}."),
+                        format!("С открытыми позициями на стопах −{stops}: {share} капитала. Правило: все позиции вместе не больше {limit}.")));
                 } else if open > zero {
-                    out.push(Advice::new(Level::Ok, format!("All positions together: {} of capital at the stops, limit {}.",
-                                                            Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct))));
+                    let (share, limit) = (Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct));
+                    out.push(Advice::new(Level::Ok, format!("All positions together: {share} of capital at the stops, limit {limit}."),
+                                         format!("Все позиции вместе: на стопах {share} капитала, лимит {limit}.")));
                 }
             } else {
-                out.push(Advice::new(Level::Warn, "An open position has no stop: total risk is unlimited."));
+                out.push(Advice::new(Level::Warn, "An open position has no stop: total risk is unlimited.", "У открытой позиции нет стопа: общий риск ничем не ограничен."));
             }
         }
 
@@ -102,57 +105,66 @@ impl RiskRules {
             let share = (loss / equity * 100).0?;
             if share > p.max_risk_pct {
                 let allowed = (Num::of(equity) * p.max_risk_pct / 100).rounded(2, Rounding::Down).0?;
-                out.push(Advice::new(Level::Block, format!(
-                    "At the stop −{}: {} of {} capital. Rule: at most {} per trade, i.e. up to {}. Lower the risk or top up. The limit is in Settings.",
-                    Fmt::usd(s.loss_at_stop_usd), Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::usd(equity), Fmt::pct(p.max_risk_pct), Fmt::usd(allowed)
-                )));
+                let (lost, pct, capital, max, allowed) = (Fmt::usd(s.loss_at_stop_usd), Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::usd(equity),
+                                                          Fmt::pct(p.max_risk_pct), Fmt::usd(allowed));
+                out.push(Advice::new(Level::Block,
+                    format!("At the stop −{lost}: {pct} of {capital} capital. Rule: at most {max} per trade, i.e. up to {allowed}. Lower the risk or top up. The limit is in Settings."),
+                    format!("На стопе −{lost}: {pct} от капитала {capital}. Правило: не больше {max} на сделку, то есть до {allowed}. Уменьши риск или пополни баланс. Лимит — в настройках.")));
             } else {
-                out.push(Advice::new(Level::Ok, format!("Risk {} of capital, within {}.", Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::pct(p.max_risk_pct))));
+                let (pct, max) = (Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::pct(p.max_risk_pct));
+                out.push(Advice::new(Level::Ok, format!("Risk {pct} of capital, within {max}."), format!("Риск {pct} капитала, в пределах {max}.")));
             }
             if s.margin > equity / Decimal::TWO {
                 let taken = (Num::of(s.margin) / equity * 100).rounded(0, Rounding::Plain).0?;
-                out.push(Advice::new(Level::Warn, format!("Margin takes {} of capital: little is left for other trades.", Fmt::pct(taken))));
+                let taken = Fmt::pct(taken);
+                out.push(Advice::new(Level::Warn, format!("Margin takes {taken} of capital: little is left for other trades."),
+                                     format!("Маржа занимает {taken} капитала: на другие сделки остаётся мало.")));
             }
         } else {
-            out.push(Advice::new(Level::Warn, "Capital unknown: no balance, so risk in % isn't checked."));
+            out.push(Advice::new(Level::Warn, "Capital unknown: no balance, so risk in % isn't checked.", "Капитал неизвестен: баланса нет, поэтому риск в % не проверяется."));
         }
 
         // Reward to risk. A hedge has no take and no bet on direction: the stop, the trend and the entry are beside the point.
         let rr = Fmt::num(p.default_reward_risk, 2);
         if i.is_hedge() {
-            out.push(Advice::new(Level::Ok, "Hedge: no take-profit, the stop only guards the margin. Net of the coins it covers, the trade costs its fees."));
+            out.push(Advice::new(Level::Ok, "Hedge: no take-profit, the stop only guards the margin. Net of the coins it covers, the trade costs its fees.",
+                                 "Хедж: без тейка, стоп только бережёт маржу. С учётом монет, которые он прикрывает, сделка стоит только комиссий."));
         } else if let Some(profit) = s.profit_at_take_usd.filter(|_| s.loss_at_stop_usd > zero) {
             let r = (Num::of(profit) / loss).rounded(1, Rounding::Plain).0?;
+            let r_text = Fmt::num(r, 2);
             out.push(if r < p.min_reward_risk {
-                Advice::new(Level::Warn, format!("Reward/risk 1:{}: the take-profit is close. The usual minimum is 1:{rr}, “take {rr}R”.", Fmt::num(r, 2)))
+                Advice::new(Level::Warn, format!("Reward/risk 1:{r_text}: the take-profit is close. The usual minimum is 1:{rr}, “take {rr}R”."),
+                            format!("Прибыль к риску 1:{r_text}: тейк слишком близко. Обычный минимум — 1:{rr}, «take {rr}R»."))
             } else {
-                Advice::new(Level::Ok, format!("Reward/risk 1:{}.", Fmt::num(r, 2)))
+                Advice::new(Level::Ok, format!("Reward/risk 1:{r_text}."), format!("Прибыль к риску 1:{r_text}."))
             });
         } else {
-            out.push(Advice::new(Level::Warn, format!("No take-profit. By the 1:{rr} rule: “take {rr}R”.")));
+            out.push(Advice::new(Level::Warn, format!("No take-profit. By the 1:{rr} rule: “take {rr}R”."), format!("Тейка нет. По правилу 1:{rr}: «take {rr}R».")));
         }
 
         // The stop against ordinary noise.
         if !i.is_hedge() && let (Some(atr), Some(stop)) = (m.atr_pct, i.stop_pct) && stop < atr {
-            out.push(Advice::new(Level::Warn, format!(
-                "Stop {} is below the average 4-hour move of {} (ATR {}): normal noise can hit it. “Stop by the book” sets {} ATR.", Fmt::pct(stop), m.name,
-                Fmt::pct(rounded(atr, 2, Rounding::Plain)), Fmt::num(p.atr_stop_multiple, 2)
-            )));
+            let (stop, name, atr, k) = (Fmt::pct(stop), &m.name, Fmt::pct(rounded(atr, 2, Rounding::Plain)), Fmt::num(p.atr_stop_multiple, 2));
+            out.push(Advice::new(Level::Warn,
+                format!("Stop {stop} is below the average 4-hour move of {name} (ATR {atr}): normal noise can hit it. “Stop by the book” sets {k} ATR."),
+                format!("Стоп {stop} меньше среднего хода {name} за 4 часа (ATR {atr}): его может задеть обычный шум. «Stop by the book» ставит {k} ATR.")));
         }
 
         // Leverage and liquidation distance.
         let lev = i.leverage.unwrap_or(Decimal::ONE);
         if lev > p.max_leverage {
-            out.push(Advice::new(Level::Warn, format!(
-                "Leverage {}× is above {}×: risk comes from the stop, but liquidation is closer and mistakes cost more.", Fmt::num(lev, 2), Fmt::num(p.max_leverage, 2)
-            )));
+            let (lev, max) = (Fmt::num(lev, 2), Fmt::num(p.max_leverage, 2));
+            out.push(Advice::new(Level::Warn,
+                format!("Leverage {lev}× is above {max}×: risk comes from the stop, but liquidation is closer and mistakes cost more."),
+                format!("Плечо {lev}× выше {max}×: риск задаёт стоп, но ликвидация ближе, а ошибки дороже.")));
         }
         let stop_distance = (Num::of(s.entry) - s.stop_price).abs().0?;
         let liq_distance = (Num::of(s.entry) - s.liquidation_price).abs().0?;
         if !i.is_hedge() && stop_distance > zero && liq_distance < (Num::of(stop_distance) * 2).0? {
-            out.push(Advice::new(Level::Warn, format!(
-                "Liquidation ({}) is less than two stops from entry: a slipping stop could reach it. Lower the leverage.", Fmt::price(s.liquidation_price)
-            )));
+            let liq = Fmt::price(s.liquidation_price);
+            out.push(Advice::new(Level::Warn,
+                format!("Liquidation ({liq}) is less than two stops from entry: a slipping stop could reach it. Lower the leverage."),
+                format!("Ликвидация ({liq}) ближе двух стопов от входа: стоп с проскальзыванием может до неё дойти. Уменьши плечо.")));
         }
 
         // Entry point: the last day's move and the cost of holding.
@@ -162,22 +174,28 @@ impl RiskRules {
             let signed = format!("{}{}", if change > zero { "+" } else { "" }, Fmt::pct(change));
             let at_market = i.entry_px.is_none();
             let level = if at_market { Level::Warn } else { Level::Ok };
+            let (name, pct) = (&m.name, Fmt::pct(change));
             if long && change >= five {
-                out.push(Advice::new(level, if at_market {
-                    format!("Not the best entry: {} +{} in 24h. A sharp rise is often followed by a pullback: “pullback 2%” sets a limit below.", m.name, Fmt::pct(change))
+                out.push(if at_market {
+                    Advice::new(level, format!("Not the best entry: {name} +{pct} in 24h. A sharp rise is often followed by a pullback: “pullback 2%” sets a limit below."),
+                                format!("Не лучший вход: {name} +{pct} за 24 ч. После резкого роста часто бывает откат: «pullback 2%» поставит лимит ниже."))
                 } else {
-                    format!("{} +{} in 24h, so the entry is a limit below the market.", m.name, Fmt::pct(change))
-                }));
+                    Advice::new(level, format!("{name} +{pct} in 24h, so the entry is a limit below the market."),
+                                format!("{name} +{pct} за 24 ч, поэтому вход — лимитом ниже рынка."))
+                });
             } else if !long && change <= -five {
-                out.push(Advice::new(level, if at_market {
-                    format!("Not the best entry: {} {} in 24h. A sharp drop is often followed by a bounce: “pullback 2%” sets a limit above.", m.name, Fmt::pct(change))
+                out.push(if at_market {
+                    Advice::new(level, format!("Not the best entry: {name} {pct} in 24h. A sharp drop is often followed by a bounce: “pullback 2%” sets a limit above."),
+                                format!("Не лучший вход: {name} {pct} за 24 ч. После резкого падения часто бывает отскок: «pullback 2%» поставит лимит выше."))
                 } else {
-                    format!("{} {} in 24h, so the entry is a limit above the market.", m.name, Fmt::pct(change))
-                }));
+                    Advice::new(level, format!("{name} {pct} in 24h, so the entry is a limit above the market."),
+                                format!("{name} {pct} за 24 ч, поэтому вход — лимитом выше рынка."))
+                });
             } else if if long { change <= -five } else { change >= five } {
-                out.push(Advice::new(Level::Warn, format!("Trade against the 24h move ({signed}): catching a reversal is riskier than following the trend.")));
+                out.push(Advice::new(Level::Warn, format!("Trade against the 24h move ({signed}): catching a reversal is riskier than following the trend."),
+                                     format!("Сделка против движения за 24 ч ({signed}): ловить разворот рискованнее, чем идти по тренду.")));
             } else {
-                out.push(Advice::new(Level::Ok, format!("24h: {signed}, no sharp move before entry.")));
+                out.push(Advice::new(Level::Ok, format!("24h: {signed}, no sharp move before entry."), format!("24 ч: {signed}, резкого движения перед входом не было.")));
             }
         }
         if let Some(funding) = m.funding {
@@ -186,8 +204,9 @@ impl RiskRules {
             let yearly = (Num::of(funding.abs()) * 24 * 365 * 100).rounded(0, Rounding::Plain).0?;
             if pays && yearly >= Decimal::from(30) {
                 let daily = (Num::of(s.notional) * funding.abs() * 24).rounded(2, Rounding::Up).0?;
-                out.push(Advice::new(Level::Warn, format!("Funding: {} pay ≈ {} a year, ≈ {} a day for this position.", if long { "longs" } else { "shorts" },
-                                                          Fmt::pct(yearly), Fmt::usd(daily))));
+                let (yearly, daily) = (Fmt::pct(yearly), Fmt::usd(daily));
+                out.push(Advice::new(Level::Warn, format!("Funding: {} pay ≈ {yearly} a year, ≈ {daily} a day for this position.", if long { "longs" } else { "shorts" }),
+                                     format!("Фандинг: {} платят ≈ {yearly} годовых, ≈ {daily} в день за эту позицию.", if long { "лонги" } else { "шорты" })));
             }
         }
         Some(out)

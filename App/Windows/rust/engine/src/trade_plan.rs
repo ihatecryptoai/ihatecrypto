@@ -462,7 +462,7 @@ impl Engine {
             }
             let advice = RiskRules::check(r, s, m, equity, &policy, self.open_risk());
             let problems: Vec<_> = advice.iter().filter(|a| a.level != Level::Ok).collect();
-            for a in &problems { out.push(format!("{} ", if a.level == Level::Block { "✗" } else { "⚠" }) + &say("Rules: ", "Правила: ") + &a.text) }
+            for a in &problems { out.push(format!("{} ", if a.level == Level::Block { "✗" } else { "⚠" }) + &say("Rules: ", "Правила: ") + &say(&a.text, &a.ru)) }
             if problems.is_empty() { out.push(say("✓ Rules: all met", "✓ Правила: все соблюдены")) }
             let loss = Fmt::usd(s.loss_at_stop_usd);
             let mut result = say(&format!("✓ Result: at the stop −{loss}"), &format!("✓ Итог: на стопе −{loss}")) + &share(s.loss_at_stop_usd);
