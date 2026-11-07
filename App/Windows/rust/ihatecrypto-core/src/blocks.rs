@@ -64,6 +64,9 @@ pub static ALL: &[Block] = &[
           "send 1 USDC to Bybit", "solana", Some("usdc")),
     block("Move money", "ANY TOKEN · AS IT IS", "Send a token", "send N|all TICKER|0xCONTRACT|MINT on NETWORK to NAME from the address book",
           "send all RAY on solana to Bybit", "solana", Some("sol")),
+    block("Move money", "PRIVATE · NEAR INTENTS", "Send privately",
+          "send N USDC privately to NAME from the address book · on chain the deposit and the payout can't be matched",
+          "send 2 USDC privately to Bybit", "check", Some("near")),
 
     block("Buy and sell", "SWAP · JUPITER", "Tokens on Solana", "buy|sell SOL, BTC, ETH, JUP, BONK… for N USDC",
           "buy SOL for 2 USDC", "jupiter", Some("jup")),

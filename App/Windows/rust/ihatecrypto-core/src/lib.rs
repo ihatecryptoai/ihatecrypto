@@ -36,7 +36,9 @@ pub mod trading_study_skill;
 pub mod blocks;
 pub mod chat_recall;
 pub mod model_exam;
+pub mod loan_guard;
 pub mod mpp;
+pub mod x402;
 pub mod normalize;
 
 // Round 5 (the other session).

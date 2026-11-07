@@ -24,8 +24,11 @@ impl Place {
 /// The legs bringing `short` USDC to `target` («solana» or an EVM network's key); nil when all the free money together
 /// isn't enough — the move's own check says what's missing.
 #[allow(clippy::too_many_arguments)]
+/// `intents`: the EVM networks NEAR Intents pays USDC on, when every leg must go through NEAR Intents (a loan guard's
+/// top-up): Hyperliquid is left out, and each move says «via NEAR Intents». A target outside them plans as usual.
+#[allow(clippy::too_many_arguments)]
 pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, evm: &[Place], hyperliquid: Decimal, near: Decimal,
-            near_price: Option<Decimal>) -> Option<Vec<String>> {
+            near_price: Option<Decimal>, intents: Option<&[&str]>) -> Option<Vec<String>> {
     if short <= Decimal::ZERO { return Some(vec![]) }
     // rust_decimal panics past 7.9·10²⁸ where Swift's Decimal goes on, and a panic stops the engine: amounts and the
     // price are held to bounds no real balance comes near (a trillion dollars, a millionth of a dollar), so a garbage
@@ -42,6 +45,8 @@ pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, ev
     // NEAR left on the account for its storage and fees.
     let near_reserve = dec("0.05");
     let to_solana = target == "solana";
+    let intents = intents.filter(|i| to_solana || i.contains(&target));
+    let via = if intents.is_some() { " via NEAR Intents" } else { "" };
     let (mut direct, mut into_solana) = (Vec::new(), Vec::new());
     let (mut own, mut landed, mut delivered) = (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
     let need = |own: Decimal, landed: Decimal, delivered: Decimal| {
@@ -61,17 +66,17 @@ pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, ev
         own = take(solana, need(own, landed, delivered).max(half) + fee);
     }
     for p in &evm {
-        if p.key == target || need(own, landed, delivered) <= Decimal::ZERO || p.usdc < floor { continue }
+        if p.key == target || need(own, landed, delivered) <= Decimal::ZERO || p.usdc < floor || intents.is_some_and(|i| !i.contains(&p.key.as_str())) { continue }
         let x = take(p.usdc, need(own, landed, delivered) + fee);
         if to_solana {
-            into_solana.push(format!("move {} USDC from {} to Solana", text(x), p.name));
+            into_solana.push(format!("move {} USDC from {} to Solana{via}", text(x), p.name));
             landed += x - fee;
         } else {
-            direct.push(format!("move {} USDC from {} to {target_name}", text(x), p.name));
+            direct.push(format!("move {} USDC from {} to {target_name}{via}", text(x), p.name));
             delivered += x - fee;
         }
     }
-    if need(own, landed, delivered) > Decimal::ZERO && hyperliquid >= floor {
+    if need(own, landed, delivered) > Decimal::ZERO && hyperliquid >= floor && intents.is_none() {
         let x = take(hyperliquid, need(own, landed, delivered) + fee + pool_fee(own, landed));
         into_solana.push(format!("withdraw {} USDC to Solana", text(x)));
         landed += x - fee;
@@ -88,9 +93,10 @@ pub fn legs(short: Decimal, target: &str, target_name: &str, solana: Decimal, ev
     if need(own, landed, delivered) > Decimal::ZERO { return None }
     // What arrives: the pool less the dollar kept for the fee. Asking the whole pool to arrive left Solana short of
     // the fee on top, and the chain stopped after its first legs.
-    let arriving = rounded(own + landed - fee, 2, Rounding::Down);
+    // Through NEAR Intents the leg names what's sent, not what arrives: the whole pool goes, the fee dollar covering 1Click's cents.
+    let arriving = rounded(own + landed - if intents.is_none() { fee } else { Decimal::ZERO }, 2, Rounding::Down);
     let mut out = direct;
     out.extend(into_solana);
-    if !to_solana && arriving > Decimal::ZERO { out.push(format!("move {} USDC from Solana to {target_name}", text(arriving))) }
+    if !to_solana && arriving > Decimal::ZERO { out.push(format!("move {} USDC from Solana to {target_name}{via}", text(arriving))) }
     Some(out)
 }

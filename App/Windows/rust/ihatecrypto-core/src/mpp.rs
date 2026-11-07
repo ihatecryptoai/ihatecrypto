@@ -33,6 +33,35 @@ pub struct Challenge {
     pub payee: String,
     pub memo: Option<Vec<u8>>,
     pub expires: Option<Date>,
+    /// «tempo», or «nearintents» (paid through NEAR Intents: `payee` is 1Click's deposit address there).
+    pub method: String,
+    pub near: Option<NearCharge>,
+}
+
+/// A charge paid through NEAR Intents (paymentauth.org draft-nearintents-charge-01): the payer sends `amount` of
+/// `currency` on `origin_network` to 1Click's deposit address; 1Click delivers exactly `amount_out` of
+/// `destination_asset` to `destination_recipient`. A deposit that doesn't settle is refunded to `refund_to`, which the
+/// service sets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NearCharge {
+    /// CAIP-2 («eip155:8453», «solana:5eykt4…») and CAIP-19 («eip155:8453/erc20:0x…»).
+    pub origin_network: String,
+    pub currency: String,
+    pub destination_network: String,
+    pub destination_asset: String,
+    pub destination_recipient: String,
+    pub amount_out: String,
+    pub min_amount_in: u64,
+    pub refund_to: String,
+    pub time_estimate: Option<i64>,
+}
+
+impl NearCharge {
+    pub const SOLANA_MAINNET: &'static str = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+    pub fn evm_chain(&self) -> Option<u64> { self.origin_network.strip_prefix("eip155:")?.parse().ok() }
+    pub fn on_solana(&self) -> bool { self.origin_network == Self::SOLANA_MAINNET }
+    /// The token `currency` names: an ERC-20 contract or a Solana mint.
+    pub fn token(&self) -> &str { self.currency.rsplit(':').next().unwrap_or(&self.currency) }
 }
 
 impl Challenge {
@@ -64,17 +93,84 @@ pub(crate) fn challenges(header: &str) -> Vec<HashMap<String, String>> {
     out
 }
 
-/// The challenge ihatecrypto can pay, or why none: USDC on Tempo, a charge of more than zero, push mode allowed. `now`:
-/// Swift's `Date()`; a quote that has expired by then is never paid.
-pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
+/// The challenge ihatecrypto can pay on Tempo, or why none: USDC on Tempo, a charge of more than zero, push mode
+/// allowed. `now`: Swift's `Date()`; a quote that has expired by then is never paid. A NEAR Intents charge never comes
+/// back from here: a caller that pays on Tempo never gets a deposit address (challenge_paying).
+pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> { challenge_paying(header, now, |_| false) }
+
+/// USDC on Tempo first, else a NEAR Intents charge in a token the wallet pays (`pays`: USDC on a network it has).
+pub fn challenge_paying(header: &str, now: Date, pays: impl Fn(&NearCharge) -> bool) -> Result<Challenge, Refusal> {
     let all = challenges(header);
-    let Some(p) = all.iter().find(|p| p.get("method").is_some_and(|m| m == "tempo") && p.get("intent").is_some_and(|i| i == "charge")) else {
-        let offered = all.iter().map(|p| format!("{} {}", p.get("method").map_or("?", String::as_str), p.get("intent").map_or("?", String::as_str)))
-            .collect::<Vec<_>>().join(", ");
-        return Err(Refusal::new(if offered.is_empty() { "The service asked for payment without an MPP challenge.".into() } else {
-            format!("The service takes {offered}, but ihatecrypto pays only a one-time charge in USDC on Tempo.")
-        }));
+    let is = |p: &HashMap<String, String>, method: &str| p.get("method").is_some_and(|m| m == method) && p.get("intent").is_some_and(|i| i == "charge");
+    let tempo = all.iter().find(|p| is(p, "tempo")).map(|p| tempo_challenge(p, now));
+    if let Some(Ok(c)) = tempo { return Ok(c) }
+    let mut near = None;
+    for p in all.iter().filter(|p| is(p, "nearintents")) {
+        match near_challenge(p, now) {
+            Ok(c) if c.near.as_ref().is_some_and(&pays) => return Ok(c),
+            Ok(c) => {
+                let n = c.near.expect("a NEAR charge");
+                near = Some(Err(Refusal::new(format!(
+                    "The service wants {} on {} through NEAR Intents. ihatecrypto pays such a charge in USDC on Solana, Base, Arbitrum or Ethereum.",
+                    n.currency, n.origin_network))));
+            }
+            Err(r) => near = Some(Err(r)),
+        }
+    }
+    if let Some(t) = tempo { return t }
+    if let Some(n) = near { return n }
+    let offered = all.iter().map(|p| format!("{} {}", p.get("method").map_or("?", String::as_str), p.get("intent").map_or("?", String::as_str)))
+        .collect::<Vec<_>>().join(", ");
+    Err(Refusal::new(if offered.is_empty() { "The service asked for payment without an MPP challenge.".into() } else {
+        format!("The service takes {offered}. ihatecrypto pays a one-time charge in USDC on Tempo or through NEAR Intents.")
+    }))
+}
+
+/// A NEAR Intents charge as the draft asks the payer to check it before depositing: the amount and the token on the
+/// network the deposit goes on, the destination leg in full, a plain transfer with no memo, proven by its hash. What the
+/// card prints (receiver, refund address, deposit) must read as an address or an account, never as the service's words.
+fn near_challenge(p: &HashMap<String, String>, now: Date) -> Result<Challenge, Refusal> {
+    let request = p.get("id").filter(|id| !id.is_empty()).and(p.get("realm")).and(p.get("request")).and_then(|r| base64url(r))
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+    let (Some(request), Some(d)) = (request.as_ref().and_then(Value::as_object), request.as_ref().and_then(|r| r.get("methodDetails")).and_then(Value::as_object)) else {
+        return Err(Refusal::new("The service's NEAR Intents payment request can't be read."));
     };
+    let text = |k: &str| d.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+    let Some(amount) = request.get("amount").and_then(Value::as_str).and_then(|a| a.parse::<u64>().ok()).filter(|a| *a > 0) else {
+        return Err(Refusal::new("The service asks for an amount that can't be read. ihatecrypto only pays real charges."));
+    };
+    let (Some(origin), Some(currency)) = (text("originNetwork"), request.get("currency").and_then(Value::as_str)) else {
+        return Err(Refusal::new("The service's token isn't on the network its deposit goes on."));
+    };
+    if !currency.starts_with(&format!("{origin}/")) { return Err(Refusal::new("The service's token isn't on the network its deposit goes on.")) }
+    let Some(deposit) = request.get("recipient").and_then(Value::as_str).filter(|r| !r.is_empty() && !r.chars().any(char::is_whitespace)) else {
+        return Err(Refusal::new("The service's deposit address can't be read."));
+    };
+    let (Some(network), Some(asset), Some(payee), Some(out), Some(refund), Some(minimum)) = (text("destinationNetwork"), text("destinationAsset"),
+        text("destinationRecipient"), text("amountOut"), text("refundTo"), text("minAmountIn").and_then(|m| m.parse::<u64>().ok())) else {
+        return Err(Refusal::new("The service doesn't say what it receives, where, or where a refund goes."));
+    };
+    const ACCOUNT: &str = "[A-Za-z0-9][A-Za-z0-9._:-]{1,99}";
+    if whole(&payee, ACCOUNT).is_none() || whole(&refund, ACCOUNT).is_none() || whole(deposit, ACCOUNT).is_none() || out.parse::<u64>().is_err() {
+        return Err(Refusal::new("The service's receiver, refund address or amount isn't an address or a number."));
+    }
+    // Less than the minimum only comes back as a refund, and the service picks where a refund goes.
+    if minimum > amount { return Err(Refusal::new("The service asks for less than its own minimum deposit.")) }
+    if d.get("depositMemo").is_some_and(|m| !m.is_null()) {
+        return Err(Refusal::new("The service's deposit needs a memo, and ihatecrypto pays with a plain transfer."));
+    }
+    if let Some(kinds) = strings(d.get("credentialTypes")) && !kinds.contains(&"hash") {
+        return Err(Refusal::new("The service takes a proof other than the transaction's hash."));
+    }
+    let expires = p.get("expires").and_then(|e| date(e));
+    if expires.is_some_and(|e| e <= now) { return Err(Refusal::new("The service's price quote has expired. Ask again.")) }
+    let charge = NearCharge { origin_network: origin, currency: currency.to_string(), destination_network: network, destination_asset: asset,
+                              destination_recipient: payee, amount_out: out, min_amount_in: minimum, refund_to: refund,
+                              time_estimate: d.get("timeEstimate").and_then(Value::as_f64).map(|t| t as i64) };
+    Ok(Challenge { params: p.clone(), amount, payee: deposit.to_string(), memo: None, expires, method: "nearintents".into(), near: Some(charge) })
+}
+
+fn tempo_challenge(p: &HashMap<String, String>, now: Date) -> Result<Challenge, Refusal> {
     let request = p.get("id").filter(|id| !id.is_empty()).and(p.get("realm")).and(p.get("request")).and_then(|r| base64url(r))
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
     let Some(request) = request.as_ref().and_then(Value::as_object) else { return Err(Refusal::new("The service's payment request can't be read.")) };
@@ -111,7 +207,7 @@ pub fn challenge(header: &str, now: Date) -> Result<Challenge, Refusal> {
     }
     let expires = p.get("expires").and_then(|e| date(e));
     if expires.is_some_and(|e| e <= now) { return Err(Refusal::new("The service's price quote has expired. Ask again.")) }
-    Ok(Challenge { params: p.clone(), amount, payee: payee.to_string(), memo, expires })
+    Ok(Challenge { params: p.clone(), amount, payee: payee.to_string(), memo, expires, method: "tempo".into(), near: None })
 }
 
 /// `(x as? NSNumber)?.uint64Value`: a JSON number or true/false, a fraction cut, a negative one wrapped as in C.
@@ -154,7 +250,8 @@ pub fn credential(c: &Challenge, hash: &str, payer: &str) -> String {
     const ECHOED: [&str; 10] = ["id", "realm", "method", "intent", "request", "description", "opaque", "digest", "expires", "header"];
     let echoed: Map<String, Value> = c.params.iter().filter(|(k, _)| ECHOED.contains(&k.as_str())).map(|(k, v)| (k.clone(), json!(v))).collect();
     // serde_json's objects keep their keys sorted, as `.sortedKeys` writes them; «/» stays unescaped.
-    let body = json!({"challenge": echoed, "payload": {"type": "hash", "hash": hash}, "source": format!("did:pkh:eip155:{CHAIN_ID}:{payer}")});
+    let network = c.near.as_ref().map_or_else(|| format!("eip155:{CHAIN_ID}"), |n| n.origin_network.clone());
+    let body = json!({"challenge": echoed, "payload": {"type": "hash", "hash": hash}, "source": format!("did:pkh:{network}:{payer}")});
     format!("Payment {}", URL_SAFE_NO_PAD.encode(body.to_string()))
 }
 
@@ -179,11 +276,17 @@ pub(crate) fn date(s: &str) -> Option<Date> {
 /// words.
 pub async fn call(method: &str, url: &str, body: Option<&str>, credential: Option<(&str, &str)>)
     -> Result<(u16, HashMap<String, String>, Vec<u8>), WalletError> {
+    call_waiting(method, url, body, credential, 60).await
+}
+
+/// `call` that waits `seconds`: a NEAR Intents charge answers only once 1Click has settled the deposit, a minute or two.
+pub async fn call_waiting(method: &str, url: &str, body: Option<&str>, credential: Option<(&str, &str)>, seconds: u64)
+    -> Result<(u16, HashMap<String, String>, Vec<u8>), WalletError> {
     // The tests' stand-in service is plain HTTP on this machine; every other build asks over https only.
     if !(url.starts_with("https:") || (cfg!(test) && url.starts_with("http://127.0.0.1:"))) { return Err(WalletError("unsupported URL".into())) }
     let method = method.parse().map_err(|e: _| WalletError(format!("{e}")))?;
     // URLRequest's timeoutInterval 60; here for the whole answer, which a service sends in one piece.
-    let mut request = net::HTTP.request(method, url).timeout(Duration::from_secs(60));
+    let mut request = net::HTTP.request(method, url).timeout(Duration::from_secs(seconds));
     if let Some(body) = body { request = request.header("Content-Type", "application/json").body(body.to_string()) }
     if let Some((field, value)) = credential { request = request.header(field, value) }
     let response = request.send().await.map_err(|e| unreached(e.is_timeout(), e.is_connect(), e.is_builder(), e.to_string()))?;
@@ -209,11 +312,18 @@ fn unreached(timeout: bool, connect: bool, builder: bool, words: String) -> Wall
 /// names the payment, so the user can show it to the service.
 pub async fn paid(method: &str, url: &str, body: Option<&str>, credential: (&str, &str), usdc: Decimal, service: &str, proof: &str)
     -> Result<Vec<u8>, Refusal> {
+    paid_on(method, url, body, credential, usdc, service, proof, "Tempo", 60).await
+}
+
+/// `paid` for a payment on `place`, waiting `seconds` for the answer (NEAR Intents: 300).
+#[allow(clippy::too_many_arguments)]
+pub async fn paid_on(method: &str, url: &str, body: Option<&str>, credential: (&str, &str), usdc: Decimal, service: &str, proof: &str, place: &str,
+                     seconds: u64) -> Result<Vec<u8>, Refusal> {
     let paid = format!("Paid {} USDC, but {service}", Fmt::num(usdc, 6));
-    match call(method, url, body, Some(credential)).await {
-        Err(e) => Err(Refusal::new(format!("{paid} didn't answer: {}. The payment is on Tempo: {proof}", trim_set(&e.0, ". ")))),
+    match call_waiting(method, url, body, Some(credential), seconds).await {
+        Err(e) => Err(Refusal::new(format!("{paid} didn't answer: {}. The payment is on {place}: {proof}", trim_set(&e.0, ". ")))),
         Ok((status, _, data)) if !(200..300).contains(&status) => {
-            Err(Refusal::new(format!("{paid} answered {status}: {}. The payment is on Tempo: {proof}", shown(&data, 300))))
+            Err(Refusal::new(format!("{paid} answered {status}: {}. The payment is on {place}: {proof}", shown(&data, 300))))
         }
         Ok((_, _, data)) => Ok(data),
     }

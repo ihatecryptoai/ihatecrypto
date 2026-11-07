@@ -75,7 +75,7 @@ fn mpp_refuses_what_it_cant_pay() {
                          Utc::now()).unwrap();
     assert!(memo.memo.as_ref().is_some_and(|m| m.len() == 32) && memo.field() == "Payment-Authorization");
     assert_eq!(challenge(r#"Payment id="a", realm="r", method="stripe", intent="charge", request="e30""#, Utc::now()).unwrap_err().reason,
-               "The service takes stripe charge, but ihatecrypto pays only a one-time charge in USDC on Tempo.");
+               "The service takes stripe charge. ihatecrypto pays a one-time charge in USDC on Tempo or through NEAR Intents.");
     // And the words for what Swift's test leaves unsaid: no challenge, a request that isn't JSON, a payee that isn't one.
     assert_eq!(challenge(r#"Bearer realm="x""#, Utc::now()).unwrap_err().reason, "The service asked for payment without an MPP challenge.");
     assert_eq!(challenge(r#"Payment id="a", realm="r", method="tempo", intent="charge", request="!!""#, Utc::now()).unwrap_err().reason,

@@ -10,6 +10,7 @@ mod foundation;
 mod funding_plan;
 mod guardian;
 mod hedge;
+mod loan_guard;
 mod moved_line;
 mod scheduled_task;
 mod site_check;
@@ -35,6 +36,7 @@ mod blocks;
 mod chat_recall;
 mod model_exam;
 mod mpp;
+mod x402;
 mod normalize;
 // Round 5 (the other session).
 mod holdings;

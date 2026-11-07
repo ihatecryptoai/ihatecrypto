@@ -289,7 +289,7 @@ impl Engine {
         let evm: Vec<Place> = EvmNetwork::searched().into_iter().map(|n| Place::new(n.key, n.name, self.usdc_free(n.key).unwrap_or_default())).collect();
         let near_price = self.st().markets.get("NEAR").map(|m| m.mark_px);
         funding_plan::legs(short, net, &W::place_name(net), self.usdc_free("solana").unwrap_or_default(), &evm,
-                           self.usdc_free("hyperliquid").unwrap_or_default(), self.held_there("NEAR", "near").unwrap_or_default(), near_price)
+                           self.usdc_free("hyperliquid").unwrap_or_default(), self.held_there("NEAR", "near").unwrap_or_default(), near_price, None)
     }
 
     /// All the wallet's free money together can't pay the move: said before a card that would fail.
