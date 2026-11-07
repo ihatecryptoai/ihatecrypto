@@ -398,6 +398,13 @@ impl Engine {
         if let Some(command) = FolderCommand::parse(canonical) { self.folder_command(command, owned()); return true }
         if let Some(entry) = JournalCommand::parse(canonical) { Box::pin(self.journal_command(entry, owned())).await; return true }
         if let Some(study) = StudyNote::parse(canonical) { self.study_note(study, owned()); return true }
+        // Asked for privacy: a send in a chain, a schedule or an alert must be the private one too — those steps are read
+        // again later without the user's words, so the check below would never see them (the Mac's runCanonical).
+        if WalletCommand::asks_privacy(text) && WalletCommand::has_public_send(canonical) {
+            self.reply(&self.say("You asked for privacy, but a step here would send in the open. Say the send itself privately — “send 20 USDC privately to Mom”. Nothing was prepared.",
+                                 "Ты просил приватно, но один из шагов отправил бы открыто. Скажи сам перевод приватно — «переведи приватно 20 USDC маме». Ничего не подготовлено."), owned());
+            return true;
+        }
         if ScheduledTask::cancels_all(canonical) { self.cancel_tasks(note); return true }
         if let Some(task) = ScheduledTask::parse(canonical, chrono::Utc::now()) { self.schedule(task, note); return true }
         if let Some(merged) = ChatRouter::plan_change(canonical, &markets) { return Box::pin(self.run_canonical(&merged, text)).await }
@@ -459,6 +466,16 @@ impl Engine {
             // The model only rewords: an address it wrote must be in the user's own message, character for character.
             if let AddressBookCommand::Save { address, .. } = &command && !text.contains(address.as_str()) { return false }
             Box::pin(self.address_book(&command, text)).await;
+            return true;
+        }
+        // The user asked for privacy and the form left it out: the same send made private, or nothing in the open.
+        if WalletCommand::asks_privacy(text) && let Some(command) = WalletCommand::parse(canonical) {
+            let Some(made) = command.made_private() else {
+                self.reply(&self.say("You asked for privacy: only a send with an amount goes privately — “send 20 USDC privately to Mom”. Nothing was prepared.",
+                                     "Ты просил приватно: приватным бывает только перевод с суммой — «переведи приватно 20 USDC маме». Ничего не подготовлено."), owned());
+                return true;
+            };
+            Box::pin(self.handle_wallet(&made, note)).await;
             return true;
         }
         if let Some(WalletCommand::SendTo { name, amount, network }) = WalletCommand::parse(canonical) {

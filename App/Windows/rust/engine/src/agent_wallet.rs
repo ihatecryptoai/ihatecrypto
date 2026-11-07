@@ -401,11 +401,14 @@ impl Engine {
         let Some(s) = agent_api::until_final(op, Duration::from_secs(900)).await.ok().filter(Status::is_final) else {
             return trade::fail(self.may_have_gone(&format!("The {n} USDC left Solana for the agent wallet"), &format!("{n} USDC ушли из Solana в кошелёк агента"), Some(op)));
         };
-        let _ = self.journal().append(&Entry::new("1click", deposit, if s.ok() { Kind::Settled } else { Kind::Failed }, &s.status));
         if !s.ok() {
+            // The USDC left Solana: the deposit stays open on the journal (status unknown, no Try again). A refund goes to
+            // the agent's own account, so nothing is lost — and a second deposit would fund it twice.
             let status = first(&s.status, 30);
-            return trade::fail(self.say(&format!("The deposit into the agent wallet ended {status}."), &format!("Депозит в кошелёк агента закончился статусом {status}.")));
+            return trade::fail(self.say(&format!("The deposit of {n} USDC into the agent wallet ended {status}. The USDC has left Solana, and a refund goes to the agent wallet's own account: don't send it again until its balance shows where it is (NEAR Intents operation {op})."),
+                                        &format!("Депозит {n} USDC в кошелёк агента закончился статусом {status}. USDC уже ушли из Solana, а возврат идёт на счёт самого кошелька агента: не отправляй снова, пока его баланс не покажет, где деньги (операция NEAR Intents {op}).")));
         }
+        let _ = self.journal().append(&Entry::new("1click", deposit, Kind::Settled, &s.status));
         Ok(self.say(&format!("{n} USDC are in the agent wallet. It spends them only within the rules you signed."),
                     &format!("{n} USDC в кошельке агента. Он тратит их только в рамках правил, которые ты подписал.")))
     }
@@ -429,7 +432,8 @@ impl Engine {
         let data = match agent_api::call("POST", &format!("/v1/agents/{}/withdraw", a.agent_id), Some(body.as_bytes()), Some(&grant), Some(&id)).await {
             Ok(data) => data,
             // Asked, and no answer: NEAR Intents may have taken it (a 0.3 USDC send that went read «timed out», 2026-11-05).
-            Err(f) if f.is_no_answer() => return trade::fail(self.may_have_gone(&gone_en, &gone_ru, None)),
+            // A gateway's 5xx is no answer either: the API may have taken the send behind it.
+            Err(f) if f.is_no_answer() || f.status >= 500 => return trade::fail(self.may_have_gone(&gone_en, &gone_ru, None)),
             Err(f) => {
                 let _ = journal.append(&Entry::new("agentapi", &id, Kind::Failed, &f.code));
                 // The policy at work: what NEAR Intents refused and why.
@@ -443,6 +447,11 @@ impl Engine {
         let Some(s) = agent_api::until_final(&op, Duration::from_secs(900)).await.ok().filter(Status::is_final) else {
             return trade::fail(self.may_have_gone(&format!("The agent wallet's send of {n} USDC is with NEAR Intents"), &format!("Перевод {n} USDC из кошелька агента — у NEAR Intents"), Some(&op)));
         };
+        // NEEDS_REVIEW isn't a refusal: it may still go, so it stays open (status unknown, no Try again with a new key).
+        if s.status == "NEEDS_REVIEW" {
+            return trade::fail(self.say(&format!("The agent wallet's send of {n} USDC is under review at NEAR Intents and may still go. Status unknown: don't send it again until the balance shows it (NEAR Intents operation {op})."),
+                                        &format!("Перевод {n} USDC из кошелька агента на проверке в NEAR Intents и ещё может пройти. Статус неизвестен: не отправляй снова, пока это не покажет баланс (операция NEAR Intents {op}).")));
+        }
         let _ = journal.append(&Entry::new("agentapi", &id, if s.ok() { Kind::Settled } else { Kind::Failed }, &s.status));
         if !s.ok() {
             let status = first(&s.status, 30);

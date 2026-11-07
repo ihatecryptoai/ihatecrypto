@@ -41,3 +41,43 @@ fn a_quotes_time_reads_in_both_languages() {
     assert_eq!(Journey::seconds_in("Confidential Intents · ≈ 45 s"), Some(45));
     assert_eq!(Journey::seconds_in("≈ 2.41 AERO"), None);
 }
+
+mod privacy_word {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use crate::engine::Engine;
+    use crate::outbox::Outbox;
+    use crate::signer_link::SignerLink;
+    use crate::store;
+
+    fn engine() -> Rc<Engine> {
+        let e = Engine::new(Outbox::silent(), Arc::new(SignerLink::new(store::url("no-signer-here"))), |_| unreachable!("the test engine stays locked"));
+        let mut st = e.st_mut();
+        st.lock.locked = true;
+        st.settings.language = Some("en".into());
+        drop(st);
+        e
+    }
+
+    fn last(e: &Engine) -> String { e.st().messages().last().map(|m| m.text.clone()).unwrap_or_default() }
+
+    /// A private request is never a public send: a form that left «privately» out goes private, and a schedule that
+    /// would send in the open later, without the user's words, is refused.
+    #[tokio::test]
+    async fn a_private_request_never_sends_in_the_open() {
+        let _dir = store::test_folder();
+        tokio::task::LocalSet::new().run_until(async {
+            let e = engine();
+            assert!(e.run_canonical("send 20 USDC to Mom", "переведи маме приватно 20 USDC").await);
+            // The private send's own reading (private_recipient), not the plain transfer's «Add it there first».
+            assert_eq!(last(&e), "There’s no “Mom” in Addresses. Save it there first, then send by its name.");
+            assert!(e.run_canonical("every friday at 09:00: send 20 USDC to Mom", "каждую пятницу переведи маме приватно 20 USDC").await);
+            assert!(last(&e).starts_with("You asked for privacy, but a step here would send in the open."), "{}", last(&e));
+            assert!(e.st().tasks.is_empty());
+            // Asked privately, a move that can't be private prepares nothing.
+            assert!(e.run_canonical("withdraw 5 USDC to solana", "выведи приватно 5 USDC").await);
+            assert!(last(&e).starts_with("You asked for privacy: only a send with an amount goes privately"), "{}", last(&e));
+        }).await;
+    }
+}

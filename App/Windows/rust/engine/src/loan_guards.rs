@@ -44,8 +44,9 @@ impl Engine {
     /// The wallet that's on's guards: another wallet's loan is never read as this one.
     fn own_guards(&self) -> Vec<LoanGuard> {
         let st = self.st();
-        let me = st.solana_address();
-        st.loan_guards.iter().filter(|g| g.owner.is_none() || g.owner == me).cloned().collect()
+        // A wallet without a Solana address (a Ledger's EVM side, a watched EVM address) owns its guards by its EVM one.
+        let (sol, evm) = (st.solana_address(), st.evm_address());
+        st.loan_guards.iter().filter(|g| g.owner.is_none() || (g.owner.is_some() && (g.owner == sol || g.owner == evm))).cloned().collect()
     }
 
     /// «guard my loan on kamino», «stop guarding my loans».
@@ -85,7 +86,7 @@ impl Engine {
                                          "Пока нечего защищать: сначала займи на Kamino или Aave, потом скажи «следи за займом»."), note);
                     return;
                 };
-                g.owner = self.st().solana_address();
+                g.owner = { let st = self.st(); st.solana_address().or_else(|| st.evm_address()) };
                 // Windows has no debug API, so no message here is untrusted: the Mac's «a test never replaces the user's
                 // own guard» has nothing to tell apart. The same guard with a new line: a fired one stays fired, so it
                 // can't prepare a second repay.

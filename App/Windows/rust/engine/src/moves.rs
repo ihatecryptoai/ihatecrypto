@@ -1065,7 +1065,9 @@ impl Engine {
         // Sent, but no outcome came back: it may have gone through, and a second try would pay twice — «unknown», never
         // «failed» (the Mac's finish(false, unknown:)).
         let since = started - TimeDelta::seconds(1);
-        let sent: Vec<execution::Entry> = self.journal().unresolved().map(|u| u.into_iter().filter(|e| e.at >= since).collect()).unwrap_or_default();
+        let mut sent: Vec<execution::Entry> = self.journal().unresolved().map(|u| u.into_iter().filter(|e| e.at >= since).collect()).unwrap_or_default();
+        // Sent with no word back, and not on the journal (it couldn't be written): unknown all the same.
+        if sent.is_empty() && let trade::Error::NoReply(_) = &error { sent.push(execution::Entry::new(&self.say("your balances", "твои балансы"), "", execution::Kind::Signed, &error.to_string())) }
         self.update_board(board.as_deref(), |b| b.state = Some(if sent.is_empty() { "failed" } else { "unknown" }.into()));
         let why = error.to_string();
         if sent.is_empty() && let trade::Error::Costly(loss) = &error {
@@ -1094,7 +1096,7 @@ impl Engine {
             let explains = !matches!(error, trade::Error::Guard(_) | trade::Error::Costly(_));
             if explains && self.st().agent_goal.is_none() { self.explain_failure(title, &why).await }
         } else {
-            let ids = sent.iter().map(|e| format!("{} {}", e.chain, e.id)).collect::<Vec<_>>().join(" · ");
+            let ids = sent.iter().map(|e| format!("{} {}", e.chain, e.id).trim().to_string()).collect::<Vec<_>>().join(" · ");
             self.reply(&(self.say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + &why + " "
                          + &self.say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + &ids), None);
         }

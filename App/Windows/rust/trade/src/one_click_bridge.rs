@@ -179,7 +179,8 @@ impl Executor {
         }
         self.report(&format!("NEAR Intents: {} USDC from Solana into the agent wallet.", Fmt::num(millionths(units), 6)));
         let tx = last_part(&self.send_solana_usdc(units, deposit_address, "the agent wallet's deposit").await?);
-        self.record("1click", deposit_address, Kind::Signed, "Solana USDC → agent wallet")?;
+        // Sent: a journal that can't be written now must not read «failed» (a second deposit would follow).
+        self.record("1click", deposit_address, Kind::Signed, "Solana USDC → agent wallet").map_err(|e| Error::NoReply(Box::new(e)))?;
         if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, deposit_address).await; }
         Ok(tx)
     }
@@ -207,7 +208,8 @@ impl Executor {
                                        &[deposit.to_string()], None, 0).await?,
             None => last_part(&self.send_solana_usdc(units, deposit, &format!("{service}'s 1Click deposit")).await?),
         };
-        self.record("1click", deposit, Kind::Signed, &format!("MPP {service} · {usdc} USDC from {name}"))?;
+        // Sent: a journal that can't be written now must not read «failed» (a second charge would follow).
+        self.record("1click", deposit, Kind::Signed, &format!("MPP {service} · {usdc} USDC from {name}")).map_err(|e| Error::NoReply(Box::new(e)))?;
         if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, deposit).await; }
         Ok(tx)
     }

@@ -369,7 +369,10 @@ impl Engine {
         // Written down before it's used: a failure from here on reads «status unknown», not «Failed» with Try again, since
         // the signature may still be settled (a second Confirm would sign a second payment).
         let id = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let _ = self.journal().append(&Entry::new("x402", &id, Kind::Signed, &format!("{service} · {usdc} USDC")));
+        // Not written, not sent: the signature goes nowhere and nothing is paid.
+        self.journal().append(&Entry::new("x402", &id, Kind::Signed, &format!("{service} · {usdc} USDC")))
+            .map_err(|e| trade::Error::Wallet(self.say("The journal couldn't be written, so the signed payment wasn't sent. Nothing was paid. ",
+                                                        "Журнал не записался, поэтому подписанная оплата не отправлена. Ничего не оплачено. ") + &e))?;
         self.running_line(self.say(&format!("Waiting for {service}'s answer"), &format!("Жду ответ {service}")));
         let (status, headers, data) = mpp::call(method, url, body, Some((field, &value))).await
             .map_err(|err| trade::Error::Execution(self.say(&format!("{service} didn't answer ({}). ", err.0), &format!("{service} не ответил ({}). ", err.0)) + &pending))?;
