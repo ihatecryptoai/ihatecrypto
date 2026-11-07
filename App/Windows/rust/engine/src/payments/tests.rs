@@ -65,7 +65,7 @@ fn last(e: &Engine) -> String { e.st().messages().last().map(|m| m.text.clone())
 /// Example's price for `pay`, asked in a run of `task` (None: in the window).
 fn quote(command: &WalletCommand, amount: u64, task: Option<&ScheduledTask>) -> PaymentQuote {
     // Hardhat's account #1, public test data.
-    let challenge = MppChallenge { params: HashMap::new(), amount, payee: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(), memo: None, expires: None };
+    let challenge = MppChallenge { params: HashMap::new(), amount, payee: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(), memo: None, expires: None, method: "tempo".into(), near: None };
     PaymentQuote { command: command.clone(), challenge, ask: String::new(), service: "Example".into(), probed: false, task: task.map(|t| t.id) }
 }
 

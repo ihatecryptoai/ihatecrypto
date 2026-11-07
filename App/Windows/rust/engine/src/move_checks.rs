@@ -185,6 +185,10 @@ impl Engine {
                 lacks(self.usdc_free(net), *asked, &W::place_name(net), dollar(net))
             }
             W::Usdt { from: net, amount: asked, .. } => lacks(self.held_there("USDT", net), *asked, &W::place_name(net), "USDT"),
+            W::Intents { from, amount: asked, .. } => lacks(self.usdc_free(from), *asked, &W::place_name(from), "USDC"),
+            // A private swap pays its USDC from the network named, its NEAR from the NEAR account: said before the card.
+            W::SwapPrivately { from: a, on, amount, .. } if a.eq_ignore_ascii_case("USDC") => lacks(self.usdc_free(on), Some(*amount), &W::place_name(on), "USDC"),
+            W::SwapPrivately { from: a, on, amount, .. } if a.eq_ignore_ascii_case("NEAR") && on == "near" => lacks(self.held_there("NEAR", "near"), Some(*amount), "NEAR", "NEAR"),
             W::BuyOn { usdc: Some(asked), from: Some(from), .. } if from != "solana" => {
                 lacks(self.usdc_free(from), Some(*asked), &W::place_name(from), dollar(from))
             }
@@ -616,6 +620,9 @@ impl Engine {
     pub fn send_cautions(&self, c: &W) -> Vec<String> {
         let address: Option<String> = match c {
             W::SendSol { .. } | W::SendNear { .. } | W::CloseNear { .. } => self.native_recipient(c).ok().flatten().map(|e| e.address),
+            W::SendPrivately { name, token, network, .. } => {
+                self.private_recipient(name, token, network.as_deref()).ok().map(|r| r.0.address)
+            }
             W::SendToken { name, token, network, .. } => {
                 // Through NEAR Intents (Bitcoin, XRP, TRON…): an exchange's XRP address without its tag loses the money.
                 if let Ok(Some(r)) = self.across_recipient(name, token, network.as_deref()) {
@@ -636,6 +643,9 @@ impl Engine {
             Pending::Transfer(e, _) => vec![e.address.clone()],
             // The address the send went to, found as the send found it (a partial name, another wallet here).
             Pending::Wallet(c) if matches!(self.native_recipient(c), Ok(Some(_))) => self.native_recipient(c).ok().flatten().map(|e| e.address).into_iter().collect(),
+            Pending::Wallet(W::SendPrivately { name, token, network, .. }) => {
+                self.private_recipient(name, token, network.as_deref()).ok().map(|r| r.0.address).into_iter().collect()
+            }
             Pending::Wallet(W::SendToken { name, token, network, .. }) => {
                 self.across_recipient(name, token, network.as_deref()).ok().flatten().map(|r| r.0.address)
                     .or_else(|| self.token_recipient(name, network.as_deref()).ok().map(|(e, _)| e.address))
@@ -1109,8 +1119,12 @@ impl Engine {
                 let Ok(Some(e)) = self.native_recipient(c) else { return None };
                 vec![st(&from_solana, &n(Some(*x), "SOL"), &sol_sol, self.moved("SOL", "solana", Some(-*x), false)), saved(&e)]
             }
+            W::SendPrivately { name, token, amount: x, network: net } => {
+                let (entry, symbol, address, on) = self.private_recipient(name, token, net.as_deref()).ok()?;
+                return Some(self.across_steps(c, &(entry, symbol, address), Some(*x), Some(&on)));
+            }
             W::SendToken { name, token, amount: x, network: net } => {
-                if let Ok(Some(r)) = self.across_recipient(name, token, net.as_deref()) { return Some(self.across_steps(c, &r, *x)) }
+                if let Ok(Some(r)) = self.across_recipient(name, token, net.as_deref()) { return Some(self.across_steps(c, &r, *x, None)) }
                 let Ok((e, network)) = self.token_recipient(name, net.as_deref()) else { return None };
                 let place = W::place_name(&network);
                 let held = self.held_there(token, &network).map_or_else(String::new, |h| say(&format!("held: {}", Fmt::num(h, 6)), &format!("есть: {}", Fmt::num(h, 6))));

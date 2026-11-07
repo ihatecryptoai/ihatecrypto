@@ -277,6 +277,8 @@ impl Engine {
             }
             WalletCommand::Usdt { from, to, .. } | WalletCommand::Bridge { from, to, .. } => EvmNetwork::named(from).is_some() && EvmNetwork::named(to).is_some(),
             WalletCommand::SendToken { name, token, amount: Some(_), network } => matches!(self.across_recipient(name, token, network.as_deref()), Ok(Some(_))),
+            WalletCommand::SendPrivately { name, token, network, .. } => self.private_recipient(name, token, network.as_deref()).is_ok(),
+            WalletCommand::SwapPrivately { .. } | WalletCommand::Intents { .. } => true,
             _ => false,
         }
     }
@@ -319,9 +321,29 @@ impl Engine {
                 Some([one("health", &format!("{h} → {a}")), one("liquidation", &liquidation.map(|l| format!("ETH ≤ {}", Fmt::usd(l))).unwrap_or_default()),
                       one("collateral", &Fmt::usd(now.collateral))].concat())
             }
-            WalletCommand::SendToken { name, token, amount: Some(x), network } => {
-                let (entry, symbol, address) = self.across_recipient(name, token, network.as_deref()).ok().flatten()?;
-                let (q, _, _, source) = e.across_quote(&symbol, *x, &entry.network, &address, false).await.ok()?;
+            WalletCommand::SwapPrivately { from, on, to, at, amount } => {
+                e.intent_quote_text(from, on, to, at, *amount, near.as_deref(), true).await.ok().map(|(gets, way)| one(&way, &gets))
+            }
+            WalletCommand::Intents { from, to, amount } => {
+                // What lands; the executor holds the move to it (within 1%).
+                let x = amount.or_else(|| self.usdc_free(from)).filter(|x| *x > Decimal::ZERO)?;
+                let (out, secs) = e.intents_quote(from, to, x).await?;
+                let time = secs.map_or_else(String::new, |s| self.say(&format!(" · ≈ {s} s"), &format!(" · ≈ {s} с")));
+                Some(one("arrives", &format!("{} USDC{time}", Fmt::num(out, 4))))
+            }
+            WalletCommand::SendToken { .. } | WalletCommand::SendPrivately { .. } => {
+                let (symbol, x, net, address, private) = match c {
+                    WalletCommand::SendToken { name, token, amount: Some(x), network } => {
+                        let (entry, symbol, address) = self.across_recipient(name, token, network.as_deref()).ok().flatten()?;
+                        (symbol, *x, entry.network, address, false)
+                    }
+                    WalletCommand::SendPrivately { name, token, amount, network } => {
+                        let (_, symbol, address, net) = self.private_recipient(name, token, network.as_deref()).ok()?;
+                        (symbol, *amount, net, address, true)
+                    }
+                    _ => return None,
+                };
+                let (q, _, _, source) = e.across_quote(&symbol, x, &net, &address, private).await.ok()?;
                 // What it's worth there, and what 1Click and the network keep: a small BTC send loses a fifth to fees.
                 let cost = foundation::decimal(&q.amount_in_formatted).unwrap_or_default();
                 let worth = q.amount_out_usd;
@@ -446,6 +468,8 @@ impl Engine {
             WalletCommand::SellOn { place, token, amount, keep } => Some(self.evm_trade(place, token, None, *amount, None, *keep)),
             WalletCommand::SwapOn { place, from, to, amount } => self.pair(c, place, from, to, *amount),
             WalletCommand::CrossSwap { from, on, to, at, amount } => Some(self.cross(c, from, on, to, at, *amount)),
+            WalletCommand::SwapPrivately { from, on, to, at, amount } => Some(self.private_swap(c, from, on, to, at, *amount)),
+            WalletCommand::Intents { from, to, amount } => Some(self.intents_route(from, to, *amount)),
             WalletCommand::RevokeApproval { place, token, spender, permit2 } => {
                 let (symbol, short) = (self.token_name(token, place), short(spender, 6, 4));
                 let who = EvmNetwork::named(place).and_then(|n| Executor::spender_name(spender, n.rpc.chain_id)).map_or_else(|| short.clone(), str::to_string);
@@ -775,6 +799,37 @@ impl Engine {
         steps
     }
 
+    /// A private swap (the Mac's privateSwapRoute): one deposit to the 1Click address bound to the quote, refused unless
+    /// 1Click holds it as confidential, and what arrives at this wallet's own address on the other side.
+    fn private_swap(&self, c: &WalletCommand, a: &str, src: &str, b: &str, dst: &str, x: Decimal) -> Vec<Step> {
+        let say = |a: &str, b: &str| self.say(a, b);
+        let quoted = self.quotes(c);
+        let first = quoted.as_ref().and_then(|q| q.first()).cloned();
+        let (a_name, to_name, own) = (self.token_name(a, src), self.token_name(b, dst), say("your own address there", "твой собственный адрес там"));
+        let line = quoted.as_ref().map_or_else(|| self.quoting(), |q| q.first().map_or_else(|| self.no_quote(), |w| format!("≈ {}", w.gets)));
+        let out = if src == "near" && a.eq_ignore_ascii_case("NEAR") { self.moved("NEAR", "near", Some(-x), false) } else { self.moved(a, src, Some(-x), false) };
+        let arrives = Self::quoted_amount(first.as_ref().map(|w| w.gets.as_str())).map(|g| self.gained(b, &to_name, dst, g));
+        vec![self.step(&self.label_from(src), &format!("{} {a_name}", Fmt::num(x, 8)), &own, out),
+             self.step(&say("PRIVATE SWAP · CONFIDENTIAL INTENTS", "ПРИВАТНЫЙ ОБМЕН · CONFIDENTIAL INTENTS"), &to_name, &line, None),
+             self.step(&self.label_to(dst), &to_name, &own, arrives)]
+    }
+
+    /// USDC through NEAR Intents' 1Click asked for by name (the Mac's intentsRoute): the amount asked is the amount signed.
+    fn intents_route(&self, src: &str, dst: &str, x: Option<Decimal>) -> Vec<Step> {
+        let say = |a: &str, b: &str| self.say(a, b);
+        let moving = x.or_else(|| self.usdc_free(src));
+        let shown = moving.map_or_else(|| say("all", "всё"), |m| Fmt::num(m, 6));
+        let c = WalletCommand::Intents { from: src.into(), to: dst.into(), amount: x };
+        let lands = self.quotes(&c).and_then(|w| w.first().map(|w| w.gets.clone()));
+        vec![self.step(&self.label_from(src), &format!("{shown} USDC"), &say(&format!("USDC on {}", WalletCommand::place_name(src)), &format!("USDC в {}", WalletCommand::place_name(src))),
+                       self.moved("USDC", src, moving.map(|m| -m), false)),
+             self.step(&say("BRIDGE · NEAR INTENTS", "МОСТ · NEAR INTENTS"), &format!("{shown} USDC"),
+                       &say("1Click · ≈ a minute · deposit checked first", "1Click · ≈ минута · депозит проверяется заранее"), None),
+             self.step(&self.label_to(dst), &lands.clone().map_or_else(|| format!("≈ {shown} USDC"), |l| format!("≈ {l}")),
+                       &say("your own address ✓", "твой собственный адрес ✓"),
+                       Self::quoted_amount(lands.as_deref()).or(moving).and_then(|m| self.moved("USDC", dst, Some(m), true)))]
+    }
+
     /// USDC → native NEAR through NEAR Intents (1Click): from Solana, or straight from the EVM network holding it when
     /// Solana is short — the executor's own rule (Executor::near_source).
     fn near_buy(&self, u: Decimal) -> Vec<Step> {
@@ -825,7 +880,8 @@ impl Engine {
 
     /// A coin to a saved address on a network only NEAR Intents reaches: the USDC it costs and where from (once quoted),
     /// 1Click's swap for exactly that much, and the saved address. `r` is across_recipient's (entry, symbol, address).
-    pub fn across_steps(&self, c: &WalletCommand, r: &(SignerAddress, String, String), amount: Option<Decimal>) -> Vec<Step> {
+    /// `private_on`: a private send through Confidential Intents, paid on that network.
+    pub fn across_steps(&self, c: &WalletCommand, r: &(SignerAddress, String, String), amount: Option<Decimal>, private_on: Option<&str>) -> Vec<Step> {
         let say = |a: &str, b: &str| self.say(a, b);
         let quoted = self.quotes(c);
         let first = quoted.as_ref().and_then(|q| q.first()).cloned();
@@ -836,8 +892,13 @@ impl Engine {
                        &quoted.as_ref().map_or_else(|| self.quoting(), |q| q.first().map_or_else(|| self.no_quote(),
                                                                                                   |w| say(&format!("{} · the rest comes back", w.gets), &format!("{} · остаток вернётся", w.gets)))),
                        Self::quoted_amount(first.as_ref().map(|w| w.gets.as_str())).and_then(|g| self.moved("USDC", key, Some(-g), true))),
-             self.step(&say("SWAP · NEAR INTENTS", "ОБМЕН · NEAR INTENTS"), &what, &say("exactly this much arrives", "придёт ровно столько"), None),
-             self.step(&self.saved_label(), &r.0.name, &(ends(&r.0.address) + " · " + &network_title(&r.0.network).map_or_else(|| r.0.network.clone(), str::to_string)), None)]
+             match private_on {
+                 None => self.step(&say("SWAP · NEAR INTENTS", "ОБМЕН · NEAR INTENTS"), &what, &say("exactly this much arrives", "придёт ровно столько"), None),
+                 Some(_) => self.step(&say("PRIVATE · CONFIDENTIAL INTENTS", "ПРИВАТНО · CONFIDENTIAL INTENTS"), &what,
+                                      &say("exactly this much arrives · not linkable to your deposit", "придёт ровно столько · не связать с твоим депозитом"), None),
+             },
+             self.step(&self.saved_label(), &r.0.name, &(ends(&r.0.address) + " · " + &private_on.map(WalletCommand::place_name)
+                 .unwrap_or_else(|| network_title(&r.0.network).map_or_else(|| r.0.network.clone(), str::to_string))), None)]
     }
 
     /// Where a top-up of Tempo comes from, as the executor's ensure_evm decides (the Mac's tempoSource): None = Solana,
@@ -1147,6 +1208,22 @@ impl Engine {
                     + &if src != "solana" && coin_in { say(&format!(" The {upper} goes to Relay's depository: that address needs Windows Hello the first time."), &format!(" {upper} уходит в хранилище Relay: этому адресу в первый раз нужен Windows Hello.")) } else { String::new() }
                     + &if src != "solana" && !coin_in { say(" An exact approve to Relay comes first, in the same transaction where the network allows.", " Сначала точное разрешение для Relay, в той же транзакции, где сеть это умеет.") } else { String::new() }
                     + &confirm)
+            }
+            WalletCommand::SendPrivately { name: who, token, amount: x, network } => {
+                let (_, symbol, _, net) = self.private_recipient(who, token, network.as_deref()).ok()?;
+                let (place, what) = (name(&net), format!("{} {symbol}", Fmt::num(*x, 8)));
+                Some(say(&format!("NEAR Intents' Confidential Intents pays this saved address exactly {what} on {place}. On chain your deposit and that payout can't be matched to each other. What's left of the USDC comes back. Its deposit address is fresh: it needs Windows Hello before anything is sent."),
+                         &format!("Confidential Intents от NEAR Intents платит этому сохранённому адресу ровно {what} в {place}. В блокчейне твой депозит и эту выплату не связать друг с другом. Остаток USDC вернётся. Адрес депозита новый: перед отправкой нужен Windows Hello.")) + &confirm)
+            }
+            WalletCommand::SwapPrivately { on, to: b, at, .. } => {
+                let (from, to, label) = (name(on), name(at), self.token_name(b, at));
+                Some(say(&format!("Through NEAR Intents' Confidential Intents: one deposit on {from} to the 1Click address bound to this quote, checked with 1Click before signing and refused unless 1Click holds it as private. That address needs Windows Hello the first time. {label} comes to your own address on {to}, and on chain the deposit and the payout can't be matched. A refund comes back to {from}."),
+                         &format!("Через Confidential Intents от NEAR Intents: один депозит в {from} на адрес 1Click, привязанный к этой котировке, — сверяется с 1Click перед подписью и отклоняется, если 1Click не держит его приватным. Этому адресу в первый раз нужен Windows Hello. {label} придёт на твой же адрес в {to}, и в блокчейне депозит и выплату не связать. Возврат — обратно в {from}.")) + &confirm)
+            }
+            WalletCommand::Intents { from, to, .. } => {
+                let (a, b) = (name(from), name(to));
+                Some(say(&format!("NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays your own address on {b} and refunds to {a}. Its solvers deliver in about a minute."),
+                         &format!("1Click от NEAR Intents: USDC уходит на адрес депозита из его котировки, после того как 1Click подтвердит, что этот адрес платит на твой же адрес в {b} и возвращает в {a}. Решатели доставляют примерно за минуту.")) + &confirm)
             }
             WalletCommand::SendToken { name: who, token, amount: Some(x), network } => {
                 let (entry, symbol, _) = self.across_recipient(who, token, network.as_deref()).ok().flatten()?;

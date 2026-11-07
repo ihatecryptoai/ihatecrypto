@@ -289,6 +289,14 @@ impl Engine {
             W::Gas { .. } => vec!["evm".into(), "solana".into()],
             W::SendNear { .. } | W::CloseNear { .. } => vec!["near".into()],
             W::BuyNear { .. } | W::SellNear { .. } => vec!["solana".into(), "near".into()],
+            W::SwapPrivately { on, at, .. } => {
+                [on, at].iter().map(|p| if *p == "solana" || *p == "near" { p.to_string() } else { "evm".into() }).collect::<BTreeSet<_>>().into_iter().collect()
+            }
+            W::Intents { from, to, .. } => {
+                [from, to].iter().map(|p| if *p == "solana" { "solana".to_string() } else { "evm".into() }).collect::<BTreeSet<_>>().into_iter().collect()
+            }
+            // The USDC comes from Solana, or from the EVM network holding it when Solana is short.
+            W::SendPrivately { .. } => vec!["solana".into()],
             // Spot, vaults, staking, sends: all on Solana.
             _ => vec!["solana".into()],
         };
@@ -345,6 +353,16 @@ impl Engine {
             }
             W::SendNear { .. } | W::CloseNear { .. } | W::SendSol { .. } => {
                 if let Err(e) = self.native_recipient(&command) { self.said(&e.0, note); return }
+            }
+            W::SendPrivately { name, token, network, .. } => {
+                if let Err(e) = self.private_recipient(name, token, network.as_deref()) { self.said(&e.0, note); return }
+            }
+            // A private swap is never sent in the open: no partner key, no private swap (the Mac's privacy twin offers the
+            // regular one).
+            W::SwapPrivately { .. } if one_click::key().is_none() => {
+                self.said(&self.say("A private swap needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.",
+                                    "Для приватного обмена нужен партнёрский ключ NEAR Intents: добавь его в Настройках › Общие › Ключ NEAR Intents."), note);
+                return;
             }
             W::SendToken { name, token, amount, network } => {
                 let checked = match self.across_recipient(name, token, network.as_deref()) {
@@ -618,6 +636,40 @@ impl Engine {
         let ru = self.st().russian();
         if let Some(off) = trade::modules().refusal(ModuleProtocol::OneClick, &[], ru) { return Err(WalletError(off)) }
         Ok(Some((entry, asset.0.to_string(), address)))
+    }
+
+    /// A private send's payee (the Mac's privateRecipient): USDC on Solana, Base, Arbitrum or Ethereum, or a coin on a
+    /// network only NEAR Intents reaches. The entry, the symbol 1Click pays, the address (an XRP tag folded in) and the
+    /// network it's paid on.
+    pub fn private_recipient(&self, name: &str, token: &str, network: Option<&str>) -> Result<(SignerAddress, String, String, String), WalletError> {
+        let Some(entry) = self.entry(name, network) else {
+            return Err(WalletError(self.say(&format!("There’s no “{name}” in Addresses. Save it there first, then send by its name."),
+                                            &format!("В адресах нет «{name}». Сначала сохрани его, потом отправляй по имени."))));
+        };
+        let net = network.map_or_else(|| entry.network.clone(), str::to_string);
+        // USDC on an EVM network goes to a 0x entry saved on any of them; everything else only to the network it's saved on.
+        if !(net == entry.network || (evm_place(&net) && evm_place(&entry.network))) {
+            return Err(WalletError(format!("“{}” is a {} address, so it can't be paid on {}.", entry.name, network_title(&entry.network), WalletCommand::place_name(&net))));
+        }
+        let Some(asset) = one_click::asset::payout(token, &net) else {
+            return Err(WalletError(format!("A private send pays USDC on Solana, Base, Arbitrum or Ethereum, or a coin on a network only NEAR Intents reaches (BTC, ZEC, TRX, USDT on TRON, XRP, DOGE, SUI) — not {} on {}.",
+                                           token.to_uppercase(), WalletCommand::place_name(&net))));
+        };
+        let mut address = entry.address.clone();
+        if !entry.memo.is_empty() {
+            let tag = entry.memo.trim_matches(' ').parse::<u32>().ok();
+            let Some(x) = tag.filter(|_| entry.network == "xrp").and_then(|t| address_check::x_address(&entry.address, t)) else {
+                return Err(WalletError(format!("“{}” needs a memo, and NEAR Intents can't add one on {}.", entry.name, network_title(&entry.network))));
+            };
+            address = x;
+        }
+        let ru = self.st().russian();
+        if let Some(off) = trade::modules().refusal(ModuleProtocol::OneClick, &[], ru) { return Err(WalletError(off)) }
+        if one_click::key().is_none() {
+            return Err(WalletError(self.say("A private send needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.",
+                                            "Для приватного перевода нужен партнёрский ключ NEAR Intents: добавь его в Настройках › Общие › Ключ NEAR Intents.")));
+        }
+        Ok((entry, asset.0.to_string(), address, net))
     }
 
     pub fn prepare_transfer(&self, amount: Decimal, name: &str, network: Option<&str>, note: Option<&str>) {
@@ -1268,6 +1320,20 @@ impl Engine {
                 if let Some((entry, symbol, address)) = self.across_recipient(name, token, network.as_deref())? {
                     reply(e.send_across(&symbol, *amount, &entry.network, &address, &entry.name, false).await?, "NEAR Intents");
                 }
+            }
+            W::SendPrivately { name, token, amount, network } => {
+                let (entry, symbol, address, net) = self.private_recipient(name, token, network.as_deref()).map_err(|e| trade::Error::Execution(e.0))?;
+                reply(e.send_across(&symbol, *amount, &net, &address, &entry.name, true).await?, &format!("NEAR Intents · private · {}", W::place_name(&net)));
+            }
+            W::SwapPrivately { from: a, on, to: b, at, amount } => {
+                let near = if on == "near" || at == "near" { Some(near_account().await?) } else { self.st().near_address() };
+                reply(e.intent_swap(a, on, b, at, Some(*amount), near.as_deref(), true).await?,
+                      &format!("NEAR Intents · private · {} → {}", W::place_name(on), W::place_name(at)));
+            }
+            W::Intents { from, to, amount } => {
+                // What the card showed landing holds the move (within 1%); a chain's step without a card goes by its quote.
+                let shown = self.quotes(command).and_then(|w| w.first().and_then(|w| Self::quoted_amount(Some(&w.gets))));
+                reply(e.intents_bridge(from, to, *amount, shown).await?, &format!("NEAR Intents · {} → {}", W::place_name(from), W::place_name(to)));
             }
             W::SendToken { name, token, amount, network } => {
                 let (entry, place) = self.token_recipient(name, network.as_deref())?;

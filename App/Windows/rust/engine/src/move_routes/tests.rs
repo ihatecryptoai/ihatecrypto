@@ -114,7 +114,7 @@ fn board(e: &Engine, id: &str) -> Board { e.st().boards().iter().find(|b| b.id =
 /// Svc.example's price: a cent of USDC on Tempo to Hardhat's account #1.
 fn payment(e: &Engine) -> WalletCommand {
     let pay = WalletCommand::Pay { method: "GET".into(), url: "https://svc.example/price".into(), body: None };
-    let challenge = MppChallenge { params: HashMap::from([("realm".into(), "svc.example".into())]), amount: 10_000, payee: PHONE.into(), memo: None, expires: None };
+    let challenge = MppChallenge { params: HashMap::from([("realm".into(), "svc.example".into())]), amount: 10_000, payee: PHONE.into(), memo: None, expires: None, method: "tempo".into(), near: None };
     e.st_mut().payment = Some(PaymentQuote { command: pay.clone(), challenge, ask: String::new(), service: "Example".into(), probed: false, task: None });
     pay
 }
@@ -240,7 +240,7 @@ fn near_moves_and_coins_sent_through_near_intents() {
         // XRP to an exchange's address with no destination tag: the card says the money would be lost.
         let xrp = WalletCommand::SendToken { name: "Exchange".into(), token: "XRP".into(), amount: Some(Decimal::from(20)), network: None };
         let r = (exchange.clone(), "XRP".to_string(), XRP_ZERO.to_string());
-        let across = |e: &Engine| e.across_steps(&xrp, &r, Some(Decimal::from(20)));
+        let across = |e: &Engine| e.across_steps(&xrp, &r, Some(Decimal::from(20)), None);
         assert_eq!(across(e).iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["FROM · SOLANA", "SWAP · NEAR INTENTS", "TO · SAVED ADDRESS"]);
         assert!(e.xrp_tag_warning(&exchange).unwrap().starts_with("An exchange’s XRP address needs its destination tag"));
         quoted(e, &xrp, &[("Arbitrum", "≈ 41.2 USDC for $40.00 of it · ≈ 30 s", "")]);
