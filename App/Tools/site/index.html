@@ -84,7 +84,7 @@
   .btn:hover { box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
   button.btn { border: 0; cursor: pointer; }
   .away .mac-only, html:not(.away) .away-only { display: none !important; }
-  .win .mac-only, html:not(.win) .win-only { display: none !important; }
+  .win .mac-only, .win .not-win, html:not(.win) .win-only { display: none !important; }
   /* Send it to a Mac: the share sheet, or a messenger, mail, X or the link copied. */
   .sendbox { display: flex; flex-direction: column; align-items: center; }
   .shares { display: flex; gap: 10px; margin-top: 14px; }
@@ -527,7 +527,7 @@
   <div class="pin">
     <canvas class="gl" aria-hidden="true"></canvas>
     <div class="beat b0 on">
-      <p class="eyebrow"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span data-t="eyebrow">A Mac app that does crypto for you</span></p>
+      <p class="eyebrow"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span class="not-win" data-t="eyebrow">A Mac app that does crypto for you</span><span class="win-only" data-t="eyebrow_win">An app that does crypto for you</span></p>
       <h1 data-t="h1">Close the ten tabs.</h1>
       <p class="lead" data-t="lead">A wallet, a swap, a bridge, an explorer, a perps exchange, a gas tracker… Moving ten dollars shouldn't take ten sites. With ihatecrypto it takes one sentence.</p>
       <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl">Download for Mac</span></a>
@@ -761,6 +761,7 @@
 "req_win": "Gratis · Windows 10 u 11 · vista previa",
 "win_more": "ARM y novedades",
 "eyebrow": "Una app para Mac que se encarga de tus criptos",
+"eyebrow_win": "Una app que se encarga de tus criptos",
 "h1": "Cierra las diez pestañas.",
 "lead": "Una billetera, un DEX, un puente, un explorador de bloques, un exchange de perpetuos, un medidor de gas… Mover diez dólares no debería requerir diez sitios. Con ihatecrypto basta una frase.",
 "hint": "Desliza",
@@ -874,6 +875,7 @@
 "req_win": "Бесплатно · Windows 10 или 11 · превью",
 "win_more": "ARM и что нового",
 "eyebrow": "Приложение для Mac, которое берёт крипту на себя",
+"eyebrow_win": "Приложение, которое берёт крипту на себя",
 "h1": "Закройте десять вкладок.",
 "lead": "Кошелёк, обменник, мост, эксплорер, фьючерсы, трекер газа… Десять сайтов, чтобы перевести десять баксов. Серьёзно? В ihatecrypto хватит одной фразы.",
 "hint": "Листайте",
