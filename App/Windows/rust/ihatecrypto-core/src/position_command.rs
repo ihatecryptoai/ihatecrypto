@@ -236,6 +236,20 @@ pub enum WalletCommand {
     /// entry, as it is, on the same network: no swap, no bridge. nil amount = all of it; `network` nil = where the entry is
     /// saved.
     SendToken { name: String, token: String, amount: Option<Decimal>, network: Option<String> },
+    /// «send 5 USDC privately to Mom», «отправь приватно 0.001 BTC на Binance»: through NEAR Intents' Confidential Intents,
+    /// so the deposit and the payout can't be matched on chain. USDC from Solana or an EVM network, paid as USDC on
+    /// Solana, Base, Arbitrum or Ethereum, or as a coin on a network only NEAR Intents reaches; always with an amount.
+    SendPrivately { name: String, token: String, amount: Decimal, network: Option<String> },
+    /// An agent wallet on NEAR Intents (Agent API) owned by this wallet's NEAR key: «create an agent wallet with $20 a
+    /// day» — it may send USDC only to this wallet's own addresses and the saved ones, at most `daily_usd` a day.
+    AgentCreate { daily_usd: Decimal },
+    /// USDC from Solana into the agent wallet.
+    AgentFund { usdc: Decimal },
+    /// USDC out of the agent wallet to a saved address (or this wallet's own), by the agent's grant alone: NEAR Intents
+    /// checks it against the policy the owner signed, and refuses what it doesn't allow.
+    AgentSend { usdc: Decimal, name: String },
+    /// Freezes the agent wallet (nothing moves), or lets it act again.
+    AgentFreeze(bool),
     /// «задепозить», «пополнить», «my address»: money coming in from outside — show where to send it.
     Receive,
     /// A Robinhood Stock Token (SPCX, TSLA…) bought on Robinhood Chain for USDC from Solana; `symbol` as the user named it,
@@ -252,6 +266,10 @@ pub enum WalletCommand {
     /// A token on one network for a token on another through Relay, one signature: «swap 0.1 SOL on Solana for ETH on
     /// Arbitrum». Places are «solana» or an EVM network's key; nil amount = all of a token.
     CrossSwap { from: String, on: String, to: String, at: String, amount: Option<Decimal> },
+    /// A swap through NEAR Intents' Confidential Intents (asked for privately): the deposit and what arrives can't be
+    /// matched on chain. Places as in `CrossSwap`, «near» for the NEAR account; always an amount, always this wallet's own
+    /// addresses on both sides. «buy NEAR for 5 USDC privately» = USDC on Solana → NEAR on NEAR.
+    SwapPrivately { from: String, on: String, to: String, at: String, amount: Decimal },
     /// Money coming in from a network ihatecrypto has no wallet on — «receive 50 USDC from Sui»: 1Click's deposit address
     /// there, what arrives swapped into USDC on Solana. `network` is the address book's («sui», «bitcoin», «tron», «xrp»,
     /// «dogecoin», «zcash»); nil amount = ask.
@@ -267,6 +285,9 @@ pub enum WalletCommand {
     Bridge { from: String, to: String, amount: Option<Decimal> },
     /// The same move through Circle's CCTP, asked for by name («… via CCTP»): Ethereum, Arbitrum, Base, Polygon.
     Cctp { from: String, to: String, amount: Option<Decimal> },
+    /// USDC through NEAR Intents' 1Click, asked for by name («… via NEAR Intents»), whatever Relay would land: between
+    /// Solana («solana»), Base, Arbitrum and Ethereum, at our own addresses.
+    Intents { from: String, to: String, amount: Option<Decimal> },
     /// USDT between two of USDT0's networks at our own address: Relay's swap of it, seconds — or, asked for by name («… via
     /// LayerZero»), Tether's own bridge: the same amount on the other side for cents of gas, in minutes to hours. nil =
     /// all the USDT on `from`.
@@ -345,10 +366,24 @@ const ALL_OF_IT: &str = r"\ball\b|\bвесь\b|\bвсё\b|\bвсе\b|полно�
 const TRADE_WORDS: &str = r"\b(?:long|short|лонг\w*|шорт\w*|perp\w*)\b";
 const BUY_WORDS: &str = r"\bbuy\b|куп\w*|purchase|приобрет\w*|\bget\s+me\b|вложи\w*\s+в";
 const SELL_WORDS: &str = r"\bsell\b|прода\w*|\bdump\b";
+const AGENT_WALLET: &str = r"agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел";
+/// A word asking for a private send. Whole adverbs only: «Приватный кошелёк» or «Тайный» is a name, not a request.
+const PRIVACY_WORD: &str = r"(?i)\b(?:privately|confidentially|anonymously|secretly|приватно|анонимно|конфиденциально|тайно|втайне|скрытно|втихую)\b";
+const INTENTS_WORDS: &str = r"near\s*intents|(?:ниар|неар|нир)\s*интент\w*|\b1\s*click\b";
+const INTENTS_ROUTE: &str = r"(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)((?:[^.]|\.(?=\d))*?)(?:\bto\b|\binto\b|\bв\b|\bна\b)\s+(?:the\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)";
 
 impl WalletCommand {
     /// Reading a text compiles no regex twice here (`foundation` keeps them): Swift's cache of parsed texts isn't needed.
     pub fn parse(text: &str) -> Option<Self> {
+        // Anything about the agent wallet is its own command or nothing: never another form's money move.
+        if has(&text.to_lowercase(), AGENT_WALLET) { return Self::agent(text) }
+        // «send 5 USDC privately to Mom», «переведи приватно 20 USDC маме»: the same send without the word, made private.
+        // A request for privacy that isn't such a send reads as nothing, never as a public move (the multisig's too).
+        if let Some(w) = first(text, PRIVACY_WORD) {
+            let m = w.get(0).expect("a match");
+            let plain = replacing(&format!("{}{}", &text[..m.start()], &text[m.end()..]), r"\s{2,}", |_| " ".into());
+            return Self::parse(&plain)?.made_private();
+        }
         if let Some(call) = ContractCall::parse(text) { return Some(Self::ContractCall(call)) }
         if let Some(multisig) = Self::multisig(text) { return Some(multisig) }
         // «pay POST https://… {"q": 1}»: the URL and the body kept as written.
@@ -581,6 +616,24 @@ impl WalletCommand {
                 return Some(Self::SellStock { symbol, amount: shares });
             }
             if has(&q, BUY_WORDS) { return Some(Self::BuyStock { symbol, usdc: amount }) }
+        }
+        // «move 2 USDC from Base to Solana via NEAR Intents», «переведи 2 USDC с бейза на солану через NEAR Intents»: 1Click,
+        // asked for by name. Only USDC, and only where 1Click pays it at our own address.
+        if has(&q, INTENTS_WORDS) && has(&q, "usdc|юсдс|юсдц") && !has(&q, r"\baave\b|ааве|morpho|морфо|kamino|камино")
+            && let Some(m) = first(&q, INTENTS_ROUTE)
+        {
+            let place = |w: &str| if w.starts_with("sol") || w.starts_with("сол") { Some("solana".to_string()) } else { Self::network(w) };
+            // Between the two networks only words about the wallet itself: «с бейза маме на солане» names a person, and
+            // this move pays only our own address — the chat asks instead.
+            let gap = group(&m, 2).split(|c: char| c.is_whitespace() || c == ',').filter(|w| !w.is_empty())
+                .all(|w| has(w, r"^(?:my|the|wallet|account|network|chain|over|мо\w*|кошел\w*|аккаунт\w*|сет\w*|сеть)$"));
+            let served = ["solana", "base", "arbitrum", "ethereum"];
+            return match (gap, place(group(&m, 1)), place(group(&m, 3))) {
+                (true, Some(from), Some(to)) if from != to && served.contains(&from.as_str()) && served.contains(&to.as_str()) => {
+                    Some(Self::Intents { from, to, amount })
+                }
+                _ => None,
+            };
         }
         // Money leaving Solana («move 5 USDC to Base from Solana»): never a move back to it, whatever network is named.
         let from_solana = has(&q, r"(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(?:solana|солан)");
@@ -975,6 +1028,97 @@ impl WalletCommand {
         }
     }
 
+    /// «create an agent wallet with $20 a day», «fund the agent wallet with 5 USDC», «send 1 USDC from the agent wallet
+    /// to Mom», «freeze the agent wallet»; «создай кошелёк агента с лимитом 20$ в день», «пополни кошелёк агента на 5
+    /// USDC», «переведи 1 USDC с кошелька агента на Маму», «заморозь кошелёк агента».
+    pub(crate) fn agent(text: &str) -> Option<Self> {
+        let q = IntentParser::plain_numbers(text).to_lowercase();
+        if !has(&q, AGENT_WALLET) { return None }
+        // A send out of it first: a payee named «Binance deposit» or «Frozen Yogurt» is a name, not another command.
+        if let Some(m) = first(text, r#"(?i)(?:send|transfer|pay|отправь\w*|переведи|скинь)\s+(\d+(?:[.,]\d+)?)\s*(?:usdc|\$|долл\w*|бакс\w*)?\s+(?:from|с|со|из)\s+(?:the\s+|my\s+)?(?:agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел\w*)\s+(?:to|на|для)\s+[«"“]?(.+?)[»"”]?\s*[.!]?$"#)
+            && let Some(usdc) = num(group(&m, 1))
+            && usdc > Decimal::ZERO
+        {
+            return Some(Self::AgentSend { usdc, name: group(&m, 2).trim().to_string() });
+        }
+        if has(&q, r"\bunfreeze|разморо\w*") { return Some(Self::AgentFreeze(false)) }
+        if has(&q, r"\bfreeze|замороз\w*|заморож\w*") { return Some(Self::AgentFreeze(true)) }
+        if has(&q, r"\b(?:create|make|open|set\s+up)\b|созда\w*|заведи|открой") {
+            let daily = num_of(&q, r"\$?\s*(\d+(?:[.,]\d+)?)\s*(?:\$|usd\w*|долл\w*|бакс\w*)?\s*(?:a|per|в|за)\s*(?:day|день|сутки)")?;
+            return (daily > Decimal::ZERO).then_some(Self::AgentCreate { daily_usd: daily });
+        }
+        // Money coming OUT of the agent wallet is never a deposit into it («положи 1 USDC с кошелька агента маме»).
+        let out_of = has(&q, r"(?:\bfrom|\bс|\bсо|\bиз)\s+(?:the\s+|my\s+)?(?:agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел)");
+        if !out_of
+            && has(&q, r"\b(?:fund|top\s+up|deposit)\b|пополн\w*|закин\w*|положи")
+            && let Some(usdc) = num_of(&q, r"(\d+(?:[.,]\d+)?)\s*(?:usdc|\$|долл\w*|бакс\w*)")
+        {
+            return (usdc > Decimal::ZERO).then_some(Self::AgentFund { usdc });
+        }
+        None
+    }
+
+    /// A payee that is the wallet itself — «me», «my wallet», «Main», «себе», «мой кошелёк» — or the active wallet's own
+    /// name: the agent wallet's rules allow its own addresses from the start, no saved entry needed.
+    pub fn is_own_wallet(name: &str, label: Option<&str>) -> bool {
+        let lowered = name.to_lowercase().replace('ё', "е");
+        let n = lowered.trim_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation() || "«»“”„…—–".contains(c));
+        if let Some(l) = label && !l.is_empty() && n == l.to_lowercase() { return true }
+        whole(n, r"me|myself|main|my(?:\s+own)?(?:\s+main)?\s+(?:wallet|account|address)|себе|мне|основно\w*(?:\s+кошел\w*)?|(?:мой|мо\w+)\s+(?:основно\w*\s+)?(?:кошел\w*|счет\w*|адрес\w*)").is_some()
+    }
+
+    /// Whether the user's own words ask for privacy: a send the chat model wrote without «privately» is then not run.
+    pub fn asks_privacy(text: &str) -> bool { has(text, PRIVACY_WORD) }
+
+    /// A send that could go privately but doesn't, in a step of a chain or after a schedule's or alert's «…:»: those
+    /// are read again later without the user's words. A lone send isn't one: the run makes it private itself.
+    pub fn has_public_send(canonical: &str) -> bool {
+        let steps = crate::normalize::ChatRouter::steps(canonical);
+        if steps.is_none() && !canonical.contains(':') { return false }
+        let parts: Vec<String> = steps.unwrap_or_else(|| vec![canonical.to_string()]).into_iter()
+            .flat_map(|step| {
+                let tail = step.find(':').map(|i| step[i + 1..].trim().to_string());
+                std::iter::once(step).chain(tail)
+            })
+            .collect();
+        parts.iter().any(|p| Self::parse(p).is_some_and(|c| c.made_private().is_some_and(|made| made != c)))
+    }
+
+    /// This send or NEAR Intents swap made private (`SendPrivately`, `SwapPrivately`), when it has an amount; None for
+    /// anything else.
+    pub fn made_private(&self) -> Option<Self> {
+        let swap = |from: &str, on: &str, to: &str, at: &str, amount: Decimal| Self::SwapPrivately {
+            from: from.into(), on: on.into(), to: to.into(), at: at.into(), amount,
+        };
+        Some(match self {
+            Self::SendToken { name, token, amount: Some(x), network } => {
+                Self::SendPrivately { name: name.clone(), token: token.clone(), amount: *x, network: network.clone() }
+            }
+            Self::SendTo { name, amount, network } => Self::SendPrivately { name: name.clone(), token: "USDC".into(), amount: *amount, network: network.clone() },
+            Self::SendPrivately { .. } | Self::SwapPrivately { .. } => self.clone(),
+            Self::BuyNear { usdc: Some(x) } => swap("USDC", "solana", "NEAR", "near", *x),
+            Self::SellNear { amount: Some(x), to } => swap("NEAR", "near", "USDC", to.as_deref().unwrap_or("solana"), *x),
+            Self::SwapOn { place, from, to, amount: Some(x) } if place == "near" => swap(from, "near", to, "near", *x),
+            Self::CrossSwap { from, on, to, at, amount: Some(x) } => swap(from, on, to, at, *x),
+            _ => return None,
+        })
+    }
+
+    /// A private swap as the same swap in the open: what the switch over Confirm offers beside it.
+    pub fn made_public(&self) -> Option<Self> {
+        let Self::SwapPrivately { from: a, on: from, to: b, at: to, amount: x } = self else { return None };
+        let x = Some(*x);
+        Some(if a.to_uppercase() == "USDC" && from == "solana" && b.to_uppercase() == "NEAR" && to == "near" {
+            Self::BuyNear { usdc: x }
+        } else if a.to_uppercase() == "NEAR" && from == "near" && b.to_uppercase() == "USDC" {
+            Self::SellNear { amount: x, to: (to != "solana").then(|| to.clone()) }
+        } else if from == "near" && to == "near" {
+            Self::SwapOn { place: "near".into(), from: a.clone(), to: b.clone(), amount: x }
+        } else {
+            Self::CrossSwap { from: a.clone(), on: from.clone(), to: b.clone(), at: to.clone(), amount: x }
+        })
+    }
+
     pub fn with_amount(&self, amount: Decimal) -> Self {
         let mut next = self.clone();
         let x = Some(amount);
@@ -984,6 +1128,7 @@ impl WalletCommand {
             | Self::Stake(a) | Self::SolanaTo(_, a) | Self::ReceiveAcross { amount: a, .. } | Self::AaveBorrow { amount: a, .. }
             | Self::KaminoBorrow { amount: a, .. } | Self::AaveCollateral { amount: a, .. } | Self::Sell { amount: a, .. } | Self::SellOn { amount: a, .. }
             | Self::SwapOn { amount: a, .. } | Self::SendToken { amount: a, .. } | Self::CrossSwap { amount: a, .. } => *a = x,
+            Self::SendPrivately { amount: a, .. } | Self::SwapPrivately { amount: a, .. } => *a = amount,
             _ => {}
         }
         next
@@ -1175,6 +1320,13 @@ impl WalletCommand {
             Self::SendToken { name, token, amount, network } => {
                 format!("send {} {token}{} to {name}", plain(amount), network.as_ref().map_or(String::new(), |n| format!(" on {n}")))
             }
+            Self::SendPrivately { name, token, amount, network } => {
+                format!("send {} {token} privately{} to {name}", decimal_text(*amount), network.as_ref().map_or(String::new(), |n| format!(" on {n}")))
+            }
+            Self::AgentCreate { daily_usd } => format!("create an agent wallet with ${} a day", decimal_text(*daily_usd)),
+            Self::AgentFund { usdc } => format!("fund the agent wallet with {} USDC", decimal_text(*usdc)),
+            Self::AgentSend { usdc, name } => format!("send {} USDC from the agent wallet to {name}", decimal_text(*usdc)),
+            Self::AgentFreeze(on) => (if *on { "freeze the agent wallet" } else { "unfreeze the agent wallet" }).into(),
             Self::Receive => "show where to top up".into(),
             Self::BuyStock { symbol, usdc } => format!(
                 "buy {} for {} USDC on Robinhood Chain", if symbol.starts_with("0x") { format!("the token {symbol}") } else { format!("{symbol} stock tokens") }, n(usdc)
@@ -1199,6 +1351,12 @@ impl WalletCommand {
                 format!("receive {}{token} from {} as USDC on Solana", amount.map_or(String::new(), |x| format!("{} ", decimal_text(x))), network_title(network))
             }
             Self::CrossSwap { from, on, to, at, amount } => format!("swap {} {} on {} for {} on {}", plain(amount), name(from), p(on), name(to), p(at)),
+            // Both places on NEAR read back as a swap there; across networks, as a swap across.
+            Self::SwapPrivately { from, on, to, at, amount } => if on == at {
+                format!("swap {} {} privately for {} on {}", decimal_text(*amount), name(from), name(to), p(at))
+            } else {
+                format!("swap {} {} on {} privately for {} on {}", decimal_text(*amount), name(from), p(on), name(to), p(at))
+            },
             Self::SolanaTo(place, x) => format!("move {} USDC from Solana to {}", n(x), p(place)),
             Self::Pay { method, url, .. } => format!("pay for {method} {url} in USDC on Tempo"),
             Self::ContractCall(c) => {
@@ -1210,6 +1368,7 @@ impl WalletCommand {
                 format!("move {} USDC from {} to {}{}", n(amount), p(from), p(to), if to == "robinhood" { " (arrives as USDG)" } else { "" })
             }
             Self::Cctp { from, to, amount } => format!("move {} USDC from {} to {} via CCTP", n(amount), p(from), p(to)),
+            Self::Intents { from, to, amount } => format!("move {} USDC from {} to {} via NEAR Intents", n(amount), p(from), p(to)),
             Self::Usdt { from, to, amount, layer_zero } => {
                 format!("move {} USDT from {} to {}{}", n(amount), p(from), p(to), if *layer_zero { " via LayerZero" } else { "" })
             }

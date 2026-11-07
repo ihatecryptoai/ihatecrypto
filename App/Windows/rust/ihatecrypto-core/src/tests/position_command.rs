@@ -5,6 +5,7 @@
 mod agent;
 mod english;
 mod findings;
+mod near;
 
 use chrono::TimeDelta;
 use rust_decimal::Decimal;

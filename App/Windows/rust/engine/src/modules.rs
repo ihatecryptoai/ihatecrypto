@@ -224,6 +224,7 @@ impl CommandRefusal for Modules {
                 let ways = [r(P::Uniswap, &via), r(P::Kyberswap, &via), r(P::Relay, &via)];
                 if ways.iter().any(Option::is_none) { None } else { ways[0].clone() }
             }),
+            W::SwapPrivately { on, at, .. } => swaps(&|| r(P::OneClick, &places([on, at]))),
             W::CrossSwap { on, at, .. } => swaps(&|| r(P::Relay, &places([on, at]))),
             // 1Click's other end: a buy pays with Solana USDC, what's received lands there, a sale pays out on `to` (nil: Solana).
             W::BuyNear { .. } | W::ReceiveAcross { .. } => r(P::OneClick, &[N::Solana]),
@@ -231,6 +232,12 @@ impl CommandRefusal for Modules {
             W::SendNear { .. } | W::CloseNear { .. } => network(N::Near),
             W::SendSol { .. } => network(N::Solana),
             W::SendToken { network: net, .. } => net.as_deref().and_then(ModuleNetwork::from_place).and_then(network),
+            W::AgentCreate { .. } | W::AgentSend { .. } | W::AgentFreeze(_) => None,
+            W::AgentFund { .. } => r(P::OneClick, &[N::Solana]),
+            W::SendPrivately { network: net, .. } => {
+                r(P::OneClick, &[vec![N::Solana], net.as_deref().and_then(ModuleNetwork::from_place).into_iter().collect()].concat())
+            }
+            W::Intents { from, to, .. } => r(P::OneClick, &places([from, to])),
             // Reading them and setting one to zero is always allowed.
             W::ShowApprovals | W::RevokeApproval { .. } => None,
             W::ContractCall(c) => ModuleNetwork::from_place(&c.network).and_then(network),
