@@ -190,6 +190,9 @@ mod tests {
         let (answers_read, mut answers_write) = std::io::pipe().unwrap();
         let (requests_read, requests_write) = std::io::pipe().unwrap();
         let broker = Broker::new(answers_read, requests_write);
+        // A browser comes once the page listens: after serve() has its port and its page. Sent right after the port, the
+        // request could be read first, find no page and be dropped, and the test waited forever (CI, 2026-11-08).
+        let (listening, browser) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
             for line in BufReader::new(requests_read).lines() {
                 let v: Value = serde_json::from_str(&line.unwrap()).unwrap();
@@ -198,6 +201,7 @@ mod tests {
                     Some("find") => json!({ "id": id, "found": v["what"] == "claude" }),
                     Some("serve") => {
                         writeln!(answers_write, "{}", json!({ "id": id, "port": 4242 })).unwrap();
+                        browser.recv().unwrap();
                         json!({ "page": 4242, "conn": 7, "data": hex(b"GET / HTTP/1.1\r\n\r\n") })
                     }
                     Some("pageReply") => json!({ "id": 99, "echo": String::from_utf8(unhex(v["data"].as_str().unwrap())).unwrap() }),
@@ -210,6 +214,7 @@ mod tests {
         assert!(!broker.find("ollama"));
         assert_eq!(broker.call(json!({ "op": "nope" }), Duration::from_secs(2)).unwrap_err(), "unknown");
         let (port, mut pages) = broker.serve(0).unwrap();
+        listening.send(()).unwrap();
         assert_eq!(port, 4242);
         let (conn, data) = pages.blocking_recv().unwrap();
         assert_eq!((conn, data.as_slice()), (7, &b"GET / HTTP/1.1\r\n\r\n"[..]));
