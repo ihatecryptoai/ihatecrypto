@@ -141,21 +141,6 @@ fn what_takes_trust_away() {
     let mut higher = old.clone();
     higher.prefs.insert("limits".into(), limits(signer_api::SignerLimits { slippage_bps: 1000, ..standard }));
     assert!(!takes_trust_away(&old, &higher));
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-    let spent = |e: &[[f64; 2]]| Pref::Data(serde_json::to_vec(e).unwrap());
-    let mut once = old.clone();
-    once.prefs.insert("spent-agent".into(), spent(&[[now - 10.0, 50.0]]));
-    let mut twice = old.clone();
-    twice.prefs.insert("spent-agent".into(), spent(&[[now - 10.0, 50.0], [now, 20.0]]));
-    assert!(takes_trust_away(&old, &once) && takes_trust_away(&once, &twice));
-    assert!(!takes_trust_away(&twice, &once));
-    let mut refund = once.clone();
-    refund.prefs.insert("spent-agent".into(), spent(&[[now - 10.0, 50.0], [now, -40.0]]));
-    assert!(!takes_trust_away(&once, &refund));
-    // An entry past the 7 days may go.
-    let mut aged = old.clone();
-    aged.prefs.insert("spent-agent".into(), spent(&[[now - 8.0 * 86_400.0, 50.0]]));
-    assert!(takes_trust_away(&aged, &old));
 }
 
 fn base64_decode(s: &str) -> Vec<u8> { use base64::Engine; base64::engine::general_purpose::STANDARD.decode(s).unwrap() }

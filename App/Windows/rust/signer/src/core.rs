@@ -53,14 +53,14 @@ fn agent_days_text() -> String { match limits::current().agent_days { 1 => "1 da
 fn agent_fresh(key: &str) -> bool { (now() as i64) - prefs::integer(key) < agent_span() }
 fn renew_agent(key: &str) { prefs::set(key, Some(Pref::Int(now() as i64))) }
 
-/// What the trading key may sign on its own: its dollars taken from the day (given back unless kept once it signed), or
-/// why it can't.
-fn agent_take(opening: &Opening) -> std::result::Result<Option<limits::Hold>, String> {
-    match opening {
+/// What the trading key may sign on its own: its dollars taken from the day and written down (given back unless kept
+/// once it signed), or why it can't. Err: the day's record couldn't be written, and nothing is signed.
+fn agent_take(opening: &Opening) -> Result<std::result::Result<Option<limits::Hold>, String>> {
+    Ok(match opening {
         Opening::Person(why) => Err(why.clone()),
         Opening::Dollars(d) if d.is_zero() => Ok(None),
-        Opening::Dollars(d) => limits::take_agent(*d, &limits::current()).map(Some),
-    }
+        Opening::Dollars(d) => limits::take_agent(*d, &limits::current())?.map(Some),
+    })
 }
 
 fn reply() -> SignerReply { SignerReply::ok() }
@@ -265,7 +265,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                 // given back when the move isn't signed.
                 let held = automation::spend(&request)?;
                 let reply = handle(*request)?;
-                if reply.ok { held.keep()? }
+                if reply.ok { held.keep() }
                 Ok(reply)
             })
         }
@@ -414,12 +414,12 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             let verdict = hl::check(&act, &owner, &HashSet::new(), None);
             if !verdict.ok() { return Ok(refused(verdict)) }
             // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
-            let held = match agent_take(&action::opening(&act)) {
+            let held = match agent_take(&action::opening(&act))? {
                 Ok(held) => held,
                 Err(why) => return Ok(refused(problem(&format!("The Ledger's trading key: {why}. {LEDGER_DEVICE}")))),
             };
             let signature = hls::sign_l1(&act, &agent, None, nonce, None, true)?;
-            if let Some(h) = held { h.keep()? }
+            if let Some(h) = held { h.keep() }
             Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() })
         }
 
@@ -748,16 +748,17 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             let fresh = agent_fresh(&agent_renewed_key()) || reduces;
             // Within the person's limits (Settings): an opening buy up to its price × size, under one order's and the day's
             // dollars. An opening sell or TWAP, or more, takes the main key in person (the 2026-11-08 review).
-            // Taken from the day in the same step as the check, before signing; given back if it isn't signed.
+            // Taken from the day in the same step as the check, before signing; given back if it isn't signed. The key
+            // opens first: its Windows Hello (once a run) also opens the day's sealed record.
             let mut over = None;
             if agent_on && fresh && agents::has(&id) {
-                match agent_take(&action::opening(&act)) {
+                // A key that's there but wasn't opened: refused, never handed to the main key.
+                let Some(agent) = agents::load(&id) else { return fail(agents::unopened()) };
+                match agent_take(&action::opening(&act))? {
                     Err(why) => over = Some(why),
                     Ok(held) => {
-                        // A key that's there but wasn't opened: refused, never handed to the main key.
-                        let Some(agent) = agents::load(&id) else { return fail(agents::unopened()) };
                         let signature = hls::sign_l1(&act, &agent, None, nonce, None, mainnet)?;
-                        if let Some(h) = held { h.keep()? }
+                        if let Some(h) = held { h.keep() }
                         return Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() });
                     }
                 }

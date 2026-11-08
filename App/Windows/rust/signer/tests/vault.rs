@@ -39,6 +39,7 @@ fn restart() {
     vault::end_session();
     trusted::reload();
     agents::forget();
+    signer::limits::forget();
 }
 
 fn send(request: SignerRequest) -> Result<SignerReply> {
@@ -511,12 +512,84 @@ fn the_automation_wallet_never_spends_what_it_couldnt_count() {
     let hex = SignerRequest::SignSponsoredTransfer { chain_id: 56, nonce: 0, gas_limit: 100_000, token: evm::BNB_USDC.into(), to: DEAD.into(),
                                                      amount: "0x3635C9ADC5DEA00000".into(), recipients: vec![DEAD.into()] };
     assert_eq!(as_automation(&id, hex).unwrap_err().0, CANCELLED);
-    // pending.json can't be written: the order is refused, not signed uncounted.
-    std::fs::create_dir_all(vault::path(".pending.json.tmp")).unwrap();
+    // The log can't be written: the order is refused, not signed uncounted.
+    std::fs::create_dir_all(vault::path(".budget.json.tmp")).unwrap();
     let refused = as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.1"), nonce: 1, mainnet: true });
-    std::fs::remove_dir_all(vault::path(".pending.json.tmp")).unwrap();
-    assert!(refused.is_err_and(|e| e.0.contains("couldn't write")));
+    std::fs::remove_dir_all(vault::path(".budget.json.tmp")).unwrap();
+    assert_eq!(refused.unwrap_err().0, signer::limits::UNWRITTEN);
     assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.1"), nonce: 2, mainnet: true }).unwrap().signature.is_some());
+}
+
+fn small(nonce: u64) -> SignerRequest { SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.1"), nonce, mainnet: true } }
+
+/// The budget log is sealed with the key a Windows Hello in this run gave: no prompt of its own while there is one; after
+/// a start with none, the automation wallet's first move asks once, and then no more.
+#[test]
+fn the_budget_log_is_sealed_with_the_runs_key() {
+    let _turn = fresh();
+    let id = automation_wallet();
+    hello(false);
+    assert!(as_automation(&id, small(1)).unwrap().signature.is_some());
+    let log = String::from_utf8(vault::read(signer::limits::LOG).unwrap()).unwrap();
+    assert!(log.contains("\"mac\""), "{log}");
+    // A start with no Windows Hello yet: the first move asks, once.
+    restart();
+    assert_eq!(as_automation(&id, small(2)).unwrap_err().0, CANCELLED);
+    hello(true);
+    assert!(as_automation(&id, small(3)).unwrap().signature.is_some());
+    hello(false);
+    assert!(as_automation(&id, small(4)).unwrap().signature.is_some());
+    // A main-wallet signature's Windows Hello opens it too: the automation wallet then asks nothing.
+    restart();
+    hello(true);
+    sign_hello().unwrap();
+    hello(false);
+    assert!(as_automation(&id, small(5)).unwrap().signature.is_some());
+}
+
+/// What another program does to the log counts as the whole day and week spent: the next move asks, never a fresh $100.
+#[test]
+fn a_deleted_edited_or_rolled_back_budget_log_counts_as_spent() {
+    let _turn = fresh();
+    let id = automation_wallet();
+    hello(false);
+    assert!(as_automation(&id, small(1)).unwrap().signature.is_some());
+    // Rolled back under this run: the copy from before the last move.
+    let before = vault::read(signer::limits::LOG).unwrap();
+    assert!(as_automation(&id, small(2)).unwrap().signature.is_some());
+    vault::write(signer::limits::LOG, &before).unwrap();
+    assert_eq!(as_automation(&id, small(3)).unwrap_err().0, CANCELLED);
+    // Asked and allowed: it signs, and the day stays spent.
+    hello(true);
+    assert!(as_automation(&id, small(4)).unwrap().signature.is_some());
+    hello(false);
+    assert_eq!(as_automation(&id, small(5)).unwrap_err().0, CANCELLED);
+
+    // Deleted, in a new run: the trusted settings say there was one.
+    let _turn2 = { drop(_turn); fresh() };
+    let id = automation_wallet();
+    hello(false);
+    assert!(as_automation(&id, small(1)).unwrap().signature.is_some());
+    restart();
+    vault::remove(signer::limits::LOG);
+    hello(true);
+    sign_hello().unwrap(); // the run's key
+    hello(false);
+    assert_eq!(as_automation(&id, small(2)).unwrap_err().0, CANCELLED);
+
+    // Edited: entries taken out, the seal left as it was.
+    let _turn3 = { drop(_turn2); fresh() };
+    let id = automation_wallet();
+    hello(false);
+    assert!(as_automation(&id, small(1)).unwrap().signature.is_some());
+    let mut sealed: Value = serde_json::from_slice(&vault::read(signer::limits::LOG).unwrap()).unwrap();
+    sealed["body"] = Value::String(STANDARD.encode(br#"{"agent":[],"automation":[]}"#));
+    vault::write(signer::limits::LOG, &serde_json::to_vec(&sealed).unwrap()).unwrap();
+    restart();
+    hello(true);
+    sign_hello().unwrap();
+    hello(false);
+    assert_eq!(as_automation(&id, small(2)).unwrap_err().0, CANCELLED);
 }
 
 #[test]

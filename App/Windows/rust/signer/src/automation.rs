@@ -113,15 +113,14 @@ pub fn spend(request: &SignerRequest) -> Result<limits::Hold> {
     }
     // Taken from the day and week at once (two tasks at the same moment can't both fit in what's left); past them, or for
     // anything that isn't dollars, the person allows it and it's counted all the same.
-    let taken = if t.others.is_empty() { limits::take_automation(t.dollars, &limits::current()) }
-                else { Err(format!("the automation wallet spends without you only dollars, not {}", t.others.join(", "))) };
-    match taken {
-        Ok(held) => Ok(held),
-        Err(why) => {
-            core::confirm_afresh(&format!("a scheduled task's move: {why}"))?;
-            Ok(limits::take(limits::Budget::AUTOMATION, t.dollars))
-        }
-    }
+    // A run that hasn't had Windows Hello yet can't read the sealed log: this prompt opens it (once a run).
+    let why = if t.others.is_empty() {
+        match limits::take_automation(t.dollars, &limits::current())? { Ok(held) => return Ok(held), Err(why) => why }
+    } else {
+        format!("the automation wallet spends without you only dollars, not {}", t.others.join(", "))
+    };
+    core::confirm_afresh(&format!("a scheduled task's move: {why}"))?;
+    limits::take(limits::Budget::AUTOMATION, t.dollars)
 }
 
 /// An EVM call's outflows: coins sent with it, tokens transferred or approved for someone else to pull, dollars burned

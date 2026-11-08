@@ -244,6 +244,7 @@ pub fn key(reason: &str, use_session: bool, within: Option<u64>) -> Result<Key> 
     }
     set_scope(&key);
     agents::open_all(&key);
+    crate::limits::opened(&key);
     Ok(key)
 }
 
@@ -259,6 +260,7 @@ pub fn confirm(reason: &str, within: Option<u64>) -> Result<()> {
     }
     set_scope(&key);
     agents::open_all(&key);
+    crate::limits::opened(&key);
     Ok(())
 }
 

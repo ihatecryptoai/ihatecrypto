@@ -167,8 +167,11 @@ pub fn verify(key: &Key, fresh: bool) -> Result<()> {
     }
     let Some((file, sealed)) = decode("state.json") else {
         if vault::exists("state.json") { return Err(tampered()) }
-        // Never written since the key was made: only a crash right after making it leaves this.
-        return write(&mut loaded, &State::default(), Some(key));
+        // Never written since the key was made: only a crash right after making it leaves this. Or it was deleted: then
+        // the budget log, if deleted too, counts as spent (limits.rs), never as a fresh one.
+        let mut state = State::default();
+        state.prefs.insert(crate::limits::ANCHOR.into(), Pref::Bool(true));
+        return write(&mut loaded, &state, Some(key));
     };
     if file.mac.as_deref() != Some(seal(&file.body, key).as_slice()) { return Err(tampered()) }
     let mut effective = sealed.clone();
@@ -249,15 +252,6 @@ pub fn takes_trust_away(old: &State, new: &State) -> bool {
             "limits" => {
                 let data = |p: Option<&Pref>| match p { Some(Pref::Data(d)) => Some(d.clone()), _ => None };
                 if !crate::limits::from(data(now).as_deref()).looser(&crate::limits::from(data(was).as_deref())).is_empty() { return false }
-            }
-            // A budget only spent: every entry still counted kept, and new ones above zero.
-            "spent-agent" | "spent-automation" => {
-                let entries = |p: Option<&Pref>| match p { Some(Pref::Data(d)) => crate::limits::entries_in(Some(d)), _ => vec![] };
-                let (before, after) = (entries(was), entries(now));
-                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
-                if before.iter().any(|e| at - e[0] < crate::limits::KEPT && !after.contains(e)) { return false }
-                if after.iter().any(|e| !before.contains(e) && !(e[0].is_finite() && e[1].is_finite() && e[1] > 0.0)) { return false }
-                if matches!(now, Some(p) if !matches!(p, Pref::Data(_))) { return false }
             }
             _ => return false,
         }
