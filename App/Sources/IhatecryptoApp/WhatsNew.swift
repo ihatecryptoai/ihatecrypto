@@ -121,6 +121,7 @@ struct WhatsNewPanel: View {
 }
 
 struct WhatsNewPage: View {
+    @Environment(Workspace.self) private var ws
     @State private var chosen = WhatsNew.shared.unseen?.version ?? WhatsNew.shared.releases.first?.version
 
     var body: some View {
@@ -151,8 +152,7 @@ struct WhatsNewPage: View {
                 VStack(alignment: .leading, spacing: 6) {
                     let stories = releases.first { $0.version == chosen }?.stories ?? []
                     ForEach(Array(stories.enumerated()), id: \.element) { i, s in
-                        Button { if let chosen { WhatsNew.shared.playing = (chosen, i) } } label: { row(s) }
-                            .buttonStyle(.plain).modifier(HoverLift(radius: 14)).help("Open as stories: ← → to switch")
+                        row(s, play: { if let chosen { WhatsNew.shared.playing = (chosen, i) } })
                     }
                 }
                 .frame(maxWidth: 560, alignment: .leading)
@@ -164,23 +164,51 @@ struct WhatsNewPage: View {
         .onAppear { WhatsNew.shared.markSeen() }
     }
 
-    /// One change: its tile, its title and the first line of what it does; the whole story is in the stories.
-    private func row(_ s: WhatsNew.Story) -> some View {
+    /// One change: its tile, its title and the first line of what it does, and «Try it» when a phrase shows it; the whole
+    /// story is in the stories.
+    private func row(_ s: WhatsNew.Story, play: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(hex: UInt32(s.color, radix: 16) ?? 0xFF7A2F))
-                .frame(width: 36, height: 36)
-                .overlay(Image(systemName: s.symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(s.title).font(.ui(14, .semibold)).foregroundStyle(.primary)
-                Text(s.text).font(.ui(12)).foregroundStyle(.secondary).lineLimit(1)
+            Button(action: play) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(hex: UInt32(s.color, radix: 16) ?? 0xFF7A2F))
+                        .frame(width: 36, height: 36)
+                        .overlay(Image(systemName: s.symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.title).font(.ui(14, .semibold)).foregroundStyle(.primary)
+                        Text(s.text).font(.ui(12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 8)
-            Image(systemName: "play.circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Brand.accentInk)
+            .buttonStyle(.plain).help("Open as stories: ← → to switch")
+            if let phrase = s.try {
+                TryItButton(phrase: phrase, size: 12) { ws.suggest(phrase); WhatsNew.shared.open = false }
+            }
+            Button(action: play) {
+                Image(systemName: "play.circle").font(.system(size: 15, weight: .semibold)).foregroundStyle(Brand.accentInk)
+            }
+            .buttonStyle(.plain).help("Open as stories: ← → to switch")
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Brand.card))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.cardBorder))
-        .contentShape(Rectangle())
+        .modifier(HoverLift(radius: 14))
+    }
+}
+
+/// «Try it»: the story's phrase into the chat's field, never sent (Workspace.suggest), shown as itself on hover.
+struct TryItButton: View {
+    let phrase: String
+    var size: CGFloat = 13
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Try it", systemImage: "text.cursor").font(.ui(size, .semibold)).foregroundStyle(Brand.onAccent)
+                .padding(.horizontal, size + 1).padding(.vertical, size * 0.6).background(Capsule().fill(Brand.accent))
+        }
+        .buttonStyle(.plain).pointerStyle(.link).help("Puts «\(phrase)» into the chat")
     }
 }
 
@@ -266,13 +294,7 @@ struct StoriesView: View {
                 Text(story.text).font(.ui(14)).foregroundStyle(.secondary).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
                 HStack {
-                    if let phrase = story.try {
-                        Button { tryIt(phrase) } label: {
-                            Label("Try it", systemImage: "text.cursor").font(.ui(13, .semibold)).foregroundStyle(Brand.onAccent)
-                                .padding(.horizontal, 14).padding(.vertical, 8).background(Capsule().fill(Brand.accent))
-                        }
-                        .buttonStyle(.plain).pointerStyle(.link).help("Puts «\(phrase)» into the chat")
-                    }
+                    if let phrase = story.try { TryItButton(phrase: phrase, size: 13) { tryIt(phrase) } }
                     Spacer()
                     Text("\(index + 1) of \(release.stories.count)").font(.ui(11)).foregroundStyle(.tertiary).monospacedDigit()
                 }
