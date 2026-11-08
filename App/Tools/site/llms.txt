@@ -1,11 +1,18 @@
 # ihatecrypto
 
-> An AI crypto wallet for Mac and Windows: an app that does crypto for you. Say what you want in plain words (English, Spanish or Russian); it looks up what it needs, lays out the move as cards: where the money comes from, how it gets there, what you end up with - and nothing moves until you confirm with Touch ID on a Mac or Windows Hello on a PC. Self-custody: the wallet is made on your computer and never leaves it.
+> An AI crypto wallet and crypto harness for Mac and Windows: the layer between an AI model (ChatGPT, Claude, Qwen, DeepSeek, Gemini, Grok or a local model) and your money. Say what you want in plain words (English, Spanish or Russian); the model plans, ihatecrypto checks the plan, lays out the move as cards: where the money comes from, how it gets there, what you end up with - and nothing moves until you confirm with Touch ID on a Mac or Windows Hello on a PC. Self-custody: the wallet is made on your computer and never leaves it, and the model never sees a key.
 
 - Download for Mac: https://ihatecrypto.ai/ihatecrypto.dmg (the latest version, free, macOS 26 or later, Apple silicon and Intel; it updates itself).
 - Download for Windows: https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe (free preview, Windows 10 or 11; ARM build and release notes: https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest).
 - Site: https://ihatecrypto.ai/ (also in Spanish: https://ihatecrypto.ai/es/ and Russian: https://ihatecrypto.ai/ru/)
 - Source code: https://github.com/ihatecryptoai/ihatecrypto (GPL-3.0; non-custodial: keys are made and kept on the user's computer). The Mac app is Swift, the Windows app is Rust (Tauri).
+
+## What it is for
+
+- Managing crypto with an AI model without handing the model the keys: a harness that turns a chat request into a checked plan, and signs only after the person confirms.
+- One app for moves that usually take several wallets and sites: swaps, bridges, earning, perps, stock tokens and transfers to exchanges, across Solana, EVM networks, Hyperliquid and NEAR.
+- A self-custody crypto wallet for Windows with Windows Hello, or for the Mac with Touch ID.
+- Not a custodial service, an exchange or a trading bot: nothing runs on a server, and every move waits for the person's Confirm, except what the person hands to a separate automation wallet or trading key, within limits they set.
 
 ## What you can ask
 
@@ -29,7 +36,8 @@
 
 ## AI
 
-- Bring your own model: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your own computer.
+- Bring your own model: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code or an Anthropic API key, OpenRouter (any model there: Qwen, DeepSeek, Llama, Mistral and others), API keys for OpenAI, DeepSeek, xAI (Grok), Gemini or NEAR AI, or a local model through Ollama or LM Studio. On a Mac, also Apple Intelligence.
+- The model gets the request, the plan's parameters and the balances it needs. It never gets the seed phrase or a key, and it can't sign: the harness parses its answer into a plan, checks it, and the signer acts only on the person's Confirm.
 
 ## Cost
 
