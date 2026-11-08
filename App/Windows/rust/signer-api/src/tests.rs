@@ -24,7 +24,7 @@ fn every_request_and_reply_matches_swift() {
         };
         assert_eq!(&back, swift, "{name}");
     }
-    assert_eq!(requests, 47); // 45 cases, signSolana and signAgentDelegate twice (with and without a sponsor, a policy)
+    assert_eq!(requests, 48); // 46 cases, signSolana and signAgentDelegate twice (with and without a sponsor, a policy)
 }
 
 #[test]
@@ -38,6 +38,24 @@ fn rust_writes_what_swift_writes() {
     assert_eq!(serde_json::to_value(&nested).unwrap(), g["asWallet"]);
     assert_eq!(serde_json::to_value(SignerReply { ok: false, ..Default::default() }).unwrap(), g["replyMinimal"]);
     assert_eq!(serde_json::to_string(&SignerReply::error("no")).unwrap(), r#"{"ok":false,"error":"no","checks":[],"problems":[]}"#);
+    let limits = SignerLimits { agent_order: 2000, agent_days: 3, slippage_bps: 50, ..SignerLimits::STANDARD };
+    assert_eq!(serde_json::to_value(SignerRequest::SetLimits { limits }).unwrap(), g["setLimits"]);
+    assert_eq!(serde_json::to_value(SignerReply { limits: Some(SignerLimits::STANDARD), ..SignerReply::ok() }).unwrap(), g["replyLimits"]);
+}
+
+/// The person's limits: checked, and loosening one names it for the Windows Hello prompt (limitsAreCheckedAndLooseningIsNamed).
+#[test]
+fn limits_are_checked_and_loosening_is_named() {
+    let standard = SignerLimits::STANDARD;
+    assert_eq!(standard.problem(), None);
+    assert!(SignerLimits { agent_day: 500, ..standard }.problem().is_some()); // the day under one order
+    assert!(SignerLimits { agent_days: 8, ..standard }.problem().is_some());
+    assert!(SignerLimits { automation_week: 50, ..standard }.problem().is_some());
+    assert_eq!(SignerLimits { agent_days: 0, ..standard }.problem().as_deref(), Some("The trading key works 1 to 7 days after Windows Hello."));
+    assert_eq!(SignerLimits { agent_order: 2000, slippage_bps: 50, ..standard }.looser(&standard), ["one trading-key order up to $2000 (was $1000)"]);
+    assert_eq!(SignerLimits { slippage_bps: 500, agent_days: 3, ..standard }.looser(&standard),
+               ["the trading key works 3 days after Windows Hello (was 2)", "swaps allow up to 5% slippage without a new prompt (was 3%)"]);
+    assert_eq!((SignerLimits::percent(50), SignerLimits::percent(300), SignerLimits::percent(1), SignerLimits::percent(125)), ("0.5%".into(), "3%".into(), "0.01%".into(), "1.25%".into()));
 }
 
 /// Where Swift's decoder refuses, so does this one; a nil written as null is read as nil by both.

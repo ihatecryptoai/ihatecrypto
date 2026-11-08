@@ -206,6 +206,23 @@
       }
     ]
   },
+  "replyLimits" : {
+    "checks" : [
+  
+    ],
+    "limits" : {
+      "agentDay" : 5000,
+      "agentDays" : 2,
+      "agentOrder" : 1000,
+      "automationDay" : 100,
+      "automationWeek" : 500,
+      "slippageBps" : 300
+    },
+    "ok" : true,
+    "problems" : [
+  
+    ]
+  },
   "replyMinimal" : {
     "checks" : [
 
@@ -252,6 +269,18 @@
     "setLedgerAgentActive" : {
       "active" : false,
       "owner" : "0x00000000000000000000000000000000000000aa"
+    }
+  },
+  "setLimits" : {
+    "setLimits" : {
+      "limits" : {
+        "agentDay" : 5000,
+        "agentDays" : 3,
+        "agentOrder" : 2000,
+        "automationDay" : 100,
+        "automationWeek" : 500,
+        "slippageBps" : 50
+      }
     }
   },
   "setSessionLength" : {

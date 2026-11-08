@@ -76,6 +76,32 @@ fn compiled_instructions_put_the_payer_first_and_merge_flags() {
     assert_eq!(compile(&[foreign], &KEY, &b58(&[1; 32]), 1).unwrap_err().0, format!("The instructions need other signers: [\"{vault}\"]"));
 }
 
+/// /build's swap, compiled with its lookup tables: the wallet's own accounts stay in the message, the rest load from the
+/// tables, and the indexes the instructions use resolve to the same accounts.
+#[test]
+fn v0_messages_load_only_others_accounts_from_tables() {
+    let me = "2EUrWmf5xMmWER9BtDbXbGbZjoL7R3eTDMXYR6H6cKPj";
+    let deposit = "5P2eQoLncuFMjAmNNF4PspnAXYNaDSE2t1gb5os76Svw";
+    let (program, pool) = ("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf");
+    let vault = "6LXutJvKUw8Q5ue2gCgKHQdAN4suWW8awzFVC6XCguFx";
+    let mine = spl::associated_account(me, "So11111111111111111111111111111111111111112", spl::TOKEN_PROGRAM).unwrap();
+    let table = "6rqx7NGgRAtGiAsBE6RAxWMaNQfSgzRy1tMSNML4GzQm";
+    let ix = Instruction { program: program.into(), data: vec![1, 2, 3],
+                           accounts: vec![(me.into(), true, false), (mine.clone(), false, true), (vault.into(), false, true), (pool.into(), false, false)] };
+    let tables = [(table.to_string(), vec![deposit.to_string(), pool.into(), mine.clone(), vault.into()])];
+    let message = compile_v0(&[ix], me, me, &tables, &[mine.clone()].into()).unwrap();
+    let m = Message::parse(&message).unwrap();
+    assert_eq!(m.version, Some(0));
+    assert_eq!(m.static_keys, [me.to_string(), mine.clone(), program.into()]);
+    assert_eq!(m.lookups.len(), 1);
+    assert_eq!((m.lookups[0].table.as_str(), &m.lookups[0].writable, &m.lookups[0].readonly), (table, &vec![3], &vec![1]));
+    let full: Vec<String> = m.static_keys.iter().cloned().chain([vault.to_string(), pool.into()]).collect();
+    assert_eq!(m.instructions[0].accounts.iter().map(|&i| full[i].clone()).collect::<Vec<_>>(), [me.to_string(), mine, vault.into(), pool.into()]);
+    // Another signer than the payer is refused.
+    let two = Instruction { program: program.into(), data: vec![], accounts: vec![(deposit.into(), true, true)] };
+    assert_eq!(compile_v0(&[two], me, me, &[], &Default::default()).unwrap_err().0, format!("The instructions need other signers: [\"{deposit}\"]"));
+}
+
 #[test]
 fn parse_rejects_bytes_after_the_message() {
     let mut wire = transfer_wire();

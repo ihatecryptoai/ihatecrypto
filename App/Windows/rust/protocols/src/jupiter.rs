@@ -40,6 +40,33 @@ pub struct Quote {
     pub impact: Decimal,
     /// What comes out, in USD by Jupiter's prices (swapUsdValue); 0 when it doesn't say.
     pub usd: Decimal,
+    /// What it was asked: the transaction (`swap_transaction`) is built for the same.
+    pub input: String,
+    pub output: String,
+    pub slippage_bps: i64,
+}
+
+/// A swap ready for the signer: its own route and amounts, which can differ a little from the quote's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Built {
+    pub wire: Vec<u8>,
+    pub last_valid_block_height: u64,
+    pub out_amount: u64,
+    pub min_out: u64,
+    pub route: String,
+    pub dexes: Vec<String>,
+}
+
+/// Why /build's swap wasn't made into a transaction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildError {
+    /// Its route doesn't fit in one transaction: its pools, to ask again without them.
+    TooBig { dexes: Vec<String>, error: WalletError },
+    Wallet(WalletError),
+}
+
+impl From<WalletError> for BuildError {
+    fn from(e: WalletError) -> Self { BuildError::Wallet(e) }
 }
 
 /// Jupiter's price impact (its sign dropped: v2 says it negative) and the swap's USD worth, from a quote or an order.
@@ -63,7 +90,8 @@ pub fn parse_quote(data: &[u8], status: u16) -> std::result::Result<Quote, net::
     let Some((j, in_amount, out_amount, min_out)) = read else { return Err(net::Again { again: retry(status), error: error(data, status) }) };
     let dexes = dexes(j);
     let (impact, usd) = impact_and_worth(j);
-    Ok(Quote { raw: data.to_vec(), in_amount, out_amount, min_out, route: dexes.join(" → "), dexes, impact, usd })
+    Ok(Quote { raw: data.to_vec(), in_amount, out_amount, min_out, route: dexes.join(" → "), dexes, impact, usd, input: String::new(), output: String::new(),
+               slippage_bps: 50 })
 }
 
 /// `exclude_dexes`: labels Jupiter must route around (a route that failed before signing). A throttle or a gateway's 5xx
@@ -71,25 +99,68 @@ pub fn parse_quote(data: &[u8], status: u16) -> std::result::Result<Quote, net::
 pub async fn quote(input: &str, output: &str, amount: u64, slippage_bps: i64, exclude_dexes: &[String]) -> Result<Quote> {
     let mut url = format!("{BASE}/quote?inputMint={input}&outputMint={output}&amount={amount}&slippageBps={slippage_bps}");
     if !exclude_dexes.is_empty() { url += &format!("&excludeDexes={}", query(&exclude_dexes.join(","))) }
-    net::run(&net::DELAYS, |_| net::get(&url, &[]), parse_quote).await
+    let quote = net::run(&net::DELAYS, |_| net::get(&url, &[]), parse_quote).await?;
+    Ok(Quote { input: input.into(), output: output.into(), slippage_bps, ..quote })
 }
 
-/// Unsigned versioned transaction for `quote`, paid by `user`, and the block its blockhash is good until.
-pub async fn swap_transaction(quote: &Quote, user: &str) -> Result<(Vec<u8>, u64)> {
-    let quote_object: Value = serde_json::from_slice(&quote.raw).map_err(|e| WalletError(e.to_string()))?;
-    let body = json!({
-        "quoteResponse": quote_object, "userPublicKey": user, "wrapAndUnwrapSol": true, "dynamicComputeUnitLimit": true,
-        "prioritizationFeeLamports": {"priorityLevelWithMaxLamports": {"maxLamports": 200_000, "priorityLevel": "medium"}},
-    });
+/// The unsigned v0 transaction for `quote`'s swap, paid by `user`, from Swap API v2's /build: its swap is route_v2 or
+/// shared_accounts_route_v2, whose amounts open the instruction, the only Jupiter swaps the signer reads (the
+/// 2026-11-08 review); /swap v1 builds v1 routes, whose amounts sit after the route. `exclude_dexes` as for the quote.
+pub async fn swap_transaction(quote: &Quote, user: &str, exclude_dexes: &[String]) -> std::result::Result<Built, BuildError> {
+    let mut url = format!("{V2}/build?inputMint={}&outputMint={}&amount={}&slippageBps={}&taker={user}", quote.input, quote.output, quote.in_amount, quote.slippage_bps);
+    if !exclude_dexes.is_empty() { url += &format!("&excludeDexes={}", query(&exclude_dexes.join(","))) }
     // Nothing is signed yet, so this is asked again like the quote.
-    let url = format!("{BASE}/swap");
-    net::run(&net::DELAYS, |_| net::post_json(&url, &body), parse_swap).await
+    let j = net::run(&net::DELAYS, |_| net::get(&url, &[]), parse_build).await?;
+    built(&j, quote, user)
 }
 
-pub fn parse_swap(data: &[u8], status: u16) -> std::result::Result<(Vec<u8>, u64), net::Again> {
+/// /build's answer, while it carries a swap.
+pub fn parse_build(data: &[u8], status: u16) -> std::result::Result<Value, net::Again> {
     let j: Option<Value> = serde_json::from_slice(data).ok();
-    let read = j.as_ref().and_then(|j| Some((STANDARD.decode(s(j, "swapTransaction")?).ok()?, j.get("lastValidBlockHeight")?.as_u64()?)));
-    read.ok_or_else(|| net::Again { again: retry(status), error: error(data, status) })
+    j.filter(|j| status == 200 && j.get("swapInstruction").is_some_and(|i| !i.is_null()))
+        .ok_or_else(|| net::Again { again: retry(status), error: error(data, status) })
+}
+
+/// /build's instructions compiled with its lookup tables. The wallet's own token accounts for both coins, and both mints,
+/// stay in the message itself: the signer lets the swap pay only an account the message names, and names the coins on
+/// its prompt from the message's own keys.
+pub fn built(j: &Value, quote: &Quote, user: &str) -> std::result::Result<Built, BuildError> {
+    let instruction = |o: &Value| -> Result<Option<solana::Instruction>> {
+        if !o.is_object() { return Ok(None) }
+        let unread = || said("an instruction Jupiter's /build sent can't be read");
+        let program = s(o, "programId").ok_or_else(unread)?;
+        let data = s(o, "data").and_then(|d| STANDARD.decode(d).ok()).ok_or_else(unread)?;
+        let accounts = o.get("accounts").and_then(Value::as_array).ok_or_else(unread)?.iter().map(|a| {
+            let key = s(a, "pubkey").ok_or_else(|| said("an account Jupiter's /build sent can't be read"))?;
+            Ok((key.to_string(), a.get("isSigner").and_then(Value::as_bool).unwrap_or(false), a.get("isWritable").and_then(Value::as_bool).unwrap_or(false)))
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Some(solana::Instruction { program: program.into(), accounts, data }))
+    };
+    let mut all = vec![];
+    for key in ["computeBudgetInstructions", "setupInstructions", "otherInstructions"] {
+        for o in j.get(key).and_then(Value::as_array).into_iter().flatten() { all.extend(instruction(o)?) }
+    }
+    all.push(j.get("swapInstruction").map(instruction).transpose()?.flatten().ok_or_else(|| said("Jupiter's /build sent no swap"))?);
+    if let Some(cleanup) = j.get("cleanupInstruction").map(instruction).transpose()?.flatten() { all.push(cleanup) }
+    let meta = j.get("blockhashWithMetadata");
+    let hash: Option<Vec<u8>> = meta.and_then(|m| m.get("blockhash")).and_then(Value::as_array)
+        .and_then(|h| h.iter().map(|b| b.as_u64().map(|b| b as u8)).collect::<Option<Vec<u8>>>()).filter(|h| h.len() == 32);
+    let height = meta.and_then(|m| m.get("lastValidBlockHeight")).and_then(Value::as_u64);
+    let (Some(hash), Some(height), Some(out_amount), Some(min_out)) = (hash, height, amount(j, "outAmount"), amount(j, "otherAmountThreshold")) else {
+        return Err(said("Jupiter's /build answer is missing its blockhash or amounts").into());
+    };
+    let mut tables: Vec<(String, Vec<String>)> = j.get("addressesByLookupTableAddress").and_then(Value::as_object).into_iter().flatten()
+        .map(|(k, v)| (k.clone(), v.as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect())).collect();
+    tables.sort_by(|a, b| a.0.cmp(&b.0));
+    let own: std::collections::HashSet<String> = [&quote.input, &quote.output].into_iter()
+        .flat_map(|mint| [solana::spl::TOKEN_PROGRAM, solana::spl::TOKEN_2022_PROGRAM].into_iter().filter_map(move |p| solana::spl::associated_account(user, mint, p).ok()))
+        .chain([quote.input.clone(), quote.output.clone()])
+        .collect();
+    let dexes = dexes(j);
+    let message = solana::compile_v0(&all, user, &wallet::keys::base58::encode(&hash), &tables, &own).map_err(|e| {
+        if e.0.contains("over Solana's limit of 1232") { BuildError::TooBig { dexes: dexes.clone(), error: e } } else { BuildError::Wallet(e) }
+    })?;
+    Ok(Built { wire: solana::unsigned_transaction(&message), last_valid_block_height: height, out_amount, min_out, route: dexes.join(" → "), dexes })
 }
 
 /// Jupiter's gasless swap (Swap API v2): for a wallet with under 0.01 SOL, Jupiter's own wallet pays the fee and the rent

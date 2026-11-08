@@ -49,6 +49,8 @@
 .pg-set-pill.good i { background: var(--accent); }
 .pg-set-chat-model { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .pg-set-input { width: 220px; height: 30px; padding: 0 10px; font-size: 12.5px; }
+.pg-limit-dollars { display: inline-flex; align-items: center; gap: 4px; }
+.pg-set-input.pg-limit-input { width: 104px; text-align: right; }
 .pg-set-controls select, .pg-set-choose { height: 30px; padding: 0 8px; font-size: 12.5px; }
 .pg-set-seg { width: 290px; display: flex; }
 .pg-set-seg button { flex: 1; }

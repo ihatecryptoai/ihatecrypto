@@ -313,9 +313,40 @@ fn jupiters_answers_are_read() {
     let none = jupiter::parse_order(br#"{"errorMessage":"Insufficient funds","transaction":""}"#, 200).unwrap_err();
     assert!(!none.again && none.error.0 == "Jupiter: Insufficient funds");
     assert_eq!(jupiter::parse_order(br#"{"requestId":"r"}"#, 200).unwrap_err().error.0, "Jupiter: no transaction for this swap");
-    assert_eq!(jupiter::parse_swap(br#"{"swapTransaction":"AQID","lastValidBlockHeight":5}"#, 200).unwrap(), (vec![1, 2, 3], 5));
     assert_eq!(jupiter::parse_order_quote(br#"{"outAmount":"77","router":"metis","priceImpactPct":"0.2"}"#, 200).unwrap(), (77, d("0.2"), "metis".into()));
     assert_eq!(crate::query("Meteora DLMM,Whirlpool"), "Meteora%20DLMM,Whirlpool");
+}
+
+/// /build's answer becomes a v0 transaction: its instructions in order, the wallet's own token accounts kept in the message,
+/// the rest loaded from its lookup table, and its own amounts and route.
+#[test]
+fn jupiters_build_compiles_to_a_v0_transaction() {
+    let (me, usdc, wsol) = ("2EUrWmf5xMmWER9BtDbXbGbZjoL7R3eTDMXYR6H6cKPj", jupiter::USDC_MINT, jupiter::SOL_MINT);
+    let (pool, table) = ("D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf", "6rqx7NGgRAtGiAsBE6RAxWMaNQfSgzRy1tMSNML4GzQm");
+    let ata = |m: &str| solana::spl::associated_account(me, m, solana::spl::TOKEN_PROGRAM).unwrap();
+    let account = |k: &str, w: bool| json!({"pubkey": k, "isSigner": k == me, "isWritable": w});
+    let answer = json!({
+        "computeBudgetInstructions": [{"programId": "ComputeBudget111111111111111111111111111111", "accounts": [], "data": "AsBcFQA="}],
+        "setupInstructions": [],
+        "swapInstruction": {"programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", "data": "u2T6zDHErxQ=",
+                            "accounts": [account(me, false), account(&ata(usdc), true), account(&ata(wsol), true), account(usdc, false), account(wsol, false), account(pool, true)]},
+        "cleanupInstruction": null,
+        "addressesByLookupTableAddress": {table: [pool, usdc, wsol, ata(wsol)]},
+        "blockhashWithMetadata": {"blockhash": vec![7u8; 32], "lastValidBlockHeight": 345},
+        "outAmount": "9386507", "otherAmountThreshold": "9339574",
+        "routePlan": [{"swapInfo": {"label": "SolFi"}}],
+    });
+    let quote = jupiter::Quote { input: usdc.into(), output: wsol.into(), ..jupiter::parse_quote(br#"{"inAmount":"1000000","outAmount":"1","otherAmountThreshold":"1"}"#, 200).unwrap() };
+    let b = jupiter::built(&jupiter::parse_build(&serde_json::to_vec(&answer).unwrap(), 200).unwrap(), &quote, me).unwrap();
+    assert_eq!((b.out_amount, b.min_out, b.last_valid_block_height, b.route.as_str()), (9_386_507, 9_339_574, 345, "SolFi"));
+    let m = solana::message::Message::parse_transaction(&b.wire).unwrap();
+    assert_eq!(m.version, Some(0));
+    assert_eq!(m.instructions.len(), 2);
+    // The wallet's own accounts and both mints stay in the message; the pool loads from the table.
+    assert!([ata(usdc), ata(wsol), usdc.into(), wsol.into()].iter().all(|k| m.static_keys.contains(k)) && !m.static_keys.iter().any(|k| k == pool));
+    assert_eq!((m.lookups[0].writable.clone(), m.lookups[0].readonly.clone()), (vec![0], vec![]));
+    // No swap in it: asked again only on a throttle.
+    assert!(!jupiter::parse_build(br#"{"error":"No routes found"}"#, 400).unwrap_err().again);
 }
 
 #[tokio::test]

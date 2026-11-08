@@ -266,6 +266,60 @@ pub mod action {
         }
     }
 
+    /// What a trading key would open with an action on its own, read from the action itself (`HLAction.Opening`).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Opening {
+        /// An opening buy costs at most its limit price × size (it fills at that price or better); 0 for what opens nothing.
+        Dollars(Decimal),
+        /// Why it takes the person instead.
+        Person(String),
+    }
+
+    /// An opening sell isn't bounded by its price (an IOC or a crossing limit fills higher, so a sell priced near zero
+    /// dumps into whoever bids), and a TWAP names no price: those take the person. Cancels, leverage, the referral code
+    /// and reduce-only orders open nothing (0). Anything else: the person.
+    pub fn opening(action: &MsgPack) -> Opening {
+        let person = |why: &str| Opening::Person(why.into());
+        if !matches!(action, MsgPack::Map(_)) { return person("an action the signer can't read") }
+        if only_reduces(action) { return Opening::Dollars(Decimal::ZERO) }
+        match kind(action) {
+            // The guard holds a trailing stop to reduce-only.
+            Some("updateLeverage" | "setReferrer" | "trailingStop") => Opening::Dollars(Decimal::ZERO),
+            Some("twapOrder") => person("the trading key doesn't start TWAPs: a TWAP names no price"),
+            Some("order") => {
+                let Some(MsgPack::Array(orders)) = action.get("orders").filter(|o| !matches!(o, MsgPack::Array(a) if a.is_empty())) else {
+                    return person("an order the signer can't read");
+                };
+                let mut total = Decimal::ZERO;
+                for o in orders {
+                    if !matches!(o, MsgPack::Map(_)) { return person("an order the signer can't read") }
+                    if o.get("r") == Some(&MsgPack::Bool(true)) { continue }
+                    if o.get("b") != Some(&MsgPack::Bool(true)) {
+                        return person("the trading key doesn't open shorts or sell: a sell's price doesn't bound what it gives");
+                    }
+                    let number = |k: &str| o.text(k).and_then(|t| Decimal::from_str(t).ok()).filter(|d| !d.is_sign_negative());
+                    let cost = number("p").zip(number("s")).and_then(|(p, s)| p.checked_mul(s)).and_then(|c| total.checked_add(c));
+                    let Some(sum) = cost else { return person("an order whose price or size the signer can't read") };
+                    total = sum;
+                }
+                Opening::Dollars(total)
+            }
+            _ => person("an action the trading key doesn't sign on its own"),
+        }
+    }
+
+    /// Every market the action names (an order's, a cancel's or a TWAP's «a», a trailing stop's «asset»), at any depth.
+    pub fn markets(action: &MsgPack) -> std::collections::BTreeSet<u64> {
+        match action {
+            MsgPack::Map(pairs) => pairs.iter().flat_map(|(k, v)| match v {
+                MsgPack::Uint(n) if k == "a" || k == "asset" => [*n].into(),
+                _ => markets(v),
+            }).collect(),
+            MsgPack::Array(items) => items.iter().flat_map(markets).collect(),
+            _ => Default::default(),
+        }
+    }
+
     /// The same order action paying ihatecrypto's fee: {"b": address, "f": fee} as its last key, after grouping, where
     /// the SDK puts it (the hash covers the order of keys). Anything else comes back as it was.
     pub fn with_builder(action: &MsgPack) -> MsgPack {

@@ -4,14 +4,16 @@
 use std::sync::Mutex;
 
 use signer_api::{SignerReply, SignerRequest};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{core, platform, vault};
 
 /// What hardening couldn't do, said in every status reply, so the window can show it.
 pub static NOTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-pub fn handle(body: &[u8]) -> Vec<u8> {
-    let answer = match serde_json::from_slice::<SignerRequest>(body) {
+/// The reply's bytes, wiped once written: a new wallet's phrase leaves in them and nowhere else.
+pub fn handle(body: &[u8]) -> Zeroizing<Vec<u8>> {
+    let mut answer = match serde_json::from_slice::<SignerRequest>(body) {
         Ok(request) => {
             let status = matches!(request, SignerRequest::Status {});
             vault::begin_request();
@@ -28,7 +30,11 @@ pub fn handle(body: &[u8]) -> Vec<u8> {
         }
         Err(e) => SignerReply::error(format!("The signer couldn't read the request: {e}")),
     };
-    serde_json::to_vec(&answer).unwrap_or_default()
+    // Sized up front, so a reply with a phrase never leaves a grown buffer behind unwiped.
+    let mut out = Zeroizing::new(Vec::with_capacity(64 << 10));
+    if serde_json::to_writer(&mut *out, &answer).is_err() { out.clear() }
+    if let Some(p) = answer.phrase.as_mut() { p.zeroize() }
+    out
 }
 
 /// Whether Windows Hello can guard a wallet here, and whether its key is in the TPM.

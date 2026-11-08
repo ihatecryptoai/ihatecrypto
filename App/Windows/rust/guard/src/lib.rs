@@ -17,6 +17,23 @@ use rust_decimal::Decimal;
 pub struct Verdict {
     pub checks: Vec<String>,
     pub problems: Vec<String>,
+    /// Signable, but only after a fresh in-person prompt that names these, whatever session is open (a swap whose
+    /// slippage is past the person's limit).
+    pub ask_afresh: Vec<String>,
+    /// What leaves the wallet, as read: a transfer (with whom it goes to: an address, or its owner for a token account the
+    /// signer could tie to one), or what a swap gives (no `to`). The automation wallet's dollars are counted from these.
+    pub outflows: Vec<Outflow>,
+    /// A swap is in it: its rate is the person's to judge (the quote it's held to comes with the request), so a person
+    /// signs it with a prompt of its own, never inside an open session (the 2026-11-08 review).
+    pub swaps: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outflow {
+    /// A mint, «SOL», or an EVM token contract / «native».
+    pub asset: String,
+    pub units: u64,
+    pub to: Option<String>,
 }
 
 impl Verdict {
@@ -25,6 +42,9 @@ impl Verdict {
     pub fn merge(&mut self, other: Verdict) {
         self.checks.extend(other.checks);
         self.problems.extend(other.problems);
+        self.ask_afresh.extend(other.ask_afresh);
+        self.outflows.extend(other.outflows);
+        self.swaps |= other.swaps;
     }
 }
 

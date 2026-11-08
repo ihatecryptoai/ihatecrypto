@@ -576,23 +576,40 @@ impl Executor {
                     Ok(q) => q,
                     Err(e) => return Err(first_failure.unwrap_or(e.into())),
                 };
-                holds_shown(quote.out_amount, Decimal::ZERO)?;
                 holds_impact(quote.impact, quote.usd, quote.out_amount)?;
+                // Built by Swap API v2 (the swaps the signer reads): its own route, held to the amount shown like the quote.
+                let tx = match jupiter::swap_transaction(&quote, sol, &excluded).await {
+                    Ok(tx) => tx,
+                    // /build's own route didn't fit: asked again without its pools (the quote's when it named none).
+                    Err(jupiter::BuildError::TooBig { dexes, error }) => {
+                        let pools = if dexes.is_empty() { &quote.dexes } else { &dexes };
+                        let route = pools.join(" → ");
+                        if attempt >= 3 {
+                            return Err(Error::Execution(format!("Jupiter's route {route} is over Solana's limit of 1232 bytes, so nothing was signed.")));
+                        }
+                        first_failure.get_or_insert(error.into());
+                        for x in pools { if !excluded.contains(x) { excluded.push(x.clone()) } }
+                        self.report(&format!("Route {route} is over Solana's limit of 1232 bytes, so nothing was signed. Asking Jupiter for a route without {}.",
+                                             excluded.join(", ")));
+                        continue;
+                    }
+                    Err(jupiter::BuildError::Wallet(e)) => return Err(e.into()),
+                };
+                holds_shown(tx.out_amount, Decimal::ZERO)?;
                 self.report(&format!("{} → {} via Jupiter: {} → ≈ {}, at least {}. Route: {}.", from.symbol, to.symbol, Fmt::num(in_shift(units), 8),
-                                     Fmt::num(out_shift(quote.out_amount), 8), Fmt::num(out_shift(quote.min_out), 8), quote.route));
-                let (wire, last_valid) = jupiter::swap_transaction(&quote, sol).await?;
+                                     Fmt::num(out_shift(tx.out_amount), 8), Fmt::num(out_shift(tx.min_out), 8), tx.route));
                 let mut rules: Vec<Rule> = vec![];
                 if !native_in { rules.push((in_account.clone(), from.symbol.clone(), true, -i(units))) }
-                if !native_out { rules.push((out_account.clone(), format!("{} (quote minimum)", to.symbol), true, i(quote.min_out))) }
+                if !native_out { rules.push((out_account.clone(), format!("{} (quote minimum)", to.symbol), true, i(tx.min_out))) }
                 let fee: i64 = 5_000_000;
                 // Up to ~0.0021 SOL more when the output token's account is created (rent, returned when it is closed).
-                let least = if native_in { (-i(units)).saturating_sub(fee) } else if native_out { i(quote.min_out) - fee } else { -fee };
-                let (failure, why) = if wire.len() > 1232 {
-                    let why = format!("is {} bytes, over Solana's limit of 1232", wire.len());
-                    (Error::Execution(format!("Jupiter's route {} {why}, so nothing was signed.", quote.route)), why)
+                let least = if native_in { (-i(units)).saturating_sub(fee) } else if native_out { i(tx.min_out) - fee } else { -fee };
+                let (failure, why) = if tx.wire.len() > 1232 {
+                    let why = format!("is {} bytes, over Solana's limit of 1232", tx.wire.len());
+                    (Error::Execution(format!("Jupiter's route {} {why}, so nothing was signed.", tx.route)), why)
                 } else {
-                    match self.sign_and_send(&wire, last_valid, &owners, &rules, &format!("Jupiter {}→{}", from.symbol, to.symbol), least, &HashMap::new(),
-                                             dry_run, None).await {
+                    match self.sign_and_send(&tx.wire, tx.last_valid_block_height, &owners, &rules, &format!("Jupiter {}→{}", from.symbol, to.symbol), least,
+                                             &HashMap::new(), dry_run, None).await {
                         Ok(c) => {
                             changes = c;
                             break;
@@ -605,9 +622,8 @@ impl Executor {
                 };
                 if attempt >= 3 { return Err(failure) }
                 first_failure.get_or_insert(failure);
-                let new: Vec<String> = quote.dexes.iter().filter(|x| !excluded.contains(x)).cloned().collect();
-                excluded.extend(new);
-                self.report(&format!("Route {} {why}, so nothing was signed. Asking Jupiter for a route without {}.", quote.route, excluded.join(", ")));
+                for x in tx.dexes.iter().chain(&quote.dexes) { if !excluded.contains(x) { excluded.push(x.clone()) } }
+                self.report(&format!("Route {} {why}, so nothing was signed. Asking Jupiter for a route without {}.", tx.route, excluded.join(", ")));
             }
         }
         if dry_run { return Ok(format!("Simulation (nothing signed): {}", changes.join("; "))) }

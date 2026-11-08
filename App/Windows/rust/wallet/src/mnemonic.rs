@@ -1,5 +1,8 @@
-//! BIP-39 recovery phrase: validation, generation and the seed (`Mnemonic.swift`). Unlike the Swift version, the seed
-//! comes back in memory that is wiped when it is dropped.
+//! BIP-39 recovery phrase: validation, generation and the seed (`Mnemonic.swift`). The seed comes back in memory that is
+//! wiped when it is dropped, and the copies made here on the way (the lowercased words, their bits, the NFKD password)
+//! are wiped too. The phrase itself is the callers' String, which Rust can overwrite where Swift can't: the signer wipes
+//! its copies once the seed is made or the new phrase sent (`core`, `host::handle`), and the engine wipes the new
+//! wallet's words once the person checked them (`phraseSaved`) and an imported phrase once it went to the signer.
 
 use std::sync::LazyLock;
 
@@ -17,12 +20,12 @@ pub fn index(word: &str) -> Option<usize> { WORDS.binary_search(&word).ok() }
 
 /// Checks word count, words and checksum. Returns the normalized phrase (lowercase, single spaces).
 pub fn validate(phrase: &str) -> Result<String> {
-    let lower = phrase.to_lowercase();
+    let lower = Zeroizing::new(phrase.to_lowercase());
     let words: Vec<&str> = lower.split_whitespace().collect();
     if ![12, 15, 18, 21, 24].contains(&words.len()) {
         return fail(format!("The phrase must have 12, 15, 18, 21 or 24 words, not {}.", words.len()));
     }
-    let mut bits = Vec::with_capacity(words.len() * 11);
+    let mut bits = Zeroizing::new(Vec::with_capacity(words.len() * 11));
     for (position, word) in words.iter().enumerate() {
         let Some(i) = index(word) else { return fail(format!("Word #{} isn't in the BIP-39 word list.", position + 1)) };
         bits.extend((0..11).rev().map(|shift| i >> shift & 1 == 1));
@@ -51,7 +54,7 @@ pub fn generate(entropy: Option<&[u8]>) -> String {
         }
     };
     let checksum = Sha256::digest(bytes)[0];
-    let mut bits: Vec<bool> = bytes.iter().flat_map(|b| (0..8).map(move |i| (b >> (7 - i)) & 1 == 1)).collect();
+    let mut bits: Zeroizing<Vec<bool>> = Zeroizing::new(bytes.iter().flat_map(|b| (0..8).map(move |i| (b >> (7 - i)) & 1 == 1)).collect());
     bits.extend((0..bytes.len() / 4).map(|i| (checksum >> (7 - i)) & 1 == 1));
     bits.chunks(11)
         .map(|chunk| WORDS[chunk.iter().fold(0usize, |n, &bit| n << 1 | bit as usize)])
@@ -61,8 +64,13 @@ pub fn generate(entropy: Option<&[u8]>) -> String {
 
 /// 64-byte seed: PBKDF2-HMAC-SHA512, 2048 rounds, salt "mnemonic" + passphrase, both NFKD.
 pub fn seed(phrase: &str, passphrase: &str) -> Result<Zeroizing<[u8; 64]>> {
-    let password = Zeroizing::new(validate(phrase)?.nfkd().collect::<String>());
-    let salt = format!("mnemonic{passphrase}").nfkd().collect::<String>();
+    let normalized = Zeroizing::new(validate(phrase)?);
+    // Sized up front, so no grown buffer is left behind unwiped (NFKD of the word list's ASCII is the same length).
+    let mut password = Zeroizing::new(String::with_capacity(normalized.len() * 3));
+    password.extend(normalized.nfkd());
+    let salted = Zeroizing::new(format!("mnemonic{passphrase}"));
+    let mut salt = Zeroizing::new(String::with_capacity(salted.len() * 3));
+    salt.extend(salted.nfkd());
     let mut seed = Zeroizing::new([0u8; 64]);
     pbkdf2::pbkdf2_hmac::<Sha512>(password.as_bytes(), salt.as_bytes(), 2048, &mut *seed);
     Ok(seed)

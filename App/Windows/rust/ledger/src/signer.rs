@@ -24,8 +24,9 @@ use wallet::to_hex;
 use crate::{Device, EVM_PATH, LedgerError, SOLANA_PATH, descriptors};
 
 /// The trading key the Ledger approved for its Hyperliquid account, in the signing process: orders, cancels and leverage
-/// go there without the device.
-pub type Agent = Arc<dyn Fn(MsgPack, u64) -> Signing<'static, EvmSignature> + Send + Sync>;
+/// go there without the device. It answers None for what the device must sign instead (a short, an order past the
+/// person's limits).
+pub type Agent = Arc<dyn Fn(MsgPack, u64) -> Signing<'static, Option<EvmSignature>> + Send + Sync>;
 
 pub struct LedgerSigner {
     pub device: Device,
@@ -202,10 +203,10 @@ impl TradeSigner for LedgerSigner {
             let verdict = hl::check(&act, &self.wallet.evm, &HashSet::new(), None);
             if !verdict.ok() { return Err(refuse(&verdict)) }
             if let Some(agent) = &self.agent {
-                if hls::is_trading(&act) { return agent(act, nonce).await }
+                if hls::is_trading(&act) && let Some(signature) = agent(act.clone(), nonce).await? { return Ok(signature) }
             }
             // A TWAP buys on for hours: only the Ledger's trading key can stop it with no one at the device.
-            if action::kind(&act) == Some("twapOrder") {
+            if action::kind(&act) == Some("twapOrder") && self.agent.is_none() {
                 return Err(failed("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits for the device's buttons. Nothing was signed."));
             }
             let what = if action::kind(&act) == Some("setReferrer") { "ihatecrypto's referral code on Hyperliquid (4% off its fees)" } else { "a Hyperliquid order" };

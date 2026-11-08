@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use signer_api::{SignerAddress, SignerReply, SignerRequest};
 use wallet::address_check::{self, Network};
+use zeroize::Zeroizing;
 use wallet::keys::{self, path};
 use wallet::{WalletError, mnemonic};
 
@@ -103,9 +104,10 @@ impl Engine {
         self.st_mut().creating_wallet = true;
         let _busy = Busy(self, |s| s.creating_wallet = false);
         let reply = self.signer_call(SignerRequest::CreateWallet { require_presence: !test }).await?;
-        let Some(words) = reply.phrase.map(|p| p.split(' ').filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>()).filter(|w| w.len() == 12) else {
-            return Ok(());
-        };
+        // Held wiped-on-drop until the person checked them (`phraseSaved`); the reply's own copy is wiped here.
+        let Some(phrase) = reply.phrase.map(Zeroizing::new) else { return Ok(()) };
+        let words = Zeroizing::new(phrase.split(' ').filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>());
+        if words.len() != 12 { return Ok(()) }
         self.st_mut().phrase = Some(words);
         Ok(())
     }
@@ -113,9 +115,10 @@ impl Engine {
     /// A phrase, with its BIP-39 passphrase if the wallet has one (taken as typed: spaces count), goes to the signer; the
     /// answer carries the first addresses it makes, to compare with the wallet it came from (the Mac's ImportWalletView).
     pub async fn import_phrase(&self, text: &str, passphrase: &str) -> Result<HashMap<String, String>, WalletError> {
-        let words = text.to_lowercase().split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
-        mnemonic::validate(&words)?;
-        self.signer_call(SignerRequest::ImportMnemonic { phrase: words.clone(), passphrase: passphrase.into(), require_presence: true }).await?;
+        let lower = Zeroizing::new(text.to_lowercase());
+        let words = Zeroizing::new(lower.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "));
+        drop(Zeroizing::new(mnemonic::validate(&words)?));
+        self.signer_call(SignerRequest::ImportMnemonic { phrase: words.to_string(), passphrase: passphrase.into(), require_presence: true }).await?;
         let accounts = Self::first_accounts(&words, passphrase, 3)?;
         Ok(HashMap::from([("accounts".into(), serde_json::to_string(&accounts).unwrap_or_else(|_| "[]".into()))]))
     }

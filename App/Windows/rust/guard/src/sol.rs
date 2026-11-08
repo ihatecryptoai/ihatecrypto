@@ -6,7 +6,7 @@ use solana::message::{AccountRights, Message};
 use solana::spl::{self, ASSOCIATED_TOKEN_PROGRAM, TOKEN_2022_PROGRAM, TOKEN_PROGRAM};
 use wallet::keys::base58;
 
-use crate::{Verdict, prefix, sol_text, suffix, units};
+use crate::{Outflow, Verdict, prefix, sol_text, suffix, units};
 
 pub const SYSTEM: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET: &str = "ComputeBudget111111111111111111111111111111";
@@ -82,18 +82,33 @@ const KAMINO_VAULT_ALLOWED: [&str; 4] = ["b712469c946da122", "33e685a4017f83ad",
 /// Farms: unstake, withdraw_unstaked_deposits, harvest_reward (to the owner), refresh_farm, refresh_user_state, initialize_user.
 const KAMINO_FARMS_ALLOWED: [&str; 6] = ["5a5f6b2acd7c32e1", "2466bb31dc248443", "44c8e4e9b820e2bc", "d6838ab790c2ac2a", "01870c3ef38c4d6c", "6f11b9fa3c7a26fe"];
 
-/// Jupiter's swap forms by discriminator: the account the output lands in, the one that replaces it when set, and the
-/// output mint.
-fn jupiter_route(kind: &str) -> Option<(usize, Option<usize>, usize)> {
+/// Jupiter's exact-in v2 swaps by discriminator (route_v2, shared_accounts_route_v2): where the arguments start
+/// (in_amount u64, quoted_out_amount u64, slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16, then the
+/// route), the account and mint that go in, the account the output lands in, the one that replaces it when set, and
+/// the output mint. Checked 2026-11-08 on mainnet swaps: in_amount is what left the source account.
+struct JupiterRoute { args: usize, source: usize, in_mint: usize, to: usize, instead: Option<usize>, mint: usize }
+
+fn jupiter_route(kind: &str) -> Option<JupiterRoute> {
     Some(match kind {
-        "e517cb977ae3ad2a" | "96564774a75d0e68" => (3, Some(4), 5),  // route, route_with_token_ledger
-        "d033ef977b2bed5c" => (3, Some(4), 6),                         // exact_out_route
-        "c1209b3341d69c81" | "e6798f50779f6aaa" | "b0d169a89a7d453e" => (6, None, 8), // shared_accounts_ the same three
-        "bb64facc31c4af14" | "9d8ab85215f4f324" => (2, Some(7), 4),    // route_v2, exact_out_route_v2
-        "d19853937cfed8e9" | "3560e5cad8bbfa18" => (5, None, 7),       // shared_accounts_route_v2, …exact_out_route_v2
+        "bb64facc31c4af14" => JupiterRoute { args: 8, source: 1, in_mint: 3, to: 2, instead: Some(7), mint: 4 },
+        "d19853937cfed8e9" => JupiterRoute { args: 9, source: 2, in_mint: 6, to: 5, instead: None, mint: 7 },
         _ => return None,
     })
 }
+
+/// Jupiter's other swaps: v1 (route, shared_accounts_route, their token-ledger and exact-out kinds) put the amounts
+/// after the route, and reading that takes Jupiter's whole list of pools, which grows every few weeks; exact-out v2
+/// isn't one ihatecrypto builds. Refused by name.
+const JUPITER_UNREAD: [&str; 8] = ["e517cb977ae3ad2a", "96564774a75d0e68", "d033ef977b2bed5c", "c1209b3341d69c81",
+                                   "e6798f50779f6aaa", "b0d169a89a7d453e", "9d8ab85215f4f324", "3560e5cad8bbfa18"];
+
+/// `n` units of `mint`, by its name where the signer knows it: «3 USDC», else «3000000 units of EPjFWd…».
+fn mint_units(n: u64, mint: &str) -> String {
+    mint_name(mint).map_or(format!("{n} units of {}…", prefix(mint, 6)), |(s, d)| format!("{} {s}", units(n, d)))
+}
+
+/// 300 → «3%».
+pub fn percent(bps: i64) -> String { format!("{}%", rust_decimal::Decimal::new(bps, 2).normalize()) }
 
 /// Jupiter Lend Earn: deposits mint fTokens to account 2, the signer's own account for the fToken mint (account 6);
 /// withdrawals and redemptions pay account 2, the signer's own account for the token (account 5).
@@ -144,18 +159,22 @@ pub struct Policy {
     /// signer; SOL may go to someone else only out of the sponsor's own account — or back to the sponsor, up to
     /// `SPONSOR_REFUND`: the rent it fronted for the swap's temporary account.
     pub sponsor: Option<String>,
+    /// The slippage a swap may allow before it asks in person afresh (the person's limit, Settings), basis points.
+    pub max_slippage_bps: i64,
 }
 
 pub const SPONSOR_REFUND: u64 = 5_000_000;
 
 impl Policy {
-    /// The Swift defaults: no recipients, the known programs, 0.005 SOL of priority fee, lookup tables trusted, no sponsor.
+    /// The Swift defaults: no recipients, the known programs, 0.005 SOL of priority fee, lookup tables trusted, no sponsor,
+    /// 3% slippage.
     pub fn new(owner: &str) -> Self {
         Policy { owner: owner.into(), recipients: HashSet::new(), programs: known_programs(), max_priority_fee: 5_000_000,
-                 trust_lookup_tables: true, sponsor: None }
+                 trust_lookup_tables: true, sponsor: None, max_slippage_bps: 300 }
     }
 }
 
+fn le16(d: &[u8], at: usize) -> u16 { u16::from_le_bytes(d[at..at + 2].try_into().expect("2 bytes")) }
 fn le32(d: &[u8], at: usize) -> u32 { u32::from_le_bytes(d[at..at + 4].try_into().expect("4 bytes")) }
 fn le64(d: &[u8], at: usize) -> u64 { u64::from_le_bytes(d[at..at + 8].try_into().expect("8 bytes")) }
 fn kind(data: &[u8]) -> String { wallet::to_hex(&data[..data.len().min(8)]) }
@@ -296,6 +315,7 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                     }
                 } else if allowed(to) {
                     v.checks.push(format!("{} SOL → {}.", sol_text(lamports), name(to)));
+                    if account(0) == Some(owner) && !mine(to) { v.outflows.push(Outflow { asset: "SOL".into(), units: lamports, to: Some(to.into()) }) }
                 } else {
                     v.problems.push(format!("SOL goes to someone else's address {to}."));
                 }
@@ -315,6 +335,13 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                     let amount = known.map_or(format!("{raw} units of a token"), |(symbol, d)| format!("{} {symbol}", units(raw, d)));
                     if allowed(to) { v.checks.push(format!("{amount} → {}.", name(to))) }
                     else { v.problems.push(format!("{amount} go to someone else's account {to}.")) }
+                    // The mint: named by TransferChecked, else the one this wallet's own source account is for.
+                    let source = account(0);
+                    let mint = if t == 12 { account(1) } else { accounts.iter().map(String::as_str).find(|m| own_token_account(source, owner, Some(m))) };
+                    // Counted when this wallet signs for it (its authority) or its own account pays, whatever the engine claims.
+                    if (account(if t == 3 { 2 } else { 3 }) == Some(owner) || source.is_some_and(|s| mine(s))) && !mine(to) {
+                        v.outflows.push(Outflow { asset: mint.unwrap_or("?").into(), units: raw, to: Some(token_owners.get(to).cloned().unwrap_or_else(|| to.into())) });
+                    }
                 }
                 Some(9) => {
                     // CloseAccount(account, destination, owner): the rent must come back to us.
@@ -465,31 +492,60 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                 let named = |a: &str, m: &str| -> String {
                     MINT_NAMES.iter().find(|x| own_token_account(Some(a), owner, Some(x.0))).map_or(m.to_string(), |x| x.0.to_string())
                 };
-                let amount = |raw: u64, m: &str| mint_name(m).map_or(format!("{raw} units of {}…", prefix(m, 6)), |(s, d)| format!("{} {s}", units(raw, d)));
+                v.outflows.push(Outflow { asset: named(source, in_mint), units: le64(data, 8), to: None });
+                v.swaps = true;
                 v.checks.push(format!("JupiterZ fill: {} for {} → {}. The balance simulation checks it.",
-                                      amount(le64(data, 8), &named(source, in_mint)), amount(le64(data, 16), &named(out, mint)),
+                                      mint_units(le64(data, 8), &named(source, in_mint)), mint_units(le64(data, 16), &named(out, mint)),
                                       if out == JUPITER_Z { "your wallet, as SOL" } else { "your account" }));
             }
             JUPITER_SWAP => {
-                // Every swap form's output account (its «instead» one when set: the program's own id when not) must be
-                // this wallet's own; any other Jupiter instruction is refused. The amounts aren't read: they end the
-                // data, and the program ignores bytes after them. The simulation checks what arrives.
+                // Exact-in v2 swaps only: in_amount, quoted_out_amount and slippage_bps open their data, so what the signer
+                // reads is what the program reads, and the prompt says what goes in and the least that comes out (the
+                // 2026-11-08 review: a program that took over the app could swap at a bad rate inside a session).
+                // v1 swaps put the amounts after the route, where a site could also append a made-up quote (the
+                // 2026-10-22 review): refused, and ihatecrypto asks Jupiter for v2. The output account (its «instead» one
+                // when set: the program's own id when not) must be this wallet's own (the 2026-10-24 review).
                 let k = kind(data);
-                let layout = jupiter_route(&k);
-                let found = layout.and_then(|(to, instead, mint)| Some((account(to)?, instead, account(mint)?)));
-                let Some((mut to, instead, mint)) = found else {
-                    v.problems.push(format!("Instruction {n}: a Jupiter instruction that isn't one of its swaps ({k})."));
+                let found = jupiter_route(&k).filter(|l| data.len() >= l.args + 22)
+                    .and_then(|l| Some((account(l.to)?, account(l.mint)?, account(l.in_mint)?, l)));
+                let Some((mut to, mint, in_mint, layout)) = found else {
+                    v.problems.push(if JUPITER_UNREAD.contains(&k.as_str()) {
+                        format!("Instruction {n}: an older Jupiter swap whose amounts the signer can't read: it signs only Jupiter's v2 swaps.")
+                    } else {
+                        format!("Instruction {n}: a Jupiter instruction that isn't one of its swaps ({k}).")
+                    });
                     continue;
                 };
-                if let Some(instead) = instead.and_then(account).filter(|i| *i != JUPITER_SWAP) { to = instead }
+                if let Some(instead) = layout.instead.and_then(account).filter(|i| *i != JUPITER_SWAP) { to = instead }
                 // This wallet's own token account for the mint, by the claim the signer proved or derived here.
                 let ours = mine(to) || own_token_account(Some(to), owner, Some(mint));
                 if !(ours && seen(to)) {
                     v.problems.push(format!("The Jupiter swap pays {to}, not your wallet."));
                     continue;
                 }
-                let symbol = mint_name(mint).map_or(format!("{}…", prefix(mint, 6)), |(s, _)| s.to_string());
-                v.checks.push(format!("Jupiter swap → your account ({symbol}). The balance simulation checks the amount."));
+                let (in_amount, quoted) = (le64(data, layout.args), le64(data, layout.args + 8));
+                let (slippage, fee) = (le16(data, layout.args + 16) as i64, le16(data, layout.args + 18) as i64);
+                if slippage > 10_000 || fee > 1_000 {
+                    v.problems.push(format!("Instruction {n}: a Jupiter swap with slippage over 100% or a fee over 10%."));
+                    continue;
+                }
+                let least = (quoted as u128 * (10_000 - slippage) as u128 / 10_000) as u64;
+                // Each mint by this wallet's own account for it where the message's mint is one a lookup table names (the
+                // signer can't read tables): «3 USDC», not «3000000 units of lookup-table entry 21».
+                let named = |a: Option<&str>, m: &str| -> String {
+                    let Some(a) = a else { return m.into() };
+                    if own_token_account(Some(a), owner, Some(m)) { return m.into() }
+                    MINT_NAMES.iter().find(|x| own_token_account(Some(a), owner, Some(x.0))).map_or(m.to_string(), |x| x.0.to_string())
+                };
+                let (given, got) = (named(account(layout.source), in_mint), named(Some(to), mint));
+                v.checks.push(format!("Jupiter swap: {} → at least {}, your account (slippage {}{})", mint_units(in_amount, &given), mint_units(least, &got),
+                                      percent(slippage), if fee > 0 { format!(", a {} fee to the site", percent(fee)) } else { String::new() }));
+                if slippage > policy.max_slippage_bps {
+                    v.ask_afresh.push(format!("slippage {} is over your {}", percent(slippage), percent(policy.max_slippage_bps)));
+                }
+                if fee > 0 { v.ask_afresh.push(format!("the site takes a {} fee", percent(fee))) }
+                v.outflows.push(Outflow { asset: given, units: in_amount, to: None });
+                v.swaps = true;
             }
             _ => v.checks.push(format!("Calls {program_name}. The balance simulation checks the result.")),
         }

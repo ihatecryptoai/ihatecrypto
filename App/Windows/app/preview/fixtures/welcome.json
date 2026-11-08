@@ -8,6 +8,14 @@
   ],
   "waiting": false,
   "sessionLength": 300,
+  "limits": {
+   "agentOrder": 1000,
+   "agentDay": 5000,
+   "agentDays": 2,
+   "automationDay": 100,
+   "automationWeek": 500,
+   "slippageBps": 300
+  },
   "ledger": null
  },
  "wallets": [],

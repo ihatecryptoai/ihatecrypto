@@ -120,8 +120,15 @@ fn a_hyperliquid_order_falls_back_to_the_two_hashes_and_recovers_to_the_ledger()
     assert!(rt().block_on(s.sign_hyperliquid(twap, 1)).unwrap_err().to_string().starts_with("A TWAP needs the Ledger's trading key on"));
     // With the trading key on, orders go there and not to the device.
     let mut with_agent = signer(SoftLedger { refuse: Some(0x6985), ..SoftLedger::new(EVM_KEY) });
-    with_agent.agent = Some(std::sync::Arc::new(|_, _| Box::pin(async { Ok(wallet::evm::EvmSignature { r: vec![1; 32], s: vec![2; 32], v: 27 }) })));
+    with_agent.agent = Some(std::sync::Arc::new(|_, _| Box::pin(async { Ok(Some(wallet::evm::EvmSignature { r: vec![1; 32], s: vec![2; 32], v: 27 })) })));
     assert_eq!(rt().block_on(with_agent.sign_hyperliquid(hyperliquid::action::cancel(&[(0, 1)]), 1)).unwrap().r, vec![1; 32]);
+    // What the trading key won't sign (a short, an order past the person's limits) goes to the device, a TWAP too.
+    let mut device = signer(SoftLedger::new(EVM_KEY));
+    device.agent = Some(std::sync::Arc::new(|_, _| Box::pin(async { Ok(None) })));
+    let sig = rt().block_on(device.sign_hyperliquid(act.clone(), 1_700_000_000_000)).unwrap();
+    assert_eq!(recover(&digest, &sig).unwrap(), wallet().evm);
+    let twap = hyperliquid::action::twap_order(0, true, hyperliquid::dec("1"), false, 30, false).unwrap();
+    assert!(rt().block_on(device.sign_hyperliquid(twap, 1)).is_ok());
 }
 
 #[test]

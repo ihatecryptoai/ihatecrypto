@@ -649,7 +649,7 @@ function walletTab(s) {
         way("link", t("Connect a Ledger", "Подключить Ledger"), t("USB or Bluetooth: every move shows on its screen", "USB или Bluetooth: каждое движение — на его экране"), () => { ui.view = "canvas"; act("addBoard", { name: "ledger" }); }))),
     section("person", presence(), t("One Windows Hello covers one move, or a few minutes.", "Одно подтверждение Windows Hello действует на одно движение или несколько минут."),
       group(
-        row({ label: t("Stays valid for", "Действует"), ico: "clock", about: t("One move covers that move's signatures for at most a minute. With 5–30 minutes, signatures need no new Windows Hello during that time, but each still passes the guard and the second check. Locking the PC ends it.", "Один перевод покрывает подписи этого перевода не дольше минуты. С 5–30 минутами новые подписи в это время не спрашивают Windows Hello, но каждая всё равно проходит проверки. Блокировка компьютера заканчивает сессию.") },
+        row({ label: t("Stays valid for", "Действует"), ico: "clock", about: t("One move covers that move's signatures for at most a minute. With 5–30 minutes, signatures need no new Windows Hello during that time, but only to the addresses and in the coins the first one used: anything else asks again. Each still passes the guard and the second check. Locking the PC ends it.", "Один перевод покрывает подписи этого перевода не дольше минуты. С 5–30 минутами новые подписи в это время не спрашивают Windows Hello, но только на те адреса и в тех монетах, что взяла первая: всё остальное спросит снова. Каждая всё равно проходит проверки. Блокировка компьютера заканчивает сессию.") },
           segmented(sessions, s.signer.sessionLength, (v) => act("sessionLength", { seconds: v }), "pg-set-seg")),
         s.trading ? row({ label: t("One transaction for approve and swap", "Одна транзакция для approve и обмена"), ico: "square.stack",
           about: t("On Base, Arbitrum, Ethereum, Polygon and Robinhood, an approve and the swap, deposit or bridge that spends it go out as one transaction under one Windows Hello (EIP-7702). For that, from the first such move on a network your wallet there runs the code of an audited account contract (eth-infinitism's Simple7702Account): it takes coins and tokens as before, only you can make it act, and every call in it is checked like a single one. Off: two transactions, two confirmations, as before. A network already switched stays so.",
@@ -664,6 +664,7 @@ function walletTab(s) {
           h("button", { class: "btn small", onclick: () => act("lock") }, t("Lock", "Заблокировать"))),
         s.signer.notes.map((n) => row({ label: n, ico: "checkmark.seal", cls: "wrap note" })),
         s.signer.error ? row({ label: s.signer.error, ico: "exclamationmark.triangle", cls: "wrap loss" }) : null)),
+    limitsSection(s, w),
     s.lock ? passcodeSection(s.lock) : null,
     s.trading?.key?.possible ? hyperliquidSection(s) : null,
     watched ? section("eye", t("Addresses for balances", "Адреса для балансов"), t("Read-only wallets. Never paste a recovery phrase or key.", "Кошельки только для просмотра. Никогда не вставляй фразу восстановления или ключ."),
@@ -671,6 +672,75 @@ function walletTab(s) {
         h("div", { class: "btns" }, h("button", { class: "btn primary", onclick: watched.save }, t("Watch", "Смотреть")),
           watched.stop ? h("button", { class: "btn", onclick: watched.stop }, t("Stop watching", "Перестать смотреть")) : null)))) : null,
   ];
+}
+
+/** Settings › Wallet › Limits (the Mac's LimitsSettings): what signs without Windows Hello, in the person's own numbers.
+ *  The signer keeps them: Save sends them, and any number raised asks for Windows Hello there (lowering one is
+ *  immediate). The checks below are the signer's own (SignerLimits), said here before Save. */
+const limitsForm = { draft: null, problem: null, saving: false };
+const LIMIT_KEYS = ["agentOrder", "agentDay", "agentDays", "automationDay", "automationWeek", "slippageBps"];
+const bpsText = (bps) => `${String(bps / 100).replace(".", t(".", ","))}%`;
+const daysText = (d) => t(d === 1 ? "1 day" : `${d} days`, `${d} ${d === 1 ? "день" : d < 5 ? "дня" : "дней"}`);
+
+function limitsProblem(l) {
+  if (["agentOrder", "agentDay", "automationDay", "automationWeek"].some((k) => !(l[k] >= 1 && l[k] <= 10_000_000))) return t("A limit is $1 to $10,000,000.", "Лимит — от\u00a0$1 до\u00a0$10\u00a0000\u00a0000.");
+  if (l.agentDay < l.agentOrder) return t("The trading key's day can't be less than one order.", "Дневной лимит торгового ключа не может быть меньше одного ордера.");
+  if (l.automationWeek < l.automationDay) return t("The automation wallet's week can't be less than its day.", "Недельный лимит кошелька автоматизации не может быть меньше дневного.");
+  if (!(l.agentDays >= 1 && l.agentDays <= 7)) return t(`The trading key works 1 to 7 days after ${presence()}.`, `Торговый ключ работает от\u00a01 до\u00a07 дней после ${presence()}.`);
+  if (!(l.slippageBps >= 1 && l.slippageBps <= 5000)) return t("Slippage is 0.01% to 50%.", "Проскальзывание — от\u00a00,01% до\u00a050%.");
+  return null;
+}
+
+function limitsSection(s, w) {
+  const saved = s.signer.limits;
+  if (!saved) return null;
+  if (!limitsForm.saving && limitsForm.draft && LIMIT_KEYS.every((k) => limitsForm.draft[k] === saved[k])) limitsForm.draft = null;
+  const draft = limitsForm.draft || saved;
+  const off = !w || limitsForm.saving;
+  // Typed in place without a redraw (the field keeps its focus); the row redraws when it's left.
+  const put = (k, v) => { limitsForm.draft = { ...(limitsForm.draft || saved), [k]: v }; limitsForm.problem = null; };
+  const dollars = (k, label) => h("span", { class: "pg-limit-dollars" }, h("span", { class: "secondary" }, "$"),
+    h("input", { id: "limit-" + k, class: "pg-set-input pg-limit-input", type: "number", min: "1", step: "1", inputmode: "numeric", value: String(draft[k]),
+      "aria-label": label, disabled: off, oninput: (e) => put(k, Math.round(Number(e.target.value))), onchange: () => render() }));
+  const pick = (k, label, options, text) => h("select", { id: "limit-" + k, "aria-label": label, disabled: off, onchange: (e) => { put(k, Number(e.target.value)); render(); } },
+    options.map((v) => h("option", { value: v, selected: draft[k] === v }, text(v))));
+  const changed = LIMIT_KEYS.some((k) => draft[k] !== saved[k]);
+  const problem = limitsForm.problem || (changed ? limitsProblem(draft) : null);
+  const looser = LIMIT_KEYS.some((k) => draft[k] > saved[k]);
+  const save = async () => {
+    limitsForm.saving = true; render();
+    const wanted = { ...draft };
+    const done = await engine("limits", { limits: wanted }).then(() => null, (e) => e.message);
+    limitsForm.saving = false;
+    limitsForm.problem = done;
+    if (done) limitsForm.draft = null;
+    render();
+  };
+  const orderLabel = t("Trading key: one order up to", "Торговый ключ: один ордер до"), dayLabel = t("Trading key: a day up to", "Торговый ключ: за день до");
+  const daysLabel = t(`Trading key works after ${presence()}`, `Торговый ключ работает после ${presence()}`);
+  const autoDay = t("Automation wallet: a day up to", "Кошелёк автоматизации: за день до"), autoWeek = t("Automation wallet: a week up to", "Кошелёк автоматизации: за неделю до");
+  const slip = t(`Swap slippage without a new ${presence()}`, `Проскальзывание обмена без нового ${presence()}`);
+  return section("dial", t("Limits", "Лимиты"), t(`What signs without ${presence()}. A higher number asks for ${presence()} when you save it.`,
+    `Что подписывается без ${presence()}. Число больше прежнего при сохранении спросит ${presence()}.`),
+    group(
+      row({ label: orderLabel, ico: "chart.line", about: t(`The Hyperliquid trading key opens a position on its own only as a buy, priced by the order itself. Bigger orders, shorts, selling and TWAPs ask for ${presence()}. Stops, takes and closes always go.`,
+        `Сам торговый ключ Hyperliquid открывает позицию только покупкой, по цене самого ордера. Ордера крупнее, шорты, продажи и TWAP спрашивают ${presence()}. Стопы, тейки и закрытия проходят всегда.`) }, dollars("agentOrder", orderLabel)),
+      row({ label: dayLabel, ico: "calendar", about: t("What the trading key opens in any 24 hours, all orders together.", "Сколько торговый ключ открывает за любые 24 часа, все ордера вместе.") }, dollars("agentDay", dayLabel)),
+      row({ label: daysLabel, ico: "clock", about: t("Days the trading key opens positions after you last turned it on or signed an order in person. Then only stops, takes and closes go until you sign again.",
+        "Сколько дней торговый ключ открывает позиции после того, как ты в последний раз включил его или сам подписал ордер. Потом проходят только стопы, тейки и закрытия, пока не подпишешь снова.") },
+        pick("agentDays", daysLabel, [1, 2, 3, 4, 5, 6, 7], daysText)),
+      row({ label: autoDay, ico: "arrow.clockwise", about: t(`Dollars scheduled tasks spend without you in any 24 hours. Money moved to your own wallets doesn't count. Past it, or for anything that isn't dollars, a task waits for ${presence()}.`,
+        `Сколько долларов задачи по расписанию тратят без тебя за любые 24 часа. Деньги на твои собственные кошельки не считаются. Сверх этого, и для всего, что не доллары, задача ждёт ${presence()}.`) }, dollars("automationDay", autoDay)),
+      row({ label: autoWeek, ico: "calendar", about: t("The same, in any 7 days.", "То же самое за любые 7 дней.") }, dollars("automationWeek", autoWeek)),
+      row({ label: slip, ico: "arrow.left.arrow.right", about: t(`A Jupiter swap that allows more slippage than this asks for ${presence()} again, whatever session is open. Its window says what goes in and the least that comes out.`,
+        `Обмен в Jupiter с проскальзыванием больше этого снова спросит ${presence()}, какая бы сессия ни была открыта. В его окне видно, что уходит и сколько минимум придёт.`) },
+        pick("slippageBps", slip, [...new Set([50, 100, 200, 300, 500, 1000, draft.slippageBps])].sort((a, b) => a - b), bpsText)),
+      changed || limitsForm.problem ? h("div", { class: "pg-set-panel pg-limits-save" },
+        problem ? h("div", { class: "secondary small" }, problem) : null,
+        h("div", { class: "btns" },
+          h("button", { class: "btn", disabled: limitsForm.saving, onclick: () => { limitsForm.draft = null; limitsForm.problem = null; render(); } }, t("Undo", "Отменить")),
+          h("button", { id: "limits-save", class: "btn primary", disabled: off || !!limitsProblem(draft) || !changed, onclick: save },
+            looser ? t(`Save with ${presence()}`, `Сохранить с ${presence()}`) : t("Save", "Сохранить")))) : null));
 }
 
 /** Settings › Wallet › Passcode (the Mac's PasscodeSettings): make, change or turn off the code; how soon it locks; lock now. */

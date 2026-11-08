@@ -369,8 +369,9 @@ fn sample_snapshot() -> Snapshot {
     let activity = Activity { title: Some("Buy".into()), ..Activity::new("request", at()) };
     let wallet = SignerWallet { id: "1".into(), label: "Main".into(), kind: "phrase".into(), solana: Some("So1".into()), evm: None, near: None, test: None, automation: None };
     Snapshot {
-        signer: Signer { ready: true, error: Some("e".into()), notes: vec![], waiting: false, session_length: Some(300), ledger: Some("Confirm".into()) },
-        wallets: vec![wallet.clone()], active: Some("1".into()), addresses: HashMap::from([("solana".into(), "So1".into())]), phrase: Some(vec!["abandon".into()]),
+        signer: Signer { ready: true, error: Some("e".into()), notes: vec![], waiting: false, session_length: Some(300), limits: Some(signer_api::SignerLimits::STANDARD),
+                         ledger: Some("Confirm".into()) },
+        wallets: vec![wallet.clone()], active: Some("1".into()), addresses: HashMap::from([("solana".into(), "So1".into())]), phrase: Some(zeroize::Zeroizing::new(vec!["abandon".into()])),
         portfolio: PortfolioView { updated_at: Some(at()), change7d: Some(Decimal::ONE), ..Default::default() }, positions: vec![Position {
             coin: "ETH".into(), side: "long".into(), size: "1".into(), entry: "$1".into(), pnl: "+$1".into(), liquidation: Some("$0".into()),
             summary: Some("s".into()), guardian: Some("g".into()), ruler: Some(PositionRuler { points: vec![], now: Some(1.0), now_text: None, guard_line: None }),
@@ -459,7 +460,7 @@ fn the_state_has_the_keys_the_window_reads_and_leaves_out_what_is_nil() {
     assert_eq!(full["automationUSD"], json!(12));
     assert_eq!(full["automationBudget"]["evm"]["base"], json!(10));
     // The nested views the pages read.
-    assert_eq!(keys(&full["signer"]), set(&["ready", "error", "notes", "waiting", "sessionLength", "ledger"]));
+    assert_eq!(keys(&full["signer"]), set(&["ready", "error", "notes", "waiting", "sessionLength", "limits", "ledger"]));
     assert_eq!(keys(&full["portfolio"]), set(&["networks", "total", "updatedAt", "ready", "errors", "equity", "change7d"]));
     assert_eq!(keys(&full["lock"]), set(&["codeSet", "locked", "codeOff", "lockAfter", "checking", "offerNewCode", "newCodeOffers", "tasksRun"]));
     assert_eq!(keys(&full["models"]), set(&["live", "servers", "installed", "sizes", "downloads", "memoryGB", "recommended", "refusals"]));

@@ -91,7 +91,8 @@ providers = [
 
 def state(**over):
     s = {
-        "signer": {"ready": True, "error": None, "notes": ["Keys under Windows Hello with this PC's TPM", "Signer checks passed"], "waiting": False, "sessionLength": 300, "ledger": None},
+        "signer": {"ready": True, "error": None, "notes": ["Keys under Windows Hello with this PC's TPM", "Signer checks passed"], "waiting": False, "sessionLength": 300,
+                   "limits": {"agentOrder": 1000, "agentDay": 5000, "agentDays": 2, "automationDay": 100, "automationWeek": 500, "slippageBps": 300}, "ledger": None},
         "wallets": [main_wallet, auto_wallet], "active": "w-main",
         "addresses": {"solana": SOL, "evm": EVM, "hyperliquid": EVM, "near": "ihatecrypto-demo.near"},
         "phrase": None,

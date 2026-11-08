@@ -11,7 +11,8 @@ use ihatecrypto_core::skills::Skill;
 use llm::catalog;
 use rust_decimal::Decimal;
 use serde::Serialize;
-use signer_api::{SignerAddress, SignerWallet};
+use signer_api::{SignerAddress, SignerLimits, SignerWallet};
+use zeroize::Zeroizing;
 
 use crate::automation::{RecurringView, TaskFacts};
 use crate::blocks::{AddressExtra, ClosedTrade};
@@ -44,6 +45,10 @@ use crate::trade_plan::PositionRuler;
 use crate::trading_agent::TradingView;
 use crate::wallet_ops::StuckView;
 
+fn words<S: serde::Serializer>(words: &Option<Zeroizing<Vec<String>>>, s: S) -> Result<S::Ok, S::Error> {
+    words.as_deref().serialize(s)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -52,8 +57,9 @@ pub struct Snapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<String>,
     pub addresses: HashMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub phrase: Option<Vec<String>>,
+    /// The new wallet's words while they're shown, wiped when the state is dropped.
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "words")]
+    pub phrase: Option<Zeroizing<Vec<String>>>,
     pub portfolio: PortfolioView,
     pub positions: Vec<Position>,
     pub chat: Vec<Message>,
@@ -205,6 +211,9 @@ pub struct Signer {
     pub waiting: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_length: Option<i64>,
+    /// The person's limits as the signer keeps them (Settings › Wallet › Limits).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<SignerLimits>,
     /// What the Ledger waits for on its screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ledger: Option<String>,
@@ -381,7 +390,8 @@ impl Engine {
         let status = st.status.as_ref();
         let signer = Signer {
             ready: status.is_some(), error: st.signer_error.clone(), notes: status.map(|s| s.checks.clone()).unwrap_or_default(),
-            waiting: st.signing > 0 || st.ledger_prompt.is_some(), session_length: status.and_then(|s| s.session_length), ledger: st.ledger_prompt.clone(),
+            waiting: st.signing > 0 || st.ledger_prompt.is_some(), session_length: status.and_then(|s| s.session_length),
+            limits: status.and_then(|s| s.limits), ledger: st.ledger_prompt.clone(),
         };
         let mut wallets = status.and_then(|s| s.wallets.clone()).unwrap_or_default();
         if let Some(l) = st.ledger.as_ref().filter(|l| l.evm.is_some()) { wallets.push(l.wallet()) }

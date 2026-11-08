@@ -293,7 +293,7 @@ impl Call {
     }
 
     /// Coins sent with this call that come back to the sender, so `to` isn't paid.
-    fn returns_coins(&self, to: &str, value: u64, chain_id: u64) -> bool {
+    pub fn returns_coins(&self, to: &str, value: u64, chain_id: u64) -> bool {
         let to = to.to_lowercase();
         match self {
             Self::Wrap => uniswap::v2(chain_id).is_some_and(|(_, weth)| weth == to),

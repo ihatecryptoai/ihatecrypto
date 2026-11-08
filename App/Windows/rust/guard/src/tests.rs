@@ -301,32 +301,92 @@ fn sending_all_of_a_token_closes_our_account_into_this_wallet() {
 }
 
 #[test]
-fn jupiter_swaps_pay_only_this_wallets_own_account() {
+fn jupiter_swaps_are_v2_pay_this_wallet_and_name_their_amounts() {
     let (source, out, theirs) = (ata(ME, USDC_MINT), ata(ME, WSOL), ata(DEPOSIT, WSOL));
     let (jup, event) = (sol::JUPITER_SWAP, "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf");
-    // The tail Jupiter's route ends in: in 1_000_000, quoted, slippage, fee.
-    let tail = |quoted: u64, fee: u8| [le(1_000_000), le(quoted), 50u16.to_le_bytes().to_vec(), vec![fee]].concat();
-    let route = [vec![0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a], vec![1, 0, 0, 100, 0, 1]].concat();
-    let keys = [ME, TOKEN_PROGRAM, &source, &out, jup, WSOL, event, &theirs];
-    let swap = |accounts: &[usize], data: Vec<u8>| verdict(&message(&keys, &[ix(4, accounts, &data)], 1), &policy(), &map(&[]));
-    let ok = swap(&[1, 0, 2, 3, 4, 5, 4, 6, 4], [route.clone(), tail(9_386_507, 0)].concat());
+    // v2's arguments open the data: in_amount, quoted_out_amount, slippage, platform fee, positive slippage; then a
+    // one-step route (Saber, all of it, 0 → 1). 1 USDC quoted at 9_386_507 lamports, as /build answers.
+    let args = |quoted: u64, slippage: u16, fee: u16| [le(1_000_000), le(quoted), slippage.to_le_bytes().to_vec(), fee.to_le_bytes().to_vec(),
+                                                       0u16.to_le_bytes().to_vec(), 1u32.to_le_bytes().to_vec(), vec![0], 10_000u16.to_le_bytes().to_vec(), vec![0, 1]].concat();
+    let route_v2 = vec![0xbb, 0x64, 0xfa, 0xcc, 0x31, 0xc4, 0xaf, 0x14];
+    // route_v2's accounts: user, source, user destination, source mint, destination mint, two token programs, destination
+    // (the program's id: none), event authority, program.
+    let keys = [ME, TOKEN_PROGRAM, &source, &out, jup, WSOL, event, &theirs, USDC_MINT];
+    let v2 = |dest: usize, instead: usize, data: Vec<u8>| verdict(&message(&keys, &[ix(4, &[0, 2, dest, 8, 5, 1, 1, instead, 6, 4], &data)], 1), &policy(), &map(&[]));
+    // The output account is this wallet's own for the mint (derived here, no claim needed), and the prompt names what goes
+    // in and the least that comes out, read where the program reads them.
+    let ok = v2(3, 4, [route_v2.clone(), args(9_386_507, 50, 0)].concat());
     assert!(ok.ok(), "{:?}", ok.problems);
-    assert!(ok.checks.contains(&"Jupiter swap → your account (SOL). The balance simulation checks the amount.".to_string()));
-    assert!(!swap(&[1, 0, 2, 7, 4, 5, 4, 6, 4], [route.clone(), tail(9_386_507, 0)].concat()).ok());
-    assert!(!swap(&[1, 0, 2, 3, 7, 5, 4, 6, 4], [route.clone(), tail(9_386_507, 0)].concat()).ok());
-    // shared_accounts_route: output account 6, output mint 8.
-    let shared = [vec![0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81, 3], vec![1, 0, 0, 100, 0, 1]].concat();
+    assert!(ok.checks.contains(&"Jupiter swap: 1 USDC → at least 0.009339574 SOL, your account (slippage 0.5%)".to_string()), "{:?}", ok.checks);
+    assert!(ok.ask_afresh.is_empty() && ok.swaps); // a swap: a person signs it with a prompt of its own
+    assert_eq!(ok.outflows, [Outflow { asset: USDC_MINT.into(), units: 1_000_000, to: None }]);
+    // Past the person's slippage limit (3% unless they set another): signable, but only after a fresh prompt.
+    let loose = v2(3, 4, [route_v2.clone(), args(9_386_507, 500, 0)].concat());
+    assert!(loose.ok() && loose.ask_afresh == ["slippage 5% is over your 3%"]);
+    assert!(!v2(3, 4, [route_v2.clone(), args(9_386_507, 10_001, 0)].concat()).ok());
+    // A site's fee is named, and asked about afresh; over 10% it's refused.
+    let fee = v2(3, 4, [route_v2.clone(), args(9_386_507, 50, 20)].concat());
+    assert!(fee.checks.iter().any(|c| c.ends_with("(slippage 0.5%, a 0.2% fee to the site)")) && fee.ask_afresh == ["the site takes a 0.2% fee"]);
+    assert!(!v2(3, 4, [route_v2.clone(), args(9_386_507, 50, 1_001)].concat()).ok());
+    // The output sent to someone else's account, as the user destination or through the optional destination: refused.
+    assert!(!v2(7, 4, [route_v2.clone(), args(9_386_507, 50, 0)].concat()).ok());
+    assert!(!v2(3, 7, [route_v2.clone(), args(9_386_507, 50, 0)].concat()).ok());
+    // Too short to hold its arguments: refused.
+    assert!(!v2(3, 4, [route_v2.clone(), args(9_386_507, 50, 0)[..12].to_vec()].concat()).ok());
+    // shared_accounts_route_v2: id, then the same arguments. Accounts: program authority, user, source, program source,
+    // program destination, destination, source mint, destination mint, …
+    let shared_v2 = vec![0xd1, 0x98, 0x53, 0x93, 0x7c, 0xfe, 0xd8, 0xe9, 3];
     let shared_keys = [ME, TOKEN_PROGRAM, DEPOSIT, &source, &theirs, &out, USDC_MINT, WSOL, jup, event];
-    let shared_swap = |accounts: &[usize]| verdict(&message(&shared_keys, &[ix(8, accounts, &[shared.clone(), tail(9_386_507, 20)].concat())], 1), &policy(), &map(&[]));
-    let s = shared_swap(&[1, 2, 0, 3, 4, 4, 5, 6, 7, 8, 8, 9, 8]);
-    assert!(s.ok() && s.checks.contains(&"Jupiter swap → your account (SOL). The balance simulation checks the amount.".to_string()));
-    assert!(!shared_swap(&[1, 2, 0, 3, 4, 4, 4, 6, 7, 8, 8, 9, 8]).ok());
-    // exact_out_route: user destination 3, destination mint 6; an instruction that isn't a swap is refused.
-    let exact_out = vec![0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c];
-    assert!(swap(&[1, 0, 2, 3, 4, 5, 5, 6, 4], [exact_out.clone(), tail(1, 0)].concat()).ok());
-    assert!(!swap(&[1, 0, 2, 7, 4, 5, 5, 6, 4], [exact_out, tail(1, 0)].concat()).ok());
+    let shared = |accounts: &[usize]| verdict(&message(&shared_keys, &[ix(8, accounts, &[shared_v2.clone(), args(9_386_507, 50, 0)].concat())], 1), &policy(), &map(&[]));
+    let s = shared(&[2, 0, 3, 4, 4, 5, 6, 7, 1, 1, 9, 8]);
+    assert!(s.ok() && s.checks.contains(&"Jupiter swap: 1 USDC → at least 0.009339574 SOL, your account (slippage 0.5%)".to_string()), "{s:?}");
+    assert!(!shared(&[2, 0, 3, 4, 4, 4, 6, 7, 1, 1, 9, 8]).ok());
+    // v1 routes put the amounts after the route, which takes Jupiter's whole list of pools to read: refused by name, as
+    // is an instruction that isn't a swap.
+    let route_v1 = [vec![0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a], vec![1, 0, 0, 0, 100, 0, 1]].concat();
+    let swap = |accounts: &[usize], data: Vec<u8>| verdict(&message(&keys, &[ix(4, accounts, &data)], 1), &policy(), &map(&[]));
+    let refused = swap(&[1, 0, 2, 3, 4, 5, 4, 6, 4], [route_v1, le(1_000_000), le(9_386_507), 50u16.to_le_bytes().to_vec(), vec![0]].concat());
+    assert!(!refused.ok() && refused.problems.iter().any(|p| p.contains("an older Jupiter swap whose amounts the signer can't read")));
     let claim = swap(&[0, 7, 4], vec![0x3e, 0xc6, 0xd6, 0xc1, 0xa6, 0x13, 0x6f, 0xd2]);
     assert_eq!(claim.problems, ["Instruction 1: a Jupiter instruction that isn't one of its swaps (3ec6d6c1a6136fd2)."]);
+}
+
+/// What leaves the wallet is read for the automation wallet's budget: SOL and tokens to someone else, not to itself.
+#[test]
+fn transfers_out_are_read_as_outflows() {
+    let (mine, theirs) = (ata(ME, USDC_MINT), ata(DEPOSIT, USDC_MINT));
+    let keys = [ME, DEPOSIT, sol::SYSTEM, TOKEN_PROGRAM, &mine, &theirs, USDC_MINT];
+    let sol_out = verdict(&message(&keys, &[ix(2, &[0, 1], &sol_transfer(5_000))], 1), &policy(), &map(&[]));
+    assert_eq!(sol_out.outflows, [Outflow { asset: "SOL".into(), units: 5_000, to: Some(DEPOSIT.into()) }]);
+    let checked = [vec![12], le(2_000_000), vec![6]].concat();
+    // Counted with this wallet as the authority, whatever the engine claimed about the source account.
+    let usdc_out = verdict(&message(&keys, &[ix(3, &[4, 6, 5, 0], &checked)], 1), &policy(), &map(&[(&theirs, DEPOSIT)]));
+    assert!(usdc_out.ok(), "{:?}", usdc_out.problems);
+    assert_eq!(usdc_out.outflows, [Outflow { asset: USDC_MINT.into(), units: 2_000_000, to: Some(DEPOSIT.into()) }]);
+    assert!(!usdc_out.swaps);
+}
+
+/// What the trading key would open, read from the action: buys at most price × size, nothing for what only reduces,
+/// and the person for an opening sell or a TWAP (no price bounds what those give).
+#[test]
+fn trading_key_openings_are_read_from_the_order() {
+    use hyperliquid::action::Opening;
+    let order = |is_buy, price: &str, size: &str, reduce_only, kind| Order { asset: 0, is_buy, price: dec(price), size: dec(size), reduce_only, kind, cloid: None };
+    let entry = order(true, "100", "1.5", false, OrderKind::Limit { tif: "Ioc".into() });
+    let stop = order(false, "90", "1.5", true, OrderKind::Trigger { price: dec("90"), is_market: true, tpsl: "sl".into() });
+    let short = order(false, "0.0001", "1000", false, OrderKind::Limit { tif: "Ioc".into() });
+    assert_eq!(action::opening(&action::order(&[entry, stop.clone()], "normalTpsl").unwrap()), Opening::Dollars(dec("150")));
+    assert_eq!(action::opening(&action::order(&[stop], "positionTpsl").unwrap()), Opening::Dollars(Decimal::ZERO));
+    assert!(matches!(action::opening(&action::order(&[short], "na").unwrap()), Opening::Person(_)), "an opening sell went without the person");
+    assert!(matches!(action::opening(&action::twap_order(0, true, dec("1"), false, 30, false).unwrap()), Opening::Person(_)), "a TWAP went without the person");
+    assert_eq!(action::opening(&action::twap_order(0, false, dec("1"), true, 30, false).unwrap()), Opening::Dollars(Decimal::ZERO));
+    assert_eq!(action::opening(&action::cancel(&[(0, 7)])), Opening::Dollars(Decimal::ZERO));
+    let leverage = MsgPack::map(vec![("type", MsgPack::str("updateLeverage")), ("asset", MsgPack::Uint(0)), ("isCross", MsgPack::Bool(true)), ("leverage", MsgPack::Uint(5))]);
+    assert_eq!(action::opening(&leverage), Opening::Dollars(Decimal::ZERO));
+    assert!(matches!(action::opening(&MsgPack::map(vec![("type", MsgPack::str("usdSend"))])), Opening::Person(_)), "a transfer went to the trading key");
+    // The markets a session binds to, at any depth.
+    assert_eq!(action::markets(&action::cancel(&[(3, 7), (5, 8)])), [3, 5].into());
+    assert_eq!(action::markets(&leverage), [0].into());
 }
 
 /// Past its 7 days the trading key still signs what can't open or add to a position: cancels and reduce-only orders.
@@ -388,6 +448,7 @@ fn jupiter_z_fills_pay_only_this_wallet() {
     let sol_out = check(&usual, &fill, &sponsored, false);
     assert!(sol_out.ok(), "{:?}", sol_out.problems);
     assert!(sol_out.checks.contains(&"JupiterZ fill: 15 USDC for 0.148288542 SOL → your wallet, as SOL. The balance simulation checks it.".to_string()));
+    assert!(sol_out.swaps && sol_out.outflows == [Outflow { asset: USDC_MINT.into(), units: 15_000_000, to: None }], "{sol_out:?}");
     let (m, list) = message(&keys, &[ix(4, &usual, &fill)], 2);
     assert!(!sol::refunds_sponsor(&m, &list, ME, maker));
     let (refund, refund_list) = message(&[maker, ME, sol::SYSTEM], &[ix(2, &[1, 0], &sol_transfer(2_039_280))], 2);

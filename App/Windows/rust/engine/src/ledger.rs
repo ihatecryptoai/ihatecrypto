@@ -159,12 +159,14 @@ impl Engine {
         // Orders, cancels and leverage through the trading key the Ledger approved (trading_key.rs): no device buttons.
         let agent: Option<Agent> = self.agent_active().then(|| {
             let (link, owner) = (self.signer.clone(), wallet.evm.clone());
-            Arc::new(move |action: MsgPack, nonce: u64| -> Signing<'static, EvmSignature> {
+            Arc::new(move |action: MsgPack, nonce: u64| -> Signing<'static, Option<EvmSignature>> {
                 let (link, owner) = (link.clone(), owner.clone());
                 Box::pin(async move {
                     let r = link.send(&SignerRequest::SignLedgerAgentL1 { owner, action, nonce }).await.map_err(|e| TradeError::Failed(e.0))?;
+                    // A short or an order past the person's limits: the trading key won't, the device signs it.
+                    if !r.ok && r.problems.iter().any(|p| p.ends_with(signer_api::LEDGER_DEVICE)) { return Ok(None) }
                     match (r.ok, r.signature.clone()) {
-                        (true, Some(signature)) => Ok(signature),
+                        (true, Some(signature)) => Ok(Some(signature)),
                         _ => Err(TradeError::Guard(link_signer::reason(&r))),
                     }
                 })

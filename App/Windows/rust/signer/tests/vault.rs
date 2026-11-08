@@ -10,10 +10,10 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use hyperliquid::{MsgPack, Order, OrderKind, action, dec};
 use serde_json::Value;
-use signer::trusted::{self, State};
+use signer::trusted::{self, Pref, State};
 use signer::vault::{self, agents, recipients, seeds};
 use signer::core;
-use signer_api::{SignerAddress, SignerReply, SignerRequest, SignerWallet};
+use signer_api::{SignerAddress, SignerLimits, SignerReply, SignerRequest, SignerWallet};
 use wallet::Result;
 
 /// Hardhat's public test phrase: not the «abandon … about» one, which the signer lets through without prompts.
@@ -389,6 +389,197 @@ fn a_ledgers_trading_key_is_sealed_even_before_any_windows_hello() {
     agents::ask_again();
     vault::begin_request();
     assert_eq!(wallet::keys::evm_address(&agents::load(&id).unwrap()).unwrap(), made);
+}
+
+// The person's limits, the trading key held to them, the automation wallet's budget and the session bound to what its
+// first signature moved (the 2026-11-08 review, SignerLimits / Automation.swift / SeedStore's scope).
+
+const CANCELLED: &str = "Cancelled, or Windows Hello didn't match: nothing was signed.";
+
+fn order(asset: u32, is_buy: bool, price: &str, size: &str) -> MsgPack {
+    action::order(&[Order { asset, is_buy, price: dec(price), size: dec(size), reduce_only: false, kind: OrderKind::Limit { tif: "Gtc".into() }, cloid: None }], "na").unwrap()
+}
+
+fn hl(a: MsgPack, nonce: u64) -> Result<SignerReply> { send(SignerRequest::SignHyperliquidL1 { action: a, nonce, mainnet: true }) }
+
+fn hello(answers: bool) { env("WINSEC_FAKE_CANCEL", if answers { "0" } else { "1" }) }
+
+fn limits() -> SignerLimits { send(SignerRequest::Status {}).unwrap().limits.unwrap() }
+
+#[test]
+fn the_trading_key_signs_only_within_the_limits_and_the_rest_asks_in_person() {
+    let _turn = fresh();
+    import();
+    send(SignerRequest::EnableAgent {}).unwrap();
+    send(SignerRequest::SetAgentActive { active: true }).unwrap();
+    // No one at Windows Hello: a $500 buy goes through the trading key.
+    hello(false);
+    assert!(hl(order(1, true, "100", "5"), 1).unwrap().signature.is_some());
+    // Over one order's $1000: the main key, after a fresh prompt.
+    assert_eq!(hl(order(1, true, "100", "11"), 2).unwrap_err().0, CANCELLED);
+    // An opening sell isn't bounded by its price, a TWAP names none: the person either way.
+    assert_eq!(hl(order(1, false, "0.0001", "1000"), 3).unwrap_err().0, CANCELLED);
+    hello(true);
+    assert!(hl(order(1, true, "100", "11"), 4).unwrap().signature.is_some());
+    // The day counts what the trading key opened: $500 today, so $600 more is over a $1000 day. Lowering asks nothing.
+    hello(false);
+    assert!(send(SignerRequest::SetLimits { limits: SignerLimits { agent_day: 1000, ..SignerLimits::STANDARD } }).unwrap().ok);
+    assert_eq!(hl(order(1, true, "100", "6"), 5).unwrap_err().0, CANCELLED);
+    // Stops and closes always go.
+    assert!(hl(action::cancel(&[(1, 7)]), 6).unwrap().signature.is_some());
+}
+
+#[test]
+fn raising_a_limit_asks_windows_hello_and_lowering_doesnt() {
+    let _turn = fresh();
+    // Even with no wallet yet: limits set silently then would hold for every wallet added later.
+    hello(false);
+    assert_eq!(send(SignerRequest::SetLimits { limits: SignerLimits { agent_order: 2000, ..SignerLimits::STANDARD } }).unwrap_err().0, CANCELLED);
+    hello(true);
+    import();
+    vault::end_session();
+    hello(false);
+    let lower = SignerLimits { agent_order: 500, ..SignerLimits::STANDARD };
+    assert_eq!(send(SignerRequest::SetLimits { limits: lower }).unwrap().limits, Some(lower));
+    assert_eq!(limits(), lower);
+    // With no key in hand the lowering waits in pending.json: one planted there that loosens counts for nothing.
+    assert!(vault::exists("pending.json"));
+    plant("pending.json", |s| { s.prefs.insert("limits".into(), Pref::Data(serde_json::to_vec(&SignerLimits { agent_order: 9000, agent_day: 9000, ..lower }).unwrap())); });
+    trusted::reload();
+    assert_eq!(limits(), SignerLimits::STANDARD);
+    let higher = SignerLimits { agent_order: 2000, ..SignerLimits::STANDARD };
+    assert_eq!(send(SignerRequest::SetLimits { limits: higher }).unwrap_err().0, CANCELLED);
+    assert_eq!(limits(), SignerLimits::STANDARD);
+    assert!(send(SignerRequest::SetLimits { limits: SignerLimits { agent_days: 9, ..higher } }).is_err()); // not limits at all
+    hello(true);
+    assert!(send(SignerRequest::SetLimits { limits: higher }).unwrap().ok);
+    restart();
+    assert_eq!(limits(), higher);
+}
+
+#[test]
+fn a_ledgers_first_enable_asks_windows_hello_and_a_refusal_turns_nothing_on() {
+    let _turn = fresh();
+    let owner = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+    send(SignerRequest::LedgerAgent { owner: owner.into(), create: true }).unwrap();
+    vault::end_session();
+    hello(false);
+    assert_eq!(send(SignerRequest::SetLedgerAgentActive { owner: owner.into(), active: true }).unwrap_err().0, CANCELLED);
+    assert_eq!(send(SignerRequest::LedgerAgent { owner: owner.into(), create: false }).unwrap().agent_active, Some(false));
+    hello(true);
+    assert_eq!(send(SignerRequest::SetLedgerAgentActive { owner: owner.into(), active: true }).unwrap().agent_active, Some(true));
+    // Over its limits the Ledger's trading key refuses: there's no key here to sign the rest in person.
+    let over = send(SignerRequest::SignLedgerAgentL1 { owner: owner.into(), action: order(1, true, "100", "11"), nonce: 1 }).unwrap();
+    assert!(!over.ok && over.problems.iter().any(|p| p.ends_with("Sign this one on the Ledger.")), "{:?}", over.problems);
+}
+
+fn automation_wallet() -> String {
+    import();
+    let made = send(SignerRequest::CreateAutomationWallet {}).unwrap();
+    vault::end_session();
+    made.wallets.unwrap().into_iter().find(|w| w.is_automation()).unwrap().id
+}
+
+fn as_automation(id: &str, request: SignerRequest) -> Result<SignerReply> { send(SignerRequest::AsWallet { id: id.into(), request: Box::new(request) }) }
+
+#[test]
+fn the_automation_wallet_spends_its_day_and_asks_past_it() {
+    let _turn = fresh();
+    let id = automation_wallet();
+    hello(false);
+    // A move the guard refuses takes nothing from the day: its $90 are given back.
+    let MsgPack::Map(mut pairs) = order(1, true, "100", "0.9") else { unreachable!() };
+    pairs.push(("builder".into(), MsgPack::map(vec![("b", MsgPack::str(DEAD)), ("f", MsgPack::Uint(50))])));
+    assert!(!as_automation(&id, SignerRequest::SignHyperliquidL1 { action: MsgPack::Map(pairs), nonce: 9, mainnet: true }).unwrap().ok);
+    assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.6"), nonce: 1, mainnet: true }).unwrap().signature.is_some());
+    // $60 spent today: $60 more is over its $100 a day.
+    assert_eq!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.6"), nonce: 2, mainnet: true }).unwrap_err().0, CANCELLED);
+    // Anything that isn't dollars takes the person too.
+    assert_eq!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, false, "100", "0.1"), nonce: 3, mainnet: true }).unwrap_err().0, CANCELLED);
+    // Answered in person, the move signs.
+    hello(true);
+    assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.6"), nonce: 4, mainnet: true }).unwrap().signature.is_some());
+}
+
+#[test]
+fn an_automation_prompt_leaves_no_session_for_the_main_wallet() {
+    let _turn = fresh();
+    let id = automation_wallet();
+    hello(true);
+    assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, false, "100", "0.1"), nonce: 1, mainnet: true }).unwrap().signature.is_some());
+    hello(false);
+    assert_eq!(sign_hello().unwrap_err().0, CANCELLED);
+}
+
+#[test]
+fn a_session_serves_only_what_its_first_signature_moved() {
+    let _turn = fresh();
+    import();
+    vault::end_session();
+    hello(true);
+    assert!(hl(order(1, true, "100", "1"), 1).unwrap().signature.is_some());
+    hello(false);
+    assert!(hl(order(1, true, "100", "2"), 2).unwrap().signature.is_some());
+    // Another market: asked again.
+    assert_eq!(hl(order(2, true, "100", "1"), 3).unwrap_err().0, CANCELLED);
+    // The prompt that replaces the session covers both.
+    hello(true);
+    assert!(hl(order(2, true, "100", "1"), 4).unwrap().signature.is_some());
+    hello(false);
+    assert!(hl(order(1, true, "100", "1"), 5).unwrap().signature.is_some());
+    // A confirmation's session starts unbound and binds to the first signature that uses it.
+    hello(true);
+    vault::end_session();
+    vault::begin_request();
+    core::approve(&["0x000000000000000000000000000000000000beef".into()], false, "send 1 USDC").unwrap();
+    hello(false);
+    assert!(hl(order(3, true, "100", "1"), 6).unwrap().signature.is_some());
+    assert_eq!(hl(order(4, true, "100", "1"), 7).unwrap_err().0, CANCELLED);
+}
+
+/// A Jupiter route_v2 swap of 1 USDC for at least ≈ 0.0093 SOL into `owner`'s own account, as an unsigned legacy
+/// transaction, and its account list.
+fn jupiter_swap(owner: &str) -> (Vec<u8>, Vec<String>) {
+    use solana::spl::{TOKEN_PROGRAM, associated_account};
+    let (usdc, wsol, jup) = ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "So11111111111111111111111111111111111111112", "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+    let (source, out) = (associated_account(owner, usdc, TOKEN_PROGRAM).unwrap(), associated_account(owner, wsol, TOKEN_PROGRAM).unwrap());
+    let keys = [owner, TOKEN_PROGRAM, &source, &out, jup, wsol, "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf", usdc];
+    let data = [vec![0xbb, 0x64, 0xfa, 0xcc, 0x31, 0xc4, 0xaf, 0x14], 1_000_000u64.to_le_bytes().to_vec(), 9_386_507u64.to_le_bytes().to_vec(),
+                50u16.to_le_bytes().to_vec(), vec![0; 4], 1u32.to_le_bytes().to_vec(), vec![0], 10_000u16.to_le_bytes().to_vec(), vec![0, 1]].concat();
+    let accounts = [0u8, 2, 3, 7, 5, 1, 1, 4, 6, 4];
+    let mut m = vec![1, 0, 5];
+    m.extend(solana::compact(keys.len()));
+    for k in keys { m.extend(wallet::keys::base58::decode(k).unwrap()) }
+    m.extend([0; 32]);
+    m.extend(solana::compact(1));
+    m.push(4);
+    m.extend(solana::compact(accounts.len()));
+    m.extend(accounts);
+    m.extend(solana::compact(data.len()));
+    m.extend(data);
+    (solana::unsigned_transaction(&m), keys.iter().map(|k| k.to_string()).collect())
+}
+
+fn sign_solana((wire, accounts): (Vec<u8>, Vec<String>)) -> SignerRequest {
+    SignerRequest::SignSolana { wire, accounts, recipients: vec![], token_owners: Default::default(), extra_programs: vec![], sponsor: None }
+}
+
+/// A swap's rate is the person's to judge: one a person signs asks afresh even inside an open session; the automation
+/// wallet's are held to its dollars instead.
+#[test]
+fn a_swap_asks_afresh_unless_the_automation_wallet_signs_it() {
+    let _turn = fresh();
+    let me = import().solana_address.unwrap();
+    hello(true);
+    sign_hello().unwrap(); // a session is open
+    hello(false);
+    assert_eq!(send(sign_solana(jupiter_swap(&me))).unwrap_err().0, CANCELLED);
+    hello(true);
+    let signed = send(sign_solana(jupiter_swap(&me))).unwrap();
+    assert!(signed.ok && signed.checks.iter().any(|c| c.starts_with("Jupiter swap: 1 USDC → at least 0.009339574 SOL")), "{:?}", signed.checks);
+    let id = send(SignerRequest::CreateAutomationWallet {}).unwrap().wallets.unwrap().into_iter().find(|w| w.is_automation()).unwrap();
+    hello(false);
+    assert!(as_automation(&id.id, sign_solana(jupiter_swap(id.solana.as_deref().unwrap()))).unwrap().ok);
 }
 
 /// The binary itself over its pipes: a frame in, a frame out, as the engine talks to it.

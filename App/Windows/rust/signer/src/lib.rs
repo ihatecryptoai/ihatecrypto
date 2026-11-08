@@ -1,8 +1,10 @@
 //! ihatecrypto's signing process for Windows (`App/Sources/Signer`): the vault under Windows Hello and DPAPI, the
 //! trusted settings, the wallets, and — next — the signer's own decisions over requests from the engine.
 
+pub mod automation;
 pub mod core;
 pub mod host;
+pub mod limits;
 pub mod platform;
 pub mod trusted;
 pub mod vault;

@@ -15,6 +15,8 @@ fn main() {
     }
     let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
     while let Some(request) = signer_api::read_frame(&mut input) {
+        // An imported phrase comes in these bytes: wiped once served.
+        let request = zeroize::Zeroizing::new(request);
         if signer_api::write_frame(&mut output, &host::handle(&request)).and_then(|_| output.flush()).is_err() { break }
     }
 }

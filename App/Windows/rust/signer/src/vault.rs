@@ -6,6 +6,7 @@
 //! The files are the Swift signer's: either reads what the other wrote.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -38,7 +39,7 @@ pub const PRODUCT: &str = "ihatecrypto";
 pub fn hello_key() -> String { format!("{PRODUCT}-signer") }
 
 /// What the person's presence is called in texts.
-pub const PRESENCE: &str = "Windows Hello";
+pub const PRESENCE: &str = signer_api::PRESENCE;
 
 pub static FOLDER: LazyLock<PathBuf> = LazyLock::new(|| {
     #[cfg(debug_assertions)]
@@ -165,27 +166,69 @@ thread_local! {
     /// What one request has opened: the trusted settings it changes are sealed with it even after `end_session`, which
     /// only stops the next request from reusing it. The host clears it before each request.
     static SCOPE: RefCell<Option<Key>> = const { RefCell::new(None) };
+    /// The recipients and coins of the request being signed (`core::move_scope`); None: one that names none.
+    static MOVE: RefCell<Option<HashSet<String>>> = const { RefCell::new(None) };
 }
 
-static SESSION: Mutex<Option<(Key, Instant)>> = Mutex::new(None);
+/// One Windows Hello's key, reused for `session_length` seconds. `scope`: the recipients and coins of the signature that
+/// first used it (None until one does): a later signature that names anything else asks in person again, however long
+/// the session (the owner's pick, 2026-11-08 review).
+struct Session {
+    key: Key,
+    since: Instant,
+    scope: Option<HashSet<String>>,
+}
+
+impl Session {
+    fn alive(&self) -> bool { self.since.elapsed() < Duration::from_secs(seeds::session_length() as u64) }
+}
+
+static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 
 /// A new request: nothing opened yet.
 pub fn begin_request() { SCOPE.with(|s| *s.borrow_mut() = None) }
 
 fn set_scope(key: &Key) { SCOPE.with(|s| *s.borrow_mut() = Some(key.clone())) }
 
-/// The key of this request or of a session still open; None when it would take a prompt.
+/// Runs `body` with `scope` as the request's recipients and coins, then back (Swift's `SeedStore.$scope.withValue`).
+pub fn with_move_scope<T>(scope: HashSet<String>, body: impl FnOnce() -> T) -> T {
+    let before = MOVE.with(|m| m.replace(Some(scope)));
+    let out = body();
+    MOVE.with(|m| *m.borrow_mut() = before);
+    out
+}
+
+/// The key of this request or of a session still open; None when it would take a prompt. For sealing the trusted
+/// settings and opening the trading key, not for a signature: `key` holds a session to the scope it was bound to.
 pub fn current_key() -> Option<Key> {
     if let Some(k) = SCOPE.with(|s| s.borrow().clone()) { return Some(k) }
-    let session = SESSION.lock().expect("session");
-    session.as_ref().filter(|(_, since)| since.elapsed() < Duration::from_secs(seeds::session_length() as u64)).map(|(k, _)| k.clone())
+    SESSION.lock().expect("session").as_ref().filter(|s| s.alive()).map(|s| s.key.clone())
 }
 
 /// The master key for a move: the open session's, or Windows Hello with `reason`. The trusted settings are checked
-/// against it before it is handed out: a key never serves settings changed outside the signer.
+/// against it before it is handed out: a key never serves settings changed outside the signer. A session serves only a
+/// signature within the scope it was bound to; an unbound one binds to this request's.
 pub fn key(reason: &str, use_session: bool, within: Option<u64>) -> Result<Key> {
+    let wanted = MOVE.with(|m| m.borrow().clone()).unwrap_or_default();
+    let mut replaced = None;
     if use_session {
-        if let Some(key) = current_key() {
+        let reuse = {
+            let mut session = SESSION.lock().expect("session");
+            let live = session.as_mut().filter(|s| s.alive());
+            match (SCOPE.with(|s| s.borrow().clone()), live) {
+                // Opened by this request's own prompt: an unbound session (that prompt's) binds to this request.
+                (Some(key), live) => {
+                    if let Some(s) = live.filter(|s| s.scope.is_none()) { s.scope = Some(wanted.clone()) }
+                    Some(key)
+                }
+                (None, Some(s)) if s.scope.as_ref().is_none_or(|bound| wanted.is_subset(bound)) => {
+                    if s.scope.is_none() { s.scope = Some(wanted.clone()) }
+                    Some(s.key.clone())
+                }
+                (None, live) => { replaced = live.and_then(|s| s.scope.clone()); None }
+            }
+        };
+        if let Some(key) = reuse {
             // The file may have changed since the session opened: checked again before the key serves.
             trusted::verify(&key, false)?;
             set_scope(&key);
@@ -194,17 +237,26 @@ pub fn key(reason: &str, use_session: bool, within: Option<u64>) -> Result<Key> 
     }
     let (key, fresh) = unlock(reason, within)?;
     trusted::verify(&key, fresh)?;
-    if use_session { *SESSION.lock().expect("session") = Some((key.clone(), Instant::now())) }
+    // A new prompt: it covers this signature's recipients and coins, and whatever the session it replaces covered.
+    if use_session {
+        let scope = wanted.union(&replaced.unwrap_or_default()).cloned().collect();
+        *SESSION.lock().expect("session") = Some(Session { key: key.clone(), since: Instant::now(), scope: Some(scope) });
+    }
     set_scope(&key);
     agents::open_all(&key);
     Ok(key)
 }
 
-/// Windows Hello again, always: a fresh confirmation, whose key then serves the signature that follows.
+/// Windows Hello again, always: a fresh confirmation, whose key then serves the signature that follows. It opens a
+/// session not yet bound to anything (the first signature binds it) — except the automation wallet's prompts (`within`),
+/// which leave none: its own signature needs none, and an open one would let the main wallet's next signature go
+/// unasked (the 2026-11-08 review).
 pub fn confirm(reason: &str, within: Option<u64>) -> Result<()> {
     let (key, fresh) = unlock(reason, within)?;
     trusted::verify(&key, fresh)?;
-    *SESSION.lock().expect("session") = Some((key.clone(), Instant::now()));
+    if within.is_none() {
+        *SESSION.lock().expect("session") = Some(Session { key: key.clone(), since: Instant::now(), scope: None });
+    }
     set_scope(&key);
     agents::open_all(&key);
     Ok(())

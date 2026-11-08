@@ -27,6 +27,7 @@ zeroize.workspace = true
 getrandom.workspace = true
 ed25519-dalek.workspace = true
 chrono.workspace = true
+rust_decimal.workspace = true
 base64.workspace = true
 
 # Windows Hello, DPAPI and the process's hardening: winsec as a Rust library here, not a DLL.

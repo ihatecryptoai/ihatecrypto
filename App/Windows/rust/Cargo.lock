@@ -2851,6 +2851,7 @@ dependencies = [
  "hmac",
  "hyperliquid",
  "pbkdf2",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",

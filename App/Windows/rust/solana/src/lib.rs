@@ -207,5 +207,75 @@ pub fn compile_message(instructions: &[Instruction], payer: &str, blockhash: &st
     Ok(m)
 }
 
+/// The v0 message for `instructions` as they come (their own compute budget included), fee payer first, with accounts
+/// that `tables` (lookup table → its addresses) hold loaded through them — except signers, programs and `keep_static`
+/// (the wallet's own accounts: the signer lets money land only in an account the message names itself).
+pub fn compile_v0(instructions: &[Instruction], payer: &str, blockhash: &str, tables: &[(String, Vec<String>)],
+                  keep_static: &std::collections::HashSet<String>) -> Result<Vec<u8>> {
+    use std::collections::{HashMap, HashSet};
+    let mut flags: HashMap<String, (bool, bool)> = [(payer.to_string(), (true, true))].into();
+    let (mut order, mut programs) = (vec![payer.to_string()], HashSet::new());
+    let mut add = |k: &str, signer: bool, writable: bool| match flags.get_mut(k) {
+        Some(f) => *f = (f.0 || signer, f.1 || writable),
+        None => { flags.insert(k.into(), (signer, writable)); order.push(k.into()) }
+    };
+    for ix in instructions {
+        for (k, s, w) in &ix.accounts { add(k, *s, *w) }
+        add(&ix.program, false, false);
+        programs.insert(ix.program.clone());
+    }
+    let signers: Vec<&String> = order.iter().filter(|k| flags[*k].0).collect();
+    if signers != [payer] {
+        let others: Vec<String> = signers.iter().filter(|k| **k != payer).map(|k| format!("\"{k}\"")).collect();
+        return fail(format!("The instructions need other signers: [{}]", others.join(", ")));
+    }
+    // Each loadable account from the first table that has it.
+    let mut loaded: HashMap<&String, (usize, u8)> = HashMap::new();
+    for key in order.iter().filter(|k| *k != payer && !programs.contains(*k) && !keep_static.contains(*k)) {
+        if let Some(at) = tables.iter().enumerate().find_map(|(t, (_, entries))| entries.iter().position(|e| e == key).filter(|&i| i < 256).map(|i| (t, i as u8))) {
+            loaded.insert(key, at);
+        }
+    }
+    let writable = |k: &String| flags[k].1;
+    let statics: Vec<&String> = order.iter().filter(|k| !loaded.contains_key(k)).collect();
+    let keys: Vec<&String> = std::iter::once(&order[0])
+        .chain(statics.iter().copied().filter(|k| *k != payer && writable(k)))
+        .chain(statics.iter().copied().filter(|k| *k != payer && !writable(k)))
+        .collect();
+    let readonly_unsigned = keys.iter().filter(|k| !writable(k)).count();
+    // The full list the instructions index: static keys, then every table's writable entries, then their readonly ones.
+    let lookups: Vec<(&String, Vec<&String>, Vec<&String>)> = tables.iter().enumerate().filter_map(|(t, (address, _))| {
+        let mine: Vec<&String> = order.iter().filter(|k| loaded.get(k).is_some_and(|l| l.0 == t)).collect();
+        let (w, r): (Vec<&String>, Vec<&String>) = mine.into_iter().partition(|k| writable(k));
+        (!w.is_empty() || !r.is_empty()).then_some((address, w, r))
+    }).collect();
+    let full: Vec<&String> = keys.iter().copied().chain(lookups.iter().flat_map(|l| l.1.clone())).chain(lookups.iter().flat_map(|l| l.2.clone())).collect();
+    if full.len() > 256 { return fail("The transaction names more than 256 accounts.") }
+    let index: HashMap<&String, u8> = full.iter().enumerate().map(|(i, k)| (*k, i as u8)).collect();
+
+    let mut m = vec![0x80, 1, 0, readonly_unsigned as u8];
+    m.extend(compact(keys.len()));
+    for k in &keys { m.extend(decode(k)?) }
+    m.extend(decode(blockhash)?);
+    m.extend(compact(instructions.len()));
+    for ix in instructions {
+        m.push(index[&ix.program]);
+        m.extend(compact(ix.accounts.len()));
+        m.extend(ix.accounts.iter().map(|(k, _, _)| index[k]));
+        m.extend(compact(ix.data.len()));
+        m.extend(&ix.data);
+    }
+    m.extend(compact(lookups.len()));
+    for (table, w, r) in &lookups {
+        m.extend(decode(table)?);
+        m.extend(compact(w.len()));
+        m.extend(w.iter().map(|k| loaded[k].1));
+        m.extend(compact(r.len()));
+        m.extend(r.iter().map(|k| loaded[k].1));
+    }
+    if m.len() + 65 > 1232 { return fail(format!("The transaction is {} bytes, over Solana's limit of 1232", m.len() + 65)) }
+    Ok(m)
+}
+
 #[cfg(test)]
 mod tests;

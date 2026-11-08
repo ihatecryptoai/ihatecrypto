@@ -13,8 +13,9 @@ use evm::protocols::{Permit3009, SponsoredTransfer, batch7702, relay, safe};
 use evm::relay_order::RelayOrder;
 use evm::{SIGNABLE, Transaction, network_name};
 use guard::{Verdict, hl, sol};
-use hyperliquid::{MsgPack, action, builder, signer as hls};
-use signer_api::{SignerAddress, SignerReply, SignerRequest, SignerWallet, passcode, session};
+use hyperliquid::action::{self, Opening};
+use hyperliquid::{MsgPack, builder, signer as hls};
+use signer_api::{LEDGER_DEVICE, SignerAddress, SignerReply, SignerRequest, SignerWallet, passcode, session};
 use solana::message::Message;
 use solana::spl;
 use wallet::address_check::{self, Network};
@@ -26,6 +27,7 @@ use wallet::{Result, WalletError, agent_owner, mnemonic, near_owner};
 use zeroize::Zeroizing;
 
 use crate::trusted::{Pref, prefs};
+use crate::{automation, limits};
 use crate::vault::{self, PRESENCE, agents, book, code, own, recipients, seeds};
 use crate::wallets;
 
@@ -35,21 +37,96 @@ fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.a
 
 pub const PUBLIC_TEST_SOLANA: &str = "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk";
 
-/// The Hyperliquid trading key opens or adds to positions for 7 days after the person's last Windows Hello for it;
-/// then cancels and reduce-only orders still go without one. Only an in-person act renews it, never the engine's word.
-const AGENT_WEEK: i64 = 7 * 86_400;
-
 fn agent_active_key() -> String { wallets::scoped("agentActive", &wallets::active_id()) }
 fn agent_renewed_key() -> String { wallets::scoped("agentRenewed", &wallets::active_id()) }
 
+/// The Hyperliquid trading key opens or adds to positions for the person's days (Settings, 2 unless set) after their
+/// last Windows Hello for it (turning it on, an order the main key signed in person); then cancels and reduce-only
+/// orders still go without one. Within those days it opens only buys inside the person's dollars (`agent_take`):
+/// together they cap how much and how long a program that took over the engine could trade the account down unseen.
+/// Only an in-person act renews it, never the engine's word.
+fn agent_span() -> i64 { limits::current().agent_days * 86_400 }
+fn agent_days_text() -> String { match limits::current().agent_days { 1 => "1 day".into(), d => format!("{d} days") } }
+
 /// Whole seconds, where the Mac keeps a Double: the Swift Windows signer's settings had no Double, so its renewal was
 /// never kept and the week never ran — the trading key could only reduce there.
-fn agent_fresh(key: &str) -> bool { (now() as i64) - prefs::integer(key) < AGENT_WEEK }
+fn agent_fresh(key: &str) -> bool { (now() as i64) - prefs::integer(key) < agent_span() }
 fn renew_agent(key: &str) { prefs::set(key, Some(Pref::Int(now() as i64))) }
+
+/// What the trading key may sign on its own: its dollars taken from the day (given back unless kept once it signed), or
+/// why it can't.
+fn agent_take(opening: &Opening) -> std::result::Result<Option<limits::Hold>, String> {
+    match opening {
+        Opening::Person(why) => Err(why.clone()),
+        Opening::Dollars(d) if d.is_zero() => Ok(None),
+        Opening::Dollars(d) => limits::take_agent(*d, &limits::current()).map(Some),
+    }
+}
 
 fn reply() -> SignerReply { SignerReply::ok() }
 
+/// Every request runs with its recipients and coins as the session's scope (`vault::with_move_scope`).
 pub fn handle(request: SignerRequest) -> Result<SignerReply> {
+    match move_scope(&request) {
+        Some(scope) => vault::with_move_scope(scope, || handle_request(request)),
+        None => handle_request(request),
+    }
+}
+
+/// What a signature moves, for binding the session: the addresses money may go to and the coins it touches (Solana keys
+/// its instructions use, EVM token contracts, Hyperliquid markets), each tied to its network — only what the signed bytes
+/// say, never the engine's lists of recipients or accounts (which could name everything). None: a request that moves
+/// nothing of the kind (a message, settings), or one whose wallet or bytes can't be read.
+fn move_scope(request: &SignerRequest) -> Option<HashSet<String>> {
+    use SignerRequest as R;
+    let keys = |list: Vec<String>, owner: Option<&str>| -> Vec<String> {
+        let owner = owner.map(recipients::key);
+        list.iter().map(|a| recipients::key(a)).filter(|k| Some(k) != owner.as_ref()).collect()
+    };
+    // The payees the signer decodes, and the token contract a transfer or an approval spends — not the called contract:
+    // an approve and the swap that spends it stay one move.
+    let evm = |to: &str, value: u64, data: &[u8], chain_id: u64, owner: &str| -> Vec<String> {
+        let call = Call::decode(data);
+        let token = match &call {
+            Call::Transfer { .. } | Call::Approve { .. } | Call::IncreaseAllowance { .. } | Call::TransferFrom { .. } => vec![to.to_string()],
+            Call::Permit2Approve { token, .. } => vec![token.clone()],
+            _ => vec![],
+        };
+        let mut list = keys([call.payees(to, value, chain_id), token].concat(), Some(owner));
+        if value > 0 { list.push("native".into()) }
+        list
+    };
+    let tagged = |prefix: String, list: Vec<String>| list.into_iter().map(|a| format!("{prefix}{a}")).collect::<HashSet<_>>();
+    Some(match request {
+        R::SignSolana { wire, sponsor, .. } => {
+            // The message's own keys its instructions use: where money goes must be one of them (the guard), coins too.
+            let (owner, m) = (address("solana").ok()?, Message::parse_transaction(wire).ok()?);
+            let used: std::collections::BTreeSet<usize> = m.instructions.iter().flat_map(|ix| ix.accounts.iter().copied()).collect();
+            let list = used.into_iter().filter_map(|i| m.static_keys.get(i).cloned()).chain(sponsor.clone()).filter(|k| *k != owner).collect();
+            tagged("sol:".into(), list)
+        }
+        R::SignEvmTransaction { chain_id, to, value, data, .. } => tagged(format!("evm:{chain_id}:"), evm(to, *value, data, *chain_id, &address("evm").ok()?)),
+        R::SignEvmBatch { chain_id, calls, .. } => {
+            let owner = address("evm").ok()?;
+            tagged(format!("evm:{chain_id}:"), calls.iter().flat_map(|c| evm(&c.to, 0, &c.data, *chain_id, &owner)).collect())
+        }
+        R::SignSafeMove { chain_id, to, value, data, .. } => tagged(format!("evm:{chain_id}:"), evm(to, *value, data, *chain_id, &address("evm").ok()?)),
+        // Markets only: leverage, the entry and its stop of one trade are one move.
+        R::SignHyperliquidL1 { action: act, .. } => action::markets(act).into_iter().map(|m| format!("hl:{m}")).collect(),
+        R::SignHyperliquidUser { action: act, .. } => {
+            tagged("hl:".into(), [act.text("destination").map(str::to_lowercase), act.text("token").map(str::to_string)].into_iter().flatten().collect())
+        }
+        R::SignSponsoredTransfer { chain_id, token, to, .. } => tagged(format!("evm:{chain_id}:"), keys(vec![token.clone(), to.clone()], None)),
+        R::SignRelayMulticallPermit { chain_id, token, relayer, refund_to, .. } => {
+            tagged(format!("evm:{chain_id}:"), keys(vec![token.clone(), relayer.clone(), refund_to.clone()], address("evm").ok().as_deref()))
+        }
+        R::SignNearTransfer { receiver, .. } => [format!("near:{receiver}")].into(),
+        R::SignNearIntentDeposit { deposit_address, .. } => [format!("near:{deposit_address}")].into(),
+        _ => return None,
+    })
+}
+
+fn handle_request(request: SignerRequest) -> Result<SignerReply> {
     use SignerRequest as R;
     match request {
         R::Status {} => {
@@ -68,6 +145,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             r.agent_address = agents::address(&wallets::active_id());
             r.agent_active = Some(prefs::bool(&agent_active_key()) && r.agent_address.is_some());
             r.session_length = Some(seeds::session_length());
+            r.limits = Some(limits::current());
             r.code_set = Some(code::is_set());
             Ok(r)
         }
@@ -128,7 +206,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             if agent.to_lowercase() == owner.to_lowercase() { return fail("The agent key matches the main key.") }
             let nonce = (SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())) as u64;
             // In person every time: an open session from another move doesn't turn the key on.
-            confirm_afresh(&format!("approve a Hyperliquid trading key: orders without {PRESENCE} for 7 days, and it can't withdraw money"))?;
+            confirm_afresh(&format!("approve a Hyperliquid trading key: buys up to ${} an order without {PRESENCE} for {}, it can't withdraw money",
+                                    limits::current().agent_order, agent_days_text()))?;
             let (act, signature) = with_key("evm", &format!("approve a trading key: orders without {PRESENCE}, and it can't withdraw money"),
                                             |k| hls::approve_agent(&agent, "ihatecrypto", nonce, k, true))?;
             // Kept only once its approval is signed.
@@ -142,7 +221,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::SetAgentActive { active: on } => {
             // Resuming a paused trading key, or one whose week is over, is the person's decision: Windows Hello afresh.
             if on && (!prefs::bool(&agent_active_key()) || !agent_fresh(&agent_renewed_key())) && agents::has(&wallets::active_id()) {
-                confirm_afresh(&format!("turn the Hyperliquid trading key on for 7 days: orders without {PRESENCE}, and it can't withdraw money"))?;
+                confirm_afresh(&format!("turn the Hyperliquid trading key on for {}: buys up to ${} an order without {PRESENCE}, it can't withdraw money",
+                                        agent_days_text(), limits::current().agent_order))?;
                 vault::end_session();
                 renew_agent(&agent_renewed_key());
             }
@@ -151,12 +231,12 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         }
 
         R::CreateWallet { require_presence } => {
-            // Without Windows Hello it can only be a test wallet: a phrase made here and now.
-            let phrase = mnemonic::generate(None);
+            // Without Windows Hello it can only be a test wallet: a phrase made here and now, wiped once sent (host.rs).
+            let phrase = Zeroizing::new(mnemonic::generate(None));
             confirm_in_person(&if require_presence { "add a new wallet to ihatecrypto and sign with it".to_string() }
                               else { format!("add a TEST wallet that signs WITHOUT {PRESENCE} — keep only a few dollars on it") })?;
             let mut r = store(&phrase, "", require_presence, !require_presence, false)?;
-            r.phrase = Some(phrase);
+            r.phrase = Some(phrase.to_string());
             Ok(r)
         }
 
@@ -180,11 +260,20 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
                 | R::SignNearIntentDeposit { .. } | R::SignNearTransfer { .. } | R::RelayOrder { .. } => {}
                 _ => return fail("The automation wallet signs only a task's moves."),
             }
-            wallets::as_wallet(wallet, || handle(*request))
+            wallets::as_wallet(wallet, || {
+                // Its dollars counted by the signer, against the person's day and week (automation::spend): taken now,
+                // given back when the move isn't signed.
+                let held = automation::spend(&request)?;
+                let reply = handle(*request)?;
+                if reply.ok { held.keep() }
+                Ok(reply)
+            })
         }
 
         R::ImportMnemonic { phrase, passphrase, require_presence } => {
-            mnemonic::validate(&phrase)?; // a mistyped phrase fails before any prompt
+            // Wiped once the seed is made.
+            let (phrase, passphrase) = (Zeroizing::new(phrase), Zeroizing::new(passphrase));
+            drop(Zeroizing::new(mnemonic::validate(&phrase)?)); // a mistyped phrase fails before any prompt
             confirm_in_person("add a wallet from a recovery phrase to ihatecrypto and sign with it")?;
             store(&phrase, &passphrase, require_presence, false, false)
         }
@@ -255,6 +344,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::RenameWallet { id, label } => {
             let name = label.trim().to_string();
             if name.is_empty() || name.chars().count() > 32 { return fail("A wallet's name is 1 to 32 characters.") }
+            // No line breaks or invisible characters: a name shows on Windows Hello prompts beside the addresses.
+            if let Some(p) = address_check::label_problem(&name) { return fail(p) }
             let mut list = wallets::all();
             let Some(w) = list.iter_mut().find(|w| w.id == id) else { return fail("No such wallet.") };
             w.label = name;
@@ -290,16 +381,19 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
         R::SetLedgerAgentActive { owner, active: on } => {
             let id = ledger_agent_id(&owner)?;
             if !agents::has(&id) { return fail("This Ledger has no trading key yet: approve one on the Ledger first.") }
+            // Back on after a lock is the person's decision, as for a wallet's own key. The first time too: that the Ledger
+            // approved this key is only the engine's word (the 2026-11-08 review). A refusal turns nothing on.
             let state = prefs::string(&format!("agentActive-{id}"));
             let renewed = format!("agentRenewed-{id}");
-            if on && state.is_none() { renew_agent(&renewed) } // just approved on the Ledger itself, in person
-            if on && (state.as_deref() == Some("paused") || (state.as_deref() == Some("on") && !agent_fresh(&renewed))) {
-                vault::confirm(&format!("turn the Hyperliquid trading key of your Ledger {owner} on for 7 days"), None)?;
+            if on && (state.is_none() || state.as_deref() == Some("paused") || (state.as_deref() == Some("on") && !agent_fresh(&renewed))) {
+                vault::confirm(&format!("turn the Hyperliquid trading key of your Ledger {owner} on for {}: buys up to ${} an order without {PRESENCE}",
+                                        agent_days_text(), limits::current().agent_order), None)?;
                 renew_agent(&renewed);
-                vault::end_session();
+                vault::end_session(); // a confirmation, not a move: it leaves no session for an unrelated signature
             }
             prefs::set(&format!("agentActive-{id}"), Some(Pref::String(if on { "on" } else { "paused" }.into())));
-            Ok(SignerReply { agent_active: Some(on), ..reply() })
+            // As kept, not as asked: a change the signer couldn't seal isn't reported as made.
+            Ok(SignerReply { agent_active: Some(prefs::string(&format!("agentActive-{id}")).as_deref() == Some("on")), ..reply() })
         }
 
         R::SignLedgerAgentL1 { owner, action: act, nonce } => {
@@ -314,12 +408,19 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
                 return fail("The Ledger's trading key is off: approve it on the Ledger, or turn it back on.");
             };
             if !agent_fresh(&format!("agentRenewed-{id}")) && !action::only_reduces(&act) {
-                return fail(format!("The Ledger's trading key opens positions for 7 days after {PRESENCE} and those are over. Stops and closes still go. \
-                                     Turn it off and on in Settings › Wallet › Hyperliquid to go on."));
+                return fail(format!("The Ledger's trading key opens positions for {} after {PRESENCE} and those are over, stops and closes still go. \
+                                     Turn it off and on in Settings › Wallet › Hyperliquid to go on.", agent_days_text()));
             }
             let verdict = hl::check(&act, &owner, &HashSet::new(), None);
             if !verdict.ok() { return Ok(refused(verdict)) }
-            Ok(SignerReply { signature: Some(hls::sign_l1(&act, &agent, None, nonce, None, true)?), checks: verdict.checks, ..reply() })
+            // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
+            let held = match agent_take(&action::opening(&act)) {
+                Ok(held) => held,
+                Err(why) => return Ok(refused(problem(&format!("The Ledger's trading key: {why}. {LEDGER_DEVICE}")))),
+            };
+            let signature = hls::sign_l1(&act, &agent, None, nonce, None, true)?;
+            if let Some(h) = held { h.keep() }
+            Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() })
         }
 
         R::Lock {} => {
@@ -338,6 +439,18 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             prefs::set("sessionLength", Some(Pref::Int(seconds)));
             vault::end_session();
             Ok(SignerReply { session_length: Some(seconds), ..reply() })
+        }
+
+        R::SetLimits { limits: wanted } => {
+            if let Some(p) = wanted.problem() { return fail(p) }
+            let looser = wanted.looser(&limits::current());
+            // In person even with no wallet yet: limits set silently then would hold for every wallet added later.
+            if !looser.is_empty() && !holds_public_test_wallet() {
+                vault::confirm(&format!("loosen your limits:\n{}", looser.join("\n")), None)?;
+                vault::end_session(); // a confirmation, not a move: it leaves no session for an unrelated signature
+            }
+            limits::save(&wanted);
+            Ok(SignerReply { limits: Some(limits::current()), ..reply() })
         }
 
         R::EndSession {} => {
@@ -412,7 +525,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
 
         R::Forget {} => {
             let Some(wallet) = wallets::active() else { return Ok(reply()) };
-            confirm_in_person(&format!("remove the wallet «{}» from ihatecrypto", wallet.label))?;
+            // Its addresses on the prompt, not only its name: the engine can rename a wallet without asking (the 2026-11-08 review).
+            confirm_in_person(&format!("remove the wallet «{}» from ihatecrypto\n{}", wallet.label, addresses(&wallet)))?;
             remove(&wallet);
             Ok(reply())
         }
@@ -542,7 +656,7 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
                 programs.entry(p.clone()).or_insert_with(|| format!("program {}… (approved by you)", &p[..6.min(p.len())]));
             }
             let policy = sol::Policy { recipients: recipients.iter().cloned().collect(), programs, trust_lookup_tables: false, sponsor: sponsor.clone(),
-                                       ..sol::Policy::new(&owner) };
+                                       max_slippage_bps: limits::current().slippage_bps, ..sol::Policy::new(&owner) };
             let verdict = sol::check(&message, &accounts, &policy, &verified_owners(&token_owners, &accounts));
             if !verdict.ok() { return Ok(refused(verdict)) }
             let relay_payees: Vec<String> = sol::relay_deposit_ids(&message).iter().map(|id| relay_orders::require(id).map(|o| o.recipient)).collect::<Result<_>>()?;
@@ -557,6 +671,12 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             approve(&[recipients, payee, relay_payees].concat(), false, &doing)?;
             // A program not on the list runs with this wallet's authority: every such transaction asks in person afresh.
             if !extra.is_empty() { confirm_afresh(&format!("{doing}\nit can move anything in this wallet: sign only if you trust this site"))? }
+            // A swap a person signs gets a prompt of its own, whatever session is open: its rate is theirs to judge (the
+            // automation wallet's swaps are held to its dollars instead). Past the person's limits (slippage, a site's
+            // fee): in person afresh, even for the automation wallet.
+            if !verdict.ask_afresh.is_empty() || (verdict.swaps && wallets::signing().is_none()) {
+                confirm_afresh(&std::iter::once(doing.clone()).chain(verdict.ask_afresh.iter().cloned()).collect::<Vec<_>>().join("\n"))?;
+            }
             let signed = with_key("solana", &doing, |k| Ok(solana::sign(&wire, k, sponsor_key.as_deref())?.1))?;
             Ok(SignerReply { signed_wire: Some(signed), checks: verdict.checks, ..reply() })
         }
@@ -618,37 +738,48 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
             let verdict = hl::check(&act, &address("evm")?, &HashSet::new(), None);
             if !verdict.ok() { return Ok(refused(verdict)) }
             // Orders, cancels and leverage go through the agent when it is active: it cannot move money out, so no
-            // prompt. Past its week it still cancels and reduces; what opens or adds takes the main key in person.
+            // prompt. Past its days it still cancels and reduces; what opens or adds takes the main key in person.
             let id = wallets::active_id();
             let agent_on = hls::is_trading(&act) && prefs::bool(&agent_active_key());
             let reduces = action::only_reduces(&act);
             // Windows keeps the key under Windows Hello, opened once a run: an order that opens or adds comes from a card
             // just confirmed, so it may ask at once.
             if agent_on && !reduces { agents::ask_again() }
-            let fresh = agent_fresh(&agent_renewed_key());
-            if agent_on && (fresh || reduces) {
-                if let Some(agent) = agents::load(&id) {
-                    return Ok(SignerReply { signature: Some(hls::sign_l1(&act, &agent, None, nonce, None, mainnet)?), checks: verdict.checks, ..reply() });
+            let fresh = agent_fresh(&agent_renewed_key()) || reduces;
+            // Within the person's limits (Settings): an opening buy up to its price × size, under one order's and the day's
+            // dollars. An opening sell or TWAP, or more, takes the main key in person (the 2026-11-08 review).
+            // Taken from the day in the same step as the check, before signing; given back if it isn't signed.
+            let mut over = None;
+            if agent_on && fresh && agents::has(&id) {
+                match agent_take(&action::opening(&act)) {
+                    Err(why) => over = Some(why),
+                    Ok(held) => {
+                        // A key that's there but wasn't opened: refused, never handed to the main key.
+                        let Some(agent) = agents::load(&id) else { return fail(agents::unopened()) };
+                        let signature = hls::sign_l1(&act, &agent, None, nonce, None, mainnet)?;
+                        if let Some(h) = held { h.keep() }
+                        return Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() });
+                    }
                 }
-                // A key that's there but wasn't opened: refused, never handed to the main key.
-                if agents::has(&id) { return fail(agents::unopened()) }
             }
-            let stale = agent_on && agents::has(&id);
+            let key_on = agent_on && agents::has(&id);
+            let stale = key_on && !fresh;
             let kind = action::kind(&act).unwrap_or("");
             // A TWAP buys on for hours: started only with a trading key on, the one thing that can stop it unattended.
-            if kind == "twapOrder" && !stale {
+            if kind == "twapOrder" && !key_on {
                 return Ok(refused(problem("A TWAP needs the Hyperliquid trading key on: locked or off, nothing could stop it unattended.")));
             }
             let what = match kind {
-                "setReferrer" => "use ihatecrypto's referral code on Hyperliquid: 4% off its fees",
-                "vaultTransfer" => "move money between your Hyperliquid account and a vault",
-                _ if stale => "sign a Hyperliquid order: the trading key's 7 days are over, and this renews them",
-                _ => "sign a Hyperliquid order",
+                "setReferrer" => "use ihatecrypto's referral code on Hyperliquid: 4% off its fees".to_string(),
+                "vaultTransfer" => "move money between your Hyperliquid account and a vault".into(),
+                _ if stale => format!("sign a Hyperliquid order: the trading key's {} are over, and this renews them", agent_days_text()),
+                _ => over.as_ref().map_or("sign a Hyperliquid order".into(), |why| format!("sign a Hyperliquid order: {why}")),
             };
-            // Renewing the trading key's week, and a vault deposit (money locked for days), ask in person afresh.
+            // Renewing the trading key's days, an order past its limits, and a vault deposit (money locked for days), ask
+            // in person afresh.
             let deposit = kind == "vaultTransfer" && act.get("isDeposit") == Some(&MsgPack::Bool(true));
-            if stale || deposit { confirm_afresh(&prompt(what, &verdict))? }
-            let signature = with_key("evm", &prompt(what, &verdict), |k| hls::sign_l1(&act, k, None, nonce, None, mainnet))?;
+            if stale || over.is_some() || deposit { confirm_afresh(&prompt(&what, &verdict))? }
+            let signature = with_key("evm", &prompt(&what, &verdict), |k| hls::sign_l1(&act, k, None, nonce, None, mainnet))?;
             if stale { renew_agent(&agent_renewed_key()) }
             Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() })
         }
@@ -869,7 +1000,8 @@ fn ledger_agent_id(owner: &str) -> Result<String> {
 
 /// A wallet's addresses for a prompt: its name is the engine's to set, its addresses are not.
 fn addresses(w: &SignerWallet) -> String {
-    [w.solana.as_ref().map(|a| format!("Solana {a}")), w.evm.as_ref().map(|a| format!("EVM {a}"))].into_iter().flatten().collect::<Vec<_>>().join("\n")
+    [w.solana.as_ref().map(|a| format!("Solana {a}")), w.evm.as_ref().map(|a| format!("EVM {a}")), w.near.as_ref().map(|a| format!("NEAR {a}"))]
+        .into_iter().flatten().collect::<Vec<_>>().join("\n")
 }
 
 /// The active wallet's key for one chain («solana», «evm», «near»), after Windows Hello or within its session: derived
@@ -948,7 +1080,7 @@ fn test_wallet_signing() -> bool {
 
 /// An act that asks in person afresh, whatever session is open. A test wallet asks nothing; the automation wallet's
 /// prompt closes by itself after a minute.
-fn confirm_afresh(reason: &str) -> Result<()> {
+pub(crate) fn confirm_afresh(reason: &str) -> Result<()> {
     if holds_public_test_wallet() || test_wallet_signing() { return Ok(()) }
     vault::confirm(reason, if wallets::signing().is_none() { None } else { Some(60) })
 }
@@ -1029,7 +1161,7 @@ fn prompt(what: &str, verdict: &Verdict) -> String {
 
 /// Keeps only claims the signer can prove: the account is the associated token account of that owner for one of the
 /// transaction's own accounts as the mint. A made-up "this is your account" is dropped.
-fn verified_owners(claimed: &BTreeMap<String, String>, mints: &[String]) -> HashMap<String, String> {
+pub(crate) fn verified_owners(claimed: &BTreeMap<String, String>, mints: &[String]) -> HashMap<String, String> {
     claimed.iter().filter(|(account, owner)| {
         mints.iter().any(|mint| [spl::TOKEN_PROGRAM, spl::TOKEN_2022_PROGRAM].iter().any(|p| spl::associated_account(owner, mint, p).is_ok_and(|a| &a == *account)))
     }).map(|(a, o)| (a.clone(), o.clone())).collect()

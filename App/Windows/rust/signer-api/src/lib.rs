@@ -116,6 +116,9 @@ pub enum SignerRequest {
     Lock {},
     /// One of `session::CHOICES`, in seconds; a longer time asks the person first.
     SetSessionLength { seconds: i64 },
+    /// The person's own limits (Settings): what the trading key and the automation wallet may do without Windows Hello,
+    /// and the slippage a swap may carry without a new prompt. A looser one than now asks for Windows Hello first.
+    SetLimits { limits: SignerLimits },
     /// Ends the session only (the screen locked, the computer slept).
     EndSession {},
     /// Sells native NEAR through 1Click: the signer builds the one wrap.near transaction itself. Reply: signedRaw.
@@ -273,6 +276,76 @@ pub mod session {
     pub const STANDARD: i64 = 60;
 }
 
+/// What the person's presence is called in texts.
+pub const PRESENCE: &str = "Windows Hello";
+
+/// How a Ledger trading key's refusal ends when the action needs the device instead (a short, an order past the person's
+/// limits): the engine then has the Ledger sign it (`SignerLedger.device`).
+pub const LEDGER_DEVICE: &str = "Sign this one on the Ledger.";
+
+/// What signs without the person, set by them in Settings and kept by the signer: lowering one is immediate, raising
+/// one asks for Windows Hello. Dollars are whole dollars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignerLimits {
+    /// One opening order the trading key signs, at its own price × size.
+    pub agent_order: i64,
+    /// The trading key's opening orders in any 24 hours.
+    pub agent_day: i64,
+    /// Days the trading key opens positions after the person's last Windows Hello for it.
+    pub agent_days: i64,
+    /// Dollars that leave the automation wallet in any 24 hours, and in any 7 days.
+    pub automation_day: i64,
+    pub automation_week: i64,
+    /// The slippage a swap may allow before it asks for Windows Hello afresh, in basis points.
+    pub slippage_bps: i64,
+}
+
+impl SignerLimits {
+    pub const STANDARD: SignerLimits = SignerLimits { agent_order: 1000, agent_day: 5000, agent_days: 2, automation_day: 100, automation_week: 500, slippage_bps: 300 };
+    pub const MAX_AGENT_DAYS: i64 = 7;
+
+    /// Why these can't be limits, or None.
+    pub fn problem(&self) -> Option<String> {
+        if [self.agent_order, self.agent_day, self.automation_day, self.automation_week].iter().any(|&d| !(1..=10_000_000).contains(&d)) {
+            return Some("A limit is $1 to $10,000,000.".into());
+        }
+        if self.agent_day < self.agent_order { return Some("The trading key's day can't be less than one order.".into()) }
+        if self.automation_week < self.automation_day { return Some("The automation wallet's week can't be less than its day.".into()) }
+        if !(1..=Self::MAX_AGENT_DAYS).contains(&self.agent_days) {
+            return Some(format!("The trading key works 1 to {} days after {PRESENCE}.", Self::MAX_AGENT_DAYS));
+        }
+        if !(1..=5000).contains(&self.slippage_bps) { return Some("Slippage is 0.01% to 50%.".into()) }
+        None
+    }
+
+    /// The lines of `self` that are looser than `old`, in words for a Windows Hello prompt.
+    pub fn looser(&self, old: &SignerLimits) -> Vec<String> {
+        let mut lines = vec![];
+        if self.agent_order > old.agent_order { lines.push(format!("one trading-key order up to ${} (was ${})", self.agent_order, old.agent_order)) }
+        if self.agent_day > old.agent_day { lines.push(format!("trading-key orders up to ${} a day (was ${})", self.agent_day, old.agent_day)) }
+        if self.agent_days > old.agent_days {
+            lines.push(format!("the trading key works {} days after {PRESENCE} (was {})", self.agent_days, old.agent_days));
+        }
+        if self.automation_day > old.automation_day {
+            lines.push(format!("the automation wallet spends up to ${} a day (was ${})", self.automation_day, old.automation_day));
+        }
+        if self.automation_week > old.automation_week {
+            lines.push(format!("the automation wallet spends up to ${} a week (was ${})", self.automation_week, old.automation_week));
+        }
+        if self.slippage_bps > old.slippage_bps {
+            lines.push(format!("swaps allow up to {} slippage without a new prompt (was {})", Self::percent(self.slippage_bps), Self::percent(old.slippage_bps)));
+        }
+        lines
+    }
+
+    /// 300 → «3%», 50 → «0.5%».
+    pub fn percent(bps: i64) -> String {
+        let (whole, part) = (bps / 100, bps % 100);
+        if part == 0 { format!("{whole}%") } else { format!("{whole}.{}%", format!("{part:02}").trim_end_matches('0')) }
+    }
+}
+
 /// The signer's answer. Every optional is left out when None; `checks` and `problems` are always there (Swift's
 /// decoder requires them).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -317,6 +390,9 @@ pub struct SignerReply {
     /// Seconds one confirmation keeps signing open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_length: Option<i64>,
+    /// The person's limits (`Status`, `SetLimits`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<SignerLimits>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<MsgPack>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -68,7 +68,7 @@ async fn no_signer_is_said_and_a_second_wallet_waits_for_the_first_words() {
         let e = engine();
         e.start_signer().await;
         assert_eq!(e.st().signer_error.as_deref(), Some("The signer isn't installed next to the engine: reinstall ihatecrypto."));
-        e.st_mut().phrase = Some(vec!["word".into(); 12]);
+        e.st_mut().phrase = Some(zeroize::Zeroizing::new(vec!["word".into(); 12]));
         let refused = e.create_wallet(true).await.unwrap_err();
         assert_eq!(refused.0, "A new wallet is being made: write its words down first.");
         assert!(!e.st().creating_wallet && e.st().signing == 0);

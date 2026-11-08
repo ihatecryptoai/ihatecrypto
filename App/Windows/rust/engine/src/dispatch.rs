@@ -143,6 +143,11 @@ impl Engine {
             "sessionLength" => {
                 boxed(|| self.signer_call(SignerRequest::SetSessionLength { seconds: r.seconds.unwrap_or(session::STANDARD) })).await?;
             }
+            // Settings › Wallet › Limits: the signer keeps them, and a raised one asks Windows Hello there.
+            "limits" => {
+                let Some(limits) = r.limits else { return Err(WalletError("No limits were sent.".into())) };
+                boxed(|| self.signer_call(SignerRequest::SetLimits { limits })).await?;
+            }
             "saveAddress" => boxed(|| self.save_address(self.address_of(r))).await?,
             "removeAddress" => boxed(|| self.delete_address(name, network)).await?,
             "removeAlert" => {

@@ -26,9 +26,10 @@ use ihatecrypto_core::skills::Skill;
 use llm::usage::ModelFacts;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use signer_api::{SignerAddress, SignerReply, SignerWallet};
+use signer_api::{SignerAddress, SignerLimits, SignerReply, SignerWallet};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use zeroize::Zeroizing;
 use trade::executor::{Order, Position, Prepared};
 use trade::stocks;
 
@@ -292,8 +293,8 @@ pub struct State {
     pub signer_error: Option<String>,
     pub book: Vec<SignerAddress>,
     pub signing: i64,
-    /// Shown once, right after a new wallet was made, until the person says they wrote it down.
-    pub phrase: Option<Vec<String>>,
+    /// Shown once, right after a new wallet was made, until the person says they checked it; wiped when dropped.
+    pub phrase: Option<Zeroizing<Vec<String>>>,
 
     // Markets and balances
     pub markets: HashMap<String, Market>,
@@ -883,6 +884,8 @@ pub struct Request {
     pub value: Option<f64>,
     /// A site's request approved with these ticks (`siteAnswer`, consent.rs).
     pub ticks: Option<Vec<String>>,
+    /// Settings › Wallet › Limits as the person set them (`limits`).
+    pub limits: Option<SignerLimits>,
 }
 
 impl Request {
