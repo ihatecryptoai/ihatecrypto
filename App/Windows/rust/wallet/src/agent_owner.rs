@@ -153,26 +153,13 @@ pub fn policy(json: &[u8], owner: &str, own: &HashSet<String>, known: &HashSet<S
                if p.get("frozen") == Some(&Value::Bool(true)) { ", frozen" } else { "" }))
 }
 
-/// A delegate that stores a policy carries the policy's hash (`agent_policy_hash`): it's signed only with the rules
-/// the signer checked (`policy`), and only when that hash is theirs — so rules the owner never saw can't ride along
-/// under a harmless preview. Hex (any case, «0x» or «sha256:» before it) or base64 of the digest.
-pub fn policy_bound(actions: &[Action], policy: Option<&[u8]>) -> Result<()> {
-    let stores: Vec<&Vec<u8>> = actions.iter().filter_map(|a| match a {
-        Action::FunctionCall { method, args, .. } if method == "store_wallet_policy" => Some(args),
-        _ => None,
-    }).collect();
-    if stores.is_empty() { return Ok(()) }
-    let Some(policy) = policy else { return fail("The rules this call stores weren't shown to the signer: not signed.") };
-    let Some(hash) = policy_hash(policy) else { return fail("The rules can't be read: not signed.") };
-    let digest = Sha256::digest(serde_json::from_slice::<Value>(policy).map(|v| v.to_string()).unwrap_or_default().as_bytes());
-    for args in stores {
-        let named = serde_json::from_slice::<Value>(args).ok().and_then(|v| v.get("agent_policy_hash").and_then(Value::as_str).map(str::to_string));
-        let Some(named) = named else { return fail("The call stores rules without naming their hash: not signed.") };
-        let bare = named.trim_start_matches("sha256:").trim_start_matches("0x");
-        if !(bare.eq_ignore_ascii_case(&hash) || bare == STANDARD.encode(digest)) {
-            return fail("The call stores other rules than the ones shown: not signed.");
-        }
-    }
+/// A call that stores rules is signed only beside the rules the signer checked (`policy`): the hash it carries
+/// (`agent_policy_hash`) is the custody's own — a live agent_create (2026-11-03) carried 2021a689… for rules the API
+/// hashed cd7ca4a9… — so it can't be recomputed here (`AgentOwner.rulesShown`). The app binds the API's preview hash
+/// before and the applied hash after.
+pub fn rules_shown(actions: &[Action], policy: Option<&[u8]>) -> Result<()> {
+    let stores = actions.iter().any(|a| matches!(a, Action::FunctionCall { method, .. } if method == "store_wallet_policy"));
+    if stores && policy.is_none() { return fail("The rules this call stores weren't shown to the signer: not signed.") }
     Ok(())
 }
 
@@ -348,24 +335,16 @@ mod tests {
 mod bound {
     use super::*;
 
-    fn store(hash: &str) -> Vec<Action> {
-        vec![Action::FunctionCall { method: "store_wallet_policy".into(), args: format!(r#"{{"wallet_pubkey":"ed25519:00","agent_policy_hash":"{hash}"}}"#).into_bytes(),
-                                    gas: 1, deposit: 0 }]
+    fn call(method: &str) -> Action {
+        // The custody's own hash, as a live agent_create carried it: unrelated to the rules' sha256.
+        Action::FunctionCall { method: method.into(), args: br#"{"agent_policy_hash":"2021a6891e3ac1b50e111434f26419f981dab0ccef94b3d24977c495d8d3f112"}"#.to_vec(), gas: 1, deposit: 0 }
     }
 
-    /// Rules ride on a delegate only with their own hash, in any of the ways a digest is written.
+    /// Rules are stored only beside the rules the signer checked, whatever hash the custody names them by.
     #[test]
-    fn stored_rules_are_the_ones_shown() {
-        let policy = br#"{"budget":{"daily_usd":"20"},"frozen":false}"#;
-        let hash = policy_hash(policy).unwrap();
-        let b64 = STANDARD.encode(Sha256::digest(serde_json::from_slice::<Value>(policy).unwrap().to_string().as_bytes()));
-        for named in [hash.clone(), hash.to_uppercase(), format!("0x{hash}"), format!("sha256:{hash}"), b64] {
-            assert!(policy_bound(&store(&named), Some(policy)).is_ok(), "{named}");
-        }
-        assert!(policy_bound(&store(&"0".repeat(64)), Some(policy)).is_err());
-        assert!(policy_bound(&store(&hash), None).is_err());
-        assert!(policy_bound(&[Action::FunctionCall { method: "store_wallet_policy".into(), args: b"{}".to_vec(), gas: 1, deposit: 0 }], Some(policy)).is_err());
-        // A call that stores no rules needs none.
-        assert!(policy_bound(&[Action::FunctionCall { method: "freeze_wallet".into(), args: b"{}".to_vec(), gas: 1, deposit: 0 }], None).is_ok());
+    fn stored_rules_were_shown() {
+        assert!(rules_shown(&[call("store_wallet_policy")], Some(br#"{"frozen":true}"#)).is_ok());
+        assert!(rules_shown(&[call("store_wallet_policy"), call("freeze_wallet")], None).is_err());
+        assert!(rules_shown(&[call("freeze_wallet")], None).is_ok());
     }
 }

@@ -392,8 +392,8 @@ pub fn handle(request: SignerRequest) -> Result<SignerReply> {
 
         R::SignAgentDelegate { payload, nonce, max_block_height, policy } => {
             let d = agent_owner::delegate(&payload, &agent_owner::METHODS)?;
-            // The rules it stores are the ones checked below, by their hash in the call itself.
-            agent_owner::policy_bound(&d.actions, policy.as_deref())?;
+            // Rules are stored only beside the ones checked below (their hash in the call is the custody's own).
+            agent_owner::rules_shown(&d.actions, policy.as_deref())?;
             // The rules in words from the signer's own reading: only addresses it knows, the owner being this wallet.
             let rules = match &policy {
                 Some(json) => {

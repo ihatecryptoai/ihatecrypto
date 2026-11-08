@@ -68,6 +68,11 @@ import EVMChain
     // A key written twice reads one way here and another way on the server: refused.
     let twice = Data(String(decoding: create, as: UTF8.self).replacingOccurrences(of: #""mode":"only""#, with: #""mode":"only","mode":"any""#).utf8)
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.delegate(twice, allowed: ["create_wallet"]) }
+    // Rules are stored only beside the rules the signer checked, under the custody's own hash.
+    let store = NearTransaction.Action.functionCall(method: "store_wallet_policy", args: Data(#"{"agent_policy_hash":"2021a689"}"#.utf8), gas: 1, deposit: 0)
+    #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.rulesShown([store], policy: nil) }
+    try AgentOwner.rulesShown([store], policy: Data(#"{"frozen":true}"#.utf8))
+    try AgentOwner.rulesShown([.functionCall(method: "freeze_wallet", args: Data("{}".utf8), gas: 1, deposit: 0)], policy: nil)
     // A grant for longer than a month isn't signed.
     let far = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60 * 86400))
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.message(payload(#"{"type":"grant_issue","agent_id":"a","expires_at":"\#(far)"}"#)) }
