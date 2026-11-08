@@ -151,11 +151,9 @@ pub fn opened(master: &Key) {
     *RUN.lock().expect("run") = Some(key.clone());
     let _taking = taking();
     let Ok(_file) = file_lock() else { return };
-    if vault::exists(LOG) { return }
     let anchored = prefs::bool(ANCHOR);
-    if write(&key, &if anchored { Log::spent() } else { Log::default() }).is_ok() && !anchored {
-        prefs::set(ANCHOR, Some(Pref::Bool(true)));
-    }
+    if !vault::exists(LOG) && write(&key, &if anchored { Log::spent() } else { Log::default() }).is_err() { return }
+    if !anchored { prefs::set(ANCHOR, Some(Pref::Bool(true))) }
 }
 
 /// For tests: forget the run's key and what it read, as a new signer process would.
