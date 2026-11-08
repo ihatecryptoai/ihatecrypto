@@ -103,6 +103,15 @@ public enum AgentOwner {
         return Delegate(receiver: receiver, actions: actions, doing: words.joined(separator: ", then "))
     }
 
+    /// A call that stores rules is signed only beside the rules the signer checked (`policy`): the hash it carries
+    /// (`agent_policy_hash`) is the custody's own — a live agent_create (2026-11-03) carried 2021a689… for rules the API
+    /// hashed cd7ca4a9… — so it can't be recomputed here. The app binds the API's preview hash before and the applied
+    /// hash after.
+    public static func rulesShown(_ actions: [NearTransaction.Action], policy: Data?) throws {
+        let stores = actions.contains { if case .functionCall("store_wallet_policy", _, _, _) = $0 { true } else { false } }
+        if stores && policy == nil { throw NearOwnerSigning.Problem("The rules this call stores weren't shown to the signer: not signed.") }
+    }
+
     /// yoctoNEAR as NEAR, to 5 decimals.
     static func near(_ yocto: UInt128) -> String {
         let micro = yocto / 10_000_000_000_000_000_000   // 1e19: hundred-thousandths of a NEAR
@@ -120,8 +129,6 @@ public enum AgentOwner {
     /// hash): money leaves only for addresses the signer itself knows — this wallet's own (`own`), ones confirmed in
     /// person (`known`) — or the owner's NEAR account; no native signing routes; nothing frozen-looking hides a change.
     /// Returns the policy in words for the prompt.
-    // ponytail: the delegate's args carry the policy's hash (docs); binding this policy to that hash waits for the
-    // scheme seen in a live generate-intent — until then `methods` is empty and no delegate is signed at all.
     public static func policy(_ json: Data, owner: String, own: Set<String>, known: Set<String>) throws -> String {
         _ = try NearOwnerSigning.stringify(json)   // a key written twice
         guard let p = try JSONSerialization.jsonObject(with: json) as? [String: Any] else { throw NearOwnerSigning.Problem("Not a policy.") }

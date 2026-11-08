@@ -380,6 +380,7 @@ enum Signer {
 
         case .signAgentDelegate(let payload, let nonce, let maxBlockHeight, let policy):
             let d = try AgentOwner.delegate(payload)
+            try AgentOwner.rulesShown(d.actions, policy: policy)
             // The rules in words from the signer's own reading: only addresses it knows, the owner being this wallet.
             let rules = try policy.map { json in
                 let owner = try address("near")
