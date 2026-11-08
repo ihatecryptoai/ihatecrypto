@@ -157,7 +157,7 @@ through v3.2's pair, whose deposit names an order the signer checks.
   address, and what the deposit address does after is the bridge's.
 - A Solana or EVM key is in the signer's memory while it signs. Copies inside the derivation and secp256k1 code can't
   be wiped from Swift.
-- Chats, canvases and settings are owner-only files in `~/Library/Application Support`, not encrypted.
+- Chats, canvases and settings are owner-only files in the app's sandbox container (`~/Library/Containers`), not encrypted.
 - A site's typed data is refused by kind and by its values (see the Guard). What passes (a login, a vote, a delegation
   with no amount) is shown field by field, and the prompt says ihatecrypto can't tell what it allows.
 - On a Mac without Touch ID the passcode is typed into ihatecrypto's own window, not a macOS dialog; it signs moves to

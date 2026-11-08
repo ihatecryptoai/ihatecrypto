@@ -1,4 +1,5 @@
 import Foundation
+import HelperAPI
 import LLMCore
 
 /// Claude Pro/Max through the Claude Code the user already installed and signed in to, the way OpenClaw does it.
@@ -20,11 +21,15 @@ public struct ClaudeCodeSubscription: LLMProvider {
         )
     }
 
+    /// In the App Sandbox the app can't see `claude` or its login: the helper finds it, and runs it (`Helper`).
     public func existingLogin() -> Credential? {
+        (Helper.sandboxed ? Helper.locateClaude() : Self.locate()).map { .external(path: $0) }
+    }
+
+    /// The installed `claude`: the usual places, then PATH.
+    public static func locate() -> String? {
         let fromPATH = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { "\($0)/claude" }
-        let found = (Self.candidates.map { NSString(string: $0).expandingTildeInPath } + fromPATH)
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
-        return found.map { .external(path: $0) }
+        return (candidates.map { NSString(string: $0).expandingTildeInPath } + fromPATH).first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     public func client(_ credential: Credential?, save: @escaping SaveCredential) throws -> any LLMClient {
@@ -33,7 +38,7 @@ public struct ClaudeCodeSubscription: LLMProvider {
     }
 }
 
-struct ClaudeCodeClient: LLMClient {
+public struct ClaudeCodeClient: LLMClient {
     let path: String
 
     /// Headless, no tools, no MCP, no user settings or hooks, nothing saved to session history.
@@ -41,27 +46,39 @@ struct ClaudeCodeClient: LLMClient {
     /// The prompt goes through stdin so it is not visible in the process list.
     /// One JSON event a line, the answer's words as they come (stream-json with partial messages), the result last: only
     /// these events say whether usage credits paid for the answer, so a short request is asked the same way.
-    static func arguments(_ r: LLMRequest) -> [String] {
+    /// The helper builds the same from the values the sandboxed app sends (`Helper.askClaude`).
+    static func arguments(_ r: LLMRequest) -> [String] { arguments(model: r.model, system: r.system, thinking: r.thinking) }
+
+    /// A model's name and nothing else: the helper refuses any other value, which read as a flag
+    /// (`--dangerously-skip-permissions`) could turn tools on.
+    public static func isModelName(_ model: String) -> Bool { model.wholeMatch(of: /[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,99}/) != nil }
+
+    /// A system prompt that starts with «-» gets a space first, so it can only be read as the prompt.
+    public static func arguments(model: String, system: String, thinking: Bool) -> [String] {
         ["-p", "--restricted", "--strict-mcp-config", "--tools", "", "--no-session-persistence",
          "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
-        + ["--model", r.model,
-         "--system-prompt", r.system.isEmpty ? "You are an assistant. Answer briefly and to the point." : r.system]
-        + (r.thinking ? ["--effort", "high"] : [])
+        + ["--model", model,
+         "--system-prompt", system.isEmpty ? "You are an assistant. Answer briefly and to the point." : system.hasPrefix("-") ? " " + system : system]
+        + (thinking ? ["--effort", "high"] : [])
     }
 
-    func complete(_ r: LLMRequest) async throws -> String {
+    public func complete(_ r: LLMRequest) async throws -> String {
         try await stream(r) { _ in }
     }
 
-    /// The same answer, its words told to `partial` as Claude Code writes them (text_delta events).
-    func stream(_ r: LLMRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
+    /// The same answer, its words told to `partial` as Claude Code writes them (text_delta events). A sandboxed app has
+    /// the helper run it.
+    public func stream(_ r: LLMRequest, partial: @escaping @Sendable (String) -> Void) async throws -> String {
         let prompt = r.dialogue.map(\.text).joined(separator: "\n\n"), text = Accumulator()
-        let output = try await Self.run(path, Self.arguments(r), input: prompt) { line in
+        let line: @Sendable (String) -> Void = { line in
             guard let j = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], j["type"] as? String == "stream_event",
                   let event = j["event"] as? [String: Any], event["type"] as? String == "content_block_delta",
                   let delta = event["delta"] as? [String: Any], delta["type"] as? String == "text_delta", let words = delta["text"] as? String else { return }
             partial(text.add(words))
         }
+        let output = try await Helper.sandboxed
+            ? Helper.askClaude(model: r.model, system: r.system, thinking: r.thinking, prompt: prompt, lines: line)
+            : Self.run(path, Self.arguments(r), input: prompt, lines: line)
         // The result is the last event; a run that wrote none (an old Claude Code) is read as one JSON answer.
         let lines = output.split(separator: 0x0a)
         func last(_ type: String) -> Data? {
@@ -109,8 +126,8 @@ struct ClaudeCodeClient: LLMClient {
     /// A `claude -p` that hangs (a login prompt, a stalled network) would keep the chat busy for good: it is stopped after
     /// two minutes, the ChatGPT client's limit, or as soon as the task waiting for it is cancelled.
     /// `lines`: each line of the output as it comes, besides the whole at the end.
-    static func run(_ path: String, _ arguments: [String], input: String, timeout: Duration = .seconds(120),
-                    lines: (@Sendable (String) -> Void)? = nil) async throws -> Data {
+    public static func run(_ path: String, _ arguments: [String], input: String, timeout: Duration = .seconds(120),
+                           lines: (@Sendable (String) -> Void)? = nil) async throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -121,6 +138,12 @@ struct ClaudeCodeClient: LLMClient {
         // A chat message never reinstalls Claude Code: while it reinstalls, every run fails («The file “claude” doesn't
         // exist», «unknown option '--restricted'») for a minute or two.
         env["DISABLE_AUTOUPDATER"] = "1"
+        // Claude Code finds its login in the Keychain by USER («Not logged in» without it) and its settings under HOME:
+        // set from the account if a launcher left them out.
+        if let me = getpwuid(getuid())?.pointee {
+            env["USER"] = env["USER"] ?? String(cString: me.pw_name)
+            env["HOME"] = env["HOME"] ?? String(cString: me.pw_dir)
+        }
         process.environment = env
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         process.standardInput = stdin
@@ -197,4 +220,40 @@ private final class Flag: @unchecked Sendable {
     private var on = false
     func set() { lock.withLock { on = true } }
     var value: Bool { lock.withLock { on } }
+}
+
+/// Claude Code itself, for the Claude-subscription option: Anthropic's own installer (claude.ai/install.sh, served from
+/// downloads.claude.ai; into ~/.local/bin, no admin rights), then its sign-in, which runs in a terminal. Checked 2026-10-06.
+/// A sandboxed app has the helper do both (`Helper.installClaude`, `Helper.signInClaude`).
+public enum ClaudeCodeInstaller {
+    public static func install(step: @escaping @Sendable (String) async -> Void = { _ in }) async throws {
+        await step("Downloading Claude Code's installer…")
+        let (script, response) = try await URLSession.shared.download(from: URL(string: "https://claude.ai/install.sh")!)
+        defer { try? FileManager.default.removeItem(at: script) }
+        // Only Anthropic's: the redirect must stay on claude.ai's hosts.
+        guard let host = response.url?.host, host == "claude.ai" || host.hasSuffix(".claude.ai") else {
+            throw LLMError("The installer didn't come from claude.ai — nothing was installed.")
+        }
+        await step("Installing Claude Code…")
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            let p = Process(), out = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = [script.path, "stable"]
+            p.standardOutput = out
+            p.standardError = out
+            p.terminationHandler = { p in
+                let said = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                if p.terminationStatus == 0 { done.resume() } else { done.resume(throwing: LLMError(said.split(separator: "\n").last.map(String.init) ?? "The installer failed.")) }
+            }
+            do { try p.run() } catch { done.resume(throwing: error) }
+        }
+    }
+
+    /// Opens Terminal on `claude auth login`: the browser sign-in Anthropic's CLI runs itself.
+    public static func signIn(_ path: String) throws {
+        let command = FileManager.default.temporaryDirectory.appending(path: "claude-sign-in.command")
+        try "#!/bin/zsh\n'\(path)' auth login\necho\necho 'Done — go back to ihatecrypto.'\n".write(to: command, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
+        try Process.run(URL(fileURLWithPath: "/usr/bin/open"), arguments: [command.path])
+    }
 }

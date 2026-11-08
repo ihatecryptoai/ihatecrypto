@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import HelperAPI
 import IhatecryptoCore
+import LLMClaudeCode
 import Security
 import SwiftUI
 import LLMCatalog
@@ -13,7 +15,7 @@ enum OllamaModels {
 
     /// Ollama's app, or its command-line server (Homebrew).
     static var installed: Bool {
-        ["/Applications/Ollama.app", NSHomeDirectory() + "/Applications/Ollama.app", "/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"].contains { FileManager.default.fileExists(atPath: $0) }
+        ["/Applications/Ollama.app", Helper.home.path + "/Applications/Ollama.app", "/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"].contains { FileManager.default.fileExists(atPath: $0) }
     }
 
     static var memoryGB: Double { Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824 }
@@ -45,7 +47,7 @@ enum OllamaModels {
         if OllamaInstaller.viaBrew, let brew = OllamaInstaller.brew {
             Task { try? await OllamaInstaller.run(brew, ["services", "start", "ollama"]) }
         } else {
-            let app = ["/Applications/Ollama.app", NSHomeDirectory() + "/Applications/Ollama.app"].first { FileManager.default.fileExists(atPath: $0) }
+            let app = ["/Applications/Ollama.app", Helper.home.path + "/Applications/Ollama.app"].first { FileManager.default.fileExists(atPath: $0) }
             if let app { NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app), configuration: .init()) }
         }
     }
@@ -92,7 +94,9 @@ enum OllamaModels {
 }
 
 /// Ollama itself, always to its newest release: Homebrew's copy through brew, otherwise the app from Ollama's GitHub
-/// release, checked to be signed by Ollama's developer ID and notarized by Apple before it replaces anything.
+/// release, checked to be signed by Ollama's developer ID and notarized by Apple before it replaces anything. A sandboxed
+/// copy can neither run brew nor write to Applications: it puts the checked app in Downloads and shows it in Finder, for
+/// the person to drag into Applications and open.
 enum OllamaInstaller {
     /// Ollama Inc.'s Developer ID team, read off the release's signature.
     static let teamID = "3MU9H2V9Y9"
@@ -108,14 +112,15 @@ enum OllamaInstaller {
 
     static func older(_ a: String, than b: String) -> Bool { a.compare(b, options: .numeric) == .orderedAscending }
 
-    /// Installs or updates Ollama and starts it; `step` says what it's doing.
-    static func install(step: @escaping @MainActor (String) -> Void) async throws {
-        if viaBrew, let brew {
+    /// Installs or updates Ollama and starts it; `step` says what it's doing. False: it's in Downloads, shown in Finder,
+    /// waiting to be dragged into Applications (the sandbox).
+    static func install(step: @escaping @MainActor (String) -> Void) async throws -> Bool {
+        if viaBrew, let brew, !Helper.sandboxed {
             await step("Updating Ollama with Homebrew…")
             try await run(brew, ["upgrade", "ollama"])
             await step("Starting Ollama…")
             try await run(brew, ["services", "restart", "ollama"])
-            return
+            return true
         }
         await step("Downloading Ollama (≈ 200 MB)…")
         let (zip, _) = try await URLSession.shared.download(from: URL(string: "https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip")!)
@@ -125,6 +130,13 @@ enum OllamaInstaller {
         let app = folder.appending(path: "Ollama.app")
         await step("Checking Ollama's signature…")
         try verify(app)
+        if Helper.sandboxed {
+            let target = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].resolvingSymlinksInPath().appending(path: "Ollama.app")
+            if FileManager.default.fileExists(atPath: target.path) { _ = try FileManager.default.replaceItemAt(target, withItemAt: app) }
+            else { try FileManager.default.moveItem(at: app, to: target) }
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+            return false
+        }
         // The running copy quits first: it can't be replaced while it runs.
         for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID(app) ?? "") { running.terminate() }
         try? await Task.sleep(for: .seconds(2))
@@ -136,6 +148,7 @@ enum OllamaInstaller {
         else { try FileManager.default.moveItem(at: app, to: target) }
         await step("Starting Ollama…")
         _ = try await NSWorkspace.shared.openApplication(at: target, configuration: .init())
+        return true
     }
 
     static func bundleID(_ app: URL) -> String? { Bundle(url: app)?.bundleIdentifier }
@@ -169,30 +182,6 @@ enum OllamaInstaller {
     }
 }
 
-/// Claude Code, for the Claude-subscription option: Anthropic's own installer (claude.ai/install.sh, served from
-/// downloads.claude.ai; into ~/.local/bin, no admin rights), then its sign-in, which runs in a terminal. Checked 2026-10-06.
-enum ClaudeCodeInstaller {
-    static func install(step: @escaping @MainActor (String) -> Void) async throws {
-        await step("Downloading Claude Code's installer…")
-        let (script, response) = try await URLSession.shared.download(from: URL(string: "https://claude.ai/install.sh")!)
-        defer { try? FileManager.default.removeItem(at: script) }
-        // Only Anthropic's: the redirect must stay on claude.ai's hosts.
-        guard let host = response.url?.host, host == "claude.ai" || host.hasSuffix(".claude.ai") else {
-            throw LLMError("The installer didn't come from claude.ai — nothing was installed.")
-        }
-        await step("Installing Claude Code…")
-        try await OllamaInstaller.run("/bin/bash", [script.path, "stable"])
-    }
-
-    /// Opens Terminal on `claude auth login`: the browser sign-in Anthropic's CLI runs itself.
-    static func signIn(_ path: String) throws {
-        let command = FileManager.default.temporaryDirectory.appending(path: "claude-sign-in.command")
-        try "#!/bin/zsh\n'\(path)' auth login\necho\necho 'Done — go back to ihatecrypto.'\n".write(to: command, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
-        NSWorkspace.shared.open(command)
-    }
-}
-
 extension Workspace {
     /// Installs Claude Code for the Claude-subscription option, then connects to it; the chat says how it went.
     func installClaudeCode() async {
@@ -200,12 +189,26 @@ extension Workspace {
         claudeCodeInstall = "…"
         defer { claudeCodeInstall = nil }
         do {
-            try await ClaudeCodeInstaller.install { [weak self] text in self?.claudeCodeInstall = text }
+            if Helper.sandboxed {
+                claudeCodeInstall = "Installing Claude Code…"
+                try await Helper.installClaude()
+            } else {
+                try await ClaudeCodeInstaller.install { [weak self] text in await MainActor.run { self?.claudeCodeInstall = text } }
+            }
             if provider("claude-code").existingLogin() != nil { useExistingLogin("claude-code") }
             reply(say("Claude Code is installed. Sign in to your Claude account with «Sign in in Terminal» in Settings › Models.",
                       "Claude Code установлен. Войди в аккаунт Claude кнопкой «Sign in in Terminal» в Settings › Models."))
         } catch {
             reply(say("Claude Code wasn't installed: ", "Claude Code не установился: ") + error.localizedDescription)
+        }
+    }
+
+    /// Claude Code's sign-in in Terminal.
+    func signInClaudeCode(_ path: String) async {
+        do {
+            if Helper.sandboxed { try await Helper.signInClaude() } else { try ClaudeCodeInstaller.signIn(path) }
+        } catch {
+            llmStatus = error.localizedDescription
         }
     }
 
@@ -216,7 +219,12 @@ extension Workspace {
         ollamaUpdated = true
         defer { ollamaInstall = nil }
         do {
-            try await OllamaInstaller.install { [weak self] text in self?.ollamaInstall = text }
+            guard try await OllamaInstaller.install(step: { [weak self] text in self?.ollamaInstall = text }) else {
+                ollamaUpdated = false
+                reply(say("Ollama is in Downloads, shown in Finder: drag it into Applications, open it, then press Check again.",
+                          "Ollama в Загрузках, открыта в Finder: перетащи её в Программы, открой и нажми Check again."))
+                return
+            }
             // The server takes a moment to answer after it starts.
             for _ in 0..<10 where localServers["ollama"] != true || ollamaOutdated {
                 try? await Task.sleep(for: .seconds(2))

@@ -12,7 +12,10 @@
 # The token in debug-token changes on every launch: it's read for each call, never kept.
 emulate -L zsh
 zmodload zsh/datetime   # EPOCHSECONDS
-BUNDLE=app.ihatecrypto.mac.dev PORT=51790 DATA=~/Library/Application\ Support/ihatecrypto-dev APP=~/Applications/"ihatecrypto Dev.app"
+BUNDLE=app.ihatecrypto.mac.dev PORT=51790 APP=~/Applications/"ihatecrypto Dev.app"
+# The data folder is in the App Sandbox's container (since 2026-11-08); a build from before the sandbox kept it outside.
+SANDBOXED=~/Library/Containers/$BUNDLE/Data/Library/Application\ Support/ihatecrypto-dev
+DATA=$SANDBOXED; [[ -d $DATA ]] || DATA=~/Library/Application\ Support/ihatecrypto-dev
 HERE=${0:A:h}
 
 api() {  # METHOD PATH [JSON]
@@ -87,6 +90,7 @@ relaunch)
   # The new token is written when the API starts; /state may answer half-written JSON for a moment (strict=False above).
   for i in {1..60}; do
     sleep 1
+    [[ -d $SANDBOXED ]] && DATA=$SANDBOXED   # the first sandboxed launch moved it there
     [[ $(stat -f %m $DATA/debug-token 2>/dev/null || echo 0) -gt $old ]] && TIMEOUT=3 api GET /state >/dev/null 2>&1 && { echo "Dev is up on $PORT"; exit 0 }
   done
   echo "Dev opened but its debug API doesn't answer: Settings › Debugging › Local debug API" >&2; exit 1;;

@@ -35,6 +35,7 @@ Guard/Core               the last check before signing, and injection screening 
 Guard/Jev                an optional classifier for untrusted text and plans (TypeSafe Jev through OpenRouter)
 Signer/API               the XPC protocol between the app and the signing process
 Signer/Service           the signing process: seed storage, parsing, the Guard, signatures; sandboxed, no network
+Helper/API, Helper/Service  the XPC service outside the App Sandbox: Claude Code for the sandboxed app (see Builds)
 ```
 
 Networks: Solana, Hyperliquid, NEAR and the EVM networks in `EVMNetwork.all` (`Execution/Trade/Aave.swift`): Base,
@@ -52,6 +53,14 @@ move through something that is off.
   id `app.ihatecrypto.mac.dev` gives it its own Keychain group (its own wallets), settings and model logins, and
   `Flavor` (`IhatecryptoApp/Canvases.swift`) gives it its own data folder (`Application Support/ihatecrypto-dev`), debug
   API port (51790) and Keep running agent. Release goes to `~/Applications/ihatecrypto Dev.app`.
+
+The app runs in the App Sandbox (`Xcode/ihatecrypto.entitlements` lists what it may reach and why), so its files are in
+its container, `~/Library/Containers/<bundle id>/Data`. On the first sandboxed launch macOS moves a copy's data folder,
+settings and web data there (`container-migration.plist`, written by project.yml). What the sandbox doesn't allow goes
+through `Helper.xpc` (`Sources/Helper`), an XPC service outside it that takes only its own app as a caller and does only
+fixed things: run the installed Claude Code with no tools, install it, open its sign-in, and remove the Keep running
+agent of a copy from before the sandbox. Keep running is an SMAppService agent: the app's own binary with
+`--keep-running-check` every minute. Codex CLI's login is read after the person picks `~/.codex/auth.json` once.
 - `release.sh`: the signed, notarized release with its Sparkle update archive and appcast.
 - `verify-release.sh <version>`: rebuilds a release's tag with `Tools/build-release.sh`, the build `release.sh` makes, in
   the same folder (`/private/tmp/ihatecrypto-release`, since its path goes into the binaries) and compares it with the
@@ -207,7 +216,8 @@ stop «ты теперь» and «you are now» only with a new role or mode («�
 - Seeds, the trading key, approved recipients and the address book: the signer's Keychain group.
 - Model keys and tokens: the app's Keychain. For other apps' logins (Codex CLI, Claude Code) only the path is kept.
 - The user's own RPC node URLs (they carry the provider's key): the login Keychain.
-- Chats, canvases, settings and kept crash reports: owner-only files in `~/Library/Application Support/<copy>`.
+- Chats, canvases, settings and kept crash reports: owner-only files in `Application Support/<copy>` in the app's
+  container.
 
 Every balance read tells the RPC operator the address and the Mac's IP.
 

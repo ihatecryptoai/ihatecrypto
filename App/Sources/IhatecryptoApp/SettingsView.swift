@@ -350,7 +350,7 @@ struct SettingsView: View {
                     .toggleStyle(AccentSwitch())
                 }
                 SettingsRow("Local address", icon: "network") { Text("127.0.0.1:\(String(DebugAPI.port))").textSelection(.enabled) }
-                SettingsRow("Access token", icon: "key", info: "Stored at Application Support/\(Flavor.folder)/debug-token. Use it as a Bearer token with curl.") {
+                SettingsRow("Access token", icon: "key", info: "Stored at \(LocalStore.url("debug-token").path(percentEncoded: false)). Use it as a Bearer token with curl.") {
                     Text("Changes each start").foregroundStyle(.secondary)
                 }
             }
@@ -650,7 +650,8 @@ enum AppLanguage: String, CaseIterable {
         else { UserDefaults.standard.set([chosen.rawValue], forKey: "AppleLanguages") }
     }
 
-    /// Quits, and opens again once this copy is gone: a second copy started while one runs exits at launch.
+    /// Quits, and opens again once this copy is gone: a second copy started while one runs exits at launch. The shell
+    /// inherits the App Sandbox, which still lets it watch this process and open the app (checked 2026-11-08).
     @MainActor static func restart() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -954,13 +955,13 @@ struct ModelSection: View {
     @ViewBuilder private func connection(_ id: String, _ info: ProviderInfo) -> some View {
         let provider = ws.provider(id), credential = ws.credential(id)
         SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
-            if let label = info.existingLoginLabel, provider.existingLogin() != nil {
+            if let label = info.existingLoginLabel, provider.existingLogin() != nil || ws.canChooseLogin(id) {
                 Button(label) { ws.useExistingLogin(id) }
             }
             // Claude Code: installed from here when it's missing, signed in from a terminal once it's there.
             if info.id == "claude-code" {
                 if case .external(let path)? = provider.existingLogin() {
-                    Button("Sign in in Terminal") { try? ClaudeCodeInstaller.signIn(path) }
+                    Button("Sign in in Terminal") { Task { await ws.signInClaudeCode(path) } }
                 } else {
                     Button(ws.claudeCodeInstall ?? "Install Claude Code") { Task { await ws.installClaudeCode() } }.disabled(ws.claudeCodeInstall != nil)
                 }

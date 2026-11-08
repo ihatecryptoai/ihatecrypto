@@ -5,8 +5,8 @@ description: Builds, relaunches and drives «ihatecrypto Dev» (the development 
 
 # The Dev copy from a terminal
 
-Only «ihatecrypto Dev.app» (bundle `app.ihatecrypto.mac.dev`, data in `~/Library/Application Support/ihatecrypto-dev`,
-debug API on 127.0.0.1:51790). Never build over, quit or drive an installed ihatecrypto.app (port 51789) unless the
+Only «ihatecrypto Dev.app» (bundle `app.ihatecrypto.mac.dev`, data in its App Sandbox container,
+`~/Library/Containers/app.ihatecrypto.mac.dev/Data/Library/Application Support/ihatecrypto-dev`, debug API on 127.0.0.1:51790). Never build over, quit or drive an installed ihatecrypto.app (port 51789) unless the
 user asks. `App/Tools/dev.sh` names only the Dev copy:
 
 ```sh

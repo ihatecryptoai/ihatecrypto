@@ -59,6 +59,12 @@ id() { /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.
   && codesign -d --entitlements - --xml "$app/Contents/XPCServices/Signer.xpc" 2>/dev/null | grep -q ">N78L833HCS.app.ihatecrypto.mac.signer<" \
   || { echo "not the working copy's bundle ids or Keychain group: nothing is published."; exit 1; }
 [[ -z $site || $(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$app/Contents/Info.plist") == $site/appcast.xml ]] || { echo "the feed didn't make it into Info.plist"; exit 1; }
+# The App Sandbox on the app, and the helper outside it, signed by the team (Sources/Helper takes only this app).
+codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q "com.apple.security.app-sandbox" \
+  && [[ $(id "$app/Contents/XPCServices/Helper.xpc") == app.ihatecrypto.mac.helper ]] \
+  && ! codesign -d --entitlements - --xml "$app/Contents/XPCServices/Helper.xpc" 2>/dev/null | grep -q "app-sandbox" \
+  && codesign -dv "$app/Contents/XPCServices/Helper.xpc" 2>&1 | grep -q "TeamIdentifier=N78L833HCS" \
+  || { echo "the app isn't sandboxed or Helper.xpc isn't the team's: nothing is published."; exit 1; }
 
 step "notarize (a few minutes)"
 ditto -c -k --keepParent "$app" $out/notarize.zip

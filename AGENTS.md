@@ -20,6 +20,7 @@ dependencies point inward: chains and protocols know nothing about the window or
 | `Execution`, `Execution/Trade` | The write-before-send journal; running an approved plan |
 | `Guard/Core`, `Guard/Jev` | The transaction guard and injection screening; the optional Jev classifier |
 | `Signer/API`, `Signer/Service` | The XPC protocol and the signing process |
+| `Helper/API`, `Helper/Service` | The XPC service outside the App Sandbox: runs Claude Code for the sandboxed app |
 
 Tests are in `App/Tests/<Target>Tests`. Tools are in `App/Tools`. `App/Xcode/project.yml` (XcodeGen) packages the app
 and `Signer.xpc`; the SwiftPM package stays the source of the modules.
@@ -45,8 +46,10 @@ The signer self-test needs a Debug build and `open`: launched directly, the app 
 ## Two copies of the app
 
 `build-app.sh` makes «ihatecrypto Dev.app» (bundle id `app.ihatecrypto.mac.dev`). It has its own Keychain group and
-wallets, settings, model logins, data folder (`~/Library/Application Support/ihatecrypto-dev`) and debug API port
-(51790). An installed ihatecrypto.app uses `app.ihatecrypto.mac`, `Application Support/ihatecrypto` and port 51789.
+wallets, settings, model logins, data folder (`Application Support/ihatecrypto-dev` in its App Sandbox container,
+`~/Library/Containers/app.ihatecrypto.mac.dev/Data/Library/…`) and debug API port (51790). An installed ihatecrypto.app
+uses `app.ihatecrypto.mac`, `Application Support/ihatecrypto` (in its container once it runs a sandboxed release) and
+port 51789.
 Build, test and run only the Dev copy. Never replace, quit or drive an installed ihatecrypto.app unless the user asks.
 
 ## Debug API and UI tests

@@ -11,9 +11,10 @@ let package = Package(
         .library(name: "IhatecryptoKit", targets: [
             "IhatecryptoCore", "LLMCore", "LLMCatalog", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
             "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
-            "LLMNearAI", "AgentAPIKit",
+            "LLMNearAI", "AgentAPIKit", "HelperAPI", "LLMClaudeCode",
         ]),
         .library(name: "IhatecryptoSignerKit", targets: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"]),
+        .library(name: "IhatecryptoHelperKit", targets: ["HelperAPI", "LLMClaudeCode"]),
     ],
     dependencies: [
         // libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
@@ -28,7 +29,7 @@ let package = Package(
         .target(name: "LLMAPIKey", dependencies: ["LLMCore"], path: "Sources/LLM/APIKey"),
         .target(name: "LLMOpenRouter", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/OpenRouter"),
         .target(name: "LLMChatGPT", dependencies: ["LLMCore"], path: "Sources/LLM/ChatGPT"),
-        .target(name: "LLMClaudeCode", dependencies: ["LLMCore"], path: "Sources/LLM/ClaudeCode"),
+        .target(name: "LLMClaudeCode", dependencies: ["LLMCore", "HelperAPI"], path: "Sources/LLM/ClaudeCode"),
         .target(name: "LLMAnthropic", dependencies: ["LLMCore"], path: "Sources/LLM/Anthropic"),
         .target(name: "LLMApple", dependencies: ["LLMCore"], path: "Sources/LLM/Apple"),
         .target(name: "LLMNearAI", dependencies: ["LLMCore", "LLMAPIKey"], path: "Sources/LLM/NearAI"),
@@ -68,6 +69,10 @@ let package = Package(
         .target(name: "SignerAPI", dependencies: ["WalletCore", "HyperliquidSigning"], path: "Sources/Signer/API"),
         .executableTarget(name: "IhatecryptoSigner", dependencies: ["SignerAPI", "WalletCore", "TxGuard", "HyperliquidSigning", "SolanaChain", "EVMChain"],
                           path: "Sources/Signer/Service"),
+        // The helper outside the App Sandbox: the XPC protocol and the service itself (built as an .xpc by project.yml;
+        // the SwiftPM target only compile-checks it). It runs Claude Code for the sandboxed app.
+        .target(name: "HelperAPI", path: "Sources/Helper/API"),
+        .executableTarget(name: "IhatecryptoHelper", dependencies: ["HelperAPI", "LLMClaudeCode"], path: "Sources/Helper/Service"),
         // A Ledger over USB (or its emulator over TCP): the Ethereum and Solana apps sign what the guard let through.
         .target(name: "Ledger", dependencies: ["WalletCore", "EVMChain", "SolanaChain", "HyperliquidSigning", "TxGuard", "TradeExecution"],
                 path: "Sources/Wallet/Ledger"),
@@ -83,7 +88,7 @@ let package = Package(
         .target(name: "IhatecryptoCore", dependencies: ["LLMCore", "WalletCore", "OneClickKit", "RelayBridge", "HyperliquidSigning"]),
         .executableTarget(
             name: "IhatecryptoApp",
-            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "LLMNearAI", "AgentAPIKit", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
+            dependencies: ["IhatecryptoCore", "LLMCore", "LLMCatalog", "LLMClaudeCode", "LLMNearAI", "AgentAPIKit", "HelperAPI", "WalletCore", "TxGuard", "GuardJev", "SignerAPI", "HyperliquidSigning", "SolanaChain",
                            "TradeExecution", "ExecutionCore", "DeFiJupiterLend", "JupiterSwap", "EVMChain", "DeFiKamino", "DeFiYields", "Ledger",
                            .product(name: "Sparkle", package: "Sparkle")],
             // Logos, sounds and the stories are bundled by the Xcode project; `swift run` shows lettered circles instead.

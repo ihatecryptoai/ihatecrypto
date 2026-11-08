@@ -98,6 +98,11 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(!args.contains("секретный текст"))
     #expect(args[args.firstIndex(of: "--system-prompt")! + 1] == "Отвечай JSON.")
     #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: [LLMMessage(.user, "x")])).contains("--system-prompt"))
+    // What the sandboxed app sends the helper can only be a model's name and the prompt, never a flag.
+    #expect(ClaudeCodeClient.isModelName("claude-opus-5-5") && ClaudeCodeClient.isModelName("claude-sonnet-4-5[1m]"))
+    #expect(!ClaudeCodeClient.isModelName("--dangerously-skip-permissions") && !ClaudeCodeClient.isModelName("x --tools Bash") && !ClaudeCodeClient.isModelName(""))
+    let flagged = ClaudeCodeClient.arguments(model: "m", system: "--tools Bash", thinking: false)
+    #expect(flagged[flagged.firstIndex(of: "--system-prompt")! + 1] == " --tools Bash")
 }
 
 /// A hung `claude -p` is stopped after its timeout, or when the chat's task is cancelled; it never keeps the chat busy.

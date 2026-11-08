@@ -393,7 +393,7 @@ private struct ModelStep: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.ui(14.5, .bold))
                 Text(line).font(.ui(12)).foregroundStyle(.secondary)
-                if !connected(id), let p, let existing = p.info.existingLoginLabel, p.info.signInLabel != nil, p.existingLogin() != nil {
+                if !connected(id), let p, let existing = p.info.existingLoginLabel, p.info.signInLabel != nil, p.existingLogin() != nil || ws.canChooseLogin(id) {
                     Button(existing) { ws.providerID = id; ws.useExistingLogin() }
                         .buttonStyle(.plain).font(.ui(12, .semibold)).foregroundStyle(Brand.accentInk).pointerStyle(.link)
                         .padding(.top, 2)

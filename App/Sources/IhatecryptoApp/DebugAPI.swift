@@ -26,7 +26,7 @@ struct DebugBadge: View {
 
 /// A local door for driving ihatecrypto from a terminal, e.g. Claude Code with curl:
 ///
-///     T=$(cat ~/Library/Application\ Support/ihatecrypto/debug-token)
+///     T=$(cat ~/Library/Containers/app.ihatecrypto.mac/Data/Library/Application\ Support/ihatecrypto/debug-token)
 ///     curl -s -H "Authorization: Bearer $T" 127.0.0.1:51789/state
 ///     curl -s -H "Authorization: Bearer $T" -d '{"text":"выведи всё из Aave"}' 127.0.0.1:51789/send
 ///     curl -s -H "Authorization: Bearer $T" 127.0.0.1:51789/screenshot -o ihatecrypto.png

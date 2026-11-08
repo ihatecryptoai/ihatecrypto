@@ -1,5 +1,7 @@
 import AppKit
+import HelperAPI
 import IhatecryptoCore
+import ServiceManagement
 import SignerAPI
 import SolanaChain
 import SwiftUI
@@ -518,49 +520,58 @@ extension Workspace {
     }
 }
 
-/// Settings › General › Keep running: a launch agent that starts ihatecrypto at login and again within a minute after
-/// it quits or crashes, so scheduled tasks, stops and alerts keep going. It starts the app only when no copy runs, and
-/// hidden (`open -g -j`): the window stays closed, the coin is in the menu bar.
+/// Settings › General › Keep running: a launch agent that starts ihatecrypto at login and again within a minute after it
+/// quits or crashes, so scheduled tasks, stops and alerts keep going. It's this app's own binary run with
+/// `--keep-running-check` (Launch, `check`), registered with SMAppService from Contents/Library/LaunchAgents (the plist is
+/// written by project.yml): it starts the app only when no copy runs, and hidden — the window stays closed, the coin is
+/// in the menu bar. Quit Completely and an update rest it (`pause`) until the app opens again or the Mac restarts.
 enum KeepRunning {
-    static let label = Flavor.id + ".keeprunning"
-    static var plist: URL { FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/LaunchAgents/\(label).plist") }
-    static var isOn: Bool { FileManager.default.fileExists(atPath: plist.path) }
+    static let checkFlag = "--keep-running-check"
+    static let agent = SMAppService.agent(plistName: Flavor.id + ".agent.plist")
+    private static let pausedKey = "keepRunningPausedAt"
+    static var isOn: Bool { agent.status == .enabled }
 
     static func set(_ on: Bool) throws {
-        let domain = "gui/\(getuid())"
-        launchctl("bootout", "\(domain)/\(label)")
-        guard on else { try? FileManager.default.removeItem(at: plist); return }
-        let job: [String: Any] = [
-            "Label": label,
-            // The app as it is now; a moved or rebuilt copy elsewhere re-registers when the switch is set again.
-            "ProgramArguments": ["/bin/sh", "-c", "/usr/bin/pgrep -qx '\(ProcessInfo.processInfo.processName)' || /usr/bin/open -g -j '\(Bundle.main.bundlePath)'"],
-            "RunAtLoad": true,
-            "StartInterval": 60,
-            "ProcessType": "Background",
-            "AssociatedBundleIdentifiers": [Flavor.id],
-        ]
-        try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0).write(to: plist)
-        guard launchctl("bootstrap", domain, plist.path) == 0 else {
-            try? FileManager.default.removeItem(at: plist)
-            throw WalletError("macOS didn’t accept the background item. Check System Settings › General › Login Items.")
+        guard on else { try? agent.unregister(); return }
+        try? agent.register()
+        guard isOn else {
+            SMAppService.openSystemSettingsLoginItems()
+            throw WalletError("macOS keeps ihatecrypto's background item off. Turn it on in System Settings › General › Login Items & Extensions › Allow in the Background.")
         }
     }
 
-    /// Sparkle is about to swap the app: the agent rests, or it could open the old copy mid-swap (Updater.swift).
-    static func pause() { launchctl("bootout", "gui/\(getuid())/\(label)") }
-    /// At launch of a copy that updates itself: the agent runs again if the switch is on (already running is fine).
-    static func resume() { if isOn { launchctl("bootstrap", "gui/\(getuid())", plist.path) } }
+    /// Sparkle is about to swap the app, or Quit Completely: the agent rests (the check reads this, the app shares its
+    /// settings), or it could open the old copy mid-swap (Updater.swift) or bring back a copy quit for good.
+    static func pause() { UserDefaults.standard.set(Date(), forKey: pausedKey) }
 
-    @discardableResult private static func launchctl(_ args: String...) -> Int32 {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = args
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return -1 }
-        p.waitUntilExit()
-        return p.terminationStatus
+    /// At launch: the agent works again. The first sandboxed launch also moves Keep running from before the sandbox,
+    /// a plist in ~/Library/LaunchAgents the app can no longer reach: the helper removes it and this agent takes over.
+    static func resume() {
+        UserDefaults.standard.removeObject(forKey: pausedKey)
+        guard Helper.sandboxed, !UserDefaults.standard.bool(forKey: "keepRunningMoved") else { return }
+        Task {
+            guard let had = try? await Helper.removeOldKeepRunning() else { return }
+            if had { try? agent.register() }
+            UserDefaults.standard.set(true, forKey: "keepRunningMoved")
+        }
+    }
+
+    /// The agent's run, before any window: opens ihatecrypto hidden unless a copy runs or it rests since this boot.
+    static func check() -> Never {
+        var boot = timeval(), size = MemoryLayout<timeval>.size
+        sysctlbyname("kern.boottime", &boot, &size, nil, 0)
+        let resting = (UserDefaults.standard.object(forKey: pausedKey) as? Date).map { $0.timeIntervalSince1970 > Double(boot.tv_sec) } ?? false
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: Flavor.id).contains { $0.processIdentifier != getpid() }
+        if !resting, !running {
+            let hidden = NSWorkspace.OpenConfiguration()
+            hidden.activates = false
+            hidden.hides = true
+            hidden.addsToRecentItems = false
+            let opened = DispatchSemaphore(value: 0)
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: hidden) { _, _ in opened.signal() }
+            _ = opened.wait(timeout: .now() + 20)
+        }
+        exit(0)
     }
 }
 

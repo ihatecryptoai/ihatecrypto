@@ -1,4 +1,5 @@
 import Foundation
+import HelperAPI
 
 /// Crash reports macOS writes for ihatecrypto and its signer (~/Library/Logs/DiagnosticReports, *.ips), copied into
 /// Application Support/ihatecrypto/Crashes before macOS retires them, each with a one-line summary: the exception and the
@@ -22,7 +23,7 @@ enum Crashes {
     /// Copies reports not kept yet and returns the ones since the last launch. The first launch with this keeps the old
     /// ones quietly: they were before anyone looked.
     static func collect() -> [Report] {
-        let logs = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/DiagnosticReports")
+        let logs = Helper.home.appending(path: "Library/Logs/DiagnosticReports")
         let files = [logs, logs.appending(path: "Retired")].flatMap { dir in
             ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
                 .filter { url in url.pathExtension == "ips" && [ProcessInfo.processInfo.processName + "-", "Signer-"].contains { url.lastPathComponent.hasPrefix($0) } }

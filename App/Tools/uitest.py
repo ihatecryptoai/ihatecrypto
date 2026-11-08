@@ -28,10 +28,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # The development copy («ihatecrypto Dev», build-app.sh) by default: tests never open canvases in the working app.
 # IHATECRYPTO_APP=work runs them against the working ihatecrypto.app (a release's smoke test).
 WORK = os.environ.get("IHATECRYPTO_APP") == "work"
-TOKEN = open(os.path.expanduser("~/Library/Application Support/ihatecrypto" + ("" if WORK else "-dev") + "/debug-token")).read().strip()
+DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
+# The data folder is in the App Sandbox's container; a copy from before the sandbox kept it in Application Support.
+# `defaults` finds a sandboxed copy's settings by its domain.
+FOLDER = "Library/Application Support/ihatecrypto" + ("" if WORK else "-dev")
+TOKEN = open(next(p for p in [os.path.expanduser(f"~/Library/Containers/{DOMAIN}/Data/{FOLDER}/debug-token"), os.path.expanduser(f"~/{FOLDER}/debug-token")]
+                  if os.path.exists(p))).read().strip()
 BASE = "http://127.0.0.1:" + ("51789" if WORK else "51790")
 SHOTS = os.environ.get("UITEST_SHOTS")
-DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
 
 
 def settings(values):

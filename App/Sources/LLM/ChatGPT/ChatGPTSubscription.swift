@@ -11,7 +11,9 @@ public struct ChatGPTSubscription: LLMProvider {
     static let issuer = "https://auth.openai.com"
     static let redirect = "http://localhost:1455/auth/callback"
     static let backend = "https://chatgpt.com/backend-api/codex/responses"
-    static let codexAuthFile = "~/.codex/auth.json"
+    /// ~/.codex/auth.json of the user's real home: in the App Sandbox `~` is the app's container. The sandboxed app reads
+    /// it once the person picked it (CodexLogin in the app keeps that permission).
+    static let codexAuthFile = (getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()) + "/.codex/auth.json"
 
     public init() {}
 
@@ -69,9 +71,8 @@ public struct ChatGPTSubscription: LLMProvider {
     }
 
     public func existingLogin() -> Credential? {
-        let path = NSString(string: Self.codexAuthFile).expandingTildeInPath
-        guard (try? CodexAuthFile.read(path)) != nil else { return nil }
-        return .external(path: path)
+        guard (try? CodexAuthFile.read(Self.codexAuthFile)) != nil else { return nil }
+        return .external(path: Self.codexAuthFile)
     }
 
     public func signIn(open: OpenURL) async throws -> Credential {
@@ -127,7 +128,11 @@ enum CodexAuthFile {
     static func read(_ path: String) throws -> (access: String, accountID: String) {
         struct Tokens: Decodable { let access_token: String; let account_id: String?; let id_token: String? }
         struct File: Decodable { let tokens: Tokens? }
-        let file = try JSONDecoder().decode(File.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        let data: Data
+        do { data = try Data(contentsOf: URL(fileURLWithPath: path)) } catch CocoaError.fileReadNoPermission {
+            throw LLMError("ihatecrypto may read the Codex CLI login only once you pick it: Settings › Models › ChatGPT › Use the Codex CLI login, then choose auth.json.")
+        }
+        let file = try JSONDecoder().decode(File.self, from: data)
         guard let t = file.tokens, let account = t.account_id ?? t.id_token.flatMap(ChatGPTSubscription.accountID) else {
             throw LLMError("Codex CLI isn't signed in with ChatGPT.")
         }

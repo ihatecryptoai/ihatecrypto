@@ -1,5 +1,6 @@
 import AppKit
 import GuardJev
+import HelperAPI
 import JupiterSwap
 import TxGuard
 import TradeExecution
@@ -19,7 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
+/// The process's start, before any window: Keep running's agent (`--keep-running-check`) checks and exits here.
 @main
+enum Launch {
+    static func main() {
+        if CommandLine.arguments.contains(KeepRunning.checkFlag) { KeepRunning.check() }
+        AppMain.main()
+    }
+}
+
 struct AppMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     /// The main window's title; DebugAPI and the window test find the window by it.
@@ -48,7 +57,8 @@ struct AppMain: App {
     init() {
         // One copy only: a second one (Keep running racing a relaunch, a test build) would run stops and tasks twice.
         if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "app.ihatecrypto.mac")
-            .contains(where: { $0.processIdentifier != getpid() && !$0.isTerminated }) {
+            // Keep running's check (`Launch`, no window, prohibited) is the same app but no copy: it may still wait for this one.
+            .contains(where: { $0.processIdentifier != getpid() && !$0.isTerminated && $0.activationPolicy != .prohibited }) {
             exit(0)
         }
         if selfTest {
@@ -60,6 +70,7 @@ struct AppMain: App {
             Task { await ws.watch() }
             // Quit Completely rested Keep running's agent; opened again, it watches again.
             KeepRunning.resume()
+            CodexLogin.restore()
             Updater.shared.start(ws)
             #if DEBUG
             // `-browserResultAfter N`: after N seconds prints the browser page's text and quits (the browser test).
@@ -252,7 +263,7 @@ struct AppMain: App {
         NSApp.setActivationPolicy(.accessory)
     }
 
-    /// Quits for real: Keep running's agent rests until ihatecrypto is opened again or the next login, or it would
+    /// Quits for real: Keep running's agent rests until ihatecrypto is opened again or the Mac restarts, or it would
     /// start it again within a minute.
     func quitCompletely() {
         KeepRunning.pause()
@@ -443,7 +454,7 @@ struct ContentView: View {
             }
             // `-importTestWallet YES` (ihatecrypto.app only): the terminal test wallet goes into the signing process.
             if UserDefaults.standard.bool(forKey: "importTestWallet"), SignerClient.isAvailable,
-               let phrase = try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".ihatecrypto/test-wallet.txt"), encoding: .utf8) {
+               let phrase = try? String(contentsOf: Helper.home.appending(path: ".ihatecrypto/test-wallet.txt"), encoding: .utf8) {
                 let r = try? await SignerClient().send(.importMnemonic(phrase: phrase, passphrase: "", requirePresence: UserDefaults.standard.bool(forKey: "presence")))
                 log("import: ok=\(r?.ok ?? false) \(r?.solanaAddress ?? "") \(r?.evmAddress ?? "") \(r?.error ?? "")")
             }

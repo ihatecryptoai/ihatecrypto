@@ -51,7 +51,8 @@ echo "── lint"
 ./lint.sh > $OUT/lint.log 2>&1 || { head -30 $OUT/lint.log; fail "./lint.sh: $PWD/$OUT/lint.log" }
 
 echo "── UI"
-api() { curl -sf -m 3 -o /dev/null -H "Authorization: Bearer $(cat ~/Library/Application\ Support/ihatecrypto-dev/debug-token 2>/dev/null)" http://127.0.0.1:51790/state }
+# The token is in the sandbox's container; a Dev from before the sandbox kept it outside.
+api() { curl -sf -m 3 -o /dev/null -H "Authorization: Bearer $(cat ~/Library/Containers/app.ihatecrypto.mac.dev/Data/Library/Application\ Support/ihatecrypto-dev/debug-token 2>/dev/null || cat ~/Library/Application\ Support/ihatecrypto-dev/debug-token 2>/dev/null)" http://127.0.0.1:51790/state }
 if ! api; then
   [[ -n $(git status --porcelain -- Sources/IhatecryptoApp) || ! -f $STAMP || -n $(find Sources/IhatecryptoApp -type f -newer $STAMP -print -quit) ]] \
     && fail "the window's code (Sources/IhatecryptoApp) changed and the Dev copy's debug API doesn't answer on 51790. Start the Dev copy: TEAM=<team id> ./build-app.sh (or open ~/Applications/'ihatecrypto Dev.app'), turn on Settings › Debugging › Local debug API, run again."

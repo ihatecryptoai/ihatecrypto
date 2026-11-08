@@ -7,6 +7,7 @@ import EVMChain
 import ExecutionCore
 import Foundation
 import GuardJev
+import HelperAPI
 import IhatecryptoCore
 import JupiterSwap
 import LLMCatalog
@@ -920,10 +921,17 @@ final class Workspace {
 
     func useExistingLogin(_ id: String? = nil) {
         let id = id ?? providerID
-        guard let login = provider(id).existingLogin() else { llmStatus = "No sign-in found on this Mac."; return }
+        guard let login = provider(id).existingLogin() ?? (canChooseLogin(id) && CodexLogin.choose() ? provider(id).existingLogin() : nil) else {
+            llmStatus = "No sign-in found on this Mac."
+            return
+        }
         setCredential(login, for: id)
         llmStatus = "Connected."
     }
+
+    /// The login of another app on this Mac that the sandbox keeps out of sight until the person picks its file: Codex
+    /// CLI's ~/.codex/auth.json (`CodexLogin`). «Use the Codex CLI login» is offered for it either way.
+    func canChooseLogin(_ id: String) -> Bool { id == "chatgpt" && Helper.sandboxed }
 
     func testModel() async {
         guard let client = llmClient() else { llmStatus = "Connect \(provider.info.name) first."; return }
@@ -2486,6 +2494,35 @@ final class Workspace {
 
 func isSolanaAddress(_ s: String) -> Bool { s.wholeMatch(of: /[1-9A-HJ-NP-Za-km-z]{32,44}/) != nil }
 func isEVMAddress(_ s: String) -> Bool { s.wholeMatch(of: /0x[0-9a-fA-F]{40}/) != nil }
+
+/// Codex CLI's ChatGPT login (~/.codex/auth.json) for the sandboxed app: picked once in an Open panel, kept as a
+/// security-scoped bookmark and opened again at each launch, so ChatGPTSubscription reads the file as before.
+enum CodexLogin {
+    static let key = "codexAuthBookmark"
+
+    /// At launch: the picked file is readable again for as long as the app runs.
+    static func restore() {
+        guard Helper.sandboxed, let data = UserDefaults.standard.data(forKey: key) else { return }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale),
+              url.startAccessingSecurityScopedResource() else { return }
+        if stale, let fresh = try? url.bookmarkData(options: .withSecurityScope) { UserDefaults.standard.set(fresh, forKey: key) }
+    }
+
+    /// The Open panel on ~/.codex; true when a file was picked and is readable now.
+    static func choose() -> Bool {
+        let panel = NSOpenPanel()
+        panel.directoryURL = Helper.home.appending(path: ".codex")
+        panel.showsHiddenFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.message = "Choose auth.json: Codex CLI keeps its ChatGPT login there. ihatecrypto only reads it."
+        panel.prompt = "Use"
+        guard panel.runModal() == .OK, let url = panel.url, let data = try? url.bookmarkData(options: .withSecurityScope) else { return false }
+        _ = url.startAccessingSecurityScopedResource()
+        UserDefaults.standard.set(data, forKey: key)
+        return true
+    }
+}
 
 /// Credentials per provider, as JSON, in the login Keychain of this Mac only.
 nonisolated enum Keychain {
