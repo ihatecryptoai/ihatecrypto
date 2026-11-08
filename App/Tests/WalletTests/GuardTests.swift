@@ -2,6 +2,7 @@ import Foundation
 import HyperliquidSigning
 @testable import SolanaChain
 import Testing
+import SignerAPI
 import TxGuard
 @testable import TradeExecution
 import WalletCore
@@ -237,49 +238,110 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!SolanaGuard.check(steal, accounts: accounts, policy: policy, tokenOwners: [mine: me]).ok)
 }
 
-@Test func jupiterSwapsPayOnlyThisWalletsOwnAccount() throws {
+@Test func jupiterSwapsAreV2PayThisWalletAndNameTheirAmounts() throws {
     let wsol = "So11111111111111111111111111111111111111112", usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     let source = try SPL.associatedAccount(owner: me, mint: usdcMint), out = try SPL.associatedAccount(owner: me, mint: wsol)
     let theirs = try SPL.associatedAccount(owner: deposit, mint: wsol)
     let jup = SolanaGuard.jupiterSwap, event = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf"
-    // The tail Jupiter's route ends in, as lite-api built it for 1 USDC → SOL: in 1_000_000, quoted 9_386_507, 50 bp, no fee.
-    func tail(quoted: UInt64, slippage: UInt16 = 50, fee: UInt8 = 0) -> [UInt8] {
-        withUnsafeBytes(of: UInt64(1_000_000).littleEndian, Array.init) + withUnsafeBytes(of: quoted.littleEndian, Array.init)
-            + withUnsafeBytes(of: slippage.littleEndian, Array.init) + [fee]
+    func le<T: FixedWidthInteger>(_ v: T) -> [UInt8] { withUnsafeBytes(of: v.littleEndian, Array.init) }
+    // v2's arguments open the data: in_amount, quoted_out_amount, slippage, platform fee, positive slippage; then a
+    // one-step route (Saber, all of it, 0 → 1). 1 USDC quoted at 9_386_507 lamports, as /build answers.
+    func args(quoted: UInt64 = 9_386_507, slippage: UInt16 = 50, fee: UInt16 = 0) -> [UInt8] {
+        le(UInt64(1_000_000)) + le(quoted) + le(slippage) + le(fee) + le(UInt16(0)) + le(UInt32(1)) + [0] + le(UInt16(10_000)) + [0, 1]
     }
-    let route: [UInt8] = [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a] + [1, 0, 0, 100, 0, 1]   // a one-step route plan
-    // route's accounts: token program, user, source, user destination, destination (the program's id: none), mint,
-    // platform fee (none), event authority, program.
-    let keys = [me, SPL.tokenProgram, source, out, jup, wsol, event, theirs]
-    let (m, accounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
-    // The output account is this wallet's own for the mint: derived here, no claim needed. No amount on the prompt: the
-    // program ignores bytes after its arguments, so a site could append a made-up quote (the 2026-10-22 review).
-    let ok = SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [:])
-    #expect(ok.ok)
-    #expect(ok.checks.contains("Jupiter swap → your account (SOL). The balance simulation checks the amount."))
+    let routeV2: [UInt8] = [0xbb, 0x64, 0xfa, 0xcc, 0x31, 0xc4, 0xaf, 0x14]
+    // route_v2's accounts: user, source, user destination, source mint, destination mint, two token programs, destination
+    // (the program's id: none), event authority, program.
+    let keys = [me, SPL.tokenProgram, source, out, jup, wsol, event, theirs, usdcMint]
+    func v2(_ dest: Int, instead: Int = 4, _ data: [UInt8]) throws -> Verdict {
+        let (m, accounts) = try message(keys, [(4, [0, 2, dest, 8, 5, 1, 1, instead, 6, 4], data)])
+        return SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [:])
+    }
+    // The output account is this wallet's own for the mint (derived here, no claim needed), and the prompt names what goes
+    // in and the least that comes out, read where the program reads them.
+    let ok = try v2(3, routeV2 + args())
+    #expect(ok.ok, "\(ok.problems)")
+    #expect(ok.checks.contains("Jupiter swap: 1 USDC → at least 0.009339574 SOL, your account (slippage 0.5%)"), "\(ok.checks)")
+    #expect(ok.askAfresh.isEmpty && ok.swaps)   // a swap: a person signs it with a prompt of its own
+    #expect(ok.outflows == [Verdict.Outflow(asset: usdcMint, units: 1_000_000, to: nil)])
+    // Past the person's slippage limit (3% unless they set another): signable, but only after a fresh prompt.
+    let loose = try v2(3, routeV2 + args(slippage: 500))
+    #expect(loose.ok && loose.askAfresh == ["slippage 5% is over your 3%"])
+    #expect(try v2(3, routeV2 + args(slippage: 10_001)).ok == false)
+    // A site's fee is named, and asked about afresh; over 10% it's refused.
+    let fee = try v2(3, routeV2 + args(fee: 20))
+    #expect(fee.checks.contains { $0.hasSuffix("(slippage 0.5%, a 0.2% fee to the site)") } && fee.askAfresh == ["the site takes a 0.2% fee"])
+    #expect(!(try v2(3, routeV2 + args(fee: 1_001))).ok)
     // The output sent to someone else's account, as the user destination or through the optional destination: refused.
-    let (other, otherAccounts) = try message(keys, [(4, [1, 0, 2, 7, 4, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
-    #expect(!SolanaGuard.check(other, accounts: otherAccounts, policy: policy, tokenOwners: [:]).ok)
-    let (redirect, redirectAccounts) = try message(keys, [(4, [1, 0, 2, 3, 7, 5, 4, 6, 4], route + tail(quoted: 9_386_507))])
-    #expect(!SolanaGuard.check(redirect, accounts: redirectAccounts, policy: policy, tokenOwners: [:]).ok)
-    // shared_accounts_route: token program, program authority, user, source, program source, program destination,
-    // destination, source mint, destination mint, platform fee, Token-2022, event authority, program.
-    let shared: [UInt8] = [0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81, 3] + [1, 0, 0, 100, 0, 1]
+    #expect(!(try v2(7, routeV2 + args())).ok)
+    #expect(!(try v2(3, instead: 7, routeV2 + args())).ok)
+    // Too short to hold its arguments: refused.
+    #expect(!(try v2(3, routeV2 + Array(args().prefix(12)))).ok)
+    // shared_accounts_route_v2: id, then the same arguments. Accounts: program authority, user, source, program source,
+    // program destination, destination, source mint, destination mint, …
+    let sharedV2: [UInt8] = [0xd1, 0x98, 0x53, 0x93, 0x7c, 0xfe, 0xd8, 0xe9, 3]
     let sharedKeys = [me, SPL.tokenProgram, deposit, source, theirs, out, usdcMint, wsol, jup, event]
-    let (s, sAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 5, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507, fee: 20))])
+    let (s, sAccounts) = try message(sharedKeys, [(8, [2, 0, 3, 4, 4, 5, 6, 7, 1, 1, 9, 8], sharedV2 + args())])
     let sharedOK = SolanaGuard.check(s, accounts: sAccounts, policy: policy, tokenOwners: [:])
-    #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap → your account (SOL). The balance simulation checks the amount."))
-    let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [1, 2, 0, 3, 4, 4, 4, 6, 7, 8, 8, 9, 8], shared + tail(quoted: 9_386_507))])
+    #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap: 1 USDC → at least 0.009339574 SOL, your account (slippage 0.5%)"), "\(sharedOK)")
+    let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [2, 0, 3, 4, 4, 4, 6, 7, 1, 1, 9, 8], sharedV2 + args())])
     #expect(!SolanaGuard.check(sTheirs, accounts: sTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
-    // Every other swap form is held to its own output account too (exact_out_route: user destination 3, destination mint 6),
-    // and an instruction that isn't a swap is refused.
-    let exactOutRoute: [UInt8] = [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c]
-    let (exactOut, exactOutAccounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 5, 6, 4], exactOutRoute + tail(quoted: 1))])
-    #expect(SolanaGuard.check(exactOut, accounts: exactOutAccounts, policy: policy, tokenOwners: [:]).ok)
-    let (exactTheirs, exactTheirsAccounts) = try message(keys, [(4, [1, 0, 2, 7, 4, 5, 5, 6, 4], exactOutRoute + tail(quoted: 1))])
-    #expect(!SolanaGuard.check(exactTheirs, accounts: exactTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
+    // v1 routes put the amounts after the route, which takes Jupiter's whole list of pools to read: refused by name, as
+    // is an instruction that isn't a swap.
+    let routeV1: [UInt8] = [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a] + [1, 0, 0, 0, 100, 0, 1]
+    let (v1, v1Accounts) = try message(keys, [(4, [1, 0, 2, 3, 4, 5, 4, 6, 4], routeV1 + le(UInt64(1_000_000)) + le(UInt64(9_386_507)) + le(UInt16(50)) + [0])])
+    let refused = SolanaGuard.check(v1, accounts: v1Accounts, policy: policy, tokenOwners: [:])
+    #expect(!refused.ok && refused.problems.contains { $0.contains("an older Jupiter swap whose amounts the signer can't read") })
     let (claim, claimAccounts) = try message(keys, [(4, [0, 7, 4], [0x3e, 0xc6, 0xd6, 0xc1, 0xa6, 0x13, 0x6f, 0xd2])])
     #expect(!SolanaGuard.check(claim, accounts: claimAccounts, policy: policy, tokenOwners: [:]).ok)
+}
+
+/// /build's swap, compiled with its lookup tables: the wallet's own accounts stay in the message, the rest load from the
+/// tables, and the indexes the instructions use resolve to the same accounts.
+@Test func v0MessagesLoadOnlyOthersAccountsFromTables() throws {
+    let program = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", pool = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf"
+    let vault = "6LXutJvKUw8Q5ue2gCgKHQdAN4suWW8awzFVC6XCguFx", mine = try SPL.associatedAccount(owner: me, mint: "So11111111111111111111111111111111111111112")
+    let table = "6rqx7NGgRAtGiAsBE6RAxWMaNQfSgzRy1tMSNML4GzQm"
+    let ix = SolanaInstruction(program: program, accounts: [.init(pubkey: me, isSigner: true, isWritable: false), .init(pubkey: mine, isSigner: false, isWritable: true),
+                                                             .init(pubkey: vault, isSigner: false, isWritable: true), .init(pubkey: pool, isSigner: false, isWritable: false)],
+                               data: Data([1, 2, 3]))
+    let message = try SolanaTransaction.compileV0([ix], payer: me, blockhash: me, tables: [(table, [deposit, pool, mine, vault])], keepStatic: [mine])
+    let m = try SolanaMessage.parse(message: message)
+    #expect(m.version == 0 && m.staticKeys == [me, mine, program])
+    #expect(m.lookups.count == 1 && m.lookups[0].table == table && m.lookups[0].writable == [3] && m.lookups[0].readonly == [1])
+    let full = m.staticKeys + [vault, pool]
+    #expect(m.instructions[0].accounts.map { full[$0] } == [me, mine, vault, pool])
+}
+
+/// What the trading key would open, read from the action: buys at most price × size, nothing for what only reduces,
+/// and the person for an opening sell or a TWAP (no price bounds what those give).
+@Test func tradingKeyOpeningsAreReadFromTheOrder() throws {
+    let entry = HLOrder(asset: 0, isBuy: true, price: 100, size: 1.5, reduceOnly: false, kind: .limit(tif: "Ioc"))
+    let stop = HLOrder(asset: 0, isBuy: false, price: 90, size: 1.5, reduceOnly: true, kind: .trigger(price: 90, isMarket: true, tpsl: "sl"))
+    let short = HLOrder(asset: 0, isBuy: false, price: 0.0001, size: 1000, reduceOnly: false, kind: .limit(tif: "Ioc"))
+    #expect(HLAction.opening(try HLAction.order([entry, stop], grouping: "normalTpsl")) == .dollars(150))
+    #expect(HLAction.opening(try HLAction.order([stop], grouping: "positionTpsl")) == .dollars(0))
+    if case .person = HLAction.opening(try HLAction.order([short])) {} else { Issue.record("an opening sell went without the person") }
+    if case .person = HLAction.opening(try HLAction.twapOrder(asset: 0, isBuy: true, size: 1, minutes: 30, randomize: false)) {} else { Issue.record("a TWAP went without the person") }
+    #expect(HLAction.opening(try HLAction.twapOrder(asset: 0, isBuy: false, size: 1, reduceOnly: true, minutes: 30, randomize: false)) == .dollars(0))
+    #expect(HLAction.opening(HLAction.cancel([(asset: 0, oid: 7)])) == .dollars(0))
+    #expect(HLAction.opening(.map([("type", .string("updateLeverage")), ("asset", .uint(0)), ("isCross", .bool(true)), ("leverage", .uint(5))])) == .dollars(0))
+    if case .person = HLAction.opening(.map([("type", .string("usdSend"))])) {} else { Issue.record("a transfer went to the trading key") }
+}
+
+/// The person's limits: checked, and loosening one names it for the Touch ID prompt.
+@Test func limitsAreCheckedAndLooseningIsNamed() {
+    #expect(SignerLimits.standard.problem == nil)
+    var l = SignerLimits.standard
+    l.agentDay = 500
+    #expect(l.problem != nil)          // the day under one order
+    l = .standard; l.agentDays = 8
+    #expect(l.problem != nil)
+    l = .standard; l.automationWeek = 50
+    #expect(l.problem != nil)
+    l = .standard; l.agentOrder = 2000; l.slippageBps = 50
+    #expect(l.looser(than: .standard) == ["one trading-key order up to $2000 (was $1000)"])
+    #expect(SignerLimits.percent(50) == "0.5%" && SignerLimits.percent(300) == "3%")
 }
 
 /// Past its 7 days the trading key still signs what can't open or add to a position: cancels and reduce-only orders.

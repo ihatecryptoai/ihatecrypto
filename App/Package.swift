@@ -49,7 +49,7 @@ let package = Package(
         .target(name: "EVMChain", dependencies: ["WalletCore", .product(name: "P256K", package: "swift-secp256k1")], path: "Sources/Chains/EVM"),
         // Write-before-send journal; later the approval envelope and step states.
         .target(name: "ExecutionCore", path: "Sources/Execution", exclude: ["Trade"]),
-        .target(name: "JupiterSwap", dependencies: ["WalletCore"], path: "Sources/Protocols/Jupiter"),
+        .target(name: "JupiterSwap", dependencies: ["WalletCore", "SolanaChain"], path: "Sources/Protocols/Jupiter"),
         .target(name: "OneClickKit", dependencies: ["WalletCore"], path: "Sources/Protocols/OneClick"),
         .target(name: "AgentAPIKit", dependencies: ["WalletCore"], path: "Sources/Protocols/AgentAPI"),
         .target(name: "RelayBridge", dependencies: ["SolanaChain", "WalletCore"], path: "Sources/Protocols/Relay"),

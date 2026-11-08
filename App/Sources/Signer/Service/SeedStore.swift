@@ -130,7 +130,12 @@ enum SeedStore {
     /// minute the app ends it as soon as the move is done (`endSession`). Every signature still passes the guard;
     /// a locked screen or sleep ends the session.
     /// `byCode`: the passcode opened it (`startCodeSession`), so signatures open the seeds' passcode seals.
-    nonisolated(unsafe) private static var session: (context: LAContext, since: Date, byCode: Bool)?
+    /// `scope`: the recipients and coins of the signature that first used it (nil until one does): a later signature
+    /// that names anything else asks in person again, however long the session (the owner's pick, 2026-11-08 review).
+    nonisolated(unsafe) private static var session: (context: LAContext, since: Date, byCode: Bool, scope: Set<String>?)?
+
+    /// The recipients and coins of the request being signed (`Signer.moveScope`); nil: one that names none.
+    @TaskLocal static var scope: Set<String>?
 
     static var sessionLength: Int {
         let chosen = Signer.defaults.integer(forKey: "sessionLength")
@@ -148,9 +153,15 @@ enum SeedStore {
             fresh.localizedReason = reason
             guard useSession else { return (fresh, false) }
             // A code session counts only where the code signs: with Touch ID the sensor signs, whatever was typed.
-            if let s = session, Date().timeIntervalSince(s.since) < TimeInterval(sessionLength), !s.byCode || CodeStore.signs { return (s.context, s.byCode) }
+            let wanted = scope ?? []
+            let alive = session.flatMap { Date().timeIntervalSince($0.since) < TimeInterval(sessionLength) && (!$0.byCode || CodeStore.signs) ? $0 : nil }
+            if let s = alive, s.scope.map(wanted.isSubset) ?? true {
+                if s.scope == nil { session?.scope = wanted }
+                return (s.context, s.byCode)
+            }
             if CodeStore.signs, CodeStore.sealed(id) != nil { throw CodeNeeded(reason: reason) }
-            session = (fresh, Date(), false)
+            // A new prompt: it covers this signature's recipients and coins, and whatever the session it replaces covered.
+            session = (fresh, Date(), false, wanted.union(alive?.scope ?? []))
             return (fresh, false)
         }
         var context = opened
@@ -241,7 +252,9 @@ enum SeedStore {
         }
         if within == nil { done.wait() }
         if let outcome { throw WalletError("Not confirmed (\(outcome.localizedDescription)): nothing was changed.") }
-        lock.withLock { session = (context, Date(), false) }
+        // The automation wallet's prompts (`within`) leave no session: its own signature needs none, and an open one would
+        // let the main wallet's next signature go unasked (the 2026-11-08 review).
+        if within == nil { lock.withLock { session = (context, Date(), false, nil) } }
     }
 
     /// The context the last `confirm` opened, while its session lasts.
@@ -251,7 +264,7 @@ enum SeedStore {
     static func startCodeSession(_ context: LAContext) {
         lock.withLock {
             session?.context.invalidate()
-            session = (context, Date(), true)
+            session = (context, Date(), true, nil)
         }
     }
 

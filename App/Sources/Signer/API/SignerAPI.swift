@@ -115,6 +115,9 @@ public enum SignerRequest: Codable, Sendable {
     /// How long one Touch ID confirmation keeps signing open: one of `SignerSession.choices`, in seconds. A longer
     /// time than now asks for Touch ID first, so the app alone can't stretch it.
     case setSessionLength(seconds: Int)
+    /// The person's own limits (Settings): what the trading key and the automation wallet may do without Touch ID, and
+    /// the slippage a swap may carry without a new prompt. A looser one than now asks for Touch ID first.
+    case setLimits(limits: SignerLimits)
     /// Ends the Touch ID session only (the Mac's screen locked or it went to sleep); the trading key stays as it is.
     case endSession
     /// Sells native NEAR through 1Click. The signer builds the ONE wrap.near transaction itself from these plain fields
@@ -260,11 +263,66 @@ public enum Passcode {
     }
 }
 
+public enum SignerLedger {
+    /// How a Ledger trading key's refusal ends when the action needs the device instead (a short, an order past the
+    /// person's limits): the app then has the Ledger sign it.
+    public static let device = "Sign this one on the Ledger."
+}
+
 public enum SignerSession {
     /// 1, 5, 15 or 30 minutes; 1 minute until the user picks another. With that minute the app also ends the session
     /// when the move is done (`endSession`), so one Touch ID covers one move.
     public static let choices = [60, 300, 900, 1800]
     public static let standard = 60
+}
+
+/// What signs without the person, set by them in Settings and kept by the signer: lowering one is immediate, raising
+/// one asks for Touch ID. Dollars are whole dollars.
+public struct SignerLimits: Codable, Sendable, Equatable {
+    /// One opening order the trading key signs, at its own price × size.
+    public var agentOrder: Int
+    /// The trading key's opening orders in any 24 hours.
+    public var agentDay: Int
+    /// Days the trading key opens positions after the person's last Touch ID for it.
+    public var agentDays: Int
+    /// Dollars that leave the automation wallet in any 24 hours, and in any 7 days.
+    public var automationDay: Int
+    public var automationWeek: Int
+    /// The slippage a swap may allow before it asks for Touch ID afresh, in basis points.
+    public var slippageBps: Int
+
+    public init(agentOrder: Int, agentDay: Int, agentDays: Int, automationDay: Int, automationWeek: Int, slippageBps: Int) {
+        (self.agentOrder, self.agentDay, self.agentDays, self.automationDay, self.automationWeek, self.slippageBps)
+            = (agentOrder, agentDay, agentDays, automationDay, automationWeek, slippageBps)
+    }
+
+    public static let standard = SignerLimits(agentOrder: 1000, agentDay: 5000, agentDays: 2, automationDay: 100, automationWeek: 500, slippageBps: 300)
+    public static let maxAgentDays = 7
+
+    /// Why these can't be limits, or nil.
+    public var problem: String? {
+        if [agentOrder, agentDay, automationDay, automationWeek].contains(where: { $0 < 1 || $0 > 10_000_000 }) { return "A limit is $1 to $10,000,000." }
+        if agentDay < agentOrder { return "The trading key's day can't be less than one order." }
+        if automationWeek < automationDay { return "The automation wallet's week can't be less than its day." }
+        if !(1...Self.maxAgentDays).contains(agentDays) { return "The trading key works 1 to \(Self.maxAgentDays) days after \(Presence.name)." }
+        if !(1...5000).contains(slippageBps) { return "Slippage is 0.01% to 50%." }
+        return nil
+    }
+
+    /// The lines of `self` that are looser than `old`, in words for a Touch ID prompt.
+    public func looser(than old: SignerLimits) -> [String] {
+        var lines: [String] = []
+        if agentOrder > old.agentOrder { lines.append("one trading-key order up to $\(agentOrder) (was $\(old.agentOrder))") }
+        if agentDay > old.agentDay { lines.append("trading-key orders up to $\(agentDay) a day (was $\(old.agentDay))") }
+        if agentDays > old.agentDays { lines.append("the trading key works \(agentDays) days after \(Presence.name) (was \(old.agentDays))") }
+        if automationDay > old.automationDay { lines.append("the automation wallet spends up to $\(automationDay) a day (was $\(old.automationDay))") }
+        if automationWeek > old.automationWeek { lines.append("the automation wallet spends up to $\(automationWeek) a week (was $\(old.automationWeek))") }
+        if slippageBps > old.slippageBps { lines.append("swaps allow up to \(Self.percent(slippageBps)) slippage without a new prompt (was \(Self.percent(old.slippageBps)))") }
+        return lines
+    }
+
+    /// 300 → «3%», 50 → «0.5%».
+    public static func percent(_ bps: Int) -> String { "\(NSDecimalNumber(decimal: Decimal(bps) / 100).stringValue)%" }
 }
 
 public struct SignerReply: Codable, Sendable {
@@ -291,6 +349,8 @@ public struct SignerReply: Codable, Sendable {
     public var activeWallet: String?
     /// Seconds one Touch ID confirmation keeps signing open.
     public var sessionLength: Int?
+    /// The person's limits (`.status`, `.setLimits`).
+    public var limits: SignerLimits?
     public var action: MsgPack?
     public var nonce: UInt64?
     /// The address book as the signer keeps it (`.addressBook`, `.saveAddresses`, `.removeAddress`).

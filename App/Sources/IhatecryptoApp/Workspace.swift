@@ -158,6 +158,8 @@ final class Workspace {
     var feeApproved: Bool?
     /// Seconds one Touch ID confirmation keeps signing open (the signer's setting).
     var sessionLength = SignerSession.standard
+    /// The person's limits as the signer keeps them (Settings › Wallet › Limits).
+    var limits = SignerLimits.standard
 
     // Execution
     var prepared: Executor.Prepared? {
@@ -2486,6 +2488,7 @@ final class Workspace {
         agentAddress = onLedger ? agent?.agentAddress : status.agentAddress
         agentActive = onLedger ? agent?.agentActive ?? false : status.agentActive ?? false
         sessionLength = status.sessionLength ?? SignerSession.standard
+        limits = status.limits ?? .standard
         confirmedAddresses = (try? await SignerClient().send(.addressBook))?.addresses ?? confirmedAddresses
         // NEAR's balance is read with Solana's.
         if nearChanged { await loadSolana() }

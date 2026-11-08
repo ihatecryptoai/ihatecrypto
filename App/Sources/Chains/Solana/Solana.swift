@@ -364,6 +364,63 @@ extension SolanaTransaction {
     }
 }
 
+extension SolanaTransaction {
+    /// The v0 message for `instructions` as they come (their own compute budget included), fee payer first, with accounts
+    /// that `tables` (lookup table → its addresses) hold loaded through them — except signers, programs and `keepStatic`
+    /// (the wallet's own accounts: the signer lets money land only in an account the message names itself).
+    public static func compileV0(_ instructions: [SolanaInstruction], payer: String, blockhash: String,
+                                 tables: [(address: String, entries: [String])], keepStatic: Set<String> = []) throws -> Data {
+        var flags: [String: (signer: Bool, writable: Bool)] = [payer: (true, true)]
+        var order = [payer], programs = Set<String>()
+        func add(_ key: String, signer: Bool, writable: Bool) {
+            if let f = flags[key] { flags[key] = (f.signer || signer, f.writable || writable) }
+            else { flags[key] = (signer, writable); order.append(key) }
+        }
+        for ix in instructions {
+            for a in ix.accounts { add(a.pubkey, signer: a.isSigner, writable: a.isWritable) }
+            add(ix.program, signer: false, writable: false)
+            programs.insert(ix.program)
+        }
+        let signers = order.filter { flags[$0]!.signer }
+        guard signers == [payer] else { throw WalletError("The instructions need other signers: \(signers.filter { $0 != payer })") }
+        // Each loadable account from the first table that has it.
+        var loaded: [String: (table: Int, index: Int)] = [:]
+        for key in order where key != payer && !programs.contains(key) && !keepStatic.contains(key) {
+            for (t, table) in tables.enumerated() {
+                if let i = table.entries.firstIndex(of: key), i < 256 { loaded[key] = (t, i); break }
+            }
+        }
+        let statics = order.filter { loaded[$0] == nil }
+        let keys = [payer] + statics.filter { $0 != payer && flags[$0]!.writable } + statics.filter { $0 != payer && !flags[$0]!.writable }
+        let readonlyUnsigned = keys.filter { !flags[$0]!.writable }.count
+        // The full list the instructions index: static keys, then every table's writable entries, then their readonly ones.
+        var lookups: [(table: String, writable: [UInt8], readonly: [UInt8], w: [String], r: [String])] = []
+        for (t, table) in tables.enumerated() {
+            let mine = order.filter { loaded[$0]?.table == t }
+            let w = mine.filter { flags[$0]!.writable }, r = mine.filter { !flags[$0]!.writable }
+            if !mine.isEmpty { lookups.append((table.address, w.map { UInt8(loaded[$0]!.index) }, r.map { UInt8(loaded[$0]!.index) }, w, r)) }
+        }
+        let full = keys + lookups.flatMap(\.w) + lookups.flatMap(\.r)
+        guard full.count <= 256 else { throw WalletError("The transaction names more than 256 accounts.") }
+        let index = Dictionary(uniqueKeysWithValues: full.enumerated().map { ($1, $0) })
+
+        var message = Data([0x80, 1, 0, UInt8(readonlyUnsigned)]) + compact(keys.count)
+        for key in keys { message += try Base58.decode(key) }
+        message += try Base58.decode(blockhash)
+        message += compact(instructions.count)
+        for ix in instructions {
+            message += Data([UInt8(index[ix.program]!)]) + compact(ix.accounts.count) + Data(ix.accounts.map { UInt8(index[$0.pubkey]!) })
+            message += compact(ix.data.count) + ix.data
+        }
+        message += compact(lookups.count)
+        for l in lookups {
+            message += try Base58.decode(l.table) + compact(l.writable.count) + Data(l.writable) + compact(l.readonly.count) + Data(l.readonly)
+        }
+        guard message.count + 65 <= 1232 else { throw WalletError("The transaction is \(message.count + 65) bytes, over Solana's limit of 1232") }
+        return message
+    }
+}
+
 extension SolanaNodes {
     /// Why `url` can't be the wallet's Solana node, or nil: https only; Solana mainnet (its genesis hash); and token
     /// accounts by owner answered — the call free public nodes turn away (publicnode: 403), which balances and moves need.

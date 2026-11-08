@@ -99,10 +99,12 @@ extension Workspace {
     func ledgerSigner(_ wallet: TradeWallet) -> LedgerSigner {
         let account = LedgerAccount.saved ?? LedgerAccount()
         let owner = wallet.evm
-        var agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature)?
+        var agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature?)?
         if agentActive {
             agent = { @Sendable action, nonce in
                 let r = try await SignerClient().send(.signLedgerAgentL1(owner: owner, action: action, nonce: nonce))
+                // A short or an order past the person's limits: the trading key won't, the device signs it.
+                if !r.ok, r.problems.contains(where: { $0.hasSuffix(SignerLedger.device) }) { return nil }
                 guard r.ok, let signature = r.signature else { throw GuardStop(XPCTradeSigner.reason(r)) }
                 return signature
             }

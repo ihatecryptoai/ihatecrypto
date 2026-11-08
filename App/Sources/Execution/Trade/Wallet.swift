@@ -422,20 +422,29 @@ extension Executor {
                 let quote: Jupiter.Quote
                 do { quote = try await Jupiter.quote(input: from.mint, output: to.mint, amount: units, excludeDexes: excluded) }
                 catch { throw firstFailure ?? error }
-                try holdsShown(quote.outAmount)
                 try holdsImpact(quote.impact, usd: quote.usd, out: quote.outAmount)
-                report("\(from.symbol) → \(to.symbol) via Jupiter: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(quote.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(quote.minOut) / outScale, maxFraction: 8)). Route: \(quote.route).")
-                let tx = try await Jupiter.swapTransaction(quote, user: wallet.solana)
+                // Built by Swap API v2 (the swaps the signer reads): its own route, held to the amount shown like the quote.
+                let failure: Error, why: String, tx: Jupiter.Built
+                do { tx = try await Jupiter.swapTransaction(quote, user: wallet.solana, excludeDexes: excluded) }
+                catch let e as Jupiter.TooBig {
+                    let route = e.dexes.isEmpty ? quote.route : e.dexes.joined(separator: " → ")
+                    guard attempt < 3 else { throw ExecutionError("Jupiter's route \(route) is over Solana's limit of 1232 bytes, so nothing was signed.") }
+                    firstFailure = firstFailure ?? e
+                    excluded += (e.dexes.isEmpty ? quote.dexes : e.dexes).filter { !excluded.contains($0) }
+                    report("Route \(route) is over Solana's limit of 1232 bytes, so nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
+                    continue
+                }
+                try holdsShown(tx.outAmount)
+                report("\(from.symbol) → \(to.symbol) via Jupiter: \(Fmt.num(Decimal(units) / scale, maxFraction: 8)) → ≈ \(Fmt.num(Decimal(tx.outAmount) / outScale, maxFraction: 8)), at least \(Fmt.num(Decimal(tx.minOut) / outScale, maxFraction: 8)). Route: \(tx.route).")
                 var rules: [(String, String, Bool, Int64)] = []
                 if !nativeIn { rules.append((inAccount, from.symbol, true, -Int64(units))) }
-                if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(quote.minOut))) }
+                if !nativeOut { rules.append((outAccount, "\(to.symbol) (quote minimum)", true, Int64(tx.minOut))) }
                 let fee: Int64 = 5_000_000
                 // Up to ~0.0021 SOL more when the output token's account is created (rent, returned when it is closed).
-                let lamportsAtLeast: Int64 = nativeIn ? -Int64(units) - fee : nativeOut ? Int64(quote.minOut) - fee : -fee
-                let failure: Error, why: String
+                let lamportsAtLeast: Int64 = nativeIn ? -Int64(units) - fee : nativeOut ? Int64(tx.minOut) - fee : -fee
                 if tx.wire.count > 1232 {
                     why = "is \(tx.wire.count) bytes, over Solana's limit of 1232"
-                    failure = ExecutionError("Jupiter's route \(quote.route) \(why), so nothing was signed.")
+                    failure = ExecutionError("Jupiter's route \(tx.route) \(why), so nothing was signed.")
                 } else {
                     do {
                         changes = try await signAndSend(tx.wire, lastValid: tx.lastValidBlockHeight, owners: owners, rules: rules, note: "Jupiter \(from.symbol)→\(to.symbol)",
@@ -448,8 +457,8 @@ extension Executor {
                 }
                 guard attempt < 3 else { throw failure }
                 firstFailure = firstFailure ?? failure
-                excluded += quote.dexes.filter { !excluded.contains($0) }
-                report("Route \(quote.route) \(why), so nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
+                excluded += (tx.dexes + quote.dexes).filter { !excluded.contains($0) }
+                report("Route \(tx.route) \(why), so nothing was signed. Asking Jupiter for a route without \(excluded.joined(separator: ", ")).")
             }
         }
         if dryRun { return "Simulation (nothing signed): " + changes.joined(separator: "; ") }

@@ -11,13 +11,33 @@ public struct Verdict: Sendable {
     public var checks: [String] = []
     /// Any entry means: do not sign.
     public var problems: [String] = []
+    /// Signable, but only after a fresh in-person prompt that names these, whatever session is open (a swap whose
+    /// slippage is past the person's limit).
+    public var askAfresh: [String] = []
+    /// What leaves the wallet, as read: a transfer (with whom it goes to: an address, or its owner for a token account the
+    /// signer could tie to one), or what a swap gives (no `to`). The automation wallet's dollars are counted from these.
+    public var outflows: [Outflow] = []
+    /// A swap is in it: its rate is the person's to judge (the quote it's held to comes with the request), so a person
+    /// signs it with a prompt of its own, never inside an open session (the 2026-11-08 review).
+    public var swaps = false
     public var ok: Bool { problems.isEmpty }
+
+    public struct Outflow: Sendable, Equatable {
+        /// A mint, «SOL», or an EVM token contract / «native».
+        public let asset: String
+        public let units: UInt64
+        public let to: String?
+        public init(asset: String, units: UInt64, to: String?) { (self.asset, self.units, self.to) = (asset, units, to) }
+    }
 
     public init() {}
 
     public mutating func merge(_ other: Verdict) {
         checks += other.checks
         problems += other.problems
+        askAfresh += other.askAfresh
+        outflows += other.outflows
+        swaps = swaps || other.swaps
     }
 }
 
@@ -39,15 +59,18 @@ public struct SolanaPolicy: Sendable {
     /// swap's temporary account, returned to us when that closes. The simulation checks what we get in the end.
     public var sponsor: String?
     public static let sponsorRefund: UInt64 = 5_000_000
+    /// The slippage a swap may allow before it asks in person afresh (the person's limit, Settings), basis points.
+    public var maxSlippageBps: Int
 
     public init(owner: String, recipients: Set<String> = [], programs: [String: String] = SolanaGuard.knownPrograms,
-                maxPriorityFee: UInt64 = 5_000_000, trustLookupTables: Bool = true, sponsor: String? = nil) {
+                maxPriorityFee: UInt64 = 5_000_000, trustLookupTables: Bool = true, sponsor: String? = nil, maxSlippageBps: Int = 300) {
         self.owner = owner
         self.recipients = recipients
         self.programs = programs
         self.maxPriorityFee = maxPriorityFee
         self.trustLookupTables = trustLookupTables
         self.sponsor = sponsor
+        self.maxSlippageBps = maxSlippageBps
     }
 }
 
@@ -139,15 +162,27 @@ public enum SolanaGuard {
         }
     }
 
-    /// Jupiter's swap forms (its IDL, 2026-10-24) by discriminator: the account the output lands in, the one that replaces
-    /// it when set, and the output mint. Plain and token-ledger routes, exact-out, their shared-accounts kinds and the v2
-    /// forms the gasless /order builds.
-    static let jupiterRoutes: [String: (to: Int, instead: Int?, mint: Int)] = [
-        "e517cb977ae3ad2a": (3, 4, 5), "96564774a75d0e68": (3, 4, 5), "d033ef977b2bed5c": (3, 4, 6),   // route, route_with_token_ledger, exact_out_route
-        "c1209b3341d69c81": (6, nil, 8), "e6798f50779f6aaa": (6, nil, 8), "b0d169a89a7d453e": (6, nil, 8), // shared_accounts_ the same three
-        "bb64facc31c4af14": (2, 7, 4), "9d8ab85215f4f324": (2, 7, 4),                                   // route_v2, exact_out_route_v2
-        "d19853937cfed8e9": (5, nil, 7), "3560e5cad8bbfa18": (5, nil, 7),                               // shared_accounts_route_v2, …exact_out_route_v2
+    /// Jupiter's exact-in v2 swaps by discriminator (route_v2, shared_accounts_route_v2): where the arguments start
+    /// (in_amount u64, quoted_out_amount u64, slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16, then the
+    /// route), the account and mint that go in, the account the output lands in, the one that replaces it when set, and
+    /// the output mint. Checked 2026-11-08 on mainnet swaps: in_amount is what left the source account.
+    static let jupiterRoutes: [String: (args: Int, source: Int, inMint: Int, to: Int, instead: Int?, mint: Int)] = [
+        "bb64facc31c4af14": (8, 1, 3, 2, 7, 4),
+        "d19853937cfed8e9": (9, 2, 6, 5, nil, 7),
     ]
+    /// Jupiter's other swaps: v1 (route, shared_accounts_route, their token-ledger and exact-out kinds) put the amounts
+    /// after the route, and reading that takes Jupiter's whole list of pools, which grows every few weeks; exact-out v2
+    /// isn't one ihatecrypto builds. Refused by name.
+    static let jupiterUnread: Set<String> = ["e517cb977ae3ad2a", "96564774a75d0e68", "d033ef977b2bed5c", "c1209b3341d69c81",
+                                             "e6798f50779f6aaa", "b0d169a89a7d453e", "9d8ab85215f4f324", "3560e5cad8bbfa18"]
+
+    /// `n` units of `mint`, by its name where the signer knows it: «3 USDC», else «3000000 units of EPjFWd…».
+    static func units(_ n: UInt64, _ mint: String) -> String {
+        mintNames[mint].map { "\(Decimal(n) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(n) units of \(mint.prefix(6))…"
+    }
+
+    /// 300 → «3%».
+    static func percent(_ bps: Int) -> String { "\(NSDecimalNumber(decimal: Decimal(bps) / 100).stringValue)%" }
 
     /// Jupiter Lend Earn (Fluid's lending program): its deposits mint fTokens to account 2, the signer's own account for
     /// the fToken mint (account 6); its withdrawals and redemptions pay account 2, the signer's own account for the token
@@ -290,6 +325,7 @@ public enum SolanaGuard {
                     }
                 } else if allowed(to) {
                     v.checks.append("\(Double(lamports) / 1e9) SOL → \(name(to)).")
+                    if account(0) == policy.owner, !mine(to) { v.outflows.append(.init(asset: "SOL", units: lamports, to: to)) }
                 } else {
                     v.problems.append("SOL goes to someone else's address \(to).")
                 }
@@ -304,6 +340,13 @@ public enum SolanaGuard {
                     let known = tag == 12 ? account(1).flatMap { mintNames[$0] } : nil
                     let amount = known.map { "\(Decimal(units) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(units) units of a token"
                     if allowed(to) { v.checks.append("\(amount) → \(name(to)).") } else { v.problems.append("\(amount) go to someone else's account \(to).") }
+                    // The mint: named by TransferChecked, else the one this wallet's own source account is for.
+                    // Counted when this wallet signs for it (its authority) or its own account pays, whatever the app claims.
+                    let source = account(0)
+                    let mint = tag == 12 ? account(1) : accounts.first { ownTokenAccount(source, owner: policy.owner, mint: $0) }
+                    if account(tag == 3 ? 2 : 3) == policy.owner || source.map(mine) == true, !mine(to) {
+                        v.outflows.append(.init(asset: mint ?? "?", units: units, to: tokenOwners[to] ?? to))
+                    }
                 case 9: // CloseAccount(account, destination, owner): the rent must come back to us
                     if let to = account(1), mine(to), policy.trustLookupTables || staticKeys.contains(to) { v.checks.append("Temporary account closes, remainder → \(name(to)).") }
                     else { v.problems.append("Closing the account sends the remainder to someone else's address.") }
@@ -417,15 +460,22 @@ public enum SolanaGuard {
                 // A mint a lookup table names is unread here: the wallet's own account for it says which it is (its address
                 // derives from the mint), so the prompt reads «3 USDC», not «3000000 units of lookup-table entry 21».
                 func named(_ a: String, _ m: String) -> String { mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m }
-                func units(_ n: UInt64, _ m: String) -> String { mintNames[m].map { "\(Decimal(n) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(n) units of \(m.prefix(6))…" }
+                v.outflows.append(.init(asset: named(source, inMint), units: le64(ix.data, 8), to: nil))
+                v.swaps = true
                 v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), named(source, inMint))) for \(units(le64(ix.data, 16), named(out, mint))) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
             case jupiterSwap:
-                // Every swap form's output account (its «instead» one when set: the program's own id when not) must be this
-                // wallet's own; any other Jupiter instruction is refused (the 2026-10-24 review: the gasless path's route_v2
-                // went unchecked). The amounts aren't read: they end the data, and the program ignores bytes after them,
-                // so a site could append a made-up quote and slippage (the 2026-10-22 review). The simulation checks what arrives.
-                guard let layout = jupiterRoutes[ix.data.prefix(8).hex], var to = account(layout.to), let mint = account(layout.mint) else {
-                    v.problems.append("Instruction \(n + 1): a Jupiter instruction that isn't one of its swaps (\(ix.data.prefix(8).hex)).")
+                // Exact-in v2 swaps only: in_amount, quoted_out_amount and slippage_bps open their data, so what the signer
+                // reads is what the program reads, and the prompt says what goes in and the least that comes out (the
+                // 2026-11-08 review: a program that took over the app could swap at a bad rate inside a Touch ID session).
+                // v1 swaps put the amounts after the route, where a site could also append a made-up quote (the
+                // 2026-10-22 review): refused, and ihatecrypto asks Jupiter for v2. The output account (its «instead» one
+                // when set: the program's own id when not) must be this wallet's own (the 2026-10-24 review).
+                let disc = ix.data.prefix(8).hex
+                guard let layout = jupiterRoutes[disc], ix.data.count >= layout.args + 22, var to = account(layout.to),
+                      let mint = account(layout.mint), let inMint = account(layout.inMint) else {
+                    v.problems.append(jupiterUnread.contains(disc)
+                        ? "Instruction \(n + 1): an older Jupiter swap whose amounts the signer can't read: it signs only Jupiter's v2 swaps."
+                        : "Instruction \(n + 1): a Jupiter instruction that isn't one of its swaps (\(disc)).")
                     continue
                 }
                 if let instead = layout.instead.flatMap(account), instead != jupiterSwap { to = instead }
@@ -435,7 +485,23 @@ public enum SolanaGuard {
                     v.problems.append("The Jupiter swap pays \(to), not your wallet.")
                     continue
                 }
-                v.checks.append("Jupiter swap → your account (\(mintNames[mint]?.symbol ?? "\(mint.prefix(6))…")). The balance simulation checks the amount.")
+                let inAmount = le64(ix.data, layout.args), quoted = le64(ix.data, layout.args + 8)
+                let slippage = Int(le16(ix.data, layout.args + 16)), fee = Int(le16(ix.data, layout.args + 18))
+                guard slippage <= 10_000, fee <= 1_000 else { v.problems.append("Instruction \(n + 1): a Jupiter swap with slippage over 100% or a fee over 10%."); continue }
+                let least = UInt64((UInt128(quoted) * UInt128(10_000 - slippage)) / 10_000)
+                // Each mint by this wallet's own account for it where the message's mint is one a lookup table names
+                // (the signer can't read tables): «3 USDC», not «3000000 units of lookup-table entry 21».
+                func named(_ a: String?, _ m: String) -> String {
+                    guard let a else { return m }
+                    return ownTokenAccount(a, owner: policy.owner, mint: m) ? m : mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m
+                }
+                let given = named(account(layout.source), inMint), got = named(to, mint)
+                v.checks.append("Jupiter swap: \(units(inAmount, given)) → at least \(units(least, got)), your account (slippage \(percent(slippage))"
+                                + (fee > 0 ? ", a \(percent(fee)) fee to the site" : "") + ")")
+                if slippage > policy.maxSlippageBps { v.askAfresh.append("slippage \(percent(slippage)) is over your \(percent(policy.maxSlippageBps))") }
+                if fee > 0 { v.askAfresh.append("the site takes a \(percent(fee)) fee") }
+                v.outflows.append(.init(asset: given, units: inAmount, to: nil))
+                v.swaps = true
             default:
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
             }

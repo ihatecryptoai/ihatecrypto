@@ -362,6 +362,7 @@ struct SettingsView: View {
         signer
         WalletManagement()
         touchID
+        LimitsSettings()
         PasscodeSettings()
         tradingKey
         addresses
@@ -430,7 +431,7 @@ struct SettingsView: View {
         SettingsSection(icon: Presence.signIcon, title: AppLock.shared.codeSigns ? "Signing" : Presence.short,
                         line: "One \(Presence.touchID ? "touch" : AppLock.shared.codeSigns ? "code" : "password") covers one move, or a few minutes.") {
             SettingsGroup {
-                SettingsRow("Stays valid for", icon: "timer", info: "One move covers that move's signatures for at most a minute and ends when it is done. With 5–30 minutes, signatures need no new \(Presence.touchID ? "touch" : "password") during that time. Each still passes the guard and second check. Locking the screen or sleep ends the session. A longer duration asks for \(Presence.name).") {
+                SettingsRow("Stays valid for", icon: "timer", info: "One move covers that move's signatures for at most a minute and ends when it is done. With 5–30 minutes, signatures need no new \(Presence.touchID ? "touch" : "password") during that time, but only to the addresses and in the coins the first one used: anything else asks again. Each still passes the guard and second check. Locking the screen or sleep ends the session. A longer duration asks for \(Presence.name).") {
                     // Drawn segments keep the brand accent instead of macOS's system blue.
                     HStack(spacing: 2) {
                         ForEach(SignerSession.choices, id: \.self) { choice in

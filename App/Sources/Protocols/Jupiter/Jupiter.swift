@@ -1,4 +1,5 @@
 import Foundation
+import SolanaChain
 import WalletCore
 
 /// Swaps inside Solana through Jupiter's free API. Jupiter builds the transaction; the wallet only checks
@@ -22,6 +23,25 @@ public enum Jupiter {
         public var impact: Decimal = 0
         /// What comes out, in USD by Jupiter's prices (swapUsdValue); 0 when it doesn't say.
         public var usd: Decimal = 0
+        /// What it was asked: the transaction (`swapTransaction`) is built for the same.
+        public var input = "", output = "", slippageBps = 50
+    }
+
+    /// /build's route doesn't fit in one transaction: its pools, to ask again without them.
+    public struct TooBig: LocalizedError {
+        public let dexes: [String]
+        public let message: String
+        public var errorDescription: String? { message }
+    }
+
+    /// A swap ready for the signer: its own route and amounts, which can differ a little from the quote's.
+    public struct Built: Sendable {
+        public let wire: Data
+        public let lastValidBlockHeight: UInt64
+        public let outAmount: UInt64
+        public let minOut: UInt64
+        public let route: String
+        public let dexes: [String]
     }
 
     /// Jupiter's price impact (its sign dropped: v2 says it negative) and the swap's USD worth, from a quote or an order.
@@ -46,32 +66,61 @@ public enum Jupiter {
             }
             let dexes = (j["routePlan"] as? [[String: Any]] ?? []).compactMap { ($0["swapInfo"] as? [String: Any])?["label"] as? String }
             let (impact, usd) = impactAndWorth(j)
-            return Quote(raw: data, inAmount: inAmount, outAmount: outAmount, minOut: minOut, route: dexes.joined(separator: " → "), dexes: dexes,
-                         impact: impact, usd: usd)
+            var quote = Quote(raw: data, inAmount: inAmount, outAmount: outAmount, minOut: minOut, route: dexes.joined(separator: " → "), dexes: dexes,
+                              impact: impact, usd: usd)
+            (quote.input, quote.output, quote.slippageBps) = (input, output, slippageBps)
+            return quote
         }
     }
 
-    /// Unsigned versioned transaction for `quote`, paid by `user`.
-    public static func swapTransaction(_ quote: Quote, user: String) async throws -> (wire: Data, lastValidBlockHeight: UInt64) {
-        let quoteObject = try JSONSerialization.jsonObject(with: quote.raw)
-        var request = URLRequest(url: URL(string: "\(base)/swap")!, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "quoteResponse": quoteObject, "userPublicKey": user,
-            "wrapAndUnwrapSol": true, "dynamicComputeUnitLimit": true,
-            "prioritizationFeeLamports": ["priorityLevelWithMaxLamports": ["maxLamports": 200_000, "priorityLevel": "medium"]],
-        ])
-        let ask = request
+    /// The unsigned v0 transaction for `quote`'s swap, paid by `user`, from Swap API v2's /build: its swap is route_v2 or
+    /// shared_accounts_route_v2, whose amounts open the instruction, the only Jupiter swaps the signer reads (the
+    /// 2026-11-08 review); /swap v1 builds v1 routes, whose amounts sit after the route. `excludeDexes` as for the quote.
+    public static func swapTransaction(_ quote: Quote, user: String, excludeDexes: [String] = []) async throws -> Built {
+        var url = URL(string: "\(v2)/build?inputMint=\(quote.input)&outputMint=\(quote.output)&amount=\(quote.inAmount)&slippageBps=\(quote.slippageBps)&taker=\(user)")!
+        if !excludeDexes.isEmpty { url.append(queryItems: [URLQueryItem(name: "excludeDexes", value: excludeDexes.joined(separator: ","))]) }
+        let ask = url
         // Nothing is signed yet, so this is asked again like the quote.
-        return try await RPCRetry.run({ try await URLSession.shared.data(for: ask) }) { data, status in
-            guard let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let b64 = j["swapTransaction"] as? String, let wire = Data(base64Encoded: b64),
-                  let height = (j["lastValidBlockHeight"] as? NSNumber)?.uint64Value else {
+        let j = try await RPCRetry.run({ try await URLSession.shared.data(from: ask) }) { data, status -> [String: Any] in
+            guard status == 200, let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], j["swapInstruction"] != nil else {
                 throw RPCRetry.Again(status == 429 || status >= 500, JupiterError(data, status))
             }
-            return (wire, height)
+            return j
         }
+        func instruction(_ any: Any?) throws -> SolanaInstruction? {
+            guard let o = any as? [String: Any] else { return nil }
+            guard let program = o["programId"] as? String, let accounts = o["accounts"] as? [[String: Any]],
+                  let data = (o["data"] as? String).flatMap({ Data(base64Encoded: $0) }) else { throw JupiterError(message: "an instruction Jupiter's /build sent can't be read") }
+            return SolanaInstruction(program: program, accounts: try accounts.map {
+                guard let key = $0["pubkey"] as? String else { throw JupiterError(message: "an account Jupiter's /build sent can't be read") }
+                return .init(pubkey: key, isSigner: $0["isSigner"] as? Bool ?? false, isWritable: $0["isWritable"] as? Bool ?? false)
+            }, data: data)
+        }
+        var all: [SolanaInstruction] = []
+        for key in ["computeBudgetInstructions", "setupInstructions", "otherInstructions"] {
+            for o in j[key] as? [Any] ?? [] { if let ix = try instruction(o) { all.append(ix) } }
+        }
+        guard let swap = try instruction(j["swapInstruction"]) else { throw JupiterError(message: "Jupiter's /build sent no swap") }
+        all.append(swap)
+        if let cleanup = try instruction(j["cleanupInstruction"]) { all.append(cleanup) }
+        guard let meta = j["blockhashWithMetadata"] as? [String: Any], let hash = meta["blockhash"] as? [Int], hash.count == 32,
+              let height = (meta["lastValidBlockHeight"] as? NSNumber)?.uint64Value,
+              let outAmount = (j["outAmount"] as? String).flatMap(UInt64.init), let minOut = (j["otherAmountThreshold"] as? String).flatMap(UInt64.init) else {
+            throw JupiterError(message: "Jupiter's /build answer is missing its blockhash or amounts")
+        }
+        let tables = (j["addressesByLookupTableAddress"] as? [String: [String]] ?? [:]).sorted { $0.key < $1.key }.map { (address: $0.key, entries: $0.value) }
+        // The wallet's own token accounts for both coins, and both mints, stay in the message itself: the signer lets the
+        // swap pay only an account the message names, and names the coins on its prompt from the message's own keys.
+        let own = Set([quote.input, quote.output].flatMap { mint in [SPL.tokenProgram, SPL.token2022Program].compactMap { try? SPL.associatedAccount(owner: user, mint: mint, program: $0) } }
+                      + [quote.input, quote.output])
+        let dexes = (j["routePlan"] as? [[String: Any]] ?? []).compactMap { ($0["swapInfo"] as? [String: Any])?["label"] as? String }
+        let message: Data
+        do {
+            message = try SolanaTransaction.compileV0(all, payer: user, blockhash: Base58.encode(Data(hash.map { UInt8(truncatingIfNeeded: $0) })),
+                                                      tables: tables, keepStatic: own)
+        } catch let e as WalletError where e.message.contains("over Solana's limit of 1232") { throw TooBig(dexes: dexes, message: e.message) }
+        return Built(wire: SolanaTransaction.unsigned(message), lastValidBlockHeight: height, outAmount: outAmount, minOut: minOut,
+                     route: dexes.joined(separator: " → "), dexes: dexes)
     }
 }
 

@@ -9,8 +9,10 @@ public struct WalletError: LocalizedError, Equatable {
 }
 
 /// BIP-39 recovery phrase: validation and seed.
-/// ponytail: the phrase and seed live in ordinary Swift memory and are not zeroed; the XPC signer
-/// planned before real funds is where that gets tightened.
+/// The seed and keys derived from it are overwritten after each use in the signer (`SeedStore.wipe`). The phrase is a
+/// Swift String, which can't be overwritten in place: copies may stay in freed memory until it's reused. So the phrase
+/// lives as briefly as it can — the signer drops it once the seed is made, and the window forgets it as soon as it was
+/// shown or imported — and no debugger can attach to the signer to read what's left.
 public enum Mnemonic {
     /// Checks word count, words and checksum. Returns the normalized phrase (lowercase, single spaces).
     public static func validate(_ phrase: String) throws -> String {

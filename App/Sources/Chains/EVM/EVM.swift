@@ -965,7 +965,7 @@ public enum EVMCall: Equatable, Sendable {
     /// Coins sent with this call that come back to the sender, so `to` isn't paid: a wrap by the network's own WETH (the one
     /// Uniswap's v2 router uses there), or a v4 swap of the network's coin through its Universal Router whose input is exactly
     /// that value (SETTLE_ALL in the zero currency; the router keeps nothing over, TAKE_ALL pays the caller).
-    func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
+    public func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
         switch self {
         case .wrap: to.lowercased() == UniswapV2.on(chainId)?.weth
         case .v4Swap(let s): to.lowercased() == UniswapV4.on(chainId)?.router && s.currencyIn == UniswapV4.native

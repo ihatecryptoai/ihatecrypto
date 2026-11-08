@@ -20,11 +20,12 @@ public struct LedgerSigner: TradeSigner {
     /// What the person has to do on the device now («Open the Solana app…», «Review … on your Ledger»); nil when done.
     public let prompt: @Sendable (String?) -> Void
     /// The trading key the Ledger approved for its Hyperliquid account, in the signing process: orders, cancels and
-    /// leverage go there without the device. Nil while there is none or it is paused.
-    public var agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature)?
+    /// leverage go there without the device. Nil while there is none or it is paused. It answers nil for what the
+    /// device must sign instead (a short, an order past the person's limits).
+    public var agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature?)?
 
     public init(device: LedgerDevice, wallet: TradeWallet, evmPath: String = LedgerDevice.evmPath, solanaPath: String = LedgerDevice.solanaPath,
-                model: String? = nil, agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature)? = nil,
+                model: String? = nil, agent: (@Sendable (MsgPack, UInt64) async throws -> EVMSignature?)? = nil,
                 prompt: @escaping @Sendable (String?) -> Void = { _ in }) {
         (self.device, self.wallet, self.evmPath, self.solanaPath, self.model, self.agent, self.prompt) = (device, wallet, evmPath, solanaPath, model, agent, prompt)
     }
@@ -151,9 +152,9 @@ public struct LedgerSigner: TradeSigner {
     public func signHyperliquid(_ action: MsgPack, nonce: UInt64) async throws -> EVMSignature {
         let verdict = HLGuard.check(action, owner: wallet.evm, recipients: [])
         guard verdict.ok else { throw Self.refuse(verdict) }
-        if let agent, HLSigner.isTrading(action) { return try await agent(action, nonce) }
+        if let agent, HLSigner.isTrading(action), let signature = try await agent(action, nonce) { return signature }
         // A TWAP buys on for hours: only the Ledger's trading key can stop it with no one at the device.
-        if HLAction.type(action) == "twapOrder" {
+        if HLAction.type(action) == "twapOrder", agent == nil {
             throw ExecutionError("A TWAP needs the Ledger's trading key on: without it, stopping the TWAP waits for the device's buttons. Nothing was signed.")
         }
         let what = HLAction.type(action) == "setReferrer" ? "ihatecrypto's referral code on Hyperliquid (4% off its fees)" : "a Hyperliquid order"
