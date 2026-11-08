@@ -16,7 +16,7 @@ body.locked .wn-over, body.in-settings .wn-over { visibility: hidden; }
 .wn-version .secondary { font-size: 11px; }
 .wn-stories { flex: 1; min-width: 0; max-width: 560px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
 .wn-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--card-border);
-  text-align: left; color: inherit; transition: transform 0.15s ease-out, box-shadow 0.15s; }
+  text-align: left; color: inherit; cursor: pointer; transition: transform 0.15s ease-out, box-shadow 0.15s; }
 .wn-row:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
 .wn-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit;
   font: inherit; text-align: left; cursor: pointer; }

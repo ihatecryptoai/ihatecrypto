@@ -59,9 +59,10 @@ export function openWhatsNew() {
         h("nav", { class: "wn-versions" }, releases.map((r) => h("button", { class: "wn-version" + (r.version === chosen ? " on" : ""), onclick: () => { chosen = r.version; draw(); } },
           h("b", {}, t("Version ", "Версия ") + r.version), day(r) ? h("span", { class: "secondary" }, day(r)) : null))),
         h("div", { class: "wn-stories" }, (release?.stories || []).map((s, i) => {
-          const open = { title: t("Open as stories: ← → to switch", "Открыть историями: ← → — листать"), onclick: () => play(release, i) };
-          // «Try it» beside the change when a phrase shows it: the phrase into the chat's field, never sent.
-          return h("div", { class: "wn-row" },
+          const open = { title: t("Open as stories: ← → to switch", "Открыть историями: ← → — листать") };
+          // «Try it» beside the change when a phrase shows it: the phrase into the chat's field, never sent. Any other click
+          // in the card (its padding and gaps too, or Enter on its buttons) opens the stories.
+          return h("div", { class: "wn-row", onclick: (e) => { if (!e.target.closest(".btn")) play(release, i); } },
             h("button", { class: "wn-row-main", ...open },
               h("span", { class: "wn-tile", style: `background:${color(s.color)}` }, icon(symbol(s.symbol), 18)),
               h("span", { class: "wn-row-text" }, h("b", {}, s.title), h("span", { class: "secondary one-line" }, s.text))),
