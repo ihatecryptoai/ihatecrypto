@@ -125,7 +125,8 @@ pub fn apply_nodes() {
     let all = node_secrets();
     for net in NodeNetwork::ALL { net.use_node(all.get(net.raw()).filter(|u| host(u).is_some()).cloned()) }
     one_click::set_key(all.get("1click").cloned());
-    agent_api::set_key(all.get("agentapi").cloned());
+    // Only a saved key is set: a launch starts with none, and a test's engine mustn't clear another test's key.
+    if let Some(k) = all.get("agentapi") { agent_api::set_key(Some(k.clone())) }
     if let Some(h) = all.get("agenthost") { agent_api::set_host(h) }
 }
 
