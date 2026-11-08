@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ihatecrypto — a Mac app that does crypto for you</title>
-<meta name="description" content="Close the ten tabs. Say what you want in plain words; ihatecrypto lays out the route as cards and waits for your Touch ID. Stocks on Robinhood Chain, Solana, Hyperliquid perps. Keys stay sealed in your Mac.">
+<title>ihatecrypto — AI crypto wallet for Mac and Windows</title>
+<meta name="description" content="An app that does crypto for you: say what you want, see the route as cards, confirm with Touch ID or Windows Hello. Free for Mac and Windows, and the keys stay with you.">
 <link rel="canonical" href="https://ihatecrypto.ai/">
 <meta name="theme-color" content="#FAFAFB">
 <!-- Not on a Mac (a phone, an iPad, another computer): the page offers to send its link to a Mac instead of a download. -->
@@ -13,7 +13,7 @@
 <meta property="og:site_name" content="ihatecrypto">
 <meta property="og:url" content="https://ihatecrypto.ai/">
 <meta property="og:title" content="ihatecrypto — Even crypto hates crypto.">
-<meta property="og:description" content="Close the ten tabs: say what you want, it lays out the route, you confirm with Touch ID. A Mac app; keys stay sealed in your Mac.">
+<meta property="og:description" content="An app that does crypto for you: say what you want, see the route as cards, confirm with Touch ID or Windows Hello. Free for Mac and Windows, and the keys stay with you.">
 <meta property="og:image" content="https://ihatecrypto.ai/og.png?v=2">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -23,7 +23,7 @@
 <meta property="og:locale:alternate" content="es_ES">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ihatecrypto — Even crypto hates crypto.">
-<meta name="twitter:description" content="Close the ten tabs: say what you want, it lays out the route, you confirm with Touch ID.">
+<meta name="twitter:description" content="An app that does crypto for you: say what you want, see the route as cards, confirm with Touch ID or Windows Hello. Free for Mac and Windows, and the keys stay with you.">
 <meta name="twitter:image" content="https://ihatecrypto.ai/og.png?v=2">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="ihatecrypto for language models">
 <link rel="icon" href="/favicon.png" sizes="64x64">
@@ -32,18 +32,15 @@
 <link rel="preload" href="/fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin>
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@graph": [
-  {"@type": "SoftwareApplication", "name": "ihatecrypto", "url": "https://ihatecrypto.ai/",
-   "description": "A Mac app that does crypto for you: say what you want in plain words, it lays out the route as cards, you confirm with Touch ID. Self-custody: the keys are sealed in the Mac's Secure Enclave.",
-   "applicationCategory": "FinanceApplication", "operatingSystem": "macOS 26 or later", "softwareVersion": "{{version}}",
-   "downloadUrl": "https://ihatecrypto.ai/ihatecrypto.dmg", "image": "https://ihatecrypto.ai/og.png",
-   "inLanguage": ["en", "es", "ru"], "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}},
+  {"@type": "WebSite", "name": "ihatecrypto", "alternateName": "I hate crypto", "url": "https://ihatecrypto.ai/"},
+  {"@type": "SoftwareApplication", "name": "ihatecrypto", "url": "https://ihatecrypto.ai/", "description": "An app that does crypto for you, for Mac and Windows: say what you want in plain words, it lays out the route as cards, and nothing moves until you confirm with Touch ID or Windows Hello. Self-custody: the keys are made and kept on your computer, sealed by the Mac's Secure Enclave or the PC's TPM chip.", "applicationCategory": "FinanceApplication", "operatingSystem": "macOS 26 or later, Windows 10, Windows 11", "softwareVersion": "{{version}}", "downloadUrl": ["https://ihatecrypto.ai/ihatecrypto.dmg", "https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"], "image": "https://ihatecrypto.ai/og.png", "inLanguage": ["en", "es", "ru"], "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "alternateName": "I hate crypto", "sameAs": ["https://github.com/ihatecryptoai/ihatecrypto"]},
   {"@type": "FAQPage", "mainEntity": [
     {"@type": "Question", "name": "Who holds the keys?", "acceptedAnswer": {"@type": "Answer", "text": "You do. The wallet is made on your Mac and sealed in its Secure Enclave; you confirm moves with Touch ID, or with a Ledger. Nothing is kept on a server."}},
     {"@type": "Question", "name": "Can the AI move my money by itself?", "acceptedAnswer": {"@type": "Answer", "text": "No. It can look things up and lay out a move; only your Confirm, with Touch ID, carries one out."}},
     {"@type": "Question", "name": "Which networks does it work with?", "acceptedAnswer": {"@type": "Answer", "text": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR and Tempo, through Jupiter, Kamino, Aave, Morpho, Relay, Uniswap and NEAR Intents."}},
     {"@type": "Question", "name": "Which AI does it use?", "acceptedAnswer": {"@type": "Answer", "text": "Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac."}},
     {"@type": "Question", "name": "What does it cost?", "acceptedAnswer": {"@type": "Answer", "text": "The app is a free download. You pay the networks' fees and your own AI plan. On Hyperliquid, ihatecrypto takes 0.05% of each trade, on top of the exchange's own fee."}},
-    {"@type": "Question", "name": "What do I need?", "acceptedAnswer": {"@type": "Answer", "text": "A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to."}}
+    {"@type": "Question", "name": "What do I need?", "acceptedAnswer": {"@type": "Answer", "text": "A Mac with macOS 26 or later, Apple silicon or Intel. Or a PC with Windows 10 or 11 and Windows Hello set up (a PIN is enough): the Windows version is a preview for now. Updates install only when you choose to."}}
   ]}
 ]}
 </script>
@@ -711,11 +708,11 @@
   <h2 class="h" data-t="q_h">Questions</h2>
   <div class="faq">
     <details><summary><span data-t="f0q">Who holds the keys?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f0a">You do. The wallet is made on your Mac and sealed in its Secure Enclave; you confirm moves with Touch ID, or with a Ledger. Nothing is kept on a server.</p><p class="win-only" data-t="f0a_win">You do. The wallet is made on your PC and sealed with a key in its TPM chip; you confirm moves with Windows Hello, or with a Ledger. Nothing is kept on a server.</p></details>
-    <details><summary><span data-t="f5q">Can the AI move my money by itself?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f5a">No. It can look things up and lay out a move; only your Confirm, with Touch ID, carries one out.</p></details>
+    <details><summary><span data-t="f5q">Can the AI move my money by itself?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f5a">No. It can look things up and lay out a move; only your Confirm, with Touch ID, carries one out.</p><p class="win-only" data-t="f5a_win">No. It can look things up and lay out a move; only your Confirm, with Windows Hello, carries one out.</p></details>
     <details><summary><span data-t="f1q">Which networks does it work with?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f1a">Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR and Tempo, through Jupiter, Kamino, Aave, Morpho, Relay, Uniswap and NEAR Intents.</p></details>
     <details><summary><span data-t="f2q">Which AI does it use?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f2a">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your Mac.</p><p class="win-only" data-t="f2a_win">Yours: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your PC.</p></details>
     <details><summary><span data-t="f3q">What does it cost?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f3a">The app is a free download. You pay the networks' fees and your own AI plan. On Hyperliquid, ihatecrypto takes 0.05% of each trade, on top of the exchange's own fee.</p></details>
-    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p class="not-win" data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. A new version installs only when you choose to.</p><p class="win-only" data-t="f4a_win">A PC with Windows 10 or 11 and Windows Hello set up (a PIN is enough). A new version installs only when you choose to.</p></details>
+    <details><summary><span data-t="f4q">What do I need?</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><p data-t="f4a">A Mac with macOS 26 or later, Apple silicon or Intel. Or a PC with Windows 10 or 11 and Windows Hello set up (a PIN is enough): the Windows version is a preview for now. Updates install only when you choose to.</p></details>
   </div>
 </section>
 
@@ -739,7 +736,7 @@
 {
 "en": {
 "se": "https://support.apple.com/en-us/guide/security/sec59b0b31ff/web",
-"meta_title": "ihatecrypto — a Mac app that does crypto for you"
+"meta_title": "ihatecrypto — AI crypto wallet for Mac and Windows"
 },
 "es": {
 "se": "https://support.apple.com/es-es/guide/security/sec59b0b31ff/web",
@@ -848,6 +845,7 @@
 "f0a_win": "Tú. La billetera se crea en tu PC y la protege una clave en su chip TPM; confirmas los movimientos con Windows Hello o con un Ledger. Nada se guarda en un servidor.",
 "f5q": "¿Puede la IA mover mi dinero por su cuenta?",
 "f5a": "No. Puede buscar cosas y preparar un movimiento; solo tu Confirm, con Touch ID, lo ejecuta.",
+"f5a_win": "No. Puede buscar cosas y preparar un movimiento; solo tu Confirm, con Windows Hello, lo ejecuta.",
 "f1q": "¿Con qué redes funciona?",
 "f1a": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR y Tempo, a través de Jupiter, Kamino, Aave, Morpho, Relay, Uniswap y NEAR Intents.",
 "f2q": "¿Qué IA usa?",
@@ -856,12 +854,11 @@
 "f3q": "¿Cuánto cuesta?",
 "f3a": "La app se descarga gratis. Pagas las comisiones de las redes y tu propio plan de IA. En Hyperliquid, ihatecrypto cobra un 0,05% de cada operación, además de la comisión del propio exchange.",
 "f4q": "¿Qué necesito?",
-"f4a": "Un Mac con macOS 26 o posterior, Apple silicon o Intel. Una versión nueva se instala solo cuando tú lo decides.",
-"f4a_win": "Un PC con Windows 10 u 11 y Windows Hello activado (basta con un PIN). Una versión nueva se instala solo cuando tú lo decides.",
+"f4a": "Un Mac con macOS 26 o posterior, Apple silicon o Intel. O un PC con Windows 10 u 11 y Windows Hello activado (basta con un PIN): la versión para Windows aún está en vista previa. Las actualizaciones se instalan solo cuando tú lo decides.",
 "slogan": "Hasta la cripto odia la cripto.",
 "end_p": "Así que cierra las pestañas. Solo di lo que quieres y la app hará el resto.",
-"meta_title": "ihatecrypto — una app para Mac que se encarga de tus criptos",
-"meta_desc": "Cierra las diez pestañas. Di lo que quieres con tus propias palabras: ihatecrypto te muestra la ruta en tarjetas y espera tu Touch ID. Acciones en Robinhood Chain, Solana, perpetuos en Hyperliquid. Las claves se quedan solo en tu Mac."
+"meta_title": "ihatecrypto — billetera cripto con IA para Mac y Windows",
+"meta_desc": "Una app que se encarga de tus criptos: di lo que quieres, revisa la ruta en tarjetas y confirma con Touch ID o Windows Hello. Gratis para Mac y Windows, y las claves se quedan contigo."
 },
 "ru": {
 "se": "https://support.apple.com/ru-ru/guide/security/sec59b0b31ff/web",
@@ -970,6 +967,7 @@
 "f0a_win": "Вы. Кошелёк создаётся на вашем компьютере и защищён ключом в чипе TPM, а операции вы подтверждаете через Windows Hello или Ledger. На серверах ничего не хранится.",
 "f5q": "Может ли ИИ сам потратить мои деньги?",
 "f5a": "Нет. Он может что-то узнать и подготовить операцию, но выполнить её можно только вашим Confirm с Touch ID.",
+"f5a_win": "Нет. Он может что-то узнать и подготовить операцию, но выполнить её можно только вашим Confirm с Windows Hello.",
 "f1q": "Какие сети поддерживаются?",
 "f1a": "Solana, Hyperliquid, Base, Arbitrum, Ethereum, Polygon, Robinhood Chain, NEAR и Tempo — через Jupiter, Kamino, Aave, Morpho, Relay, Uniswap и NEAR Intents.",
 "f2q": "Какой ИИ внутри?",
@@ -978,12 +976,11 @@
 "f3q": "Сколько стоит?",
 "f3a": "Приложение бесплатное. Вы платите комиссии сетей и за свою подписку на ИИ. Со сделок на Hyperliquid ihatecrypto берёт 0,05% сверх комиссии самой биржи.",
 "f4q": "Что нужно для работы?",
-"f4a": "Mac с macOS 26 или новее, Apple silicon или Intel. Новая версия ставится, только когда вы сами решите.",
-"f4a_win": "Компьютер с Windows 10 или 11 и включённым Windows Hello (хватит PIN-кода). Новая версия ставится, только когда вы сами решите.",
+"f4a": "Mac с macOS 26 или новее, Apple silicon или Intel. Или компьютер с Windows 10 или 11 и включённым Windows Hello (хватит PIN-кода): версия для Windows пока предварительная. Обновления ставятся, только когда вы сами решите.",
 "slogan": "Даже крипта ненавидит крипту.",
 "end_p": "Так что закрывайте вкладки. Просто скажите, что нужно, — остальное сделает приложение.",
-"meta_title": "ihatecrypto — приложение для Mac, которое берёт крипту на себя",
-"meta_desc": "Закройте десять вкладок. Скажите своими словами, что нужно, — ihatecrypto покажет маршрут карточками и дождётся вашего Touch ID. Акции на Robinhood Chain, Solana, фьючерсы на Hyperliquid. Ключи хранятся только на вашем Mac."
+"meta_title": "ihatecrypto — криптокошелёк с ИИ для Mac и Windows",
+"meta_desc": "Приложение, которое берёт крипту на себя: скажите, что нужно, проверьте маршрут на карточках и подтвердите через Touch ID или Windows Hello. Бесплатно для Mac и Windows, ключи остаются у вас."
 }
 }
 </script>

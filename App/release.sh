@@ -117,7 +117,8 @@ $sparkle/generate_appcast --download-url-prefix "$site/" $out/site
 # The landing (Tools/site) shares the folder: ihatecrypto.ai downloads this release's disk image.
 # The page and its manifesto in English, Spanish and Russian (/, /es/, /ru/ and manifesto/ under each), each in its own words for search engines.
 python3 Tools/site/build.py "$version" $out/site >/dev/null
-cp Tools/site/{_headers,icon.png,favicon.png,og.png,llms.txt,robots.txt,sitemap.xml,three.min.js} $out/site/
+# The 7f53….txt file is the site's IndexNow key: Bing and Yandex check it when told the pages changed.
+cp Tools/site/{_headers,icon.png,favicon.png,og.png,llms.txt,robots.txt,sitemap.xml,three.min.js,7f535856533c875fb6e3a0ec47efbfc1.txt} $out/site/
 cp -R Tools/site/{fonts,mf} $out/site/
 cp $dmg $out/site/ihatecrypto.dmg
 rm -rf "$log" $root

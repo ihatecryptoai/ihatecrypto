@@ -1,17 +1,18 @@
 # ihatecrypto
 
-> A Mac app that does crypto for you. Say what you want in plain words (English, Spanish or Russian); it looks up what it needs, lays out the move as cards: where the money comes from, how it gets there, what you end up with - and nothing moves until you confirm with Touch ID. Self-custody: the wallet is made on the Mac and sealed in its Secure Enclave.
+> An AI crypto wallet for Mac and Windows: an app that does crypto for you. Say what you want in plain words (English, Spanish or Russian); it looks up what it needs, lays out the move as cards: where the money comes from, how it gets there, what you end up with - and nothing moves until you confirm with Touch ID on a Mac or Windows Hello on a PC. Self-custody: the wallet is made on your computer and never leaves it.
 
-- Download: https://ihatecrypto.ai/ihatecrypto.dmg (the latest version, free, macOS 26 or later, Apple silicon and Intel; it updates itself).
-- Site: https://ihatecrypto.ai/
-- Source code: https://github.com/ihatecryptoai/ihatecrypto (GPL-3.0; non-custodial: keys are made and kept on the user's Mac).
+- Download for Mac: https://ihatecrypto.ai/ihatecrypto.dmg (the latest version, free, macOS 26 or later, Apple silicon and Intel; it updates itself).
+- Download for Windows: https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe (free preview, Windows 10 or 11; ARM build and release notes: https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest).
+- Site: https://ihatecrypto.ai/ (also in Spanish: https://ihatecrypto.ai/es/ and Russian: https://ihatecrypto.ai/ru/)
+- Source code: https://github.com/ihatecryptoai/ihatecrypto (GPL-3.0; non-custodial: keys are made and kept on the user's computer). The Mac app is Swift, the Windows app is Rust (Tauri).
 
 ## What you can ask
 
 - "buy $10 of Tesla on Robinhood": USDC from the wallet on Base, bridged with Relay, bought on Robinhood Chain as a stock token.
-- "send 20 USDC from Solana to Bybit": checked against an address book the user approves with Touch ID, then sent to the exchange account.
+- "send 20 USDC from Solana to Bybit": checked against an address book the user approves, then sent to the exchange account.
 - "short oil on a 2% pullback by the book": a perp on Hyperliquid sized by the user's risk rules, with the stop and the take placed together with the order.
-- Also: swaps, bridges between networks, deposits to earn (Kamino, Jupiter Lend, JitoSOL, Aave, Morpho, Hyperliquid's HLP vault), price alerts and scheduled tasks, claiming rewards.
+- Also: swaps, bridges between networks, deposits to earn (Kamino, Jupiter Lend, JitoSOL, Aave, Morpho, Hyperliquid's HLP vault), private transfers and swaps on NEAR, price alerts and scheduled tasks, claiming rewards.
 
 ## Networks and protocols
 
@@ -20,14 +21,15 @@
 
 ## Keys and safety
 
-- Keys stay on the Mac, sealed in the Secure Enclave; nothing is kept on a server.
-- Moves are confirmed with Touch ID, or on a Ledger.
+- Mac: keys stay on the Mac, sealed in the Secure Enclave; moves are confirmed with Touch ID (or a 6-digit passcode on a Mac without it), or on a Ledger.
+- Windows: keys stay on the PC, sealed with a Windows Hello key kept in the TPM chip; moves are confirmed with Windows Hello (face, fingerprint or PIN), or on a Ledger.
+- Nothing is kept on a server.
 - The AI never holds a key: it looks things up and lays out a move; only the Confirm button on the card signs. Every command is read twice, and nothing runs when the two readings disagree.
 - Signing happens in a separate process with no network access; it refuses unlimited approvals, permits and blind signatures.
 
 ## AI
 
-- Bring your own model: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on the Mac.
+- Bring your own model: a ChatGPT Plus or Pro subscription, a Claude subscription through Claude Code, OpenRouter, an API key, or a model running on your own computer.
 
 ## Cost
 
