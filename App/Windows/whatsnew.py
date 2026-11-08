@@ -43,6 +43,18 @@ def said(text):
 releases = json.load(open(src, encoding="utf-8"))
 # The PC's own releases, newest first, before the Mac's: what only the Windows app changed.
 PC_ONLY = [
+    {"version": "0.9.1", "date": "2026-11-08", "stories": [
+        {"title": "Your own limits", "symbol": "gearshape.fill", "color": "0A84FF",
+         "text": "Settings › Wallet › Limits holds what may sign without Windows Hello: the trading key's cap per order and per "
+                 "day, how many days it keeps opening positions, and the automation wallet's cap per day and per week. The "
+                 "separate signer keeps these numbers and what was spent, in a log no other program can reset. A lower number "
+                 "holds at once, a higher one asks Windows Hello, and a move whose spending can't be written down isn't signed."},
+        {"title": "The engine in a box of its own", "symbol": "lock.shield.fill", "color": "30D158",
+         "text": "The part that reads the chat, the models, sites and networks runs in a Windows AppContainer now. It can't "
+                 "open your files, the signer's folder or a USB device, and can't start a program. What it needs beyond that, "
+                 "such as Claude Code or a sign-in page, the window does for it, one fixed request at a time. Your data moves "
+                 "into the container's folder on the first start."},
+    ]},
     {"version": "0.9.0", "date": "2026-11-07", "stories": [
         {"title": "Rebuilt in Rust", "symbol": "wrench.and.screwdriver.fill", "color": "FF9F0A",
          "text": "The engine and the signer are Rust programs now, each part checked against the Mac's code with its own tests. "
@@ -58,6 +70,10 @@ for r in releases[len(PC_ONLY):]:
     for s in r["stories"]:
         for k in ("title", "text", "try"):
             if isinstance(s.get(k), str): s[k] = said(s[k])
+# 0.9.1 brings the Mac's 0.8.2 (NEAR) to the PC: its stories lead the PC's own, and the Mac's entry isn't listed twice.
+mac = next(r for r in releases if r["version"] == "0.8.2")
+releases.remove(mac)
+releases[0]["stories"] = mac["stories"] + releases[0]["stories"]
 # A phrase that no longer matches would leave the Mac's words on the PC: the Mac's text changed, so say it again here.
 missing = [a for a, _ in PHRASES if a not in used]
 if missing: raise SystemExit("whatsnew.py: these phrases no longer match the Mac's text:\n" + "\n".join(missing))
