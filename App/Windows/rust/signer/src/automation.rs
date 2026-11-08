@@ -73,9 +73,11 @@ pub fn spend(request: &SignerRequest) -> Result<limits::Hold> {
         }
         R::SignEvmTransaction { chain_id, to, value, data, .. } => evm(&mut t, *chain_id, to, *value, data),
         R::SignEvmBatch { chain_id, calls, .. } => for c in calls { evm(&mut t, *chain_id, &c.to, 0, &c.data) },
-        R::SignSponsoredTransfer { token, to, amount, .. } => {
-            t.add(Decimal::from_str(amount).unwrap_or_default(), dollar_decimals(token), Some(to), || format!("{amount} units of {}…", prefix(token, 8)));
-        }
+        // Read as the signing path reads it (a U256, «0x…» too): one it can't read asks the person.
+        R::SignSponsoredTransfer { token, to, amount, .. } => match amount.parse::<evm::U256>() {
+            Ok(n) => t.add(decimal(n), dollar_decimals(token), Some(to), || format!("{amount} units of {}…", prefix(token, 8))),
+            Err(_) => t.others.push(format!("an amount the signer can't read ({amount})")),
+        },
         R::SignRelayMulticallPermit { chain_id, token, value, valid_before, relayer, refund_to, nft_recipient, metadata, calls } => {
             // Into Relay's depository for an order whose payee the signer checked: to this wallet's own address elsewhere
             // it's the person's money moving, else spending.
@@ -94,11 +96,14 @@ pub fn spend(request: &SignerRequest) -> Result<limits::Hold> {
         R::SignHyperliquidUser { action: act, .. } => {
             let to = act.text("destination").unwrap_or("");
             let token = act.text("token").map_or("USDC".to_string(), |k| k.split(':').next().unwrap_or("").to_string());
-            let amount = act.text("amount").and_then(|a| Decimal::from_str(a).ok()).unwrap_or_default();
-            match action::kind(act) {
-                Some("usdClassTransfer") => {}
-                Some("vaultTransfer") => t.others.push("a Hyperliquid vault transfer".into()),
-                _ => t.add(amount, (token == "USDC").then_some(0), Some(to), || format!("{amount} {token}")),
+            let text = act.text("amount").unwrap_or("");
+            let amount = Decimal::from_str(text).or_else(|_| Decimal::from_scientific(text)).ok().filter(|d| !d.is_sign_negative());
+            match (action::kind(act), amount) {
+                (Some("usdClassTransfer"), _) => {}
+                (Some("vaultTransfer"), _) => t.others.push("a Hyperliquid vault transfer".into()),
+                (_, Some(amount)) => t.add(amount, (token == "USDC").then_some(0), Some(to), || format!("{amount} {token}")),
+                // One the signer can't read isn't counted as nothing: the person.
+                (_, None) => if !is_own(to) { t.others.push(format!("an amount the signer can't read ({text} {token})")) },
             }
         }
         R::SignNearIntentDeposit { amount, .. } => t.others.push(format!("{amount} yoctoNEAR")),
@@ -128,10 +133,7 @@ fn evm(t: &mut Tally, chain_id: u64, to: &str, value: u64, data: &[u8]) {
     }
     let token = to.to_lowercase();
     let decimals = dollar_decimals(&token);
-    let units = |word: &[u8]| -> (Decimal, String) {
-        let n = evm::word_value(word);
-        (u128::try_from(n).ok().and_then(|n| Decimal::try_from_i128_with_scale(n as i128, 0).ok()).unwrap_or(Decimal::MAX), n.to_string())
-    };
+    let units = |word: &[u8]| -> (Decimal, String) { let n = evm::word_value(word); (decimal(n), n.to_string()) };
     let short = prefix(&token, 8);
     match &call {
         Call::Transfer { to: r, amount } => { let (u, s) = units(amount); t.add(u, decimals, Some(r), || format!("{s} units of {short}…")) }
@@ -149,6 +151,11 @@ fn evm(t: &mut Tally, chain_id: u64, to: &str, value: u64, data: &[u8]) {
         }
         _ => {}
     }
+}
+
+/// A U256 as a Decimal; past what one holds, the most it holds (so it's never under the limit).
+fn decimal(n: evm::U256) -> Decimal {
+    u128::try_from(n).ok().and_then(|n| i128::try_from(n).ok()).and_then(|n| Decimal::try_from_i128_with_scale(n, 0).ok()).unwrap_or(Decimal::MAX)
 }
 
 fn dollar_decimals(token: &str) -> Option<u32> { evm::dollar(token).map(|_| evm::dollar_decimals(token) as u32) }

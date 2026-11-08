@@ -544,7 +544,10 @@ pub fn check(m: &Message, accounts: &[String], policy: &Policy, token_owners: &H
                     v.ask_afresh.push(format!("slippage {} is over your {}", percent(slippage), percent(policy.max_slippage_bps)));
                 }
                 if fee > 0 { v.ask_afresh.push(format!("the site takes a {} fee", percent(fee))) }
-                v.outflows.push(Outflow { asset: given, units: in_amount, to: None });
+                // Counted as that coin only when it leaves this wallet's own account for it; else unknown (the automation
+                // wallet then asks), where a coin named only by the message could be taken for dollars.
+                let counted = account(layout.source).is_some_and(|a| own_token_account(Some(a), owner, Some(&given)));
+                v.outflows.push(Outflow { asset: if counted { given } else { "?".into() }, units: in_amount, to: None });
                 v.swaps = true;
             }
             _ => v.checks.push(format!("Calls {program_name}. The balance simulation checks the result.")),

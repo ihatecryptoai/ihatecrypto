@@ -716,9 +716,9 @@ function limitsSection(s, w) {
     if (done) limitsForm.draft = null;
     render();
   };
-  const orderLabel = t("Trading key: one order up to", "Торговый ключ: один ордер до"), dayLabel = t("Trading key: a day up to", "Торговый ключ: за день до");
+  const orderLabel = t("Trading key: one order up\u00a0to", "Торговый ключ: один ордер\u00a0до"), dayLabel = t("Trading key: a day up\u00a0to", "Торговый ключ: за день\u00a0до");
   const daysLabel = t(`Trading key works after ${presence()}`, `Торговый ключ работает после ${presence()}`);
-  const autoDay = t("Automation wallet: a day up to", "Кошелёк автоматизации: за день до"), autoWeek = t("Automation wallet: a week up to", "Кошелёк автоматизации: за неделю до");
+  const autoDay = t("Automation wallet: a day up\u00a0to", "Кошелёк автоматизации: за день\u00a0до"), autoWeek = t("Automation wallet: a week up\u00a0to", "Кошелёк автоматизации: за неделю\u00a0до");
   const slip = t(`Swap slippage without a new ${presence()}`, `Проскальзывание обмена без нового ${presence()}`);
   return section("dial", t("Limits", "Лимиты"), t(`What signs without ${presence()}. A higher number asks for ${presence()} when you save it.`,
     `Что подписывается без ${presence()}. Число больше прежнего при сохранении спросит ${presence()}.`),

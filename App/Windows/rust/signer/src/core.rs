@@ -265,7 +265,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                 // given back when the move isn't signed.
                 let held = automation::spend(&request)?;
                 let reply = handle(*request)?;
-                if reply.ok { held.keep() }
+                if reply.ok { held.keep()? }
                 Ok(reply)
             })
         }
@@ -419,7 +419,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                 Err(why) => return Ok(refused(problem(&format!("The Ledger's trading key: {why}. {LEDGER_DEVICE}")))),
             };
             let signature = hls::sign_l1(&act, &agent, None, nonce, None, true)?;
-            if let Some(h) = held { h.keep() }
+            if let Some(h) = held { h.keep()? }
             Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() })
         }
 
@@ -757,7 +757,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                         // A key that's there but wasn't opened: refused, never handed to the main key.
                         let Some(agent) = agents::load(&id) else { return fail(agents::unopened()) };
                         let signature = hls::sign_l1(&act, &agent, None, nonce, None, mainnet)?;
-                        if let Some(h) = held { h.keep() }
+                        if let Some(h) = held { h.keep()? }
                         return Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() });
                     }
                 }

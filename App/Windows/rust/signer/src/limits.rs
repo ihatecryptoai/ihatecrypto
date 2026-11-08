@@ -9,7 +9,9 @@ use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::{Decimal, RoundingStrategy};
 use signer_api::SignerLimits;
 
-use crate::trusted::{Pref, prefs};
+use wallet::WalletError;
+
+use crate::trusted::{self, Pref, prefs};
 
 pub fn current() -> SignerLimits { from(prefs::data("limits").as_deref()) }
 
@@ -50,15 +52,27 @@ impl Budget {
         written.saturating_add(HELD.lock().expect("held").get(self.0).copied().unwrap_or_default())
     }
 
-    fn record(&self, dollars: Decimal) {
-        if dollars <= Decimal::ZERO { return }
+    /// Written down, or why it couldn't be: then the move it counts isn't handed out.
+    fn record(&self, dollars: Decimal) -> wallet::Result<()> {
+        if dollars <= Decimal::ZERO { return Ok(()) }
         let now = now();
+        let entry = [now, dollars.to_f64().unwrap_or(f64::MAX)];
         let mut all = self.entries(now);
-        all.push([now, dollars.to_f64().unwrap_or(f64::MAX)]);
-        prefs::set(self.0, serde_json::to_vec(&all).ok().map(Pref::Data));
+        all.push(entry);
+        let data = serde_json::to_vec(&all).map_err(|e| WalletError(e.to_string()))?;
+        // Only ever more spent, so it never waits for Windows Hello (trusted::takes_trust_away); read back to be sure.
+        trusted::mutate(None, |s| { s.prefs.insert(self.0.into(), Pref::Data(data)); })?;
+        if !entries_in(prefs::data(self.0).as_deref()).contains(&entry) {
+            return Err(WalletError("The signer couldn't count this move against your limits, so it wasn't signed.".into()));
+        }
+        Ok(())
     }
 }
 
+/// ponytail: what's spent with no Windows Hello key in hand waits in pending.json, which a program of this Windows user
+/// can delete between two signer runs, as it can a pause or a rename kept there (trusted.rs): the budget then starts
+/// over. Holding it would take a key no one is asked for (seal the entries with a key kept for the run, and count the
+/// day as spent until it's opened) — the owner's call.
 /// Checking a budget and taking from it is one step under this lock, so moves sent together can't each pass before any
 /// is counted (the 2026-11-08 review). The signer serves one request at a time today; this holds if that changes.
 static TAKING: Mutex<()> = Mutex::new(());
@@ -79,11 +93,13 @@ impl Hold {
         Hold { budget, dollars: dollars.max(Decimal::ZERO) }
     }
 
-    /// The move was signed: its dollars count from now on.
-    pub fn keep(mut self) {
+    /// The move was signed: its dollars count from now on. An error: they couldn't be written down, and the caller
+    /// doesn't hand out the signature.
+    pub fn keep(mut self) -> wallet::Result<()> {
         let _taking = TAKING.lock().unwrap_or_else(|e| e.into_inner());
-        self.budget.record(self.dollars);
+        let written = self.budget.record(self.dollars);
         self.release();
+        written
     }
 
     fn release(&mut self) {

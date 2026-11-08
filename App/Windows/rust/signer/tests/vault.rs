@@ -501,6 +501,24 @@ fn the_automation_wallet_spends_its_day_and_asks_past_it() {
     assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.6"), nonce: 4, mainnet: true }).unwrap().signature.is_some());
 }
 
+/// What the signer can't count isn't counted as nothing, and a move whose dollars can't be written down isn't signed.
+#[test]
+fn the_automation_wallet_never_spends_what_it_couldnt_count() {
+    let _turn = fresh();
+    let id = automation_wallet();
+    hello(false);
+    // 1000 BNB-chain USDC written as hex: the signing path reads it, so the count must too — here, by asking.
+    let hex = SignerRequest::SignSponsoredTransfer { chain_id: 56, nonce: 0, gas_limit: 100_000, token: evm::BNB_USDC.into(), to: DEAD.into(),
+                                                     amount: "0x3635C9ADC5DEA00000".into(), recipients: vec![DEAD.into()] };
+    assert_eq!(as_automation(&id, hex).unwrap_err().0, CANCELLED);
+    // pending.json can't be written: the order is refused, not signed uncounted.
+    std::fs::create_dir_all(vault::path(".pending.json.tmp")).unwrap();
+    let refused = as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.1"), nonce: 1, mainnet: true });
+    std::fs::remove_dir_all(vault::path(".pending.json.tmp")).unwrap();
+    assert!(refused.is_err_and(|e| e.0.contains("couldn't write")));
+    assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, true, "100", "0.1"), nonce: 2, mainnet: true }).unwrap().signature.is_some());
+}
+
 #[test]
 fn an_automation_prompt_leaves_no_session_for_the_main_wallet() {
     let _turn = fresh();
