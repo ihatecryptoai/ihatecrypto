@@ -6,16 +6,18 @@
 </p>
 
 <p align="center">
-  Say what you want done with your crypto. ihatecrypto lays the move out as cards, and nothing moves until you confirm with Touch ID.
+  <b>A crypto harness for Mac and Windows: between your AI model and your money.</b><br>
+  Say what you want done with your crypto. ihatecrypto lays the move out as cards, and nothing moves until you confirm
+  with Touch ID or Windows Hello.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
-  <img alt="Platform: macOS 26" src="https://img.shields.io/badge/platform-macOS%2026-lightgrey">
+  <img alt="Platform: macOS 26, Windows 10 and 11" src="https://img.shields.io/badge/platform-macOS%2026%20%7C%20Windows%2010%2F11-lightgrey">
   <a href="https://ihatecrypto.ai"><img alt="Site: ihatecrypto.ai" src="https://img.shields.io/badge/site-ihatecrypto.ai-FF7A2F"></a>
 </p>
 
-ihatecrypto is a self-custody Mac wallet you talk to. Write «buy $10 of Tesla» or «put my USDC where it earns most»
+ihatecrypto is a self-custody crypto wallet you talk to, for Mac and Windows. Write «buy $10 of Tesla» or «put my USDC where it earns most»
 in English, Spanish or Russian. It looks up prices and balances, picks a route across networks and shows where the
 money comes from, how it gets there and what you end up with. The model never holds a key: a separate signing
 process checks every transaction in code and signs only after you press Confirm.
@@ -89,8 +91,8 @@ so the live run used a merchant of our own.
       the limit in Settings). The stop and the take go in with the order. Price alerts and scheduled buys keep
       running from the menu bar when the window is closed.</p>
       <h3>Bring your own model</h3>
-      <p>A ChatGPT Plus or Pro plan, a Claude plan through Claude Code, OpenRouter, an API key, or a model on your Mac
-      through Ollama. ihatecrypto has no model of its own, and your chat goes from the Mac to the model you pick.</p>
+      <p>A ChatGPT Plus or Pro plan, a Claude plan through Claude Code, OpenRouter (Qwen, DeepSeek, Llama and others),
+      an API key, or a model on your own computer through Ollama or LM Studio. ihatecrypto has no model of its own, and your chat goes from the Mac to the model you pick.</p>
     </td>
   </tr>
 </table>
@@ -99,6 +101,18 @@ so the live run used a merchant of our own.
 Tempo and NEAR; Bitcoin and others through NEAR Intents.
 **Protocols:** Jupiter, Uniswap, Relay, NEAR Intents, CCTP, USDT0, Aave, Kamino, Jupiter Lend, JitoSOL, Morpho and
 Hyperliquid's HLP.
+
+## Windows (preview)
+
+The same app for Windows 10 and 11, rebuilt in Rust (Tauri): the same chat, cards and moves. The wallet is sealed
+with a Windows Hello key kept in the TPM chip, every move asks Windows Hello (face, fingerprint or PIN), and signing
+runs in its own process. Download
+[ihatecrypto-windows-x64-setup.exe](https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe)
+(the ARM build and the release notes are on
+[windows-latest](https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest)). The installer isn't
+code-signed yet, so Windows asks before running it. Updates are signed and install only when you choose to. The code
+is on the [`windows`](https://github.com/ihatecryptoai/ihatecrypto/tree/windows) branch, see
+[docs/windows.md](https://github.com/ihatecryptoai/ihatecrypto/blob/windows/docs/windows.md).
 
 ## Install
 
