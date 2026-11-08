@@ -374,7 +374,7 @@ enum Signer {
             guard verdict.ok else { return refused(verdict) }
             // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
             let opening = HLAction.opening(action)
-            if let why = agentTake(opening) {
+            if let why = try agentTake(opening) {
                 var v = Verdict()
                 v.problems.append("The Ledger's trading key: \(why). \(ledgerDevice)")
                 return refused(v)
@@ -753,7 +753,7 @@ enum Signer {
             var agent = agentOn && fresh ? AgentStore.load() : nil
             defer { if agent != nil { SeedStore.wipe(&agent!) } }
             // Taken from the day in the same step as the check, before signing; given back if the signature fails.
-            let over = agent != nil ? agentTake(opening) : nil
+            let over = agent != nil ? try agentTake(opening) : nil
             if let key = agent, over == nil {
                 do { r.signature = try HLSigner.signL1(action, privateKey: key, nonce: nonce, mainnet: mainnet) }
                 catch { if case .dollars(let d) = opening { Limits.refund(.agent, d) }; throw error }
@@ -915,10 +915,10 @@ enum Signer {
     static var agentDaysText: String { let d = Limits.current.agentDays; return d == 1 ? "1 day" : "\(d) days" }
     static func agentFresh(_ key: String) -> Bool { Date().timeIntervalSince1970 - ((defaults.object(forKey: key) as? Double) ?? 0) < agentSpan }
     /// Why the trading key can't sign `opening` on its own, or nil — and then its dollars are taken from the day.
-    static func agentTake(_ opening: HLAction.Opening) -> String? {
+    static func agentTake(_ opening: HLAction.Opening) throws -> String? {
         switch opening {
         case .person(let why): why
-        case .dollars(let d): d == 0 ? nil : Limits.takeAgent(d)
+        case .dollars(let d): d == 0 ? nil : try Limits.takeAgent(d)
         }
     }
 

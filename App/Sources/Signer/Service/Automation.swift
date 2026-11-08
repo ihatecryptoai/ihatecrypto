@@ -82,9 +82,9 @@ enum Automation {
         }
         // Taken from the day and week at once (two tasks at the same moment can't both fit in what's left); past them, or
         // for anything that isn't dollars, the person allows it and it's counted all the same.
-        if let why = others.isEmpty ? Limits.takeAutomation(dollars) : "the automation wallet spends without you only dollars, not " + others.joined(separator: ", ") {
+        if let why = try others.isEmpty ? Limits.takeAutomation(dollars) : "the automation wallet spends without you only dollars, not " + others.joined(separator: ", ") {
             try Signer.confirmAfresh("a scheduled task's move: \(why)")
-            Limits.take(.automation, dollars)
+            try Limits.take(.automation, dollars)
         }
         return dollars
     }

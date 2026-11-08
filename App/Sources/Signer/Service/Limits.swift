@@ -1,5 +1,6 @@
 import Foundation
 import SignerAPI
+import WalletCore
 
 /// The person's limits (Settings), kept in the signer's own settings: the app can lower them, and raises them only
 /// through a Touch ID that names the new numbers (`Signer.handle(.setLimits)`).
@@ -29,10 +30,13 @@ enum Limits {
             entries(now: now).filter { now.timeIntervalSince1970 - $0[0] < seconds }.reduce(Decimal()) { $0 + Decimal($1[1]) }
         }
 
-        /// Call under `lock`: the list is read and written back.
-        fileprivate func record(_ dollars: Decimal, now: Date = Date()) {
+        /// Call under `lock`: the list is read and written back. Throws when it couldn't be stored: a move whose dollars
+        /// aren't written down isn't signed, or a restart would forget them (the Windows signer does the same).
+        fileprivate func record(_ dollars: Decimal, now: Date = Date()) throws {
             guard dollars > 0 else { return }
-            Signer.defaults.set(entries(now: now) + [[now.timeIntervalSince1970, NSDecimalNumber(decimal: dollars).doubleValue]], forKey: key)
+            guard Signer.defaults.set(entries(now: now) + [[now.timeIntervalSince1970, NSDecimalNumber(decimal: dollars).doubleValue]], forKey: key) else {
+                throw WalletError("The signer couldn't write down what this move spends: nothing was signed.")
+            }
         }
 
         fileprivate func remove(_ dollars: Decimal) {
@@ -48,25 +52,25 @@ enum Limits {
     private static let lock = NSLock()
 
     /// Takes `dollars` from the trading key's day if they fit: nil, else why not.
-    static func takeAgent(_ dollars: Decimal) -> String? {
-        lock.withLock {
+    static func takeAgent(_ dollars: Decimal) throws -> String? {
+        try lock.withLock {
             if let why = agentOver(dollars) { return why }
-            Budget.agent.record(dollars)
+            try Budget.agent.record(dollars)
             return nil
         }
     }
 
     /// Takes `dollars` from the automation wallet's day and week if they fit: nil, else why not (nothing taken).
-    static func takeAutomation(_ dollars: Decimal) -> String? {
-        lock.withLock {
+    static func takeAutomation(_ dollars: Decimal) throws -> String? {
+        try lock.withLock {
             if let why = automationOver(dollars) { return why }
-            Budget.automation.record(dollars)
+            try Budget.automation.record(dollars)
             return nil
         }
     }
 
     /// Counts `dollars` the person allowed in person, past the limits.
-    static func take(_ budget: Budget, _ dollars: Decimal) { lock.withLock { budget.record(dollars) } }
+    static func take(_ budget: Budget, _ dollars: Decimal) throws { try lock.withLock { try budget.record(dollars) } }
 
     /// Gives back what a move took that wasn't signed after all.
     static func refund(_ budget: Budget, _ dollars: Decimal) {

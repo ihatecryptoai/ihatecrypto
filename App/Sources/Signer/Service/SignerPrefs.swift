@@ -52,16 +52,20 @@ final class SignerPrefs: @unchecked Sendable {
         return old
     }
 
-    private func save(_ values: [String: Any]) {
-        cache = values
-        guard let data = try? PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0) else { return }
-        if SecItemUpdate(Self.query as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecItemNotFound {
+    /// False when the Keychain didn't take it: then the cache keeps what is stored, not what wasn't.
+    @discardableResult private func save(_ values: [String: Any]) -> Bool {
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0) else { return false }
+        var status = SecItemUpdate(Self.query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
             var q = Self.query
             q[kSecValueData as String] = data
             // Readable while the screen is locked, after the first unlock: a task's status read then still finds the wallets.
             q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(q as CFDictionary, nil)
+            status = SecItemAdd(q as CFDictionary, nil)
         }
+        guard status == errSecSuccess else { cache = nil; return false }
+        cache = values
+        return true
     }
 
     func object(forKey key: String) -> Any? { lock.withLock { load()?[key] } }
@@ -71,12 +75,12 @@ final class SignerPrefs: @unchecked Sendable {
     func integer(forKey key: String) -> Int { object(forKey: key) as? Int ?? 0 }
     func dictionaryRepresentation() -> [String: Any] { lock.withLock { load() ?? [:] } }
 
-    /// nil removes the key, as UserDefaults does.
-    func set(_ value: Any?, forKey key: String) {
+    /// nil removes the key, as UserDefaults does. False: not stored (the Keychain didn't answer or refused).
+    @discardableResult func set(_ value: Any?, forKey key: String) -> Bool {
         lock.withLock {
-            guard var values = load() else { return }
+            guard var values = load() else { return false }
             values[key] = value
-            save(values)
+            return save(values)
         }
     }
 
