@@ -501,6 +501,8 @@ impl Engine {
 
     /// Ollama's app or its server on this PC.
     pub fn ollama_installed() -> bool {
+        // In its container LOCALAPPDATA is the container's and Program Files' Ollama folder is out of reach: the window looks.
+        if let Some(broker) = net::broker::get() { return broker.find("ollama") }
         let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
         let program = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
         [format!("{local}\\Programs\\Ollama\\ollama app.exe"), format!("{local}\\Programs\\Ollama\\ollama.exe"), format!("{program}\\Ollama\\ollama.exe")]
@@ -605,7 +607,8 @@ impl Engine {
         if self.st().model_downloads.contains_key(model) { return }
         // An Ollama older than its newest release is updated first: a new model wants a new Ollama (the Mac's pull).
         if self.st().local_setup.ollama_version.is_none() { self.read_ollama_versions().await }
-        if self.st().local_servers.get("ollama") == Some(&true) && self.needs_new_ollama() { self.install_ollama().await }
+        // In its container the engine can't update Ollama itself (install_ollama would only open its page again).
+        if self.st().local_servers.get("ollama") == Some(&true) && self.needs_new_ollama() && !net::broker::on() { self.install_ollama().await }
         self.st_mut().model_downloads.insert(model.into(), 0.0);
         self.changed();
         let shown = |p: f64| {
@@ -641,6 +644,10 @@ impl Engine {
         #[cfg(windows)]
         {
             use std::process::{Command, Stdio};
+            if let Some(broker) = net::broker::get() {
+                let _ = broker.call(serde_json::json!({ "op": "ollamaStart" }), Duration::from_secs(10));
+                return;
+            }
             // Every place ollama_installed counts: the tray app first, else the server alone.
             let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
             let program = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());

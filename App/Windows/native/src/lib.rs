@@ -8,6 +8,7 @@
 pub mod ble;
 pub mod ledger;
 pub mod power;
+pub mod sandbox;
 
 use std::ffi::c_void;
 use std::sync::Once;
@@ -566,7 +567,18 @@ fn sha256(bytes: &[u8]) -> Option<[u8; 32]> {
 /// administrators only, so a program of the user can't put its own file there.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn winsec_parent_check(expected: *const u8, expected_len: usize) -> i32 {
-    let expected = unsafe { text(expected, expected_len) }.to_lowercase();
+    parent_check(&unsafe { text(expected, expected_len) }, false)
+}
+
+/// The same with `expected` in the folder above this program's: the window (ihatecrypto.exe), which starts the signer
+/// for an engine in its AppContainer (bin\ under the window's folder).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn winsec_parent_check_above(expected: *const u8, expected_len: usize) -> i32 {
+    parent_check(&unsafe { text(expected, expected_len) }, true)
+}
+
+fn parent_check(expected: &str, above: bool) -> i32 {
+    let expected = expected.to_lowercase();
     let mut info = PROCESS_BASIC_INFORMATION::default();
     let mut size = 0u32;
     let status = unsafe {
@@ -587,6 +599,7 @@ pub unsafe extern "C" fn winsec_parent_check(expected: *const u8, expected_len: 
         }
         let folder = |p: &str| p.rsplit_once('\\').map(|(dir, file)| (dir.to_lowercase(), file.to_lowercase()));
         let (Some((their_dir, their_file)), Some((my_dir, _))) = (folder(&theirs), folder(&mine)) else { return WRONG_PARENT };
+        let my_dir = if above { match my_dir.rsplit_once('\\') { Some((up, _)) => up.to_string(), None => return WRONG_PARENT } } else { my_dir };
         if their_dir != my_dir || their_file != expected { return WRONG_PARENT }
         match signer_certificate(&mine) {
             Some(cert) if signer_certificate(&theirs) != Some(cert) => WRONG_PARENT,

@@ -77,14 +77,57 @@ unsafe fn ledger(path: &[u16], access: u32) -> Option<(HANDLE, HIDP_CAPS, u16)> 
 pub extern "C" fn winsec_ledger_open() -> *mut c_void {
     for p in unsafe { paths() } {
         let Some((handle, caps, _)) = (unsafe { ledger(&p, (GENERIC_READ | GENERIC_WRITE).0) }) else { continue };
-        let Ok(event) = (unsafe { CreateEventW(None, true, false, PCWSTR::null()) }) else {
-            let _ = unsafe { CloseHandle(handle) };
-            continue;
-        };
-        let device = Device { handle, event, input: caps.InputReportByteLength as usize, output: caps.OutputReportByteLength as usize };
-        return Box::into_raw(Box::new(device)) as *mut c_void;
+        if let Some(device) = unsafe { device(handle, &caps) } { return device }
     }
     std::ptr::null_mut()
+}
+
+unsafe fn device(handle: HANDLE, caps: &HIDP_CAPS) -> Option<*mut c_void> {
+    let Ok(event) = (unsafe { CreateEventW(None, true, false, PCWSTR::null()) }) else {
+        let _ = unsafe { CloseHandle(handle) };
+        return None;
+    };
+    let device = Device { handle, event, input: caps.InputReportByteLength as usize, output: caps.OutputReportByteLength as usize };
+    Some(Box::into_raw(Box::new(device)) as *mut c_void)
+}
+
+/// The first Ledger's APDU interface opened for reading and writing, for the window to hand to the contained engine,
+/// which can't open a device itself (winsec_ledger_adopt there).
+pub fn open_handle() -> Option<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::FromRawHandle;
+    for p in unsafe { paths() } {
+        if let Some((handle, _, _)) = unsafe { ledger(&p, (GENERIC_READ | GENERIC_WRITE).0) } {
+            return Some(unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle.0) });
+        }
+    }
+    None
+}
+
+/// A Ledger the window opened (`open_handle`), as winsec_ledger_open's device; null when the handle isn't a Ledger's
+/// APDU interface. The device owns the handle from here.
+#[unsafe(no_mangle)]
+pub extern "C" fn winsec_ledger_adopt(handle: isize) -> *mut c_void {
+    let handle = HANDLE(handle as *mut c_void);
+    let mut caps = HIDP_CAPS::default();
+    let mut pre = PHIDP_PREPARSED_DATA::default();
+    let mut attrs = HIDD_ATTRIBUTES { Size: size_of::<HIDD_ATTRIBUTES>() as u32, ..Default::default() };
+    let ok = unsafe { HidD_GetAttributes(handle, &mut attrs) } && attrs.VendorID == VENDOR && unsafe { HidD_GetPreparsedData(handle, &mut pre) } && {
+        let read = unsafe { HidP_GetCaps(pre, &mut caps) } == HIDP_STATUS_SUCCESS && caps.UsagePage == USAGE_PAGE;
+        let _ = unsafe { HidD_FreePreparsedData(pre) };
+        read
+    };
+    if !ok {
+        let _ = unsafe { CloseHandle(handle) };
+        return std::ptr::null_mut();
+    }
+    unsafe { device(handle, &caps) }.unwrap_or(std::ptr::null_mut())
+}
+
+/// «Nano S Plus», «Flex»… of the first Ledger plugged in.
+pub fn product() -> Option<String> {
+    let mut name = [0u8; 64];
+    let n = unsafe { winsec_ledger_product(name.as_mut_ptr(), name.len() as i32) };
+    (n > 0).then(|| String::from_utf8_lossy(&name[..n as usize]).into_owned())
 }
 
 /// «Nano S Plus», «Flex»… of the first Ledger plugged in, as UTF-8 into `out`: its length, 0 when none is.

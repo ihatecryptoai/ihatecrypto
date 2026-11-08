@@ -1,11 +1,13 @@
-//! The window: the page in ../ui over the engine. The engine (ihatecrypto-engine, Swift) runs as this process's child
-//! with pipes; every line it writes reaches the page as the «engine» event, every line the page sends goes to it. The
-//! engine starts the signer itself, so this process never holds a key or talks to the signer.
+//! The window: the page in ../ui over the engine. The engine (ihatecrypto-engine) runs as this process's child with
+//! pipes, on Windows in an AppContainer (broker.rs); every line it writes reaches the page as the «engine» event, every
+//! line the page sends goes to it. The signer talks only to the engine: off Windows the engine starts it, on Windows this
+//! window does and hands the engine its pipes, so this process never holds a key or reads a signer's reply.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+#[cfg(not(windows))]
+use std::process::{Child, Command, Stdio};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -14,8 +16,8 @@ use std::sync::mpsc;
 use tauri::{Emitter, EventTarget, Manager};
 
 struct Engine {
-    input: Mutex<ChildStdin>,
-    child: Mutex<Child>,
+    input: Mutex<Box<dyn Write + Send>>,
+    child: Mutex<EngineProcess>,
     /// The browser's calls waiting for the engine's answer, by request id (from DAPP_IDS up, so the page's own never meet them).
     dapp: Mutex<HashMap<i64, mpsc::Sender<String>>>,
     next: AtomicI64,
@@ -81,18 +83,47 @@ fn engine_path(app: &tauri::AppHandle) -> PathBuf {
     app.path().resource_dir().map(|dir| dir.join("bin").join(name)).unwrap_or_else(|_| name.into())
 }
 
-fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
-    let mut command = Command::new(engine_path(app));
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+/// The engine's process: in its AppContainer on Windows, a plain child on a developer's Mac.
+#[cfg(windows)]
+struct EngineProcess(std::sync::Arc<std::os::windows::io::OwnedHandle>);
+#[cfg(not(windows))]
+struct EngineProcess(Child);
+
+impl EngineProcess {
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+    fn kill(&mut self) {
+        use std::os::windows::io::AsRawHandle;
+        let _ = unsafe { windows::Win32::System::Threading::TerminateProcess(windows::Win32::Foundation::HANDLE(self.0.as_raw_handle()), 1) };
     }
-    let mut child = command.spawn()?;
-    let input = child.stdin.take().expect("engine stdin");
-    let output = child.stdout.take().expect("engine stdout");
+    #[cfg(windows)]
+    fn exit_code(&mut self) -> Option<i32> {
+        use std::os::windows::io::AsRawHandle;
+        let mut code = 0u32;
+        unsafe { windows::Win32::System::Threading::GetExitCodeProcess(windows::Win32::Foundation::HANDLE(self.0.as_raw_handle()), &mut code) }.ok()?;
+        (code != 259 /* STILL_ACTIVE */).then_some(code as i32)
+    }
+    #[cfg(not(windows))]
+    fn kill(&mut self) { let _ = self.0.kill(); }
+    #[cfg(not(windows))]
+    fn exit_code(&mut self) -> Option<i32> { self.0.try_wait().ok().flatten().and_then(|s| s.code()) }
+}
+
+/// The engine in its AppContainer, its broker serving it (broker.rs).
+#[cfg(windows)]
+fn spawn_engine(app: &tauri::AppHandle) -> std::io::Result<(Box<dyn Write + Send>, Box<dyn Read + Send>, EngineProcess)> {
+    let started = broker::start(app, &engine_path(app))?;
+    Ok((Box::new(started.input), Box::new(started.output), EngineProcess(started.process)))
+}
+
+#[cfg(not(windows))]
+fn spawn_engine(app: &tauri::AppHandle) -> std::io::Result<(Box<dyn Write + Send>, Box<dyn Read + Send>, EngineProcess)> {
+    let mut child = Command::new(engine_path(app)).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()?;
+    let (input, output) = (child.stdin.take().expect("engine stdin"), child.stdout.take().expect("engine stdout"));
+    Ok((Box::new(input), Box::new(output), EngineProcess(child)))
+}
+
+fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
+    let (input, output, child) = spawn_engine(app)?;
     let handle = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
@@ -169,8 +200,8 @@ fn start_engine(app: &tauri::AppHandle) -> std::io::Result<Engine> {
         let _ = handle.emit_to("main", "engine", "{\"event\":\"engineStopped\",\"data\":{}}");
         // Not on the way out: kept for the chat's line at the next launch.
         if !system::QUITTING.load(Ordering::SeqCst) {
-            let code = handle.try_state::<Engine>().and_then(|e| e.child.lock().ok().and_then(|mut c| c.try_wait().ok().flatten()))
-                .and_then(|status| status.code()).map(|c| format!(" (exit code {c:#x})")).unwrap_or_default();
+            let code = handle.try_state::<Engine>().and_then(|e| e.child.lock().ok().and_then(|mut c| c.exit_code()))
+                .map(|c| format!(" (exit code {c:#x})")).unwrap_or_default();
             system::write_crash(&handle, "engine", &format!("the engine stopped{code}"));
         }
     });
@@ -344,6 +375,8 @@ fn bring_hello_forward() {
 #[cfg(not(windows))]
 fn bring_hello_forward() {}
 
+#[cfg(windows)]
+mod broker;
 mod keys;
 mod system;
 mod voice;
@@ -965,7 +998,7 @@ fn main() {
             if let tauri::RunEvent::Exit = event {
                 system::QUITTING.store(true, Ordering::SeqCst);
                 if let Some(engine) = app.try_state::<Engine>() {
-                    if let Ok(mut child) = engine.child.lock() { let _ = child.kill(); }
+                    if let Ok(mut child) = engine.child.lock() { child.kill(); }
                 }
             }
         });

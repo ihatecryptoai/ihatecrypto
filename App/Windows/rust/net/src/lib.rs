@@ -2,6 +2,7 @@
 //! client, retries for what a second ask may fix, and JSON-RPC that walks to the next node when one throttles, fails or
 //! turns a key away. The signer links none of this: it has no network.
 
+pub mod broker;
 pub mod evm_rpc;
 pub mod solana_rpc;
 

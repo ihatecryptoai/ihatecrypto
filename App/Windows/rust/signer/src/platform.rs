@@ -66,6 +66,7 @@ mod imp {
     pub fn unprotect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { transform(data, false) }
     pub fn harden() -> i32 { w::winsec_harden() }
     pub fn parent_check(engine: &str) -> bool { unsafe { w::winsec_parent_check(engine.as_ptr(), engine.len()) == 0 } }
+    pub fn parent_check_above(window: &str) -> bool { unsafe { w::winsec_parent_check_above(window.as_ptr(), window.len()) == 0 } }
     pub fn folder_protected() -> bool { w::winsec_folder_protected() == 0 }
 }
 
@@ -92,6 +93,7 @@ mod imp {
     pub fn unprotect(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> { protect(data) }
     pub fn harden() -> i32 { 0 }
     pub fn parent_check(_engine: &str) -> bool { true }
+    pub fn parent_check_above(_window: &str) -> bool { true }
     pub fn folder_protected() -> bool { false }
 }
 

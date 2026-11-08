@@ -204,6 +204,12 @@ impl Engine {
     /// two fixed paths, never one the page names.
     pub fn open_study_files(&self, journal: bool) -> Result<(), WalletError> {
         if journal && !journal_kept() { return Err(WalletError(self.say("No journal entries yet.", "В журнале пока нет записей."))) }
+        // In its container the engine starts no program: the window opens these same two places, by name.
+        if let Some(broker) = net::broker::get() {
+            if !journal { study_folder(); }
+            return broker.call(serde_json::json!({ "op": "reveal", "what": if journal { "journal" } else { "study" } }), std::time::Duration::from_secs(10))
+                .map(drop).map_err(WalletError);
+        }
         let target = if journal { store::url("journal.json") } else { study_folder() };
         let opener = if cfg!(windows) { format!("{}\\explorer.exe", std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())) } else { "/usr/bin/open".into() };
         std::process::Command::new(opener).arg(target).spawn().map(drop).map_err(|e| WalletError(e.to_string()))

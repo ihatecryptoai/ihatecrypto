@@ -44,7 +44,7 @@ pub fn codex_auth_file() -> PathBuf {
 pub(crate) async fn models(credential: Option<&Credential>, endpoint: &str) -> Vec<String> {
     let access = match credential {
         Some(Credential::OAuth(t)) if t.expires > now() => t.account_id.clone().map(|a| (t.access.clone(), a)),
-        Some(Credential::External { path }) => read_codex_file(path).ok(),
+        Some(Credential::External { path }) => read_codex(path).await.ok(),
         _ => None,
     };
     let Some((token, account)) = access else { return info().models };
@@ -80,6 +80,9 @@ pub fn listed(data: &[u8]) -> Vec<String> {
 
 pub(crate) fn existing_login() -> Option<Credential> {
     let path = codex_auth_file().to_string_lossy().into_owned();
+    // In its container the engine can't open the person's folders: the window says whether the file is there, and reads
+    // it only once the person has picked it (`read_codex`).
+    if let Some(broker) = net::broker::get() { return broker.find("codex").then_some(Credential::External { path }) }
     read_codex_file(&path).ok().map(|_| Credential::External { path })
 }
 
@@ -121,10 +124,24 @@ pub fn account_id(jwt: &str) -> Option<String> {
     oauth::claims(jwt)?.get("https://api.openai.com/auth")?.get("chatgpt_account_id")?.as_str().map(str::to_string)
 }
 
-/// Codex CLI's login file: its access token and account. Codex CLI refreshes it itself.
+/// Codex CLI's login file: its access token and account. Codex CLI refreshes it itself. In the container the window
+/// reads it — the file the person picked once in its Open dialog — and hands over its tokens without the refresh token.
+pub async fn read_codex(path: &str) -> Result<(String, String)> {
+    let Some(broker) = net::broker::get() else { return read_codex_file(path) };
+    // The first time the window asks the person to pick it: off the engine's thread while the dialog waits.
+    let answer = tokio::task::spawn_blocking(move || broker.call(json!({ "op": "codex" }), Duration::from_secs(600))).await
+        .map_err(|e| Error::Io(e.to_string()))?.map_err(Error::Llm)?;
+    read_codex_text(answer["text"].as_str().unwrap_or("").as_bytes())
+}
+
+/// The same read here, outside a container.
 pub fn read_codex_file(path: &str) -> Result<(String, String)> {
-    let data = std::fs::read(path).map_err(|e| Error::Io(e.to_string()))?;
-    let file: Value = serde_json::from_slice(&data).map_err(|_| Error::Llm("Codex CLI isn't signed in with ChatGPT.".into()))?;
+    read_codex_text(&std::fs::read(path).map_err(|e| Error::Io(e.to_string()))?)
+}
+
+/// The access token and account in a Codex CLI login file's text.
+pub fn read_codex_text(data: &[u8]) -> Result<(String, String)> {
+    let file: Value = serde_json::from_slice(data).map_err(|_| Error::Llm("Codex CLI isn't signed in with ChatGPT.".into()))?;
     let t = file.get("tokens");
     let access = t.and_then(|t| t.get("access_token")).and_then(Value::as_str);
     let account = t.and_then(|t| t.get("account_id")).and_then(Value::as_str).map(str::to_string)
@@ -187,7 +204,7 @@ impl ChatGptClient {
         let mut source = self.source.lock().await;
         match &mut *source {
             Source::CodexFile(path) => {
-                let (access, account) = read_codex_file(path)?;
+                let (access, account) = read_codex(path).await?;
                 if oauth::expiry(&access).is_some_and(|exp| exp < now()) {
                     return fail("The Codex CLI login expired. Run codex once or sign in via the browser.");
                 }

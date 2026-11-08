@@ -490,6 +490,18 @@ impl PageServer {
     pub fn start<F, Fut>(handle: F) -> Result<PageServer, WalletError>
     where F: Fn(PageRequest) -> Fut + 'static, Fut: Future<Output = Vec<u8>> + 'static {
         let failed = |_| WalletError("The page couldn't start.".into());
+        // In its container the engine takes no connection from the person's browser: the window listens, reads each
+        // request whole (64 KB, 5 s at most, as `serve`) and hands it over, and gives the browser this answer.
+        if let Some(broker) = net::broker::get() {
+            let (port, mut requests) = broker.serve(0).map_err(WalletError)?;
+            let task = tokio::task::spawn_local(async move {
+                while let Some((conn, data)) = requests.recv().await {
+                    let reply = match PageRequest::parse(&data) { Some(r) => handle(r).await, None => response(400, "text/plain", b"Bad request") };
+                    broker.reply(conn, &reply);
+                }
+            });
+            return Ok(PageServer { port, task });
+        }
         let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(failed)?;
         socket.set_nonblocking(true).map_err(failed)?;
         let port = socket.local_addr().map_err(failed)?.port();
@@ -501,7 +513,10 @@ impl PageServer {
         Ok(PageServer { port, task })
     }
 
-    pub fn stop(&self) { self.task.abort() }
+    pub fn stop(&self) {
+        self.task.abort();
+        if let Some(broker) = net::broker::get() { broker.unserve(self.port) }
+    }
 
     async fn serve<F, Fut>(mut c: TcpStream, handle: &F)
     where F: Fn(PageRequest) -> Fut, Fut: Future<Output = Vec<u8>> {
@@ -518,7 +533,7 @@ impl PageServer {
 }
 
 impl Drop for PageServer {
-    fn drop(&mut self) { self.task.abort() }
+    fn drop(&mut self) { self.stop() }
 }
 
 /// The page's HTML: its {{…}} filled by `page`.

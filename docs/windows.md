@@ -5,17 +5,69 @@ Guard, the plans and the execution, each crate checked against the Swift it came
 window, the engine that runs the chat in place of the Mac's `Workspace`, and where the signer keeps its keys.
 
 ```
-ihatecrypto.exe (Tauri)          App/Windows/app        the window: the page in ui/, no key, no money logic
-  └─ ihatecrypto-engine.exe      Windows/rust/engine    the chat, the cards, Confirm, balances
-       └─ ihatecrypto-signer.exe Windows/rust/signer    what the signer decides, as the Mac's; keys under Windows
-                                                        Hello, the trusted settings, the pipe
-     (both link winsec)          App/Windows/native     Windows Hello, DPAPI, hardening (windows-rs)
+ihatecrypto.exe (Tauri)          App/Windows/app        the window: the page in ui/, no key, no money logic; the
+  │                                                     engine's broker (src/broker.rs)
+  ├─ ihatecrypto-engine.exe      Windows/rust/engine    the chat, the cards, Confirm, balances — in an AppContainer
+  └─ ihatecrypto-signer.exe      Windows/rust/signer    what the signer decides, as the Mac's; keys under Windows
+                                                        Hello, the trusted settings, the pipe — its pipes the engine's
+     (all link winsec)           App/Windows/native     Windows Hello, DPAPI, hardening, the container (windows-rs)
 ```
 
-The window starts the engine with pipes; the engine starts the signer with pipes. Each line between the window and the
-engine is one JSON request (`Engine.Request`) or one answer or event (`Outbox`); the engine sends the whole state after
-every change. Between the engine and the signer go the Mac's own `SignerRequest` and `SignerReply`, framed by a
-4-byte length.
+The window starts the engine with pipes, in its AppContainer, and starts the signer for it, handing the engine the
+signer's pipes (below). Each line between the window and the engine is one JSON request (`Engine.Request`) or one
+answer or event (`Outbox`); the engine sends the whole state after every change. Between the engine and the signer go
+the Mac's own `SignerRequest` and `SignerReply`, framed by a 4-byte length. Outside the window (tests, a developer's
+Mac) the engine starts the signer itself, as before.
+
+## The engine's AppContainer
+
+The Windows counterpart of the Mac's App Sandbox (`winsec::sandbox`, the window's `broker.rs`). The engine reads what
+services, sites and models answer, so it runs where a flaw in it reaches little: an AppContainer named after the app's
+identifier (`app.ihatecrypto.windows.engine`), made once per user, with two capabilities — connections out to the
+internet and to the home network (a person's own node) — and a rule that it may start no process at all
+(`PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY`). From there, checked on Windows 11 (`native/examples/acprobe.rs`), it
+can't read the person's files (Documents), read or write the signer's folder (so it can't delete `pending.json`),
+write the registry's Run key or the Startup folder, reach Task Scheduler, start a program, open a USB device, or take
+a connection from the browser; DPAPI, Windows Hello's checks, the internet and the session's idle time work as before.
+
+Its files are in the container's own folder (`%LOCALAPPDATA%\Packages\app.ihatecrypto.windows.engine\AC`, which
+Windows gives it as LOCALAPPDATA and TEMP, and the window names them too): `ihatecrypto\engine` there. On the first start
+in the container the window copies the old `%LOCALAPPDATA%\ihatecrypto\engine` in, file by file so the copies take the
+container's rules, and renames the old one `engine-before-container`; a copy that fails leaves it as it was and the
+engine unstarted, so the next start tries again. DPAPI-sealed keys and sign-ins read as before. A development build keeps IHATECRYPTO_ENGINE_DIR, which the
+window lets the container into.
+
+What the container doesn't allow, the window does — the Mac's Helper.xpc. The engine asks on two pipes of their own
+that only the two hold (no other program can write to them, so no caller check is needed), and each request is one
+fixed thing (`broker.rs`), with ceilings — 32 requests, 3 Claude Code runs and 4 pages at once, 4 MB a line:
+
+| Request | What the window does |
+| --- | --- |
+| `signer` | starts the signer beside the engine, hardened as before, and hands the engine its pipes and a handle that can only wait for it; the signer accepts the window (`ihatecrypto.exe`, the folder above `bin`) as its parent too |
+| `claude` | runs the installed `claude.exe` with arguments built in the window: `-p --restricted --strict-mcp-config --tools "" --no-session-persistence …`, a model name that must be `claude-` and `[a-z0-9.-]`, the system prompt (in a file of the window's, `--system-prompt-file`: the chat's is longer than Windows' 32,767-character command line), the effort; the prompt goes through the stdin the engine gets |
+| `find` | says whether Claude Code, Codex CLI's login or Ollama is on this PC — yes or no |
+| `codex` | reads the Codex CLI login the person picked once in the window's Open dialog (kept in the window's folder) and hands over the access token, account and id token, never the refresh token |
+| `serve`, `pageReply`, `unserve` | listens on 127.0.0.1 (any free port, or 1455 for ChatGPT's sign-in) for the Top up page and the sign-in redirects, hands each request over whole (64 KB, 5 s) and gives the browser the engine's answer |
+| `claudeInstall`, `claudeSignIn` | Anthropic's installer (claude.ai/install.ps1, only if the download stayed on claude.ai); `claude auth login` in a terminal |
+| `ollamaStart` | Ollama's app, or its server |
+| `reveal` | the journal, copied into the window's folder and shown selected there, or the study notes folder, opened only while it holds nothing but .md and .txt files and no link: Explorer reads a folder's desktop.ini and a shortcut's icon as the person, outside the container |
+| `locked` | whether the session is locked: the container can't open the input desktop |
+| `hello` | the app lock's Windows Hello, with the unlock key the window names (the container has no package for Windows Hello to keep a key under); only signed, cancelled or failed goes back |
+| `ledger` | the first Ledger's USB handle, opened by the window and handed over (the container can't open a device) |
+
+Windows keeps a container off 127.0.0.1 both ways. Out: the per-machine installer, which runs as an administrator, lets
+the engine's container reach this PC's own servers (`windows/hooks.nsh`, CheckNetIsolation's loopback exemption by the
+container's SID), so Ollama and LM Studio answer; the uninstaller takes it back. The exemption is for every port on
+127.0.0.1, not only theirs: an engine taken over could still reach this PC's own servers (a debugging port, a database,
+Ollama's whole API), as it could before the container. Narrowing it means the window carrying Ollama's requests itself.
+In: no exemption allows it outside debugging, hence the window's listener. Getting Ollama opens its download page
+instead of running its installer, and an Ollama older than the newest is used as it is.
+
+Left as it was: the window itself isn't contained. WebView2 in a custom AppContainer isn't something Microsoft
+supports for an unpackaged app, and the window's tray, notifications, Run key, Keep running's scheduled task, updates
+and microphone would each need a broker of their own; the pages it shows run in WebView2's own sandbox, and a site
+reaches the window only through `dapp_call`. A Ledger over Bluetooth (WinRT in the container) isn't checked yet, nor is
+the terminal tool's journal in `~\.ihatecrypto` read any more (out of the container's reach).
 
 ## Keys and Windows Hello
 
@@ -66,9 +118,9 @@ signer narrows that (`winsec_harden`, `winsec_spawn_signer`):
 - its process and threads are created with an access rule that lets the user's other programs only see, wait for and
   end them — no memory reads, no new threads, no rule changes (an administrator still can, as root on a Mac);
 - no extension DLLs (global hooks, AppInit), no remote images, no child processes;
-- it serves only the engine that started it, from its own folder, signed with the same certificate when it is signed
-  (`winsec_parent_check`); in an install for all users (Program Files, the installer's mode) the user can't put a file
-  there.
+- it serves only the engine that started it, from its own folder, or the window from the folder above, signed with the
+  same certificate when it is signed (`winsec_parent_check`, `winsec_parent_check_above`); in an install for all users
+  (Program Files, the installer's mode) the user can't put a file there.
 
 What remains: a program of the same user can open the same Windows Hello key by name and ask for a prompt itself, and
 read the engine's memory. It still needs the person to answer a prompt, and the Guard and the signer's checks hold for
@@ -81,7 +133,7 @@ counters can tell an older copy from the newest, so these stay:
   an address approved for money — until the next change seals a newer one. Every move still asks Windows Hello with
   the address shown; only the automation wallet's moves, which ask nothing, could then pay such an address.
 - **`pending.json` deleted** undoes a change that only took trust away and wasn't sealed yet (it is at the next
-  Windows Hello). While the signer runs it notices and stops every signature; after a restart it doesn't. The trading
+  Windows Hello). The engine, in its container, can't touch the signer's folder; another program of the user can. While the signer runs it notices and stops every signature; after a restart it doesn't. The trading
   key's pause is the one that matters, and the paused key stays sealed under Windows Hello, so the program still can't
   use it.
 - **The scheduled tasks' key** (`task-seal.key`, DPAPI): a list with no key beside it loads paused, but a program that
@@ -291,6 +343,11 @@ A runner has no Windows Hello, microphone, Ledger or person at it, so these are 
     or Flex over Bluetooth the same way (Windows may ask to pair it first).
 11. A scheduled buy switched on in the Schedule block runs from the automation wallet with no Windows Hello, and what it
     bought arrives on the main wallet.
+12. The engine's container: `acprobe token <engine pid>` (`cargo build --example acprobe` in App/Windows/native) says
+    AppContainer, the container's SID, low integrity, its two capabilities and no child processes; `acprobe run` started
+    from the user's session (a scheduled task with /IT: a container started from an SSH session has no desktop and
+    fails with 0xC0000142) runs the same checks from inside the same container. The chat answers on the Claude Code
+    subscription, Ollama's models list (after the installer's loopback rule), and a Windows Hello signature still works.
 
 ### What a Windows 11 machine has shown so far
 

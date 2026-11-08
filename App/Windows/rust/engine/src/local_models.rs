@@ -251,6 +251,15 @@ impl Engine {
     /// Ollama's newest release, checked by its signature before it runs, installed for this user; the chat says how it went.
     pub async fn install_ollama(&self) {
         if self.st().local_setup.ollama_install.is_some() { return }
+        // In its container the engine runs no installer: Ollama's own download page, for the person to install it, as
+        // the Mac's sandboxed app leaves it in Downloads.
+        if net::broker::on() {
+            self.get_ollama();
+            let line = self.say("Ollama's download page is open in your browser: install it, then pick a model here.",
+                                "Страница загрузки Ollama открыта в браузере: установи её и выбери модель здесь.");
+            self.reply(&line, None);
+            return;
+        }
         self.st_mut().local_setup.ollama_install = Some("…".into());
         self.changed();
         let step = |text: &str| {
@@ -289,7 +298,8 @@ impl Engine {
         self.refresh_models().await;
         self.read_ollama_versions().await;
         let up = || self.st().local_servers.get("ollama") == Some(&true);
-        if !up() || self.needs_new_ollama() { self.install_ollama().await }
+        // In its container the engine can't update Ollama itself: an outdated one that answers is used as it is.
+        if !up() || (self.needs_new_ollama() && !net::broker::on()) { self.install_ollama().await }
         if !up() { return }
         let have: Vec<String> = self.st().live_models.get("ollama").into_iter().flatten().filter(|m| catalog::chat_refusal(m).is_none()).cloned().collect();
         let current = (self.provider_id() == "ollama").then(|| self.model());
@@ -390,6 +400,12 @@ pub fn from_claude(host: Option<&str>) -> bool { host.is_some_and(|h| h == "clau
 /// administrator), run by PowerShell (the Mac's ClaudeCodeInstaller).
 pub async fn claude_code_install(step: &dyn Fn(&str)) -> Result<(), WalletError> {
     if !cfg!(windows) { return Err(WalletError("Claude Code installs from the Windows app here.".into())) }
+    // In its container the engine runs no program: the window runs Anthropic's installer, the same way.
+    if let Some(broker) = net::broker::get() {
+        step("Installing Claude Code…");
+        return tokio::task::spawn_blocking(move || broker.call(serde_json::json!({ "op": "claudeInstall" }), Duration::from_secs(1800))).await
+            .map_err(|e| WalletError(e.to_string()))?.map(drop).map_err(WalletError);
+    }
     step("Downloading Claude Code's installer…");
     // PowerShell runs a file only with its extension.
     let script = std::env::temp_dir().join(format!("claude-install-{}.ps1", Uuid::new()));
@@ -403,6 +419,9 @@ pub async fn claude_code_install(step: &dyn Fn(&str)) -> Result<(), WalletError>
 /// `ClaudeCodeSetup.signIn`: a terminal on `claude auth login`, the browser sign-in Anthropic's CLI runs itself.
 pub fn claude_code_sign_in(path: &str) -> Result<(), WalletError> {
     if !cfg!(windows) { return Err(WalletError("Claude Code signs in from the Windows app here.".into())) }
+    if let Some(broker) = net::broker::get() {
+        return broker.call(serde_json::json!({ "op": "claudeSignIn" }), Duration::from_secs(10)).map(drop).map_err(WalletError);
+    }
     std::process::Command::new(format!("{}\\System32\\cmd.exe", system_root()))
         .args(["/c", "start", "Claude Code", "cmd", "/k", path, "auth", "login"]).spawn().map(drop).map_err(|e| WalletError(e.to_string()))
 }

@@ -43,6 +43,9 @@ jobs:
       - name: Build
         shell: pwsh
         run: ./Windows/build.ps1
+      # The window's own tests (the engine's broker, the installer's container SID), once build.ps1 has put bin\ in place.
+      - name: Test the window
+        run: cargo test --locked --manifest-path Windows/app/src-tauri/Cargo.toml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ihatecrypto-windows-setup

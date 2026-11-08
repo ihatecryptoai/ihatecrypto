@@ -18,6 +18,10 @@ fn late() -> LedgerError { LedgerError::new("The Ledger didn't answer in time: c
 
 /// «Nano S Plus», «Flex»… of the first Ledger plugged in, or None when none is.
 pub fn connected() -> Option<String> {
+    // In its container the engine can't open a device: the window looks, and opens it (`open`).
+    if let Some(broker) = net::broker::get() {
+        return broker.call(serde_json::json!({ "op": "ledger" }), Duration::from_secs(5)).ok()?["product"].as_str().map(str::to_string);
+    }
     let mut name = [0u8; 64];
     let n = unsafe { w::ledger::winsec_ledger_product(name.as_mut_ptr(), name.len() as i32) };
     (n > 0).then(|| String::from_utf8_lossy(&name[..n as usize]).into_owned())
@@ -36,11 +40,11 @@ impl Transport for Usb {
 fn usb_exchange(apdu: &[u8], timeout: Duration) -> Result<Vec<u8>> {
     let _one = HID.lock().unwrap_or_else(|e| e.into_inner());
     // Right after an app switch the device is briefly gone: wait for it to come back.
-    let mut device = w::ledger::winsec_ledger_open();
+    let mut device = open();
     for _ in 0..20 {
         if !device.is_null() { break }
         std::thread::sleep(Duration::from_millis(250));
-        device = w::ledger::winsec_ledger_open();
+        device = open();
     }
     if device.is_null() {
         return Err(LedgerError::new(if connected().is_none() { "No Ledger found: plug it in over USB and unlock it." }
@@ -64,6 +68,17 @@ fn usb_exchange(apdu: &[u8], timeout: Duration) -> Result<Vec<u8>> {
         let n = unsafe { w::ledger::winsec_ledger_read(device.0, buffer.as_mut_ptr(), buffer.len() as i32, left.min(Duration::from_secs(1)).as_millis() as i32) };
         if n < 0 { return Err(LedgerError::new("Couldn't read from the Ledger: plug it in again.")) }
         if n > 0 { packets.push(buffer[..n as usize].to_vec()) }
+    }
+}
+
+/// The first Ledger opened for one exchange: by the engine, or in its container by the window, which hands over the
+/// device's handle (the container's token can't open it, a handle it was given still reads and writes).
+fn open() -> *mut std::ffi::c_void {
+    let Some(broker) = net::broker::get() else { return w::ledger::winsec_ledger_open() };
+    let Ok(answer) = broker.call(serde_json::json!({ "op": "ledger", "open": true }), Duration::from_secs(5)) else { return std::ptr::null_mut() };
+    match answer["handle"].as_u64() {
+        Some(h) => w::ledger::winsec_ledger_adopt(h as isize),
+        None => std::ptr::null_mut(),
     }
 }
 

@@ -27,6 +27,8 @@ pub fn info() -> Info {
 /// The installed `claude`: on Windows Anthropic's installer puts claude.exe in %USERPROFILE%\.local\bin, and PATH is
 /// split by «;». ponytail: npm's claude.cmd isn't taken — a .cmd needs cmd.exe to run.
 pub(crate) fn existing_login() -> Option<Credential> {
+    // In its container the engine can't look in the person's folders: the window looks, and runs it (`stream`).
+    if let Some(broker) = net::broker::get() { return broker.find("claude").then(|| Credential::External { path: "claude.exe".into() }) }
     let env = |k: &str| std::env::var(k).unwrap_or_default();
     let found = if cfg!(windows) {
         let home = env("USERPROFILE");
@@ -52,6 +54,9 @@ fn executable(p: &str) -> bool {
 #[cfg(not(unix))]
 fn executable(p: &str) -> bool { Path::new(p).is_file() }
 
+/// The system prompt when a request has none.
+pub const DEFAULT_SYSTEM: &str = "You are an assistant. Answer briefly and to the point.";
+
 #[derive(Debug, Clone)]
 pub struct ClaudeCodeClient {
     pub path: String,
@@ -68,7 +73,7 @@ impl ClaudeCodeClient {
             .iter().map(|s| s.to_string()).collect();
         args.push(r.model.clone());
         args.push("--system-prompt".into());
-        args.push(if system.is_empty() { "You are an assistant. Answer briefly and to the point.".into() } else { system });
+        args.push(if system.is_empty() { DEFAULT_SYSTEM.into() } else { system });
         if r.thinking { args.extend(["--effort".into(), "high".into()]) }
         args
     }
@@ -87,7 +92,19 @@ impl ClaudeCodeClient {
             t.push_str(words);
             partial(&t);
         };
-        let output = run(&self.path, &Self::arguments(r), &prompt, Duration::from_secs(120), Some(&tell)).await?;
+        let output = match net::broker::get() {
+            // In its container the engine can't start Claude Code: the window does, with the same arguments built there
+            // from the model, the system prompt and the effort alone, and hands over its pipes.
+            Some(broker) => {
+                let system = r.system();
+                let ask = serde_json::json!({ "op": "claude", "model": r.model, "effort": r.thinking,
+                                              "system": if system.is_empty() { DEFAULT_SYSTEM.to_string() } else { system } });
+                let answer = tokio::task::spawn_blocking(move || broker.call(ask, Duration::from_secs(20))).await
+                    .map_err(|e| Error::Io(e.to_string()))?.map_err(|e| Error::Io(format!("Claude Code didn't start: {e}")))?;
+                run_brokered(&answer, &prompt, Duration::from_secs(120), Some(&tell)).await?
+            }
+            None => run(&self.path, &Self::arguments(r), &prompt, Duration::from_secs(120), Some(&tell)).await?,
+        };
         // The result is the last event; a run that wrote none (an old Claude Code) is read as one JSON answer.
         let lines: Vec<&[u8]> = output.split(|&b| b == b'\n').collect();
         let typed = |line: &[u8]| serde_json::from_slice::<Value>(line).ok().filter(|v| v.is_object());
@@ -152,7 +169,37 @@ pub async fn run(path: &str, arguments: &[String], input: &str, timeout: Duratio
     tokio::spawn(async move { let _ = stdin.write_all(&prompt).await; });
     let mut stderr = child.stderr.take().expect("piped");
     let errors = tokio::spawn(async move { let mut e = Vec::new(); let _ = stderr.read_to_end(&mut e).await; e });
-    let mut stdout = BufReader::new(child.stdout.take().expect("piped"));
+    let stdout = child.stdout.take().expect("piped");
+    let ended = async move { child.wait().await.map(|s| (s.success(), code(&s))).map_err(|e| Error::Io(e.to_string())) };
+    collect(stdout, ended, errors, timeout, lines).await
+}
+
+/// The same for the Claude Code the window started (`stream` in the container): its pipes and a handle that can only
+/// wait for it or end it, which goes — and the run with it — when the future is dropped or the time is up.
+async fn run_brokered(answer: &Value, input: &str, timeout: Duration, lines: Option<&(dyn Fn(&str) + Send + Sync)>) -> Result<Vec<u8>> {
+    use std::io::{Read, Write};
+    let gone = || Error::Io("Claude Code didn't start: the window handed over no pipes.".into());
+    let (mut stdin, mut stderr) = (net::broker::handle(answer, "stdin").ok_or_else(gone)?, net::broker::handle(answer, "stderr").ok_or_else(gone)?);
+    let stdout = tokio::fs::File::from_std(net::broker::handle(answer, "stdout").ok_or_else(gone)?);
+    let process = std::sync::Arc::new(net::broker::Process::from_answer(answer, "process").ok_or_else(gone)?);
+    let prompt = input.as_bytes().to_vec();
+    std::thread::spawn(move || { let _ = stdin.write_all(&prompt); });
+    let errors = tokio::task::spawn_blocking(move || { let mut e = Vec::new(); let _ = stderr.read_to_end(&mut e); e });
+    struct End(std::sync::Arc<net::broker::Process>);
+    impl Drop for End { fn drop(&mut self) { self.0.kill() } }
+    let end = End(process.clone());
+    let ended = async move {
+        let code = tokio::task::spawn_blocking(move || process.wait()).await.map_err(|e| Error::Io(e.to_string()))?;
+        drop(end);
+        Ok((code == 0, code))
+    };
+    collect(stdout, ended, errors, timeout, lines).await
+}
+
+/// Reads a run's output to its end, then how it ended (success, code); stopped after `timeout`.
+async fn collect<R, E, F>(stdout: R, ended: F, errors: E, timeout: Duration, lines: Option<&(dyn Fn(&str) + Send + Sync)>) -> Result<Vec<u8>>
+where R: tokio::io::AsyncRead + Unpin, F: Future<Output = Result<(bool, i32)>>, E: Future<Output = std::result::Result<Vec<u8>, tokio::task::JoinError>> {
+    let mut stdout = BufReader::new(stdout);
     let read = async {
         let mut all = Vec::new();
         loop {
@@ -161,17 +208,16 @@ pub async fn run(path: &str, arguments: &[String], input: &str, timeout: Duratio
             all.extend_from_slice(&line);
             if let (Some(tell), Some(b'\n')) = (lines, line.last()) { tell(&String::from_utf8_lossy(&line[..line.len() - 1])) }
         }
-        let status = child.wait().await;
-        (all, status)
+        (all, ended.await)
     };
     let Ok((data, status)) = tokio::time::timeout(timeout, read).await else {
         return fail(format!("Claude Code didn't answer in {} s, so it was stopped. Send it again, or pick another model.", timeout.as_secs()));
     };
-    let status = status.map_err(|e| Error::Io(e.to_string()))?;
-    if data.is_empty() && !status.success() {
+    let (success, code) = status?;
+    if data.is_empty() && !success {
         let e = errors.await.unwrap_or_default();
         let said = String::from_utf8_lossy(&e[e.len().saturating_sub(300)..]).trim().to_string();
-        return fail(format!("Claude Code stopped with code {}{}", code(&status), if said.is_empty() { ".".into() } else { format!(": {said}") }));
+        return fail(format!("Claude Code stopped with code {code}{}", if said.is_empty() { ".".into() } else { format!(": {said}") }));
     }
     Ok(data)
 }

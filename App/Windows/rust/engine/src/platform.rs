@@ -36,6 +36,14 @@ mod imp {
     use winsec as w;
 
     pub fn spawn_signer(exe: &Path) -> Option<Child> {
+        // In its container the engine may start no process: the window starts the signer (beside this engine) and hands
+        // over its pipes and a handle that can only wait for it.
+        if let Some(broker) = net::broker::get() {
+            let answer = broker.call(serde_json::json!({ "op": "signer" }), std::time::Duration::from_secs(15)).ok()?;
+            let (input, output) = (net::broker::handle(&answer, "stdin")?, net::broker::handle(&answer, "stdout")?);
+            let process = net::broker::handle(&answer, "process")?;
+            return Some(Child { pid: answer["pid"].as_u64()? as u32, input: Box::new(input), output: Box::new(output), _process: Box::new(process) });
+        }
         // The system's own form of the path («C:\Program Files\…»).
         let path = exe.to_string_lossy();
         let (mut pid, mut process, mut to_child, mut from_child) = (0u32, 0isize, 0isize, 0isize);
@@ -50,9 +58,21 @@ mod imp {
 
     pub fn allow_foreground(pid: u32) -> bool { w::winsec_allow_foreground(pid) == 0 }
     pub fn idle_ms() -> u32 { w::winsec_idle_ms() }
-    pub fn session_locked() -> bool { w::winsec_session_locked() == 1 }
+    /// In its container the engine can't open the input desktop (it reads as locked for ever): the window looks.
+    pub fn session_locked() -> bool {
+        match net::broker::get() {
+            Some(broker) => broker.call(serde_json::json!({ "op": "locked" }), std::time::Duration::from_secs(5)).is_ok_and(|v| v["locked"] == true),
+            None => w::winsec_session_locked() == 1,
+        }
+    }
 
     pub fn hello(key: &str, challenge: &[u8], reason: &str) -> Hello {
+        // In its container the engine has no package for Windows Hello to keep its key under: the window asks, with the
+        // unlock key it names itself, and says only how it went.
+        if let Some(broker) = net::broker::get() {
+            let answer = broker.call(serde_json::json!({ "op": "hello", "reason": reason }), std::time::Duration::from_secs(900));
+            return match answer.as_ref().ok().and_then(|v| v["hello"].as_str()) { Some("signed") => Hello::Signed, Some("cancelled") => Hello::Cancelled, _ => Hello::Failed };
+        }
         let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
         let code = unsafe {
             w::winsec_hello_sign(key.as_ptr(), key.len(), challenge.as_ptr(), challenge.len(), reason.as_ptr(), reason.len(), 1, &mut out, &mut len)
