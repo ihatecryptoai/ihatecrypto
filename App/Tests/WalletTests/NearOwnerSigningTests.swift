@@ -143,4 +143,8 @@ import EVMChain
     let d = try AgentOwner.delegate(freeze("0"))
     #expect(d.actions.count == 2 && d.doing.contains("freeze the agent wallet") && !d.doing.contains(";"))
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.delegate(freeze("1000000000000000000000000")) }
+    // agent_unfreeze as the API asked it live (2026-11-08): the rules stored unfrozen, then unfreeze_wallet.
+    let unfreeze = Data(String(decoding: freeze("0"), as: UTF8.self).replacingOccurrences(of: "\"freeze_wallet\"", with: "\"unfreeze_wallet\"").utf8)
+    let u = try AgentOwner.delegate(unfreeze)
+    #expect(u.actions.count == 2 && u.doing.contains("unfreeze the agent wallet") && !u.doing.contains(";"))
 }

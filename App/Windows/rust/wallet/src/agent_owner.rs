@@ -23,9 +23,10 @@ const MESSAGES: [&str; 3] = ["grant_issue", "grant_revoke", "execution_cancel"];
 /// The custody contract's methods an owner's delegate action may call, pinned from what the API was seen to ask (a live
 /// generate-intent, 2026-11-04): agent_create stores the wallet's first policy with `store_wallet_policy` (args:
 /// wallet_pubkey, encrypted_data, wallet_signature, agent_policy_hash, storage_refund_to), and agent_freeze stores it
-/// again frozen, then calls `freeze_wallet` (2026-11-05), no NEAR attached.
-// ponytail: unfreeze/policy_update methods get pinned the same way when a live run first asks for them.
-pub const METHODS: [&str; 2] = ["store_wallet_policy", "freeze_wallet"];
+/// again frozen, then calls `freeze_wallet` (2026-11-05), and agent_unfreeze stores it unfrozen, then calls
+/// `unfreeze_wallet` (2026-11-08), no NEAR attached.
+// ponytail: a policy update's method gets pinned the same way when a live run first asks for it.
+pub const METHODS: [&str; 3] = ["store_wallet_policy", "freeze_wallet", "unfreeze_wallet"];
 /// The NEAR a policy's storage may take from the owner's account (store_wallet_policy asked 0.01882 NEAR).
 const MAX_STORAGE: u128 = 50_000_000_000_000_000_000_000; // 0.05 NEAR
 /// A grant lasts at most this long: a bearer token on the PC shouldn't outlive a month.
@@ -212,6 +213,7 @@ fn say_call(method: &str, args: &Map<String, Value>) -> String {
     // The policy a call carries, when it carries one: the daily budget and where money may go.
     let policy = args.get("policy").and_then(Value::as_object).unwrap_or(args);
     if method == "freeze_wallet" { return "freeze the agent wallet: nothing leaves it until you unfreeze it".into() }
+    if method == "unfreeze_wallet" { return "unfreeze the agent wallet: it can spend again, within its rules".into() }
     let mut parts = vec![method.replace('_', " ")];
     if let Some(budget) = policy.get("budget").and_then(|b| b.get("daily_usd")).and_then(Value::as_str) { parts.push(format!("at most ${} a day", plain(budget, 20))) }
     let destinations = policy.get("destinations").and_then(Value::as_object);
@@ -317,6 +319,9 @@ mod tests {
         let d = delegate(freeze("0").as_bytes(), &METHODS).unwrap();
         assert!(d.actions.len() == 2 && d.doing.contains("freeze the agent wallet") && !d.doing.contains(';'), "{}", d.doing);
         assert!(delegate(freeze("1000000000000000000000000").as_bytes(), &METHODS).is_err());
+        // agent_unfreeze as the API asked it live (2026-11-08): the rules stored unfrozen, then unfreeze_wallet.
+        let u = delegate(freeze("0").replace("\"freeze_wallet\"", "\"unfreeze_wallet\"").as_bytes(), &METHODS).unwrap();
+        assert!(u.actions.len() == 2 && u.doing.contains("unfreeze the agent wallet") && !u.doing.contains(';'), "{}", u.doing);
     }
 
     /// Swift's `AgentAPI.policyHash` of the policy the app asks for (JSONSerialization, sorted keys, 2026-11-07), keys
