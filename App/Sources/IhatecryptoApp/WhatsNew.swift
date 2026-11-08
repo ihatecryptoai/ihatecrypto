@@ -191,6 +191,9 @@ struct WhatsNewPage: View {
             .buttonStyle(.plain).help("Open as stories: ← → to switch")
         }
         .padding(10)
+        // The card's padding and the gaps open the stories too (the buttons in it keep their own clicks).
+        .contentShape(Rectangle())
+        .onTapGesture(perform: play)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Brand.card))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.cardBorder))
         .modifier(HoverLift(radius: 14))
