@@ -31,7 +31,8 @@ write the registry's Run key or the Startup folder, reach Task Scheduler, start 
 a connection from the browser; DPAPI, Windows Hello's checks, the internet and the session's idle time work as before.
 
 Its files are in the container's own folder (`%LOCALAPPDATA%\Packages\app.ihatecrypto.windows.engine\AC`, which
-Windows gives it as LOCALAPPDATA and TEMP, and the window names them too): `ihatecrypto\engine` there. On the first start
+Windows gives it as LOCALAPPDATA and TEMP, made from the window's own LOCALAPPDATA — the window mustn't name them, or
+Windows adds `Packages\…\AC` to the folder named): `ihatecrypto\engine` there. On the first start
 in the container the window copies the old `%LOCALAPPDATA%\ihatecrypto\engine` in, file by file so the copies take the
 container's rules, and renames the old one `engine-before-container`; a copy that fails leaves it as it was and the
 engine unstarted, so the next start tries again. DPAPI-sealed keys and sign-ins read as before. A development build keeps IHATECRYPTO_ENGINE_DIR, which the

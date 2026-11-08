@@ -101,10 +101,9 @@ pub fn start(app: &tauri::AppHandle, exe: &Path) -> std::io::Result<Started> {
     let bin = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     // Program Files lets every container read and run already; a development build's folder is let in here.
     sandbox::grant(&bin, &sid, false);
-    // The folders Windows gives a container anyway, named so the engine never depends on that.
-    let folders = [("LOCALAPPDATA", home.display().to_string()), ("TEMP", home.join("Temp").display().to_string()),
-                   ("TMP", home.join("Temp").display().to_string())];
-    let engine = sandbox::spawn(exe, &folders, &sid)?;
+    // Windows gives the engine `home` as its LOCALAPPDATA and its Temp as TEMP, made from this window's own LOCALAPPDATA:
+    // named here they'd be made from `home`, «…\AC\Packages\<name>\AC», and the engine would start empty beside its files.
+    let engine = sandbox::spawn(exe, &[], &sid)?;
     let process = Arc::new(engine.process);
     let broker = Arc::new(Broker {
         app: app.clone(), engine: process.clone(), answers: Mutex::new(engine.answers), data, bin,
