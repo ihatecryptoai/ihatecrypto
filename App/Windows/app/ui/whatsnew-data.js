@@ -9,7 +9,8 @@ export const releases = [
     "title": "Send and swap privately",
     "text": "«send 20 USDC privately to Mom» or «buy NEAR for 5 USDC privately» goes through NEAR Intents' Confidential Intents: on chain the deposit and what arrives can't be matched. A USDC send to a saved address offers Regular or Private right over Confirm, with each way's fees and time.",
     "symbol": "lock.fill",
-    "color": "BF5AF2"
+    "color": "BF5AF2",
+    "try": "buy NEAR for 5 USDC privately"
    },
    {
     "title": "A private assistant",
@@ -21,25 +22,29 @@ export const releases = [
     "title": "Won't let you get liquidated",
     "text": "«guard my loan on kamino» watches a Kamino or Aave loan and, under its line, prepares the repay, with the USDC it lacks brought through NEAR Intents, for one Confirm. You can also borrow USDC against SOL on Kamino's main market.",
     "symbol": "shield.checkered",
-    "color": "FF9F0A"
+    "color": "FF9F0A",
+    "try": "guard my loan on kamino"
    },
    {
     "title": "Pay any API, run an agent wallet",
     "text": "A paid API answers after you Confirm: x402 by a signature on Base, MPP on Tempo or through NEAR Intents from the USDC you hold. An agent wallet on NEAR Intents spends within the daily limit your NEAR key signed, and you can freeze it.",
     "symbol": "creditcard.fill",
-    "color": "0A84FF"
+    "color": "0A84FF",
+    "try": "create an agent wallet with $5 a day"
    },
    {
     "title": "TWAP and trailing stops",
     "text": "«buy ETH for $2000 over 2 hours» is one TWAP on Hyperliquid, its stop and take covering the whole position from the first part. «trailing 2%» puts Hyperliquid's own trailing stop on the exchange.",
     "symbol": "chart.line.uptrend.xyaxis",
-    "color": "30B0C7"
+    "color": "30B0C7",
+    "try": "long ETH risk $5 over 1 h"
    },
    {
     "title": "See where your money goes",
     "text": "Every move waiting for Confirm reads as a receipt: what you pay and from where, the blockchain's fees, what arrives. A move through NEAR Intents shows its way after Confirm. Lookalike addresses, scam addresses from GoPlus and sites asking for more than they show are called out before you sign.",
     "symbol": "doc.text.magnifyingglass",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "move 5 USDC from Solana to Base"
    },
    {
     "title": "Your own limits",
@@ -87,25 +92,29 @@ export const releases = [
     "title": "The best way to swap",
     "text": "On Solana JupiterZ's market makers fill a swap when they pay more than the pools. On EVM networks Uniswap, KyberSwap and Relay are compared by what's left after gas. From Solana to another network, Relay's swap is weighed against Relay's bridge plus the best exchange there, and the card names the one you sign.",
     "symbol": "arrow.triangle.branch",
-    "color": "0A84FF"
+    "color": "0A84FF",
+    "try": "buy AERO on base for 2 USDC"
    },
    {
     "title": "Stocks from Ondo",
     "text": "Buy US stocks and ETFs from Ondo on Solana («buy $5 of Nvidia from Ondo») at the market makers' price, and keep dollars in Ondo's USDY. Ondo's residency limits show before you confirm.",
     "symbol": "building.columns.fill",
-    "color": "30B0C7"
+    "color": "30B0C7",
+    "try": "buy NVDAon on solana for 5 USDC"
    },
    {
     "title": "Borrow against your stocks",
     "text": "Kamino's Backpack market lends USDC against tokenized stocks such as SPCX or MU, so you get dollars without selling them. Every card says «all» with its number.",
     "symbol": "banknote.fill",
-    "color": "34C759"
+    "color": "34C759",
+    "try": "borrow 2 USDC on kamino against SPCX"
    },
    {
     "title": "Hedge what you hold",
     "text": "Say «hedge my SOL» and ihatecrypto opens a short on Hyperliquid the size of the coins you hold, with no take-profit, so a fall is covered; the risk rules count it net of your coins.",
     "symbol": "shield.lefthalf.filled",
-    "color": "BF5AF2"
+    "color": "BF5AF2",
+    "try": "hedge SOL"
    },
    {
     "title": "Smoother canvas, safer chat",
@@ -123,7 +132,8 @@ export const releases = [
     "title": "Your P/L, not your top-ups",
     "text": "The portfolio's line shows what prices did to what you hold. Money you add or send, swaps and bridges don't move it, so a top-up no longer looks like a gain. And the line is a smooth curve now.",
     "symbol": "chart.line.uptrend.xyaxis",
-    "color": "34C759"
+    "color": "34C759",
+    "try": "profit and loss month"
    },
    {
     "title": "Deposits you can read",
@@ -159,19 +169,22 @@ export const releases = [
     "title": "Send all of anything",
     "text": "«Send all» works for every coin now: all your SOL, the rent of the empty token accounts with it; ETH, POL or BNB less only the fee; all of Tempo's USDC with a speck left, not a cent. Sending all of a token closes its account and its rent comes back. A token named by its contract is no longer taken for the address it goes to.",
     "symbol": "paperplane.fill",
-    "color": "FF9F0A"
+    "color": "FF9F0A",
+    "try": "send all BONK on solana to Mom"
    },
    {
     "title": "Price alerts on the Schedule",
     "text": "Your price alerts sit on the Schedule beside the tasks: the level, how far the price is, a switch to pause one and a page of its own. A row gets its orange edge only while it's open, not under the pointer.",
     "symbol": "bell.badge.fill",
-    "color": "BF5AF2"
+    "color": "BF5AF2",
+    "try": "alert me when SOL is below 70"
    },
    {
     "title": "Every fee counted",
     "text": "A Hyperliquid spot quote takes off the exchange's 0.07% and, on a sale, ihatecrypto's 0.05%. On your first trade the signing card counts the fee approval as the signature it is.",
     "symbol": "percent",
-    "color": "64D2FF"
+    "color": "64D2FF",
+    "try": "buy HYPE on hyperliquid spot for 10 USDC"
    }
   ]
  },
@@ -214,7 +227,7 @@ export const releases = [
     "text": "USDC on BNB Chain with no BNB beside it now moves out: BNB Chain's own paymaster, MegaFuel, pays the gas for its transfer to Relay.",
     "symbol": "fuelpump.fill",
     "color": "FFD60A",
-    "try": "show where to top up"
+    "try": "top up"
    }
   ]
  },
@@ -227,7 +240,7 @@ export const releases = [
     "text": "USDC with no SOL beside it still swaps for SOL: Jupiter pays that one swap's fee, from $5. USDC on Base, Arbitrum, Optimism, Polygon, Ethereum or Robinhood Chain with none of the network's coin goes to Solana or Hyperliquid by a signature, Relay paying the gas, and gas for that network comes back over Solana. Gas for BNB Chain and HyperEVM can come from your Hyperliquid balance. When dollars land where they can't move, the chat says so once and offers the way out.",
     "symbol": "fuelpump.fill",
     "color": "30D158",
-    "try": "show where to top up"
+    "try": "top up"
    }
   ]
  },
@@ -258,7 +271,8 @@ export const releases = [
     "title": "Hyperliquid from the chat",
     "text": "«Move 11 USDC from Solana to Hyperliquid» opens your Hyperliquid account: about $1 of the first deposit pays its opening fee, and its smallest order is $10. Once money is there, the chat offers to turn on the trading key, and «turn on the trading key» does it.",
     "symbol": "bolt.fill",
-    "color": "34C759"
+    "color": "34C759",
+    "try": "move 11 USDC from Solana to Hyperliquid"
    },
    {
     "title": "Small safety fixes",
@@ -288,7 +302,8 @@ export const releases = [
     "title": "ihatecrypto's fee on Hyperliquid",
     "text": "Trades on Hyperliquid placed in ihatecrypto carry a 0.05% fee for ihatecrypto, on top of the exchange's own: perps both ways, spot only when selling. The first trade you confirm asks you to approve it once, every plan shows it in the fees, and Settings › Wallet › Hyperliquid can take the approval back.",
     "symbol": "percent",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "long BTC risk $5"
    },
    {
     "title": "4% off Hyperliquid's fees",
@@ -306,7 +321,8 @@ export const releases = [
     "title": "Sends that find the money",
     "text": "A send to a saved address on Hyperliquid brings what Hyperliquid lacks from Solana first — or straight from the network that holds it — in the same Confirm, and its card says how much comes over. A send no balance can cover is said at once, before any card.",
     "symbol": "arrow.triangle.branch",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "send 2 USDC to Mom on hyperliquid"
    },
    {
     "title": "When something fails, a way that works",
@@ -318,7 +334,8 @@ export const releases = [
     "title": "Nothing moves without your click",
     "text": "The first recurring buy is a card to confirm, scheduled buys ask you to approve again, a stop or take the assistant suggests on an open trade waits for Confirm, an alert's moves wait for Confirm, and tasks that move money from the automation wallet start paused.",
     "symbol": "hand.raised.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "buy SOL for 2 USDC every week"
    },
    {
     "title": "Updates wait for you",
@@ -336,7 +353,8 @@ export const releases = [
     "title": "Swaps to ETH finish unwrapping",
     "text": "After a one-signature approve and swap on an EVM network, the next transaction no longer gets «nonce too low», and a swap to ETH waits for its WETH before unwrapping it, so none is left behind.",
     "symbol": "wrench.and.screwdriver.fill",
-    "color": "5856D6"
+    "color": "5856D6",
+    "try": "swap 2 USDC for ETH on base"
    }
   ]
  },
@@ -390,7 +408,8 @@ export const releases = [
     "title": "Lock the app with a passcode",
     "text": "Set a 6-digit code when you set up or in Settings › Wallet › Passcode. The app locks when it opens, after the time away you pick, when the PC sleeps, on «lock» and on Ctrl+L. Open it with the code or Windows Hello. Five wrong codes turn the code off. Scheduled tasks, stops and alerts keep running while it's locked.",
     "symbol": "lock.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "lock"
    },
    {
     "title": "A chat that's easier to read",
@@ -438,7 +457,8 @@ export const releases = [
     "title": "Send more from the top-up page",
     "text": "After a top-up arrives, «Send more» lets you pick another amount. The page shows both wallets' balances now → after, and your wallet asks to confirm again.",
     "symbol": "arrow.up.circle.fill",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "top up"
    },
    {
     "title": "Favorites: tokens and wallets",
@@ -468,7 +488,8 @@ export const releases = [
     "title": "Scheduled buys land on your main wallet",
     "text": "What a task buys with the automation wallet is sent on to your main wallet after each run. A sale always waits for your Confirm and Windows Hello. When the week's buys need more than Automation holds, the Schedule says how much to top up, a day ahead.",
     "symbol": "arrow.down.to.line.circle.fill",
-    "color": "9945FF"
+    "color": "9945FF",
+    "try": "every week: buy SOL for 2 USDC"
    },
    {
     "title": "A clearer Schedule",
@@ -480,7 +501,8 @@ export const releases = [
     "title": "Skills and a trading study",
     "text": "Settings › Skills lists what the chat can follow, with a switch each, and takes your own .md or .txt. The built-in «Trading study» measures any Hyperliquid account's closed trades after fees and funding, keeps a journal of why you entered, and writes down what works for you. No money moves.",
     "symbol": "graduationcap.fill",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "journal ETH: funding is low, buyers take the dips"
    },
    {
     "title": "Smoother canvas",
@@ -504,13 +526,15 @@ export const releases = [
     "title": "The chat asks when it's unsure",
     "text": "When it isn't clear which coin, how much, which network or who gets it, the chat asks one question with answers as cards right under it. Click one, or press ↑ and pick with the arrows and Return. «Swap USDC to USDT and send it to Bybit» now does exactly that, never a trade.",
     "symbol": "questionmark.bubble.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "send 2 USDC"
    },
    {
     "title": "P/L on every coin",
     "text": "Every coin shows how it did since you got it, gas coins too: what you paid comes from the wallet's own history, even for coins bought outside the app. A coin that came in by a transfer or a bridge is counted at its price that day.",
     "symbol": "chart.line.uptrend.xyaxis",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "profit and loss for SOL"
    },
    {
     "title": "Hide your balance",
@@ -522,7 +546,8 @@ export const releases = [
     "title": "Top up, one look",
     "text": "Browser wallet, Phone wallet and Exchange show the same block: the QR, what to do, and the whole address with Copy. «Other» picks another token, «Custom» types your own amount.",
     "symbol": "qrcode",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "top up"
    },
    {
     "title": "Smaller things",
@@ -540,13 +565,15 @@ export const releases = [
     "title": "Top up from any network",
     "text": "Top up lists every network the app works on, in one row. Pick the coin and the amount, or «Any» for either, and the way: a browser wallet like Phantom or MetaMask on a page the app opens, a phone by its QR and the address, or an exchange. When the money lands, Top up says how much arrived and where.",
     "symbol": "arrow.down.circle.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "top up"
    },
    {
     "title": "Where the money went",
     "text": "History opens on what moved: the day summed up («−25 USDT sent to Automation · 5 sends»), then each move with where it went, the amount and a link to the explorer. Or ask the chat: «where did the money go today?»",
     "symbol": "clock.arrow.circlepath",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "where did the money go today?"
    },
    {
     "title": "The Schedule by date",
@@ -558,7 +585,8 @@ export const releases = [
     "title": "Your automation wallet, counted",
     "text": "The balance in the sidebar is both wallets, with the split under it: Main and Automation. The portfolio has the Automation card, and the Schedule shows its money in dollars. With no SOL for fees, one button sends it 0.01 SOL, and a top-up from the Schedule brings the fee along.",
     "symbol": "dollarsign.circle.fill",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "create an automation wallet"
    },
    {
     "title": "Smaller things",
@@ -576,19 +604,22 @@ export const releases = [
     "title": "A multisig in one move",
     "text": "Say «make a multisig»: a card with its keys — this PC's, your Ledger's, any saved address, as many as you want — how many of them must sign, and the networks you pick. One Confirm makes it at the same address on each; then pay from it in the chat.",
     "symbol": "key.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "make a multisig"
    },
    {
     "title": "What every bridge costs",
     "text": "A move between networks lists each bridge that can make it — Relay, Circle's CCTP, NEAR Intents, LayerZero — with what it costs and how long it takes, on the bridge's own step. The one the move goes by comes first.",
     "symbol": "arrow.left.arrow.right.circle.fill",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "move 5 USDC from Base to Arbitrum"
    },
    {
     "title": "USDT over Tether's own bridge",
     "text": "«Move 50 USDT from Arbitrum to Polygon via LayerZero» sends it over USDT0: the same amount arrives, for cents of gas, between Ethereum, Arbitrum, Optimism, Polygon and HyperEVM. It takes minutes to hours, so the card says the wait and the portfolio shows it in transit.",
     "symbol": "point.3.connected.trianglepath.dotted",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "move 5 USDT from Arbitrum to Polygon via LayerZero"
    },
    {
     "title": "How full the chat is",
@@ -606,7 +637,8 @@ export const releases = [
     "title": "Smaller things",
     "text": "A small first Kamino deposit asks «Send anyway?» with its rent in numbers instead of refusing. Jupiter is asked again when it's busy, and its errors read as a sentence. The window's buttons stay in their corner after a relaunch.",
     "symbol": "wrench.and.screwdriver.fill",
-    "color": "8E8E93"
+    "color": "8E8E93",
+    "try": "deposit 1 USDC to kamino"
    }
   ]
  },
@@ -618,13 +650,15 @@ export const releases = [
     "title": "Every step says what it does",
     "text": "Each card of a move shows its state in words on its picture — Ready, Now, Done, Windows Hello — then what it does and with which protocol, with that protocol's logo. Click a card for the rest; ✕, Close or Esc closes it.",
     "symbol": "rectangle.stack",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "move 2 USDC from Base to Solana then deposit 2 USDC to kamino"
    },
    {
     "title": "Your money now → after",
     "text": "Every step that moves money shows the balances it changes: «Solana 26.65 → 24.65 USDC», «Kamino Lend 0 → 2 USDC». Once it's done, it reads was → now.",
     "symbol": "arrow.left.arrow.right",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "lend 2 USDC"
    },
    {
     "title": "Coins open like tokens",
@@ -636,7 +670,8 @@ export const releases = [
     "title": "The chat calls any contract",
     "text": "Ask for anything a contract does on nine networks: the chat writes the call, checks the contract and simulates it before a card with Confirm. It says its next step out loud, remembers what you tell it to, and can watch things in the background.",
     "symbol": "curlybraces",
-    "color": "5856D6"
+    "color": "5856D6",
+    "try": "put 2 USDC into Fluid on Arbitrum"
    },
    {
     "title": "Calls that can't trick you",
@@ -660,31 +695,36 @@ export const releases = [
     "title": "The chat looks things up itself",
     "text": "Ask about anything on-chain — your Aave health factor, a pool's rate on DefiLlama, your past Hyperliquid fills — and the chat reads the contract, the network or the public data itself, with no feature built for it first.",
     "symbol": "magnifyingglass",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "what is my Aave health factor?"
    },
    {
     "title": "It carries on after a move",
     "text": "Ask for something that depends on how a move goes — «buy SOL for $1, then an alert 5% under my price» — and after your Confirm the chat takes the next step from what actually happened.",
     "symbol": "arrow.turn.down.right",
-    "color": "5856D6"
+    "color": "5856D6",
+    "try": "buy SOL for 1 USDC, then an alert 5% under my price"
    },
    {
     "title": "Every big stablecoin, everywhere",
     "text": "USDT, USDC, USDS, USDe and DAI by their names on every network they're on — swap one for another, send them, move them across networks. They count as dollars in your portfolio, «not earning» like USDC.",
     "symbol": "dollarsign.circle",
-    "color": "26A17B"
+    "color": "26A17B",
+    "try": "buy USDT on solana for 2 USDC"
    },
    {
     "title": "The amount, not «all»",
     "text": "A card that moves all of a coin shows how much that is, with «all available» under it.",
     "symbol": "number",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "sell all JUP"
    },
    {
     "title": "Open Hyperliquid your way",
     "text": "Your first trade asks how to open the account: Relay in seconds with Hyperliquid's $1.20 opening fee, or NEAR Intents in 2–4 minutes without it.",
     "symbol": "arrow.triangle.branch",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "long SOL risk $5"
    },
    {
     "title": "New networks wait for you",
@@ -720,13 +760,15 @@ export const releases = [
     "title": "BNB Chain",
     "text": "USDC to BNB Chain and back from Solana or any network, BNB for its gas coming along, sends to saved addresses, and its tokens in the portfolio. «move 5 USDC from Solana to BNB», «buy CAKE on bnb for 5 USDC».",
     "symbol": "hexagon.fill",
-    "color": "F0B90B"
+    "color": "F0B90B",
+    "try": "move 5 USDC from Solana to BNB"
    },
    {
     "title": "Any token for any other",
     "text": "On every network: «swap 0.1 SOL for BONK on solana», «swap 1 TSLA for NVDA on robinhood», «swap 1 HYPE for PURR on hyperliquid spot», «swap 1 NEAR for AURORA on near» through NEAR Intents, and across networks — SOL for CAKE on BNB Chain, NEAR for SOL.",
     "symbol": "arrow.left.arrow.right",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "swap 0.01 SOL for BONK on solana"
    },
    {
     "title": "Buy and Sell on every coin",
@@ -738,7 +780,8 @@ export const releases = [
     "title": "Send anyway?",
     "text": "A move that would lose more than usual to fees no longer just stops: it says how much — «Relay keeps ≈ $0.23 of $2.00» — and asks. Send anyway, or cancel. A swap's card warns when fees take more than a tenth.",
     "symbol": "exclamationmark.triangle.fill",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "move 2 USDC from Solana to Ethereum"
    }
   ]
  },
@@ -756,13 +799,15 @@ export const releases = [
     "title": "Profit and loss on every token",
     "text": "A token bought in the app shows what it made or lost next to its amount, and its board says it in dollars with what it cost. One that came from elsewhere shows today's move.",
     "symbol": "chart.line.uptrend.xyaxis",
-    "color": "0B7A55"
+    "color": "0B7A55",
+    "try": "profit and loss all"
    },
    {
     "title": "Swaps on Optimism and HyperEVM",
     "text": "«swap 0.001 ETH for OP on optimism» goes through Uniswap there; on HyperEVM, where the money isn't in Uniswap's pools, «swap 5 USDC for HYPE on hyperevm» or for UBTC, UETH, USOL and kHYPE goes through Relay's swap.",
     "symbol": "arrow.triangle.2.circlepath",
-    "color": "FF0420"
+    "color": "FF0420",
+    "try": "swap 5 USDC for HYPE on hyperevm"
    },
    {
     "title": "Prompts typed out",
@@ -792,7 +837,8 @@ export const releases = [
     "title": "What you get, on the card",
     "text": "A swap's card says what arrives, as quoted now: «≈ 0.0083 SOL», «≈ 1.8 UNI», «≈ 0.11 HYPE». Jupiter, Relay, Hyperliquid's spot book and Robinhood's stock tokens.",
     "symbol": "arrow.triangle.2.circlepath",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "buy JUP for 2 USDC"
    },
    {
     "title": "Asked for more than you have",
@@ -835,7 +881,8 @@ export const releases = [
     "title": "Tokens stay tokens",
     "text": "A message with $SPX or $ and a contract shows the token's chip in the chat too, not a long address, and «understood as» names the token. The model still gets the exact address.",
     "symbol": "dollarsign.circle.fill",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "buy $JUP for 2 USDC"
    },
    {
     "title": "Models on this PC, ten times faster",
@@ -888,7 +935,8 @@ export const releases = [
     "title": "Money in transit",
     "text": "A bridge that left and hasn't landed shows above the network cards; a click opens the bridge's own word on it, the transaction and the address. The legs of a move from several networks travel together, as fast as the slowest.",
     "symbol": "clock.arrow.2.circlepath",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "move 5 USDC from Solana to Arbitrum"
    },
    {
     "title": "Approvals and dust",
@@ -926,7 +974,8 @@ export const releases = [
     "title": "Uniswap v4 everywhere",
     "text": "On Base, Arbitrum, Ethereum and Polygon every swap takes the better of Uniswap v3 and v4, the card shows the price impact, and a deep pool trades within half a percent of its quote. Ethereum's swaps go through MEV Blocker, out of the public mempool.",
     "symbol": "arrow.left.arrow.right.circle.fill",
-    "color": "FF007A"
+    "color": "FF007A",
+    "try": "buy UNI on arbitrum for 2 USDC"
    },
    {
     "title": "Buy over time",
@@ -977,7 +1026,8 @@ export const releases = [
     "title": "A token's month, free",
     "text": "Looking a token up now brings its pool's last 30 days: the low, the high and a close a day. «Where should I buy?» gets a range from the chart, not an offer to pay for history.",
     "symbol": "chart.xyaxis.line",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "where should I buy BONK?"
    }
   ]
  },
@@ -989,7 +1039,8 @@ export const releases = [
     "title": "Orders keep their price",
     "text": "«limit 2650.» and «stop at 2650.» no longer lose the price to the full stop, so a limit stays a limit. «Brent oil» is Brent, not WTI. 26,617 ways to write a command were checked; all read right.",
     "symbol": "scope",
-    "color": "FF7A2F"
+    "color": "FF7A2F",
+    "try": "long ETH risk $5 limit 2000."
    },
    {
     "title": "A yes is a yes",
@@ -1007,7 +1058,8 @@ export const releases = [
     "title": "Small things",
     "text": "A note that mentions an alert or a chart stays a note. «save 0x… as Mom on tempo» saves «Mom» on Tempo. «Sell all JUP» shows how much «all» is.",
     "symbol": "checkmark.seal.fill",
-    "color": "4615C8"
+    "color": "4615C8",
+    "try": "write to folder Ideas: set an alert on SOL"
    }
   ]
  },
@@ -1050,7 +1102,8 @@ export const releases = [
     "title": "Understands you better",
     "text": "«2,500» is two and a half thousand, «sell SOL for $10» never sells it all, «ok?» is a question and not a yes, and an answer in the wrong unit is asked again.",
     "symbol": "text.bubble.fill",
-    "color": "2775CA"
+    "color": "2775CA",
+    "try": "sell SOL for $2"
    },
    {
     "title": "Trades keep their stop",

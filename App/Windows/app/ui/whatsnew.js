@@ -58,11 +58,21 @@ export function openWhatsNew() {
       h("div", { class: "wn-body" },
         h("nav", { class: "wn-versions" }, releases.map((r) => h("button", { class: "wn-version" + (r.version === chosen ? " on" : ""), onclick: () => { chosen = r.version; draw(); } },
           h("b", {}, t("Version ", "Версия ") + r.version), day(r) ? h("span", { class: "secondary" }, day(r)) : null))),
-        h("div", { class: "wn-stories" }, (release?.stories || []).map((s, i) => h("button", { class: "wn-row", title: t("Open as stories: ← → to switch", "Открыть историями: ← → — листать"),
-          onclick: () => play(release, i) },
-          h("span", { class: "wn-tile", style: `background:${color(s.color)}` }, icon(symbol(s.symbol), 18)),
-          h("span", { class: "wn-row-text" }, h("b", {}, s.title), h("span", { class: "secondary one-line" }, s.text)),
-          icon("play", 16))))));
+        h("div", { class: "wn-stories" }, (release?.stories || []).map((s, i) => {
+          const open = { title: t("Open as stories: ← → to switch", "Открыть историями: ← → — листать"), onclick: () => play(release, i) };
+          // «Try it» beside the change when a phrase shows it: the phrase into the chat's field, never sent.
+          return h("div", { class: "wn-row" },
+            h("button", { class: "wn-row-main", ...open },
+              h("span", { class: "wn-tile", style: `background:${color(s.color)}` }, icon(symbol(s.symbol), 18)),
+              h("span", { class: "wn-row-text" }, h("b", {}, s.title), h("span", { class: "secondary one-line" }, s.text))),
+            s.try ? tryIt(s.try, "btn primary capsule small") : null,
+            h("button", { class: "wn-row-play", ...open }, icon("play", 16)));
+        }))));
+  }
+
+  function tryIt(phrase, cls) {
+    return h("button", { class: cls, title: t(`Puts «${phrase}» into the chat`, `Вставит «${phrase}» в чат`), onclick: () => { close(); suggest(phrase); } },
+      t("Try it", "Попробовать"));
   }
 
   function card() {
@@ -78,7 +88,7 @@ export function openWhatsNew() {
               h("button", { class: "wn-close", title: t("Back to the list · Esc", "К списку · Esc"), onclick: back }, icon("xmark", 12))))),
         h("div", { class: "wn-card-text" }, h("h3", {}, s.title), h("p", { class: "secondary" }, s.text), h("span", { class: "spacer" }),
           h("div", { class: "wn-card-foot" },
-            s.try ? h("button", { class: "btn primary capsule", title: t(`Puts «${s.try}» into the chat`, `Вставит «${s.try}» в чат`), onclick: () => { close(); suggest(s.try); } }, t("Try it", "Попробовать")) : null,
+            s.try ? tryIt(s.try, "btn primary capsule") : null,
             h("span", { class: "spacer" }), h("span", { class: "tertiary num" }, t(`${index + 1} of ${release.stories.length}`, `${index + 1} из ${release.stories.length}`))))),
       h("button", { class: "wn-arrow", title: index + 1 < release.stories.length ? t("Next · →", "Дальше · →") : t("Back to the list · →", "К списку · →"), onclick: () => go(1) }, icon("chevron.right", 18)));
   }

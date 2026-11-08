@@ -18,7 +18,11 @@ body.locked .wn-over, body.in-settings .wn-over { visibility: hidden; }
 .wn-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--card-border);
   text-align: left; color: inherit; transition: transform 0.15s ease-out, box-shadow 0.15s; }
 .wn-row:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
-.wn-row > .ico { color: var(--accent-ink); width: 16px; height: 16px; flex: none; }
+.wn-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer; }
+.wn-row-play { display: inline-flex; padding: 0; border: 0; background: none; color: var(--accent-ink); cursor: pointer; flex: none; }
+.wn-row-play .ico { width: 16px; height: 16px; }
+.wn-row .btn.small { height: 26px; padding: 0 12px; font-size: 12px; border-radius: 999px; flex: none; }
 .wn-tile { width: 36px; height: 36px; border-radius: 10px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: #fff; }
 .wn-tile .ico { width: 18px; height: 18px; }
 .wn-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
