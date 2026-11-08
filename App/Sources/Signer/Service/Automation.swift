@@ -45,7 +45,10 @@ enum Automation {
         case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
             for c in calls { evm(chainId, to: c.to, value: 0, data: c.data, add: add) }
         case .signSponsoredTransfer(_, _, _, let token, let to, let amount, _):
-            add(token, Decimal(string: amount) ?? 0, decimals: dollarDecimals(token), to: to, name: "\(amount) units of \(token.prefix(8))…")
+            // Read as the signing path reads it (SponsoredTransfer.refusal): a whole number of units, else the person.
+            if let units = Decimal(string: amount), units > 0, units == units.whole {
+                add(token, units, decimals: dollarDecimals(token), to: to, name: "\(amount) units of \(token.prefix(8))…")
+            } else { others.append("an amount the signer can't read (\(amount.prefix(20)))") }
         case .signRelayMulticallPermit(let chainId, let token, let value, let validBefore, let relayer, let refundTo, let nftRecipient, let metadata, let calls):
             // Into Relay's depository for an order whose payee the signer checked: to this wallet's own address elsewhere
             // it's the person's money moving, else spending.
@@ -62,11 +65,13 @@ enum Automation {
         case .signHyperliquidUser(let action, _, _):
             let to = HLAction.text(action, "destination") ?? ""
             let token = HLAction.text(action, "token").map { String($0.split(separator: ":").first ?? "") } ?? "USDC"
-            let amount = Decimal(string: HLAction.text(action, "amount") ?? "", locale: Locale(identifier: "en_US_POSIX")) ?? 0
+            let amount = Decimal(string: HLAction.text(action, "amount") ?? "", locale: Locale(identifier: "en_US_POSIX"))
             switch HLAction.type(action) {
             case "usdClassTransfer": break
             case "vaultTransfer": others.append("a Hyperliquid vault transfer")
-            default: add(token, amount, decimals: token == "USDC" ? 0 : nil, to: to, name: "\(amount) \(token)")
+            default:
+                if let amount, amount >= 0 { add(token, amount, decimals: token == "USDC" ? 0 : nil, to: to, name: "\(amount) \(token)") }
+                else { others.append("a Hyperliquid amount the signer can't read") }
             }
         case .signNearIntentDeposit(let amount, _, _, _):
             others.append("\(amount) yoctoNEAR")

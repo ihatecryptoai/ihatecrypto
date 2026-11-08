@@ -474,7 +474,7 @@ struct SettingsView: View {
         SettingsSection(icon: "bolt", title: "Hyperliquid", line: "A trading key places orders. It cannot withdraw money.") {
             SettingsGroup {
                 SettingsRow("Trading key", icon: "key", logo: "hype", info: ws.agentActive
-                            ? "Opens positions without \(Presence.name) for 7 days after your last \(Presence.short) for it; stops and closes go on after that. It cannot withdraw money."
+                            ? "Opens positions without \(Presence.name) only as buys within your limits, for \(ws.limits.agentDays == 1 ? "1 day" : "\(ws.limits.agentDays) days") after your last \(Presence.short) for it; stops and closes go on after that. It cannot withdraw money."
                             : ws.ledgerActive ? "Without a trading key, every order asks for the Ledger's buttons. Hyperliquid accepts the key after the account has had a deposit."
                             : "Without a trading key, every order asks for \(Presence.name). Hyperliquid accepts the key after the account has had a deposit.") {
                     SettingsPill(text: ws.agentActive ? "On" : "Off", good: ws.agentActive)

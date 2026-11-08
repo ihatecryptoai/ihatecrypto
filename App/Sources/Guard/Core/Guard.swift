@@ -500,7 +500,9 @@ public enum SolanaGuard {
                                 + (fee > 0 ? ", a \(percent(fee)) fee to the site" : "") + ")")
                 if slippage > policy.maxSlippageBps { v.askAfresh.append("slippage \(percent(slippage)) is over your \(percent(policy.maxSlippageBps))") }
                 if fee > 0 { v.askAfresh.append("the site takes a \(percent(fee)) fee") }
-                v.outflows.append(.init(asset: given, units: inAmount, to: nil))
+                // Counted as that coin only when it leaves this wallet's own account for it.
+                let sourceOwn = account(layout.source).map { mine($0) || ownTokenAccount($0, owner: policy.owner, mint: given) } ?? false
+                v.outflows.append(.init(asset: sourceOwn ? given : "?", units: inAmount, to: nil))
                 v.swaps = true
             default:
                 v.checks.append("Calls \(programName). The balance simulation checks the result.")
