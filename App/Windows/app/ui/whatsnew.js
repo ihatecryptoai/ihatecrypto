@@ -21,7 +21,7 @@ const SYMBOLS = { bolt: "bolt", lock: "lock", "lock.shield": "lock", eye: "eye",
   "rectangle.stack": "rectangle.stack", "square.stack.3d.up": "rectangle.stack", star: "star", gearshape: "gear", "person.crop.circle": "person",
   "clock.arrow.circlepath": "clock", "clock.arrow.2.circlepath": "clock", "calendar.badge.clock": "calendar", "checkmark.seal": "checkmark.seal",
   "arrow.triangle.2.circlepath": "arrow.clockwise", "arrow.down.circle": "arrow.down.circle", "arrow.down.to.line.circle": "arrow.down.circle",
-  "wallet.bifold": "wallet.pass", "folder": "rectangle.stack", "key": "lock" };
+  "wallet.bifold": "wallet.pass", "folder": "rectangle.stack", "key": "lock", "antenna.radiowaves.left.and.right": "globe" };
 const symbol = (name) => { const base = (name || "").replace(/\.fill$/, ""); return SYMBOLS[base] || "sparkles"; };
 const color = (hex) => "#" + (/^[0-9a-f]{6}$/i.test(hex || "") ? hex : "FF7A2F");
 

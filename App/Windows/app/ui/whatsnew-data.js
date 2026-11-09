@@ -2,6 +2,18 @@
 // App/Windows/whatsnew.py at release; edit the Mac's file, not this one.
 export const releases = [
  {
+  "version": "0.9.2",
+  "date": "2026-11-10",
+  "stories": [
+   {
+    "title": "Solana keeps answering when its public node is busy",
+    "symbol": "antenna.radiowaves.left.and.right",
+    "color": "9945FF",
+    "text": "Without a node of your own, the app asked only Solana's public node, and when it said «too many requests» a balance or a move could stop after a few tries. Now those tries go to a second free node, Pocket, so reads and sends keep going. Settings › General › Your own nodes also names FluxRPC, which has a free plan like Helius."
+   }
+  ]
+ },
+ {
   "version": "0.9.1",
   "date": "2026-11-08",
   "stories": [
