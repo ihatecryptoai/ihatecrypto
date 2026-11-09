@@ -15,16 +15,25 @@ use wallet::{Result, WalletError};
 
 use crate::{Again, DELAYS, fail, head, post_json, run, transient};
 
-/// The person's own node (Settings › General › Solana node), asked first when set; the public one after it.
+/// The person's own node (Settings › General › Solana node), asked first when set; the public one after it, then Pocket's.
 static OWN: Mutex<Option<String>> = Mutex::new(None);
 
 pub fn custom() -> Option<String> { OWN.lock().expect("nodes").clone() }
 pub fn set_custom(url: Option<String>) { *OWN.lock().expect("nodes") = url }
 
+/// A node that doesn't serve this call, so the next node should: its key refused (401, 403: expired, over its plan), or
+/// the node's own limits in Pocket's words (2026-11-09): HTTP 400 «… requires a mint filter on this endpoint», HTTP 400
+/// «request budget exhausted», and -32010 «Tokenkeg… excluded from account secondary indexes» from a backend without the
+/// index. `body`: the HTTP body, or a JSON-RPC error's message. Any other answer is the call's own.
+pub fn passes_on(status: u16, body: &[u8]) -> bool {
+    let text = head(body, 400);
+    status == 401 || status == 403 || ["on this endpoint", "budget exhausted", "secondary indexes"].iter().any(|w| text.contains(w))
+}
+
 #[derive(Debug, Clone)]
 pub struct SolanaRpc {
-    /// Made for one node (a check, a test): no other is asked.
-    pinned: Option<String>,
+    /// The nodes asked when made for some (a check, a test); None: the person's own, the public one, Pocket's.
+    fixed: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,11 +54,17 @@ impl Default for SolanaRpc {
 
 impl SolanaRpc {
     /// The nodes read at each call: the person's own first when set.
-    pub fn new() -> Self { Self { pinned: None } }
-    pub fn pinned(url: &str) -> Self { Self { pinned: Some(url.into()) } }
+    pub fn new() -> Self { Self { fixed: None } }
+    /// One node and no other (a check, a test).
+    pub fn pinned(url: &str) -> Self { Self { fixed: Some(vec![url.into()]) } }
+    #[cfg(test)]
+    pub(crate) fn with_nodes(nodes: &[String]) -> Self { Self { fixed: Some(nodes.to_vec()) } }
 
     pub fn nodes(&self) -> Vec<String> {
-        match &self.pinned { Some(u) => vec![u.clone()], None => custom().into_iter().chain([solana::PUBLIC_NODE.to_string()]).collect() }
+        match &self.fixed {
+            Some(nodes) => nodes.clone(),
+            None => custom().into_iter().chain([solana::PUBLIC_NODE, solana::POCKET_NODE].map(String::from)).collect(),
+        }
     }
 
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> { self.call_with(method, params, &DELAYS).await }
@@ -58,10 +73,10 @@ impl SolanaRpc {
         let nodes = self.nodes();
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
         // The public RPC answers 429 under bursts and drops a connection now and then: backed-off retries, each to the
-        // next node. The person's node refusing its key (401, 403) passes the call to the next.
+        // next node. A node refusing its key or the call (`passes_on`) passes the call to the next.
         run(delays, |attempt| post_json(&nodes[attempt % nodes.len()], &body), |data, status| {
             if !(200..300).contains(&status) {
-                let next = (status == 401 || status == 403) && nodes.len() > 1;
+                let next = passes_on(status, data) && nodes.len() > 1;
                 return Err(Again::new(status == 429 || status >= 500 || next, format!("Solana RPC {method}: HTTP {status} {}", head(data, 120))));
             }
             let Ok(Value::Object(reply)) = serde_json::from_slice::<Value>(data) else {
@@ -69,7 +84,8 @@ impl SolanaRpc {
             };
             if let Some(error) = reply.get("error").filter(|e| e.is_object()) {
                 let message = error.get("message").and_then(Value::as_str).map_or_else(|| error.to_string(), str::to_string);
-                return Err(Again::new(transient(&message), format!("Solana RPC {method}: {message}")));
+                let next = passes_on(status, message.as_bytes()) && nodes.len() > 1;
+                return Err(Again::new(transient(&message) || next, format!("Solana RPC {method}: {message}")));
             }
             Ok(reply.get("result").cloned().unwrap_or(Value::Null))
         }).await

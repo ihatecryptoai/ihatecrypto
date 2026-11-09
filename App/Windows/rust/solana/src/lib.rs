@@ -16,6 +16,10 @@ pub const COMPUTE_BUDGET_PROGRAM: &str = "ComputeBudget1111111111111111111111111
 /// The genesis hash of Solana mainnet: a node that answers another is another network.
 pub const MAINNET_GENESIS: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 pub const PUBLIC_NODE: &str = "https://api.mainnet-beta.solana.com";
+/// Keyless, ~0.3 s, 30 calls at once without a 429 (2026-11-09) — a gateway to nodes that differ: none reads token
+/// accounts by program, some not by mint either, and its own budget runs out now and then. So it comes after the public
+/// node, the one keyless node that reads a whole wallet, and each of those refusals goes back to it (`passes_on`).
+pub const POCKET_NODE: &str = "https://solana.api.pocket.network";
 
 pub(crate) fn decode(s: &str) -> Result<Vec<u8>> { base58::decode(s) }
 

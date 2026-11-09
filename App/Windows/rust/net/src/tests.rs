@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::evm_rpc::{EvmRpc, ens};
-use crate::solana_rpc::SolanaRpc;
+use crate::solana_rpc::{SolanaRpc, passes_on};
 use crate::*;
 
 const QUICK: [Duration; 4] = [Duration::from_millis(1); 4];
@@ -102,6 +102,28 @@ async fn solana_calls_and_a_send_that_already_landed() {
     assert_eq!(rpc.send(&tx).await.unwrap(), wallet::keys::base58::encode(&[7; 64]));
     assert_eq!(rpc.latest_blockhash().await.unwrap(), ("abc".into(), 9));
     assert_eq!(seen.lock().unwrap()[1]["params"][1]["commitment"], "finalized");
+}
+
+/// A node that turns a call away passes it to the next: each of Pocket's refusals (its words, 2026-11-09) — a 400 for
+/// token accounts by program, a 400 when its budget runs out, a 200 with -32010 from a backend without the token index —
+/// ends in the next node's answer. With one node the refusal is the answer. Without a node of one's own: the public
+/// node, then Pocket's.
+#[tokio::test]
+async fn a_call_turned_away_goes_to_the_next_node() {
+    let refusal = |status: u16, code: i64, message: &str| (status, json!({"jsonrpc": "2.0", "id": 1, "error": {"code": code, "message": message}}).to_string());
+    for (status, body) in [refusal(400, -32602, "getTokenAccountsByOwner requires a mint filter on this endpoint"),
+                           refusal(400, -38026, "request budget exhausted"),
+                           refusal(200, -32010, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA excluded from account secondary indexes; this RPC method unavailable for key")] {
+        let (refuser, _) = node(vec![(status, body.clone())]).await;
+        let (next, _) = node(vec![ok(Value::Null)]).await;
+        let read = SolanaRpc::with_nodes(&[refuser, next]).call_with("getTokenAccountsByOwner", json!([]), &QUICK).await;
+        assert_eq!(read.unwrap(), Value::Null, "{body}");
+        let (alone, _) = node(vec![(status, body.clone())]).await;
+        assert!(SolanaRpc::pinned(&alone).call_with("getTokenAccountsByOwner", json!([]), &QUICK).await.is_err(), "{body}");
+    }
+    assert!(passes_on(401, b"") && passes_on(403, b""));
+    assert!(!passes_on(400, br#"{"error":{"message":"Invalid params: invalid type"}}"#));
+    assert_eq!(SolanaRpc::new().nodes(), [solana::PUBLIC_NODE, solana::POCKET_NODE]);
 }
 
 #[tokio::test]

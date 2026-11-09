@@ -285,7 +285,7 @@ function nodesSection(v) {
               t(`Create an app, pick ${n.title} Mainnet, and copy its HTTPS URL: ${n.example}`, `Создай приложение, выбери ${n.title} Mainnet и скопируй его адрес HTTPS: ${n.example}`),
               t("Paste it below and press Check and save.", "Вставь его ниже и нажми «Проверить и сохранить».")],
           [n.site, t(`Open ${n.site.replace("https://www.", "")}`, `Открыть ${n.site.replace("https://www.", "")}`)], n.example, save, true,
-          sol ? t("Any Solana mainnet node works the same way: QuickNode, Alchemy, Triton — paste its https address.", "Так же подойдёт любая нода Solana mainnet: QuickNode, Alchemy, Triton — вставь её адрес https.")
+          sol ? t("Any Solana mainnet node works the same way: FluxRPC (also a free plan), QuickNode, Alchemy, Triton — paste its https address.", "Так же подойдёт любая нода Solana mainnet: FluxRPC (у него тоже есть бесплатный план), QuickNode, Alchemy, Triton — вставь её адрес https.")
             : t(`Any ${n.title} node works the same way: QuickNode, Infura, drpc with a key — paste its https address. If the check says a node lacks something, try another provider.`,
               `Так же подойдёт любая нода ${n.title}: QuickNode, Infura, drpc с ключом — вставь её адрес https. Если проверка скажет, что ноде чего-то не хватает, попробуй другого провайдера.`)) : null];
     })));
