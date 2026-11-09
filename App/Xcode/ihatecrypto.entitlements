@@ -21,21 +21,20 @@
 	<true/>
 	<key>com.apple.security.device.bluetooth</key>
 	<true/>
-	<!-- Files the person picks in an Open panel (skills, address icons, Codex CLI's auth.json), kept across launches as
-	     bookmarks. -->
+	<!-- Files the person picks in an Open panel (skills, address icons). -->
 	<key>com.apple.security.files.user-selected.read-write</key>
-	<true/>
-	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
 	<!-- Ollama goes to Downloads for the person to drag into Applications (LocalModels.swift). -->
 	<key>com.apple.security.files.downloads.read-write</key>
 	<true/>
-	<!-- Read only: crash reports of the app and the signer (Crashes.swift), and the terminal tool's journal
-	     (~/.ihatecrypto, HistoryView.swift). -->
+	<!-- Read only: crash reports of the app and the signer (Crashes.swift), the terminal tool's journal
+	     (~/.ihatecrypto, HistoryView.swift), and Codex CLI's ChatGPT login for «Use the Codex CLI login»
+	     (ChatGPTSubscription.swift): that one file, which Codex refreshes itself, not the rest of ~/.codex. -->
 	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
 	<array>
 		<string>/Library/Logs/DiagnosticReports/</string>
 		<string>/.ihatecrypto/</string>
+		<string>/.codex/auth.json</string>
 	</array>
 	<!-- Sparkle's installer for a sandboxed app (SUEnableInstallerLauncherService in ihatecrypto-Info.plist). -->
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>

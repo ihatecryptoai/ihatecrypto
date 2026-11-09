@@ -60,7 +60,7 @@ settings and web data there (`container-migration.plist`, written by project.yml
 through `Helper.xpc` (`Sources/Helper`), an XPC service outside it that takes only its own app as a caller and does only
 fixed things: run the installed Claude Code with no tools, install it, open its sign-in, and remove the Keep running
 agent of a copy from before the sandbox. Keep running is an SMAppService agent: the app's own binary with
-`--keep-running-check` every minute. Codex CLI's login is read after the person picks `~/.codex/auth.json` once.
+`--keep-running-check` every minute. Codex CLI's login is read from `~/.codex/auth.json`, the one file of `~/.codex` the entitlements let the app read.
 - `release.sh`: the signed, notarized release with its Sparkle update archive and appcast.
 - `verify-release.sh <version>`: rebuilds a release's tag with `Tools/build-release.sh`, the build `release.sh` makes, in
   the same folder (`/private/tmp/ihatecrypto-release`, since its path goes into the binaries) and compares it with the

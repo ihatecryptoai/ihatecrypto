@@ -956,7 +956,7 @@ struct ModelSection: View {
     @ViewBuilder private func connection(_ id: String, _ info: ProviderInfo) -> some View {
         let provider = ws.provider(id), credential = ws.credential(id)
         SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
-            if let label = info.existingLoginLabel, provider.existingLogin() != nil || ws.canChooseLogin(id) {
+            if let label = info.existingLoginLabel, provider.existingLogin() != nil {
                 Button(label) { ws.useExistingLogin(id) }
             }
             // Claude Code: installed from here when it's missing, signed in from a terminal once it's there.

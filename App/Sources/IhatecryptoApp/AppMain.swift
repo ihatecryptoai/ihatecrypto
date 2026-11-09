@@ -70,7 +70,6 @@ struct AppMain: App {
             Task { await ws.watch() }
             // Quit Completely rested Keep running's agent; opened again, it watches again.
             KeepRunning.resume()
-            CodexLogin.restore()
             Updater.shared.start(ws)
             #if DEBUG
             // `-browserResultAfter N`: after N seconds prints the browser page's text and quits (the browser test).
