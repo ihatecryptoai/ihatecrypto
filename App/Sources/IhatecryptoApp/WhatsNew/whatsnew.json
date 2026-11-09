@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.8.4",
+    "date": "2026-11-09",
+    "stories": [
+      {
+        "title": "Solana keeps answering when its public node is busy",
+        "text": "Without a node of your own, the app asked only Solana's public node, and when it said «too many requests» a balance or a move could stop after a few tries. Now those tries go to a second free node, Pocket, so reads and sends keep going. Settings › General › Your own nodes also names FluxRPC, which has a free plan like Helius.",
+        "symbol": "antenna.radiowaves.left.and.right",
+        "color": "9945FF"
+      }
+    ]
+  },
+  {
     "version": "0.8.3",
     "date": "2026-11-09",
     "stories": [
