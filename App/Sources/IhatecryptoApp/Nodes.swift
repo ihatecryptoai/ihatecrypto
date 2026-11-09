@@ -54,7 +54,7 @@ nonisolated enum NodeNetwork: String, CaseIterable, Identifiable {
     }
 
     var others: String {
-        self == .solana ? "Any Solana mainnet node works the same way: QuickNode, Alchemy, Triton — paste its https address."
+        self == .solana ? "Any Solana mainnet node works the same way: FluxRPC (also a free plan), QuickNode, Alchemy, Triton — paste its https address."
             : "Any \(title) node works the same way: QuickNode, Infura, drpc with a key — paste its https address. If the check says a node lacks something, try another provider."
     }
 }

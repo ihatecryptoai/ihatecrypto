@@ -6,15 +6,17 @@ import WalletCore
 public struct SolanaRPC: Sendable {
     /// The node asked first.
     public let url: URL
-    /// Made for one node (a check, a test): no other is asked.
-    let pinned: Bool
+    /// The nodes asked when made for some (a check, a test); nil: SolanaNodes.
+    let fixed: [URL]?
 
-    /// SolanaNodes, read at each call: the user's own node first when set, the public one after it.
-    public init() { (url, pinned) = (SolanaNodes.urls[0], false) }
-    public init(url: URL) { (self.url, pinned) = (url, true) }
+    /// SolanaNodes, read at each call: the user's own node first when set, then the public ones.
+    public init() { (url, fixed) = (SolanaNodes.urls[0], nil) }
+    /// One node and no other (a check, a test).
+    public init(url: URL) { (self.url, fixed) = (url, [url]) }
+    init(nodes: [URL]) { (url, fixed) = (nodes[0], nodes) }
 
     public func call(_ method: String, _ params: [Any]) async throws -> Any {
-        let nodes = pinned ? [url] : SolanaNodes.urls
+        let nodes = fixed ?? SolanaNodes.urls
         var attempt = 0
         var request = URLRequest(url: nodes[0], timeoutInterval: 30)
         request.httpMethod = "POST"
@@ -22,14 +24,14 @@ public struct SolanaRPC: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": method, "params": params])
         // The public RPC answers 429 under bursts and drops a connection now and then: backed-off retries (RPCRetry),
         // each to the next node, then a clear error. A resent transaction is the same one (its signature), so sends
-        // retry too. The user's node refusing its key (401, 403: expired, over its plan) passes the call to the next.
+        // retry too. A node refusing its key or the call (SolanaNodes.passesOn) passes the call to the next.
         return try await RPCRetry.run {
             request.url = nodes[attempt % nodes.count]
             attempt += 1
             return try await URLSession.shared.data(for: request)
         } answer: { data, status in
             guard (200..<300).contains(status) else {
-                let next = (status == 401 || status == 403) && nodes.count > 1
+                let next = SolanaNodes.passesOn(status: status, body: data) && nodes.count > 1
                 throw RPCRetry.Again(status == 429 || status >= 500 || next, WalletError("Solana RPC \(method): HTTP \(status) \(String(decoding: data.prefix(120), as: UTF8.self))"))
             }
             guard let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
@@ -37,7 +39,8 @@ public struct SolanaRPC: Sendable {
             }
             if let error = reply["error"] as? [String: Any] {
                 let message = error["message"] as? String ?? "\(error)"
-                throw RPCRetry.Again(RPCRetry.transient(message), WalletError("Solana RPC \(method): \(message)"))
+                let next = SolanaNodes.passesOn(status: status, body: Data(message.utf8)) && nodes.count > 1
+                throw RPCRetry.Again(RPCRetry.transient(message) || next, WalletError("Solana RPC \(method): \(message)"))
             }
             return reply["result"] ?? NSNull()
         }

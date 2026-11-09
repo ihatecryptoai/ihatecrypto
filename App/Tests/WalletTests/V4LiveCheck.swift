@@ -161,15 +161,15 @@ func ensAndSNSNamesResolveOnTheirChains() async throws {
     await #expect(throws: (any Error).self) { try await SNS.resolve("this-name-is-not-registered-ihatecrypto.sol") }
 }
 
-/// The user's own Solana node goes first and the public one after it; none set, only the public one.
+/// The user's own Solana node goes first, then the public one, then Pocket's; none set, the public one first.
 @Test func solanaNodesPutTheUsersOwnFirst() {
     let saved = SolanaNodes.custom
     defer { SolanaNodes.custom = saved }
     SolanaNodes.custom = nil
-    #expect(SolanaNodes.urls == [SolanaNodes.publicNode] && SolanaRPC().url == SolanaNodes.publicNode)
+    #expect(SolanaNodes.urls == [SolanaNodes.publicNode, SolanaNodes.pocket] && SolanaRPC().url == SolanaNodes.publicNode)
     let own = URL(string: "https://mainnet.helius-rpc.com/?api-key=x")!
     SolanaNodes.custom = own
-    #expect(SolanaNodes.urls == [own, SolanaNodes.publicNode] && SolanaRPC().url == own)
+    #expect(SolanaNodes.urls == [own, SolanaNodes.publicNode, SolanaNodes.pocket] && SolanaRPC().url == own)
 }
 
 /// IHATECRYPTO_NET=1: a node of one's own that is down, or refuses its key (Helius, 401), hands the call to the public
