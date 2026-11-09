@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.8.3",
+    "date": "2026-11-09",
+    "stories": [
+      {
+        "title": "Your own limits",
+        "text": "Settings › Wallet › Limits holds what may sign without Touch ID: the trading key's cap per order and per day, and the automation wallet's cap per day and per week. The signer keeps these numbers and reads every move itself, so the app can't talk it past them. Lowering a limit takes effect at once. Raising one asks Touch ID.",
+        "symbol": "gauge.with.dots.needle.50percent",
+        "color": "0A84FF"
+      },
+      {
+        "title": "The app in a box of its own",
+        "text": "ihatecrypto now runs in the macOS App Sandbox. It reaches the network, the Ledger and the microphone, and it can't open your other files or start other programs. Claude Code for the chat runs from a small helper with fixed arguments. Your canvases, chats and settings move into the app's own folder on the first start.",
+        "symbol": "lock.shield.fill",
+        "color": "30D158"
+      },
+      {
+        "title": "Try it from What's New",
+        "text": "Every change that a chat phrase can show has «Try it» on its row. The button puts the phrase into the chat. It doesn't send it.",
+        "symbol": "text.cursor",
+        "color": "FF7A2F"
+      }
+    ]
+  },
+  {
     "version": "0.8.2",
     "date": "2026-11-07",
     "stories": [
