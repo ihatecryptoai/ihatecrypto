@@ -5,7 +5,7 @@
 - Download for Mac: https://ihatecrypto.ai/ihatecrypto.dmg (the latest version, free, macOS 26 or later, Apple silicon and Intel; it updates itself).
 - Download for Windows: https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe (free preview, Windows 10 or 11; ARM build and release notes: https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest).
 - Site: https://ihatecrypto.ai/ (also in Spanish: https://ihatecrypto.ai/es/ and Russian: https://ihatecrypto.ai/ru/)
-- What's new: https://ihatecrypto.ai/whats-new/ (every release and what changed in it).
+- What's new: https://ihatecrypto.ai/whats-new/ (every release and what changed in it; also in Spanish: https://ihatecrypto.ai/es/whats-new/ and Russian: https://ihatecrypto.ai/ru/whats-new/).
 - Source code: https://github.com/ihatecryptoai/ihatecrypto (GPL-3.0; non-custodial: keys are made and kept on the user's computer). The Mac app is Swift, the Windows app is Rust (Tauri).
 
 ## What it is for

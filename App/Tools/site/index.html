@@ -1592,6 +1592,7 @@ function setLang(l) {
   $$('.eyebrow span, .askb').forEach(hug);
   $$('.askb').forEach((el, k) => { el.textContent = ASK[k].cmds[l]; });
   $$('a[data-t=n_mf]').forEach((a) => { a.href = (l === 'en' ? '' : '/' + l) + '/manifesto/'; });
+  $$('a[href$="/whats-new/"]').forEach((a) => { a.href = (l === 'en' ? '' : '/' + l) + '/whats-new/'; });
   $('.lang-btn b').textContent = l.toUpperCase(); $('.lang-btn use').setAttribute('href', '#fl-' + l);
   $$('.lang-menu button').forEach((b) => b.setAttribute('aria-checked', b.dataset.l === l));
   $$('.mlangs button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.l === l));

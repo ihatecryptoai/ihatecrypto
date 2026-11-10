@@ -7,6 +7,12 @@
   Content-Type: text/html; charset=utf-8
 /ru/
   Content-Type: text/html; charset=utf-8
+/whats-new/
+  Content-Type: text/html; charset=utf-8
+/es/whats-new/
+  Content-Type: text/html; charset=utf-8
+/ru/whats-new/
+  Content-Type: text/html; charset=utf-8
 /llms.txt
   Content-Type: text/plain; charset=utf-8
 /robots.txt

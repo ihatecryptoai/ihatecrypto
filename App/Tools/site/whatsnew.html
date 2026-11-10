@@ -1,18 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>What's new in ihatecrypto — every release</title>
-<meta name="description" content="Every release of ihatecrypto, the AI crypto wallet for Mac and Windows, and what changed in it. The latest is {{version}}.">
-<link rel="canonical" href="https://ihatecrypto.ai/whats-new/">
+<title>{{t.title}}</title>
+<meta name="description" content="{{t.desc}}">
+{{links}}
 <meta name="theme-color" content="#FAFAFB">
 <script>{ const u = navigator.userAgent, d = document.documentElement; if (/Windows NT/.test(u)) d.classList.add('win'); else if (!/Macintosh/.test(u) || navigator.maxTouchPoints > 1) d.classList.add('away'); }</script>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="ihatecrypto">
-<meta property="og:url" content="https://ihatecrypto.ai/whats-new/">
-<meta property="og:title" content="What's new in ihatecrypto">
-<meta property="og:description" content="Every release and what changed in it. The latest is {{version}}.">
+<meta property="og:url" content="{{url}}">
+<meta property="og:title" content="{{t.og_title}}">
+<meta property="og:description" content="{{t.og_desc}}">
 <meta property="og:image" content="https://ihatecrypto.ai/og.png?v=2">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.png" sizes="64x64">
@@ -20,8 +20,9 @@
 <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin>
 <!-- Every release and what changed in it, at ihatecrypto.ai/whats-new/: build.py fills the releases in from the app's
-     own What's New (Sources/IhatecryptoApp/WhatsNew/whatsnew.json), so the page and the app say the same. English only,
-     like the app's list. The fonts and the coin are the landing's own, taken from index.html. The words in double
+     own What's New (Sources/IhatecryptoApp/WhatsNew/whatsnew.json), so the page and the app say the same, and in Spanish
+     and Russian from whatsnew.i18n.json beside this file (a change without a translation there stays in English).
+     The fonts and the coin are the landing's own, taken from index.html. The words in double
      braces below are build.py's: none may stand in a comment, or what fills it would be on the page twice. -->
 <style>
 {{fonts}}  :root { color-scheme: light; --ink: #111111; --muted: #5F636B; --line: #E1E4EC; --accent: #FF7A2F; --accent-ink: #B8480C; }
@@ -63,37 +64,59 @@
   .st h3 { font: 700 17px/1.3 Onest, sans-serif; display: flex; align-items: baseline; gap: 9px; text-wrap: balance; }
   .st h3 i { flex: none; width: 10px; height: 10px; border-radius: 50%; transform: translateY(-1px); }
   .st p { color: #3A3D44; font-size: 15px; text-wrap: pretty; }
-  /* What to say to see it: the phrase the app's «Try it» puts into the chat. */
-  .try { align-self: flex-start; margin-top: 6px; background: var(--ink); color: #FFFFFF; border-radius: 14px 14px 14px 4px; padding: 7px 12px; font: 600 13.5px/1.4 Onest, sans-serif; overflow-wrap: anywhere; }
-  .st p.try { color: #FFFFFF; font-size: 13.5px; }
+  /* What to say to see it: the phrase the app's «Try it» puts into the chat. A press copies it, and the icon turns
+     into a tick for a moment. */
+  .try { align-self: flex-start; margin-top: 6px; display: inline-flex; align-items: center; gap: 10px; border: 0; cursor: pointer; text-align: left;
+         background: var(--ink); color: #FFFFFF; border-radius: 14px 14px 14px 4px; padding: 7px 11px 7px 12px; font: 600 13.5px/1.4 Onest, sans-serif; overflow-wrap: anywhere; }
+  .try svg { flex: none; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .65; transition: opacity .2s; }
+  .try:hover svg, .try.ok svg { opacity: 1; }
+  .try .i2, .try.ok .i1 { display: none; }
+  .try.ok .i2 { display: block; }
+  .try:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   footer { text-align: center; color: var(--muted); font-size: 13px; padding: 56px 16px 44px; }
   @media (max-width: 960px) { .nav { display: none; } }
   @media (max-width: 760px) {
     .logo svg { width: 30px; height: 30px; } .logo span { font-size: 19px; }
+    .bar { gap: 6px; padding: 0 7px 0 10px; } .btn { padding: 0 12px; }
     main { padding-top: 104px; }
     .lead { margin-bottom: 36px; }
     .rel { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 28px 0; }
     .rel header { position: static; }
     .sts { grid-template-columns: minmax(0, 1fr); }
   }
+  @media (max-width: 380px) { .logo span { font-size: 17px; } }   /* a narrow phone: the name and the button side by side */
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></symbol>
+<symbol id="i-ok" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+</defs></svg>
 <header class="top">
   <div class="bar">
-    <a class="logo" href="/" aria-label="ihatecrypto">{{coin}}<span>ihatecrypto</span></a>
-    <nav class="nav"><a href="/manifesto/">Manifesto</a><a href="/#plugins">Plugins</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
-    <a class="btn mac-only" href="/ihatecrypto.dmg" download>Download</a>
-    <a class="btn win-only" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest">Download</a>
-    <a class="btn away-only" href="/">Get the app</a>
+    <a class="logo" href="{{home}}" aria-label="ihatecrypto">{{coin}}<span>ihatecrypto</span></a>
+    <nav class="nav"><a href="{{home}}manifesto/">{{t.n_mf}}</a><a href="{{home}}#plugins">{{t.n_pl}}</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
+    <a class="btn mac-only" href="/ihatecrypto.dmg" download>{{t.dl}}</a>
+    <a class="btn win-only" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest">{{t.dl}}</a>
+    <a class="btn away-only" href="{{home}}">{{t.get}}</a>
   </div>
 </header>
 <main>
-  <p class="kicker">What's new</p>
-  <h1>Every release, and what changed.</h1>
-  <p class="lead">The app tells you when a new version is out and installs it only when you say so. This is the same list it shows you.</p>
+  <p class="kicker">{{t.kicker}}</p>
+  <h1>{{t.h1}}</h1>
+  <p class="lead">{{t.lead}}</p>
 {{releases}}
 </main>
-<footer>ihatecrypto · <a href="/">Home</a> · <a href="/manifesto/">Manifesto</a> · <a href="https://github.com/ihatecryptoai/ihatecrypto/releases" target="_blank" rel="noopener">Releases on GitHub</a></footer>
+<footer>ihatecrypto · <a href="{{home}}">{{t.home}}</a> · <a href="{{home}}manifesto/">{{t.n_mf}}</a> · <a href="https://github.com/ihatecryptoai/ihatecrypto/releases" target="_blank" rel="noopener">{{t.rel}}</a> · <a href="/whats-new/" hreflang="en" lang="en">English</a> · <a href="/es/whats-new/" hreflang="es" lang="es">Español</a> · <a href="/ru/whats-new/" hreflang="ru" lang="ru">Русский</a></footer>
+<script>
+// A phrase pressed is copied, to paste into the app's chat.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.try');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.firstElementChild.textContent); } catch (err) { return; }
+  b.classList.add('ok');
+  setTimeout(() => b.classList.remove('ok'), 1500);
+});
+</script>
 </body>
 </html>

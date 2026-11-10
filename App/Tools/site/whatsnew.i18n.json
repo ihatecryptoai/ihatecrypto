@@ -1,0 +1,1262 @@
+{
+ "es": {
+  "44d658944bda": {
+   "title": "El Touch ID de un puente muestra lo que recibes",
+   "text": "El Touch ID de un puente de Relay ahora lleva una línea que el proceso de firma lee del propio pedido de Relay: «Relay then pays at least 4.878026 USDC to …», con la dirección completa y su red. Hasta ahora, lo que llegaba solo aparecía en la tarjeta, que es la palabra de la app. La cantidad de esa línea es la que se firma en el pedido, cifra por cifra."
+  },
+  "47e0e38e7d97": {
+   "title": "Otra revisión, todos los hallazgos corregidos",
+   "text": "Una dirección escrita sin su «0x» nunca se firma, así que nada pasa las comprobaciones que conocen tu billetera y Relay por sus direcciones. Un sitio que pide todos tus NFT se rechaza, diga lo que diga en el texto de aprobación, donde antes un 2 se leía como una revocación. Una orden que la clave de trading no puede contar se te devuelve a ti. Un puente de una tarea cuenta para su límite diario por lo que no vuelve. El texto de un sitio pide Touch ID por su cuenta, sea cual sea la sesión abierta."
+  },
+  "4b11c550e4f8": {
+   "title": "Los pasos esperan su Confirm y el dinero",
+   "text": "Los pasos que siguen a una tarjeta se ejecutan solo cuando pulsas Confirm en esa tarjeta, no después de que otro movimiento del lienzo se complete. Un paso que sigue a un retiro espera hasta que el saldo lo muestre: «withdraw 1 USDC from Jupiter then deposit 1 USDC into Jupiter» deposita 1, donde antes depositaba los 0.1 que ya estaban allí."
+  },
+  "41f72f01d2aa": {
+   "title": "NEAR AI muestra que es privado",
+   "text": "En el menú de modelos del chat, NEAR AI lleva una etiqueta verde «Private» y una línea que explica lo que significa: el modelo funciona en un entorno protegido que NEAR no puede leer, y la app comprueba ese entorno antes de cada mensaje. La línea bajo cada empresa ahora se mantiene completa en lugar de terminar en «…»."
+  },
+  "d21b0c86b629": {
+   "title": "Conecta un modelo con clave en dos pasos",
+   "text": "Settings › AI model ahora indica de dónde sale cada clave: «Get a key at platform.openai.com», con lo que hay que pulsar allí y un botón Open, y después un campo donde pegarla. NEAR AI, OpenAI, Anthropic, DeepSeek, xAI, Gemini y OpenRouter funcionan así. El modelo es una lista de nombres, con «Custom…» para un id propio, y Disconnect va en su propia fila roja."
+  },
+  "657b08b79669": {
+   "title": "Solana sigue respondiendo cuando su nodo público está ocupado",
+   "text": "Sin un nodo propio, la app preguntaba solo al nodo público de Solana, y cuando este decía «too many requests», un saldo o un movimiento podía detenerse tras unos cuantos intentos. Ahora esos intentos van a un segundo nodo gratuito, Pocket, para que las lecturas y los envíos sigan funcionando. Settings › General › Your own nodes también menciona FluxRPC, que tiene un plan gratuito como Helius."
+  },
+  "fc3a5f9455f9": {
+   "title": "Tus propios límites",
+   "text": "Settings › Wallet › Limits guarda lo que puede firmar sin Touch ID: el tope por orden y por día de la clave de trading, y el tope por día y por semana de la billetera de automatización. El proceso de firma guarda estas cifras y revisa cada movimiento por sí mismo, así que la app no puede convencerlo de saltárselas. Bajar un límite surte efecto de inmediato. Subir uno pide Touch ID."
+  },
+  "42b943a4978c": {
+   "title": "La app en una caja propia",
+   "text": "ihatecrypto ahora funciona dentro del App Sandbox de macOS. Accede a la red, al Ledger y al micrófono, y no puede abrir tus otros archivos ni iniciar otros programas. Claude Code para el chat se ejecuta desde un pequeño ayudante con argumentos fijos. Tus lienzos, chats y ajustes se mueven a la carpeta propia de la app en el primer inicio."
+  },
+  "204a2abc5394": {
+   "title": "Pruébalo desde Novedades",
+   "text": "Cada cambio que una frase del chat puede mostrar tiene «Try it» en su fila. El botón pone la frase en el chat. No la envía."
+  },
+  "50fa4c9378c3": {
+   "title": "Envía e intercambia en privado",
+   "text": "«send 20 USDC privately to Mom» o «buy NEAR for 5 USDC privately» pasa por los Confidential Intents de NEAR Intents: en la cadena, el depósito y lo que llega no se pueden relacionar. Un envío de USDC a una dirección guardada ofrece Regular o Private justo encima de Confirm, con las comisiones y el tiempo de cada opción."
+  },
+  "ec6a18f8d27b": {
+   "title": "Un asistente privado",
+   "text": "Elige NEAR AI Cloud y el chat funciona en un entorno protegido. Antes de cada mensaje, ihatecrypto comprueba el enclave hasta llegar a Intel y NVIDIA, y los bytes de cada respuesta frente a la clave propia del modelo. El encabezado dice «Private assistant» y Proof muestra lo que se comprobó."
+  },
+  "919da24f133f": {
+   "title": "No dejará que te liquiden",
+   "text": "«guard my loan on kamino» vigila un préstamo de Kamino o Aave y, debajo de su línea, prepara el reembolso, con los USDC que le faltan traídos por NEAR Intents, para un solo Confirm. También puedes pedir USDC prestados contra SOL en el mercado principal de Kamino."
+  },
+  "9bfacb838ef9": {
+   "title": "Paga cualquier API y ten una billetera de agente",
+   "text": "Una API de pago responde después de que pulses Confirm: x402 mediante una firma en Base, MPP en Tempo o a través de NEAR Intents desde los USDC que tienes. Una billetera de agente en NEAR Intents gasta dentro del límite diario que firmó tu clave de NEAR, y puedes congelarla."
+  },
+  "e5e9c2471f79": {
+   "title": "TWAP y stops móviles",
+   "text": "«buy ETH for $2000 over 2 hours» es un único TWAP en Hyperliquid, con su stop y su take cubriendo toda la posición desde la primera parte. «trailing 2%» coloca en el exchange el trailing stop propio de Hyperliquid."
+  },
+  "4c0f127bc3e4": {
+   "title": "Mira a dónde va tu dinero",
+   "text": "Cada movimiento que espera Confirm se lee como un recibo: lo que pagas y desde dónde, las comisiones de la cadena, lo que llega. Un movimiento por NEAR Intents muestra su ruta después de Confirm. Las direcciones parecidas, las direcciones de estafa de GoPlus y los sitios que piden más de lo que muestran se señalan antes de firmar."
+  },
+  "6f2d686916db": {
+   "title": "Ninguna pérdida silenciosa por impacto en el precio",
+   "text": "Un intercambio que movería el precio más de un 2% se detiene antes de firmar nada y ofrece una parte más pequeña ahora, el total de todos modos con la pérdida en dólares, o nada. Vender un memecoin poco líquido de una sola vez ya no se come a escondidas una buena parte de él."
+  },
+  "3fac3759d243": {
+   "title": "La mejor forma de intercambiar",
+   "text": "En Solana, los market makers de JupiterZ ejecutan un intercambio cuando pagan más que los pools. En las redes EVM se comparan Uniswap, KyberSwap y Relay según lo que queda después del gas. De Solana a otra red, el intercambio de Relay se pesa frente al puente de Relay más el mejor exchange de allí, y la tarjeta indica cuál es el que firmas."
+  },
+  "ac8c0be467af": {
+   "title": "Acciones de Ondo",
+   "text": "Compra acciones y ETF de Estados Unidos de Ondo en Solana («buy $5 of Nvidia from Ondo») al precio de los market makers, y guarda dólares en el USDY de Ondo. Los límites de residencia de Ondo se muestran antes de pulsar Confirm."
+  },
+  "bb9e993fd4ae": {
+   "title": "Pide prestado contra tus acciones",
+   "text": "El mercado Backpack de Kamino presta USDC contra acciones tokenizadas como SPCX o MU, así que obtienes dólares sin venderlas. Cada tarjeta muestra «all» con su cifra."
+  },
+  "c23f2f652baa": {
+   "title": "Cubre lo que tienes",
+   "text": "Di «hedge my SOL» e ihatecrypto abre en Hyperliquid un corto del tamaño de las monedas que tienes, sin take-profit, así que una caída queda cubierta. Las reglas de riesgo lo cuentan neto de tus monedas."
+  },
+  "df8be474e2c6": {
+   "title": "Lienzo más suave, chat más seguro",
+   "text": "Los paneos con dos dedos mueven el lienzo una vez por fotograma, con suavidad. La segunda comprobación lee cada mensaje del chat y dice en tu idioma por qué lo detuvo. Help › Report a Problem abre un issue de GitHub con tu versión ya rellenada."
+  },
+  "7e157ab33de3": {
+   "title": "Tu P/L, no tus recargas",
+   "text": "La línea del portafolio muestra lo que hicieron los precios con lo que tienes. El dinero que añades o envías, los intercambios y los puentes no la mueven, así que una recarga ya no parece una ganancia. Y la línea ahora es una curva suave."
+  },
+  "9b1a2be07dad": {
+   "title": "Depósitos que puedes leer",
+   "text": "Cada depósito es una sola ficha: el protocolo, la moneda que pusiste, su tasa anual, los dólares, lo que aporta al día y al mes, y lo que Jupiter Lend te ha generado hasta ahora."
+  },
+  "f7fdcf2e1127": {
+   "title": "Protocolos con sus propios colores",
+   "text": "Los 50 protocolos DeFi principales de DefiLlama tienen cada uno su logo y sus colores en su ficha de depósito."
+  },
+  "914c14f47001": {
+   "title": "Una versión nueva que se ve",
+   "text": "Cuando sale una nueva ihatecrypto, «↓ its version» aparece junto al logo hasta que la instales, y el menú de la app y la moneda de la barra de menús también la ofrecen. Un clic muestra qué hay de nuevo con Install; nada se descarga por sí solo."
+  },
+  "00073ca67f10": {
+   "title": "Envía todo de cualquier moneda",
+   "text": "«Send all» funciona ya con cualquier moneda: todo tu SOL, con el alquiler de las cuentas de token vacías incluido; ETH, POL o BNB menos solo la comisión; todo el USDC de Tempo dejando una mota, no un centavo. Enviar todo un token cierra su cuenta y su alquiler vuelve. Un token nombrado por su contrato ya no se toma por la dirección a la que va."
+  },
+  "2b54f1027409": {
+   "title": "Alertas de precio en el Horario",
+   "text": "Tus alertas de precio están en el Horario junto a las tareas: el nivel, a qué distancia está el precio, un interruptor para pausar una y una página propia. Una fila solo recibe su borde naranja mientras está abierta, no cuando pasa el puntero por encima."
+  },
+  "5c8d27a879e5": {
+   "title": "Todas las comisiones contadas",
+   "text": "Una cotización spot de Hyperliquid descuenta el 0.07% del exchange y, en una venta, el 0.05% de ihatecrypto. En tu primera operación, la tarjeta de firma cuenta la aprobación de la comisión como la firma que es."
+  },
+  "e73a667d10a0": {
+   "title": "Un puente solo paga donde tú dijiste",
+   "text": "Cada puente de Relay ahora lo revisa el propio proceso de firma: recalcula la orden a partir de la cotización de Relay y firma el depósito solo cuando esa orden te paga a ti o a una dirección que aprobaste, y reembolsa solo a ti. El dinero sale de una red sin gas solo mediante una firma que nombra una orden así."
+  },
+  "1d1892bf5c0c": {
+   "title": "Seis revisores, todos los hallazgos corregidos",
+   "text": "Claude, Codex, Kimi y GLM vuelven a leer el código. En Solana, una cuenta nombrada solo por una tabla de búsqueda nunca se toma por la tuya, cada formulario de intercambio de Jupiter paga solo a tu cuenta, y el programa propio de un sitio pide Touch ID cada vez. En EVM se detectan la llamada propia de un multisig, un intercambio que paga a dos direcciones y una aprobación de NFT del token 0. Se rechaza la firma de un sitio que incluye a otra persona junto a una cifra. Las tareas programadas modificadas fuera de la app se cargan pausadas."
+  },
+  "e2d8e8ebc31b": {
+   "title": "Cada firma, leída con más atención",
+   "text": "Touch ID para una dirección nueva ahora dice qué hace el movimiento, con la cantidad incluida. Un contrato que el proceso de firma no puede leer te pide permiso una vez, sea quien sea quien lo llame. Kamino, Jupiter Lend y Jupiter DCA los lee el propio proceso de firma: solo lo que te paga, sobre tu propia posición. La firma de un sitio que nombra a otra persona junto a una cantidad se rechaza, y una clave privada pegada en el chat nunca llega al modelo."
+  },
+  "8adba4567f7a": {
+   "title": "La clave de trading, una semana a la vez",
+   "text": "La clave de trading de Hyperliquid abre posiciones durante 7 días después de tu último Touch ID para ella; los stops, los takes y los cierres siempre se ejecutan. Luego, la siguiente posición nueva pide Touch ID una vez y renueva la semana. Un intercambio en Solana no se ejecuta si sale más de un 1% peor que su tarjeta, un servicio de pago ve tu solicitud solo después de Confirm, y crear una billetera de automatización pausa las tareas que gastarían de ella."
+  },
+  "1ae79b5bf778": {
+   "title": "Los dólares salen de BNB Chain sin BNB",
+   "text": "Los USDC en BNB Chain sin BNB al lado ahora pueden salir: el paymaster propio de BNB Chain, MegaFuel, paga el gas de su transferencia a Relay."
+  },
+  "3c1c58088bcf": {
+   "title": "Los dólares se mueven sin gas",
+   "text": "Los USDC sin SOL al lado siguen intercambiándose por SOL: Jupiter paga la comisión de ese único intercambio, desde $5. Los USDC en Base, Arbitrum, Optimism, Polygon, Ethereum o Robinhood Chain sin nada de la moneda de la red van a Solana o Hyperliquid mediante una firma, con Relay pagando el gas, y el gas para esa red vuelve por Solana. El gas de BNB Chain y de HyperEVM puede venir de tu saldo de Hyperliquid. Cuando los dólares llegan a un lugar donde no pueden moverse, el chat lo dice una vez y ofrece la salida."
+  },
+  "776a6aa4e1ad": {
+   "title": "Tu operación en su gráfico",
+   "text": "Con el gráfico de una moneda en el lienzo, un largo o un corto en esa moneda se dibuja justo encima: la entrada, el stop y el take a través de las velas, la pérdida y la ganancia entre ellos, y Cancel y Confirm arriba. Una compra, un envío o un plan sobre otra moneda pone el gráfico al lado de su tarjeta, nunca encima de sus botones."
+  },
+  "d970f057d9f3": {
+   "title": "Un inicio más corto",
+   "text": "La configuración ya no se detiene a probar el modelo: lo eliges de la lista de la cuenta. Top up es el Top up propio de la app (todas las redes, una billetera en el navegador, tu teléfono o un exchange) y ve llegar el dinero donde sea que llegue. Sáltalo y el lienzo se abre al instante; la clave de trading de Hyperliquid aparece solo cuando Hyperliquid ya tiene tu dinero."
+  },
+  "8504c457159e": {
+   "title": "Hyperliquid desde el chat",
+   "text": "«Move 11 USDC from Solana to Hyperliquid» abre tu cuenta de Hyperliquid: unos $1 del primer depósito paga su comisión de apertura, y su orden mínima es de $10. Una vez que hay dinero, el chat ofrece activar la clave de trading, y «turn on the trading key» lo hace."
+  },
+  "e8b037cd0c0c": {
+   "title": "Pequeñas correcciones de seguridad",
+   "text": "La llamada de un sitio a un contrato que ihatecrypto no puede leer se permite una vez, como llamada y nunca como destino de dinero. Una compra programada que espera Touch ID ya no retiene las alertas ni las actualizaciones, y si tu segunda comprobación usaba OpenRouter antes de la 0.7.0, el chat pregunta una vez si quieres mantenerlo."
+  },
+  "29015b4e01d2": {
+   "title": "La configuración de la comisión, con nombres correctos",
+   "text": "La aprobación de la comisión en un plan de operación y en Novedades ahora apuntan a Settings › Wallet › Hyperliquid, donde se muestra la comisión de ihatecrypto con su botón Revoke, y un Ledger muestra el código de referido al firmarlo. Además, cada versión ahora se reconstruye byte a byte en el Mac de GitHub, no solo en el nuestro."
+  },
+  "92be29c22034": {
+   "title": "Comisión de ihatecrypto en Hyperliquid",
+   "text": "Las operaciones en Hyperliquid que colocas en ihatecrypto llevan una comisión de 0.05% para ihatecrypto, además de la del propio exchange: perpetuos en los dos sentidos y spot solo al vender. La primera operación que confirmes te pide aprobarlo una vez, cada plan lo muestra entre las comisiones, y Settings › Wallet › Hyperliquid puede retirar la aprobación."
+  },
+  "0b8e5f6817e6": {
+   "title": "4% menos en las comisiones de Hyperliquid",
+   "text": "Una cuenta de Hyperliquid sin código de referido recibe el de ihatecrypto, IHATECRYPTO, en su primera operación aquí: el exchange entonces cobra un 4% menos de su propia comisión. La clave de trading lo firma, sin preguntar."
+  },
+  "1f324d37366a": {
+   "title": "Envíos que encuentran el dinero",
+   "text": "Un envío a una dirección guardada en Hyperliquid trae primero lo que le falta a Hyperliquid desde Solana, o directamente desde la red que lo tiene, con el mismo Confirm, y su tarjeta dice cuánto llega. La app avisa de inmediato de un envío que ningún saldo puede cubrir, antes de cualquier tarjeta."
+  },
+  "0237c5abb276": {
+   "title": "Cuando algo falla, una vía que funciona",
+   "text": "Si un movimiento, una operación o un cierre no se completa, o no se puede preparar, el asistente dice por qué con palabras sencillas y ofrece lo que funcionaría como tarjetas: nada se ejecuta hasta que pulses una y luego Confirm. Un bloqueo del guard, del proceso de firma o de la comprobación antiestafas nunca se evita."
+  },
+  "3cc21d8cadcf": {
+   "title": "Nada se mueve sin tu clic",
+   "text": "La primera compra recurrente es una tarjeta para confirmar, las compras programadas te piden aprobarlas de nuevo, un stop o take que el asistente sugiere en una operación abierta espera a Confirm, los movimientos de una alerta esperan a Confirm, y las tareas que mueven dinero desde la billetera de automatización empiezan pausadas."
+  },
+  "9568d39d2e7c": {
+   "title": "Las actualizaciones esperan por ti",
+   "text": "Una versión nueva muestra una ventana pequeña: Install Update, Remind Me Later o Skip This Version. Nada se descarga ni se instala hasta que pulses Install."
+  },
+  "3eb728bc3a3e": {
+   "title": "Código abierto, reconstruido byte por byte",
+   "text": "El código de ihatecrypto es público bajo GPL-3.0, y cada versión se reconstruye desde su etiqueta byte por byte salvo las firmas, así que cualquiera puede comprobar que la app es ese código. El proceso de firma ahora demuestra con la clave cada una de tus propias direcciones en cada firma, verifica lo que pagan Uniswap y Jupiter, y pone un tope al apalancamiento."
+  },
+  "8726aba0f4d6": {
+   "title": "Los intercambios a ETH ya convierten todo su WETH",
+   "text": "Tras una aprobación y un intercambio con una sola firma en una red EVM, la siguiente transacción ya no da «nonce too low», y un intercambio a ETH espera a su WETH y lo convierte en ETH, para que no quede nada atrás."
+  },
+  "611b91c5d429": {
+   "title": "Tus billeteras y sus direcciones",
+   "text": "Haz clic en el nombre de la billetera junto al saldo. Tus billeteras están a la izquierda. Haz clic en una para ver su dirección en cada red (Solana, EVM, con la misma dirección en las nueve, Hyperliquid y NEAR), completa y con su botón Copy, y «Switch to …». Una multifirma muestra su dirección, las redes en las que está y sus claves."
+  },
+  "f9b349854dd2": {
+   "title": "Un saldo que no da saltos",
+   "text": "El saldo ya no muestra ceros mientras carga: ves el último, desvanecido, hasta que se lee cada red. La barra lateral, el portafolio y la barra de menús ahora muestran el mismo total, con Automation incluido."
+  },
+  "23ded8a88dab": {
+   "title": "Recargar gas desde Schedule",
+   "text": "Las pestañas Tasks y Wallet de Schedule tienen «Top up gas». Calcula cuánto SOL necesitan las tareas de la billetera de automatización para las próximas 4 semanas, y la moneda de gas de cada red donde tiene USDC, y escribe el envío en el chat con el importe listo para cambiar. Nada sale hasta que lo envíes, y luego Confirm."
+  },
+  "564fad1ab7c7": {
+   "title": "Añadir una cuenta de IA no cambia tu chat",
+   "text": "Añadir una cuenta en Settings › AI model ya no cambia el chat a ella: pulsa Switch cuando la quieras."
+  },
+  "af532c05ded8": {
+   "title": "HYPE está verificado",
+   "text": "HYPE en la tarjeta de Hyperliquid tiene una marca de verificación, como ETH en sus redes. Las demás monedas del lado spot de Hyperliquid ya no dicen «unverified»: un nombre allí pertenece a un solo token, así que ninguno puede ser una imitación."
+  },
+  "76536bf16f71": {
+   "title": "Bloquea la app con un código",
+   "text": "Define un código de 6 dígitos al configurarla o en Settings › Wallet › Passcode. La app se bloquea al abrirla, tras el tiempo fuera que elijas, cuando el Mac entra en reposo, con «lock» y con ⌘L. Ábrela con el código, con Touch ID o con la contraseña de tu Mac. Cinco códigos incorrectos desactivan el código. Las tareas programadas, los stop y las alertas siguen funcionando mientras está bloqueada."
+  },
+  "bac66cc6a716": {
+   "title": "Un chat más fácil de leer",
+   "text": "Las respuestas largas llegan en párrafos y listas bajo el logo del modelo y la hora. Un control deslizante sobre el campo elige 25%, 50% o Max. Haz clic derecho en cualquier bloque del lienzo y elige «Ask or act in chat» para enviar al chat lo que muestra."
+  },
+  "8cf0a652662c": {
+   "title": "Cambios menores",
+   "text": "Los logos de las 300 monedas principales vienen con la app, así que tokens como HYPE y USDC en la tarjeta de Hyperliquid muestran su logo en lugar de una letra. El selector de iconos para lienzos, carpetas y direcciones es un solo desplazamiento con los botones Logos, Symbols, Emoji y Picture. En un Mac sin Touch ID, los avisos dicen «your Mac password»."
+  },
+  "851d15a0c0a6": {
+   "title": "Tus cuentas en el menú de perfil",
+   "text": "El menú de perfil lista las cuentas de IA que has conectado, como una suscripción, una clave de API o un modelo en este Mac, cada una con su logo. Haz clic en una para cambiar el chat a ella. «…» cierra sesión solo en esa cuenta. Settings, Browser y What's new aparecen justo debajo."
+  },
+  "8a928069e7f3": {
+   "title": "Módulos de un vistazo",
+   "text": "Settings › Modules es una lista a la izquierda que muestra cuántos de cada tipo están activados. Los protocolos o redes del tipo elegido aparecen a la derecha, cada uno con su propio interruptor."
+  },
+  "5b1449970f82": {
+   "title": "Cambios menores",
+   "text": "Las direcciones se muestran como un bloque uniforme de líneas iguales, nunca con media línea partida en una línea propia. Una clave de trading pausada por «lock» se reanuda desde Settings › Wallet › Hyperliquid. El ticker de la franja lateral se lee bien con el aspecto claro."
+  },
+  "5d298f981efb": {
+   "title": "Envía más desde la página de recarga",
+   "text": "Tras llegar una recarga, «Send more» te deja elegir otro importe. La página muestra ahora los saldos de ambas billeteras, antes → después, y tu billetera pide confirmar de nuevo."
+  },
+  "ce7b789be2f1": {
+   "title": "Favoritos: tokens y billeteras",
+   "text": "Favoritos tiene dos pestañas. Tokens es una tabla con precio, 24h, liquidez y lo que tienes; la ficha de un token se abre al lado de la lista. Billeteras muestra tus billeteras y direcciones guardadas. Pega cualquier cosa en «+» y te dice si es un token o una billetera."
+  },
+  "509c5497dd6b": {
+   "title": "Ideas para empezar un chat",
+   "text": "El chat ofrece 22 puntos de partida, cuatro a la vez, y ↻ trae otros cuatro. Cada uno dice con palabras sencillas qué hace."
+  },
+  "d829141a42e6": {
+   "title": "Cambios menores",
+   "text": "Schedule se mantiene fluido con muchas tareas abiertas: ya no vuelve a leer cada paso en cada repintado. Las filas del portafolio ya no dicen «gas» ni «not earning»."
+  },
+  "5bb6ec140ff0": {
+   "title": "Las compras programadas llegan a tu billetera principal",
+   "text": "Lo que una tarea compra con la billetera de automatización se envía a tu billetera principal después de cada ejecución. Una venta siempre espera tu Confirm y Touch ID. Cuando las compras de la semana necesitan más de lo que tiene Automation, Schedule dice cuánto recargar, con un día de antelación."
+  },
+  "a4fbae7fd90e": {
+   "title": "Un Schedule más claro",
+   "text": "Las tareas pausadas se pliegan bajo «Paused», cada una con Delete. «New schedule» empieza una en el chat. Una ejecución sin nada que hacer ahora lo dice en lugar de parecer hecha, y cada tarea muestra de qué billetera paga; puedes cambiarla. «Ask in chat» en una tarea da al chat sus detalles y sus últimas ejecuciones."
+  },
+  "6422b98e5318": {
+   "title": "Habilidades y un estudio de trading",
+   "text": "Settings › Skills lista lo que el chat puede seguir, con un interruptor para cada una, y acepta tus propios archivos .md o .txt. El «Trading study» integrado mide las operaciones cerradas de cualquier cuenta de Hyperliquid después de comisiones y funding, lleva un diario de por qué entraste y anota lo que te funciona. No se mueve dinero."
+  },
+  "2f9edf809228": {
+   "title": "Lienzo más fluido",
+   "text": "El zoom con pellizco y con ⌘ más desplazamiento se mantiene a la velocidad de cuadros completa. El borde luminoso de un lienzo cargado respira unas cuantas veces y luego se queda encendido, y la cara de la moneda se reproduce como una película, así que el Mac trabaja mucho menos mientras el chat piensa."
+  },
+  "0b52b1df25db": {
+   "title": "Cambios menores",
+   "text": "Schedule › Wallet muestra lo que hay en cada red en dólares, con la dirección completa y Copy."
+  },
+  "b0b720051668": {
+   "title": "El chat pregunta cuando no está seguro",
+   "text": "Cuando no está claro qué moneda, cuánto, en qué red o quién la recibe, el chat hace una pregunta con las respuestas como tarjetas justo debajo. Haz clic en una, o pulsa ↑ y elige con las flechas y Return. «Swap USDC to USDT and send it to Bybit» ahora hace exactamente eso, nunca una operación."
+  },
+  "bfa071b311d9": {
+   "title": "P/L en cada moneda",
+   "text": "Cada moneda muestra cómo le ha ido desde que la tienes, también las monedas de gas: lo que pagaste sale del historial de la propia billetera, incluso de monedas compradas fuera de la app. Una moneda que llegó por una transferencia o un puente se cuenta a su precio de ese día."
+  },
+  "8bc0eb2ac97f": {
+   "title": "Oculta tu saldo",
+   "text": "El ojo junto a «Balance» oculta los importes en la barra lateral, el portafolio, las tarjetas de monedas, las posiciones y el P/L. Los porcentajes siguen visibles. Lo que confirmas siempre se muestra completo."
+  },
+  "8a1c6b855bc8": {
+   "title": "Recarga, una sola vista",
+   "text": "Browser wallet, Phone wallet y Exchange muestran el mismo bloque: el QR, qué hacer y la dirección completa con Copy. «Other» elige otro token, «Custom» escribe tu propio importe."
+  },
+  "7334772af0a7": {
+   "title": "Cambios menores",
+   "text": "En la lista de lienzos, cada lienzo muestra el logo de su empresa de IA y la fecha y hora completas; un nombre largo se desplaza al pasar el cursor sobre él."
+  },
+  "891b6a76caba": {
+   "title": "Recarga desde cualquier red",
+   "text": "Recarga enumera todas las redes con las que funciona la app, en una sola fila. Elige la moneda y el importe, o «Any» para cualquiera, y la vía: una billetera del navegador como Phantom o MetaMask en una página que abre la app, un teléfono mediante su QR y la dirección, o un exchange. Cuando el dinero llega, Recarga dice cuánto llegó y adónde."
+  },
+  "b83b150e84a1": {
+   "title": "Adónde fue el dinero",
+   "text": "History se abre mostrando lo que se movió: el día resumido («−25 USDT sent to Automation · 5 sends»), luego cada movimiento con adónde fue, el importe y un enlace al explorador. O pregunta al chat: «where did the money go today?»"
+  },
+  "7830bb4d7689": {
+   "title": "El Schedule por fecha",
+   "text": "Cada ejecución es una ficha con su fecha, su hora y quién la firma: la billetera de automatización sola, o tú con Touch ID. Al abrir una tarea se ve su tarjeta entera. «Run now» deja la siguiente ejecución como estaba."
+  },
+  "298e7b56f979": {
+   "title": "Tu billetera de automatización, contada",
+   "text": "El saldo de la barra lateral son ambas billeteras, con el reparto debajo: Main y Automation. El portafolio tiene la tarjeta de Automation, y Schedule muestra su dinero en dólares. Sin SOL para comisiones, un botón le envía 0.01 SOL, y una recarga desde Schedule trae también la comisión."
+  },
+  "db24106c0bd7": {
+   "title": "Cambios menores",
+   "text": "Un envío y una dirección guardada se dibujan como tarjetas de ruta. Los botones y los interruptores van en el naranja de la app en lugar del azul del sistema. La segunda verificación entiende lo que significa un comando y lee lo que trae una consulta antes de que lo lea el chat."
+  },
+  "f1d8bfe31c88": {
+   "title": "Una multifirma en un solo movimiento",
+   "text": "Di «make a multisig»: aparece una tarjeta con sus claves (la de este Mac, la de tu Ledger, cualquier dirección guardada, las que quieras), cuántas de ellas deben firmar y las redes que elijas. Un solo Confirm la crea en la misma dirección en cada red; después paga desde ella en el chat."
+  },
+  "07fcbba0ca7f": {
+   "title": "Lo que cuesta cada puente",
+   "text": "Un movimiento entre redes muestra cada puente que puede hacerlo —Relay, CCTP de Circle, NEAR Intents, LayerZero— con su costo y su duración, en el paso propio del puente. El que usa el movimiento aparece primero."
+  },
+  "55de3302057c": {
+   "title": "USDT por el puente propio de Tether",
+   "text": "«Move 50 USDT from Arbitrum to Polygon via LayerZero» envía con USDT0: llega la misma cantidad, por centavos de gas, entre Ethereum, Arbitrum, Optimism, Polygon y HyperEVM. Tarda de minutos a horas, así que la tarjeta indica la espera y el portafolio lo muestra como en tránsito."
+  },
+  "b6ea565fa5c6": {
+   "title": "Cuánto se llena el chat",
+   "text": "Un chip junto al nombre del modelo muestra cuánto de su ventana llena el chat —«21k / 1M»— o, si paga una clave de API, cuánto cuestan las respuestas. Pulsa sobre él para ver de qué está hecho: las instrucciones, el chat, el lienzo y tus saldos."
+  },
+  "45f7fb619503": {
+   "title": "Un chat que mantiene el hilo",
+   "text": "Cada mensaje ahora va con el chat del lienzo desde su inicio —y con su parte más reciente cuando se hace largo—, no solo con las últimas líneas, así que «as usual» sigue significando lo que dijiste. Y el bloque más nuevo siempre va arriba: los movimientos terminados quedan debajo del actual, del más nuevo al más antiguo."
+  },
+  "536047f42c8e": {
+   "title": "Cosas más pequeñas",
+   "text": "Un primer depósito pequeño en Kamino pregunta «Send anyway?» con su alquiler (rent) en cifras, en lugar de rechazarse. La app vuelve a consultar a Jupiter cuando está ocupado, y sus errores se explican en una frase. Los botones de la ventana siguen en su esquina después de volver a abrir la app."
+  },
+  "adc3b3d84b6d": {
+   "title": "Cada paso dice qué hace",
+   "text": "Cada tarjeta de un movimiento muestra su estado con palabras sobre su imagen —Ready, Now, Done, Touch ID—, luego qué hace y con qué protocolo, con el logo de ese protocolo. Pulsa una tarjeta para ver el resto; ✕, Close o Esc la cierran."
+  },
+  "1b8d386756fa": {
+   "title": "Tu dinero ahora → después",
+   "text": "Cada paso que mueve dinero muestra los saldos que cambia: «Solana 26.65 → 24.65 USDC», «Kamino Lend 0 → 2 USDC». Cuando termina, se lee antes → ahora."
+  },
+  "0b46c5472472": {
+   "title": "Las monedas se abren como tokens",
+   "text": "SOL, ETH y NEAR se abren igual que tus tokens, en la misma tarjeta: precio con 24h, 7d y 30d, el gráfico, los números del día, lo que tienes, Ask in chat, Buy and Sell."
+  },
+  "139310f4b470": {
+   "title": "El chat llama a cualquier contrato",
+   "text": "Pide cualquier cosa que haga un contrato en nueve redes: el chat escribe la llamada, revisa el contrato y la simula antes de una tarjeta con Confirm. Dice qué va a hacer a continuación, recuerda lo que le pidas que recuerde y puede vigilar cosas en segundo plano."
+  },
+  "f08c8a295f92": {
+   "title": "Llamadas que no pueden engañarte",
+   "text": "Una llamada que le cedería derechos sobre tus monedas se rechaza. Un protocolo que ihatecrypto no conoce tiene que pasar sus revisiones, y como máximo se arriesgan $50. Los depósitos en cualquier bóveda aparecen en tu portafolio."
+  },
+  "ce0362da3987": {
+   "title": "Detener",
+   "text": "Mientras el chat responde, el botón de enviar se convierte en Stop (Esc también lo hace): nada de lo que iba a hacer se ejecuta."
+  },
+  "613f6aa4c4ef": {
+   "title": "El chat busca información por su cuenta",
+   "text": "Pregunta sobre cualquier cosa on-chain —tu factor de salud en Aave, la tasa de un pool en DefiLlama, tus operaciones ejecutadas en Hyperliquid— y el chat lee el contrato, la red o los datos públicos por sí mismo, sin que antes se haya creado una función para ello."
+  },
+  "552d548cc597": {
+   "title": "Sigue después de un movimiento",
+   "text": "Pide algo que depende de cómo salga un movimiento —«buy SOL for $1, then an alert 5% under my price»— y, tras tu Confirm, el chat da el siguiente paso según lo que realmente pasó."
+  },
+  "fd90daf4cd5a": {
+   "title": "Todas las stablecoins grandes, en todas partes",
+   "text": "USDT, USDC, USDS, USDe y DAI por su nombre en cada red en la que estén: cambia una por otra, envíalas, muévelas entre redes. Cuentan como dólares en tu portafolio, «not earning» como USDC."
+  },
+  "50ff89d2da38": {
+   "title": "La cantidad, no «all»",
+   "text": "Una tarjeta que mueve todo lo que hay de una moneda muestra cuánto es, con «all available» debajo."
+  },
+  "4d9199dbb75f": {
+   "title": "Abre Hyperliquid a tu manera",
+   "text": "Tu primera operación pregunta cómo abrir la cuenta: Relay en segundos, con la comisión de apertura de Hyperliquid de $1.20, o NEAR Intents en 2–4 minutos sin ella."
+  },
+  "2cddd26adea2": {
+   "title": "Las redes nuevas esperan tu decisión",
+   "text": "Las redes y protocolos que traiga una versión posterior llegan apagados y preguntan una vez si quieres activarlos."
+  },
+  "66687ae124f4": {
+   "title": "Salir a la barra de menús",
+   "text": "⌘Q ahora deja ihatecrypto en la barra de menús: tu horario, tus alertas y tus stops siguen en marcha, y la ventana ya no vuelve a aparecer sola. ⌥⌘Q —o Quit Completely en la barra de menús— sale de verdad."
+  },
+  "34bff9e05de9": {
+   "title": "Tu horario en la barra de menús",
+   "text": "Pulsa la moneda para ver qué se ejecuta a continuación —tareas y compras recurrentes— y cómo terminó la última ejecución de cada una. Un clic la abre."
+  },
+  "7c4d3c49def1": {
+   "title": "BNB Chain",
+   "text": "USDC a BNB Chain y de vuelta desde Solana o cualquier red, con el BNB para pagar su gas incluido, envíos a direcciones guardadas y sus tokens en el portafolio. «move 5 USDC from Solana to BNB», «buy CAKE on bnb for 5 USDC»."
+  },
+  "6f53e95500aa": {
+   "title": "Cualquier token por otro",
+   "text": "En cada red: «swap 0.1 SOL for BONK on solana», «swap 1 TSLA for NVDA on robinhood», «swap 1 HYPE for PURR on hyperliquid spot», «swap 1 NEAR for AURORA on near» mediante NEAR Intents, y entre redes: SOL por CAKE en BNB Chain, NEAR por SOL."
+  },
+  "eb65e97b3772": {
+   "title": "Buy and Sell en cada moneda",
+   "text": "SOL, ETH, BNB, HYPE, POL y NEAR se abren con Buy and Sell como cualquier token, en su gráfico y en el menú del clic derecho. Ningún token oculta sus botones: si un movimiento no puede hacerse, dice por qué al enviarlo."
+  },
+  "d6d19d1b2ed4": {
+   "title": "Send anyway?",
+   "text": "Un movimiento que perdería más de lo normal en comisiones ya no simplemente se detiene: dice cuánto —«Relay keeps ≈ $0.23 of $2.00»— y pregunta. Enviar de todos modos, o cancelar. La tarjeta de un intercambio avisa cuando las comisiones se llevan más de la décima parte."
+  },
+  "a5cbd0ea0446": {
+   "title": "Cada moneda se abre",
+   "text": "Cada fila de la tarjeta de una red se abre: un token, su tablero; SOL o ETH, su gráfico; el USDC sin usar, su propia página con Buy and Sell; un depósito, sus detalles. Monedas y depósitos van por separado, la cantidad debajo del nombre y el cambio del día junto a los dólares."
+  },
+  "13b4aefb3d36": {
+   "title": "Ganancia y pérdida en cada token",
+   "text": "Un token comprado en la app muestra lo que ganó o perdió junto a su cantidad, y su tablero lo dice en dólares con lo que costó. Uno que llegó de otro sitio muestra el movimiento de hoy."
+  },
+  "044e3a678a67": {
+   "title": "Intercambios en Optimism y HyperEVM",
+   "text": "«swap 0.001 ETH for OP on optimism» pasa por Uniswap allí; en HyperEVM, donde el dinero no está en los pools de Uniswap, «swap 5 USDC for HYPE on hyperevm», o a UBTC, UETH, USOL y kHYPE, pasa por el intercambio de Relay."
+  },
+  "0f54dd7ca6a5": {
+   "title": "Las frases se escriben solas",
+   "text": "Un botón que pone una frase en el chat la escribe, así ves dónde mirar antes de enviarla."
+  },
+  "da3da104fe39": {
+   "title": "Pequeñas correcciones",
+   "text": "«Novedades» desplaza su lista de versiones; el lienzo ya no ilumina tarjetas bajo el chat o un panel; una errata en el nombre de una carpeta cuenta como esa carpeta; un movimiento a una red que ihatecrypto no tiene ya no se lee como una operación."
+  },
+  "40c920261c9a": {
+   "title": "Un lienzo que sigue el ritmo",
+   "text": "Arrastrar el lienzo, con dos dedos o con el ratón, ahora lo mueve entero: los fotogramas no se pierden, incluso con un movimiento esperando tu Confirm. Una tarjeta en espera, un modelo que responde y los primeros segundos tras abrir la app ocupan una fracción de lo que ocupaban antes."
+  },
+  "98e1f6ca39ee": {
+   "title": "Lo que recibes, en la tarjeta",
+   "text": "La tarjeta de un intercambio dice lo que llega, según la cotización actual: «≈ 0.0083 SOL», «≈ 1.8 UNI», «≈ 0.11 HYPE». Jupiter, Relay, el libro spot de Hyperliquid y los tokens de acciones de Robinhood."
+  },
+  "ce3d115f5ef8": {
+   "title": "Pides más de lo que tienes",
+   "text": "«Buy SOL for 150» con 100 en Solana ya no inicia una cadena de movimientos: el chat dice lo que hay, y el lienzo ofrece formas de seguir: traer el resto desde otra red antes, tomar todo lo que hay o recargar."
+  },
+  "315cc9ed9e0b": {
+   "title": "Piensa antes de responder",
+   "text": "Settings › Models tiene un interruptor para que el modelo razone antes de responder: más estable ante una petición confusa, unos segundos más lento. Desactivado por defecto."
+  },
+  "c08c82a2245d": {
+   "title": "El mejor modelo que tu Mac puede ejecutar",
+   "text": "«On this Mac» elige según la memoria de tu Mac: Gemma 4 12B en 16–24 GB, Gemma 4 26B en 32 GB —9 de 10 en el examen del chat, a 5.4 segundos por respuesta—, Gemma 4 31B desde 36 GB, y Nemotron 3 Super de NVIDIA desde 192 GB. El menú de modelos marca el que le cabe al tuyo."
+  },
+  "42db8c1fceba": {
+   "title": "El tipo de cambio antes de intercambiar",
+   "text": "Un intercambio en espera de Confirm dice lo que recibes y a qué tipo de cambio —«You get ≈ 23 SPX · 1 SPX ≈ $0.43»—. En Solana también se compra a través de Jupiter. Confirm se mantiene 15 segundos desde el precio; después, Refresh pide uno nuevo."
+  },
+  "60635a3cf441": {
+   "title": "Los tokens siguen siendo tokens",
+   "text": "Un mensaje con $SPX o $ y un contrato muestra también en el chat el chip del token, no una dirección larga, y «understood as» nombra el token. El modelo sigue recibiendo la dirección exacta."
+  },
+  "096264cd8ba5": {
+   "title": "Modelos en este Mac, diez veces más rápidos",
+   "text": "Un modelo en este Mac ya no piensa para sí antes de cada respuesta: Gemma 4 12B responde al chat en unos 8 segundos en vez de dos minutos."
+  },
+  "d34520d464ef": {
+   "title": "Tokens en el chat",
+   "text": "Escribe $ para elegir un token: $SOL se muestra con su logo, y $ con un contrato o una mint muestra ese token con su imagen, así ves qué vas a comprar antes de enviarlo. Mientras una tarjeta espera, sus botones Cancel y Confirm aparecen justo en el campo."
+  },
+  "f64ff41b95f2": {
+   "title": "Intercambia entre redes",
+   "text": "Cualquier token en una red por cualquier token en otra, en una sola firma: SOL en Solana por ETH en Arbitrum. Cada puente de USDC compara Relay con NEAR Intents, y CCTP de Circle cuando da más o cuando lo pides."
+  },
+  "3db0ce9415fa": {
+   "title": "Envía a Bitcoin, TRON, XRP y más",
+   "text": "Mediante NEAR Intents, el dinero va a una dirección guardada de Bitcoin, TRON, XRP, Dogecoin, Zcash o Sui —por ejemplo, el depósito de un exchange— y también llega desde ellas: «receive» muestra una dirección y un QR. NEAR se cambia por USDC en Base, Arbitrum o Ethereum."
+  },
+  "16a5ff55373f": {
+   "title": "Pedir prestado en Aave",
+   "text": "Deposita ETH o USDC y luego pide USDC prestado con esa garantía en Base, Arbitrum, Polygon o Ethereum. La tarjeta muestra el factor de salud antes y después, y el precio del ETH al que se liquidaría. La app nunca pide prestado por debajo de 1.5."
+  },
+  "0f51345d6ad2": {
+   "title": "Intercambios en HyperEVM, Optimism y Tempo",
+   "text": "Dos redes nuevas: USDC de entrada y de salida con el gas incluido, sus tarjetas en el portafolio y sus interruptores en Settings › Modules. En Tempo, las stablecoins se intercambian en su propio exchange por uno o dos puntos básicos."
+  },
+  "fd499ad7cd6f": {
+   "title": "Dinero en tránsito",
+   "text": "Un puente que ya salió y aún no llega aparece encima de las tarjetas de las redes. Con un clic se abre lo que el propio puente dice al respecto, la transacción y la dirección. Los tramos de una operación que pasa por varias redes viajan juntos, al ritmo del más lento."
+  },
+  "191677c1b6ae": {
+   "title": "Aprobaciones y polvo",
+   "text": "«show my approvals» muestra cada permiso de gasto que tu billetera ha concedido, primero los ilimitados, cada uno con Revoke. «sweep dust» convierte el polvo en USDC. El USDC.e de puente aparece con ese nombre, a un clic del USDC de Circle."
+  },
+  "3bbbcdcd5cc1": {
+   "title": "Respuestas a medida que se escriben",
+   "text": "Cada respuesta de un modelo se muestra mientras se escribe, y un modelo en este Mac lee el prompt completo. Claude Code se instala desde Settings › Models. Una clave de NEAR Intents en Settings › General baja las comisiones de 1Click. Hyperliquid también compra y vende en spot."
+  },
+  "8e14cdf163e6": {
+   "title": "Confirm es un botón",
+   "text": "Una tarjeta que espera Confirm solo avanza cuando pulsas Confirm. Un «yes», «do it» o «sí» escrito se responde, nunca se firma, así que el texto de una web, una nota o un mensaje pegado no puede dar el sí por ti."
+  },
+  "29073e797d4b": {
+   "title": "Dinero desde cualquier lugar",
+   "text": "Una compra o un depósito trae el dinero desde donde esté (Base, Arbitrum, Ethereum, Hyperliquid o NEAR), en tramos bajo un solo Confirm, y su tarjeta indica de dónde sale realmente cada dólar. NEAR se puede comprar directamente desde Base, Arbitrum o Ethereum."
+  },
+  "a868148d7d3c": {
+   "title": "Uniswap v4 en todas partes",
+   "text": "En Base, Arbitrum, Ethereum y Polygon, cada intercambio toma la mejor de Uniswap v3 y v4, la tarjeta muestra el impacto en el precio, y un pool profundo opera a menos de medio por ciento de su cotización. Los intercambios de Ethereum pasan por MEV Blocker, fuera del mempool público."
+  },
+  "12d25d940591": {
+   "title": "Comprar a lo largo del tiempo",
+   "text": "Jupiter DCA compra una moneda por partes en la cadena, aunque la app esté cerrada. Cuando pides comprar a lo largo del tiempo, el chat ofrece las dos formas, Jupiter DCA o las compras regulares de la app, y explica cada una en una línea."
+  },
+  "cea59d3e7e3a": {
+   "title": "Un modelo en este Mac, con un clic",
+   "text": "«On this Mac» instala o actualiza Ollama, elige un modelo que quepa en la memoria de tu Mac, lo descarga y lo inicia. El menú de modelos muestra primero lo que ya está descargado."
+  },
+  "e5fa4b28abf3": {
+   "title": "Tus propios nodos",
+   "text": "Settings › General › Your own nodes: un nodo gratuito propio para Solana (Helius) o para una red EVM (Alchemy), con los pasos para conseguirlo. El tuyo va primero, los nodos integrados quedan detrás, y la clave se guarda en el Llavero de este Mac."
+  },
+  "86301c80e186": {
+   "title": "Un solo Touch ID para aprobar e intercambiar",
+   "text": "Desactivado a menos que lo enciendas, en Settings › Wallet: una aprobación y el intercambio, depósito o puente que la gasta se envían como una sola transacción (EIP-7702). Tu billetera en esa red ejecuta entonces un contrato de cuenta auditado. El ⓘ del interruptor explica qué significa."
+  },
+  "6c1f38d3815a": {
+   "title": "Pequeñas cosas",
+   "text": "«save vitalik.eth as Vitalik» o «save toly.sol as Toly» guarda la dirección a la que apunta el nombre. ↑ y ↓ en el chat recorren todo lo que has enviado. Una ruta de Jupiter que falla antes de firmar cede el paso a otra. Robinhood es solo «Robinhood»."
+  },
+  "bb7239002e01": {
+   "title": "El chat ve tu lienzo",
+   "text": "Pregunta lo que quieras del lienzo (la tarjeta de un token, un gráfico, una posición, el P/L o la respuesta de un servicio) y la respuesta sale de los números que ves ahí, dentro del rango que muestra el gráfico."
+  },
+  "91834070068e": {
+   "title": "El mes de un token, gratis",
+   "text": "Al buscar un token, ahora la app trae el historial de los últimos 30 días de su pool: el mínimo, el máximo y el cierre de cada día. «Where should I buy?» recibe un rango tomado del gráfico, no una oferta para pagar el historial."
+  },
+  "bc9c7ca6fca5": {
+   "title": "Las órdenes conservan su precio",
+   "text": "«limit 2650.» y «stop at 2650.» ya no pierden el precio por el punto final, así que un límite sigue siendo un límite. «Brent oil» es Brent, no WTI. Se revisaron 26 617 formas de escribir un comando, y todas se interpretan bien."
+  },
+  "e52c5f350566": {
+   "title": "Un sí es un sí",
+   "text": "«yeah right» o «sí, claro» pueden ser sarcasmo, así que van al modelo en lugar de firmar la tarjeta que espera. Un sí simple firma enseguida, y ningún cambio firma nunca."
+  },
+  "3fc7272bbcd8": {
+   "title": "El chat nunca se congela",
+   "text": "Una respuesta de Claude Code no puede colgar el chat después de terminar, y que Claude Code se actualice solo ya no rompe las respuestas durante un minuto."
+  },
+  "b8014acc2ad5": {
+   "title": "Pequeñas cosas",
+   "text": "Una nota que menciona una alerta o un gráfico sigue siendo una nota. «save 0x… as Mom on tempo» guarda «Mom» en Tempo. «Sell all JUP» muestra cuánto es «all»."
+  },
+  "c3486161af43": {
+   "title": "Nuevos ajustes",
+   "text": "Ordenados en General (tema, idioma de la app, notificaciones, segundo plano), Trading agent (Careful, Balanced o Bold, con cada límite a tu alcance), AI model y Wallet, donde están todas tus billeteras en un solo lugar. Una columna serena, con un icono en cada fila."
+  },
+  "1ddb1d1c3fcd": {
+   "title": "Funciona sin modelo",
+   "text": "¿Sin suscripción? Los comandos escritos como «long ETH risk $5» o «send 5 USDC to Bybit» siguen funcionando, y nada se mueve sin Confirm ni Touch ID. Los inicios de sesión lo indican, y el lienzo vacío ofrece «Connect a model»."
+  },
+  "38e3ab00a1b5": {
+   "title": "Carpetas con iconos",
+   "text": "«Change icon…» en una carpeta de la barra lateral: el logo de un token, un símbolo, un emoji o tu propia imagen."
+  },
+  "9ca0186e00a9": {
+   "title": "Firmas más seguras",
+   "text": "Un sitio no puede obtener una firma que saque dinero de Hyperliquid o envíe USDC por su cuenta. Las monedas, los NFT y los permisos de gasto solo van a direcciones que aprobaste, con el importe y la comisión de red en el aviso."
+  },
+  "a8979865f224": {
+   "title": "Te entiende mejor",
+   "text": "«2 500» son dos mil quinientos, «sell SOL for $10» nunca vende todo, «ok?» es una pregunta y no un sí, y una respuesta en la unidad equivocada se vuelve a preguntar."
+  },
+  "81a664399762": {
+   "title": "Las operaciones conservan su stop",
+   "text": "«cancel the limit» quita solo las entradas que siguen en espera, y la posición, su stop y su take se mantienen. Un límite en un retroceso reserva el margen suficiente para colocarse."
+  },
+  "7ffad4f2f475": {
+   "title": "Más estable en todas partes",
+   "text": "Retirar de Aave o Morpho devuelve solo lo que salió, cambiar de billetera descarta las tarjetas hechas para la otra, y un modelo colgado no puede congelar el chat."
+  },
+  "4b5568c32885": {
+   "title": "Las actualizaciones llegan solas",
+   "text": "Esta copia revisa updates.ihatecrypto.ai una vez al día. Una versión nueva se descarga en segundo plano y se instala al pulsar «Restart to update». La billetera, los ajustes y los lienzos se conservan."
+  },
+  "fce9dc9e0c78": {
+   "title": "Pregunta lo que quieras",
+   "text": "Las preguntas sobre la app, tu cuota o tu vida reciben una respuesta directa, y una línea sobre lo que el lienzo podría guardar para ti. Preguntar por el prompt del sistema ya no se frena como un ataque."
+  },
+  "4797d5a6e36d": {
+   "title": "Shift-Return para un salto de línea",
+   "text": "Shift-Return corta la línea en el campo del chat, y Return sigue enviando."
+  },
+  "aba1b80e95e5": {
+   "title": "La clave de trading espera a un depósito",
+   "text": "Hyperliquid acepta una clave de trading cuando la cuenta ya recibió un depósito. Hasta entonces, los primeros pasos no piden Touch ID. Después, en Settings › Wallet › Key and signing está el botón."
+  },
+  "41984c324a7d": {
+   "title": "Actualizaciones solas",
+   "text": "ihatecrypto busca una versión nueva una vez al día. Cuando una está lista, recibes una notificación, y Install muestra antes qué cambió."
+  },
+  "629230567cda": {
+   "title": "Un sonido para cada cosa",
+   "text": "Una moneda suena cuando llega dinero o termina una operación, un tintineo suave cuando algo pide revisión, y un golpe grave cuando una operación falla."
+  },
+  "0cc984cf0ea9": {
+   "title": "El token real lleva una insignia",
+   "text": "Un token se muestra por su ticker, y el verificado tiene una roseta azul. «buy STONK» compra el STONK real, no una copia con un pool falso, y lo que compraste aquí muestra su ganancia junto al importe."
+  },
+  "d0af7328e22c": {
+   "title": "Cualquier sitio, con tu billetera",
+   "text": "«open kamino.com» abre el sitio junto al chat con tu billetera, y cada firma se muestra primero. Arrastra el panel a donde quieras. Los sitios de la lista de phishing de MetaMask no se abren."
+  },
+  "bc47c052ebe5": {
+   "title": "Las recompensas se venden solas",
+   "text": "«every hour: sweep rewards over $10 into USDC» reclama lo que Merkl debe una vez que vale $10 y lo vende por USDC. Con menos de $5 no se firma nada. Desde la billetera de automatización se ejecuta sin Touch ID."
+  },
+  "b9519366fb21": {
+   "title": "/ y @ en el chat",
+   "text": "Escribe / para ver los bloques que puedes añadir, con un ejemplo para terminar. Escribe @ para ver nombres de tu libreta de direcciones y tokens favoritos."
+  },
+  "af628ca8434a": {
+   "title": "Tus propios límites",
+   "text": "Settings › Wallet › Limits guarda lo que puede firmar sin Windows Hello: el tope por orden y por día de la clave de trading, cuántos días seguirá abriendo posiciones, y el tope por día y por semana de la billetera de automatización. El proceso de firma separado guarda estos números y lo gastado, en un registro que ningún otro programa puede restablecer. Un número más bajo se aplica de inmediato, uno más alto pide Windows Hello, y un movimiento cuyo gasto no pueda anotarse no se firma."
+  },
+  "753792f1f691": {
+   "title": "El motor en una caja propia",
+   "text": "La parte que lee el chat, los modelos, los sitios y las redes ahora funciona en un AppContainer de Windows. No puede abrir tus archivos, la carpeta del proceso de firma ni un dispositivo USB, y tampoco puede iniciar un programa. Lo que necesita además, como Claude Code o una página de inicio de sesión, se lo hace la ventana de la app, una solicitud fija a la vez. Tus datos pasan a la carpeta del contenedor en el primer inicio."
+  },
+  "7b9177c6deea": {
+   "title": "Reconstruido en Rust",
+   "text": "El motor y el proceso de firma son ahora programas en Rust, y cada parte se compara con el código del Mac con sus propias pruebas. Un comando simple del chat recibe respuesta en unos 8 ms en lugar de 120, la app arranca más rápido, y lo que se instala son dos programas de 20 MB en lugar de 38 archivos de 155 MB."
+  },
+  "89bb3fab0c1b": {
+   "title": "Windows Hello tal como lo dibuja Windows",
+   "text": "Confirm, la pantalla de bloqueo y la solicitud de un sitio muestran el teclado numérico PIN que pide Windows Hello. Cada movimiento sigue pidiendo Windows Hello antes de firmarse, y el código de acceso de la app solo abre la ventana."
+  }
+ },
+ "ru": {
+  "44d658944bda": {
+   "title": "Touch ID моста говорит, что вы получите",
+   "text": "Touch ID для моста Relay теперь показывает строку, которую процесс подписи читает из самого ордера Relay: «Relay then pays at least 4.878026 USDC to …», с адресом целиком и его сетью. До сих пор то, что придёт, было только на карточке, а это слово приложения. Сумма в этой строке — та, на которую подписан ордер, цифра в цифру."
+  },
+  "47e0e38e7d97": {
+   "title": "Ещё одна проверка, все находки исправлены",
+   "text": "Адрес, записанный без «0x», никогда не подписывается, поэтому ничего не проходит мимо проверок, которые знают ваш кошелёк и Relay по их адресам. Сайт, который просит доступ ко всем вашим NFT, получает отказ, что бы он ни написал в подтверждении, а раньше «2» читалось как отзыв. Ордер, который торговый ключ не может посчитать, передаётся вам. Мост задачи засчитывается в её дневной лимит по тому, что не возвращается. Текст сайта сам просит Touch ID, какой бы сеанс ни был открыт."
+  },
+  "4b11c550e4f8": {
+   "title": "Шаги ждут своего Confirm и денег",
+   "text": "Шаги после карточки выполняются только после того, как вы нажмёте Confirm на этой карточке, а не после того, как прошла другая операция на холсте. Шаг, который идёт после вывода, ждёт, пока баланс не покажет его: «withdraw 1 USDC from Jupiter then deposit 1 USDC into Jupiter» вносит 1 USDC, а раньше вносил 0.1, которые уже там лежали."
+  },
+  "41f72f01d2aa": {
+   "title": "NEAR AI показывает, что он приватный",
+   "text": "В меню моделей в чате у NEAR AI теперь зелёная метка «Private» и строка о том, что она значит: модель работает в защищённом анклаве, который NEAR не может прочитать, а приложение проверяет этот анклав перед каждым сообщением. Строка под каждой компанией теперь остаётся целой, а не обрывается на «…»."
+  },
+  "d21b0c86b629": {
+   "title": "Модель подключается по ключу в два шага",
+   "text": "В Settings › AI model теперь написано, откуда берётся каждый ключ: «Get a key at platform.openai.com», что нажать там, и кнопка Open, а затем поле, куда его вставить. Так работают NEAR AI, OpenAI, Anthropic, DeepSeek, xAI, Gemini и OpenRouter. Модель — это список названий, с «Custom…» для собственного id, а Disconnect стоит в отдельной красной строке."
+  },
+  "657b08b79669": {
+   "title": "Solana отвечает, когда её публичная нода занята",
+   "text": "Без собственной ноды приложение спрашивало только публичную ноду Solana, и когда та отвечала «too many requests», баланс или операция могли остановиться после нескольких попыток. Теперь эти попытки уходят на вторую бесплатную ноду, Pocket, так что чтения и переводы продолжают работать. В Settings › General › Your own nodes также назван FluxRPC, у которого есть бесплатный тариф, как у Helius."
+  },
+  "fc3a5f9455f9": {
+   "title": "Ваши собственные лимиты",
+   "text": "В Settings › Wallet › Limits задаётся, что может подписываться без Touch ID: лимит торгового ключа на ордер и на день и лимит кошелька автоматизации на день и неделю. Процесс подписи хранит эти числа и сам читает каждую операцию, так что приложение не может уговорить его обойти их. Снижение лимита действует сразу. Повышение запрашивает Touch ID."
+  },
+  "42b943a4978c": {
+   "title": "Приложение в собственной песочнице",
+   "text": "ihatecrypto теперь работает в macOS App Sandbox. Приложение имеет доступ к сети, Ledger и микрофону, но не может открывать ваши другие файлы или запускать другие программы. Claude Code для чата запускается из небольшого помощника с фиксированными аргументами. Ваши холсты, чаты и настройки переносятся в папку приложения при первом запуске."
+  },
+  "204a2abc5394": {
+   "title": "Попробовать прямо из списка «Что нового»",
+   "text": "У каждого изменения, которое может показать фраза в чате, на строке есть кнопка «Try it». Она вставляет фразу в чат, но не отправляет её."
+  },
+  "50fa4c9378c3": {
+   "title": "Отправка и обмен приватно",
+   "text": "«send 20 USDC privately to Mom» или «buy NEAR for 5 USDC privately» идёт через Confidential Intents от NEAR Intents: в блокчейне депозит и то, что приходит, нельзя сопоставить. Перевод USDC на сохранённый адрес предлагает Regular или Private прямо над кнопкой Confirm, с комиссиями и временем каждого способа."
+  },
+  "ec6a18f8d27b": {
+   "title": "Приватный ассистент",
+   "text": "Выберите NEAR AI Cloud, и чат работает в защищённом анклаве. Перед каждым сообщением ihatecrypto проверяет анклав вплоть до Intel и NVIDIA, а байты каждого ответа — по ключу самой модели. В шапке написано «Private assistant», а Proof показывает, что было проверено."
+  },
+  "919da24f133f": {
+   "title": "Не даст попасть под ликвидацию",
+   "text": "«guard my loan on kamino» следит за займом в Kamino или Aave и, когда заём опускается ниже своей черты, готовит погашение под один Confirm: недостающие USDC приходят через NEAR Intents. Ещё можно занять USDC под SOL на главном рынке Kamino."
+  },
+  "9bfacb838ef9": {
+   "title": "Платите любому API и запускайте кошелёк агента",
+   "text": "Платный API отвечает после того, как вы нажмёте Confirm: x402 — подписью в сети Base, MPP — в Tempo или через NEAR Intents из USDC, который у вас есть. Кошелёк агента на NEAR Intents тратит в пределах дневного лимита, который вы подписали ключом NEAR, и его можно заморозить."
+  },
+  "e5e9c2471f79": {
+   "title": "TWAP и трейлинг-стопы",
+   "text": "«buy ETH for $2000 over 2 hours» — это один TWAP на Hyperliquid, его стоп и тейк покрывают всю позицию с первой части. «trailing 2%» ставит собственный трейлинг-стоп Hyperliquid на бирже."
+  },
+  "4c0f127bc3e4": {
+   "title": "Видно, куда уходят деньги",
+   "text": "Каждая операция, которая ждёт Confirm, читается как чек: что вы платите и откуда, комиссии блокчейна, что придёт. Перевод через NEAR Intents показывает свой путь после Confirm. Адреса-двойники, адреса мошенников из GoPlus и сайты, которые просят больше, чем показывают, помечаются до подписи."
+  },
+  "6f2d686916db": {
+   "title": "Без тихих потерь из-за влияния на цену",
+   "text": "Обмен, который сдвинул бы цену больше чем на 2%, останавливается до подписи и предлагает меньшую часть сейчас, или всё целиком, но с потерей в долларах, или ничего. Продажа тонкого мемкоина разом больше не съедает его кусок незаметно."
+  },
+  "3fac3759d243": {
+   "title": "Лучший способ обмена",
+   "text": "В Solana маркет-мейкеры JupiterZ исполняют обмен, когда платят больше, чем пулы. В сетях EVM Uniswap, KyberSwap и Relay сравниваются по тому, что остаётся после газа. Из Solana в другую сеть обмен Relay взвешивается против моста Relay плюс лучшего обмена там, а карточка называет тот вариант, который вы подписываете."
+  },
+  "ac8c0be467af": {
+   "title": "Акции от Ondo",
+   "text": "Покупайте акции и ETF США от Ondo в Solana («buy $5 of Nvidia from Ondo») по цене маркет-мейкеров и храните доллары в USDY от Ondo. Ограничения Ondo по резидентству показываются до Confirm."
+  },
+  "bb9e993fd4ae": {
+   "title": "Заём под ваши акции",
+   "text": "Рынок Backpack у Kamino даёт USDC в долг под токенизированные акции, например SPCX или MU, так что вы получаете доллары, не продавая их. Каждая карточка пишет «all» с его суммой."
+  },
+  "c23f2f652baa": {
+   "title": "Хеджируйте то, что держите",
+   "text": "Скажите «hedge my SOL», и ihatecrypto откроет шорт на Hyperliquid размером с монеты, которые у вас есть, без тейка. Так падение будет покрыто, а правила риска считают шорт за вычетом ваших монет."
+  },
+  "df8be474e2c6": {
+   "title": "Плавнее холст, безопаснее чат",
+   "text": "Панорамирование двумя пальцами двигает холст раз в кадр, плавно. Вторая проверка читает каждое сообщение чата и на вашем языке говорит, почему остановила его. Help › Report a Problem открывает задачу на GitHub с уже вписанной вашей версией."
+  },
+  "7e157ab33de3": {
+   "title": "Ваш P/L, а не ваши пополнения",
+   "text": "Линия портфеля показывает, что цены сделали с тем, что вы держите. Деньги, которые вы вносите или переводите, обмены и мосты её не двигают, так что пополнение больше не выглядит как прибыль. И линия теперь плавная кривая."
+  },
+  "9b1a2be07dad": {
+   "title": "Депозиты, которые можно прочитать",
+   "text": "Каждый депозит — одна плитка: протокол, монета, которую вы внесли, её годовая ставка, доллары, сколько он приносит в день и в месяц, и сколько Jupiter Lend уже заработал вам."
+  },
+  "f7fdcf2e1127": {
+   "title": "Протоколы в собственных цветах",
+   "text": "У топ-50 DeFi-протоколов на DefiLlama на их плитке депозита есть свой логотип и цвета."
+  },
+  "914c14f47001": {
+   "title": "Новую версию видно",
+   "text": "Когда выходит новый ihatecrypto, рядом с логотипом до установки стоит «↓ its version», и меню приложения, а также монетка в строке меню тоже предлагают её. Клик показывает, что нового, с кнопкой Install. Ничего не скачивается само."
+  },
+  "00073ca67f10": {
+   "title": "Отправить всё, что угодно",
+   "text": "«Send all» теперь работает для любой монеты. Весь ваш SOL отправляется вместе с рентой пустых токен-аккаунтов. От ETH, POL или BNB отнимается только комиссия. Весь USDC в Tempo отправляется с крошкой остатка, а не с центом. Отправка всех токенов закрывает их аккаунт, и рента возвращается. Токен, названный своим контрактом, больше не принимается за адрес, на который он уходит."
+  },
+  "2b54f1027409": {
+   "title": "Ценовые алерты в расписании",
+   "text": "Ваши ценовые алерты стоят в расписании рядом с задачами: уровень, насколько далеко цена, переключатель для паузы и отдельная страница у каждого. Строка получает оранжевый край, только пока открыта, а не когда на неё наведён курсор."
+  },
+  "5c8d27a879e5": {
+   "title": "Все комиссии учтены",
+   "text": "Котировка спота Hyperliquid вычитает комиссию биржи 0.07% и, при продаже, 0.05% ihatecrypto. При первой сделке карточка подписи считает апрув комиссии подписью, какой он и есть."
+  },
+  "e73a667d10a0": {
+   "title": "Мост платит только туда, куда вы сказали",
+   "text": "Каждый мост Relay теперь проверяется самим процессом подписи: он пересчитывает ордер по котировке Relay и подписывает депозит, только если этот ордер платит вам или адресу, который вы одобрили, и возвращает деньги только вам. Доллары покидают сеть без газа только по подписи, в которой назван такой ордер."
+  },
+  "1d1892bf5c0c": {
+   "title": "Шесть ревьюеров, все находки исправлены",
+   "text": "Claude, Codex, Kimi и GLM перечитали код. В Solana аккаунт, названный только таблицей поиска, никогда не принимается за ваш. Каждая форма обмена Jupiter платит только вашему аккаунту, а собственная программа сайта запрашивает Touch ID каждый раз. В EVM ловятся вызов самого мультисига, обмен, платящий двум адресам, и апрув NFT на токен 0. Подпись сайта с чужим адресом рядом с числом отказывается. Запланированные задачи, изменённые вне приложения, открываются на паузе."
+  },
+  "e2d8e8ebc31b": {
+   "title": "Каждую подпись читают внимательнее",
+   "text": "Touch ID для нового адреса теперь говорит, что делает операция, включая сумму. Контракт, который процесс подписи не может прочитать, спрашивает вас один раз, кто бы его ни вызывал. Kamino, Jupiter Lend и Jupiter DCA читает сам процесс подписи: только то, что платит вам, и только по вашей позиции. Подпись сайта, которая называет другого человека рядом с суммой, отказывается, а приватный ключ, вставленный в чат, до модели не доходит никогда."
+  },
+  "8adba4567f7a": {
+   "title": "Торговый ключ — по неделе",
+   "text": "Торговый ключ Hyperliquid открывает позиции 7 дней после вашего последнего Touch ID для него. Стопы, тейки и закрытия проходят всегда. Затем следующая новая позиция запрашивает Touch ID один раз и продлевает неделю. Обмен в Solana не пройдёт, если выйдет больше чем на 1% хуже карточки. Платный сервис видит ваш запрос только после Confirm, а создание кошелька автоматизации ставит на паузу задачи, которые тратили бы из него."
+  },
+  "1ae79b5bf778": {
+   "title": "Доллары уходят из BNB Chain без BNB",
+   "text": "USDC в BNB Chain без BNB рядом теперь уходит: собственный пеймастер BNB Chain, MegaFuel, платит газ за его перевод в Relay."
+  },
+  "3c1c58088bcf": {
+   "title": "Доллары двигаются без газа",
+   "text": "USDC без SOL рядом всё равно меняется на SOL: Jupiter платит комиссию за этот один обмен, от $5. USDC в Base, Arbitrum, Optimism, Polygon, Ethereum или Robinhood Chain без монеты этой сети уходит в Solana или Hyperliquid подписью, газ платит Relay, а газ для этой сети возвращается через Solana. Газ для BNB Chain и HyperEVM может прийти с вашего баланса Hyperliquid. Когда доллары попадают туда, где не могут двигаться, чат говорит об этом один раз и предлагает выход."
+  },
+  "776a6aa4e1ad": {
+   "title": "Ваша сделка на её графике",
+   "text": "Когда график монеты открыт на холсте, лонг или шорт по этой монете рисуется прямо на нём: вход, стоп и тейк поперёк свечей, убыток и прибыль между ними, а сверху Cancel и Confirm. Покупка, перевод или план по другой монете ставит график рядом со своей карточкой, никогда не над её кнопками."
+  },
+  "d970f057d9f3": {
+   "title": "Короче старт",
+   "text": "Настройка больше не останавливается, чтобы проверить модель: вы выбираете её из списка аккаунта. Top up — собственная функция приложения: каждая сеть, кошелёк в браузере, телефон или биржа, и приложение видит, как деньги приходят, где бы это ни было. Можно пропустить, и холст откроется сразу. Торговый ключ Hyperliquid появляется только тогда, когда на Hyperliquid уже лежат ваши деньги."
+  },
+  "8504c457159e": {
+   "title": "Hyperliquid из чата",
+   "text": "«Move 11 USDC from Solana to Hyperliquid» открывает ваш аккаунт Hyperliquid: около $1 первого депозита уходит на комиссию открытия, а минимальный ордер — $10. Когда деньги там, чат предлагает включить торговый ключ, и «turn on the trading key» делает это."
+  },
+  "e8b037cd0c0c": {
+   "title": "Небольшие исправления безопасности",
+   "text": "Вызов сайта к контракту, который ihatecrypto не может прочитать, разрешается один раз как вызов, но никогда как место, куда могут уйти деньги. Запланированная покупка, которая ждёт Touch ID, больше не задерживает алерты и обновления. А если ваша вторая проверка использовала OpenRouter до 0.7.0, чат один раз спросит, оставить ли OpenRouter для неё."
+  },
+  "29015b4e01d2": {
+   "title": "Настройки комиссии названы верно",
+   "text": "Апрув комиссии в плане сделки и «Что нового» теперь ведут в Settings › Wallet › Hyperliquid, где комиссия ihatecrypto показана с кнопкой Revoke, а Ledger называет реферальный код, когда подписывает его. Теперь каждый релиз также пересобирается байт в байт на Mac у GitHub, а не только у нас."
+  },
+  "92be29c22034": {
+   "title": "Комиссия ihatecrypto на Hyperliquid",
+   "text": "Сделки на Hyperliquid, открытые в ihatecrypto, несут комиссию ihatecrypto 0.05% сверх комиссии самой биржи: фьючерсы в обе стороны, спот только при продаже. При первой подтверждённой сделке приложение один раз попросит одобрить это, каждый план показывает комиссию в списке комиссий, а отозвать одобрение можно в Settings › Wallet › Hyperliquid."
+  },
+  "0b8e5f6817e6": {
+   "title": "Скидка 4% на комиссии Hyperliquid",
+   "text": "Аккаунт Hyperliquid без реферального кода получает код ihatecrypto, IHATECRYPTO, на первой сделке здесь: биржа тогда берёт на 4% меньше собственной комиссии. Торговый ключ подписывает это без запроса."
+  },
+  "1f324d37366a": {
+   "title": "Переводы, которые находят деньги",
+   "text": "Перевод на сохранённый адрес в Hyperliquid сначала приносит то, чего не хватает на Hyperliquid, из Solana или прямо из сети, где это лежит, одним подтверждением Confirm, а в карточке написано, сколько придёт. Перевод, которому не хватает баланса, сообщается сразу, до любой карточки."
+  },
+  "0237c5abb276": {
+   "title": "Если что-то не вышло, есть работающий путь",
+   "text": "Если операция, сделка или закрытие не проходит или не удаётся подготовить, чат прямо говорит почему и предлагает, что сработает, карточками. Ничего не выполняется, пока вы не нажмёте одну из них и Confirm. Остановку от Guard, процесса подписи или проверки на скам никогда не обходят."
+  },
+  "3cc21d8cadcf": {
+   "title": "Ничего не двигается без вашего клика",
+   "text": "Первая регулярная покупка — карточка, которую нужно подтвердить. Запланированные покупки снова просят одобрить. Стоп или тейк, который чат предлагает по открытой сделке, ждёт Confirm, действия алерта ждут Confirm, а задачи, которые двигают деньги с кошелька автоматизации, начинают на паузе."
+  },
+  "9568d39d2e7c": {
+   "title": "Обновления ждут вас",
+   "text": "Новая версия показывает небольшое окно: Install Update, Remind Me Later или Skip This Version. Ничего не скачивается и не устанавливается, пока вы не нажмёте Install."
+  },
+  "3eb728bc3a3e": {
+   "title": "Открытый код, пересобирается побайтно",
+   "text": "Код ihatecrypto открыт под GPL-3.0, и каждый релиз пересобирается из своего тега побайтно, кроме подписей, так что любой может проверить, что приложение — это именно этот код. Процесс подписи теперь при каждой подписи подтверждает каждый ваш адрес его ключом, проверяет, что выплачивают Uniswap и Jupiter, и ограничивает плечо."
+  },
+  "8726aba0f4d6": {
+   "title": "Обмены в ETH доводят распаковку до конца",
+   "text": "После апрува и обмена одной подписью в сети EVM следующая транзакция больше не получает «nonce too low», а обмен в ETH ждёт своего WETH, прежде чем его распаковать, чтобы WETH не остался нераспакованным."
+  },
+  "611b91c5d429": {
+   "title": "Ваши кошельки и их адреса",
+   "text": "Нажмите на имя кошелька рядом с балансом. Ваши кошельки слева: нажмите на один, чтобы увидеть его адрес в каждой сети — Solana, EVM (один и тот же адрес во всех девяти), Hyperliquid и NEAR — целиком, у каждого кнопка Copy, и «Switch to …». Мультисиг показывает свой адрес, сети, в которых он есть, и свои ключи."
+  },
+  "f9b349854dd2": {
+   "title": "Баланс, который не прыгает",
+   "text": "Баланс больше не показывает нули, пока грузится: вы видите последнее значение, бледным, пока не прочитана каждая сеть. А боковая панель, портфель и строка меню теперь показывают одну и ту же сумму, включая Automation."
+  },
+  "23ded8a88dab": {
+   "title": "Пополнение газа из расписания",
+   "text": "На вкладках Tasks и Wallet в расписании есть «Top up gas». Кнопка считает, сколько SOL нужно задачам кошелька автоматизации на следующие 4 недели, и монету газа в каждой сети, где у него есть USDC, и вписывает перевод в чат с готовой суммой, которую можно изменить. Ничего не уходит, пока вы его не отправите и не нажмёте Confirm."
+  },
+  "564fad1ab7c7": {
+   "title": "Добавление аккаунта ИИ не меняет чат",
+   "text": "Добавление аккаунта в Settings › AI model больше не переключает чат на него. Нажмите Switch, когда захотите."
+  },
+  "af532c05ded8": {
+   "title": "HYPE проверен",
+   "text": "У HYPE в карточке Hyperliquid стоит галочка, как у ETH в его сетях. Остальные монеты на споте Hyperliquid больше не пишут «unverified»: имя там принадлежит одному токену, поэтому ни одна из них не может быть подделкой под другую."
+  },
+  "76536bf16f71": {
+   "title": "Блокировка приложения кодом",
+   "text": "Задайте 6-значный код при настройке или в Settings › Wallet › Passcode. Приложение блокируется при открытии, после перерыва, который вы выберете, когда Mac засыпает, по «lock» и по ⌘L. Откройте его кодом, Touch ID или паролем от Mac. Пять неверных кодов отключают код. Запланированные задачи, стопы и алерты продолжают работать, пока приложение заблокировано."
+  },
+  "bac66cc6a716": {
+   "title": "Чат, который легче читать",
+   "text": "Длинные ответы идут абзацами и списками под логотипом модели и временем. Ползунок над полем выбирает 25%, 50% или Max. Щёлкните правой кнопкой по любому блоку на холсте и выберите «Ask or act in chat», чтобы отправить в чат то, что он показывает."
+  },
+  "8cf0a652662c": {
+   "title": "Мелочи",
+   "text": "Логотипы 300 главных монет поставляются с приложением, поэтому токены вроде HYPE и USDC в карточке Hyperliquid показывают логотипы вместо буквы. Выбор иконки для холстов, папок и адресов — это одна прокрутка с кнопками Logos, Symbols, Emoji и Picture. На Mac без Touch ID запросы пишут «your Mac password»."
+  },
+  "851d15a0c0a6": {
+   "title": "Ваши аккаунты в меню профиля",
+   "text": "Меню профиля показывает подключённые аккаунты ИИ, например подписку, ключ API или модель на этом Mac, каждый со своим логотипом. Нажмите на один, чтобы переключить чат на него. «…» выходит только из этого аккаунта. Settings, Browser и «Что нового» идут сразу ниже."
+  },
+  "8a928069e7f3": {
+   "title": "Модули одним взглядом",
+   "text": "Settings › Modules — это список слева, где видно, сколько включено у каждого вида. Протоколы или сети выбранного вида справа, у каждого свой переключатель."
+  },
+  "5b1449970f82": {
+   "title": "Мелочи",
+   "text": "Адреса выводятся ровным блоком строк одинаковой длины, и ни одна строка не переносит половину адреса отдельно. Торговый ключ, остановленный через «lock», возобновляется в Settings › Wallet › Hyperliquid. Тикер на боковой панели в светлой теме отображается правильно."
+  },
+  "5d298f981efb": {
+   "title": "Отправить ещё со страницы пополнения",
+   "text": "После того как пополнение пришло, «Send more» позволяет выбрать другую сумму. Страница показывает балансы обоих кошельков сейчас → после, а ваш кошелёк снова просит подтверждения."
+  },
+  "ce7b789be2f1": {
+   "title": "Избранное: токены и кошельки",
+   "text": "В Избранном две вкладки. Tokens — таблица с ценой, 24h, ликвидностью и тем, что у вас есть; доска токена открывается рядом со списком. Wallets — ваши кошельки и сохранённые адреса. Вставьте что угодно в «+», и приложение отличит токен от кошелька."
+  },
+  "509c5497dd6b": {
+   "title": "Идеи, с которых начать чат",
+   "text": "Чат предлагает 22 стартовых варианта, по четыре за раз, а ↻ показывает ещё четыре. Каждый простыми словами говорит, что делает."
+  },
+  "d829141a42e6": {
+   "title": "Мелочи",
+   "text": "Расписание остаётся плавным при множестве открытых задач: оно больше не перечитывает каждый шаг при каждой перерисовке. Строки портфеля больше не пишут «gas» или «not earning»."
+  },
+  "5bb6ec140ff0": {
+   "title": "Запланированные покупки попадают на основной кошелёк",
+   "text": "То, что задача покупает с кошелька автоматизации, после каждого запуска переходит на ваш основной кошелёк. Продажа всегда ждёт вашего Confirm и Touch ID. Когда покупкам за неделю нужно больше, чем есть у Automation, расписание заранее, за день, говорит, на сколько пополнить."
+  },
+  "a4fbae7fd90e": {
+   "title": "Расписание стало понятнее",
+   "text": "Приостановленные задачи сворачиваются под «Paused», у каждой есть Delete. «New schedule» создаёт задачу в чате. Запуск, которому сейчас нечего делать, так и пишет, а не выглядит выполненным. Каждая задача показывает, с какого кошелька платит, и это можно переключить. «Ask in chat» у задачи передаёт чату её детали и последние запуски."
+  },
+  "6422b98e5318": {
+   "title": "Навыки и изучение торговли",
+   "text": "Settings › Skills показывает навыки, которым может следовать чат, с переключателем у каждого, и принимает ваши .md или .txt. Встроенное «Trading study» измеряет закрытые сделки любого аккаунта Hyperliquid после комиссий и фандинга, ведёт журнал: почему вы вошли, и записывает, что работает именно у вас. Деньги не двигаются."
+  },
+  "2f9edf809228": {
+   "title": "Холст стал плавнее",
+   "text": "Масштабирование щипком и ⌘-прокруткой остаётся на полной частоте кадров. Светящаяся кромка занятого холста несколько раз плавно пульсирует, а потом остаётся включённой, а лицо монеты проигрывается как видео. Поэтому Mac делает заметно меньше работы, пока чат думает."
+  },
+  "0b52b1df25db": {
+   "title": "Мелочи",
+   "text": "Schedule › Wallet показывает, что есть в каждой сети, в долларах, с полным адресом и Copy."
+  },
+  "b0b720051668": {
+   "title": "Чат спрашивает, когда не уверен",
+   "text": "Если непонятно, какая монета, сколько, в какой сети или кому, чат задаёт один вопрос, а ответы идут карточками прямо под ним. Нажмите на одну или нажмите ↑ и выбирайте стрелками, а Return подтверждает выбор. «Swap USDC to USDT and send it to Bybit» теперь делает именно это и никогда не превращается в сделку."
+  },
+  "bfa071b311d9": {
+   "title": "P/L по каждой монете",
+   "text": "Каждая монета показывает P/L с момента, как вы её получили, включая монеты газа. Что вы заплатили, берётся из истории самого кошелька, даже для монет, купленных вне приложения. Монета, пришедшая переводом или мостом, учитывается по её цене в тот день."
+  },
+  "8bc0eb2ac97f": {
+   "title": "Скрыть баланс",
+   "text": "Глаз рядом с «Balance» скрывает суммы в боковой панели, портфеле, карточках монет, позициях и P/L. Проценты остаются. То, что вы подтверждаете, всегда показывается полностью."
+  },
+  "8a1c6b855bc8": {
+   "title": "Пополнение в одном виде",
+   "text": "Browser wallet, Phone wallet и Exchange показывают один и тот же блок: QR, что делать, и полный адрес с Copy. «Other» выбирает другой токен, а «Custom» вводит свою сумму."
+  },
+  "7334772af0a7": {
+   "title": "Мелочи",
+   "text": "В списке холстов у каждого холста есть логотип ИИ-компании и полные дата и время. Длинное название прокручивается, когда на него наводят курсор."
+  },
+  "891b6a76caba": {
+   "title": "Пополнение из любой сети",
+   "text": "Пополнение показывает все сети, с которыми работает приложение, в одной строке. Выберите монету и сумму (или «Any», если всё равно), и способ: браузерный кошелёк вроде Phantom или MetaMask на странице, которую открывает приложение, телефон по QR-коду и адресу или биржа. Когда деньги приходят, Пополнение говорит, сколько пришло и куда."
+  },
+  "b83b150e84a1": {
+   "title": "Куда ушли деньги",
+   "text": "История открывается на том, что двигалось: день в сумме («−25 USDT sent to Automation · 5 sends»), затем каждое движение: куда ушло, сумма и ссылка на эксплорер. Или спросите чат: «where did the money go today?»"
+  },
+  "7830bb4d7689": {
+   "title": "Расписание по датам",
+   "text": "Каждый запуск — плитка с датой, временем и тем, кто подписывает: сам кошелёк автоматизации или вы с Touch ID. Задача открывается в полной карточке. «Run now» не сдвигает следующий запуск."
+  },
+  "298e7b56f979": {
+   "title": "Кошелёк автоматизации в балансе",
+   "text": "Баланс в боковой панели — это оба кошелька, с разбивкой под ним: Main и Automation. В портфеле есть карточка Automation, а расписание показывает его деньги в долларах. Если нет SOL на комиссии, одна кнопка отправляет ему 0.01 SOL, а пополнение из расписания приносит и комиссию."
+  },
+  "db24106c0bd7": {
+   "title": "Мелочи",
+   "text": "Перевод и сохранённый адрес рисуются карточками маршрута. Кнопки и переключатели оранжевые, а не системного синего цвета. Вторая проверка понимает, что значит команда, и читает результаты поиска раньше, чем их увидит чат."
+  },
+  "f1d8bfe31c88": {
+   "title": "Мультисиг одним действием",
+   "text": "Скажите «make a multisig»: появится карточка с ключами — этого Mac, вашего Ledger, любой сохранённый адрес, сколько угодно — с тем, сколько из них должны подписать, и сетями, которые вы выберете. Одним Confirm он создаётся с одним и тем же адресом в каждой сети, а потом платите с него в чате."
+  },
+  "07fcbba0ca7f": {
+   "title": "Что стоит каждый мост",
+   "text": "Операция между сетями показывает каждый мост, который может её провести (Relay, CCTP от Circle, NEAR Intents, LayerZero), с ценой и временем, на собственном шаге моста. Тот, по которому идёт операция, стоит первым."
+  },
+  "55de3302057c": {
+   "title": "USDT по собственному мосту Tether",
+   "text": "«Move 50 USDT from Arbitrum to Polygon via LayerZero» отправляет их через USDT0: на получение приходит та же сумма, за копейки газа, между Ethereum, Arbitrum, Optimism, Polygon и HyperEVM. Это занимает от минут до часов, поэтому карточка показывает, сколько ждать, а портфель показывает средства в пути."
+  },
+  "b6ea565fa5c6": {
+   "title": "Насколько заполнен чат",
+   "text": "Чип рядом с именем модели показывает, какую долю окна модели занимает чат, например «21k / 1M», или, если платит API-ключ, сколько стоят ответы. Нажмите на него, чтобы увидеть, из чего он состоит: инструкции, чат, холст и ваши балансы."
+  },
+  "45f7fb619503": {
+   "title": "Чат, который помнит нить разговора",
+   "text": "Каждое сообщение теперь уходит вместе с чатом холста с самого начала (когда он становится длинным, с его самой новой частью), а не только с последними строками, поэтому «as usual» по-прежнему значит то, что вы имели в виду. Самый новый блок всегда наверху: законченные операции стоят под текущей, самые новые первыми."
+  },
+  "536047f42c8e": {
+   "title": "Мелочи",
+   "text": "Небольшой первый депозит в Kamino спрашивает «Send anyway?» и показывает аренду цифрами вместо отказа. При загруженности Jupiter приложение повторяет запрос, а его ошибки пишутся целой фразой. Кнопки окна после перезапуска остаются в своём углу."
+  },
+  "adc3b3d84b6d": {
+   "title": "Каждый шаг говорит, что он делает",
+   "text": "Каждая карточка операции показывает своё состояние словами на своей картинке: Ready, Now, Done, Touch ID. Затем видно, что она делает и каким протоколом, с логотипом этого протокола. Нажмите на карточку, чтобы увидеть остальное. ✕, Close или Esc её закрывают."
+  },
+  "1b8d386756fa": {
+   "title": "Деньги: было → стало",
+   "text": "Каждый шаг, который двигает деньги, показывает балансы, которые он меняет: «Solana 26.65 → 24.65 USDC», «Kamino Lend 0 → 2 USDC». Когда всё готово, пишется «было → стало»."
+  },
+  "0b46c5472472": {
+   "title": "Монеты открываются как токены",
+   "text": "SOL, ETH и NEAR открываются там же, где ваши токены, на той же карточке: цена и изменение за 24h, 7d и 30d, график, дневные цифры, сколько вы держите, Ask in chat, Buy и Sell."
+  },
+  "139310f4b470": {
+   "title": "Чат вызывает любой контракт",
+   "text": "Попросите любое, что делает контракт, в девяти сетях: чат пишет вызов, проверяет контракт и симулирует его перед карточкой с Confirm. Он вслух называет следующий шаг, запоминает то, что вы ему поручили, и может следить за чем-то в фоне."
+  },
+  "f08c8a295f92": {
+   "title": "Вызовы, которые не обманут вас",
+   "text": "Вызов, который передал бы права на ваши монеты, отклоняется. Протокол, которого ihatecrypto не знает, должен пройти свои проверки, и на нём держится не больше $50. Депозиты в любой волт показываются в вашем портфеле."
+  },
+  "ce0362da3987": {
+   "title": "Стоп",
+   "text": "Пока чат отвечает, кнопка отправки превращается в Stop (Esc тоже работает): ничего из того, что он собирался сделать, не запускается."
+  },
+  "613f6aa4c4ef": {
+   "title": "Чат сам ищет данные",
+   "text": "Спросите о чём угодно в сети (ваш коэффициент здоровья в Aave, ставку пула на DefiLlama, ваши прошлые сделки на Hyperliquid), и чат сам читает контракт, сеть или публичные данные, без отдельной функции, написанной заранее."
+  },
+  "552d548cc597": {
+   "title": "Чат продолжает после операции",
+   "text": "Попросите то, что зависит от исхода операции, например «buy SOL for $1, then an alert 5% under my price». После вашего Confirm чат делает следующий шаг, исходя из того, что произошло на самом деле."
+  },
+  "fd90daf4cd5a": {
+   "title": "Все крупные стейблкоины везде",
+   "text": "USDT, USDC, USDS, USDe и DAI по их именам в каждой сети, где они есть: меняйте один на другой, отправляйте, переводите между сетями. В портфеле они считаются долларами и «not earning», как USDC."
+  },
+  "50ff89d2da38": {
+   "title": "Сумма, а не «all»",
+   "text": "Карточка, которая переводит всю монету, показывает, сколько это, с «all available» под ней."
+  },
+  "4d9199dbb75f": {
+   "title": "Откройте Hyperliquid, как вам удобно",
+   "text": "Первая сделка спрашивает, как открыть аккаунт: Relay за секунды с комиссией открытия Hyperliquid $1.20 или NEAR Intents за 2–4 минуты без неё."
+  },
+  "2cddd26adea2": {
+   "title": "Новые сети ждут вашего решения",
+   "text": "Сети и протоколы, которые принесёт более поздняя версия, появляются выключенными и один раз спрашивают, включать ли их."
+  },
+  "66687ae124f4": {
+   "title": "Выход в строку меню",
+   "text": "⌘Q теперь оставляет ihatecrypto в строке меню: ваше расписание, алерты и стоп-ордера продолжают работать, а окно больше само не возвращается. ⌥⌘Q, или Quit Completely в строке меню, выходит по-настоящему."
+  },
+  "34bff9e05de9": {
+   "title": "Расписание в строке меню",
+   "text": "Нажмите на монету, чтобы увидеть, что выполнится дальше (задачи и регулярные покупки) и как прошёл последний запуск каждой. Щелчок открывает его."
+  },
+  "7c4d3c49def1": {
+   "title": "BNB Chain",
+   "text": "USDC в BNB Chain и обратно из Solana или любой сети, BNB для газа приходит вместе с ним, отправки на сохранённые адреса и его токены в портфеле. «move 5 USDC from Solana to BNB», «buy CAKE on bnb for 5 USDC»."
+  },
+  "6f53e95500aa": {
+   "title": "Любой токен на любой другой",
+   "text": "В каждой сети: «swap 0.1 SOL for BONK on solana», «swap 1 TSLA for NVDA on robinhood», «swap 1 HYPE for PURR on hyperliquid spot», «swap 1 NEAR for AURORA on near» через NEAR Intents, а также между сетями: обмен SOL на CAKE в BNB Chain, NEAR на SOL."
+  },
+  "eb65e97b3772": {
+   "title": "Buy и Sell у каждой монеты",
+   "text": "SOL, ETH, BNB, HYPE, POL и NEAR открываются с Buy и Sell, как любой токен, на своём графике и в меню правой кнопки. Ни у одного токена кнопки не скрыты: если операция не может пройти, при отправке будет сказано почему."
+  },
+  "d6d19d1b2ed4": {
+   "title": "Отправить всё равно?",
+   "text": "Операция, которая потеряет на комиссиях больше обычного, больше не просто останавливается: она говорит, сколько, например «Relay keeps ≈ $0.23 of $2.00», и спрашивает. Отправить всё равно или отменить. У карточки обмена появляется предупреждение, когда комиссии забирают больше десятой части."
+  },
+  "a5cbd0ea0446": {
+   "title": "Каждая монета открывается",
+   "text": "Каждая строка карточки сети открывается: токен своей страницей, SOL или ETH своим графиком, USDC, который лежит без дела, своей страницей с Buy и Sell, депозит своими подробностями. Монеты и депозиты стоят отдельно: сумма под названием, дневное изменение рядом с долларами."
+  },
+  "13b4aefb3d36": {
+   "title": "Прибыль и убыток у каждого токена",
+   "text": "Токен, купленный в приложении, показывает, сколько он заработал или потерял, рядом с суммой, а его страница сообщает это в долларах и с тем, сколько он стоил. Токен, пришедший откуда-то ещё, показывает сегодняшнее изменение."
+  },
+  "044e3a678a67": {
+   "title": "Обмены на Optimism и HyperEVM",
+   "text": "«swap 0.001 ETH for OP on optimism» проходит там через Uniswap. На HyperEVM деньги не лежат в пулах Uniswap, поэтому «swap 5 USDC for HYPE on hyperevm» или обмен на UBTC, UETH, USOL и kHYPE проходит через Relay swap."
+  },
+  "0f54dd7ca6a5": {
+   "title": "Фразы печатаются в чат",
+   "text": "Кнопка, которая вставляет фразу в чат, печатает её, так что вы видите, куда смотреть, прежде чем отправить."
+  },
+  "da3da104fe39": {
+   "title": "Мелкие исправления",
+   "text": "«Что нового» прокручивает свой список версий. Холст больше не подсвечивает карточки под чатом или панелью. Опечатка в названии папки теперь указывает на эту папку. Перевод в сеть, которой нет в ihatecrypto, больше не принимается за сделку."
+  },
+  "40c920261c9a": {
+   "title": "Холст, который не отстаёт",
+   "text": "Перетаскивание холста двумя пальцами или мышью теперь двигает его целиком: кадры не проседают, даже когда операция ждёт Confirm. Ожидание карточки, ответ модели и первые секунды после запуска занимают долю от прежнего времени."
+  },
+  "98e1f6ca39ee": {
+   "title": "Что вы получите, на карточке",
+   "text": "Карточка обмена показывает, что придёт, по текущей котировке: «≈ 0.0083 SOL», «≈ 1.8 UNI», «≈ 0.11 HYPE». Котировки берутся у Jupiter, Relay, спотовой книги Hyperliquid и токенов акций Robinhood."
+  },
+  "ce3d115f5ef8": {
+   "title": "Запрошено больше, чем есть",
+   "text": "«Buy SOL for 150» при 100 в Solana больше не запускает цепочку операций: чат говорит, что есть, а холст предлагает способы продолжить. Сначала принести остаток из другой сети, забрать всё, что есть, или пополнить."
+  },
+  "315cc9ed9e0b": {
+   "title": "Думать перед ответом",
+   "text": "В Settings › Models есть переключатель, который заставляет модель рассуждать перед ответом: она устойчивее на запутанном запросе, но на несколько секунд медленнее. По умолчанию выключен."
+  },
+  "c08c82a2245d": {
+   "title": "Лучшая модель, которую потянет ваш Mac",
+   "text": "«On this Mac» выбирает модель по памяти вашего Mac: Gemma 4 12B на 16–24 GB, Gemma 4 26B на 32 GB (9 из 10 на экзамене чата, по 5.4 секунды на ответ), Gemma 4 31B от 36 GB и Nemotron 3 Super от NVIDIA от 192 GB. В меню моделей отмечена та, что подходит вашему Mac."
+  },
+  "42db8c1fceba": {
+   "title": "Курс перед обменом",
+   "text": "Обмен, ждущий Confirm, говорит, что вы получите и по какому курсу: «You get ≈ 23 SPX · 1 SPX ≈ $0.43». Покупки в Solana тоже идут через Jupiter. Confirm держит цену 15 секунд, потом Refresh запрашивает новую."
+  },
+  "60635a3cf441": {
+   "title": "Токены остаются токенами",
+   "text": "Сообщение с $SPX или $ и контрактом показывает в чате чип токена, а не длинный адрес, а «understood as» называет токен. Модель по-прежнему получает точный адрес."
+  },
+  "096264cd8ba5": {
+   "title": "Модели на этом Mac в десять раз быстрее",
+   "text": "Модель на этом Mac больше не размышляет про себя перед каждым ответом: Gemma 4 12B отвечает в чате примерно за 8 секунд вместо двух минут."
+  },
+  "d34520d464ef": {
+   "title": "Токены в чате",
+   "text": "Наберите $, чтобы выбрать токен: $SOL показывается своим логотипом, а $ с контрактом или mint показывает этот токен с его картинкой, так что вы видите, что купите, прежде чем отправить. Пока карточка ждёт, Cancel и Confirm находятся прямо в поле ввода."
+  },
+  "f64ff41b95f2": {
+   "title": "Обмен между сетями",
+   "text": "Любой токен в одной сети на любой токен в другой, одной подписью: SOL в Solana на ETH в Arbitrum. Каждый мост для USDC сравнивает Relay с NEAR Intents, а CCTP от Circle выбирается, когда он даёт больше или когда вы его попросите."
+  },
+  "3db0ce9415fa": {
+   "title": "Отправка в Bitcoin, TRON, XRP и не только",
+   "text": "Через NEAR Intents деньги уходят на сохранённый адрес Bitcoin, TRON, XRP, Dogecoin, Zcash или Sui (например, депозит биржи) и приходят с них. «receive» показывает адрес и QR-код. NEAR продаётся за USDC в Base, Arbitrum или Ethereum."
+  },
+  "16a5ff55373f": {
+   "title": "Заём на Aave",
+   "text": "Внесите ETH или USDC, затем берите USDC в долг под них в Base, Arbitrum, Polygon или Ethereum. Карточка показывает коэффициент здоровья до и после займа и цену ETH, при которой позиция будет ликвидирована. ihatecrypto никогда не даёт занять так, чтобы коэффициент упал ниже 1.5."
+  },
+  "0f51345d6ad2": {
+   "title": "Обмены в HyperEVM, Optimism и Tempo",
+   "text": "Две новые сети: USDC туда и обратно, газ приходит вместе с ним, их карточки в портфеле и их переключатели в Settings › Modules. В Tempo стейблкоины меняются на его собственной бирже за один-два базисных пункта."
+  },
+  "fd499ad7cd6f": {
+   "title": "Деньги в пути",
+   "text": "Мост, который ушёл и ещё не пришёл, показывается над карточками сетей. Щелчок открывает страницу самого моста с этой операцией, транзакцией и адресом. Части операции из нескольких сетей идут вместе, со скоростью самой медленной."
+  },
+  "191677c1b6ae": {
+   "title": "Апрувы и пыль",
+   "text": "«show my approvals» показывает каждое разрешение, которое дал ваш кошелёк, сначала безлимитные, у каждого кнопка Revoke. «sweep dust» превращает мелкие остатки в USDC. USDC.e, пришедший через мост, так и называется, и в одно нажатие меняется на USDC от Circle."
+  },
+  "3bbbcdcd5cc1": {
+   "title": "Ответы показываются по мере написания",
+   "text": "Ответ каждой модели показывается по мере написания, а модель на этом Mac читает весь промпт. Claude Code устанавливается из Settings › Models; ключ NEAR Intents в Settings › General снижает комиссии 1Click. Покупки и продажи спота на Hyperliquid тоже работают."
+  },
+  "8e14cdf163e6": {
+   "title": "Confirm — это кнопка",
+   "text": "Карточка, которая ждёт Confirm, выполняется только когда вы нажмёте Confirm. Набранное «yes», «do it» или «да» получает ответ, но не подпись, так что текст с сайта, заметка или вставленное сообщение не могут согласиться за вас."
+  },
+  "29073e797d4b": {
+   "title": "Деньги из любой сети",
+   "text": "Покупка или внесение берёт деньги оттуда, где они лежат, — Base, Arbitrum, Ethereum, Hyperliquid, NEAR, — частями под одним Confirm, а карточка называет, откуда на самом деле пришёл каждый доллар. NEAR можно купить сразу за деньги из Base, Arbitrum или Ethereum."
+  },
+  "a868148d7d3c": {
+   "title": "Uniswap v4 везде",
+   "text": "В Base, Arbitrum, Ethereum и Polygon каждый обмен берёт лучшее из Uniswap v3 и v4, карточка показывает влияние на цену, а глубокий пул торгует в пределах полупроцента от своей котировки. Обмены в Ethereum идут через MEV Blocker, минуя публичный мемпул."
+  },
+  "12d25d940591": {
+   "title": "Покупки во времени",
+   "text": "Jupiter DCA покупает монету частями прямо в сети, даже когда приложение закрыто. Если попросить купить во времени, чат предлагает оба способа, Jupiter DCA или собственные регулярные покупки приложения, каждый одной строкой."
+  },
+  "cea59d3e7e3a": {
+   "title": "Модель на этом Mac в один клик",
+   "text": "«On this Mac» устанавливает или обновляет Ollama, подбирает модель под память вашего Mac, скачивает её и запускает. В меню моделей сначала показываются уже скачанные."
+  },
+  "e5fa4b28abf3": {
+   "title": "Свои ноды",
+   "text": "Settings › General › Your own nodes: бесплатная собственная нода для Solana (Helius) или сети EVM (Alchemy), с шагами, как её получить. Ваша идёт первой, встроенные ноды остаются за ней, а ключ хранится в Keychain этого Mac."
+  },
+  "86301c80e186": {
+   "title": "Один Touch ID на апрув и обмен",
+   "text": "Выключено, пока не включите в Settings › Wallet: апрув и обмен, внесение или мост, который его тратит, идут одной транзакцией (EIP-7702). Ваш кошелёк в этой сети тогда работает через контракт аккаунта, проверенный аудитом. Значок ⓘ у переключателя объясняет, что это значит."
+  },
+  "6c1f38d3815a": {
+   "title": "Мелочи",
+   "text": "«save vitalik.eth as Vitalik» или «save toly.sol as Toly» сохраняет адрес, на который указывает имя. ↑ и ↓ в чате листают всё, что вы отправляли. Маршрут Jupiter, который падает до подписи, уступает место другому. Robinhood пишется просто «Robinhood»."
+  },
+  "bb7239002e01": {
+   "title": "Чат видит ваш холст",
+   "text": "Спрашивайте о чём угодно на холсте: карточка токена, график, позиция, P/L, ответ сервиса. Ответ берётся из цифр, которые вы там видите, и из того диапазона, который показывает график."
+  },
+  "91834070068e": {
+   "title": "Месяц токена, бесплатно",
+   "text": "Поиск токена теперь показывает историю его пула за последние 30 дней: минимум, максимум и цену закрытия за каждый день. На «Where should I buy?» приходит диапазон из графика, а не предложение заплатить за историю."
+  },
+  "bc9c7ca6fca5": {
+   "title": "Ордера сохраняют цену",
+   "text": "«limit 2650.» и «stop at 2650.» больше не теряют цену из-за точки в конце, так что лимит остаётся лимитом. «Brent oil» — это Brent, а не WTI. Проверили 26 617 способов написать команду; все читаются верно."
+  },
+  "e52c5f350566": {
+   "title": "Да — это да",
+   "text": "«yeah right» или «ну да, конечно» могут быть сарказмом: они уходят модели вместо подписи ждущей карточки. Простое «да» по-прежнему подписывает сразу, а изменённая карточка не подписывается сама никогда."
+  },
+  "3fc7272bbcd8": {
+   "title": "Чат не зависает",
+   "text": "Ответ Claude Code не может подвесить чат после своего окончания, а обновление самого Claude Code больше не ломает ответы на минуту."
+  },
+  "b8014acc2ad5": {
+   "title": "Мелочи",
+   "text": "Заметка, в которой упоминается алерт или график, остаётся заметкой. «save 0x… as Mom on tempo» сохраняет «Mom» в Tempo. «Sell all JUP» показывает, сколько составляет «all»."
+  },
+  "c3486161af43": {
+   "title": "Новые настройки",
+   "text": "Разложены по разделам: General (тема, язык приложения, уведомления, фон), Trading agent (Careful, Balanced или Bold, а каждый лимит можно менять), AI model и Wallet, где собраны все ваши кошельки. Одна спокойная колонка, значок у каждой строки."
+  },
+  "1ddb1d1c3fcd": {
+   "title": "Работает без модели",
+   "text": "Нет подписки? Набранные команды вроде «long ETH risk $5» или «send 5 USDC to Bybit» всё равно работают, и ничего не уходит без Confirm и Touch ID. На экране входа об этом сказано, а пустой холст предлагает «Connect a model»."
+  },
+  "38e3ab00a1b5": {
+   "title": "Папки со значками",
+   "text": "«Change icon…» у папки в боковой панели: логотип токена, символ, эмодзи или ваша картинка."
+  },
+  "9ca0186e00a9": {
+   "title": "Безопаснее подписи",
+   "text": "Сайт не может получить подпись, которая выводит деньги с Hyperliquid или сама отправляет USDC. Монеты, NFT и права на траты уходят только на адреса, которые вы одобрили, а сумма и комиссия сети видны в запросе."
+  },
+  "a8979865f224": {
+   "title": "Понимает вас лучше",
+   "text": "«2 500» — это две с половиной тысячи, «sell SOL for $10» никогда не продаёт весь SOL, «ok?» — это вопрос, а не «да», а ответ в неверных единицах переспрашивается."
+  },
+  "81a664399762": {
+   "title": "Сделки сохраняют стоп",
+   "text": "«cancel the limit» снимает только заявки, которые ещё ждут, а позиция, её стоп и тейк остаются. Лимит на откат сам добавляет достаточно маржи, чтобы ордер можно было выставить."
+  },
+  "7ffad4f2f475": {
+   "title": "Стабильнее везде",
+   "text": "Вывод из Aave или Morpho возвращает только то, что вышло, при смене кошелька пропадают карточки, сделанные для другого, а модель, которая зависла, не может заморозить чат."
+  },
+  "4b5568c32885": {
+   "title": "Обновления приходят сами",
+   "text": "Эта копия раз в сутки смотрит на updates.ihatecrypto.ai. Новая версия скачивается в фоне и ставится по кнопке «Restart to update»; кошелёк, настройки и холсты остаются."
+  },
+  "fce9dc9e0c78": {
+   "title": "Спрашивайте о чём угодно",
+   "text": "На вопросы о приложении, вашей квоте или жизни отвечают прямо, и одной строкой о том, что холст мог бы для вас сохранить. Вопрос о системном промпте больше не останавливают как атаку."
+  },
+  "4797d5a6e36d": {
+   "title": "Shift-Return для новой строки",
+   "text": "Shift-Return переносит строку в поле чата, а Return по-прежнему отправляет."
+  },
+  "aba1b80e95e5": {
+   "title": "Торговый ключ ждёт внесения",
+   "text": "Hyperliquid принимает торговый ключ, когда на аккаунт пришло первое внесение. До этого первые шаги не спрашивают Touch ID, а после этого кнопка есть в Settings › Wallet › Key and signing."
+  },
+  "41984c324a7d": {
+   "title": "Обновления сами",
+   "text": "ihatecrypto раз в сутки ищет новую версию. Когда она готова, приходит уведомление, а Install сначала показывает, что изменилось."
+  },
+  "629230567cda": {
+   "title": "Свой звук на каждое событие",
+   "text": "Монета звенит, когда приходят деньги или операция завершается, мягкий звон, когда что-то просит внимания, а низкий глухой стук, когда операция срывается."
+  },
+  "0cc984cf0ea9": {
+   "title": "У настоящего токена есть значок",
+   "text": "Токен показывается по своему тикеру, а проверенный отмечен синей розеткой. «buy STONK» берёт настоящий STONK, а не копию с фальшивым пулом, а купленное здесь показывает прибыль рядом с суммой."
+  },
+  "d0af7328e22c": {
+   "title": "Любой сайт с вашим кошельком",
+   "text": "«open kamino.com» открывает сайт рядом с чатом с вашим кошельком, и каждая подпись сначала показывается вам. Панель можно перетащить куда угодно. Сайты из списка фишинга MetaMask не открываются."
+  },
+  "bc47c052ebe5": {
+   "title": "Награды продаются сами",
+   "text": "«every hour: sweep rewards over $10 into USDC» забирает то, что Merkl должен, когда это стоит $10, и продаёт за USDC. Если меньше $5, ничего не подписывается. Из кошелька автоматизации работает без Touch ID."
+  },
+  "b9519366fb21": {
+   "title": "/ и @ в чате",
+   "text": "Введите /, чтобы увидеть блоки, которые можно добавить, с примером, чтобы доделать. Введите @, чтобы найти имена из адресной книги и избранные токены."
+  },
+  "af628ca8434a": {
+   "title": "Свои лимиты",
+   "text": "Settings › Wallet › Limits задаёт, что может подписываться без Windows Hello: лимит торгового ключа на один ордер и на день, сколько дней он может открывать позиции, а также лимит кошелька автоматизации на день и на неделю. Отдельный процесс подписи хранит эти числа и потраченное в журнале, который не может сбросить ни одна другая программа. Меньшее значение вступает в силу сразу, большее требует подтверждения через Windows Hello, а операция, трату по которой не удаётся записать, не подписывается."
+  },
+  "753792f1f691": {
+   "title": "Движок в собственной песочнице",
+   "text": "Часть, которая читает чат, модели, сайты и сети, теперь работает в Windows AppContainer. Она не может открыть ваши файлы, папку процесса подписи или USB-устройство и не может запустить программу. Всё, что ей нужно сверх этого, например Claude Code или страницу входа, окно приложения делает за неё, по одному заранее заданному запросу за раз. Ваши данные переносятся в папку контейнера при первом запуске."
+  },
+  "7b9177c6deea": {
+   "title": "Переписано на Rust",
+   "text": "Движок и процесс подписи теперь написаны на Rust, и каждая часть сверена с версией для Mac и проверена собственными тестами. Простая команда в чате получает ответ примерно за 8 ms вместо 120, приложение запускается быстрее, а установлены теперь две программы по 20 MB вместо 38 файлов на 155 MB."
+  },
+  "89bb3fab0c1b": {
+   "title": "Windows Hello в оформлении Windows",
+   "text": "Confirm, экран блокировки и запрос сайта показывают ту же клавиатуру для PIN-кода, что и Windows Hello. Каждая операция по-прежнему запрашивает Windows Hello перед подписью, а код доступа приложения только открывает окно приложения."
+  }
+ }
+}
