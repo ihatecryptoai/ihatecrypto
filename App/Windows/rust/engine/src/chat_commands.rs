@@ -526,15 +526,83 @@ impl Engine {
         let why = if local && failure.to_lowercase().contains("not found") {
             if id == "ollama" { self.say(&format!("it isn't downloaded — run «ollama pull {model}» in a terminal"), &format!("она не скачана — выполни в терминале «ollama pull {model}»")) }
             else { self.say("it isn't downloaded", "она не скачана") }
-        } else { prefix(failure, 140) };
+        } else { llm::failure::words(failure) };
+        // What happened in the person's words (no credits, too many requests, a key that didn't fit…), never the service's
+        // JSON: «NEAR AI: {"error":{"message":"No spending limit configured…» said nothing to do.
+        let missing = local && failure.to_lowercase().contains("not found");
+        let known = if missing { None } else { self.model_failure_words(failure, &id, &model) };
         let line = if typed_by_user && self.read_displays(text).await {
-            self.say(&format!("{model} isn't answering ({why}), so I read this one myself. Pick another model for the rest."),
-                     &format!("{model} не отвечает ({why}), поэтому это я прочитал сам. Для остального выбери другую модель."))
+            match &known {
+                Some((why, fix)) => self.say3(&format!("{model} didn’t answer. {why} So I read this one myself. {fix}"),
+                                              &format!("{model} не ответил. {why} Поэтому это я прочитал сам. {fix}"),
+                                              &format!("{model} no respondió. {why} Así que esto lo leí yo. {fix}")),
+                None => self.say(&format!("{model} isn't answering ({why}), so I read this one myself. Pick another model for the rest."),
+                                 &format!("{model} не отвечает ({why}), поэтому это я прочитал сам. Для остального выбери другую модель.")),
+            }
+        } else if let Some((why, fix)) = &known {
+            self.say3(&format!("{model} didn’t answer. {why} {fix} I didn’t act on this — nothing moved."),
+                      &format!("{model} не ответил. {why} {fix} Ничего не сделал — ничего не ушло."),
+                      &format!("{model} no respondió. {why} {fix} No hice nada: no se movió nada."))
         } else {
             self.say(&format!("I couldn’t reach {model} ({why}), so I didn’t act on this — nothing moved. Send it again, or pick another model."),
                      &format!("Не достучался до {model} ({why}), поэтому ничего не сделал — ничего не ушло. Отправь ещё раз или выбери другую модель."))
         };
         self.reply(&line, Some(model));
+    }
+
+    /// A model that didn't answer, in the person's words: what happened and what to do, a sentence each, in the chat's
+    /// language — never the service's JSON (the Mac's modelFailureWords). None for a failure the chat has no words for:
+    /// the service's own sentence is shown then. The service's own page is named where the fix is there.
+    fn model_failure_words(&self, failure: &str, provider: &str, model: &str) -> Option<(String, String)> {
+        use llm::failure::Failure as F;
+        let mut kind = llm::failure::read(failure)?;
+        let info = self.provider(provider).map(|x| (x.info().name.to_string(), x.info().kind));
+        let local = info.as_ref().is_some_and(|(_, k)| *k == Kind::Local);
+        // A program on this PC says in its own words why it failed («model requires more system memory»): «overloaded,
+        // send it again later» would never help. A subscription has no key: its 401 is a sign-in that ran out.
+        if local && kind == F::Busy { return None }
+        if info.as_ref().is_some_and(|(_, k)| *k == Kind::Subscription) && kind == F::Key { kind = F::SignIn }
+        let p = info.map_or_else(|| provider.to_string(), |(name, _)| name);
+        let at = llm::failure::site(provider).map(|u| self.say3(&format!(" at {u}"), &format!(" на {u}"), &format!(" en {u}"))).unwrap_or_default();
+        let (why, fix) = match kind {
+            F::Credits => (self.say3(&format!("{p} says this account has no credits, or no spending limit is set for the key."),
+                                     &format!("{p} пишет, что на счёте нет денег или для ключа не задан лимит расходов."),
+                                     &format!("{p} dice que la cuenta no tiene saldo o que la clave no tiene límite de gasto.")),
+                           self.say3(&format!("Add credits or set the limit in your account{at}."), &format!("Пополни баланс или задай лимит в кабинете{at}."),
+                                     &format!("Añade saldo o fija el límite en tu cuenta{at}."))),
+            F::PlanLimit => (self.say3(&format!("The limit of your {p} plan is used up until it resets."), &format!("Лимит {p} исчерпан, он обновится позже."),
+                                       &format!("Se agotó el límite de tu plan de {p} hasta que se renueve.")),
+                             self.say3("Wait for the reset.", "Подожди, пока он обновится.", "Espera a que se renueve.")),
+            F::RateLimit => (self.say3(&format!("{p} got too many requests and asks to wait."), &format!("{p} получил слишком много запросов и просит подождать."),
+                                       &format!("{p} recibió demasiadas solicitudes y pide esperar.")),
+                             self.say3("Send it again in a minute.", "Отправь ещё раз через минуту.", "Envíalo de nuevo en un minuto.")),
+            F::Key => (self.say3(&format!("{p} didn’t take the key. It is wrong, revoked or expired."), &format!("{p} не принял ключ. Он неверный, отозван или истёк."),
+                                 &format!("{p} no aceptó la clave. Es incorrecta, fue revocada o caducó.")),
+                       self.say3(&format!("Make a new one{at} and paste it in Settings › AI model."), &format!("Создай новый{at} и вставь в Settings › AI model."),
+                                 &format!("Crea una nueva{at} y pégala en Settings › AI model."))),
+            F::SignIn => (self.say3(&format!("The sign-in to {p} has expired."), &format!("Сессия {p} истекла."), &format!("La sesión de {p} caducó.")),
+                          self.say3("Sign in again in Settings › AI model.", "Войди заново в Settings › AI model.", "Inicia sesión de nuevo en Settings › AI model.")),
+            F::Access => (self.say3(&format!("This key or account may not use {model} at {p}."), &format!("Этому ключу или аккаунту {p} модель {model} недоступна."),
+                                    &format!("Esta clave o cuenta de {p} no puede usar {model}.")), String::new()),
+            F::NoModel => (self.say3(&format!("{p} has no model {model}."), &format!("У {p} нет модели {model}."), &format!("{p} no tiene el modelo {model}.")), String::new()),
+            F::TooLong => (self.say3(&format!("This conversation is longer than {model} can read."), &format!("Разговор стал длиннее, чем {model} может прочитать."),
+                                     &format!("La conversación es más larga de lo que {model} puede leer.")),
+                           self.say3("Start a new canvas.", "Начни новый холст.", "Empieza un lienzo nuevo.")),
+            F::Busy => (self.say3(&format!("{p} is overloaded or down right now."), &format!("{p} сейчас перегружен или недоступен."), &format!("{p} está sobrecargado o caído ahora.")),
+                        self.say3("Send it again a little later.", "Отправь ещё раз чуть позже.", "Envíalo de nuevo un poco más tarde.")),
+            F::Offline if local => (self.say3(&format!("{p} isn’t running on this PC."), &format!("{p} не запущен на этом компьютере."), &format!("{p} no está abierto en este PC.")),
+                                    self.say3("Open it and send this again.", "Открой его и отправь ещё раз.", "Ábrelo y envíalo de nuevo.")),
+            F::Offline => (self.say3(&format!("There’s no connection to {p} from this PC."), &format!("С этого компьютера нет связи с {p}."), &format!("No hay conexión con {p} desde este PC.")),
+                           self.say3("Check the internet and send it again.", "Проверь интернет и отправь ещё раз.", "Revisa internet y envíalo de nuevo.")),
+            F::Timeout => (self.say3(&format!("{p} took too long to answer."), &format!("{p} отвечал слишком долго."), &format!("{p} tardó demasiado en responder.")),
+                           self.say3("Send it again.", "Отправь ещё раз.", "Envíalo de nuevo.")),
+            F::Updating => (self.say3("Claude Code is being updated on this PC right now.", "Claude Code сейчас обновляется на этом компьютере.",
+                                      "Claude Code se está actualizando en este PC ahora."),
+                            self.say3("Send it again in a minute or two.", "Отправь ещё раз через минуту-две.", "Envíalo de nuevo en un minuto o dos.")),
+        };
+        let another = if fix.is_empty() { self.say3("Pick another model.", "Выбери другую модель.", "Elige otro modelo.") }
+                      else { format!("{fix} {}", self.say3("Or pick another model.", "Или выбери другую модель.", "O elige otro modelo.")) };
+        Some((why, another))
     }
 
     /// What shows something without moving money: a token, a chart, P/L, a Solana token by its ticker.

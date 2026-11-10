@@ -8,6 +8,7 @@ pub mod api_key;
 pub mod catalog;
 pub mod chatgpt;
 pub mod claude_code;
+pub mod failure;
 pub mod http;
 pub mod near_ai;
 pub mod near_attestation;

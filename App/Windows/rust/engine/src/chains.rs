@@ -606,8 +606,8 @@ impl Engine {
                 // The legs still landing where this step spends (all of them for one that names no place).
                 self.landed(landings, Self::source(c).as_deref()).await?;
                 // Money a move before brought to Solana: the step waits until Solana's balance shows it.
-                if arrived.contains("solana") && Self::spends(c).as_deref() == Some("solana") && let Some(need) = Self::solana_usdc(c) {
-                    self.wait_for_deposit(need, &c.summary()).await;
+                if arrived.contains("solana") && Self::spends_on_solana(c) {
+                    self.wait_for_deposit(Self::solana_usdc(c), &c.summary()).await;
                 }
                 let c = if i > 0 { self.fitted_to_arrival(c).await } else { c.clone() };
                 // A paid request pays a price a card showed: the chain's card shows its first step's (chain()). Any other,
@@ -733,23 +733,54 @@ impl Engine {
         }
     }
 
+    /// A step that spends USDC held on Solana: one that names it (`spends`), or a spread of the free USDC wherever it is.
+    /// A deposit of another coin («lend 2 SOL») spends none.
+    pub fn spends_on_solana(c: &WalletCommand) -> bool {
+        match c {
+            W::Allocate { symbol, from: None, .. } => symbol.eq_ignore_ascii_case("USDC"),
+            W::LendDeposit(symbol, _) | W::Kamino { deposit: true, symbol, .. } => symbol.eq_ignore_ascii_case("USDC"),
+            _ => Self::spends(c).as_deref() == Some("solana"),
+        }
+    }
+
+    /// The wait for money a move brought to Solana is over. Balances are read at «finalized» and a move ends at
+    /// «confirmed», some 13 s earlier, so the money is counted before it shows. With the step's amount there it is over.
+    /// Without one («then move all»), or when the move brings less than the step asks (the rest comes from another
+    /// network), it is over once the finalized balance equals the confirmed one — equal, not «at least»: what an earlier
+    /// step spent is confirmed before it is final too — and that one has read the same several times in a row: three
+    /// when it stands above `entry`, the balance the wait began with (the money is seen coming), eight when it doesn't
+    /// (it had landed already, or a node a little behind still answers the old balance). No confirmed read at all: only
+    /// the step's own amount ends it.
+    pub fn deposit_shown(need: Option<Decimal>, finalized: Decimal, confirmed: Option<Decimal>, steady: u32, entry: Decimal) -> bool {
+        need.is_some_and(|n| finalized >= n) || confirmed.is_some_and(|c| finalized == c && steady >= if c > entry { 3 } else { 8 })
+    }
+
     /// A step that spends on Solana what a move before it brought: an «ARRIVES · SOLANA» card on the route until Solana's
-    /// balance shows the money, two minutes at most; then the step goes on and its own check says what's short.
-    async fn wait_for_deposit(&self, need: Decimal, step: &str) {
+    /// balance shows the money (`deposit_shown`), two minutes at most; then the step goes on and its own check says
+    /// what's short. `need`: the step's amount, None when it names none («move all», a spread) — it read the old balance
+    /// then, and a step asking for more than the move brought waited the whole two minutes (the Mac, 2026-11-10).
+    async fn wait_for_deposit(&self, need: Option<Decimal>, step: &str) {
         let owner = self.st().solana_address();
         let Some(owner) = owner else { return };
         let (rpc, mint) = (SolanaRpc::new(), SpotAsset::usdc().mint);
-        let have = rpc.owned_amount(&owner, &mint).await.unwrap_or_default();
-        if have >= need { return }
-        let card = |have: Decimal| Step {
-            label: "ARRIVES · SOLANA".into(), title: format!("{} USDC", Fmt::num(need, 2)),
-            lines: vec![self.say3("on Solana now", "на Solana сейчас", "en Solana ahora") + &format!("\t{} USDC", Fmt::num(have, 2)),
-                        self.say3("Then: ", "Потом: ", "Luego: ") + step],
-            money: None, status: None,
+        // The one account, read lightly: USDC is the classic token program's.
+        let Ok(account) = solana::spl::associated_account(&owner, &mint, solana::spl::TOKEN_PROGRAM) else { return };
+        let have = rpc.account_amount(&account, "finalized").await.unwrap_or_default();
+        if need.is_some_and(|n| have >= n) { return }
+        let mut confirmed = rpc.account_amount(&account, "confirmed").await;
+        let card = |have: Decimal, confirmed: Option<Decimal>| {
+            // What the step asks for, else what is seen coming.
+            let coming = need.or(confirmed.filter(|c| *c > have).map(|c| c - have));
+            Step {
+                label: "ARRIVES · SOLANA".into(), title: coming.map_or("USDC".to_string(), |c| format!("{} USDC", Fmt::num(c, 2))),
+                lines: vec![self.say3("on Solana now", "на Solana сейчас", "en Solana ahora") + &format!("\t{} USDC", Fmt::num(have, 2)),
+                            self.say3("Then: ", "Потом: ", "Luego: ") + step],
+                money: None, status: None,
+            }
         };
         let id = self.st().running_board.clone();
         let mut at = 0;
-        let first = card(have);
+        let first = card(have, confirmed);
         self.update_board(id.as_deref(), |b| {
             let mut list = b.steps.take().unwrap_or_default();
             at = list.iter().position(|s| s.title == step).unwrap_or(list.len());
@@ -759,12 +790,23 @@ impl Engine {
         let line = self.say3("Waiting for the deposit on Solana", "Жду депозит на Solana", "Esperando el depósito en Solana");
         if let Some(r) = self.st_mut().running.as_mut() { r.lines.push(line) }
         self.changed();
-        for _ in 0..60 {
+        let (mut now, mut steady, mut unread) = (have, 0u32, 0u32);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        while tokio::time::Instant::now() < deadline && !Self::deposit_shown(need, now, confirmed, steady, have) {
+            // No amount to wait for and the node says nothing of what is counted: nothing to wait on.
+            if need.is_none() && confirmed.is_none() && unread >= 5 { break }
             tokio::time::sleep(Duration::from_secs(2)).await;
-            let now = rpc.owned_amount(&owner, &mint).await.unwrap_or_default();
-            let shown = card(now);
+            if let Some(finalized) = rpc.account_amount(&account, "finalized").await { now = finalized }
+            // A read that failed says nothing: it neither counts toward «the same» nor starts the count again.
+            match rpc.account_amount(&account, "confirmed").await {
+                Some(again) => {
+                    steady = if Some(again) == confirmed { steady + 1 } else { 0 };
+                    confirmed = Some(again);
+                }
+                None => unread += 1,
+            }
+            let shown = card(now, confirmed);
             self.update_board(id.as_deref(), |b| if let Some(steps) = b.steps.as_mut() && at < steps.len() { steps[at] = shown });
-            if now >= need { break }
         }
         // It was a wait, not a step: the route goes back to the moves.
         self.update_board(id.as_deref(), |b| if let Some(steps) = b.steps.as_mut() && at < steps.len() && steps[at].label == "ARRIVES · SOLANA" { steps.remove(at); });

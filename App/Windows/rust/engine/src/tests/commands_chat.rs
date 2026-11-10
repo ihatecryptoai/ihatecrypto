@@ -130,10 +130,17 @@ async fn the_model_out_of_reach_says_why_and_nothing_moves() {
         assert_eq!(said.text, "claude-opus-5-5 answered, but not in a form ihatecrypto can read, so nothing ran. Say it another way, or pick another model.");
         assert_eq!(said.note.as_deref(), Some("claude-opus-5-5"));
         // Typed, but nothing in it reads without a model: it isn't acted on.
+        // A failure the engine knows is said in plain words with what to do, never the service's own text.
         e.model_unreachable("buy SOL for 5 USDC", &format!("HTTP 500: {}", "x".repeat(200)), false, true).await;
+        assert_eq!(last(&e), "claude-opus-5-5 didn’t answer. Anthropic API is overloaded or down right now. Send it again a little later. \
+                              Or pick another model. I didn’t act on this — nothing moved.");
+        e.model_unreachable("buy SOL for 5 USDC", r#"HTTP 402: {"error":{"message":"Insufficient Balance"}}"#, false, true).await;
+        assert!(last(&e).starts_with("claude-opus-5-5 didn’t answer. Anthropic API says this account has no credits"), "{}", last(&e));
+        // One it doesn't know keeps the service's own words, cut short.
+        e.model_unreachable("buy SOL for 5 USDC", &format!("weird: {}", "x".repeat(200)), false, true).await;
         let text = last(&e);
-        assert!(text.starts_with("I couldn’t reach claude-opus-5-5 (HTTP 500: xxx") && text.ends_with("x), so I didn’t act on this — nothing moved. Send it again, or pick another model."), "{text}");
-        assert_eq!(text.chars().filter(|c| *c == 'x').count(), 140 - "HTTP 500: ".len());
+        assert!(text.starts_with("I couldn’t reach claude-opus-5-5 (weird: xxx") && text.ends_with("x), so I didn’t act on this — nothing moved. Send it again, or pick another model."), "{text}");
+        assert_eq!(text.chars().filter(|c| *c == 'x').count(), 140 - "weird: ".len());
         // A model on this PC that isn't downloaded: how to get it.
         e.set_settings(|s| s.provider = Some("ollama".into()));
         e.model_unreachable("hi", "model 'gemma4:26b' not found", false, false).await;

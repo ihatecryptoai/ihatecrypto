@@ -819,3 +819,49 @@ async fn near_ai_sends_whole_and_checks_the_reply_it_got() {
     for (k, v) in [("authorization", "Bearer k"), ("x-no-aliasing", "true"), ("accept-encoding", "identity")] { assert_eq!(a[0].headers[k], v) }
     assert_eq!(a[1].path, format!("/signature/chatcmpl-1?model={model}&signing_algo=ed25519"));
 }
+
+
+/// What a model's service said, read as what happened (the Mac's LLMFailureTests: the chat showed NEAR AI's JSON).
+#[test]
+fn a_services_error_is_read_as_what_happened() {
+    use crate::failure::{Failure::*, read, words};
+    let cases = [
+        (r#"NEAR AI: {"error":{"message":"No spending limit configured. Please contact support to set up credits.","type":"no_limit_configured","param":null}}"#, Some(Credits)),
+        (r#"HTTP 429: {"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota"}}"#, Some(Credits)),
+        ("Anthropic: Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.", Some(Credits)),
+        (r#"HTTP 402: {"error":{"message":"Insufficient Balance","type":"unknown_error"}}"#, Some(Credits)),
+        (r#"HTTP 429: {"error":{"message":"Rate limit reached for gpt-5 in organization org-x on requests per min (RPM)","type":"requests"}}"#, Some(RateLimit)),
+        (r#"HTTP 429: {"error":{"code":429,"message":"Quota exceeded for metric: generate_content_free_tier_requests","status":"RESOURCE_EXHAUSTED"}}"#, Some(RateLimit)),
+        ("HTTP 429: Too Many Requests", Some(RateLimit)),
+        ("Claude Code: You've hit your limit · resets 3pm (Europe/Kyiv)", Some(PlanLimit)),
+        (r#"HTTP 401: {"error":{"message":"Incorrect API key provided: sk-proj-…","type":"invalid_request_error","code":"invalid_api_key"}}"#, Some(Key)),
+        ("Anthropic: invalid x-api-key", Some(Key)),
+        ("The Codex CLI login expired. Run codex once or sign in via the browser.", Some(SignIn)),
+        (r#"HTTP 404: {"error":{"message":"The model `gpt-9` does not exist or you do not have access to it.","code":"model_not_found"}}"#, Some(Access)),
+        (r#"HTTP 404: {"error":{"message":"No endpoints found for x/y.","code":404}}"#, Some(NoModel)),
+        (r#"HTTP 400: {"error":{"message":"This model's maximum context length is 128000 tokens.","code":"context_length_exceeded"}}"#, Some(TooLong)),
+        ("Anthropic: Overloaded", Some(Busy)),
+        ("HTTP 503: Service Unavailable", Some(Busy)),
+        ("error sending request for url (http://localhost:11434/api/chat)", Some(Offline)),
+        ("Claude Code didn't answer in 120 s, so it was stopped. Send it again, or pick another model.", Some(Timeout)),
+        ("Claude Code stopped with code 1: error: unknown option '--restricted'", Some(Updating)),
+        (r#"HTTP 429: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits."#, Some(RateLimit)),
+        (r#"HTTP 429: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}"#, Some(PlanLimit)),
+        (r#"HTTP 401: {"error":{"message":"Provided authentication token is expired. Please try signing in again.","code":"token_expired"}}"#, Some(SignIn)),
+        (r#"HTTP 404: {"error":{"message":"No endpoints found matching your data policy (Free model publication)","code":404}}"#, Some(Access)),
+        ("Claude Code stopped with code 127: env: node: No such file or directory", None),
+        ("NEAR AI gave no enclave evidence for x, so nothing was sent. Pick another of its private models.", None),
+        ("The model returned an empty reply.", None),
+    ];
+    for (text, kind) in cases { assert_eq!(read(text), kind, "{text}") }
+    // A failure nobody knows still reads as a sentence: the service's «message», «detail» or «error» string, cut off or
+    // not, never its JSON and never only «HTTP 400».
+    assert_eq!(words(r#"NEAR AI: {"error":{"message":"Model is warming up, \"retry\" soon.","type":"warmup"}}"#), r#"Model is warming up, "retry" soon."#);
+    assert_eq!(words(r#"HTTP 400: {"error":{"message":"It’s https:\/\/x.y down"}}"#), "It’s https://x.y down");
+    assert_eq!(words(r#"HTTP 400: {"error":"registry.ollama.ai/library/x does not support tools"}"#), "registry.ollama.ai/library/x does not support tools");
+    assert_eq!(words(r#"HTTP 400: {"detail":"Unsupported value"}"#), "Unsupported value");
+    assert_eq!(words(r#"NEAR AI: {"error":{"message":"The enclave is restar"#), "The enclave is restar");
+    assert_eq!(words("The model returned an empty reply."), "The model returned an empty reply.");
+    assert_eq!(words(r#"The model service: {"code":"weird"}"#), "The model service: code:weird");
+    assert_eq!(words(&"я".repeat(400)).chars().count(), 140);
+}

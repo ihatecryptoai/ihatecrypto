@@ -85,6 +85,19 @@ fn the_next_step_is_fitted_to_what_arrived() {
     assert_eq!(Engine::arrives(&WalletCommand::Kamino { deposit: false, symbol: "USDC".into(), amount: None }).as_deref(), Some("solana"));
     assert_eq!(Engine::arrives(&WalletCommand::LendWithdraw("SOL".into(), None)), None);
     assert_eq!(Engine::arrives(&one), None);
+    // The wait for what a move brought: over with the step's amount there, and for a step that names none, or asks for
+    // more than the move brought, once the finalized balance equals a confirmed one that stopped moving.
+    let shown = |need: Option<&str>, finalized: &str, confirmed: Option<&str>, steady: u32, entry: &str| Engine::deposit_shown(need.map(d), d(finalized), confirmed.map(d), steady, d(entry));
+    assert!(!shown(Some("1"), "0.107", Some("1.107"), 5, "0.107") && shown(Some("1"), "1.107", Some("1.107"), 0, "0.107") && shown(Some("1"), "1", None, 0, "0.107"));
+    assert!(!shown(None, "0.107", Some("1.107"), 9, "0.107") && !shown(None, "1.107", Some("1.107"), 2, "0.107") && shown(None, "1.107", Some("1.107"), 3, "0.107"));
+    // Nothing seen coming (it had landed already, or a node behind still answers the old balance): eight reads, not three.
+    assert!(!shown(None, "0.107", Some("0.107"), 7, "0.107") && shown(None, "0.107", Some("0.107"), 8, "0.107"));
+    assert!(!shown(Some("50"), "5", Some("6"), 9, "5") && shown(Some("50"), "6", Some("6"), 3, "5") && !shown(Some("50"), "6", None, 9, "5"));
+    // Money an earlier step spent is confirmed before it is final: 20 final, 15 counted is not «caught up».
+    assert!(!shown(None, "20", Some("15"), 9, "20") && shown(None, "15", Some("15"), 8, "20"));
+    // Which steps wait: one that spends Solana's USDC, and a spread of the free USDC wherever it is; never another coin's deposit.
+    assert!(Engine::spends_on_solana(&WalletCommand::LendDeposit("USDC".into(), None)) && Engine::spends_on_solana(&WalletCommand::SolanaTo("base".into(), None)));
+    assert!(!Engine::spends_on_solana(&WalletCommand::LendDeposit("SOL".into(), Some(Decimal::TWO))) && !Engine::spends_on_solana(&WalletCommand::LendWithdraw("USDC".into(), Some(Decimal::ONE))));
     // A token a swap gave: within 2 % only.
     let send = |x: Decimal| WalletCommand::SendToken { name: "Bybit".into(), token: "USDT".into(), amount: Some(x), network: Some("solana".into()) };
     assert_eq!(Engine::fitted(&send(Decimal::from(750)), Decimal::from(750), d("749.8"), false), Some(send(d("749.8"))));

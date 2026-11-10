@@ -108,19 +108,27 @@ impl SolanaRpc {
     /// What `owner`'s own token account for `mint` holds, in whole tokens; 0 without one. Two light reads, never
     /// getTokenAccountsByOwner, which the public node throttles right after a swap.
     pub async fn owned_amount(&self, owner: &str, mint: &str) -> Result<Decimal> {
+        Ok(self.amount_at(owner, mint, "finalized").await?.unwrap_or_default())
+    }
+
+    /// What one token account holds, in whole tokens, at a commitment of the caller's: «confirmed» counts a move the
+    /// moment it is through, some 13 s before the finalized balance shows it. One light read. None when the node didn't
+    /// answer or there is no account — never 0 for a read that failed: a wait hangs on it.
+    pub async fn account_amount(&self, account: &str, commitment: &str) -> Option<Decimal> {
+        let answer = self.call("getTokenAccountBalance", json!([account, {"commitment": commitment}])).await.ok()?;
+        let value = answer.get("value")?;
+        let units = value.get("amount").and_then(Value::as_str).and_then(|a| a.parse::<Decimal>().ok())?;
+        let decimals = value.get("decimals").and_then(Value::as_u64).filter(|d| *d <= 28)?;
+        Some(units / Decimal::from_i128_with_scale(10i128.pow(decimals as u32), 0))
+    }
+
+    async fn amount_at(&self, owner: &str, mint: &str, commitment: &str) -> Result<Option<Decimal>> {
         let info = self.call("getAccountInfo", json!([mint, {"encoding": "base64", "commitment": "finalized"}])).await?;
         let program = info.get("value").and_then(|v| v.get("owner")).and_then(Value::as_str)
             .filter(|p| [spl::TOKEN_PROGRAM, spl::TOKEN_2022_PROGRAM].contains(p));
         let Some(program) = program else { return fail(format!("{mint} isn't a token mint on Solana.")) };
         let account = spl::associated_account(owner, mint, program)?;
-        let Ok(answer) = self.call("getTokenAccountBalance", json!([account, {"commitment": "finalized"}])).await else { return Ok(Decimal::ZERO) };
-        let value = answer.get("value");
-        let units = value.and_then(|v| v.get("amount")).and_then(Value::as_str).and_then(|a| a.parse::<Decimal>().ok());
-        let decimals = value.and_then(|v| v.get("decimals")).and_then(Value::as_u64);
-        match (units, decimals) {
-            (Some(u), Some(d)) if d <= 28 => Ok(u / Decimal::from_i128_with_scale(10i128.pow(d as u32), 0)),
-            _ => Ok(Decimal::ZERO),
-        }
+        Ok(self.account_amount(&account, commitment).await)
     }
 
     /// Raw units of an SPL token held by `owner` across its accounts.
