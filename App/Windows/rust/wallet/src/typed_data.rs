@@ -209,7 +209,7 @@ fn value(v: Option<&Json>, ty: &str) -> Result<Value> {
 }
 
 /// An unsigned integer as a 32-byte big-endian word, from a JSON number, decimal or 0x-hex string.
-/// ponytail: ASCII digits only, where Swift's `isNumber` also lets other scripts' digits through.
+/// The digits 0–9 only, as on the Mac since the 2026-11-10 review (its `isNumber` took marked digits and other scripts').
 pub fn word(v: Option<&Json>) -> Result<[u8; 32]> {
     let text = match v {
         Some(Json::String(s)) => s.clone(),

@@ -79,15 +79,20 @@ pub fn spend(request: &SignerRequest) -> Result<limits::Hold> {
             Err(_) => t.others.push(format!("an amount the signer can't read ({amount})")),
         },
         R::SignRelayMulticallPermit { chain_id, token, value, valid_before, relayer, refund_to, nft_recipient, metadata, calls } => {
-            // Into Relay's depository for an order whose payee the signer checked: to this wallet's own address elsewhere
-            // it's the person's money moving, else spending.
+            // Into Relay's depository for an order whose payee the signer checked. To one of the person's own wallets,
+            // in dollars, for exactly this deposit: what is spent is what doesn't come back, the deposit less the order's
+            // minimum. The order names its own amounts, so «to my own wallet» alone counted nothing while it could pay
+            // back a cent (the 2026-11-10 review). Another payee, or a coin the signer can't count: the whole deposit.
             let m = relay::MulticallPermit {
                 chain_id: *chain_id, token: token.clone(), from: core::address("evm")?, value: *value, valid_before: *valid_before, relayer: relayer.clone(),
                 refund_to: refund_to.clone(), nft_recipient: nft_recipient.clone(), metadata: metadata.clone(),
                 calls: calls.iter().map(|c| relay::Call { target: c.target.clone(), allow_failure: c.allow_failure, value: c.value, call_data: c.data.clone() }).collect(),
             };
-            let paid_to_own = m.deposit_id().and_then(|id| relay_orders::order(&id)).is_some_and(|o| is_own(&o.recipient));
-            if !paid_to_own { t.add(Decimal::from(*value), dollar_decimals(token), None, || format!("{value} units of {}…", prefix(token, 8))) }
+            t.add(Decimal::from(*value), dollar_decimals(token), None, || format!("{value} units of {}…", prefix(token, 8)));
+            let back = m.deposit_id().and_then(|id| relay_orders::order(&id))
+                .filter(|o| dollar_decimals(token).is_some() && is_own(&o.recipient) && o.input_currency == token.to_lowercase() && o.input_amount == value.to_string())
+                .and_then(|o| o.minimum_dollars());
+            if let Some(back) = back { t.dollars = t.dollars.saturating_sub(back).max(Decimal::ZERO) }
         }
         R::SignHyperliquidL1 { action: act, .. } => match action::opening(act) {
             Opening::Dollars(d) => t.dollars = t.dollars.saturating_add(d),

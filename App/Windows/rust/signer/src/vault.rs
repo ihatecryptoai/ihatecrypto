@@ -221,7 +221,10 @@ pub fn key(reason: &str, use_session: bool, within: Option<u64>) -> Result<Key> 
                     if let Some(s) = live.filter(|s| s.scope.is_none()) { s.scope = Some(wanted.clone()) }
                     Some(key)
                 }
-                (None, Some(s)) if s.scope.as_ref().is_none_or(|bound| wanted.is_subset(bound)) => {
+                // A session no signature has used yet was opened by another request's prompt (a move's new address, a
+                // setting): a move takes it, a site's text never does — after a move's prompt that ended in a
+                // refusal, the text signed next would have gone unseen.
+                (None, Some(s)) if s.scope.as_ref().map_or(!wanted.iter().any(|w| w.starts_with("text:")), |bound| wanted.is_subset(bound)) => {
                     if s.scope.is_none() { s.scope = Some(wanted.clone()) }
                     Some(s.key.clone())
                 }

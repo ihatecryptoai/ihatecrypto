@@ -17,7 +17,6 @@ use std::time::Duration;
 use wallet::evm::eip712::{Parts, Typed, Value};
 use wallet::evm::{EvmSignature, checksum};
 use wallet::keys::{base58, parse_path};
-use wallet::from_hex;
 
 /// An error the person reads, with the device's status word when it gave one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,9 +329,9 @@ pub fn field_type(ty: &str) -> Result<Vec<u8>> {
 pub fn field_value(value: &Value) -> Result<Vec<u8>> {
     Ok(match value {
         Value::String(s) => s.as_bytes().to_vec(),
-        Value::Address(a) => match from_hex(a) {
-            Some(b) if b.len() == 20 => b,
-            _ => return Err(LedgerError::new(format!("Invalid address: {a}"))),
+        Value::Address(a) => match wallet::address_bytes(a) {
+            Some(b) => b,
+            None => return Err(LedgerError::new(format!("Invalid address: {a}"))),
         },
         Value::Uint(n) => {
             let trimmed: Vec<u8> = n.to_be_bytes().into_iter().skip_while(|&b| b == 0).collect();

@@ -521,7 +521,7 @@ pub mod uniswap {
         if tokens.len() != fees.len() + 1 { return fail("A Uniswap path needs one fee between each two tokens.") }
         let mut out = Vec::new();
         for (i, token) in tokens.iter().enumerate() {
-            let Some(bytes) = from_hex(token).filter(|b| b.len() == 20) else { return fail(format!("Invalid address: {token}")) };
+            let Some(bytes) = wallet::address_bytes(token) else { return fail(format!("Invalid address: {token}")) };
             out.extend(bytes);
             if let Some(fee) = fees.get(i) { out.extend(&(*fee as u32).to_be_bytes()[1..]) }
         }
@@ -984,7 +984,7 @@ impl SponsoredTransfer {
 
     /// rlp([nonce, gasPrice 0, gasLimit, token, value 0, data]): the legacy fields.
     fn fields(&self) -> Result<Vec<Rlp>> {
-        let Some(token) = from_hex(&self.token).filter(|t| t.len() == 20) else { return fail(format!("Invalid token address: {}", self.token)) };
+        let Some(token) = wallet::address_bytes(&self.token) else { return fail(format!("Invalid token address: {}", self.token)) };
         Ok(vec![Rlp::uint(self.nonce), Rlp::uint(0), Rlp::uint(self.gas_limit), Rlp::Bytes(token), Rlp::uint(0), Rlp::Bytes(self.calldata()?)])
     }
 
@@ -1273,7 +1273,7 @@ pub mod batch7702 {
         if !CHAINS.contains(&chain_id) { out.push(format!("ihatecrypto doesn't batch calls on network {chain_id}.")) }
         if calls.is_empty() || calls.len() > MAX_CALLS { out.push(format!("A batch holds 1 to {MAX_CALLS} calls, not {}.", calls.len())) }
         for c in calls {
-            if from_hex(&c.to).map(|b| b.len()) != Some(20) { out.push(format!("Not an address: {}.", c.to)) }
+            if wallet::address_bytes(&c.to).is_none() { out.push(format!("Not an address: {}.", c.to)) }
             out.extend(self_call(&c.to, &c.data, owner));
             out.extend(Call::decode(&c.data).refusal(owner, Some(chain_id)));
             out.extend(Call::target_refusal(&c.to, &c.data, owner));

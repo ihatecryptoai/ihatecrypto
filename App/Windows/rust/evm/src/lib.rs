@@ -10,7 +10,7 @@ pub mod simulation;
 
 pub use ruint::aliases::U256;
 use wallet::evm::{EvmSignature, keccak, sign};
-use wallet::{Result, WalletError, from_hex, to_hex};
+use wallet::{Result, WalletError, to_hex};
 
 pub(crate) fn fail<T>(m: impl Into<String>) -> Result<T> { Err(WalletError(m.into())) }
 
@@ -45,7 +45,7 @@ fn header(length: usize, short: u8, long: u8) -> Vec<u8> {
     [vec![long + be.len() as u8], be].concat()
 }
 
-fn address20(a: &str) -> Option<Vec<u8>> { from_hex(a).filter(|b| b.len() == 20) }
+fn address20(a: &str) -> Option<Vec<u8>> { wallet::address_bytes(a) }
 
 /// EIP-7702: this address may run `address`'s code. The key signed keccak256(0x05 ‖ rlp([chainId, address, nonce])).
 #[derive(Debug, Clone, PartialEq, Eq)]

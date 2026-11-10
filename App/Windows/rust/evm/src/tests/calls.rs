@@ -729,3 +729,51 @@ fn a_signature_from_elsewhere_makes_the_same_transaction() {
     let flipped = EvmSignature { v: if signature.v == 27 { 28 } else { 27 }, ..signature };
     assert_ne!(recover(&tx.signing_hash().unwrap(), &flipped).ok(), Some(me));
 }
+
+/// The 2026-11-10 review (the Mac's Review1110Tests): an address without its «0x» reads as the same 20 bytes, while
+/// every check that compares it as text misses it — the wallet's own address called with executeBatch passed
+/// `self_call`. Nothing that is signed takes one.
+#[test]
+fn an_address_without_its_prefix_is_not_signed() {
+    let owner = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    let key = h("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+    let bare = &owner[2..];
+    let batch = vec![0x34, 0xfc, 0xd5, 0xbe];
+    assert_eq!(wallet::address_bytes(owner).map(|b| b.len()), Some(20));
+    assert_eq!(from_hex(bare).map(|b| b.len()), Some(20));
+    for odd in [bare.to_string(), format!("0X{bare}"), format!("{owner}00"), owner[..40].to_string(), format!(" {owner}"), String::new(),
+                "0x4cd0+e387622c35bddb9b4c962c136462338bc31".to_string()] {
+        assert_eq!(wallet::address_bytes(&odd), None, "{odd}");
+    }
+    // What let it through: the text comparison says «not this wallet».
+    assert_eq!(batch7702::self_call(bare, &batch, owner), None);
+    // A transaction to it has no bytes to sign, and neither has a batch's call, an ABI word or typed data.
+    let tx = |to: &str, value: u64, data: Vec<u8>| Transaction { chain_id: 8453, nonce: 0, max_priority_fee_per_gas: 1, max_fee_per_gas: 1, gas_limit: 100_000,
+                                                                 to: to.into(), value, data, authorizations: vec![] };
+    assert!(tx(bare, 0, batch.clone()).signed(&key).is_err());
+    assert!(tx(bare, 0, batch.clone()).signing_hash().is_err());
+    let call = batch7702::BatchCall { to: bare.into(), data: batch.clone() };
+    assert!(batch7702::problems(std::slice::from_ref(&call), owner, 8453).iter().any(|p| p.starts_with("Not an address")));
+    assert!(batch7702::execute_batch(std::slice::from_ref(&call)).is_err());
+    assert!(abi::address(bare).is_err());
+    use wallet::evm::eip712::{self, Field, Value};
+    assert!(eip712::digest(&[Field::new("verifyingContract", "address", Value::Address(bare.into()))], "T",
+                           &[Field::new("a", "address", Value::Address(owner.into()))]).is_err());
+    // With the prefix, in any case, it signs as before.
+    assert!(tx(&owner.to_lowercase(), 1, vec![]).signed(&key).is_ok());
+}
+
+/// setApprovalForAll(operator, 2): a contract that doesn't hold the flag to 0 or 1 (ABI coder v1, Solady) reads it as
+/// yes, while «last byte is 1» read it as a revoke. Any non-zero word grants, and is refused.
+#[test]
+fn any_non_zero_approval_for_all_is_a_grant() {
+    let me = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
+    let thief = "11".repeat(20);
+    let call = |flag: &str| Call::decode(&h(&format!("a22cb465{}{}", word(&thief), flag)));
+    assert_eq!(call(&word("0")), Call::SetApprovalForAll { operator: format!("0x{thief}"), approved: false });
+    assert_eq!(call(&word("0")).refusal(me, None), None);
+    for flag in [word("1"), word("2"), word("100"), format!("80{}", "0".repeat(62)), "f".repeat(64)] {
+        assert_eq!(call(&flag), Call::SetApprovalForAll { operator: format!("0x{thief}"), approved: true }, "{flag}");
+        assert!(call(&flag).refusal(me, None).is_some(), "{flag}");
+    }
+}

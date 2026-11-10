@@ -23,7 +23,7 @@ pub fn checksum(hex: &str) -> String {
 /// EIP-712 typed-data hashing for flat structs, which is all Hyperliquid and a deposit need.
 pub mod eip712 {
     use super::keccak;
-    use crate::{Result, fail, from_hex};
+    use crate::{Result, fail};
 
     #[derive(Debug, Clone, PartialEq)]
     pub enum Value {
@@ -88,9 +88,9 @@ pub mod eip712 {
         let mut word = [0u8; 32];
         match value {
             Value::String(s) => return Ok(keccak(s.as_bytes())),
-            Value::Address(a) => match from_hex(a) {
-                Some(bytes) if bytes.len() == 20 => word[12..].copy_from_slice(&bytes),
-                _ => return fail(format!("Invalid address: {a}")),
+            Value::Address(a) => match crate::address_bytes(a) {
+                Some(bytes) => word[12..].copy_from_slice(&bytes),
+                None => return fail(format!("Invalid address: {a}")),
             },
             Value::Uint(n) => word[24..].copy_from_slice(&n.to_be_bytes()),
             Value::Bool(b) => word[31] = *b as u8,

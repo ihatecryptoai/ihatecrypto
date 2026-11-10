@@ -120,6 +120,11 @@ fn move_scope(request: &SignerRequest) -> Option<HashSet<String>> {
         R::SignRelayMulticallPermit { chain_id, token, relayer, refund_to, .. } => {
             tagged(format!("evm:{chain_id}:"), keys(vec![token.clone(), relayer.clone(), refund_to.clone()], address("evm").ok().as_deref()))
         }
+        // A site's text or typed data, by what is signed: with no scope it was inside every open session (the empty set
+        // is in any), so a move's prompt also signed whatever a site asked next, unseen (the 2026-11-10 review).
+        R::SignPersonal { message: text } | R::SignSolanaMessage { message: text } | R::SignTypedData { json: text } => {
+            [format!("text:{}", wallet::to_hex(&wallet::evm::keccak(text)))].into()
+        }
         R::SignNearTransfer { receiver, .. } => [format!("near:{receiver}")].into(),
         R::SignNearIntentDeposit { deposit_address, .. } => [format!("near:{deposit_address}")].into(),
         _ => return None,
@@ -568,14 +573,14 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             let tx = Transaction { chain_id, nonce, max_priority_fee_per_gas: max_priority_fee, max_fee_per_gas: max_fee, gas_limit, to: to.clone(), value,
                                    data: data.clone(), authorizations: vec![] };
             if !SIGNABLE.contains(&chain_id) { v.problems.push(format!("ihatecrypto doesn't sign for network {chain_id}.")) }
+            // «0x» and 40 hex digits only: the checks below compare `to` as text (wallet::address_bytes).
+            if wallet::address_bytes(&to).is_none() { v.problems.push(format!("Not an address: {to}.")) }
             v.problems.extend(call.refusal(&owner, Some(chain_id)));
             v.problems.extend(Call::target_refusal(&to, &data, &owner));
             v.problems.extend(batch7702::self_call(&to, &data, &owner));
-            let relay_payees = match Call::relay_deposit_id(&to, &data) {
-                Some(id) => relay_orders::order(&id).map(|o| vec![o.recipient]),
-                None => Some(vec![]),
-            };
-            if relay_payees.is_none() { v.problems.push(relay_orders::UNCHECKED.into()) }
+            let deposit = Call::relay_deposit_id(&to, &data);
+            let relay_order = deposit.as_ref().and_then(|id| relay_orders::order(id));
+            if deposit.is_some() && relay_order.is_none() { v.problems.push(relay_orders::UNCHECKED.into()) }
             v.problems.extend(tx.fee_problem());
             // Coins, tokens, NFTs and spending rights go only to this wallet or an address approved in person.
             for payee in call.payees(&to, value, chain_id) {
@@ -583,10 +588,10 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             }
             if !v.ok() { return Ok(refused(v)) }
             // A contract whose call can't be read is asked about in person once, as a call only.
-            let doing = format!("{}\nnetwork fee {}", call.summary(chain_id, &to, value), tx.fee_text());
+            let doing = format!("{}{}\nnetwork fee {}", call.summary(chain_id, &to, value), relay_orders::line(relay_order.as_slice()), tx.fee_text());
             let target = call.unread_target(&to, value, chain_id);
             let mut money: Vec<String> = recipients.iter().filter(|r| Some(recipients::key(r)) != target).cloned().collect();
-            money.extend(relay_payees.unwrap_or_default());
+            money.extend(relay_order.map(|o| o.recipient));
             approve(&money, false, &doing)?;
             if let Some(t) = &target { approve(std::slice::from_ref(t), true, &doing)? }
             let raw = with_key("evm", &doing, |k| Ok(tx.signed(k)?.0))?;
@@ -614,25 +619,25 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                                     value: 0, data: vec![], authorizations: vec![] };
             v.problems.extend(fee.fee_problem());
             let approved: HashSet<String> = recipients.iter().map(|r| r.to_lowercase()).chain([owner.to_lowercase()]).collect();
-            let mut relay_payees = Vec::new();
+            let mut relay: Vec<RelayOrder> = Vec::new();
             for c in &calls {
                 for payee in Call::decode(&c.data).payees(&c.to, 0, chain_id) {
                     if !approved.contains(&payee.to_lowercase()) { v.problems.push(format!("Money or the right to spend it goes to an unapproved address {payee}.")) }
                 }
                 if let Some(id) = Call::relay_deposit_id(&c.to, &c.data) {
-                    match relay_orders::order(&id) { Some(o) => relay_payees.push(o.recipient), None => v.problems.push(relay_orders::UNCHECKED.into()) }
+                    match relay_orders::order(&id) { Some(o) => relay.push(o), None => v.problems.push(relay_orders::UNCHECKED.into()) }
                 }
             }
             if !v.ok() { return Ok(refused(v)) }
             // The prompt names every call, then that they go as one — and that the wallet keeps running the batch
             // account's code on that network afterwards.
             let lines: Vec<String> = calls.iter().map(|c| Call::decode(&c.data).summary(chain_id, &c.to, 0)).collect();
-            let doing = format!("{}\nas one transaction: this wallet runs the audited batch account on {} (EIP-7702)\nnetwork fee {}",
-                                lines.join("\nthen "), network_name(chain_id), fee.fee_text());
+            let doing = format!("{}{}\nas one transaction: this wallet runs the audited batch account on {} (EIP-7702)\nnetwork fee {}",
+                                lines.join("\nthen "), relay_orders::line(&relay), network_name(chain_id), fee.fee_text());
             let targets: Vec<String> = calls.iter().filter_map(|c| Call::decode(&c.data).unread_target(&c.to, 0, chain_id)).collect();
             let payees: HashSet<String> = calls.iter().flat_map(|c| Call::decode(&c.data).payees(&c.to, 0, chain_id)).map(|p| recipients::key(&p)).collect();
             let mut money: Vec<String> = recipients.iter().filter(|r| !targets.contains(&recipients::key(r)) || payees.contains(&recipients::key(r))).cloned().collect();
-            money.extend(relay_payees);
+            money.extend(relay.into_iter().map(|o| o.recipient));
             approve(&money, false, &doing)?;
             if !targets.is_empty() { approve(&targets, true, &doing)? }
             let raw = with_key("evm", &doing, |k| Ok(batch7702::signed(chain_id, nonce, max_priority_fee, max_fee, gas_limit, &owner, &calls, k)?.0))?;
@@ -659,16 +664,16 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                                        max_slippage_bps: limits::current().slippage_bps, ..sol::Policy::new(&owner) };
             let verdict = sol::check(&message, &accounts, &policy, &verified_owners(&token_owners, &accounts));
             if !verdict.ok() { return Ok(refused(verdict)) }
-            let relay_payees: Vec<String> = sol::relay_deposit_ids(&message).iter().map(|id| relay_orders::require(id).map(|o| o.recipient)).collect::<Result<_>>()?;
+            let relay: Vec<RelayOrder> = sol::relay_deposit_ids(&message).iter().map(|id| relay_orders::require(id)).collect::<Result<_>>()?;
             // The programs the person allowed for this one transaction are named in full: they run with the wallet's authority.
             let known = sol::known_programs();
             let extra: Vec<String> = extra_programs.iter().filter(|p| !known.contains_key(*p) && base58::decode(p).is_ok_and(|k| k.len() == 32))
                 .map(|p| format!("runs {p}, not on ihatecrypto's list")).collect();
             let payer: Vec<String> = sponsor.iter().map(|s| format!("the network fee is paid by {}…{}, not by you", &s[..4.min(s.len())], &s[s.len().saturating_sub(4)..])).collect();
-            let doing = [vec![prompt("sign a Solana transaction", &verdict)], extra.clone(), payer].concat().join("\n");
+            let doing = [vec![prompt("sign a Solana transaction", &verdict)], extra.clone(), payer].concat().join("\n") + &relay_orders::line(&relay);
             // The fee payer may get rent back from this wallet: then it's a payee like any other.
             let payee: Vec<String> = sponsor.iter().filter(|s| sol::refunds_sponsor(&message, &accounts, &owner, s)).cloned().collect();
-            approve(&[recipients, payee, relay_payees].concat(), false, &doing)?;
+            approve(&[recipients, payee, relay.into_iter().map(|o| o.recipient).collect()].concat(), false, &doing)?;
             // A program not on the list runs with this wallet's authority: every such transaction asks in person afresh.
             if !extra.is_empty() { confirm_afresh(&format!("{doing}\nit can move anything in this wallet: sign only if you trust this site"))? }
             // A swap a person signs gets a prompt of its own, whatever session is open: its rate is theirs to judge (the
@@ -727,7 +732,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             if let Some(r) = m.refusal(&owner, now()) { return Ok(refused(problem(&r))) }
             let permit: Permit3009 = m.permit()?;
             let digests = [m.digest()?, permit.typed()?.parts()?.digest()];
-            let signatures = with_key("evm", &format!("{}\ninto Relay's depository for this wallet", permit.summary()), |k| {
+            let signatures = with_key("evm", &format!("{}\ninto Relay's depository for this wallet{}", permit.summary(), relay_orders::line(std::slice::from_ref(&order))), |k| {
                 digests.iter().map(|d| sign(d, k)).collect::<Result<Vec<_>>>()
             })?;
             Ok(SignerReply { signatures: Some(signatures),
@@ -802,7 +807,8 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
                 return Ok(refused(problem(&format!("The deposit mapping isn't for your wallet: {w}, {depositor}."))));
             }
             let digest = hls::relay_nonce_mapping_digest(&w, &depositor, &id, nonce)?;
-            let signature = with_key("evm", "link a Hyperliquid withdrawal to a Relay order", |k| sign(&digest, k))?;
+            let reason = format!("link a Hyperliquid withdrawal to a Relay order{}", relay_orders::line(std::slice::from_ref(&order)));
+            let signature = with_key("evm", &reason, |k| sign(&digest, k))?;
             Ok(SignerReply { signature: Some(signature), checks: vec!["Deposit mapping: the wallet and depositor are yours.".into()], ..reply() })
         }
 
@@ -889,6 +895,10 @@ pub mod relay_orders {
 
     static HELD: LazyLock<Mutex<HashMap<Vec<u8>, RelayOrder>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
     pub const UNCHECKED: &str = "A Relay deposit for an order the signer hasn't checked: nothing was signed.";
+
+    /// What the orders a deposit names pay out, as lines for its prompt: the order's own words (RelayOrder::pays),
+    /// since the card's «you get» is only the engine's.
+    pub fn line(orders: &[RelayOrder]) -> String { orders.iter().map(|o| format!("\nRelay then pays {}", o.pays())).collect() }
 
     pub fn add(order: RelayOrder) {
         let t = now();

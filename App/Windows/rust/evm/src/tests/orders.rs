@@ -39,6 +39,41 @@ fn relay_orders_that_pay_someone_else_are_refused() {
 
 /// MegaFuel's zero-fee transfer on BNB Chain: only a dollar it knows, a whole amount, a real recipient, under 100,000 gas,
 /// signed as a legacy EIP-155 transaction whose sender recovers to the key.
+/// What an order takes and gives back (the Mac's relayOrdersSayWhatComesBackInDollars and …SayWhatTheyPayOnThePrompt):
+/// for the automation wallet's limits and for the deposit's prompt, in the order's own words.
+#[test]
+fn relay_orders_say_what_they_pay() {
+    let d = |s: &str| s.parse::<rust_decimal::Decimal>().unwrap();
+    let read = |json: &str| RelayOrder::read(json.as_bytes(), Some(EVM), Some(SOLANA), 1_700_000_000);
+    let orders: Vec<RelayOrder> = ORDERS.iter().map(|(_, json)| read(json).unwrap()).collect();
+    // Solana → Base, Hyperliquid → Base, Base → Solana: 5 USDC in, at least 4.878… USDC out.
+    assert_eq!(orders.iter().map(|o| o.input_currency.as_str()).collect::<Vec<_>>(),
+               ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "0x00000000000000000000000000000000", BASE_USDC]);
+    assert_eq!(orders.iter().map(|o| o.input_amount.as_str()).collect::<Vec<_>>(), ["5000000", "500000000", "5000000"]);
+    assert_eq!(orders.iter().map(|o| o.minimum_dollars()).collect::<Vec<_>>(), [Some(d("4.878026")), Some(d("4.878146")), Some(d("4.878735"))]);
+    let me = EVM.to_lowercase();
+    assert_eq!(orders[0].pays(), format!("at least 4.878026 USDC to {me} on base"));
+    assert_eq!(orders[0].summary(), format!("bridge 5 USDC from solana through Relay: at least 4.878026 USDC to {me} on base"));
+    assert!(orders[1].summary().starts_with("bridge 5 USDC from hyperliquid"));
+    // Paid in anything else — another token, the network's coin — nothing is counted as coming back, and the prompt
+    // names its smallest units and the coin.
+    let paid = r#""currency":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","minimumAmount":"4878026""#;
+    let coin = ORDERS[0].1.replace(paid, r#""currency":"0x0000000000000000000000000000000000000000","minimumAmount":"4878026""#);
+    assert_ne!(coin, ORDERS[0].1);
+    let other = read(&coin).unwrap();
+    assert_eq!(other.minimum_dollars(), None);
+    assert_eq!(other.pays(), format!("at least 4878026 units of 0x0000000000000000000000000000000000000000 to {me} on base"));
+    // An amount the prompt would read one way and the id's hash another is refused: marked digits, a hex, a number.
+    for odd in ["\"minimumAmount\":\"4878026\u{200d}\"", "\"minimumAmount\":\"0x4a6e8a\"", "\"minimumAmount\":4878026", "\"minimumAmount\":\"\"",
+                "\"minimumAmount\":\"٤٨٧٨٠٢٦\""] {
+        let changed = ORDERS[0].1.replace(r#""minimumAmount":"4878026""#, odd);
+        assert_ne!(changed, ORDERS[0].1);
+        assert!(read(&changed).is_err(), "{odd}");
+    }
+    let input = ORDERS[0].1.replace(r#""amount":"5000000""#, "\"amount\":\"5000000\u{200d}\"");
+    assert!(input != ORDERS[0].1 && read(&input).is_err());
+}
+
 #[test]
 fn sponsored_transfers_are_built_by_the_signer() {
     let t = SponsoredTransfer { chain_id: 56, nonce: 3, gas_limit: 60_000, token: BNB_USDC.into(), to: "0x000000000000000000000000000000000000dEaD".into(),

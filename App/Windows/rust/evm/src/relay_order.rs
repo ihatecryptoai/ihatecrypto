@@ -3,6 +3,9 @@
 //! depository names — so the signer recomputes it from the order and checks the order before any deposit naming it
 //! signs.
 
+use std::str::FromStr;
+
+use rust_decimal::Decimal;
 use serde_json::{Map, Value as Json};
 use wallet::evm::keccak;
 use wallet::keys::base58;
@@ -13,8 +16,11 @@ use wallet::from_hex;
 pub struct RelayOrder {
     pub id: [u8; 32],
     pub input_chain: String,
+    /// What is deposited, as its chain writes it (an EVM token lowercased), and how much, in its smallest units.
+    pub input_currency: String,
     pub input_amount: String,
     pub output_chain: String,
+    pub output_currency: String,
     /// The output's one payee, as its chain writes it (an EVM address lowercased, a Solana address in Base58).
     pub recipient: String,
     pub minimum_amount: String,
@@ -50,11 +56,60 @@ fn vm(chain: &str) -> Option<Vm> {
     })
 }
 
+/// The dollar the signer counts on each network, by Relay's name for it, with its decimals (Hyperliquid's is the perp
+/// account's USDC, sixteen zero bytes, in 1e-8).
+fn dollar_coin(chain: &str) -> Option<(&'static str, u32)> {
+    Some(match chain {
+        "solana" => ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6),
+        "hyperliquid" => ("0x00000000000000000000000000000000", 8),
+        "ethereum" => (crate::ETHEREUM_USDC, 6),
+        "base" => (crate::BASE_USDC, 6),
+        "arbitrum" => (crate::ARBITRUM_USDC, 6),
+        "optimism" => (crate::OPTIMISM_USDC, 6),
+        "polygon" => (crate::POLYGON_USDC, 6),
+        "bnb" => (crate::BNB_USDC, 18),
+        "hyperevm" => (crate::HYPEREVM_USDC, 6),
+        "robinhood" => (crate::ROBINHOOD_USDG, 6),
+        "tempo" => (crate::TEMPO_USDC, 6),
+        _ => return None,
+    })
+}
+
+/// Plain digits as a dollar amount; None for anything else (or a number past what a Decimal holds).
+fn dollars(units: &str, decimals: u32) -> Option<Decimal> {
+    if units.is_empty() || !units.bytes().all(|b| b.is_ascii_digit()) { return None }
+    Decimal::from_str(units).ok()?.checked_div(Decimal::from(10u64.pow(decimals)))
+}
+
+/// An amount in the order's words: dollars where the coin is the network's dollar, else its smallest units and the coin
+/// as the order writes it — an amount on the prompt, never none.
+fn amount(units: &str, currency: &str, chain: &str) -> String {
+    match dollar_coin(chain).filter(|(c, _)| *c == currency).and_then(|(_, d)| dollars(units, d)) {
+        Some(n) => format!("{} {}", n.normalize(), if chain == "robinhood" { "USDG" } else { "USDC" }),
+        None => format!("{units} units of {currency}"),
+    }
+}
+
 impl RelayOrder {
     /// For the prompt that allows its payee: what the order does.
     pub fn summary(&self) -> String {
-        format!("bridge {} units from {} through Relay: at least {} units to {} on {}",
-                self.input_amount, self.input_chain, self.minimum_amount, self.recipient, self.output_chain)
+        format!("bridge {} from {} through Relay: {}", amount(&self.input_amount, &self.input_currency, &self.input_chain), self.input_chain, self.pays())
+    }
+
+    /// «at least 4.878026 USDC to 0x9858… on base»: what the order pays out, for the prompt of the deposit that names
+    /// it. The card's «you get» is the engine's word, this is the order's own, and the deposit's prompt is the one place
+    /// a person sees it before the money is in Relay's depository (the 2026-11-10 review).
+    pub fn pays(&self) -> String {
+        format!("at least {} to {} on {}", amount(&self.minimum_amount, &self.output_currency, &self.output_chain), self.recipient, self.output_chain)
+    }
+
+    /// The least the order pays out, in dollars: None when what it pays isn't the output network's dollar. The order
+    /// names its own amounts and nothing here prices a coin, so only dollars against dollars can be compared: a task's
+    /// bridge to the person's own wallet spends what doesn't come back (signer's automation).
+    pub fn minimum_dollars(&self) -> Option<Decimal> {
+        let (currency, decimals) = dollar_coin(&self.output_chain)?;
+        if currency != self.output_currency { return None }
+        dollars(&self.minimum_amount, decimals)
     }
 
     /// The order read and checked: one input, one payee on the output network, every refund to `evm`/`solana` (or the
@@ -93,10 +148,21 @@ impl RelayOrder {
             if !matches!((chain, to), (Some(c), Some(t)) if ours(t, c)) { return Err(refuse("refunds someone else")) }
         }
         let recipient = if vm(out_chain) == Some(Vm::Svm) { pay.to_string() } else { pay.to_lowercase() };
-        let text = |m: &Map<String, Json>, k: &str| m.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+        // Amounts as plain digits only: they are shown on the deposit's prompt and counted for a task's limits, so each
+        // must read here exactly as the id's hash reads it (typed_data::word) — not a number, a hex or marked digits.
+        let digits = |m: &Map<String, Json>, k: &str| -> R<String> {
+            match m.get(k).and_then(Json::as_str) {
+                Some(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => Ok(s.to_string()),
+                _ => Err(refuse("names an amount ihatecrypto can't read")),
+            }
+        };
+        let currency = |m: &Map<String, Json>, chain: &str| -> String {
+            m.get("currency").and_then(Json::as_str).map(|c| if vm(chain) == Some(Vm::Svm) { c.to_string() } else { c.to_lowercase() }).unwrap_or_default()
+        };
         Ok(RelayOrder {
-            id: hash_order(&o)?, input_chain: in_chain.into(), input_amount: text(payment, "amount"), output_chain: out_chain.into(),
-            recipient, minimum_amount: text(payments[0], "minimumAmount"), deadline,
+            id: hash_order(&o)?, input_chain: in_chain.into(), input_currency: currency(payment, in_chain), input_amount: digits(payment, "amount")?,
+            output_chain: out_chain.into(), output_currency: currency(payments[0], out_chain),
+            recipient, minimum_amount: digits(payments[0], "minimumAmount")?, deadline,
         })
     }
 }
@@ -111,9 +177,9 @@ fn bytes(s: &str, chain: &str) -> R<Vec<u8>> {
             Ok(b) if b.len() == 32 => Ok(b),
             _ => no(format!("Not a Solana address: {s}.")),
         },
-        Some(Vm::Evm) => match from_hex(s) {
-            Some(b) if b.len() == 20 => Ok(b),
-            _ => no(format!("Not an EVM address: {s}.")),
+        Some(Vm::Evm) => match wallet::address_bytes(s) {
+            Some(b) => Ok(b),
+            None => no(format!("Not an EVM address: {s}.")),
         },
         Some(Vm::HypEvm) => match from_hex(s) {
             Some(b) if (1..=20).contains(&b.len()) => Ok(b),

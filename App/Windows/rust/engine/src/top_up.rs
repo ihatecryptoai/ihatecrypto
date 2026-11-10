@@ -583,7 +583,15 @@ button.go{justify-content:center;background:var(--accent);border-color:var(--acc
 </main><script>
 const C = {{config}};
 const list = document.getElementById('wallets'), statusLine = document.getElementById('status'), seen = new Set();
-const say = (html, kind) => { statusLine.innerHTML = html; statusLine.className = kind || ''; };
+// Text only: a wallet's name and its error are that wallet's words, and as HTML they would run on this page.
+const say = (text, kind, link) => {
+  statusLine.textContent = text;
+  statusLine.className = kind || '';
+  if (!link) return;
+  const a = document.createElement('a');
+  a.target = '_blank'; a.rel = 'noreferrer'; a.href = link; a.textContent = 'See it ↗';
+  statusLine.append(' ', a);
+};
 const post = async (what, body) => {
   const r = await fetch(location.pathname + '/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(await r.text());
@@ -633,7 +641,7 @@ async function send(name, pay) {
     // Sent is sent: a closed page (the card was closed meanwhile) only means ihatecrypto learns it from the balance.
     await post('sent', { id }).catch(() => {});
     last = { name, pay, from };
-    say('Sent ' + fmt(coins(units)) + ' ✓ ihatecrypto shows it the moment it lands. You can close this tab. <a target="_blank" rel="noreferrer" href="' + escape(C.explorer + id) + '">See it ↗</a>', 'ok');
+    say('Sent ' + fmt(coins(units)) + ' ✓ ihatecrypto shows it the moment it lands. You can close this tab.', 'ok', C.explorer + encodeURIComponent(id));
     $('fromName').textContent = name;
     $('more').hidden = false;
     $('form').hidden = true;

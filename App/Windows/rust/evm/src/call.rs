@@ -95,7 +95,8 @@ impl Call {
                 (Some(from), Some(to), Some(amount)) => Some(Self::TransferFrom { from, to, amount }),
                 _ => None,
             },
-            "a22cb465" => address(0).zip(word(1)).map(|(operator, b)| Self::SetApprovalForAll { operator, approved: b[31] == 1 }),
+            // Any non-zero word grants: a contract that doesn't check the bool is 0 or 1 (ABI coder v1, Solady) reads 2 as yes.
+            "a22cb465" => address(0).zip(word(1)).map(|(operator, b)| Self::SetApprovalForAll { operator, approved: b.iter().any(|&x| x != 0) }),
             "d505accf" | "8fcbaf0c" => Some(Self::Permit),
             "04e45aaf" | "5023b4df" => payee(3, false),
             "414bf389" | "db3e2198" => payee(3, true),

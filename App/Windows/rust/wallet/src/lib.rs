@@ -27,6 +27,15 @@ pub(crate) fn fail<T>(message: impl Into<String>) -> Result<T> { Err(WalletError
 /// `Data(hex:)`: "0x…" or bare hex; None on odd length or a non-hex character.
 pub fn from_hex(s: &str) -> Option<Vec<u8>> { hex::decode(s.strip_prefix("0x").unwrap_or(s)).ok() }
 
+/// An EVM address as its 20 bytes: «0x» and 40 hex digits, nothing else (`Data(evmAddress:)`). `from_hex` reads bare
+/// hex too, and an address that is signed is also compared as text (the wallet's own, a router, Relay's depository):
+/// «4cd2…» would sign for the same contract while every such comparison missed it (the 2026-11-10 review). Whatever
+/// puts an address into something signed reads it here.
+pub fn address_bytes(s: &str) -> Option<Vec<u8>> {
+    let digits = s.strip_prefix("0x").filter(|d| d.len() == 40)?;
+    hex::decode(digits).ok()
+}
+
 /// `Data.hex`: lowercase, no 0x.
 pub fn to_hex(bytes: &[u8]) -> String { hex::encode(bytes) }
 

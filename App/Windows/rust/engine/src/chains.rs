@@ -815,12 +815,15 @@ impl Engine {
         Self::fitted(c, asked, there, true).unwrap_or_else(|| c.clone())
     }
 
-    /// The step for what arrived, when it's within 2 % of what it asked (dollars: or within $1); None when the gap is
-    /// bigger, nothing arrived, or the fitted step wouldn't read back the same from its words.
+    /// The step for what arrived, when it's within 2 % of what it asked (dollars: or within $1 — Ethereum's fee — but
+    /// never more than a quarter of the amount: with a balance read before the money showed, «deposit 1» became
+    /// «deposit 0.1» on the Mac, 2026-11-10); None when the gap is bigger, nothing arrived, or the fitted step wouldn't
+    /// read back the same from its words.
     pub fn fitted(c: &WalletCommand, asked: Decimal, there: Decimal, dollars: bool) -> Option<WalletCommand> {
         let slack = (Num::of(asked) * Decimal::new(2, 2)).0?;
+        let quarter = (Num::of(asked) * Decimal::new(25, 2)).0?;
         let gap = (Num::of(asked) - there).0?;
-        if !(there > Decimal::ZERO && there < asked && gap <= if dollars { slack.max(Decimal::ONE) } else { slack }) { return None }
+        if !(there > Decimal::ZERO && there < asked && gap <= if dollars { slack.max(Decimal::ONE.min(quarter)) } else { slack }) { return None }
         let fitted = c.with_amount(if dollars { rounded(there, 2, Rounding::Down) } else { there });
         (fitted != *c && WalletCommand::parse(&fitted.summary()).as_ref() == Some(&fitted)).then_some(fitted)
     }
@@ -832,6 +835,9 @@ impl Engine {
         match c {
             W::Bridge { to, .. } => (to != "hyperliquid").then(|| to.clone()),
             W::EvmToSolana(..) | W::BaseToSolana(_) | W::ArbitrumToSolana(_) | W::RobinhoodToSolana(_) | W::WithdrawToSolana(_) | W::SellNear { .. } => Some("solana".into()),
+            // Out of a vault into the wallet: the balance shows it a moment after the move is through, and the step
+            // after it waits for that like for a bridge («withdraw 1 then deposit 1» read the old balance).
+            W::LendWithdraw(symbol, _) | W::Kamino { deposit: false, symbol, .. } if symbol == "USDC" => Some("solana".into()),
             W::SolanaTo(to, _) => Some(to.clone()),
             _ => None,
         }

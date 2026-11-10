@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use super::*;
 use wallet::evm::eip712::Field;
 use wallet::evm::{recover, sign};
+use wallet::from_hex;
 use wallet::keys::evm_address;
 
 #[test]

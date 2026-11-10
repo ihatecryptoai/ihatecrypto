@@ -74,6 +74,17 @@ fn the_next_step_is_fitted_to_what_arrived() {
     // A small move gets a dollar of slack.
     let mv = WalletCommand::SolanaTo("arbitrum".into(), Some(Decimal::from(5)));
     assert_eq!(Engine::fitted(&mv, Decimal::from(5), d("4.2"), true), Some(WalletCommand::SolanaTo("arbitrum".into(), Some(d("4.2")))));
+    // But never more than a quarter of the amount: «withdraw 1 then deposit 1» read the balance before the withdrawal
+    // showed and deposited the 0.1 that was there (the Mac, 2026-11-10).
+    let one = WalletCommand::LendDeposit("USDC".into(), Some(Decimal::ONE));
+    assert_eq!(Engine::fitted(&one, Decimal::ONE, d("0.107186"), true), None);
+    assert_eq!(Engine::fitted(&WalletCommand::LendDeposit("USDC".into(), Some(Decimal::TWO)), Decimal::TWO, d("1.1"), true), None);
+    assert_eq!(Engine::fitted(&one, Decimal::ONE, d("0.8"), true), Some(WalletCommand::LendDeposit("USDC".into(), Some(d("0.8")))));
+    // What comes out of a vault lands on Solana like a bridge's money: the step after it waits for the balance.
+    assert_eq!(Engine::arrives(&WalletCommand::LendWithdraw("USDC".into(), Some(Decimal::ONE))).as_deref(), Some("solana"));
+    assert_eq!(Engine::arrives(&WalletCommand::Kamino { deposit: false, symbol: "USDC".into(), amount: None }).as_deref(), Some("solana"));
+    assert_eq!(Engine::arrives(&WalletCommand::LendWithdraw("SOL".into(), None)), None);
+    assert_eq!(Engine::arrives(&one), None);
     // A token a swap gave: within 2 % only.
     let send = |x: Decimal| WalletCommand::SendToken { name: "Bybit".into(), token: "USDT".into(), amount: Some(x), network: Some("solana".into()) };
     assert_eq!(Engine::fitted(&send(Decimal::from(750)), Decimal::from(750), d("749.8"), false), Some(send(d("749.8"))));
