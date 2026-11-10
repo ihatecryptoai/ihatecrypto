@@ -132,10 +132,13 @@ async fn the_model_out_of_reach_says_why_and_nothing_moves() {
         // Typed, but nothing in it reads without a model: it isn't acted on.
         // A failure the engine knows is said in plain words with what to do, never the service's own text.
         e.model_unreachable("buy SOL for 5 USDC", &format!("HTTP 500: {}", "x".repeat(200)), false, true).await;
-        assert_eq!(last(&e), "claude-opus-5-5 didn’t answer. Anthropic API is overloaded or down right now. Send it again a little later. \
+        assert_eq!(last(&e), "claude-opus-5-5 didn’t answer. Anthropic is overloaded or down right now. Send it again a little later. \
                               Or pick another model. I didn’t act on this — nothing moved.");
         e.model_unreachable("buy SOL for 5 USDC", r#"HTTP 402: {"error":{"message":"Insufficient Balance"}}"#, false, true).await;
-        assert!(last(&e).starts_with("claude-opus-5-5 didn’t answer. Anthropic API says this account has no credits"), "{}", last(&e));
+        assert!(last(&e).starts_with("claude-opus-5-5 didn’t answer. Anthropic says this account has no credits"), "{}", last(&e));
+        for (long, short) in [("Claude (subscription via Claude Code)", "Claude"), ("Ollama on this PC", "Ollama"), ("OpenAI API", "OpenAI"), ("NEAR AI Cloud (private)", "NEAR AI Cloud")] {
+            assert_eq!(Engine::service_name(long), short);
+        }
         // One it doesn't know keeps the service's own words, cut short.
         e.model_unreachable("buy SOL for 5 USDC", &format!("weird: {}", "x".repeat(200)), false, true).await;
         let text = last(&e);

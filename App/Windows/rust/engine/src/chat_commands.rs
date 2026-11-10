@@ -550,6 +550,14 @@ impl Engine {
         self.reply(&line, Some(model));
     }
 
+    /// A provider's name as a sentence takes it: «Claude (subscription via Claude Code)» → «Claude», «Ollama on this PC» →
+    /// «Ollama», «OpenAI API» → «OpenAI».
+    pub fn service_name(name: &str) -> String {
+        let mut n = name.split(" (").next().unwrap_or(name);
+        for tail in [" on this PC", " API"] { n = n.strip_suffix(tail).unwrap_or(n) }
+        n.to_string()
+    }
+
     /// A model that didn't answer, in the person's words: what happened and what to do, a sentence each, in the chat's
     /// language — never the service's JSON (the Mac's modelFailureWords). None for a failure the chat has no words for:
     /// the service's own sentence is shown then. The service's own page is named where the fix is there.
@@ -562,7 +570,8 @@ impl Engine {
         // send it again later» would never help. A subscription has no key: its 401 is a sign-in that ran out.
         if local && kind == F::Busy { return None }
         if info.as_ref().is_some_and(|(_, k)| *k == Kind::Subscription) && kind == F::Key { kind = F::SignIn }
-        let p = info.map_or_else(|| provider.to_string(), |(name, _)| name);
+        // The service by its short name: «Ollama», not «Ollama on this PC isn’t running on this PC».
+        let p = Self::service_name(&info.map_or_else(|| provider.to_string(), |(name, _)| name));
         let at = llm::failure::site(provider).map(|u| self.say3(&format!(" at {u}"), &format!(" на {u}"), &format!(" en {u}"))).unwrap_or_default();
         let (why, fix) = match kind {
             F::Credits => (self.say3(&format!("{p} says this account has no credits, or no spending limit is set for the key."),
