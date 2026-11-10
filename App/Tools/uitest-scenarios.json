@@ -1634,19 +1634,13 @@
     }
   },
   {
-    "name": "create an agent wallet → the rules the NEAR key signs drawn as a card, waiting for Confirm",
+    "name": "create an agent wallet when the wallet has one → said before any card, nothing waits for Confirm",
     "send": [
-      "создай кошелёк агента с лимитом 20$ в день"
+      "создай кошелёк агента с лимитом 5$ в день"
     ],
     "expect": {
-      "pending_kind": "wallet",
-      "title_contains": "agent wallet",
-      "steps": [
-        "YOUR NEAR KEY",
-        "RULES",
-        "GRANT"
-      ],
-      "footer_contains": "refuses"
+      "no_pending": true,
+      "reply_contains": "уже есть"
     }
   },
   {

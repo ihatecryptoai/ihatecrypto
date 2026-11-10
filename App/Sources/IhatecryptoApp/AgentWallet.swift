@@ -280,16 +280,23 @@ extension Workspace {
         guard let grant = NodeStore.agentGrant else { throw ExecutionError("This Mac has no grant for the agent wallet.") }
         let (payee, _, chain, address) = try agentPayee(name)
         let body = AgentAPI.json(["asset": Self.agentUSDC.solana, "amount": "\(Self.agentUnits(usdc))", "chain": chain, "recipient": address])
-        let data: Data
-        do {
-            data = try await AgentAPI.call("POST", "/v1/agents/\(a.agentID)/withdraw", body: body, grant: grant, idempotency: "withdraw-\(UUID().uuidString.lowercased())")
-        } catch let e as AgentAPI.Failure {
-            // The policy at work: say what NEAR Intents refused and why.
-            throw ExecutionError("NEAR Intents refused the agent wallet's send: \(e.text) (\(e.code)). Your rules: at most $\(Fmt.num(a.dailyUSD)) a day, only to your own and saved addresses.")
-        } catch is URLError {
-            // Asked, and no answer: NEAR Intents may have taken it (a 0.3 USDC send that went read «timed out», 2026-11-05).
-            throw ExecutionError(Self.mayHaveGone("The agent wallet's send of \(Fmt.num(usdc)) USDC was asked of NEAR Intents", nil))
+        // A timeout doesn't say the send wasn't taken: the same request under the same Idempotency-Key gives back the
+        // original result (the API's rule), so it's asked again rather than read as «may have gone» (a 0.3 USDC send read
+        // «timed out» on 2026-11-05; a 0.5 USDC one landed 10 s after «status unknown» on 2026-11-10).
+        let key = "withdraw-\(UUID().uuidString.lowercased())"
+        var data: Data?
+        for attempt in 1...3 where data == nil {
+            do {
+                data = try await AgentAPI.call("POST", "/v1/agents/\(a.agentID)/withdraw", body: body, grant: grant, idempotency: key)
+            } catch let e as AgentAPI.Failure where e.status < 500 && !["wallet_busy", "idempotency_conflict"].contains(e.code) {
+                // The policy at work: say what NEAR Intents refused and why (a replay gives back the same refusal).
+                throw ExecutionError("NEAR Intents refused the agent wallet's send: \(e.text) (\(e.code)). " + agentRules(a, payee: e.code == "policy_destination_denied" ? name : nil))
+            } catch is AgentAPI.Failure, is URLError {
+                // No answer, a server error, or the first request still being carried out: asked again, then said as unknown.
+                if attempt < 3 { try await Task.sleep(for: .seconds(5)) }
+            }
         }
+        guard let data else { throw ExecutionError(Self.mayHaveGone("The agent wallet's send of \(Fmt.num(usdc)) USDC was asked of NEAR Intents", nil)) }
         guard let op = (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["correlation_id"] as? String else { throw ExecutionError("The Agent API gave no operation id.") }
         let s = try? await AgentAPI.final(op, within: 900)
         guard let s, s.final else { throw ExecutionError(Self.mayHaveGone("The agent wallet's send of \(Fmt.num(usdc)) USDC is with NEAR Intents", op)) }
@@ -300,6 +307,15 @@ extension Workspace {
     /// A move NEAR Intents may have made with no word back: it says so and that it mustn't be asked again yet.
     static func mayHaveGone(_ what: String, _ op: String?) -> String {
         "\(what), but no final answer came back, so it may have gone. Status unknown: don't send it again until the balance shows it\(op.map { " (NEAR Intents operation \($0))" } ?? "")."
+    }
+
+    /// What the rules allow, as they were signed: the destinations are this wallet's own addresses and the saved ones the
+    /// signer had confirmed at that moment (agentDestinations). «Only to your own and saved addresses» let the model explain
+    /// a refused «Automation» as saved after the agent wallet, when it had been saved weeks before and never confirmed.
+    func agentRules(_ a: AgentWalletRecord, payee: String? = nil) -> String {
+        "Your rules, signed on \(a.created.formatted(date: .abbreviated, time: .omitted)): at most $\(Fmt.num(a.dailyUSD)) a day, only to this "
+            + "wallet's own addresses and to the saved addresses that were confirmed with \(Presence.name) when the rules were signed."
+            + (payee.map { " «\($0)» wasn't one of them, and the rules can't be changed from the chat." } ?? "")
     }
 
     /// The saved address an agent's send pays, and where: a Solana one on Solana, a Base one on Base — the same the

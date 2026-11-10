@@ -43,6 +43,15 @@ dev state
 echo $s | py "sys.exit(0 if d['boards'].get('pending') else 1)" || { echo "No card waits for Confirm: nothing to press."; dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null; exit 1 }
 if [[ -n $DRY ]]; then dev api POST /cancel >/dev/null; dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null; exit 0; fi
 
+# A priced card's Confirm lasts 15 s, then reads «Refresh»: a press after that lands on nothing («send … privately then
+# send … privately» seemed to ignore Confirm on 2026-11-10, its quote 40 s old). Ask again and press while it's fresh.
+for i in {1..30}; do
+  q=$(TIMEOUT=10 dev api GET /state | py "print((d['boards'].get('pending') or {}).get('quoteState', ''))")
+  [[ $q == fresh* && $q != *'seconds: '[1-3]')' ]] && break
+  [[ $q == none || -z $q ]] && break
+  [[ $q == stale ]] && $AX press Refresh >/dev/null 2>&1
+  sleep 1
+done
 for b in $buttons; do
   # An exact title, or the first button whose title contains it («Send anyway» for «Send anyway · ≈ $3.10 lost»).
   # The chat's cards fade in one at a time after the reply: up to 10 s for it to show.

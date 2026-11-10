@@ -3422,6 +3422,19 @@ extension Workspace {
                 _ = try privateRecipient(name, token: token, network: network)
             case .swapPrivately:
                 return privateSwapRefusal(command)
+            case .agentCreate:
+                // This Mac keeps one agent wallet (agentwallet.json): a second one was drawn as a card and refused only
+                // after Confirm (agentCreate refuses the same two cases).
+                if let a = agentWallet {
+                    if let near = nearAddress, a.owner != near {
+                        return say("This Mac's one agent wallet belongs to another wallet: switch to it to use it.",
+                                   "Кошелёк агента на этом Mac один, и он у другого кошелька: переключись на него.")
+                    }
+                    if NodeStore.agentGrant != nil {
+                        return say("You already have an agent wallet, $\(Fmt.num(a.dailyUSD)) a day, the one this Mac keeps: fund it, send from it or freeze it.",
+                                   "Кошелёк агента уже есть, $\(Fmt.num(a.dailyUSD)) в день, на этом Mac он один: пополни его, отправь с него или заморозь.")
+                    }
+                }
             case .sendToken(let name, let token, let amount, let network):
                 if try acrossRecipient(name, token: token, network: network) != nil {
                     guard amount != nil else { throw ExecutionError("Say how much \(token.uppercased()): there's none in this wallet to send all of — it's bought with USDC on the way.") }
