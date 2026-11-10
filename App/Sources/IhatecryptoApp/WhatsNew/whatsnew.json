@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.8.6",
+    "date": "2026-11-10",
+    "stories": [
+      {
+        "title": "A model that didn't answer says why",
+        "text": "When a model's service refuses, the chat says what happened and what to do, not the service's error text: «NEAR AI Cloud says this account has no credits, or no spending limit is set for the key. Add credits or set the limit in your account at cloud.near.ai». It knows a used-up plan, too many requests, a key that didn't fit, a sign-in that ran out, a model that isn't there, a service that is down and a program that isn't running.",
+        "symbol": "exclamationmark.bubble.fill",
+        "color": "FF9F0A"
+      },
+      {
+        "title": "A step sees the money the step before brought",
+        "text": "A step that names no amount, «…then move all», waits until the balance shows what the step before it brought, where it used to read the old balance. A step that asks for more than came waits only until what came shows, not two minutes. The wait no longer uses up Jupiter's request limit, so the step after it isn't turned away with «too many requests».",
+        "symbol": "arrow.triangle.2.circlepath",
+        "color": "FF7A2F",
+        "try": "withdraw 1 USDC from Jupiter then deposit 1 USDC into Jupiter"
+      }
+    ]
+  },
+  {
     "version": "0.8.5",
     "date": "2026-11-10",
     "stories": [

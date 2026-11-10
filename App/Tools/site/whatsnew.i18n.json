@@ -1,5 +1,13 @@
 {
  "es": {
+  "63324585935c": {
+   "title": "Si un modelo no responde, el chat dice por qué",
+   "text": "Cuando el servicio de un modelo se niega, el chat dice qué pasó y qué hacer, no el texto de error del servicio: «NEAR AI Cloud dice que la cuenta no tiene saldo o que la clave no tiene límite de gasto. Añade saldo o fija el límite en tu cuenta en cloud.near.ai». Distingue un plan agotado, demasiadas solicitudes, una clave que no sirvió, una sesión caducada, un modelo que no existe, un servicio caído y un programa que no está abierto."
+  },
+  "7c0978fe8d66": {
+   "title": "Un paso ve el dinero que trajo el anterior",
+   "text": "Un paso sin cantidad, «…y luego mueve todo», espera a que el saldo muestre lo que trajo el paso anterior. Antes leía el saldo viejo. Un paso que pide más de lo que llegó espera solo a que aparezca lo que llegó, no dos minutos. La espera ya no gasta el límite de solicitudes de Jupiter, así que al paso siguiente no lo rechazan con «demasiadas solicitudes»."
+  },
   "44d658944bda": {
    "title": "El Touch ID de un puente muestra lo que recibes",
    "text": "El Touch ID de un puente de Relay ahora lleva una línea que el proceso de firma lee del propio pedido de Relay: «Relay then pays at least 4.878026 USDC to …», con la dirección completa y su red. Hasta ahora, lo que llegaba solo aparecía en la tarjeta, que es la palabra de la app. La cantidad de esa línea es la que se firma en el pedido, cifra por cifra."
@@ -630,6 +638,14 @@
   }
  },
  "ru": {
+  "63324585935c": {
+   "title": "Модель не ответила — чат говорит почему",
+   "text": "Когда сервис модели отказывает, чат пишет, что случилось и что сделать, а не текст ошибки сервиса: «NEAR AI Cloud пишет, что на счёте нет денег или для ключа не задан лимит расходов. Пополни баланс или задай лимит в кабинете на cloud.near.ai». Он различает исчерпанный лимит подписки, слишком частые запросы, ключ, который не подошёл, истёкшую сессию, модель, которой нет, сервис, который лежит, и программу, которая не запущена."
+  },
+  "7c0978fe8d66": {
+   "title": "Шаг видит деньги, которые принёс предыдущий",
+   "text": "Шаг без суммы, «…а потом переведи всё», ждёт, пока баланс покажет то, что принёс шаг перед ним. Раньше он читал старый баланс. Шаг, которому нужно больше, чем пришло, ждёт только пока пришедшее появится, а не две минуты. Ожидание больше не тратит лимит запросов Jupiter, поэтому следующий шаг не получает отказ «слишком много запросов»."
+  },
   "44d658944bda": {
    "title": "Touch ID моста говорит, что вы получите",
    "text": "Touch ID для моста Relay теперь показывает строку, которую процесс подписи читает из самого ордера Relay: «Relay then pays at least 4.878026 USDC to …», с адресом целиком и его сетью. До сих пор то, что придёт, было только на карточке, а это слово приложения. Сумма в этой строке — та, на которую подписан ордер, цифра в цифру."
