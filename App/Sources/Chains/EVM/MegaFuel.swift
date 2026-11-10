@@ -44,7 +44,7 @@ public struct SponsoredTransfer: Codable, Sendable, Equatable {
 
     /// rlp([nonce, gasPrice 0, gasLimit, token, value 0, data, chainId, 0, 0]): EIP-155's signing payload.
     func fields() throws -> [RLP] {
-        guard let token = Data(hex: token), token.count == 20 else { throw WalletError("Invalid token address: \(self.token)") }
+        guard let token = Data(evmAddress: token) else { throw WalletError("Invalid token address: \(self.token)") }
         return [.uint(nonce), .uint(0), .uint(gasLimit), .bytes(token), .uint(0), .bytes(try calldata())]
     }
 

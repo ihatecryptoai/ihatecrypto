@@ -24,7 +24,9 @@ enum Signer {
 
     /// What a signature moves, for binding the session: the addresses money may go to, the coins it touches (Solana mints
     /// this wallet has a token account for in the transaction, EVM contracts, Hyperliquid markets), each tied to its
-    /// network. nil: a request that moves nothing of the kind (a message, settings).
+    /// network. A site's text or typed data is a scope of its own, by what is signed: with none it was inside every
+    /// open session (the empty set is in any), so a move's Touch ID also signed whatever a site asked next, unseen
+    /// (the 2026-11-10 review). nil: a request that signs nothing of the kind (settings).
     static func moveScope(_ request: SignerRequest) throws -> Set<String>? {
         // Only what the signed bytes say, never the app's lists of recipients or accounts (which could name everything).
         func keys(_ list: [String], owner: String?) -> [String] { list.map(RecipientStore.key).filter { $0 != owner.map(RecipientStore.key) } }
@@ -59,6 +61,7 @@ enum Signer {
             return Set(keys([token, to], owner: nil).map { "evm:\(chainId):" + $0 })
         case .signRelayMulticallPermit(let chainId, let token, _, _, let relayer, let refundTo, _, _, _):
             return Set(keys([token, relayer, refundTo], owner: try? address("evm")).map { "evm:\(chainId):" + $0 })
+        case .signPersonal(let text), .signSolanaMessage(let text), .signTypedData(let text): return ["text:" + Keccak.hash256(text).hex]
         case .signNearTransfer(_, let receiver, _, _, _): return ["near:" + receiver]
         case .signNearIntentDeposit(_, let depositAddress, _, _): return ["near:" + depositAddress]
         default: return nil
@@ -551,6 +554,8 @@ enum Signer {
             let tx = EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee,
                                     gasLimit: gasLimit, to: to, value: value, data: data)
             if !EVMRPC.signable.contains(chainId) { v.problems.append("ihatecrypto doesn't sign for network \(chainId).") }
+            // «0x» and 40 hex digits only: the checks below compare `to` as text (Data(evmAddress:)).
+            if Data(evmAddress: to) == nil { v.problems.append("Not an address: \(to).") }
             if let refusal = call.refusal(sender: owner, chainId: chainId) { v.problems.append(refusal) }
             if let refusal = EVMCall.targetRefusal(to: to, data: data, sender: owner) { v.problems.append(refusal) }
             if let refusal = Batch7702.selfCall(to: to, data: data, owner: owner) { v.problems.append(refusal) }

@@ -155,7 +155,11 @@ enum SeedStore {
             // A code session counts only where the code signs: with Touch ID the sensor signs, whatever was typed.
             let wanted = scope ?? []
             let alive = session.flatMap { Date().timeIntervalSince($0.since) < TimeInterval(sessionLength) && (!$0.byCode || CodeStore.signs) ? $0 : nil }
-            if let s = alive, s.scope.map(wanted.isSubset) ?? true {
+            // A session no signature has used yet was opened by a prompt for a move (a new address, with the move on it)
+            // or by the passcode typed for this very request. A site's text takes only the second: after a move's
+            // prompt that ended in a refusal, the text signed next would have gone unseen.
+            let text = wanted.contains { $0.hasPrefix("text:") }
+            if let s = alive, s.scope.map(wanted.isSubset) ?? (s.byCode || !text) {
                 if s.scope == nil { session?.scope = wanted }
                 return (s.context, s.byCode)
             }

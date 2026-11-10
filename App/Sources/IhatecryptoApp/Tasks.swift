@@ -361,7 +361,7 @@ extension Workspace {
         }
         snapshotCanvas()
         saveCanvas()
-        taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived)
+        taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived, false)
         // A confirmed chain is through (or stopped): the model goes on with the request it was a step of.
         if confirmed { await afterMove() }
     }
@@ -410,12 +410,25 @@ extension Workspace {
     /// within half an hour (a card waits 15 minutes; a later move on that canvas is something else).
     func continueTask() {
         guard let q = taskQueue else { return }
+        // Only the Confirm on the chain's own card starts the rest. Another move that goes through on this canvas while
+        // that card waits (a position closed from its card) isn't that Confirm: the steps ran «as confirmed» after it,
+        // the trading key's without a prompt (the 2026-11-10 review). They keep waiting with the card.
+        if !q.confirmed, q.canvas == canvasID, pendingAction != nil || pendingAllocation != nil || awaitingAmount != nil,
+           Date().timeIntervalSince(q.since) < 1800 { return }
         taskQueue = nil
-        guard q.canvas == canvasID, finishedAction?.outcome.ok == true, Date().timeIntervalSince(q.since) < 1800, let first = q.steps.first else { return }
+        guard q.confirmed, q.canvas == canvasID, finishedAction?.outcome.ok == true, Date().timeIntervalSince(q.since) < 1800,
+              let first = q.steps.first else { return }
         // The next step's board in the same breath as the move's goes: no frame where the chain's cards are gone.
         chainAhead = (q.canvas, Array(q.steps.dropFirst()))
         showNext(first)
         Task { await runSteps(q.steps, confirmed: true, brought: q.brought) }
+    }
+
+    /// Confirm on the card a chain's steps wait behind (this canvas's): its move, once through, starts them. `after`:
+    /// that Confirm is over — steps still armed never started (it ended without a move: an address saved, a module
+    /// off, no trading key), and no later move may start them.
+    func chainConfirmed(after: Bool = false) {
+        if after { if taskQueue?.confirmed == true { taskQueue = nil } } else if taskQueue?.canvas == canvasID { taskQueue?.confirmed = true }
     }
 
     /// The step a confirmed chain goes to, lit, before its move's own board takes its place.

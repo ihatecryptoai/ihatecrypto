@@ -194,6 +194,9 @@ public enum HLAction {
                       price >= 0, size >= 0 else { return .person("an order whose price or size the signer can't read") }
                 total += price * size
             }
+            // Past what Decimal holds (a price of 1e100 times a size of 1e100) the sum is NaN: under every limit when
+            // compared, and nothing to count. One such order beside a real one took the whole batch past the limits.
+            guard total.isFinite else { return .person("an order whose price or size the signer can't read") }
             return .dollars(total)
         default: return .person("an action the trading key doesn't sign on its own")
         }

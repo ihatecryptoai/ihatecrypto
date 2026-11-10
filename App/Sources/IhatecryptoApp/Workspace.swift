@@ -553,7 +553,8 @@ final class Workspace {
     @ObservationIgnored var tasksTampered = TaskSeal.tasks(forKey: Workspace.scoped("tasks")).tampered
     /// A running task's steps after one that waits for Confirm, and the canvas it runs on: they go when that move is done.
     /// `brought`: networks the steps before delivered USDC to, so a step there waits for the money (runSteps).
-    var taskQueue: (canvas: UUID?, steps: [String], since: Date, brought: Set<String>)?
+    /// `confirmed`: Confirm was pressed on the card they wait behind — only then do they run (continueTask).
+    var taskQueue: (canvas: UUID?, steps: [String], since: Date, brought: Set<String>, confirmed: Bool)?
     /// While a confirmed chain runs, its steps after the one under way: drawn after its cards (Workspace.chainSteps).
     /// Only for the canvas; `taskQueue` is what runs.
     var chainAhead: (canvas: UUID?, steps: [String])?
@@ -1219,7 +1220,7 @@ final class Workspace {
         let asksModel = !confirms && !declines && client != nil
         if let pending = pendingAllocation, !asksModel {
             pendingAllocation = nil
-            if confirms { await move(pending, confirmed: true); return }
+            if confirms { chainConfirmed(); await move(pending, confirmed: true); chainConfirmed(after: true); return }
             if declines {
                 allocationPreview = nil
                 rebalancePlan = nil
@@ -1236,7 +1237,9 @@ final class Workspace {
                 return
             }
             if confirms {
+                chainConfirmed()
                 await carryOut(pending)
+                chainConfirmed(after: true)
                 return
             }
         }

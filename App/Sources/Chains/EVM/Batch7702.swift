@@ -86,7 +86,7 @@ public enum Batch7702 {
         if !chains.contains(chainId) { out.append("ihatecrypto doesn't batch calls on network \(chainId).") }
         if calls.isEmpty || calls.count > maxCalls { out.append("A batch holds 1 to \(maxCalls) calls, not \(calls.count).") }
         for c in calls {
-            if Data(hex: c.to)?.count != 20 { out.append("Not an address: \(c.to).") }
+            if Data(evmAddress: c.to) == nil { out.append("Not an address: \(c.to).") }
             if let why = selfCall(to: c.to, data: c.data, owner: owner) { out.append(why) }
             if let why = EVMCall.decode(c.data).refusal(sender: owner, chainId: chainId) { out.append(why) }
             if let why = EVMCall.targetRefusal(to: c.to, data: c.data, sender: owner) { out.append(why) }

@@ -10,8 +10,11 @@ import WalletCore
 public struct RelayOrder: Sendable, Equatable {
     public let id: Data
     public let inputChain: String
+    /// What is deposited, as its chain writes it (an EVM token lowercased), and how much, in its smallest units.
+    public let inputCurrency: String
     public let inputAmount: String
     public let outputChain: String
+    public let outputCurrency: String
     /// The output's one payee, as its chain writes it (an EVM address lowercased, a Solana address in Base58).
     public let recipient: String
     public let minimumAmount: String
@@ -20,6 +23,24 @@ public struct RelayOrder: Sendable, Equatable {
     /// For the prompt that allows its payee: what the order does.
     public var summary: String {
         "bridge \(inputAmount) units from \(inputChain) through Relay: at least \(minimumAmount) units to \(recipient) on \(outputChain)"
+    }
+
+    /// The dollar the signer counts on each network, by Relay's name for it, with its decimals (Hyperliquid's is the
+    /// perp account's USDC, sixteen zero bytes, in 1e-8).
+    static let dollarCoins: [String: (currency: String, decimals: Int)] = [
+        "solana": ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6), "hyperliquid": ("0x" + String(repeating: "0", count: 32), 8),
+        "ethereum": (EVMRPC.ethereumUSDC, 6), "base": (EVMRPC.baseUSDC, 6), "arbitrum": (EVMRPC.arbitrumUSDC, 6),
+        "optimism": (EVMRPC.optimismUSDC, 6), "polygon": (EVMRPC.polygonUSDC, 6), "bnb": (EVMRPC.bnbUSDC, 18),
+        "hyperevm": (EVMRPC.hyperevmUSDC, 6), "robinhood": (EVMRPC.robinhoodUSDG, 6), "tempo": (EVMRPC.tempoUSDC, 6),
+    ]
+
+    /// The least the order pays out, in dollars: nil when what it pays isn't the output network's dollar. The order
+    /// names its own amounts and nothing here prices a coin, so only dollars against dollars can be compared: a task's
+    /// bridge to the person's own wallet spends what doesn't come back (Automation.spend).
+    public var minimumDollars: Decimal? {
+        guard let coin = Self.dollarCoins[outputChain], coin.currency == outputCurrency,
+              let units = Decimal(string: minimumAmount, locale: Locale(identifier: "en_US_POSIX")), units.isFinite, units >= 0 else { return nil }
+        return units / pow(10, coin.decimals)
     }
 
     enum VM { case evm, svm, hypevm }
@@ -62,7 +83,10 @@ public struct RelayOrder: Sendable, Equatable {
             }
         }
         let recipient = vms[outChain] == .svm ? pay : pay.lowercased()
-        return RelayOrder(id: try hashOrder(o), inputChain: inChain, inputAmount: payment["amount"] as? String ?? "", outputChain: outChain,
+        func currency(_ c: Any?, on chain: String) -> String { (c as? String).map { vms[chain] == .svm ? $0 : $0.lowercased() } ?? "" }
+        return RelayOrder(id: try hashOrder(o), inputChain: inChain, inputCurrency: currency(payment["currency"], on: inChain),
+                          inputAmount: payment["amount"] as? String ?? "", outputChain: outChain,
+                          outputCurrency: currency(payments[0]["currency"], on: outChain),
                           recipient: recipient, minimumAmount: payments[0]["minimumAmount"] as? String ?? "", deadline: deadline)
     }
 
@@ -74,7 +98,7 @@ public struct RelayOrder: Sendable, Equatable {
             guard b.count == 32 else { throw Refusal(reason: "Not a Solana address: \(s).") }
             return b
         case .evm?:
-            guard let b = Data(hex: s), b.count == 20 else { throw Refusal(reason: "Not an EVM address: \(s).") }
+            guard let b = Data(evmAddress: s) else { throw Refusal(reason: "Not an EVM address: \(s).") }
             return b
         case .hypevm?:
             guard let b = Data(hex: s), (1...20).contains(b.count) else { throw Refusal(reason: "Not a Hyperliquid address: \(s).") }

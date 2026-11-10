@@ -38,3 +38,19 @@ private let evm = "0x9858EfFD232B4033E47d90003D41EC34EcaEda94", solana = "HAgk14
     }
     #expect(throws: RelayOrder.Refusal.self) { try RelayOrder.read(Data(base.utf8), evm: evm, solana: solana, now: 4_000_000_000) }
 }
+
+/// What an order takes and gives back, for the automation wallet's limits: its bridge to the person's own wallet spends
+/// the deposit less the order's minimum, and only when both sides are dollars the signer counts (the 2026-11-10 review).
+@Test func relayOrdersSayWhatComesBackInDollars() throws {
+    let read = { (i: Int) in try RelayOrder.read(Data(relayOrders[i].json.utf8), evm: evm, solana: solana, now: 1_700_000_000) }
+    // Solana → Base, Hyperliquid → Base, Base → Solana: 5 USDC in, at least 4.878… USDC out.
+    let orders = try [read(0), read(1), read(2)]
+    #expect(orders.map(\.inputCurrency) == ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "0x00000000000000000000000000000000", EVMRPC.baseUSDC])
+    #expect(orders.map(\.inputAmount) == ["5000000", "500000000", "5000000"])
+    #expect(orders.map(\.minimumDollars) == [Decimal(string: "4.878026"), Decimal(string: "4.878146"), Decimal(string: "4.878735")])
+    // Paid in anything else — another token, the network's coin — nothing is counted as coming back.
+    let other = relayOrders[0].json.replacingOccurrences(of: #""currency":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","minimumAmount":"4878026""#,
+                                                         with: #""currency":"0x0000000000000000000000000000000000000000","minimumAmount":"4878026""#)
+    #expect(other != relayOrders[0].json)
+    #expect(try RelayOrder.read(Data(other.utf8), evm: evm, solana: solana, now: 1_700_000_000).minimumDollars == nil)
+}

@@ -117,6 +117,16 @@ enum SignerSelfTest {
             let unlimited = Data(hex: "095ea7b3")! + word(String(repeating: "5c", count: 20)) + Data(repeating: 0xff, count: 32)
             check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
                                                             to: arbitrumUSDC, value: 0, data: unlimited, recipients: [])).ok == false, "unlimited approve not signed")
+            // The 2026-11-10 review: the wallet's own address without its «0x» (the text checks missed it, the bytes are
+            // the same), and setApprovalForAll with a flag of 2, which older NFT contracts read as yes.
+            let batch = try Batch7702.executeBatch([.init(to: arbitrumUSDC, data: unlimited)])
+            check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
+                                                            to: String((imported.evmAddress ?? "").dropFirst(2)), value: 0, data: batch, recipients: [])).ok == false,
+                  "a call into this wallet's own address written without 0x not signed")
+            let allNFTs = Data(hex: "a22cb465")! + word(String(repeating: "5c", count: 20)) + word("02")
+            check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
+                                                            to: arbitrumUSDC, value: 0, data: allNFTs, recipients: [scamEVM])).ok == false,
+                  "setApprovalForAll with a flag of 2 not signed")
 
             // NEAR → 1Click: the signer builds the wrap.near transaction itself; it must equal the reference and verify.
             let nearPublic = try Curve25519.Signing.PrivateKey(rawRepresentation: Derivation.ed25519(seed: seed, path: WalletPath.near(0))).publicKey

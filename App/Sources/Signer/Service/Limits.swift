@@ -33,6 +33,8 @@ enum Limits {
         /// Call under `lock`: the list is read and written back. Throws when it couldn't be stored: a move whose dollars
         /// aren't written down isn't signed, or a restart would forget them (the Windows signer does the same).
         fileprivate func record(_ dollars: Decimal, now: Date = Date()) throws {
+            // NaN compares as under any limit and above nothing: never counted as «nothing spent».
+            guard dollars.isFinite else { throw WalletError("The signer couldn't count what this move spends: nothing was signed.") }
             guard dollars > 0 else { return }
             guard Signer.defaults.set(entries(now: now) + [[now.timeIntervalSince1970, NSDecimalNumber(decimal: dollars).doubleValue]], forKey: key) else {
                 throw WalletError("The signer couldn't write down what this move spends: nothing was signed.")

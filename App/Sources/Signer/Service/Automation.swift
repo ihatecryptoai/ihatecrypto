@@ -50,13 +50,18 @@ enum Automation {
                 add(token, units, decimals: dollarDecimals(token), to: to, name: "\(amount) units of \(token.prefix(8))…")
             } else { others.append("an amount the signer can't read (\(amount.prefix(20)))") }
         case .signRelayMulticallPermit(let chainId, let token, let value, let validBefore, let relayer, let refundTo, let nftRecipient, let metadata, let calls):
-            // Into Relay's depository for an order whose payee the signer checked: to this wallet's own address elsewhere
-            // it's the person's money moving, else spending.
+            // Into Relay's depository for an order whose payee the signer checked. To one of the person's own wallets,
+            // in dollars, for exactly this deposit: what is spent is what doesn't come back, the deposit less the order's
+            // minimum. The order names its own amounts, so «to my own wallet» alone counted nothing while it could pay
+            // back a cent (the 2026-11-10 review). Another payee, or a coin the signer can't count: the whole deposit.
             let m = RelayMulticallPermit(chainId: chainId, token: token, from: try Signer.address("evm"), value: value, validBefore: validBefore,
                                          relayer: relayer, refundTo: refundTo, nftRecipient: nftRecipient, metadata: metadata,
                                          calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
-            if let id = m.depositID, let order = Signer.RelayOrders.order(id), own(order.recipient) { break }
             add(token, Decimal(value), decimals: dollarDecimals(token), to: nil, name: "\(value) units of \(token.prefix(8))…")
+            if let id = m.depositID, let order = Signer.RelayOrders.order(id), own(order.recipient), dollarDecimals(token) != nil,
+               order.inputCurrency == token.lowercased(), order.inputAmount == String(value), let back = order.minimumDollars {
+                dollars = max(0, dollars - back)
+            }
         case .signHyperliquidL1(let action, _, _):
             switch HLAction.opening(action) {
             case .dollars(let d): dollars += d
