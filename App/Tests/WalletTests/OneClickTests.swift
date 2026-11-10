@@ -315,15 +315,26 @@ func tempoExchangeQuotes() async throws {
 /// A chain's bridge legs land together: waiting for one place leaves the others running, they overlap in time, and a
 /// leg that failed throws when its place is needed.
 @Test(.timeLimit(.minutes(1))) func landingsAreWaitedForByPlace() async throws {
-    let landings = Landings()
-    let started = ContinuousClock.now
-    landings.add("arbitrum") { try await Task.sleep(for: .milliseconds(400)); return "one" }
-    landings.add("arbitrum") { try await Task.sleep(for: .milliseconds(400)); return "two" }
+    // How many legs run at one moment: the clock said so until a loaded machine made 0.4 s take 1.1 (2026-11-10).
+    actor Running {
+        var now = 0, most = 0
+        func enter() { now += 1; most = max(most, now) }
+        func leave() { now -= 1 }
+    }
+    let landings = Landings(), running = Running()
+    for name in ["one", "two"] {
+        landings.add("arbitrum") {
+            await running.enter()
+            try await Task.sleep(for: .milliseconds(400))
+            await running.leave()
+            return name
+        }
+    }
     landings.add("solana") { throw ExecutionError("Relay returned refund.") }
     #expect(landings.count(at: "arbitrum") == 2 && landings.count(at: nil) == 3)
     #expect(try await landings.wait(for: "arbitrum") == ["one", "two"])
-    // Two 0.4 s landings at once, not one after the other.
-    #expect(ContinuousClock.now - started < .milliseconds(750))
+    // Two landings at once, not one after the other.
+    #expect(await running.most == 2)
     #expect(landings.count(at: "arbitrum") == 0 && landings.count(at: "solana") == 1)
     await #expect(throws: ExecutionError.self) { try await landings.wait(for: "solana") }
     #expect(landings.count(at: nil) == 0)

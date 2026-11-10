@@ -1645,11 +1645,21 @@ final class Workspace {
             let why = missing
                 ? (provider.info.id == "ollama" ? say("it isn't downloaded — run «ollama pull \(model)» in Terminal", "она не скачана — выполни в Терминале «ollama pull \(model)»")
                                                  : say("it isn't downloaded in \(provider.info.name)", "она не скачана в \(provider.info.name)"))
-                : String(failure.prefix(140))
+                : LLMFailure.words(failure)
+            // What happened in the person's words (no credits, too many requests, a key that didn't fit…), never the
+            // service's JSON: «NEAR AI: {"error":{"message":"No spending limit configured…» said nothing to do.
+            let known = missing ? nil : modelFailureWords(failure, provider: provider.info, model: model)
             // What reads the same without a model — a chart, a token, P/L — still shows; nothing that could move money.
             if typed == nil, said == nil, await readWithoutModel(text) {
-                reply(say("\(model) isn't answering (\(why)), so I read this one myself. Pick another model above for the rest.",
-                          "\(model) не отвечает (\(why)), поэтому это я прочитал сам. Для остального выбери другую модель сверху."), note: model)
+                reply(known.map { say("\(model) didn’t answer. \($0.why) So I read this one myself. \($0.fix)",
+                                      "\(model) не ответил. \($0.why) Поэтому это я прочитал сам. \($0.fix)",
+                                      "\(model) no respondió. \($0.why) Así que esto lo leí yo. \($0.fix)") }
+                      ?? say("\(model) isn't answering (\(why)), so I read this one myself. Pick another model above for the rest.",
+                             "\(model) не отвечает (\(why)), поэтому это я прочитал сам. Для остального выбери другую модель сверху."), note: model)
+            } else if let known {
+                reply(say("\(model) didn’t answer. \(known.why) \(known.fix) I didn’t act on this — nothing moved.",
+                          "\(model) не ответил. \(known.why) \(known.fix) Ничего не сделал — ничего не ушло.",
+                          "\(model) no respondió. \(known.why) \(known.fix) No hice nada: no se movió nada."), note: model)
             } else {
                 reply(say("I couldn’t reach \(model) (\(why)), so I didn’t act on this — nothing moved. Send it again, or pick another model above.",
                           "Не достучался до \(model) (\(why)), поэтому ничего не сделал — ничего не ушло. Отправь ещё раз или выбери другую модель сверху."), note: model)

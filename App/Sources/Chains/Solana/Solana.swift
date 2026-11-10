@@ -65,14 +65,25 @@ public struct SolanaRPC: Sendable {
     /// What `owner`'s own token account for `mint` holds, in whole tokens; 0 without one. Two light reads (the mint's
     /// program, the account's balance), never getTokenAccountsByOwner, which the public node throttles right after a swap.
     public func ownedAmount(owner: String, mint: String) async throws -> Decimal {
+        try await amount(owner: owner, mint: mint, commitment: "finalized") ?? 0
+    }
+
+    /// What one token account holds, in whole tokens, at a commitment of the caller's: «confirmed» counts a move the
+    /// moment it is through, some 13 s before the finalized balance shows it. One light read. nil when the node didn't
+    /// answer or there is no account — never 0 for a read that failed: a wait hangs on it.
+    public func accountAmount(_ account: String, commitment: String) async -> Decimal? {
+        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": commitment]]) as? [String: Any])?["value"] as? [String: Any],
+              let units = (value["amount"] as? String).flatMap({ Decimal(string: $0) }), let decimals = (value["decimals"] as? NSNumber)?.intValue else { return nil }
+        return units / pow(Decimal(10), decimals)
+    }
+
+    private func amount(owner: String, mint: String, commitment: String) async throws -> Decimal? {
         let info = try await call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let program = (info?["value"] as? [String: Any])?["owner"] as? String, [SPL.tokenProgram, SPL.token2022Program].contains(program) else {
             throw WalletError("\(mint) isn't a token mint on Solana.")
         }
         let account = try SPL.associatedAccount(owner: owner, mint: mint, program: program)
-        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": "finalized"]]) as? [String: Any])?["value"] as? [String: Any],
-              let units = (value["amount"] as? String).flatMap({ Decimal(string: $0) }), let decimals = (value["decimals"] as? NSNumber)?.intValue else { return 0 }
-        return units / pow(Decimal(10), decimals)
+        return await accountAmount(account, commitment: commitment)
     }
 
     /// Raw units of an SPL token held by `owner` across its accounts.

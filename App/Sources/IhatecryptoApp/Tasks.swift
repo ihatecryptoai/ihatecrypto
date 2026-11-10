@@ -291,8 +291,8 @@ extension Workspace {
                 showNext(step)
                 if let landings, !(await landed(landings, before: command, step: step)) { stopped = true; break }
                 // Money a move before brought to Solana: this step waits until Solana's balance shows it.
-                if arrived.contains("solana"), let c = command, Self.spends(c) == "solana", let need = Self.solanaUSDC(c) {
-                    await waitForDeposit(need, then: step)
+                if arrived.contains("solana"), let c = command, Self.spendsOnSolana(c) {
+                    await waitForDeposit(Self.solanaUSDC(c), then: step)
                 }
             }
             // The first step reads the balances as they are now: one that can't be paid is said before any card
@@ -443,25 +443,66 @@ extension Workspace {
         runningAction = (say("Next: ", "Дальше: ", "Siguiente: ") + readable(ScheduleCanvas.readable(step)), chainSteps(of: [step]), [], Date())
     }
 
+    /// A step that spends USDC held on Solana: one that names it (`spends`), or a spread of the free USDC wherever it
+    /// is. A deposit of another coin («lend 2 SOL») spends none.
+    static func spendsOnSolana(_ c: WalletCommand) -> Bool {
+        switch c {
+        case .allocate(let asset, maxShare: _, amount: _, without: _, from: nil): asset.uppercased() == "USDC"
+        case .lendDeposit(let symbol, _), .kamino(deposit: true, symbol: let symbol, amount: _): symbol.uppercased() == "USDC"
+        default: spends(c) == "solana"
+        }
+    }
+
+    /// The wait for money a move brought to Solana is over. Balances are read at «finalized» and a move ends at
+    /// «confirmed», some 13 s earlier, so the money is counted before it shows. With the step's amount there it is
+    /// over. Without one («then move all»), or when the move brings less than the step asks (the rest comes from
+    /// another network), it is over once the finalized balance equals the confirmed one — equal, not «at least»: what
+    /// an earlier step spent is confirmed before it is final too — and that one has read the same several times in a
+    /// row: three when it stands above `entry`, the balance the wait began with (the money is seen coming), eight when
+    /// it doesn't (it had landed already, or a node a little behind still answers the old balance). No confirmed read
+    /// at all: only the step's own amount ends it.
+    static func depositShown(need: Decimal?, finalized: Decimal, confirmed: Decimal?, steady: Int, entry: Decimal) -> Bool {
+        if let need, finalized >= need { return true }
+        guard let confirmed else { return false }
+        return finalized == confirmed && steady >= (confirmed > entry ? 3 : 8)
+    }
+
     /// A step that spends on Solana what a move before it brought: a card of its own («ARRIVES · SOLANA») until
-    /// Solana's balance shows the money, two minutes at most; then the step goes on and its own check says what's short.
-    private func waitForDeposit(_ need: Decimal, then step: String) async {
-        guard let have = solana?.usdc, have < need else { return }
+    /// Solana's balance shows the money (`depositShown`), two minutes at most; then the step goes on and its own check
+    /// says what's short. `need`: the step's amount, nil when it names none («move all», a spread) — it read the old
+    /// balance then, and a step asking for more than the move brought waited the whole two minutes (2026-11-10).
+    private func waitForDeposit(_ need: Decimal?, then step: String) async {
+        guard let have = solana?.usdc, need.map({ have < $0 }) ?? true,
+              let account = try? SPL.associatedAccount(owner: solanaAddress, mint: SpotAsset.usdc.mint) else { return }
+        let rpc = SolanaRPC()
+        var confirmed = await rpc.accountAmount(account, commitment: "confirmed"), steady = 0, now = have, unread = 0
         func card(_ have: Decimal) -> ActivityBubble {
-            ActivityBubble(kind: "step", label: "ARRIVES · SOLANA", title: "\(Fmt.num(need)) USDC",
-                           lines: [say("on Solana now", "на Solana сейчас", "en Solana ahora") + "\t\(Fmt.num(have)) USDC",
-                                   say("then", "потом", "luego") + "\t" + readable(ScheduleCanvas.readable(step))],
-                           logo: "sol", fill: .solana)
+            // What the step asks for, else what is seen coming.
+            let coming = need ?? confirmed.flatMap { $0 > have ? $0 - have : nil }
+            return ActivityBubble(kind: "step", label: "ARRIVES · SOLANA", title: coming.map { "\(Fmt.num($0)) USDC" } ?? "USDC",
+                                  lines: [say("on Solana now", "на Solana сейчас", "en Solana ahora") + "\t\(Fmt.num(have)) USDC",
+                                          say("then", "потом", "luego") + "\t" + readable(ScheduleCanvas.readable(step))],
+                                  logo: "sol", fill: .solana)
         }
         runningAction = (say("Waiting for the deposit on Solana", "Жду депозит на Solana", "Esperando el depósito en Solana"),
                          [card(have)] + chainSteps(of: [step]), [], Date())
-        for _ in 0..<60 {
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline, !Self.depositShown(need: need, finalized: now, confirmed: confirmed, steady: steady, entry: have) {
+            // No amount to wait for and the node says nothing of what is counted: nothing to wait on.
+            if need == nil, confirmed == nil, unread >= 5 { break }
             try? await Task.sleep(for: .seconds(2))
-            await loadSolana()
-            let now = solana?.usdc ?? 0
-            if now >= need { break }
+            // The one account, two light reads: the whole portfolio every two seconds (loadSolana) spent Jupiter's five
+            // calls per ten seconds, and the step's own call after the wait got «too many requests» (2026-11-10).
+            if let finalized = await rpc.accountAmount(account, commitment: "finalized") { now = finalized }
+            // A read that failed says nothing: it neither counts toward «the same» nor starts the count again.
+            if let again = await rpc.accountAmount(account, commitment: "confirmed") {
+                steady = again == confirmed ? steady + 1 : 0
+                confirmed = again
+            } else { unread += 1 }
             runningAction?.steps[0] = card(now)
         }
+        // Once, for the step's own checks, which read the portfolio.
+        await loadSolana()
     }
 
     /// The USDC a step spends on Solana: what it waits for when a move before it brings the money.
