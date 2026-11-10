@@ -1,5 +1,43 @@
 [
   {
+    "version": "0.8.5",
+    "date": "2026-11-10",
+    "stories": [
+      {
+        "title": "A bridge's Touch ID says what you get",
+        "text": "Touch ID for a Relay bridge now carries a line the signer reads from Relay's order itself: «Relay then pays at least 4.878026 USDC to …», with the address whole and its network. Until now what arrives was only on the card, which is the app's word. The amount on that line is the one the order is signed for, digit for digit.",
+        "symbol": "text.badge.checkmark",
+        "color": "0A84FF",
+        "try": "move 5 USDC from Solana to Base"
+      },
+      {
+        "title": "Another review, every finding fixed",
+        "text": "An address written without its «0x» is never signed, so nothing gets past the checks that know your wallet and Relay by their addresses. A site asking for all your NFTs is refused whatever it puts in the yes, where a 2 used to read as a revoke. An order the trading key can't count goes to you. A task's bridge counts toward its daily limit by what doesn't come back. A site's text asks Touch ID of its own, whatever session is open.",
+        "symbol": "checkmark.shield.fill",
+        "color": "30D158"
+      },
+      {
+        "title": "Steps wait for their Confirm, and for the money",
+        "text": "The steps after a card run only once you press Confirm on that card, not after some other move on the canvas goes through. A step that follows a withdrawal waits until the balance shows it: «withdraw 1 USDC from Jupiter then deposit 1 USDC into Jupiter» deposits 1, where it used to deposit the 0.1 that was already there.",
+        "symbol": "list.number",
+        "color": "FF7A2F",
+        "try": "withdraw 1 USDC from Jupiter then deposit 1 USDC into Jupiter"
+      },
+      {
+        "title": "NEAR AI shows it's private",
+        "text": "In the chat's model menu NEAR AI carries a green «Private» tag and one line on what it means: the model runs in sealed hardware NEAR can't read, and the app checks that hardware before every message. The line under each company now stays whole instead of ending in «…».",
+        "symbol": "lock.shield.fill",
+        "color": "00EC97"
+      },
+      {
+        "title": "Connect a model by key in two steps",
+        "text": "Settings › AI model now says where each key comes from: «Get a key at platform.openai.com» with what to press there and an Open button, then a field to paste it into. NEAR AI, OpenAI, Anthropic, DeepSeek, xAI, Gemini and OpenRouter all work this way. The model is a list of names, with «Custom…» for an id of your own, and Disconnect sits on its own red row.",
+        "symbol": "key.fill",
+        "color": "FF9F0A"
+      }
+    ]
+  },
+  {
     "version": "0.8.4",
     "date": "2026-11-09",
     "stories": [
