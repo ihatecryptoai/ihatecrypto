@@ -177,7 +177,8 @@ to `windows` and keeps the installer as an artifact for two weeks.
   archive signed with the key whose public half is in `tauri.conf.json`. The private key and its password are in the
   release Mac's Keychain (`ihatecrypto-windows-updater`, `ihatecrypto-windows-updater-password`), and the key stays
   there: the installers are signed on that Mac.
-- **A release** (0.9.0, 2026-11-07, the first one): the version in `tauri.conf.json` and the window's `Cargo.toml`, the
+- **A release** (the previews 0.9.0–0.9.2 came first; since 0.8.6, 2026-11-10, the PC's version is the Mac's, and the
+  previews' releases and tags are gone): the version in `tauri.conf.json` and the window's `Cargo.toml`, the
   PC's own What's New in `whatsnew.py`, a push to `windows` (CI builds the x64 installer as an artifact) and
   `build.ps1` on a Windows on ARM machine for the ARM64 one. On the Mac, `npx @tauri-apps/cli@2.12.4 signer sign <installer>`
   with the key from the Keychain in `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` writes each
