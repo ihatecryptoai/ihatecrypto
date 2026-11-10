@@ -321,7 +321,8 @@ extension Workspace {
             steps.append(ActivityBubble(kind: "step", label: "TO · \(p.to.name.uppercased())", title: "\(amount) → \(p.to.name)",
                                         lines: ["from the multisig \(short(p.multisig.address))", "gas from this Mac"],
                                         logo: ModuleNetwork(place: net.key)?.logo, fill: RouteFill(rawValue: net.key) ?? .check,
-                                        money: [MoneyMove(place: "Multisig", symbol: p.symbol, was: p.held, after: p.held - p.amount)]))
+                                        money: [MoneyMove(place: "Multisig", symbol: p.symbol, was: p.held, after: p.held - p.amount)],
+                                        address: p.to.address))
             return MoveRoute(title: "\(amount) from the multisig to \(p.to.name)",
                              footer: "Each key signs the same move: a plain payment, money only to \(p.to.name). Then this Mac sends it with the signatures and pays the gas; the multisig needs no \(net.gasCoin). Press Confirm.",
                              steps: steps)

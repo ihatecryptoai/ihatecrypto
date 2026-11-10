@@ -395,6 +395,8 @@ struct RouteCard: View {
     var isOpen = false
     /// The history draws the same card narrower.
     var width = RouteCards.cardWidth
+    /// Its height where the width's share of the canvas card's isn't enough: the words don't shrink with the picture.
+    var height: CGFloat?
     /// A long route's small card: the same parts a size smaller, fewer of its numbers; the rest opens on a click.
     var compact = false
     /// A route's card opens its details on a click: its last line says so («Details ›», «Close ×» while open).
@@ -426,7 +428,10 @@ struct RouteCard: View {
             .clipped()
             info(kind)
         }
-        .frame(width: w, height: compact ? RouteCards.smallHeight : RouteCards.cardHeight * width / RouteCards.cardWidth, alignment: .topLeading)
+        // ponytail: the height is fixed and the words under the picture aren't cut any more: a money row on two lines
+        // with a four-line note is taller than the card and loses its last line at the edge. No step says that much
+        // today; when one does, let the note go to Details first.
+        .frame(width: w, height: height ?? (compact ? RouteCards.smallHeight : RouteCards.cardHeight * width / RouteCards.cardWidth), alignment: .topLeading)
         .background(Brand.card)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay { edges(look, kind: kind, radius: radius) }
@@ -443,9 +448,16 @@ struct RouteCard: View {
         let parts = step.label.components(separatedBy: "·").map { $0.trimmingCharacters(in: .whitespaces) }
         let place = parts.count > 1 ? Self.pretty(parts.dropFirst().joined(separator: " · ")) : nil
         let money = step.money ?? []
-        let rows = step.lines.filter { $0.contains("\t") }
+        // The address a step pays or saves is whole in the box, so the line that gave its ends keeps only what follows
+        // them («7xKX 9fQm … 3kPq 2Wd1 · Solana» → «Solana»).
+        let ends = step.address.map { a in let e = AddressCheck.ends(a); return "\(e.start) … \(e.end)" }
+        let lines = step.lines.map { line in
+            guard let ends, line.hasPrefix(ends) else { return line }
+            return String(line.dropFirst(ends.count)).trimmingCharacters(in: CharacterSet(charactersIn: " ·"))
+        }
+        let rows = lines.filter { $0.contains("\t") }
         // «free: 29.39 USDC» says again what the money box shows.
-        let notes = step.lines.filter { line in
+        let notes = lines.filter { line in
             !line.isEmpty && !line.contains("\t") && (money.isEmpty || !(["free:", "held:", "in the vault:"].contains(where: line.hasPrefix)
                 || line.wholeMatch(of: /≈ [\d.,]+ \S+/) != nil))
         }
@@ -456,15 +468,16 @@ struct RouteCard: View {
         return VStack(alignment: .leading, spacing: compact ? 6 : 8) {
             HStack(spacing: 6) {
                 Text(parts.first ?? step.label).font(.ui(compact ? 9.5 : 10, .heavy)).tracking(0.7).foregroundStyle(verbInk(kind))
+                    .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                 if let place {
                     Circle().fill(Color.secondary.opacity(0.6)).frame(width: 3, height: 3)
                     LogoBadge(step: step, size: compact ? 16 : 18)
-                    Text(place).font(.ui(compact ? 11 : 11.5, .semibold)).foregroundStyle(.primary)
+                    // A long place on a narrow card («Confidential Intents» in the history) takes a second line.
+                    Text(place).font(.ui(compact ? 11 : 11.5, .semibold)).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .lineLimit(1)
             StepTitle(step: step, ink: .primary, size: compact ? 17 : 19)
-            if !money.isEmpty || !rows.isEmpty || !said.isEmpty {
+            if !money.isEmpty || !rows.isEmpty || !said.isEmpty || step.address != nil {
                 // As many of its numbers as fit; the rest open with a click.
                 ViewThatFits(in: .vertical) {
                     ForEach(Array(stride(from: compact ? 3 : 4, through: 1, by: -1)), id: \.self) { n in
@@ -489,6 +502,8 @@ struct RouteCard: View {
                 // What stops the step comes first, in red.
                 StepLine(line: line, look: paper, size: compact ? 10.5 : 11, alert: state == .blocked && i == 0 && shown.isEmpty)
             }
+            // Who is paid, whole (the owner, 2026-10-16: never only an address's ends); Copy is in the opened step.
+            if let address = step.address { AddressLines(address: address, size: compact ? 9.5 : 10, copy: false) }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -500,7 +515,9 @@ struct RouteCard: View {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let note {
-                    Text(note).font(.ui(compact ? 10 : 10.5)).foregroundStyle(state == .blocked ? Brand.loss : .secondary).lineLimit(compact ? 1 : 2)
+                    // Whole, on the lines it needs: the box above gives up a number for it.
+                    Text(note).font(.ui(compact ? 10 : 10.5)).foregroundStyle(state == .blocked ? Brand.loss : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
                 if opens {
@@ -644,16 +661,34 @@ struct StepLine: View {
     var body: some View {
         let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
         if parts.count == 2 {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(parts[0]).font(.ui(size)).foregroundStyle(look.line).lineLimit(1)
-                Spacer(minLength: 4)
-                Text(parts[1]).font(.ui(size, .semibold)).monospacedDigit().foregroundStyle(tint(parts[0], parts[1]) ?? look.ink)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+            // The label and its value on one line at this size or a smaller one, else the value under its label on the
+            // lines it needs: neither is cut.
+            ViewThatFits(in: .horizontal) {
+                row(parts, size)
+                row(parts, size * 0.85)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(parts[0]).font(.ui(size)).foregroundStyle(look.line)
+                    value(parts, size)
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
         } else {
             Text(line).font(.ui(size, alert ? .semibold : .regular)).foregroundStyle(alert ? look.loss : look.line)
-                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func row(_ parts: [String], _ size: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(parts[0]).font(.ui(size)).foregroundStyle(look.line)
+            Spacer(minLength: 4)
+            value(parts, size)
+        }
+        .lineLimit(1)
+    }
+
+    private func value(_ parts: [String], _ size: CGFloat) -> some View {
+        Text(parts[1]).font(.ui(size, .semibold)).monospacedDigit().foregroundStyle(tint(parts[0], parts[1]) ?? look.ink)
     }
 
     private func tint(_ label: String, _ value: String) -> Color? {
@@ -669,15 +704,36 @@ struct MoneyLine: View {
     var size: CGFloat = 11.5
 
     var body: some View {
+        // The place beside its numbers at this size or a smaller one, else on the line above them: a place cut to «…»
+        // didn't say whose balance changes.
+        ViewThatFits(in: .horizontal) {
+            row(size)
+            row(size * 0.88)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(move.place).foregroundStyle(.secondary)
+                HStack(spacing: 0) { Spacer(minLength: 0); numbers(size).minimumScaleFactor(0.75) }
+            }
+            .font(.ui(size))
+        }
+        .monospacedDigit().lineLimit(1)
+    }
+
+    private func row(_ size: CGFloat) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(move.place).foregroundStyle(.secondary).layoutPriority(-1)
+            Text(move.place).foregroundStyle(.secondary)
             Spacer(minLength: 4)
+            numbers(size)
+        }
+        .font(.ui(size))
+    }
+
+    private func numbers(_ size: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(Self.amount(move.was, move.symbol)).foregroundStyle(.secondary)
             Text("→").foregroundStyle(.tertiary)
             Text((move.approx ? "≈ " : "") + Self.amount(move.after, move.symbol)).fontWeight(.bold)
             Text(move.symbol).font(.ui(size - 1.5)).foregroundStyle(.secondary)
         }
-        .font(.ui(size)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
     }
 
     /// Dollars to the cent; another coin to 4 places from 1 up (2.4722 AERO), 6 under it (0.074852 SOL).
@@ -707,20 +763,32 @@ struct StepTitle: View {
     var body: some View {
         // «→ Hyperliquid» starts with its arrow: an empty first part.
         let parts = ws.readable(step.title).components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+        // On one line at its size or a smaller one, else all of it on the lines it needs: a title is never cut («send 10
+        // USDC privately on solana to t…» hid who the money goes to).
+        ViewThatFits(in: .horizontal) {
+            line(parts, size)
+            line(parts, size * 0.85)
+            line(parts, size * 0.7)
+            Text(parts.joined(separator: " → ").trimmingCharacters(in: .whitespaces)).font(.ui(size * 0.7, .bold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .monospacedDigit().foregroundStyle(ink)
+    }
+
+    private func line(_ parts: [String], _ size: CGFloat) -> some View {
         HStack(spacing: size * 0.3) {
             ForEach(parts.indices, id: \.self) { i in
                 if i > 0 { Text("→") }
                 if !parts[i].isEmpty {
-                    icon(parts[i])
+                    icon(parts[i], size)
                     Text(parts[i])
                 }
             }
         }
-        .font(.ui(size, .bold)).monospacedDigit().foregroundStyle(ink)
-        .lineLimit(1).minimumScaleFactor(0.55)
+        .font(.ui(size, .bold)).lineLimit(1)
     }
 
-    @ViewBuilder private func icon(_ part: String) -> some View {
+    @ViewBuilder private func icon(_ part: String, _ size: CGFloat) -> some View {
         if let contract = step.title.firstMatch(of: /0x[0-9a-fA-F]{40}/).map({ String($0.0) }), let token = ws.favoriteToken(contract) {
             TokenIcon(token: token, size: size + 1)
         } else if let name = Self.logo(part) {
@@ -1208,7 +1276,9 @@ struct StepDetails: View {
             }
             if pending == nil {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(step.lines.filter { !$0.isEmpty }, id: \.self) { Text($0.rowText).font(.ui(12)) }
+                    ForEach(step.lines.filter { !$0.isEmpty }, id: \.self) { Text($0.rowText).font(.ui(12)).fixedSize(horizontal: false, vertical: true) }
+                    // Who is paid, whole, with Copy.
+                    if let address = step.address { AddressLines(address: address, size: 12).padding(.vertical, 4) }
                     if let footer { Text(footer).font(.ui(11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 }
             }
@@ -1238,8 +1308,10 @@ struct StepDetails: View {
         HStack(spacing: 12) {
             LogoBadge(step: step, size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(Self.pretty(step.label)).font(.ui(16, .bold)).lineLimit(1)
-                Text("Step \(index + 1) of \(count) · \(ws.readable(step.title))").font(.ui(12)).foregroundStyle(.secondary).lineLimit(1)
+                // Opened, a step says all of itself: on as many lines as it takes.
+                Text(Self.pretty(step.label)).font(.ui(16, .bold)).fixedSize(horizontal: false, vertical: true)
+                Text("Step \(index + 1) of \(count) · \(ws.readable(step.title))").font(.ui(12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             if let place = step.logo.flatMap(Openable.place(logo:)) {
@@ -1308,7 +1380,8 @@ struct StepDetails: View {
                         TokenLogo(name: q.way == "relay" ? "relay" : "uni", size: 24, round: true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(Workspace.stockWayName(q.way)).font(.ui(13, .bold))
-                            Text("≈ \(q.gets)" + (i == 0 ? "" : " · \(Fmt.usd(quotes[0].worth - q.worth)) less")).font(.ui(11)).foregroundStyle(.secondary).lineLimit(1)
+                            Text("≈ \(q.gets)" + (i == 0 ? "" : " · \(Fmt.usd(quotes[0].worth - q.worth)) less")).font(.ui(11)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 6)
                         if i == 0 {
@@ -1347,7 +1420,7 @@ struct StepDetails: View {
                     .frame(width: 42, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.ui(13, .bold))
-                    Text(detail).font(.ui(11)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(detail).font(.ui(11)).foregroundStyle(.secondary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 6)
                 if recommended {

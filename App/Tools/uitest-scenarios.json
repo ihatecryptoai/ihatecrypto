@@ -1549,7 +1549,36 @@
       ],
       "title_contains": "privately",
       "footer_contains": "can't be matched",
-      "privacy": "private"
+      "privacy": "private",
+      "step_address": "steps"
+    },
+    "only_if": {
+      "wallet": "test"
+    }
+  },
+  {
+    "name": "a chain whose later step can never run (a Solana address asked to be paid on Base) → said before any card, nothing on the canvas",
+    "send": [
+      "withdraw 1 USDC from Jupiter Lend, then send 1 USDC privately on base to Test"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "Base"
+    },
+    "only_if": {
+      "wallet": "test"
+    }
+  },
+  {
+    "name": "a chain that ends in a send: its step keeps the whole address for the opened details",
+    "send": [
+      "withdraw 1 USDC from Jupiter Lend, then send 1 USDC to Automation on solana"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "title_contains": "Jupiter Lend",
+      "step_address": "chain"
     },
     "only_if": {
       "wallet": "test"

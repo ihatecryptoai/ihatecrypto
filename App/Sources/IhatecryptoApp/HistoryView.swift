@@ -444,7 +444,8 @@ struct HistoryBubble: View {
     var body: some View {
         Group {
             if let step = bubble.routeStep {
-                RouteCard(step: step, state: .plain, width: 210)
+                // As tall as the canvas card less what the narrower picture gives back: its words are the same size.
+                RouteCard(step: step, state: .plain, width: 210, height: RouteCards.cardHeight - 140 * (RouteCards.cardWidth - 210) / 340)
             } else {
                 generic
             }

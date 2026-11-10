@@ -879,7 +879,8 @@ struct NextLine: View {
                     time
                 }
             } else {
-                Text(entry.when)
+                // «now 84.527 · 24.2% away» whole: on a second line where the row is narrow.
+                Text(entry.when).lineLimit(nil).fixedSize(horizontal: false, vertical: true)
             }
         }
         .font(.ui(11)).foregroundStyle(.secondary).lineLimit(1)

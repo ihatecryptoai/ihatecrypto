@@ -106,6 +106,8 @@ def check(expect, state, replies):
                 why.append(f"steps {labels}, expected {want}")
         elif key == "steps_lack" and any(want.upper() in s["label"].upper() for s in (pending or {}).get("steps", [])):
             why.append(f"steps {[s['label'] for s in (pending or {}).get('steps', [])]} name «{want}»")
+        elif key == "step_address" and not any(s.get("wholeAddress") for s in (pending or {}).get(want, [])):
+            why.append(f"no step of «{want}» carries its whole address for the opened details: {text((pending or {}).get(want))}")
         elif key == "pending_name" and (pending or {}).get("name") != want:
             why.append(f"the card saves «{(pending or {}).get('name')}», expected «{want}»")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):

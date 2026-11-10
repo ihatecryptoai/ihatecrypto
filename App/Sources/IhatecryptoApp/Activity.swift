@@ -54,6 +54,8 @@ nonisolated struct ActivityBubble: Codable, Hashable, Sendable {
     var answer: ServiceAnswer?
     /// A money move's step: the balances it changes, read when the route was drawn (the card's «now → after»).
     var money: [MoneyMove]?
+    /// A step that pays or saves an address: all of it, for the card and the opened step (`lines` keep its ends, for text).
+    var address: String?
 }
 
 extension ActivityBubble {
@@ -105,7 +107,7 @@ extension Workspace {
     static func saveStep(_ entry: SavedAddress) -> ActivityBubble {
         let ends = AddressCheck.ends(entry.address)
         return ActivityBubble(kind: "step", label: "SAVE · \(entry.network.title.uppercased())", title: entry.name, lines: ["\(ends.start) … \(ends.end)"],
-                              logo: entry.network.logo, fill: RouteFill(rawValue: entry.network.rawValue) ?? .check)
+                              logo: entry.network.logo, fill: RouteFill(rawValue: entry.network.rawValue) ?? .check, address: entry.address)
     }
 
     /// The canvas as it is now, as bubbles: the plan, an allocation, rates or take-profit choices.

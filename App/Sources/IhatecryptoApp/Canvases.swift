@@ -1495,14 +1495,15 @@ extension Workspace {
                          warning: refused ?? line("liquidation").flatMap { $0.isEmpty ? nil : "Liquidation if \($0): Kamino sells your \(stock ?? "collateral") at a penalty. Keep an eye on it, or borrow less." })
     }
 
-    private func step(_ logo: String, _ label: String, _ title: String, _ line: String, _ fill: RouteFill, money: [MoneyMove] = []) -> ActivityBubble {
+    private func step(_ logo: String, _ label: String, _ title: String, _ line: String, _ fill: RouteFill, money: [MoneyMove] = [],
+                      address: String? = nil) -> ActivityBubble {
         let money = money.isEmpty ? nil : money
         // «all USDT» reads as the amount itself, «all available» small under it: the user wants the number, not «all».
         if title.hasPrefix("all "), let (x, symbol) = heldForAll(String(title.dropFirst(4)), fill: fill, label: label) {
             let all = label.hasPrefix("APPROVE") || line.hasPrefix("all available") ? line : line.isEmpty ? "all available" : "all available · \(line)"
-            return ActivityBubble(kind: "step", label: label, title: "\(Fmt.num(x, maxFraction: 8)) \(symbol)", lines: [all], logo: logo, fill: fill, money: money)
+            return ActivityBubble(kind: "step", label: label, title: "\(Fmt.num(x, maxFraction: 8)) \(symbol)", lines: [all], logo: logo, fill: fill, money: money, address: address)
         }
-        return ActivityBubble(kind: "step", label: label, title: title, lines: [line], logo: logo, fill: fill, money: money)
+        return ActivityBubble(kind: "step", label: label, title: title, lines: [line], logo: logo, fill: fill, money: money, address: address)
     }
 
     /// A Solana buy's coin now → after, by the quote the card shows; none until it's quoted.
@@ -1672,7 +1673,7 @@ extension Workspace {
             step("near", "FROM · NEAR", "\(Fmt.num(amount, maxFraction: 4)) NEAR",
                  usd.map { "≈ \(Fmt.usd($0))" + (close ? " · everything" : asked == nil ? " · ≈ 0.012 NEAR stays" : "") } ?? "", .near,
                  money: nearMove(by: -amount)),
-            step(entry.network.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", .near),
+            step(entry.network.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", .near, address: entry.address),
         ], warning: firstSendWarning(entry))
     }
 
@@ -1716,7 +1717,7 @@ extension Workspace {
                             + hl.footer + " Press Confirm.",
                          steps: [
             step(net.logo, "FROM · \(net.title.uppercased())", "\(Fmt.num(goes)) USDC", line, fill, money: bridged + moneyMove("USDC", on: net.rawValue, by: -goes)),
-            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)" + hl.to, fill),
+            step(net.logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)" + hl.to, fill, address: entry.address),
         ], warning: warnings.isEmpty ? nil : warnings.joined(separator: " "))
     }
 
@@ -1747,7 +1748,7 @@ extension Workspace {
                          steps: [
             step("sol", "FROM · SOLANA", "\(Fmt.num(amount, maxFraction: 9)) SOL", solana.map { "free: \(Fmt.num($0.sol, maxFraction: 6)) SOL" } ?? "", .solana,
                  money: moneyMove("SOL", on: "solana", by: -amount)),
-            step("sol", "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", .solana),
+            step("sol", "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", .solana, address: entry.address),
         ], warning: firstSendWarning(entry))
     }
 
@@ -1768,7 +1769,7 @@ extension Workspace {
             step(logo, "FROM · \((place?.title ?? net).uppercased())", what, amount == nil ? (held == nil ? "" : "all available") : held.map { "held: \(Fmt.num($0.amount, maxFraction: 6)) \($0.symbol)" } ?? "", fill,
                  money: held.map { h in [MoneyMove(place: WalletCommand.placeName(net), symbol: h.symbol, was: h.amount, after: max(0, h.amount - (amount ?? h.amount)))] }
                     ?? moneyMove(token, on: net, by: amount.map { -$0 })),
-            step(logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", fill),
+            step(logo, "TO · \(entry.label?.uppercased() ?? "SAVED ADDRESS")", entry.name, "\(ends.start) … \(ends.end)", fill, address: entry.address),
         ], warning: firstSendWarning(entry))
     }
 
@@ -2044,7 +2045,7 @@ extension Workspace {
                 let ends = entry.map { AddressCheck.ends($0.address) }
                 return [ActivityBubble(kind: "step", label: "SEND · \(network.title.uppercased())",
                                        title: "\(Fmt.num(amount)) USDC", lines: ["to \(entry?.name ?? name)"] + (ends.map { ["\($0.start) … \($0.end)"] } ?? []),
-                                       status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check)]
+                                       status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check, address: entry?.address)]
             default:
                 // Any other step without a route still shows, as its words: a chain never loses a step on the canvas.
                 return route(c, ahead: ahead)?.steps.filter { !$0.label.hasPrefix("FROM") && !$0.label.hasPrefix("APPROVE")
@@ -2449,7 +2450,7 @@ extension Workspace {
                                      step("near", "RULES CHECKED BY", "NEAR Intents", "not by this app", .check),
                                      (try? agentPayee(name)).map { p in
                                          step(p.chain == "sol" ? "sol" : "base", "TO · \(p.label?.uppercased() ?? "SAVED ADDRESS")", p.name,
-                                              "\(AddressCheck.ends(p.address).start) … \(AddressCheck.ends(p.address).end) · \(p.chain == "sol" ? "Solana" : "Base")", .check)
+                                              "\(AddressCheck.ends(p.address).start) … \(AddressCheck.ends(p.address).end) · \(p.chain == "sol" ? "Solana" : "Base")", .check, address: p.address)
                                      } ?? step("usdc", "TO", name, "not a saved Solana or Base address", .check)])
         default:
             let on = { if case .agentFreeze(let on) = command { return on }; return true }()
@@ -2475,7 +2476,7 @@ extension Workspace {
                        // What goes through the private hop: the payout itself, exactly (the rest of the USDC comes back).
                        money: amount.map { [MoneyMove(place: "Pays out", symbol: r.symbol, was: 0, after: $0)] } ?? []),
             step(privateOn.flatMap { ModuleNetwork(place: $0)?.logo } ?? r.entry.network.logo, "TO · \(r.entry.label?.uppercased() ?? "SAVED ADDRESS")", r.entry.name,
-                 "\(ends.start) … \(ends.end) · \(title)", .check),
+                 "\(ends.start) … \(ends.end) · \(title)", .check, address: r.entry.address),
         ]
         let warning = r.entry.network == .xrp && r.entry.memo.isEmpty
             ? "An exchange's XRP address needs its destination tag: without it the exchange can't credit you. Save the tag as this address's memo first."
@@ -3411,6 +3412,61 @@ struct WithdrawBoard: View {
 extension Workspace {
     static let help = "I didn’t catch what to do. For example: “deposit 1 USDC into Jupiter”, “long ETH risk $5 by the book”, “send 5 USDC to Bybit”, “where to keep USDC”, “alert me when ETH is below 2,500”."
 
+    /// Why a move can't go to the recipient it names, said before any card: the name isn't in Addresses, is saved on
+    /// another network, needs a memo, isn't confirmed, or the way there is switched off. nil for a move that can be
+    /// paid, or has no recipient. It reads no balance.
+    func recipientRefusal(_ command: WalletCommand) -> String? {
+        do {
+            switch command {
+            case .sendPrivately(let name, let token, _, let network):
+                _ = try privateRecipient(name, token: token, network: network)
+            case .swapPrivately:
+                return privateSwapRefusal(command)
+            case .sendToken(let name, let token, let amount, let network):
+                if try acrossRecipient(name, token: token, network: network) != nil {
+                    guard amount != nil else { throw ExecutionError("Say how much \(token.uppercased()): there's none in this wallet to send all of — it's bought with USDC on the way.") }
+                } else {
+                    _ = try tokenRecipient(name, network: network)
+                }
+            case .sendNear(let name, _), .closeNear(let name), .sendSol(let name, _):
+                let network: AddressCheck.Network = if case .sendSol = command { .solana } else { .near }
+                guard let entry = savedAddress(name, on: network) else {
+                    return "There’s no \(network.title) address “\(name)” in Addresses. Save it first, e.g. “save <address> as \(name) on \(network.rawValue)”."
+                }
+                guard entry.memo.isEmpty else {
+                    return "“\(entry.name)” needs a memo / tag, and ihatecrypto can’t add one to this transfer — send it from the exchange’s app instead."
+                }
+                try requireConfirmed(entry)
+            default:
+                break
+            }
+        } catch {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
+    /// The first later step of a chain that can never run, by its number in the chain, and why: its recipient can't be
+    /// paid (recipientRefusal; a plain transfer's own checks, transferRecipient). The chain's one Confirm would carry
+    /// out the steps before it and stop there, so the chain is refused before its first card (the owner, 2026-11-10).
+    /// The first step says its own refusal when it runs. Nothing is judged after a step that may make the recipient a
+    /// later one names: a multisig being made, or a step that isn't a money move (an address being saved): «make a
+    /// multisig then send 10 USDC to Multisig» goes on as before.
+    /// ponytail: only recipients are judged; a later step whose module is off or whose key is missing still stops the
+    /// chain when it's reached (moduleRefusal, missingKey could join here).
+    func unrunnableStep(_ steps: [String]) -> (number: Int, why: String)? {
+        for (k, step) in steps.enumerated() {
+            guard let command = WalletCommand.parse(step) else { return nil }
+            if case .multisigCreate = command { return nil }
+            guard k > 0 else { continue }
+            if let why = recipientRefusal(command) { return (k + 1, why) }
+            if case .sendTo(let name, let amount, let network) = command {
+                do { _ = try transferRecipient(amount, to: name, network: network) } catch { return (k + 1, error.localizedDescription) }
+            }
+        }
+        return nil
+    }
+
     /// One path for every wallet command, typed or read by the model: a missing amount is asked for and remembered;
     /// money moves only after «do it» on the drawn route.
     /// `quiet`: a step of a chain; its card shows, the chain's own line already said what it is.
@@ -3458,35 +3514,7 @@ extension Workspace {
                       "Твои адреса на холсте\(sol.map { " — \($0) для USDC и SOL (рекомендую)" } ?? ""), и Base для USDC и ETH. ihatecrypto не может сам забрать деньги: отправь их туда с биржи или другого кошелька, именно в этой сети. Они появятся примерно через 30 с, и я скажу, когда придут. Чтобы положить уже имеющиеся деньги в хранилище, скажи «положи 1 USDC в Jupiter»."), note: note)
             return
         }
-        if case .sendPrivately(let name, let token, _, let network) = command {
-            do { _ = try privateRecipient(name, token: token, network: network) } catch { reply(error.localizedDescription, note: note); return }
-        }
-        if let why = privateSwapRefusal(command) { reply(why, note: note); return }
-        if case .sendToken(let name, let token, let amount, let network) = command {
-            do {
-                if try acrossRecipient(name, token: token, network: network) != nil {
-                    guard amount != nil else { throw ExecutionError("Say how much \(token.uppercased()): there's none in this wallet to send all of — it's bought with USDC on the way.") }
-                } else {
-                    _ = try tokenRecipient(name, network: network)
-                }
-            } catch { reply(error.localizedDescription, note: note); return }
-        }
-        let recipient: (name: String, network: AddressCheck.Network)? = switch command {
-        case .sendNear(let name, _), .closeNear(let name): (name, .near)
-        case .sendSol(let name, _): (name, .solana)
-        default: nil
-        }
-        if let recipient {
-            guard let entry = savedAddress(recipient.name, on: recipient.network) else {
-                reply("There’s no \(recipient.network.title) address “\(recipient.name)” in Addresses. Save it first, e.g. “save <address> as \(recipient.name) on \(recipient.network.rawValue)”.", note: note)
-                return
-            }
-            guard entry.memo.isEmpty else {
-                reply("“\(entry.name)” needs a memo / tag, and ihatecrypto can’t add one to this transfer — send it from the exchange’s app instead.", note: note)
-                return
-            }
-            do { try requireConfirmed(entry) } catch { reply(error.localizedDescription, note: note); return }
-        }
+        if let why = recipientRefusal(command) { reply(why, note: note); return }
         if let question = command.amountQuestion {
             awaitingAmount = command
             reply(say(question, "Сколько? Напиши число.") + amountHint(command), note: note)

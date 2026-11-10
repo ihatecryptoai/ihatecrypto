@@ -423,7 +423,7 @@ final class DebugAPI {
     /// running and its step, finished ones, and the other boards.
     private func boards(_ ws: Workspace, _ canvas: CanvasSession?) -> [String: Any] {
         func steps(_ bubbles: [ActivityBubble]) -> [[String: Any]] {
-            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines] as [String: Any] }
+            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines, "wholeAddress": $0.address != nil] as [String: Any] }
         }
         var out: [String: Any] = [:]
         switch ws.pendingAction {

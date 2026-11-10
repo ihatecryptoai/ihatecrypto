@@ -295,6 +295,15 @@ extension Workspace {
                     await waitForDeposit(Self.solanaUSDC(c), then: step)
                 }
             }
+            // A later step that can never run stops the chain before its first card: one Confirm would move the money of
+            // the steps before it and stop there.
+            if k == 0, !confirmed, TaskRun.automation == nil, let stop = unrunnableStep(steps) {
+                reply(say("The chain doesn’t start because of step \(stop.number): \(stop.why)",
+                          "Цепочку не начинаю из-за шага \(stop.number): \(stop.why)",
+                          "No empiezo la cadena por el paso \(stop.number): \(stop.why)"))
+                noteFailure(steps.joined(separator: " then "), ExecutionError(stop.why))
+                break
+            }
             // The first step reads the balances as they are now: one that can't be paid is said before any card
             // («Move 0 USDC · Ethereum → Arbitrum» was drawn). Later steps wait for the money the ones before bring.
             if k == 0, !confirmed, TaskRun.automation == nil, let c = WalletCommand.parse(step) { await freshenSource(c) }
