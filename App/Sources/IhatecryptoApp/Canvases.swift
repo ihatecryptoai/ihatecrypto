@@ -2060,6 +2060,9 @@ extension Workspace {
         case .bridge(_, let to, _): to == "hyperliquid" ? nil : to
         case .intents(_, let to, _): to
         case .evmToSolana, .baseToSolana, .arbitrumToSolana, .robinhoodToSolana, .withdrawToSolana, .sellNear: "solana"
+        // Out of a vault into the wallet: the balance shows it a moment after the move is through, and the step
+        // after it waits for that like for a bridge («withdraw 1 then deposit 1» read the old balance).
+        case .lendWithdraw("USDC", _), .kamino(deposit: false, symbol: "USDC", amount: _): "solana"
         case .solanaTo(let to, _): to
         default: nil
         }

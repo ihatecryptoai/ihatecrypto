@@ -559,8 +559,8 @@ enum Signer {
             if let refusal = call.refusal(sender: owner, chainId: chainId) { v.problems.append(refusal) }
             if let refusal = EVMCall.targetRefusal(to: to, data: data, sender: owner) { v.problems.append(refusal) }
             if let refusal = Batch7702.selfCall(to: to, data: data, owner: owner) { v.problems.append(refusal) }
-            let relayPayees = EVMCall.relayDepositID(to: to, data: data).map { RelayOrders.order($0).map { [$0.recipient] } } ?? []
-            if relayPayees == nil { v.problems.append(RelayOrders.unchecked) }
+            let deposit = EVMCall.relayDepositID(to: to, data: data), relayOrder = deposit.flatMap(RelayOrders.order)
+            if deposit != nil, relayOrder == nil { v.problems.append(RelayOrders.unchecked) }
             if let fee = tx.feeProblem { v.problems.append(fee) }
             // Coins (calldata or not), tokens, NFTs and spending rights go only to this wallet or an address approved in person.
             for payee in call.payees(to: to, value: value, chainId: chainId) where !approved.contains(payee.lowercased()) {
@@ -569,9 +569,9 @@ enum Signer {
             guard v.ok else { return refused(v) }
             // A contract whose call can't be read is asked about in person once, whether or not the app named it: it's
             // allowed as a call, apart from money recipients (a site's contract comes as a recipient only to be asked about).
-            let doing = call.summary(chainId: chainId, to: to, value: value) + "\nnetwork fee " + tx.feeText
+            let doing = call.summary(chainId: chainId, to: to, value: value) + RelayOrders.line(relayOrder.map { [$0] } ?? []) + "\nnetwork fee " + tx.feeText
             let target = call.unreadTarget(to: to, value: value, chainId: chainId)
-            try approve(recipients.filter { RecipientStore.key($0) != target } + (relayPayees ?? []), doing: doing)
+            try approve(recipients.filter { RecipientStore.key($0) != target } + (relayOrder.map { [$0.recipient] } ?? []), doing: doing)
             if let target { try approve([target], calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -604,13 +604,13 @@ enum Signer {
                                      gasLimit: gasLimit, to: owner, value: 0, data: Data())
             if let problem = fee.feeProblem { v.problems.append(problem) }
             let approved = Set(recipients.map { $0.lowercased() } + [owner.lowercased()])
-            var relayPayees: [String] = []
+            var relayOrders: [RelayOrder] = []
             for c in calls {
                 for payee in EVMCall.decode(c.data).payees(to: c.to, value: 0, chainId: chainId) where !approved.contains(payee.lowercased()) {
                     v.problems.append("Money or the right to spend it goes to an unapproved address \(payee).")
                 }
                 if let id = EVMCall.relayDepositID(to: c.to, data: c.data) {
-                    if let order = RelayOrders.order(id) { relayPayees.append(order.recipient) } else { v.problems.append(RelayOrders.unchecked) }
+                    if let order = RelayOrders.order(id) { relayOrders.append(order) } else { v.problems.append(RelayOrders.unchecked) }
                 }
             }
             guard v.ok else { return refused(v) }
@@ -618,12 +618,13 @@ enum Signer {
             // keeps running the batch account's code on that network afterwards (it accepts coins and tokens as before).
             let lines = calls.map { EVMCall.decode($0.data).summary(chainId: chainId, to: $0.to, value: 0) }
             let net = EVMRPC.names[chainId] ?? "network \(chainId)"
-            let doing = lines.joined(separator: "\nthen ") + "\nas one transaction: this wallet runs the audited batch account on \(net) (EIP-7702)\nnetwork fee " + fee.feeText
+            let doing = lines.joined(separator: "\nthen ") + RelayOrders.line(relayOrders)
+                + "\nas one transaction: this wallet runs the audited batch account on \(net) (EIP-7702)\nnetwork fee " + fee.feeText
             // Each unread contract is asked about once, as in a single call; one another call lets spend (an exact approve
             // for the chat's `call`) is a money recipient, and that approval covers its call too.
             let targets = calls.compactMap { EVMCall.decode($0.data).unreadTarget(to: $0.to, value: 0, chainId: chainId) }
             let payees = Set(calls.flatMap { EVMCall.decode($0.data).payees(to: $0.to, value: 0, chainId: chainId) }.map(RecipientStore.key))
-            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayPayees, doing: doing)
+            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayOrders.map(\.recipient), doing: doing)
             if !targets.isEmpty { try approve(targets, calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -652,16 +653,16 @@ enum Signer {
                                                                  sponsor: sponsor, maxSlippageBps: Limits.current.slippageBps),
                                             tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
             guard verdict.ok else { return refused(verdict) }
-            let relayPayees = try SolanaGuard.relayDepositIDs(message).map { try RelayOrders.require($0).recipient }
+            let relayOrders = try SolanaGuard.relayDepositIDs(message).map { try RelayOrders.require($0) }
             // The programs the user allowed for this one transaction are named in full: they run with the wallet's authority.
             let extra = extraPrograms.filter { SolanaGuard.knownPrograms[$0] == nil && (try? Base58.decode($0))?.count == 32 }
                 .map { "runs \($0), not on ihatecrypto's list" }
             let payer = sponsor.map { ["the network fee is paid by \($0.prefix(4))…\($0.suffix(4)), not by you"] } ?? []
-            let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n")
+            let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n") + RelayOrders.line(relayOrders)
             // The fee payer may get rent back from this wallet: then it's a payee like any other, allowed in person once. One that
             // gets nothing of the wallet's (a JupiterZ maker, which only swaps) isn't kept as an address money may go to.
             let payee = sponsor.flatMap { SolanaGuard.refundsSponsor(message, accounts: accounts, owner: owner, sponsor: $0) ? [$0] : nil } ?? []
-            try approve(recipients + payee + relayPayees, doing: doing)
+            try approve(recipients + payee + relayOrders.map(\.recipient), doing: doing)
             // A program not on the list runs with this wallet's authority and the signer can't read what it does: every
             // such transaction asks in person afresh, whatever session is open (the 2026-10-24 review).
             if !extra.isEmpty { try confirmAfresh(doing + "\nit can move anything in this wallet: sign only if you trust this site") }
@@ -735,7 +736,7 @@ enum Signer {
             let permit = try m.permit()
             let digests = [try m.digest(), try permit.typed().parts().digest]
             var r = SignerReply(ok: true)
-            r.signatures = try withKey("evm", reason: permit.summary + "\ninto Relay's depository for this wallet") { key in
+            r.signatures = try withKey("evm", reason: permit.summary + "\ninto Relay's depository for this wallet" + RelayOrders.line([order])) { key in
                 try digests.map { try EVMSigner.sign(digest: $0, privateKey: key) }
             }
             r.checks = ["The signer read Relay's calls itself (one deposit into its depository for this wallet) and computed the nonce they bind."]
@@ -809,7 +810,9 @@ enum Signer {
             }
             let digest = try HLSigner.relayNonceMappingDigest(wallet: wallet, depositor: depositor, id: id, nonce: nonce)
             var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: "link a Hyperliquid withdrawal to a Relay order") { try EVMSigner.sign(digest: digest, privateKey: $0) }
+            r.signature = try withKey("evm", reason: "link a Hyperliquid withdrawal to a Relay order" + RelayOrders.line([order])) {
+                try EVMSigner.sign(digest: digest, privateKey: $0)
+            }
             r.checks = ["Deposit mapping: the wallet and depositor are yours."]
             return r
 
@@ -895,6 +898,9 @@ enum Signer {
         static let lock = NSLock()
         nonisolated(unsafe) static var held: [Data: RelayOrder] = [:]
         static let unchecked = "A Relay deposit for an order the signer hasn't checked: nothing was signed."
+        /// What the orders a deposit names pay out, as lines for its prompt: the order's own words (RelayOrder.pays),
+        /// since the card's «you get» is only the app's.
+        static func line(_ orders: [RelayOrder]) -> String { orders.map { "\nRelay then pays " + $0.pays }.joined() }
         static func add(_ order: RelayOrder) {
             let now = UInt64(Date().timeIntervalSince1970)
             lock.withLock { held = held.filter { $0.value.deadline > now }; held[order.id] = order }

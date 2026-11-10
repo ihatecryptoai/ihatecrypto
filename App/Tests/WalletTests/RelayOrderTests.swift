@@ -54,3 +54,38 @@ private let evm = "0x9858EfFD232B4033E47d90003D41EC34EcaEda94", solana = "HAgk14
     #expect(other != relayOrders[0].json)
     #expect(try RelayOrder.read(Data(other.utf8), evm: evm, solana: solana, now: 1_700_000_000).minimumDollars == nil)
 }
+
+/// The deposit's prompt says what the order pays out, in the order's own words: dollars where it pays the network's
+/// dollar, raw units and the coin's address where it doesn't — never the app's «you get».
+@Test func relayOrdersSayWhatTheyPayOnThePrompt() throws {
+    let order = try RelayOrder.read(Data(relayOrders[0].json.utf8), evm: evm, solana: solana, now: 1_700_000_000)
+    #expect(order.pays == "at least 4.878026 USDC to \(evm.lowercased()) on base")
+    #expect(order.summary == "bridge 5 USDC from solana through Relay: at least 4.878026 USDC to \(evm.lowercased()) on base")
+    let coin = relayOrders[0].json.replacingOccurrences(of: #""currency":"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913","minimumAmount":"4878026""#,
+                                                        with: #""currency":"0x0000000000000000000000000000000000000000","minimumAmount":"4878026""#)
+    #expect(try RelayOrder.read(Data(coin.utf8), evm: evm, solana: solana, now: 1_700_000_000).pays
+            == "at least 4878026 units of 0x0000000000000000000000000000000000000000 to \(evm.lowercased()) on base")
+    // Hyperliquid's USDC is in 1e-8.
+    #expect(try RelayOrder.read(Data(relayOrders[1].json.utf8), evm: evm, solana: solana, now: 1_700_000_000).summary.hasPrefix("bridge 5 USDC from hyperliquid"))
+}
+
+
+/// An amount the prompt would read one way and the id's hash another is refused: a digit with an invisible mark on it
+/// («5000000» + a joiner hashed as 5000000 and showed as 50000000), a hex, a JSON number.
+@Test func relayOrderAmountsArePlainDigits() throws {
+    let base = relayOrders[0].json
+    for odd in [#""minimumAmount":"4878026\u200d""#, #""minimumAmount":"4\u0301878026""#, #""minimumAmount":"0x4a6e8a""#, #""minimumAmount":4878026"#,
+                #""minimumAmount":"""#, #""minimumAmount":"٤٨٧٨٠٢٦""#] {
+        let changed = base.replacingOccurrences(of: #""minimumAmount":"4878026""#, with: odd)
+        #expect(changed != base)
+        // Refused by the id's hash or by the order's own reading, whichever meets it first.
+        #expect(throws: (any Error).self) { try RelayOrder.read(Data(changed.utf8), evm: evm, solana: solana, now: 1_700_000_000) }
+    }
+    let input = base.replacingOccurrences(of: #""amount":"5000000""#, with: #""amount":"5000000\u200d""#)
+    #expect(input != base)
+    #expect(throws: (any Error).self) { try RelayOrder.read(Data(input.utf8), evm: evm, solana: solana, now: 1_700_000_000) }
+    // The typed-data reader takes the digits 0–9 only, too.
+    #expect(throws: (any Error).self) { try TypedData.word("12\u{200D}3") }
+    #expect(throws: (any Error).self) { try TypedData.word("١٢٣") }
+    #expect(try TypedData.word("123") == ABI.uint(123) && TypedData.word("0x7b") == ABI.uint(123) && TypedData.word(123) == ABI.uint(123))
+}

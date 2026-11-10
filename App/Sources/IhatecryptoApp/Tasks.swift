@@ -400,10 +400,17 @@ extension Workspace {
         } else {
             there = nil
         }
-        guard let there, there < asked, asked - there <= max(1, asked * Decimal(string: "0.02")!) else { return step }
+        guard let there, Self.fitsArrival(asked: asked, there: there) else { return step }
         let fitted = c.with(amount: there.rounded(2, .down))
         // Run again from its words: only a command that reads back the same.
         return WalletCommand.parse(fitted.summary) == fitted ? fitted.summary : step
+    }
+
+    /// A step asked for `asked` with `there` to spend: short by little enough to spend what is there. Up to a dollar
+    /// (Ethereum's fee) or 2%, but never more than a quarter of the amount: with a balance read before the money
+    /// showed, «deposit 1» became «deposit 0.1» (2026-11-10). A bigger gap is left for the step's own refusal.
+    static func fitsArrival(asked: Decimal, there: Decimal) -> Bool {
+        there < asked && asked - there <= max(min(1, asked / 4), asked * Decimal(string: "0.02")!)
     }
 
     /// When a move finishes: the rest of a scheduled task, if the move was on its canvas, went through, and came

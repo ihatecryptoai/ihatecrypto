@@ -22,7 +22,28 @@ public struct RelayOrder: Sendable, Equatable {
 
     /// For the prompt that allows its payee: what the order does.
     public var summary: String {
-        "bridge \(inputAmount) units from \(inputChain) through Relay: at least \(minimumAmount) units to \(recipient) on \(outputChain)"
+        "bridge \(Self.amount(inputAmount, of: inputCurrency, on: inputChain)) from \(inputChain) through Relay: \(pays)"
+    }
+
+    /// «at least 4.878026 USDC to 0x9858… on base»: what the order pays out, for the prompt of the deposit that names
+    /// it. The card's «you get» is the app's word, this is the order's own, and the deposit's prompt is the one place a
+    /// person sees it before the money is in Relay's depository (the 2026-11-10 review).
+    public var pays: String {
+        "at least \(Self.amount(minimumAmount, of: outputCurrency, on: outputChain)) to \(recipient) on \(outputChain)"
+    }
+
+    /// An amount in the order's words: dollars where the coin is the network's dollar, else its smallest units and the
+    /// coin as the order writes it — an amount on the prompt, never none.
+    static func amount(_ units: String, of currency: String, on chain: String) -> String {
+        guard let coin = dollarCoins[chain], coin.currency == currency, let n = dollars(units, coin.decimals) else {
+            return "\(units) units of \(currency)"
+        }
+        return "\(NSDecimalNumber(decimal: n).stringValue) \(chain == "robinhood" ? "USDG" : "USDC")"
+    }
+
+    private static func dollars(_ units: String, _ decimals: Int) -> Decimal? {
+        guard let n = Decimal(string: units, locale: Locale(identifier: "en_US_POSIX")), n.isFinite, n >= 0, n == n.whole else { return nil }
+        return n / pow(10, decimals)
     }
 
     /// The dollar the signer counts on each network, by Relay's name for it, with its decimals (Hyperliquid's is the
@@ -38,9 +59,8 @@ public struct RelayOrder: Sendable, Equatable {
     /// names its own amounts and nothing here prices a coin, so only dollars against dollars can be compared: a task's
     /// bridge to the person's own wallet spends what doesn't come back (Automation.spend).
     public var minimumDollars: Decimal? {
-        guard let coin = Self.dollarCoins[outputChain], coin.currency == outputCurrency,
-              let units = Decimal(string: minimumAmount, locale: Locale(identifier: "en_US_POSIX")), units.isFinite, units >= 0 else { return nil }
-        return units / pow(10, coin.decimals)
+        guard let coin = Self.dollarCoins[outputChain], coin.currency == outputCurrency else { return nil }
+        return Self.dollars(minimumAmount, coin.decimals)
     }
 
     enum VM { case evm, svm, hypevm }
@@ -83,11 +103,17 @@ public struct RelayOrder: Sendable, Equatable {
             }
         }
         let recipient = vms[outChain] == .svm ? pay : pay.lowercased()
+        // Amounts as plain digits only: they are shown on the deposit's prompt and counted for a task's limits, so each
+        // must read here exactly as the id's hash reads it (TypedData.word) — not a number, a hex or marked digits.
+        func amount(_ v: Any?) throws -> String {
+            guard let s = v as? String, !s.isEmpty, s.utf8.allSatisfy({ (48...57).contains($0) }) else { throw refuse("names an amount ihatecrypto can't read") }
+            return s
+        }
         func currency(_ c: Any?, on chain: String) -> String { (c as? String).map { vms[chain] == .svm ? $0 : $0.lowercased() } ?? "" }
         return RelayOrder(id: try hashOrder(o), inputChain: inChain, inputCurrency: currency(payment["currency"], on: inChain),
-                          inputAmount: payment["amount"] as? String ?? "", outputChain: outChain,
+                          inputAmount: try amount(payment["amount"]), outputChain: outChain,
                           outputCurrency: currency(payments[0]["currency"], on: outChain),
-                          recipient: recipient, minimumAmount: payments[0]["minimumAmount"] as? String ?? "", deadline: deadline)
+                          recipient: recipient, minimumAmount: try amount(payments[0]["minimumAmount"]), deadline: deadline)
     }
 
     /// An address or a currency as its network's raw bytes: Base58 on Solana, 20 bytes on an EVM network, 1–20 on Hyperliquid.
