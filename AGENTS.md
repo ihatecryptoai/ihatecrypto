@@ -73,8 +73,8 @@ canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that on
    review the window after each one. Green writes `App/.build/done/summary.json`. A change that none of this covers
    (docs, the site): `App/done.sh --skip "why"`. The Stop hook in `.claude/settings.json` reminds you while App/Sources
    or App/Tests changed after the last green.
-3. Have the diff reviewed by a fresh eye: a new subagent given only your diff and the plan, and Codex too when it's
-   installed (`codex review --uncommitted`; in a shared checkout tell it which files are yours). Fix what you confirm.
+3. Have the diff reviewed by a fresh eye: a new subagent given only your diff and the plan (in a shared checkout tell
+   it which files are yours). Fix what you confirm.
 4. Commit only your own files.
 
 ## Conventions
