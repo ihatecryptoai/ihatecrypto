@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What's new in ihatecrypto — every release</title>
+<meta name="description" content="Every release of ihatecrypto, the AI crypto wallet for Mac and Windows, and what changed in it. The latest is {{version}}.">
+<link rel="canonical" href="https://ihatecrypto.ai/whats-new/">
+<meta name="theme-color" content="#FAFAFB">
+<script>{ const u = navigator.userAgent, d = document.documentElement; if (/Windows NT/.test(u)) d.classList.add('win'); else if (!/Macintosh/.test(u) || navigator.maxTouchPoints > 1) d.classList.add('away'); }</script>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ihatecrypto">
+<meta property="og:url" content="https://ihatecrypto.ai/whats-new/">
+<meta property="og:title" content="What's new in ihatecrypto">
+<meta property="og:description" content="Every release and what changed in it. The latest is {{version}}.">
+<meta property="og:image" content="https://ihatecrypto.ai/og.png?v=2">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.png" sizes="64x64">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/dynapuff-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!-- Every release and what changed in it, at ihatecrypto.ai/whats-new/: build.py fills the releases in from the app's
+     own What's New (Sources/IhatecryptoApp/WhatsNew/whatsnew.json), so the page and the app say the same. English only,
+     like the app's list. The fonts and the coin are the landing's own, taken from index.html. The words in double
+     braces below are build.py's: none may stand in a comment, or what fills it would be on the page twice. -->
+<style>
+{{fonts}}  :root { color-scheme: light; --ink: #111111; --muted: #5F636B; --line: #E1E4EC; --accent: #FF7A2F; --accent-ink: #B8480C; }
+  * { box-sizing: border-box; margin: 0; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 84px; }
+  body { background: #FAFAFB radial-gradient(#D9DCE2 1.2px, transparent 1.5px) 0 0 / 22px 22px; color: var(--ink);
+         font: 400 16px/1.5 Onest, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: clip;
+         padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  a { color: var(--accent-ink); }
+  .away .mac-only, html:not(.away) .away-only { display: none !important; }
+  .win .mac-only, html:not(.win) .win-only { display: none !important; }
+  .top { position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding: 10px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); pointer-events: none; }
+  .bar { pointer-events: auto; max-width: 1120px; height: 58px; margin: 0 auto; padding: 0 9px 0 12px; border-radius: 17px; display: flex; align-items: center; gap: 8px;
+         background: rgba(255,255,255,.74); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
+         border: 1px solid rgba(17,17,17,.08); box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 16px 48px rgba(17,17,17,.10); }
+  .logo { display: flex; align-items: center; gap: 9px; margin-right: auto; color: var(--ink); text-decoration: none; border-radius: 10px; min-width: 0; }
+  .logo svg { width: 36px; height: 36px; flex: none; }
+  .logo span { font: 600 23px/1 DynaPuff, Onest, sans-serif; letter-spacing: -.2px; white-space: nowrap; }
+  .nav { display: flex; gap: 2px; }
+  .nav a { color: #3A3D44; text-decoration: none; font: 500 14px Onest, sans-serif; padding: 8px 12px; border-radius: 10px; border: 1.5px solid transparent; }
+  .nav a:hover { border-color: rgba(255,122,47,.6); color: var(--ink); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 11px; flex: none;
+         background: var(--accent); color: var(--ink); font: 600 14px Onest, sans-serif; text-decoration: none; white-space: nowrap; transition: box-shadow .25s; }
+  .btn:hover { box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
+  .btn:focus-visible, .nav a:focus-visible, .logo:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  main { max-width: 1120px; margin: 0 auto; padding: 132px 16px 0; }
+  .kicker { font: 800 12px Onest, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); }
+  h1 { font: 800 clamp(36px, 5.4vw, 64px)/1.04 Onest, sans-serif; letter-spacing: -.035em; margin-top: 12px; max-width: 16ch; text-wrap: balance; }
+  .lead { font-size: 18px; color: #3A3D44; max-width: 600px; margin: 16px 0 56px; text-wrap: pretty; }
+  /* One release: its number and date stay beside its changes while they scroll past. */
+  .rel { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 24px; padding: 36px 0; border-top: 1px solid var(--line); }
+  .rel header { position: sticky; top: 92px; align-self: start; }
+  .rel h2 { font: 800 30px/1.1 Onest, sans-serif; letter-spacing: -.03em; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .now { font: 800 11px Onest, sans-serif; letter-spacing: .04em; text-transform: uppercase; background: var(--ink); color: #FFFFFF; border-radius: 7px; padding: 4px 7px; }
+  .rel time { display: block; margin-top: 6px; color: var(--muted); font-size: 14px; }
+  .sts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .st { background: #FFFFFF; border: 1px solid var(--line); border-radius: 20px; padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .st h3 { font: 700 17px/1.3 Onest, sans-serif; display: flex; align-items: baseline; gap: 9px; text-wrap: balance; }
+  .st h3 i { flex: none; width: 10px; height: 10px; border-radius: 50%; transform: translateY(-1px); }
+  .st p { color: #3A3D44; font-size: 15px; text-wrap: pretty; }
+  /* What to say to see it: the phrase the app's «Try it» puts into the chat. */
+  .try { align-self: flex-start; margin-top: 6px; background: var(--ink); color: #FFFFFF; border-radius: 14px 14px 14px 4px; padding: 7px 12px; font: 600 13.5px/1.4 Onest, sans-serif; overflow-wrap: anywhere; }
+  .st p.try { color: #FFFFFF; font-size: 13.5px; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 56px 16px 44px; }
+  @media (max-width: 960px) { .nav { display: none; } }
+  @media (max-width: 760px) {
+    .logo svg { width: 30px; height: 30px; } .logo span { font-size: 19px; }
+    main { padding-top: 104px; }
+    .lead { margin-bottom: 36px; }
+    .rel { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 28px 0; }
+    .rel header { position: static; }
+    .sts { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="bar">
+    <a class="logo" href="/" aria-label="ihatecrypto">{{coin}}<span>ihatecrypto</span></a>
+    <nav class="nav"><a href="/manifesto/">Manifesto</a><a href="/#plugins">Plugins</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
+    <a class="btn mac-only" href="/ihatecrypto.dmg" download>Download</a>
+    <a class="btn win-only" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest">Download</a>
+    <a class="btn away-only" href="/">Get the app</a>
+  </div>
+</header>
+<main>
+  <p class="kicker">What's new</p>
+  <h1>Every release, and what changed.</h1>
+  <p class="lead">The app tells you when a new version is out and installs it only when you say so. This is the same list it shows you.</p>
+{{releases}}
+</main>
+<footer>ihatecrypto · <a href="/">Home</a> · <a href="/manifesto/">Manifesto</a> · <a href="https://github.com/ihatecryptoai/ihatecrypto/releases" target="_blank" rel="noopener">Releases on GitHub</a></footer>
+</body>
+</html>

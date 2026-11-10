@@ -13,7 +13,7 @@
   "assets": {
     "directory": "../../dist/site",
     "binding": "ASSETS",
-    "run_worker_first": ["/", "/index.html", "/manifesto", "/manifesto/*", "/es", "/es/*", "/ru", "/ru/*", "/e", "/ihatecrypto.dmg", "/appcast.xml", "/stats", "/stats/"]
+    "run_worker_first": ["/", "/index.html", "/manifesto", "/manifesto/*", "/whats-new", "/whats-new/*", "/es", "/es/*", "/ru", "/ru/*", "/e", "/ihatecrypto.dmg", "/appcast.xml", "/stats", "/stats/"]
   },
   // The landing's counts and the update checks by day (schema.sql): no IPs, no ids.
   "d1_databases": [{ "binding": "DB", "database_name": "ihatecrypto-landing", "database_id": "b0f74dc6-d205-42e7-9634-7ed7a96bebda" }],

@@ -313,6 +313,107 @@
   .btn.ghost:hover { box-shadow: inset 0 0 0 1.5px var(--line), 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
   @media (max-width: 760px) { .oss { padding: 44px 16px 40px; } .oss .row { flex-direction: column; align-self: stretch; } .oss .btn { padding: 0 18px; } }
 
+  /* The first screen's labels: what a visitor should know before scrolling; each opens its section. A phone's first
+     screen and a short window are full already, so they go without. */
+  .trust { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+  .trust a { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 11px; border-radius: 18px; background: #FFFFFF; border: 1px solid var(--line);
+             font: 600 13.5px Onest, sans-serif; color: var(--ink); text-decoration: none; white-space: nowrap; }
+  .trust a:hover { border-color: rgba(255,122,47,.6); }
+  .trust a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .trust svg { color: var(--accent-ink); flex: none; }
+  @media (max-width: 760px), (max-height: 759px) { .trust { display: none; } }   /* below 760 the Russian headline's three lines leave no room */
+  @media (max-height: 815px) { .away .trust { display: none; } }   /* off a Mac and a PC the send box is taller than a download */
+
+  /* Privacy: tiles of unequal size, one big thing in each (the owner's pick: «Бенто-плитки»). */
+  .sec > .kicker { text-align: center; margin-bottom: 10px; }
+  .pv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 40px; }
+  .pvt { border-radius: 24px; padding: 26px; background: #FFFFFF; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .pvt h3 { font: 700 19px/1.2 Onest, sans-serif; }
+  .pvt p { color: #3A3D44; font-size: 15px; }
+  .pv-cap { font: 800 12px Onest, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .pvt p.pv-cap { font-size: 12px; color: var(--muted); }
+  .pvt p.pv-vi { color: #5B3FD6; }
+  .pvt-w2 { grid-column: span 2; }
+  .pvt-big { grid-column: span 2; grid-row: span 2; background: #111111; border: 0; color: #FFFFFF; padding: 30px; gap: 14px; }
+  .pvt-big h3 { font: 800 28px/1.12 Onest, sans-serif; letter-spacing: -.02em; }
+  .pvt-big p { color: #A3A6AD; font-size: 16px; }
+  .pvt-big p.pv-cap { color: #A3A6AD; }
+  .pv-orb { flex: 1; min-height: 200px; display: flex; align-items: center; justify-content: center; }
+  .pv-orb span { width: 148px; height: 148px; border-radius: 50%; background: #0D2A20; border: 2px solid #00EC97; color: #00EC97; display: flex; align-items: center; justify-content: center;
+                 box-shadow: 0 0 0 12px rgba(0,236,151,.10), 0 0 70px rgba(0,236,151,.40); }
+  /* A set of panels, one shown at a time (.pk, picked by a button with data-show): all of them keep their place, so
+     the tile or the section doesn't change height when another is picked. */
+  .pv-modes, .pg-stage { display: grid; min-width: 0; }
+  .pv-modes > .pk, .pg-stage > .pk { grid-area: 1 / 1; }
+  .pv-modes > .pk[hidden], .pg-stage > .pk[hidden] { display: flex !important; visibility: hidden; }
+  .pv-modes > .pk { display: flex; flex-direction: column; gap: 10px; }
+  .pv-sw { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; background: #EDEEF2; border-radius: 18px; padding: 5px; }
+  .pv-sw button { border: 0; background: none; cursor: pointer; border-radius: 14px; padding: 15px 8px; color: var(--muted); font: 700 18px Onest, sans-serif;
+                  display: flex; align-items: center; justify-content: center; gap: 8px; transition: background-color .2s, color .2s; }
+  .pv-sw button:hover { color: var(--ink); }
+  .pv-sw button[aria-pressed=true] { background: #FFFFFF; color: var(--ink); box-shadow: 0 2px 6px rgba(17,17,17,.12); }
+  .pv-sw button.pv-p[aria-pressed=true] { background: #B9A6FF; color: #1B1340; box-shadow: none; }
+  .pv-sw button:focus-visible, .pg-pp:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .pvt-pic img { width: 124px; height: auto; align-self: center; margin-bottom: 4px; }
+  .pvt-pic h3 { margin-top: auto; font-size: 18px; }
+  .pvt-pic p { font-size: 14px; color: var(--muted); }
+  .pvt-zero { background: var(--accent); border: 0; }
+  .pvt-zero b { font: 800 112px/.9 Onest, sans-serif; letter-spacing: -.05em; }
+  .pvt-zero p { margin-top: auto; color: var(--ink); font: 700 17px/1.3 Onest, sans-serif; }
+  .pvt-line { flex-direction: row; gap: 18px; align-items: flex-start; }
+  .pvt-line .ic { flex: none; width: 52px; height: 52px; border-radius: 16px; }
+  .pvt-line > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .pvt-dark { background: #141518; border: 0; color: #FFFFFF; }
+  .pvt-dark p { color: #A3A6AD; }
+  .pvt-dark .ic { background: #26282D; color: #FFFFFF; }
+  .win .pvt-nodes { grid-column: span 4; }   /* Windows has no sandbox tile beside it */
+  @media (max-width: 960px) {
+    .pv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pvt-big { grid-row: auto; }
+    .win .pvt-nodes { grid-column: span 2; }
+  }
+  @media (max-width: 760px) {
+    .pv { grid-template-columns: minmax(0, 1fr); }
+    .pvt-w2, .pvt-big, .win .pvt-nodes { grid-column: auto; }
+    .pv-sw button { font-size: 16px; }
+  }
+
+  /* Plugins: what one does, drawn as its three steps (the owner's pick: «Что происходит»). */
+  .pg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; align-items: center; }
+  .pg .h, .pg .sub { text-align: left; margin-left: 0; margin-right: 0; }
+  .pg .kicker { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .pg-soon { background: var(--ink); color: #FFFFFF; border-radius: 7px; padding: 4px 7px; letter-spacing: .04em; }
+  .pg-ls { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 12px; margin-top: 24px; font-weight: 600; }
+  .pg-ls li { display: flex; align-items: center; gap: 10px; }
+  .pg-ls svg { flex: none; color: var(--accent-ink); }
+  .pg-flow { background: #FFDFCD; border-radius: 32px; padding: 32px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  .pg-c { background: #FFFFFF; border-radius: 18px; box-shadow: 0 18px 40px rgba(17,17,17,.10), 0 2px 6px rgba(17,17,17,.05); padding: 16px 18px; display: flex; align-items: center; gap: 14px; }
+  .pg-c img { width: 56px; height: 56px; border-radius: 14px; flex: none; }
+  .pg-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pg-c b { font: 700 17px/1.25 Onest, sans-serif; }
+  .pg-c small { font-size: 14px; color: var(--muted); }
+  .pg-cap { font: 800 10.5px Onest, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .pg-ok { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 5px; background: #E3F8EE; color: #0A7A4F; border-radius: 999px; padding: 5px 10px 5px 7px; font: 700 12px Onest, sans-serif; }
+  .pg-num { margin-left: auto; flex: none; text-align: right; }
+  .pg-num b { display: block; font: 800 34px/1 Onest, sans-serif; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .pg-num small { display: block; margin-top: 4px; font: 700 12px Onest, sans-serif; color: var(--accent-ink); }
+  .pg-ln { align-self: center; height: 28px; border-left: 2px dashed var(--ink); }
+  .pg-st { flex-direction: column; align-items: stretch; gap: 12px; padding: 18px; }
+  .pg-st .pg-big { font: 700 22px/1.2 Onest, sans-serif; letter-spacing: -.01em; }
+  .pg-btn { height: 46px; border-radius: 12px; background: var(--accent); color: var(--ink); font: 700 15px Onest, sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .pg-flow > p { margin-top: 18px; text-align: center; font-weight: 700; font-size: 15px; }
+  .pg-more { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 40px; }
+  .pg-more > span:first-child { font: 800 11px Onest, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+  .pg-pp { display: inline-flex; align-items: center; gap: 10px; background: #FFFFFF; border: 1.5px solid var(--line); border-radius: 16px; padding: 8px 16px 8px 8px;
+           font: 700 15px Onest, sans-serif; color: var(--ink); cursor: pointer; text-align: left; transition: border-color .2s; }
+  .pg-pp:hover { border-color: rgba(255,122,47,.6); }
+  .pg-pp[aria-pressed=true] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .pg-pp img { width: 36px; height: 36px; border-radius: 9px; flex: none; }
+  @media (max-width: 960px) { .pg { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+  @media (max-width: 760px) { .pg-flow { padding: 16px; border-radius: 24px; } .pg-c { padding: 14px; gap: 12px; } .pg-more { margin-top: 28px; } }
+  /* A narrow phone: «Checked» goes under the plugin's name instead of squeezing it into one word a line. */
+  @media (max-width: 480px) { .pg-c { flex-wrap: wrap; } .pg-tx { flex: 1 1 0; min-width: 120px; } .pg-ok { margin-left: 0; } }
+
   /* The canvas: the app's window, drawn at 1088 × 600 and scaled to the page; tilted with its blocks lifted while --t is 1. */
   .appwrap { margin-top: 40px; height: calc(600px * var(--ak, 1)); }
   .swipe { display: none; text-align: center; color: var(--muted); font: 600 13px Onest, sans-serif; margin-top: 10px; }
@@ -503,7 +604,7 @@
 <header class="top">
   <div class="bar glass">
     <a class="logo" href="#top" aria-label="ihatecrypto"><svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-wait"/></svg><span>ihatecrypto</span></a>
-    <nav class="nav"><a href="/manifesto/" data-t="n_mf">Manifesto</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
+    <nav class="nav"><a href="/manifesto/" data-t="n_mf">Manifesto</a><a href="#plugins" data-t="n_pl">Plugins</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
     <div class="lang">
       <button type="button" class="lang-btn" aria-haspopup="menu" aria-expanded="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg><span class="sr">Language: </span><b>EN</b><svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="lang-menu" role="menu" hidden><button type="button" role="menuitemradio" aria-checked="true" data-l="en"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg><span>English</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><button type="button" role="menuitemradio" aria-checked="false" data-l="es"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-es"/></svg><span>Español</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><button type="button" role="menuitemradio" aria-checked="false" data-l="ru"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-ru"/></svg><span>Русский</span><svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div>
@@ -511,6 +612,8 @@
     <button type="button" class="menu-btn" aria-haspopup="menu" aria-expanded="false" data-ta="menu" aria-label="Menu"><svg class="bars" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><svg class="x" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     <div class="menu" hidden>
       <a href="/manifesto/" data-t="n_mf">Manifesto</a>
+      <a href="#plugins" data-t="n_pl">Plugins</a>
+      <a href="/whats-new/" data-t="wn">What's new</a>
       <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a>
       <div class="mlangs"><button type="button" data-l="en" aria-pressed="true"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-en"/></svg>EN</button><button type="button" data-l="es" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-es"/></svg>ES</button><button type="button" data-l="ru" aria-pressed="false"><svg class="fl" viewBox="0 0 28 28" aria-hidden="true"><use href="#fl-ru"/></svg>RU</button></div>
     </div>
@@ -529,10 +632,16 @@
       <h1 data-t="h1">Close the ten tabs.</h1>
       <p class="lead" data-t="lead">A wallet, a swap, a bridge, an explorer, a perps exchange, a gas tracker… Moving ten dollars shouldn't take ten sites. With ihatecrypto it takes one sentence.</p>
       <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl">Download for Mac</span></a>
-      <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}} · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
+      <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · <a class="win" href="/whats-new/">v{{version}}</a> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
       <a class="btn win-only dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_win">Download for Windows</span></a>
       <p class="meta win-only"><span data-t="req_win">Free · Windows 10 or 11 · Preview</span> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win_more">ARM and what's new</a></p>
       <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send me the link</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">Open it on a Mac or a Windows PC.</p></div>
+      <ul class="trust">
+        <li><a href="#safe"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l3 3M14 9l2 2"/></svg><span class="not-win" data-t="tr0">Keys stay on your Mac</span><span class="win-only" data-t="tr0_win">Keys stay on your PC</span></a></li>
+        <li><a href="#private"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-t="tr1">Private mode</span></a></li>
+        <li><a href="#plugins"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h4v3h3a2 2 0 0 1 2 2v2h-1.5a2 2 0 0 0 0 4H18v3a2 2 0 0 1-2 2h-3v-1.5a2 2 0 0 0-4 0V20H6a2 2 0 0 1-2-2v-3h1.5a2 2 0 0 0 0-4H4V9a2 2 0 0 1 2-2h3z"/></svg><span data-t="tr2">Plugins</span></a></li>
+        <li><a href="#open"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/></svg><span data-t="tr3">Open source</span></a></li>
+      </ul>
     </div>
     <div class="beat b1">
       <p class="kicker" data-t="k1">Instead</p>
@@ -677,6 +786,47 @@
   <p class="fine"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span class="not-win" data-t="safe_fine">Signed and notarized by Apple. Updates are signed too and install only when you choose to.</span><span class="win-only" data-t="safe_fine_win">The installer isn't code-signed yet, so Windows asks before running it. Updates are signed and install only when you choose to.</span></p>
 </section>
 
+<section class="sec" id="private">
+  <p class="kicker" data-t="pv_k">Privacy</p>
+  <h2 class="h" data-t="pv_h">Private when you want it.</h2>
+  <div class="pv">
+    <article class="pvt pvt-big">
+      <p class="pv-cap" data-t="pv0k">Private assistant</p>
+      <div class="pv-orb" aria-hidden="true"><span><svg width="68" height="68" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span></div>
+      <h3 data-t="pv0t">A chat nobody else can read</h3>
+      <p data-t="pv0p">Pick NEAR AI and the model runs in sealed hardware that even NEAR can't read. The app checks it before every message.</p>
+    </article>
+    <article class="pvt pvt-w2">
+      <p class="pv-cap pv-vi" data-t="pv1k">Private transfers</p>
+      <div class="pv-sw" role="group" data-ta="pv_sw" aria-label="Regular or private">
+        <button type="button" aria-pressed="false" data-set="pv" data-show="pv-reg"><span data-t="pv_reg">Regular</span></button>
+        <button type="button" class="pv-p" aria-pressed="true" data-set="pv" data-show="pv-priv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span data-t="pv_priv">Private</span></button>
+      </div>
+      <div class="pv-modes">
+        <div class="pk" id="pv-priv" data-set="pv"><h3 data-t="pv1t">A transfer with no trail</h3><p data-t="pv1p">One switch right over Confirm. On chain, what you sent and what arrived can't be matched.</p></div>
+        <div class="pk" id="pv-reg" data-set="pv" hidden><h3 data-t="pv1rt">A regular transfer</h3><p data-t="pv1rp">It lands in seconds. Anyone with an explorer can see who you paid.</p></div>
+      </div>
+    </article>
+    <article class="pvt pvt-pic">
+      <img src="/mf/laptop.webp" alt="" width="208" height="192" loading="lazy">
+      <h3 data-t="pv2t">Or on your own computer</h3>
+      <p><span class="not-win">Ollama, LM Studio, Apple Intelligence</span><span class="win-only">Ollama, LM Studio</span></p>
+    </article>
+    <article class="pvt pvt-zero">
+      <b>0</b>
+      <p data-t="pv3p">accounts, sign-ups and emails</p>
+    </article>
+    <article class="pvt pvt-w2 pvt-line pvt-dark pvt-nodes">
+      <span class="ic" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
+      <div><h3 data-t="pv4t">Your own nodes</h3><p data-t="pv4p">Give Solana, Base, Arbitrum, Ethereum or Polygon a node of your own, and the app reads and sends through it instead of a public one.</p></div>
+    </article>
+    <article class="pvt pvt-w2 pvt-line not-win">
+      <span class="ic" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></span>
+      <div><h3 data-t="pv5t">In a box of its own</h3><p data-t="pv5p">On a Mac the app is sandboxed: it can't open your other files.</p></div>
+    </article>
+  </div>
+</section>
+
 <section class="sec" id="open">
   <div class="card oss">
     <svg viewBox="0 0 140 140" aria-hidden="true"><use href="#f-think"/></svg>
@@ -705,6 +855,73 @@
   <ul class="more"><li data-t="m0">lend 2 USDC on Aave</li><li data-t="m1">buy NEAR for 2 USDC</li><li data-t="m2">add gas on Robinhood for 1 USDC</li><li data-t="m3">sweep dust under $5</li><li data-t="m4">long SOL by the book</li><li data-t="m5">in 1 week: rebalance USDC</li></ul>
 </section>
 
+<!-- Plugins aren't in a release yet: the section says «Soon» and has nothing to press. -->
+<section class="sec" id="plugins">
+  <div class="pg">
+    <div>
+      <p class="kicker"><span data-t="pl_k">Plugins</span><span class="pg-soon" data-t="pl_soon">Soon</span></p>
+      <h2 class="h" data-t="pl_h">Rules that watch the market for you.</h2>
+      <p class="sub" data-t="pl_p">Install a plugin and it checks on a schedule. When its condition is met, a card appears on your canvas. The rest is up to you.</p>
+      <ul class="pg-ls">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span data-t="pl_l0">It never sees a key</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span data-t="pl_l1">It can't send money out</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span data-t="pl_l2">It has a daily limit it can't get around</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span data-t="pl_l3">We check every version before it's listed</span></li>
+      </ul>
+    </div>
+    <div class="pg-stage">
+      <div class="pg-flow pk" id="pg-fear-greed" data-set="pg" style="background: #FFDFCD">
+        <div class="pg-c"><img src="/mf/pl-fear-greed.webp" alt="" width="56" height="56" loading="lazy"><div class="pg-tx"><b data-t="pl_n">Fear &amp; Greed</b><small data-t="pl_c">Checks the index every day at 9:00</small></div><span class="pg-ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span data-t="pl_ck">Checked</span></span></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c"><div class="pg-tx"><span class="pg-cap" data-t="pl_if">If</span><b data-t="pl_ifp">The index is 25 or lower</b></div><div class="pg-num"><b>22</b><small data-t="pl_fear">Extreme Fear</small></div></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c pg-st"><span class="pg-cap" data-t="pl_th">Then · a card on your canvas</span><b class="pg-big" data-t="pl_buy">Buy $50 of BTC</b><small data-t="pl_by">Proposed by the plugin Fear &amp; Greed · 1.2.1</small><div class="pg-btn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v4M8.5 14.5V12a3.5 3.5 0 0 1 7 0v2.5M5.5 15v-3a6.5 6.5 0 0 1 13 0v1.5M10 20.5c-1-1.5-1.5-3.3-1.5-5M14.5 20.5c.7-1.4 1-3 1-4.5M18.2 17.5c-.2 1-.5 2-.9 2.8"/></svg>Confirm</div></div>
+        <p data-t="pl_no">Nothing moves until you press Confirm.</p>
+      </div>
+      <div class="pg-flow pk" id="pg-eth-dip" data-set="pg" style="background: #DFEAFF" hidden>
+        <div class="pg-c"><img src="/mf/pl-eth-dip.webp" alt="" width="56" height="56" loading="lazy"><div class="pg-tx"><b data-t="pl_m0">ETH Dip Buyer</b><small data-t="p1c">Checks ETH's price every hour</small></div><span class="pg-ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span data-t="pl_ck">Checked</span></span></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c"><div class="pg-tx"><span class="pg-cap" data-t="pl_if">If</span><b data-t="p1i">5% or more lower than a day ago</b></div><div class="pg-num"><b>−6%</b><small data-t="p1l">in a day</small></div></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c pg-st"><span class="pg-cap" data-t="pl_th">Then · a card on your canvas</span><b class="pg-big" data-t="p1b">Buy $20 of ETH</b><small data-t="p1y">Proposed by the plugin ETH Dip Buyer · 1.0.0</small><div class="pg-btn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v4M8.5 14.5V12a3.5 3.5 0 0 1 7 0v2.5M5.5 15v-3a6.5 6.5 0 0 1 13 0v1.5M10 20.5c-1-1.5-1.5-3.3-1.5-5M14.5 20.5c.7-1.4 1-3 1-4.5M18.2 17.5c-.2 1-.5 2-.9 2.8"/></svg>Confirm</div></div>
+        <p data-t="pl_no">Nothing moves until you press Confirm.</p>
+      </div>
+      <div class="pg-flow pk" id="pg-depeg-guard" data-set="pg" style="background: #DCF1E5" hidden>
+        <div class="pg-c"><img src="/mf/pl-depeg-guard.webp" alt="" width="56" height="56" loading="lazy"><div class="pg-tx"><b data-t="pl_m1">Depeg guard</b><small data-t="p2c">Checks USDC, USDT and DAI every hour</small></div><span class="pg-ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span data-t="pl_ck">Checked</span></span></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c"><div class="pg-tx"><span class="pg-cap" data-t="pl_if">If</span><b data-t="p2i">A coin is below $0.995 or above $1.005</b></div><div class="pg-num"><b data-t="p2v">$0.991</b><small data-t="p2l">a coin's price</small></div></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c pg-st"><span class="pg-cap" data-t="pl_th">Then · a card on your canvas</span><b class="pg-big" data-t="p2b">Swap it for another stablecoin</b><small data-t="p2y">Proposed by the plugin Depeg guard · 1.0.1</small><div class="pg-btn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v4M8.5 14.5V12a3.5 3.5 0 0 1 7 0v2.5M5.5 15v-3a6.5 6.5 0 0 1 13 0v1.5M10 20.5c-1-1.5-1.5-3.3-1.5-5M14.5 20.5c.7-1.4 1-3 1-4.5M18.2 17.5c-.2 1-.5 2-.9 2.8"/></svg>Confirm</div></div>
+        <p data-t="pl_no">Nothing moves until you press Confirm.</p>
+      </div>
+      <div class="pg-flow pk" id="pg-fear-dca" data-set="pg" style="background: #F9EED4" hidden>
+        <div class="pg-c"><img src="/mf/pl-fear-dca.webp" alt="" width="56" height="56" loading="lazy"><div class="pg-tx"><b data-t="pl_m2">Buy the fear</b><small data-t="p3c">Checks the index every day at 10:00</small></div><span class="pg-ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span data-t="pl_ck">Checked</span></span></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c"><div class="pg-tx"><span class="pg-cap" data-t="pl_if">If</span><b data-t="pl_ifp">The index is 25 or lower</b></div><div class="pg-num"><b>22</b><small data-t="pl_fear">Extreme Fear</small></div></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c pg-st"><span class="pg-cap" data-t="pl_th">Then · a card on your canvas</span><b class="pg-big" data-t="p3b">Buy $10 of BTC</b><small data-t="p3y">Proposed by the plugin Buy the fear · 1.0.1</small><div class="pg-btn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v4M8.5 14.5V12a3.5 3.5 0 0 1 7 0v2.5M5.5 15v-3a6.5 6.5 0 0 1 13 0v1.5M10 20.5c-1-1.5-1.5-3.3-1.5-5M14.5 20.5c.7-1.4 1-3 1-4.5M18.2 17.5c-.2 1-.5 2-.9 2.8"/></svg>Confirm</div></div>
+        <p data-t="pl_no">Nothing moves until you press Confirm.</p>
+      </div>
+      <div class="pg-flow pk" id="pg-funding-watch" data-set="pg" style="background: #DFEAFF" hidden>
+        <div class="pg-c"><img src="/mf/pl-funding-watch.webp" alt="" width="56" height="56" loading="lazy"><div class="pg-tx"><b data-t="pl_m3">Funding watch</b><small data-t="p4c">Checks BTC and ETH funding every 4 hours</small></div><span class="pg-ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span data-t="pl_ck">Checked</span></span></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c"><div class="pg-tx"><span class="pg-cap" data-t="pl_if">If</span><b data-t="p4i">Above 0.05% or below −0.05% per 8 hours</b></div><div class="pg-num"><b data-t="p4v">0.06%</b><small data-t="p4l">per 8 hours</small></div></div>
+        <i class="pg-ln" aria-hidden="true"></i>
+        <div class="pg-c pg-st"><span class="pg-cap" data-t="pl_th2">Then · a line in your chat</span><b class="pg-big" data-t="p4b">Longs are paying shorts</b><small data-t="p4y">From the plugin Funding watch · 1.0.1</small></div>
+        <p data-t="pl_no2">This one only tells you. It can't move money.</p>
+      </div>
+    </div>
+  </div>
+  <div class="pg-more">
+    <span data-t="pl_more">Pick a plugin</span>
+    <button type="button" class="pg-pp" aria-pressed="true" data-set="pg" data-show="pg-fear-greed"><img src="/mf/pl-fear-greed.webp" alt="" width="36" height="36" loading="lazy"><span data-t="pl_n">Fear &amp; Greed</span></button>
+    <button type="button" class="pg-pp" aria-pressed="false" data-set="pg" data-show="pg-eth-dip"><img src="/mf/pl-eth-dip.webp" alt="" width="36" height="36" loading="lazy"><span data-t="pl_m0">ETH Dip Buyer</span></button>
+    <button type="button" class="pg-pp" aria-pressed="false" data-set="pg" data-show="pg-depeg-guard"><img src="/mf/pl-depeg-guard.webp" alt="" width="36" height="36" loading="lazy"><span data-t="pl_m1">Depeg guard</span></button>
+    <button type="button" class="pg-pp" aria-pressed="false" data-set="pg" data-show="pg-fear-dca"><img src="/mf/pl-fear-dca.webp" alt="" width="36" height="36" loading="lazy"><span data-t="pl_m2">Buy the fear</span></button>
+    <button type="button" class="pg-pp" aria-pressed="false" data-set="pg" data-show="pg-funding-watch"><img src="/mf/pl-funding-watch.webp" alt="" width="36" height="36" loading="lazy"><span data-t="pl_m3">Funding watch</span></button>
+  </div>
+</section>
+
 <section class="sec" id="faq">
   <h2 class="h" data-t="q_h">Questions</h2>
   <div class="faq">
@@ -723,14 +940,14 @@
     <h2 data-t="slogan">Even crypto hates crypto.</h2>
     <p data-t="end_p">So close the tabs and let it do the crypto. All you do is say what you want.</p>
     <a class="btn mac-only" href="/ihatecrypto.dmg" download><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl">Download for Mac</span></a>
-    <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · v{{version}} · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
+    <p class="meta mac-only"><span data-t="req">Free · macOS 26 or later</span> · <a class="win" href="/whats-new/">v{{version}}</a> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win">Also for Windows (Preview)</a></p>
     <a class="btn win-only dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-t="dl_win">Download for Windows</span></a>
     <p class="meta win-only"><span data-t="req_win">Free · Windows 10 or 11 · Preview</span> · <a class="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest" target="_blank" rel="noopener" data-t="win_more">ARM and what's new</a></p>
     <div class="sendbox away-only"><button type="button" class="btn sendto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 3 10.5l7 2.5M21 3l-3 18-8-8M21 3 10 13v6l3.2-3.2"/></svg><span data-t="send">Send me the link</span></button><div class="shares"><a class="sh tg" target="_blank" rel="noopener" aria-label="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 4.1 2.9 11c-1 .4-1 1.4 0 1.7l4.5 1.4 1.7 5.3c.2.6.9.8 1.4.4l2.5-2.3 4.7 3.5c.6.4 1.4.1 1.6-.6l3-13.9c.2-1-.7-1.8-1.6-1.4zM8.5 13.7l9.4-6-7.6 7.3-.3 3.2z" fill="#FFFFFF"/></svg></a><a class="sh wa" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 0 0-7.3 12.9l-1.2 4.1 4.2-1.1A8.5 8.5 0 1 0 12 3.5z" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.3 8.3c.3-.5.8-.5 1 0l.7 1.5c.1.3 0 .5-.2.7l-.5.5c.5 1.1 1.4 2 2.5 2.5l.5-.5c.2-.2.5-.3.7-.2l1.5.7c.5.2.5.7 0 1-1 .7-2.1.7-3.3 0a8.6 8.6 0 0 1-3.2-3.2c-.7-1.2-.7-2.3.3-3z" fill="#FFFFFF"/></svg></a><a class="sh em" data-ta="mail" aria-label="Email"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg></a><a class="sh x" target="_blank" rel="noopener" aria-label="X"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 3.5h3l-6.6 7.5 7.7 9.5h-6l-4.7-5.8-5.4 5.8h-3l7-7.9L2.3 3.5h6.2l4.3 5.4zm-1 15.3h1.7L7.5 5.1H5.7z" fill="#FFFFFF"/></svg></a><button class="sh cp" type="button" data-ta="copy" aria-label="Copy link"><svg class="i1" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg><svg class="i2" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button></div><p class="meta" data-t="away">Open it on a Mac or a Windows PC.</p></div>
   </div>
 </section>
 </main>
-<footer>ihatecrypto · <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a> · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><span class="win-only"><a class="dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe" data-t="dl_win">Download for Windows</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
+<footer>ihatecrypto · <a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a> · <a href="/whats-new/" data-t="wn">What's new</a> · <span class="mac-only"><a href="/ihatecrypto.dmg" download data-t="dl">Download for Mac</a> · </span><span class="win-only"><a class="dlwin" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe" data-t="dl_win">Download for Windows</a> · </span><a href="/" hreflang="en" lang="en">English</a> · <a href="/es/" hreflang="es" lang="es">Español</a> · <a href="/ru/" hreflang="ru" lang="ru">Русский</a></footer>
 
 <!-- The words in Spanish and Russian (English is the page itself); build.py renders /es/ and /ru/ from them. -->
 <script type="application/json" id="i18n">
@@ -742,6 +959,77 @@
 "es": {
 "se": "https://support.apple.com/es-es/guide/security/sec59b0b31ff/web",
 "n_mf": "Manifiesto",
+"p2v": "$0,991",
+"p4v": "0,06%",
+"pv_sw": "Normal o privada",
+"pv1rt": "Una transferencia normal",
+"pv1rp": "Llega en segundos. Cualquiera con un explorador puede ver a quién pagaste.",
+"p1c": "Revisa el precio de ETH cada hora",
+"p1i": "Un 5% o más por debajo de hace un día",
+"p1l": "en un día",
+"p1b": "Comprar $20 de ETH",
+"p1y": "Propuesto por el plugin Comprador de caídas de ETH · 1.0.0",
+"p2c": "Revisa USDC, USDT y DAI cada hora",
+"p2i": "Una moneda vale menos de $0,995 o más de $1,005",
+"p2l": "precio de una moneda",
+"p2b": "Cambiarla por otra stablecoin",
+"p2y": "Propuesto por el plugin Guardia del anclaje · 1.0.1",
+"p3c": "Revisa el índice cada día a las 10:00",
+"p3b": "Comprar $10 de BTC",
+"p3y": "Propuesto por el plugin Comprar el miedo · 1.0.1",
+"p4c": "Revisa el funding de BTC y ETH cada 4 horas",
+"p4i": "Por encima del 0,05% o por debajo del −0,05% cada 8 horas",
+"p4l": "cada 8 horas",
+"p4b": "Los largos pagan a los cortos",
+"p4y": "Del plugin Vigía del funding · 1.0.1",
+"pl_th2": "Entonces · una línea en tu chat",
+"pl_no2": "Este solo avisa. No puede mover dinero.",
+"n_pl": "Plugins",
+"wn": "Novedades",
+"tr0": "Las claves no salen de tu Mac",
+"tr0_win": "Las claves no salen de tu PC",
+"tr1": "Modo privado",
+"tr2": "Plugins",
+"tr3": "Código abierto",
+"pv_k": "Privacidad",
+"pv_h": "Privado cuando lo necesites.",
+"pv0k": "Asistente privado",
+"pv0t": "Un chat que nadie más puede leer",
+"pv0p": "Elige NEAR AI y el modelo corre en un entorno protegido que ni siquiera NEAR puede leer. La app lo comprueba antes de cada mensaje.",
+"pv1k": "Transferencias privadas",
+"pv_reg": "Normal",
+"pv_priv": "Privada",
+"pv1t": "Una transferencia sin rastro",
+"pv1p": "Un interruptor justo encima de Confirm. En la cadena no se puede relacionar lo que enviaste con lo que llegó.",
+"pv2t": "O en tu propio ordenador",
+"pv3p": "cuentas, registros y correos",
+"pv4t": "Tus propios nodos",
+"pv4p": "Conecta un nodo tuyo para Solana, Base, Arbitrum, Ethereum o Polygon y la app leerá y enviará a través de él, no de uno público.",
+"pv5t": "En su propio sandbox",
+"pv5p": "En Mac la app corre en el sandbox de macOS y no puede abrir tus otros archivos.",
+"pl_k": "Plugins",
+"pl_soon": "Pronto",
+"pl_h": "Reglas que vigilan el mercado por ti.",
+"pl_p": "Instala un plugin y revisará el mercado según un horario. Cuando se cumpla su condición, aparecerá una tarjeta en tu lienzo. El resto lo decides tú.",
+"pl_l0": "Nunca ve una clave",
+"pl_l1": "No puede sacar dinero",
+"pl_l2": "Tiene un límite diario que no puede saltarse",
+"pl_l3": "Revisamos cada versión antes de publicarla",
+"pl_n": "Miedo y codicia",
+"pl_c": "Revisa el índice cada día a las 9:00",
+"pl_ck": "Revisado",
+"pl_if": "Si",
+"pl_ifp": "El índice es 25 o menos",
+"pl_fear": "Miedo extremo",
+"pl_th": "Entonces · una tarjeta en tu lienzo",
+"pl_buy": "Comprar $50 de BTC",
+"pl_by": "Propuesto por el plugin Miedo y codicia · 1.2.1",
+"pl_no": "Nada se mueve hasta que pulses Confirm.",
+"pl_more": "Elige un plugin",
+"pl_m0": "Comprador de caídas de ETH",
+"pl_m1": "Guardia del anclaje",
+"pl_m2": "Comprar el miedo",
+"pl_m3": "Vigía del funding",
 "menu": "Menú",
 "swipe": "← Desliza el lienzo →",
 "send_s": "Enviar",
@@ -864,6 +1152,77 @@
 "ru": {
 "se": "https://support.apple.com/ru-ru/guide/security/sec59b0b31ff/web",
 "n_mf": "Манифест",
+"p2v": "$0,991",
+"p4v": "0,06%",
+"pv_sw": "Обычный или приватный",
+"pv1rt": "Обычный перевод",
+"pv1rp": "Приходит за секунды. В эксплорере любой увидит, кому вы заплатили.",
+"p1c": "Проверяет цену ETH каждый час",
+"p1i": "На 5% или больше ниже, чем сутки назад",
+"p1l": "за сутки",
+"p1b": "Купить ETH на $20",
+"p1y": "Предложил плагин «Покупка ETH на просадке» · 1.0.0",
+"p2c": "Проверяет USDC, USDT и DAI каждый час",
+"p2i": "Монета дешевле $0,995 или дороже $1,005",
+"p2l": "цена монеты",
+"p2b": "Обменять её на другой стейблкоин",
+"p2y": "Предложил плагин «Страж привязки» · 1.0.1",
+"p3c": "Проверяет индекс каждый день в 10:00",
+"p3b": "Купить BTC на $10",
+"p3y": "Предложил плагин «Покупка на страхе» · 1.0.1",
+"p4c": "Проверяет фандинг BTC и ETH каждые 4 часа",
+"p4i": "Выше 0,05% или ниже −0,05% за 8 часов",
+"p4l": "за 8 часов",
+"p4b": "Лонги платят шортам",
+"p4y": "От плагина «Фандинг» · 1.0.1",
+"pl_th2": "Тогда · строка в чате",
+"pl_no2": "Этот только сообщает. Двигать деньги он не может.",
+"n_pl": "Плагины",
+"wn": "Что нового",
+"tr0": "Ключи только на вашем Mac",
+"tr0_win": "Ключи только на вашем ПК",
+"tr1": "Приватный режим",
+"tr2": "Плагины",
+"tr3": "Открытый код",
+"pv_k": "Приватность",
+"pv_h": "Приватно, когда нужно.",
+"pv0k": "Приватный ассистент",
+"pv0t": "Чат, который никто не прочитает",
+"pv0p": "Выберите NEAR AI, и модель будет работать в защищённом анклаве: ваши сообщения не прочитает даже NEAR. Приложение проверяет анклав перед каждым сообщением.",
+"pv1k": "Приватные переводы",
+"pv_reg": "Обычный",
+"pv_priv": "Приватный",
+"pv1t": "Перевод без следа",
+"pv1p": "Один переключатель прямо над Confirm. В блокчейне не связать то, что вы отправили, с тем, что пришло получателю.",
+"pv2t": "Или на вашем компьютере",
+"pv3p": "аккаунтов, регистраций и почтовых адресов",
+"pv4t": "Свои ноды",
+"pv4p": "Подключите свою ноду для Solana, Base, Arbitrum, Ethereum или Polygon, и приложение будет читать балансы и отправлять транзакции через неё, а не через публичную.",
+"pv5t": "Приложение в песочнице",
+"pv5p": "На Mac приложение работает в песочнице macOS и не может открыть другие ваши файлы.",
+"pl_k": "Плагины",
+"pl_soon": "Скоро",
+"pl_h": "Правила, которые следят за рынком вместо вас.",
+"pl_p": "Установите плагин, и он будет проверять рынок по расписанию. Когда условие сработает, на холсте появится карточка. Дальше решаете вы.",
+"pl_l0": "Не видит ключей",
+"pl_l1": "Не может вывести деньги",
+"pl_l2": "Дневной лимит, который ему не обойти",
+"pl_l3": "Каждую версию проверяем до публикации",
+"pl_n": "Страх и жадность",
+"pl_c": "Проверяет индекс каждый день в 9:00",
+"pl_ck": "Проверен",
+"pl_if": "Если",
+"pl_ifp": "Индекс 25 или ниже",
+"pl_fear": "Крайний страх",
+"pl_th": "Тогда · карточка на холсте",
+"pl_buy": "Купить BTC на $50",
+"pl_by": "Предложил плагин «Страх и жадность» · 1.2.1",
+"pl_no": "Пока вы не нажмёте Confirm, ничего не сдвинется.",
+"pl_more": "Выберите плагин",
+"pl_m0": "Покупка ETH на просадке",
+"pl_m1": "Страж привязки",
+"pl_m2": "Покупка на страхе",
+"pl_m3": "Фандинг",
 "menu": "Меню",
 "swipe": "← Листайте холст →",
 "send_s": "Ссылка",
@@ -1258,6 +1617,14 @@ $$('.lang-menu button').forEach((b) => b.addEventListener('click', () => { pick(
 addEventListener('click', (e) => { if (!e.target.closest('.lang')) langOpen(false); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && !langMenu.hidden) { langOpen(false); langBtn.focus(); } });
 $$('.chip').forEach((b, i) => b.addEventListener('click', () => { sc = i; play(); }));
+// A name pressed shows its panel: a plugin's three steps, the regular or the private transfer. Every
+// panel is in the page (so each language has them all) and one of a set is visible; one off the screen is brought to it.
+$$('button[data-show]').forEach((b) => b.addEventListener('click', () => {
+  $$(`button[data-set="${b.dataset.set}"]`).forEach((x) => x.setAttribute('aria-pressed', x === b));
+  $$(`.pk[data-set="${b.dataset.set}"]`).forEach((p) => { p.hidden = p.id !== b.dataset.show; });
+  const shown = document.getElementById(b.dataset.show), r = shown.getBoundingClientRect();
+  if (r.bottom < 140 || r.top > innerHeight - 140) shown.scrollIntoView({ block: 'center' });
+}));
 
 // The composition is drawn at 1174 wide and scaled to the demo's card, never past the app's 0.8.
 // A wrapped pill hugs its longest line: text-wrap: balance evens the lines but leaves the box at full width.
@@ -1274,7 +1641,7 @@ document.fonts.ready.then(() => $$('.eyebrow span, .askb').forEach(hug));
 // How far people get: each section once.
 // (a section counts once its top passes 60% of the screen: some are taller than four screens on a phone)
 const seenObs = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && track('seen_' + e.target.id)), { rootMargin: '0px 0px -40% 0px' });
-['canvas', 'how', 'safe', 'open', 'ask', 'faq'].forEach((id) => seenObs.observe(document.getElementById(id)));
+['canvas', 'how', 'safe', 'private', 'open', 'ask', 'plugins', 'faq'].forEach((id) => seenObs.observe(document.getElementById(id)));
 $$('.oss .btn').forEach((a) => a.addEventListener('click', () => track(a.id, false)));
 $$('.faq details').forEach((d) => d.addEventListener('toggle', () => d.open && track('faq_open', false)));
 

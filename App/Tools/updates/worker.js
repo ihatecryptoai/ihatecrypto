@@ -9,7 +9,7 @@
 import { stats } from './stats.js';
 
 const EVENTS = new Set(['send', 'share_tg', 'share_wa', 'share_mail', 'share_x', 'share_copy', 'story_1', 'story_2', 'story_end',
-  'seen_canvas', 'seen_how', 'seen_safe', 'seen_open', 'seen_ask', 'seen_faq', 'faq_open', 'menu', 'lang', 'claude', 'github']);
+  'seen_canvas', 'seen_how', 'seen_safe', 'seen_private', 'seen_open', 'seen_ask', 'seen_plugins', 'seen_faq', 'faq_open', 'menu', 'lang', 'claude', 'github']);
 const LANGS = new Set(['en', 'es', 'ru']);
 const SITE = new Set(['ihatecrypto.ai', 'www.ihatecrypto.ai']);
 

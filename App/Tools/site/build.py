@@ -2,7 +2,8 @@
 """The landing in three languages, as search engines read it: index.html (English, the page as written) and /es/, /ru/
 rendered from the same page with its own words (the i18n block): the text, the title and description, the previews,
 the FAQ for search results, and hreflang links tying the three together. The manifesto (manifesto.html) the same way,
-at /manifesto/, /es/manifesto/ and /ru/manifesto/.
+at /manifesto/, /es/manifesto/ and /ru/manifesto/. What's new (whatsnew.html) at /whats-new/: every release from the
+app's own list (Sources/IhatecryptoApp/WhatsNew/whatsnew.json), in English like the app's.
 
     python3 Tools/site/build.py <version> <out dir>      (release.sh runs it; out is dist/site)
 """
@@ -10,6 +11,7 @@ import html
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 SITE = 'https://ihatecrypto.ai/'
@@ -97,9 +99,37 @@ def manifesto(page: str, lang: str) -> str:
     return page
 
 
+def whatsnew(page: str, landing: str, releases: list) -> str:
+    """whatsnew.html with every release, newest first, from the app's own What's New: a version, its date and its changes,
+    each with the phrase the app's «Try it» puts into the chat. English only, like the app's list. The fonts and the
+    coin are the landing's own, so there is one copy of each."""
+    def story(s):
+        say = f'<p class="try">{html.escape(s["try"])}</p>' if s.get('try') else ''
+        return (f'<article class="st"><h3><i style="background:#{html.escape(s["color"])}"></i>{html.escape(s["title"])}</h3>'
+                f'<p>{html.escape(s["text"])}</p>{say}</article>')
+
+    def release(r, latest):
+        day = date.fromisoformat(r['date'])
+        mark = ' <span class="now">Latest</span>' if latest else ''   # the space: read aloud it is «0.8.5 Latest»
+        return (f'<section class="rel" id="v{html.escape(r["version"])}"><header><h2>{html.escape(r["version"])}{mark}</h2>'
+                f'<time datetime="{day.isoformat()}">{day:%B} {day.day}, {day.year}</time></header>\n'
+                f'<div class="sts">{"".join(story(s) for s in r["stories"])}</div></section>')
+
+    coin = re.search(r'<symbol id="f-wait" viewBox="([^"]*)">(.*?)</symbol>', landing, re.S)
+    page = page.replace('{{fonts}}', ''.join(re.findall(r'  @font-face \{[^}]*\}\n', landing)))
+    page = page.replace('{{coin}}', f'<svg viewBox="{coin.group(1)}" aria-hidden="true">{coin.group(2)}</svg>')
+    return page.replace('{{releases}}', '\n'.join(release(r, i == 0) for i, r in enumerate(releases)))
+
+
 def main():
     version, out = sys.argv[1], Path(sys.argv[2])
     here = Path(__file__).parent
+    releases = json.loads((here.parent.parent / 'Sources/IhatecryptoApp/WhatsNew/whatsnew.json').read_text(encoding='utf-8'))
+    news = whatsnew((here / 'whatsnew.html').read_text(encoding='utf-8').replace('{{version}}', version),
+                    (here / 'index.html').read_text(encoding='utf-8'), releases)
+    (out / 'whats-new').mkdir(parents=True, exist_ok=True)
+    (out / 'whats-new' / 'index.html').write_text(news, encoding='utf-8')
+    print(out / 'whats-new' / 'index.html')
     page = (here / 'index.html').read_text(encoding='utf-8').replace('{{version}}', version)
     mf = (here / 'manifesto.html').read_text(encoding='utf-8').replace('{{version}}', version)
     T = json.loads(re.search(r'<script type="application/json" id="i18n">\n(.*?)\n</script>', page, re.S).group(1))
