@@ -32,8 +32,7 @@
          font: 400 16px/1.5 Onest, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: clip;
          padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   a { color: var(--accent-ink); }
-  .away .mac-only, html:not(.away) .away-only { display: none !important; }
-  .win .mac-only, html:not(.win) .win-only { display: none !important; }
+  .away .dl, html:not(.away) .away-only { display: none !important; }   /* a phone gets the way home, a computer the downloads */
   .top { position: fixed; top: 0; left: 0; right: 0; z-index: 50; padding: 10px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); pointer-events: none; }
   .bar { pointer-events: auto; max-width: 1120px; height: 58px; margin: 0 auto; padding: 0 9px 0 12px; border-radius: 17px; display: flex; align-items: center; gap: 8px;
          background: rgba(255,255,255,.74); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
@@ -47,7 +46,20 @@
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 11px; flex: none;
          background: var(--accent); color: var(--ink); font: 600 14px Onest, sans-serif; text-decoration: none; white-space: nowrap; transition: box-shadow .25s; }
   .btn:hover { box-shadow: 0 0 0 3px #FFFFFF, 0 0 0 5.5px var(--accent); }
-  .btn:focus-visible, .nav a:focus-visible, .logo:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .btn:focus-visible, .nav a:focus-visible, .logo:focus-visible, .dl-menu a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  /* The download: one button, and under it the latest version for each computer (the landing's own menu, as its language's). */
+  .dl { position: relative; flex: none; }
+  .dl-btn { border: 0; cursor: pointer; padding: 0 13px 0 16px; }
+  .dl-btn svg { transition: transform .2s; }
+  .dl-btn[aria-expanded=true] svg { transform: rotate(180deg); }
+  .dl-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 216px; padding: 6px; border-radius: 14px; display: flex; flex-direction: column; gap: 2px;
+             background: #FFFFFF; border: 1px solid rgba(17,17,17,.08); box-shadow: 0 18px 48px rgba(17,17,17,.16); }
+  .dl-menu[hidden] { display: none; }
+  .dl-menu a { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 12px; border-radius: 10px; border: 1.5px solid transparent;
+               font: 600 15px Onest, sans-serif; color: var(--ink); text-decoration: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .dl-menu a:hover { border-color: rgba(255,122,47,.6); }
+  .dl-menu a.mine { background: rgba(255,122,47,.10); }
+  .dl-menu svg { flex: none; color: var(--accent-ink); }
 
   main { max-width: 1120px; margin: 0 auto; padding: 132px 16px 0; }
   .kicker { font: 800 12px Onest, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); }
@@ -96,8 +108,13 @@
   <div class="bar">
     <a class="logo" href="{{home}}" aria-label="ihatecrypto">{{coin}}<span>ihatecrypto</span></a>
     <nav class="nav"><a href="{{home}}manifesto/">{{t.n_mf}}</a><a href="{{home}}#plugins">{{t.n_pl}}</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
-    <a class="btn mac-only" href="/ihatecrypto.dmg" download>{{t.dl}}</a>
-    <a class="btn win-only" href="https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest">{{t.dl}}</a>
+    <div class="dl">
+      <button type="button" class="btn dl-btn" aria-haspopup="menu" aria-expanded="false">{{t.dl}}<svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="dl-menu" role="menu" hidden>
+        <a role="menuitem" data-os="mac" href="/ihatecrypto.dmg" download><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Mac ({{version}})</a>
+        <a role="menuitem" data-os="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>{{win}}</a>
+      </div>
+    </div>
     <a class="btn away-only" href="{{home}}">{{t.get}}</a>
   </div>
 </header>
@@ -109,6 +126,19 @@
 </main>
 <footer>ihatecrypto · <a href="{{home}}">{{t.home}}</a> · <a href="{{home}}manifesto/">{{t.n_mf}}</a> · <a href="https://github.com/ihatecryptoai/ihatecrypto/releases" target="_blank" rel="noopener">{{t.rel}}</a> · <a href="/whats-new/" hreflang="en" lang="en">English</a> · <a href="/es/whats-new/" hreflang="es" lang="es">Español</a> · <a href="/ru/whats-new/" hreflang="ru" lang="ru">Русский</a></footer>
 <script>
+// The download's menu: the visitor's own computer is marked, a PC on ARM gets its own installer (as on the landing), and
+// a press elsewhere or Escape closes it.
+{
+  const btn = document.querySelector('.dl-btn'), menu = document.querySelector('.dl-menu'), win = document.documentElement.classList.contains('win');
+  const open = (b) => { menu.hidden = !b; btn.setAttribute('aria-expanded', b); };
+  menu.querySelector(win ? '[data-os=win]' : '[data-os=mac]').classList.add('mine');
+  if (win) navigator.userAgentData?.getHighEntropyValues?.(['architecture'])
+    .then((v) => { if (v.architecture === 'arm') { const a = menu.querySelector('[data-os=win]'); a.href = a.href.replace('-x64-', '-arm64-'); } }).catch(() => {});
+  btn.addEventListener('click', () => open(menu.hidden));
+  menu.addEventListener('click', () => open(false));
+  addEventListener('click', (e) => { if (!e.target.closest('.dl')) open(false); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { open(false); btn.focus(); } });
+}
 // A phrase pressed is copied, to paste into the app's chat.
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('.try');

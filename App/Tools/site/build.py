@@ -12,6 +12,7 @@ import hashlib
 import html
 import json
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -135,6 +136,20 @@ def story_id(s: dict) -> str:
     return hashlib.sha1((s['title'] + '\n' + s['text']).encode()).hexdigest()[:12]
 
 
+def windows_version() -> str:
+    """The latest Windows release, for the download's menu: the highest windows-v tag of this repository. Every Windows
+    release makes one, so nobody has to remember a number here. Without git or the tags it is empty, and the menu says
+    «Windows» with no number rather than an old one: a release must not stop over it, so this only leaves a note."""
+    try:
+        tags = subprocess.run(['git', '-C', str(Path(__file__).parent), 'tag', '-l', 'windows-v*', '--sort=-v:refname'],
+                              capture_output=True, text=True).stdout.split()
+    except OSError:
+        tags = []
+    if not tags:
+        print("What's new: no windows-v tag here (git fetch --tags), so the download's menu names no Windows version", file=sys.stderr)
+    return tags[0].removeprefix('windows-v') if tags else ''
+
+
 def translated(words: dict, s: dict):
     """This language's title and text of a change, or None when it has none (or an empty one): then the English stands."""
     w = words.get(story_id(s))
@@ -143,7 +158,8 @@ def translated(words: dict, s: dict):
 
 def whatsnew(page: str, landing: str, releases: list, lang: str, words: dict, version: str) -> str:
     """whatsnew.html in one language with every release, newest first, from the app's own What's New: a version, its
-    date and its changes, each with the phrase the app's «Try it» puts into the chat, copied by a press. The phrase
+    date and its changes, each with the phrase the app's «Try it» puts into the chat, copied by a press. Its download
+    names the latest version for each computer: this release for the Mac, the newest windows-v tag for a PC. The phrase
     stays as the app has it: that is the one known to work. `words` are this language's translations by story_id; a
     change without one stays in English. The fonts and the coin are the landing's own, so there is one copy of each."""
     path, _ = LANGS[lang]
@@ -170,6 +186,8 @@ def whatsnew(page: str, landing: str, releases: list, lang: str, words: dict, ve
     page = page.replace('{{links}}', f'<link rel="canonical" href="{SITE}{path}whats-new/">\n{links}'
                         f'<link rel="alternate" hreflang="x-default" href="{SITE}whats-new/">')
     page = page.replace('{{lang}}', lang).replace('{{home}}', '/' + path).replace('{{url}}', f'{SITE}{path}whats-new/')
+    pc = windows_version()
+    page = page.replace('{{version}}', html.escape(version)).replace('{{win}}', 'Windows' + (f' ({html.escape(pc)})' if pc else ''))
     for k, v in t.items():
         page = page.replace('{{t.' + k + '}}', html.escape(v))
     page = page.replace('{{fonts}}', ''.join(re.findall(r'  @font-face \{[^}]*\}\n', landing)))
