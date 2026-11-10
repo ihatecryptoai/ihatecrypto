@@ -2,6 +2,14 @@ import Foundation
 import LLMCore
 
 extension Workspace {
+    /// A provider's name as a sentence takes it: «Claude (subscription via Claude Code)» → «Claude», «Ollama on this
+    /// Mac» → «Ollama», «OpenAI API» → «OpenAI».
+    nonisolated static func serviceName(_ name: String) -> String {
+        var n = name.split(separator: " (").first.map(String.init) ?? name
+        for tail in [" on this Mac", " API"] where n.hasSuffix(tail) { n.removeLast(tail.count) }
+        return n
+    }
+
     /// A model that didn't answer, in the person's words: what happened and what to do, a sentence each, in the chat's
     /// language — never the service's JSON (the owner, 2026-11-10). nil for a failure the chat has no words for: the
     /// service's own sentence is shown then. The service's own page (ProviderInfo.keyURL) is named where the fix is there.
@@ -11,7 +19,8 @@ extension Workspace {
         // send it again later» would never help. A subscription has no key: its 401 is a sign-in that ran out.
         if provider.kind == .local, kind == .busy { return nil }
         if provider.kind == .subscription, kind == .key { kind = .signIn }
-        let p = provider.name
+        // The service by its short name: «Ollama», not «Ollama on this Mac isn’t running on this Mac».
+        let p = Self.serviceName(provider.name)
         let at = provider.keyURL.map { say(" at \($0.absoluteString)", " на \($0.absoluteString)", " en \($0.absoluteString)") } ?? ""
         let (why, fix): (String, String) = switch kind {
         case .credits:
