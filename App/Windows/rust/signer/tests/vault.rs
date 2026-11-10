@@ -81,6 +81,18 @@ fn a_wallet_is_sealed_under_windows_hello_and_signs() {
     assert_eq!(status.evm_address, imported.evm_address);
 }
 
+/// The Mac's plugin limits (setPluginLimit, forPlugin) aren't taken on Windows: both refused, and the plain asWallet
+/// inside a plugin's move is never signed on its own.
+#[test]
+fn the_macs_plugin_requests_are_refused() {
+    let _turn = fresh();
+    import();
+    let refused = "Plugins aren't on Windows yet.";
+    assert_eq!(send(SignerRequest::SetPluginLimit { plugin: "fear-greed".into(), dollars_per_day: 50u64.into() }).unwrap_err().0, refused);
+    let inner = SignerRequest::AsWallet { id: "9".into(), request: Box::new(SignerRequest::SignPersonal { message: b"hello".to_vec() }) };
+    assert_eq!(send(SignerRequest::ForPlugin { plugin: "fear-greed".into(), request: Box::new(inner) }).unwrap_err().0, refused);
+}
+
 #[test]
 fn a_cancelled_prompt_signs_nothing() {
     let _turn = fresh();

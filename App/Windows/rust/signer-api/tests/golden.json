@@ -64,6 +64,21 @@
 
     }
   },
+  "forPlugin" : {
+    "forPlugin" : {
+      "plugin" : "fear-greed",
+      "request" : {
+        "asWallet" : {
+          "id" : "9",
+          "request" : {
+            "signPersonal" : {
+              "message" : "AQID+\/8="
+            }
+          }
+        }
+      }
+    }
+  },
   "importMnemonic" : {
     "importMnemonic" : {
       "passphrase" : "",
@@ -281,6 +296,12 @@
         "automationWeek" : 500,
         "slippageBps" : 50
       }
+    }
+  },
+  "setPluginLimit" : {
+    "setPluginLimit" : {
+      "dollarsPerDay" : 50,
+      "plugin" : "fear-greed"
     }
   },
   "setSessionLength" : {

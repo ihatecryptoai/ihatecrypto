@@ -150,6 +150,11 @@ pub enum SignerRequest {
     EnterCode { code: String, sign: bool },
     /// `request` signed by the automation wallet `id` while another wallet stays active: a scheduled task's move.
     AsWallet { id: String, request: Box<SignerRequest> },
+    /// The Mac's plugins (branch `plugins`): the most a plugin's scheduled moves may spend from the automation wallet in
+    /// 24 hours, a Swift Decimal (`Number` keeps it as written). Windows has no plugins yet: the signer refuses it.
+    SetPluginLimit { plugin: String, dollars_per_day: serde_json::Number },
+    /// `request` (an `asWallet`) made for the plugin `plugin`. Refused on Windows, never signed as a plain `AsWallet`.
+    ForPlugin { plugin: String, request: Box<SignerRequest> },
 }
 
 /// One call Relay's proxy runs (Multicall3's Call3Value).

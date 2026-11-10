@@ -134,6 +134,8 @@ fn move_scope(request: &SignerRequest) -> Option<HashSet<String>> {
 fn handle_request(request: SignerRequest) -> Result<SignerReply> {
     use SignerRequest as R;
     match request {
+        // The Mac's plugin limits: no plugin runs on Windows, so neither a limit nor a plugin's move is taken here.
+        R::SetPluginLimit { .. } | R::ForPlugin { .. } => fail("Plugins aren't on Windows yet."),
         R::Status {} => {
             let mut r = reply();
             let all = wallets::all();
