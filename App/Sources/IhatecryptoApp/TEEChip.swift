@@ -17,6 +17,18 @@ extension Workspace {
     }
 }
 
+/// «🔒 Private» beside a sealed provider's name (ModelCompany.sealed), in the model menu and Settings.
+struct PrivateTag: View {
+    var body: some View {
+        Label("Private", systemImage: "lock.fill").labelStyle(.titleAndIcon)
+            .font(.ui(10, .semibold)).foregroundStyle(Brand.teeInk)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(Brand.tee.opacity(0.16)))
+            .fixedSize()
+            .help("Runs in sealed hardware: the provider can't read your chat or balances. ihatecrypto checks it before every message.")
+    }
+}
+
 /// T4 «Private assistant» (owner's pick, 2026-11-06): the coin's lock in the chat's header while the model runs in an
 /// attested enclave. Green, the color of the sealed hardware.
 struct TEELockBadge: View {

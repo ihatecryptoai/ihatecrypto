@@ -3504,6 +3504,14 @@ struct ChatModelMenu: View {
     private func ways(_ c: ModelCompany) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             caption(c.name.uppercased())
+            if c.sealed {
+                VStack(alignment: .leading, spacing: 4) {
+                    PrivateTag()
+                    Text("Runs in sealed hardware: NEAR can't read your chat or balances. Checked before every message.")
+                        .font(.ui(10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10).padding(.bottom, 6)
+            }
             ForEach(c.ids.compactMap { LLMCatalog.provider(id: $0)?.info }) { way($0) }
         }
     }
@@ -3598,13 +3606,18 @@ struct ChatModelMenu: View {
 
     private func chosen(_ info: ProviderInfo) -> String { ws.modelChoices[info.id] ?? info.defaultModel }
 
-    /// Under the company: the model in use, or else how to get in.
+    /// Under the company, short enough to stay whole: its model, or else how to get in. The accent ink says which one
+    /// the chat uses and the section says «on this Mac», so neither is spelled out («in use», «· connected» got cut).
     private func summary(_ ways: [ProviderInfo], current: ProviderInfo?) -> String {
         if let current {
             let model = chosen(current)
-            return (model.isEmpty ? current.name : LLMCatalog.displayName(model: model)) + " · in use"
+            return model.isEmpty ? current.name : LLMCatalog.displayName(model: model)
         }
-        if ways.count == 1, let only = ways.first { return detail(only) }
+        if ways.count == 1, let only = ways.first {
+            guard connected(only) else { return only.takesKey && only.signInLabel == nil ? "needs an API key" : "sign-in needed" }
+            let model = chosen(only)
+            return model.isEmpty ? "pick a model" : LLMCatalog.displayName(model: model)
+        }
         return ways.filter { $0.unavailable == nil }.map { $0.kind == .subscription ? "Subscription" : "API key" }
             .joined(separator: " or ")
     }
@@ -3623,8 +3636,9 @@ struct ChatModelMenu: View {
 
     private func detail(_ info: ProviderInfo) -> String {
         let model = chosen(info)
+        if info.takesKey, info.signInLabel == nil, !connected(info) { return "needs an API key" }
         let state = info.kind == .local ? "on this Mac" : connected(info) ? "connected" : "sign-in needed"
-        let shown = info.takesKey && !connected(info) ? "any model by key" : model.isEmpty ? "" : LLMCatalog.displayName(model: model)
+        let shown = model.isEmpty ? "" : LLMCatalog.displayName(model: model)
         return [shown, state].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
@@ -3638,6 +3652,8 @@ struct ModelCompany: Identifiable {
     /// The color for a one-color logo; nil keeps the logo's own colors.
     var ink: UInt32?
     let ids: [String]
+    /// The model runs in attested hardware the provider can't read (NEAR AI Cloud): the menu and Settings say «Private».
+    var sealed = false
     var id: String { name }
     var local: Bool { LLMCatalog.provider(id: ids[0])?.info.kind == .local }
 
@@ -3648,7 +3664,7 @@ struct ModelCompany: Identifiable {
         .init(name: "xAI", logo: "llm-grok", tile: 0x000000, ink: 0xFFFFFF, ids: ["grok-subscription", "xai"]),
         .init(name: "DeepSeek", logo: "llm-deepseek", tile: 0xFFFFFF, ids: ["deepseek"]),
         // The network's own logo (Logos/near.png) is already its green square: the tile is that same green.
-        .init(name: "NEAR AI Cloud (private)", logo: "near", tile: 0x01EC97, ids: ["nearai"]),
+        .init(name: "NEAR AI", logo: "near", tile: 0x01EC97, ids: ["nearai"], sealed: true),
         .init(name: "OpenRouter", logo: "llm-openrouter", tile: 0x6566F1, ink: 0xFFFFFF, ids: ["openrouter"]),
         .init(name: "Ollama", logo: "llm-ollama", tile: 0xFFFFFF, ink: 0x000000, ids: ["ollama"]),
         .init(name: "LM Studio", logo: "llm-lmstudio", tile: 0x4338CA, ink: 0xFFFFFF, ids: ["lmstudio"]),
@@ -3707,8 +3723,13 @@ private struct CompanyRow: View {
             HStack(spacing: 10) {
                 ModelCompanyLogo(company: company)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(company.name).font(.ui(13, .semibold))
-                    Text(detail).font(.ui(10)).foregroundStyle(current ? AnyShapeStyle(Brand.accentInk) : AnyShapeStyle(.secondary)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(company.name).font(.ui(13, .semibold))
+                        if company.sealed { PrivateTag() }
+                    }
+                    // Never cut with «…»: a long model name takes a second line.
+                    Text(detail).font(.ui(10)).foregroundStyle(current ? AnyShapeStyle(Brand.accentInk) : AnyShapeStyle(.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))

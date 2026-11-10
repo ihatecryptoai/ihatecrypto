@@ -9,9 +9,10 @@ import LLMCore
 /// attest (provider=near, 2026-11-01): Claude, Gemini, GLM and the others there are proxied, not private.
 public struct NearAI: LLMProvider {
     public let info = ProviderInfo(
-        id: "nearai", name: "NEAR AI Cloud (private)", kind: .apiKey, defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-        note: "Key from cloud.near.ai. The model runs in a hardware enclave; ihatecrypto checks the enclave before every chat, so the provider can't read your balances.",
-        takesKey: true, models: ["deepseek-ai/DeepSeek-V4.1-Flash-1017", "Qwen/Qwen3.8-27B", "Qwen/Qwen3.6-35B-A3B-FP8"])
+        id: "nearai", name: "NEAR AI Cloud", kind: .apiKey, defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        note: "Private: the model runs in sealed hardware, so NEAR can't read your messages or balances. ihatecrypto checks that hardware before every message, and each reply's signature after.",
+        takesKey: true, models: ["deepseek-ai/DeepSeek-V4.1-Flash-1017", "Qwen/Qwen3.8-27B", "Qwen/Qwen3.6-35B-A3B-FP8"],
+        keyURL: "https://cloud.near.ai", keySteps: "Sign in, buy credits in Credits, then create a key in API Keys.")
     static let base = "https://cloud-api.near.ai/v1"
 
     public init() {}

@@ -88,6 +88,8 @@ canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that on
   `SolanaGuard.knownPrograms`, and balance rules for the simulation check.
 - The chat model rewrites a request as one English form (`ChatRouter.forms` in `IhatecryptoCore/Normalize.swift`);
   code parses the form. A new command gets a form there and parser tests in English and Russian.
+- UI text is never cut with «…»: shorten the words first (drop what a header or color already says), else let it take a
+  second line. Look for «…» in every screenshot of a change.
 - UI text never says «Touch ID» directly: use `Presence.name`, `Presence.short` and `Presence.icon`, since a Mac
   without Touch ID asks for its password.
 - Launch flags that drive the app (`-signerSelfTest`, `-openBrowser`) stay inside `#if DEBUG`.

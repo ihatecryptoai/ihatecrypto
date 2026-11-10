@@ -800,6 +800,32 @@ struct SettingsPill: View {
     }
 }
 
+/// «Disconnect» as its own red row at the bottom of an account's group: the one thing there that takes something away.
+struct DisconnectRow: View {
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.portrait.and.arrow.right").font(.system(size: 11, weight: .semibold))
+                    .frame(width: 26, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 7.3).fill(Brand.loss.opacity(0.12)))
+                Text("Disconnect").font(.ui(13, .medium))
+                Spacer(minLength: 8)
+            }
+            .foregroundStyle(Brand.loss)
+            .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+            .background(Brand.loss.opacity(hover ? 0.06 : 0))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .onHover { hover = $0 }
+        .help(help)
+    }
+}
+
 struct ModelSection: View {
     @Environment(Workspace.self) private var ws
     @AppStorage("modelThinking") private var thinking = false
@@ -807,6 +833,8 @@ struct ModelSection: View {
     /// The account whose sign-in shows below the list; nil = the one the chat uses. Picking a row here never switches
     /// the chat: «Switch» does (the owner, 2026-10-20: «я просто хотел подключить другой аккаунт»).
     @State private var shownID: String?
+    /// «Custom…» picked in the model list: the field for a model id the list doesn't have.
+    @State private var customModel = false
     private var shown: String { shownID ?? ws.providerID }
     private static let ways = ["claude-code", "chatgpt", "openrouter"]
 
@@ -824,7 +852,7 @@ struct ModelSection: View {
                 }
             }
         }
-        .onChange(of: shown) { key = ""; ws.llmStatus = nil; ws.availableModels = [] }
+        .onChange(of: shown) { key = ""; customModel = false; ws.llmStatus = nil; ws.availableModels = [] }
     }
 
     /// A second model (Jev on OpenRouter) reads each command and plan again; it can stop a move, never approve one.
@@ -862,7 +890,7 @@ struct ModelSection: View {
                 other
             }
             SettingsGroup {
-                SettingsRow("\(info.name)", icon: "info.circle", info: info.note.isEmpty ? nil : info.note) {
+                header(id, info) {
                     if let unavailable = info.unavailable { Text(unavailable).foregroundStyle(Brand.accentInk).fixedSize(horizontal: false, vertical: true) }
                     else if connected, id == ws.providerID { chatsModel }
                     else {
@@ -955,7 +983,8 @@ struct ModelSection: View {
 
     @ViewBuilder private func connection(_ id: String, _ info: ProviderInfo) -> some View {
         let provider = ws.provider(id), credential = ws.credential(id)
-        SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
+        let signIn = info.signInLabel != nil || info.existingLoginLabel != nil || info.id == "claude-code"
+        if signIn || !info.takesKey { SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
             if let label = info.existingLoginLabel, provider.existingLogin() != nil {
                 Button(label) { ws.useExistingLogin(id) }
             }
@@ -970,24 +999,90 @@ struct ModelSection: View {
             if let label = info.signInLabel {
                 Button(label) { Task { await ws.signIn(id) } }.disabled(ws.llmBusy)
             }
-            if info.signInLabel == nil, info.existingLoginLabel == nil {
-                Text(info.kind == .local ? "No key needed" : "Use an API key below").foregroundStyle(.secondary)
+            if !signIn { Text("No key needed").foregroundStyle(.secondary) }
+        } }
+        // A key: where to get it and what to press there, then the field. Once saved, the steps give way to the model.
+        if info.takesKey, credential == nil {
+            if let url = info.keyURL {
+                step(1, "Get a key at \(url.host() ?? url.absoluteString)", info.keySteps) {
+                    Button("Open", systemImage: "arrow.up.right") { NSWorkspace.shared.open(url) }
+                        .help(url.absoluteString)
+                }
+            }
+            step(info.keyURL == nil ? nil : 2, "Paste it here", "Kept in this Mac's Keychain.") {
+                SecureField("API key", text: $key).textFieldStyle(.roundedBorder).frame(maxWidth: 240)
+                    .onSubmit { save(id) }
+                Button("Save") { save(id) }.disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        if info.takesKey {
-            SettingsRow("API key", icon: "key") {
-                SecureField("API key", text: $key).textFieldStyle(.roundedBorder).frame(maxWidth: 320)
-                Button("Save") { ws.setCredential(.apiKey(key), for: id); key = "" }.disabled(key.isEmpty)
-            }
+        if credential != nil || !info.takesKey { connected(id, credential) }
+        if let status = ws.llmStatus {
+            SettingsRow(status, icon: "info.circle") { EmptyView() }.textSelection(.enabled)
         }
+    }
+
+    private func save(_ id: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        ws.setCredential(.apiKey(trimmed), for: id)
+        key = ""
+    }
+
+    /// The account's row on top: its company's logo, its name, «Private» for a sealed one, the note behind ⓘ.
+    private func header(_ id: String, _ info: ProviderInfo, @ViewBuilder control: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            if let company = ModelCompany.of(id) { ModelCompanyLogo(company: company, size: 26) } else { SettingsIcon(icon: "info.circle") }
+            Text(info.name).font(.ui(13, .semibold)).fixedSize(horizontal: false, vertical: true)
+            if ModelCompany.of(id)?.sealed == true { PrivateTag() }
+            if !info.note.isEmpty { SettingsInfo(text: info.note, label: info.name) }
+            Spacer(minLength: 8)
+            control().font(.ui(12.5))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+        .overlay(alignment: .bottom) { Brand.cardBorder.opacity(0.65).frame(height: 0.5).padding(.leading, 50) }
+    }
+
+    /// One step of connecting by key: its number where the icon goes, what to do, and how, under it.
+    private func step(_ n: Int?, _ title: String, _ line: String?, @ViewBuilder control: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            if let n {
+                Text("\(n)").font(.ui(12, .bold)).foregroundStyle(Brand.accentInk).frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.primary.opacity(0.06)))
+            } else { SettingsIcon(icon: "key") }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.ui(13))
+                if let line { Text(line).font(.ui(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: 8)
+            control().font(.ui(12.5))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+        .overlay(alignment: .bottom) { Brand.cardBorder.opacity(0.65).frame(height: 0.5).padding(.leading, 50) }
+    }
+
+    /// A connected account: which model, whether it reads the chat right, and the way out.
+    @ViewBuilder private func connected(_ id: String, _ credential: Credential?) -> some View {
+        let model = Binding(get: { ws.model(id) }, set: { ws.modelChoices[id] = $0 })
         SettingsRow("Model", icon: "sparkles") {
-            TextField("Model", text: Binding(get: { ws.model(id) }, set: { ws.modelChoices[id] = $0 }))
-                .textFieldStyle(.roundedBorder).labelsHidden().frame(maxWidth: 300)
-            Menu("List") {
-                if ws.availableModels.isEmpty { Button("Load models") { Task { await ws.loadModels(id) } } }
-                ForEach(ws.availableModels, id: \.self) { m in Button(m) { ws.modelChoices[id] = m } }
+            if customModel {
+                TextField("Model id", text: model).textFieldStyle(.roundedBorder).labelsHidden().frame(maxWidth: 280)
+                    .onSubmit { customModel = false }
+                Button("Done") { customModel = false }
+            } else {
+                // Names, not ids. The provider's whole list comes on request; an id typed by hand goes in «Custom…».
+                Menu {
+                    Picker("Model", selection: model) {
+                        ForEach(choices(id), id: \.self) { Text(LLMCatalog.displayName(model: $0)).tag($0) }
+                    }
+                    .pickerStyle(.inline).labelsHidden()
+                    Divider()
+                    if ws.availableModels.isEmpty { Button("Load the full list") { Task { await ws.loadModels(id) } } }
+                    Button("Custom…") { customModel = true }
+                } label: {
+                    Text(model.wrappedValue.isEmpty ? "Choose a model" : LLMCatalog.displayName(model: model.wrappedValue))
+                }
+                .fixedSize().help(model.wrappedValue)
             }
-            .fixedSize()
         }
         SettingsRow("Connection", icon: "antenna.radiowaves.left.and.right",
                     info: "Check asks the model \(ModelExam.questions.count) requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat; fewer, and it will misread.") {
@@ -999,11 +1094,22 @@ struct ModelSection: View {
                 SettingsPill(text: s.short, good: s.good)
             }
             Button("Check") { Task { await ws.checkModel(id) } }.disabled(ws.llmBusy || ws.examProgress != nil || !ws.hasModel(id))
-            if credential != nil { Button("Disconnect") { ws.setCredential(nil, for: id) } }
         }
-        if let status = ws.llmStatus {
-            SettingsRow(status, icon: "info.circle") { EmptyView() }.textSelection(.enabled)
+        if let credential {
+            DisconnectRow(help: { if case .apiKey = credential { "Removes the key from this Mac's Keychain" } else { "Signs this account out of ihatecrypto" } }()) {
+                customModel = false
+                ws.setCredential(nil, for: id)
+            }
         }
+    }
+
+    /// The way's models for the list: its own, the provider's whole list once loaded, and the one in use.
+    private func choices(_ id: String) -> [String] {
+        var list: [String] = []
+        for m in (ws.liveModels[id] ?? ws.provider(id).info.models) + ws.availableModels + [ws.model(id)] where !m.isEmpty && !list.contains(m) {
+            list.append(m)
+        }
+        return list
     }
 
     private func connectionText(_ credential: Credential?, _ info: ProviderInfo) -> String {

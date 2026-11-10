@@ -80,7 +80,7 @@ if [[ $ui != skipped* ]]; then
 You are a strict design reviewer for ihatecrypto, a macOS wallet. The picture is its main window right after a UI test sent the chat message of the scenario named above. Layout: a wallet rail on the left, a canvas with framed boards and cards, a floating chat panel. The look is monochrome with one orange accent.
 
 Check the window against these rules:
-1. Nothing sticks out: no text, button, chip, logo, badge or shadow crosses its card's edge, nothing overlaps, and important text (amounts, titles, addresses, button labels) is not cut off or ended with an ellipsis.
+1. Nothing sticks out: no text, button, chip, logo, badge or shadow crosses its card's edge, nothing overlaps, and no text is cut off or ended with an ellipsis «…», a row's grey second line included (the owner, 2026-11-10: shorter words or a second line, never «…»).
 2. Text wraps well in every language (Russian is the longest): no lonely last word on a line of a title, pill, button or card title; button labels stay on one line; a pill or bubble hugs its text instead of stretching across.
 3. Orange is rare: the one main button, a selected edge, switches and small links. Never orange text or icons on an orange fill; secondary buttons, menus and pickers are muted (grey fill, normal text). No system-blue buttons, no red buttons.
 4. What the chat made is a card on the canvas, and the chat says one short line about it. The model's plain answer has no frame; a framed card in the chat only for a result, a failure or a checklist. Ways to go on are selectable cards inside the chat, under the reply that offered them, at most one marked recommended.

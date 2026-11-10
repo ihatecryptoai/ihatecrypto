@@ -39,7 +39,12 @@ public enum LLMCatalog {
     public static func displayName(model: String) -> String {
         let id = model.split(separator: "/").last.map(String.init) ?? model
         var words: [String] = []
-        for part in id.split(whereSeparator: { "-_: ".contains($0) }).map(String.init) {
+        var parts = id.split(whereSeparator: { "-_: ".contains($0) }).map(String.init)
+        // A release stamp at the end («…-Flash-1017») says nothing a person picks by.
+        // ponytail: two local models that differ only by it («qwen3-30b-a3b», «…-2507») read the same; keep the stamp then.
+        if parts.count > 1, let last = parts.last, last.count == 4, last.allSatisfy(\.isNumber),
+           !parts[parts.count - 2].allSatisfy(\.isNumber) { parts.removeLast() }
+        for part in parts {
             // Version parts: «4-5» reads 4.5.
             if part.allSatisfy(\.isNumber), let last = words.last, last.allSatisfy({ $0.isNumber || $0 == "." }) {
                 words[words.count - 1] += "." + part
