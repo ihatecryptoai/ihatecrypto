@@ -632,12 +632,11 @@ async function balances() {
   // A side the network didn't answer keeps its last value.
   if (b) { bal = { to: b.to == null ? bal.to : Number(b.to), from: b.from == null ? bal.from : Number(b.from) }; render(); }
 }
-const escape = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 async function send(name, pay) {
   for (const x of document.querySelectorAll('button')) x.disabled = true;
   try {
-    say('Connecting ' + escape(name) + '…');
-    const { id, from } = await pay(units, () => say('Approve the transfer in ' + escape(name) + '…'));
+    say('Connecting ' + name + '…');
+    const { id, from } = await pay(units, () => say('Approve the transfer in ' + name + '…'));
     // Sent is sent: a closed page (the card was closed meanwhile) only means ihatecrypto learns it from the balance.
     await post('sent', { id }).catch(() => {});
     last = { name, pay, from };
@@ -650,7 +649,7 @@ async function send(name, pay) {
     balances();
   } catch (e) {
     const no = e && (e.code === 4001 || /reject|denied|cancel|declined/i.test(e.message || ''));
-    say(no ? 'Cancelled in the wallet. Nothing was sent.' : 'It didn’t go through: ' + escape((e && e.message) || e), 'bad');
+    say(no ? 'Cancelled in the wallet. Nothing was sent.' : 'It didn’t go through: ' + ((e && e.message) || e), 'bad');
     for (const x of document.querySelectorAll('button')) x.disabled = false;
     render();
   }

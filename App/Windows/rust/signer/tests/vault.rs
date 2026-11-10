@@ -133,7 +133,9 @@ fn a_session_checks_the_settings_again() {
     import();
     sign_hello().unwrap(); // opens a session
     plant("state.json", |s| { s.recipients.insert("1".into(), vec![DEAD.into()]); });
-    assert_eq!(send(SignerRequest::SignPersonal { message: b"again".to_vec() }).unwrap_err(), trusted::tampered());
+    // The same text again: served by the session (another text would be a prompt of its own), and checked again.
+    hello(false);
+    assert_eq!(sign_hello().unwrap_err(), trusted::tampered());
 }
 
 fn label() -> String { send(SignerRequest::Status {}).unwrap().wallets.unwrap()[0].label.clone() }
@@ -611,6 +613,8 @@ fn an_automation_prompt_leaves_no_session_for_the_main_wallet() {
     hello(true);
     assert!(as_automation(&id, SignerRequest::SignHyperliquidL1 { action: order(1, false, "100", "0.1"), nonce: 1, mainnet: true }).unwrap().signature.is_some());
     hello(false);
+    // A move, which would take a session left unbound (a site's text never takes one, so it would prove nothing here).
+    assert_eq!(hl(order(1, true, "100", "1"), 2).unwrap_err().0, CANCELLED);
     assert_eq!(sign_hello().unwrap_err().0, CANCELLED);
 }
 
@@ -638,6 +642,34 @@ fn a_session_serves_only_what_its_first_signature_moved() {
     hello(false);
     assert!(hl(order(3, true, "100", "1"), 6).unwrap().signature.is_some());
     assert_eq!(hl(order(4, true, "100", "1"), 7).unwrap_err().0, CANCELLED);
+}
+
+/// A site's text or typed data is a scope of its own (the 2026-11-10 review): with none it was inside every open
+/// session, so a move's prompt also signed whatever a site asked next, unseen.
+#[test]
+fn a_sites_text_asks_for_itself() {
+    let _turn = fresh();
+    import();
+    vault::end_session();
+    let text = |t: &[u8]| send(SignerRequest::SignPersonal { message: t.to_vec() });
+    // Inside a move's session a text is asked about.
+    hello(true);
+    assert!(hl(order(1, true, "100", "1"), 1).unwrap().signature.is_some());
+    hello(false);
+    assert_eq!(text(b"hello").unwrap_err().0, CANCELLED);
+    // Asked once, the same text signs again in its session, and another text asks again.
+    hello(true);
+    assert!(text(b"hello").unwrap().signature.is_some());
+    hello(false);
+    assert!(text(b"hello").unwrap().signature.is_some());
+    assert_eq!(text(b"other").unwrap_err().0, CANCELLED);
+    // A session another request's prompt opened (a move's new address) is never a text's: a move takes it.
+    hello(true);
+    vault::end_session();
+    vault::begin_request();
+    core::approve(&["0x000000000000000000000000000000000000cafe".into()], false, "send 1 USDC").unwrap();
+    hello(false);
+    assert_eq!(text(b"hello").unwrap_err().0, CANCELLED);
 }
 
 /// A Jupiter route_v2 swap of 1 USDC for at least ≈ 0.0093 SOL into `owner`'s own account, as an unsigned legacy
