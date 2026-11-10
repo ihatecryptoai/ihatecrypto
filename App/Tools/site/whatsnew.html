@@ -98,6 +98,8 @@
   }
   @media (max-width: 380px) { .logo span { font-size: 17px; } }   /* a narrow phone: the name and the button side by side */
 </style>
+<!-- Without scripts nothing can open the download's menu, so it stands open. -->
+<noscript><style>.dl-menu[hidden] { display: flex; }</style></noscript>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -109,10 +111,10 @@
     <a class="logo" href="{{home}}" aria-label="ihatecrypto">{{coin}}<span>ihatecrypto</span></a>
     <nav class="nav"><a href="{{home}}manifesto/">{{t.n_mf}}</a><a href="{{home}}#plugins">{{t.n_pl}}</a><a href="https://github.com/ihatecryptoai/ihatecrypto" target="_blank" rel="noopener">GitHub</a></nav>
     <div class="dl">
-      <button type="button" class="btn dl-btn" aria-haspopup="menu" aria-expanded="false">{{t.dl}}<svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      <div class="dl-menu" role="menu" hidden>
-        <a role="menuitem" data-os="mac" href="/ihatecrypto.dmg" download><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Mac ({{version}})</a>
-        <a role="menuitem" data-os="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>{{win}}</a>
+      <button type="button" class="btn dl-btn" aria-expanded="false" aria-controls="dl-menu">{{t.dl}}<svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="dl-menu" id="dl-menu" hidden>
+        <a data-os="mac" href="/ihatecrypto.dmg" download><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Mac ({{version}})</a>
+        <a data-os="win" href="https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>{{win}}</a>
       </div>
     </div>
     <a class="btn away-only" href="{{home}}">{{t.get}}</a>

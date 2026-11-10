@@ -137,11 +137,12 @@ def story_id(s: dict) -> str:
 
 
 def windows_version() -> str:
-    """The latest Windows release, for the download's menu: the highest windows-v tag of this repository. Every Windows
-    release makes one, so nobody has to remember a number here. Without git or the tags it is empty, and the menu says
+    """The latest Windows release, for the download's menu: the newest windows-v tag of this repository, by the day it
+    was made, not by its number (the PC's preview ran ahead as 0.9.x before it took the Mac's numbers at 0.8.6). Every
+    Windows release makes one, so nobody has to remember a number here. Without git or the tags it is empty, and the menu says
     «Windows» with no number rather than an old one: a release must not stop over it, so this only leaves a note."""
     try:
-        tags = subprocess.run(['git', '-C', str(Path(__file__).parent), 'tag', '-l', 'windows-v*', '--sort=-v:refname'],
+        tags = subprocess.run(['git', '-C', str(Path(__file__).parent), 'tag', '-l', 'windows-v*', '--sort=-creatordate'],
                               capture_output=True, text=True).stdout.split()
     except OSError:
         tags = []
@@ -156,10 +157,10 @@ def translated(words: dict, s: dict):
     return w if w and w.get('title') and w.get('text') else None
 
 
-def whatsnew(page: str, landing: str, releases: list, lang: str, words: dict, version: str) -> str:
+def whatsnew(page: str, landing: str, releases: list, lang: str, words: dict, version: str, pc: str) -> str:
     """whatsnew.html in one language with every release, newest first, from the app's own What's New: a version, its
     date and its changes, each with the phrase the app's «Try it» puts into the chat, copied by a press. Its download
-    names the latest version for each computer: this release for the Mac, the newest windows-v tag for a PC. The phrase
+    names the latest version for each computer: this release for the Mac, `pc` (windows_version) for a PC. The phrase
     stays as the app has it: that is the one known to work. `words` are this language's translations by story_id; a
     change without one stays in English. The fonts and the coin are the landing's own, so there is one copy of each."""
     path, _ = LANGS[lang]
@@ -186,7 +187,6 @@ def whatsnew(page: str, landing: str, releases: list, lang: str, words: dict, ve
     page = page.replace('{{links}}', f'<link rel="canonical" href="{SITE}{path}whats-new/">\n{links}'
                         f'<link rel="alternate" hreflang="x-default" href="{SITE}whats-new/">')
     page = page.replace('{{lang}}', lang).replace('{{home}}', '/' + path).replace('{{url}}', f'{SITE}{path}whats-new/')
-    pc = windows_version()
     page = page.replace('{{version}}', html.escape(version)).replace('{{win}}', 'Windows' + (f' ({html.escape(pc)})' if pc else ''))
     for k, v in t.items():
         page = page.replace('{{t.' + k + '}}', html.escape(v))
@@ -203,6 +203,7 @@ def main():
     here = Path(__file__).parent
     releases = json.loads((here.parent.parent / 'Sources/IhatecryptoApp/WhatsNew/whatsnew.json').read_text(encoding='utf-8'))
     words = json.loads((here / 'whatsnew.i18n.json').read_text(encoding='utf-8'))
+    pc = windows_version()
     news = (here / 'whatsnew.html').read_text(encoding='utf-8')
     page = (here / 'index.html').read_text(encoding='utf-8').replace('{{version}}', version)
     mf = (here / 'manifesto.html').read_text(encoding='utf-8').replace('{{version}}', version)
@@ -215,7 +216,7 @@ def main():
                 print(f"What's new in {lang}: {missing} changes have no translation in whatsnew.i18n.json yet and stay in English", file=sys.stderr)
         for target, text in [(out / path / 'index.html', enclave(render(page, lang, T), T[lang]['se'])),
                              (out / path / 'manifesto' / 'index.html', manifesto(mf, lang)),
-                             (out / path / 'whats-new' / 'index.html', whatsnew(news, page, releases, lang, mine, version))]:
+                             (out / path / 'whats-new' / 'index.html', whatsnew(news, page, releases, lang, mine, version, pc))]:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding='utf-8')
             print(target)
