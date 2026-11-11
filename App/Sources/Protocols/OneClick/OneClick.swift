@@ -271,6 +271,7 @@ public enum OneClick {
         if let v = a["swapView"] as? [String: Any] {
             for key in ["swapType", "amountIn", "maxAmountIn", "minAmountOut", "amountOut"] { if let s = v[key] as? String { f[key] = s } }
         }
+        if let final = a["isPayoutStatusFinal"] as? Bool { f["isPayoutStatusFinal"] = final ? "true" : "false" }
         f["appFees"] = (a["appFees"] as? [[String: Any]] ?? []).map { "\($0["recipient"] as? String ?? "?"):\(($0["fee"] as? NSNumber)?.intValue ?? -1)" }
             .joined(separator: ",")
         let fills = a["partialFills"] as? [[String: Any]] ?? []

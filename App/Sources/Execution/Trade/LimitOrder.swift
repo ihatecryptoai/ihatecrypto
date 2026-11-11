@@ -158,8 +158,33 @@ extension Executor {
         public var state: String { Executor.orderWords[status] ?? status.lowercased() }
     }
 
+    /// What the journal learns about an order from 1Click now: confirmed once 1Click saw its deposit (it may see it after
+    /// the move's three minutes), settled once its payout is final (filled, canceled or expired, the money out). nil:
+    /// nothing new for an entry last written as `kind`.
+    static func limitJournalStep(after kind: Journal.Entry.Kind, fillStatus: String, payoutFinal: Bool) -> Journal.Entry.Kind? {
+        if payoutFinal { return .settled }
+        return kind == .signed && fillStatus != "AWAITING_DEPOSIT" ? .confirmed : nil
+    }
+
+    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled: read with the board, so a
+    /// deposit seen late or a cancel's refund is written down when the orders are next read.
+    func syncLimitJournal() async {
+        guard let all = try? journal.entries() else { return }
+        var latest: [String: Journal.Entry] = [:], order: [String] = []
+        for e in all where e.chain == "1click-order" {
+            if latest[e.id] == nil { order.append(e.id) }
+            latest[e.id] = e
+        }
+        for id in order.reversed().filter({ latest[$0]?.kind != .settled }).prefix(20) {
+            guard let last = latest[id], let o = try? await OneClick.order(id), let fill = o["fillStatus"],
+                  let step = Self.limitJournalStep(after: last.kind, fillStatus: fill, payoutFinal: o["isPayoutStatusFinal"] == "true") else { continue }
+            try? journal.append(.init(chain: "1click-order", id: id, kind: step, note: step == .settled ? "\(fill) · payout \(o["payoutStatus"] ?? "?")" : fill))
+        }
+    }
+
     /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses.
     public func limitOrders(near: String?) async throws -> [(order: OneClick.Order, view: LimitOrderView)] {
+        await syncLimitJournal()
         let own = Set([wallet.solana, wallet.evm, near ?? ""].filter { !$0.isEmpty }.map { $0.lowercased() })
         let tokens = (try? await OneClick.tokens()) ?? []
         let f = ISO8601DateFormatter()
@@ -192,7 +217,6 @@ extension Executor {
             let v = o.view, line = "\(v.sell ? "sell" : "buy") \(Fmt.num(v.coins, maxFraction: 8)) \(v.coin) at \(Fmt.usd(v.price))"
             do {
                 try await OneClick.cancelOrder(v.id)
-                try? journal.append(.init(chain: "1click-order", id: v.id, kind: .settled, note: "cancel asked"))
                 done.append(line)
             } catch {
                 failed.append("\(line): \(error.localizedDescription)")

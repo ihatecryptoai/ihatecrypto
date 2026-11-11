@@ -1687,7 +1687,7 @@
         "LIMIT ORDER · PRIVATE"
       ],
       "title_contains": "limit",
-      "footer_contains": "Confidential Intents",
+      "footer_contains": "no signature",
       "quote_contains": "away",
       "command_contains": "limitOrder(sell: false"
     },

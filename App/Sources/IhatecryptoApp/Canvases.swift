@@ -2487,16 +2487,16 @@ extension Workspace {
         let out = from == "near" && paid == "NEAR" ? nearMove(by: -amount) : moneyMove(paid, on: from, by: -amount)
         let coins = sell ? amount : amount * Executor.limitBuyHeadroom / price
         let market = swapQuote.flatMap { $0.command == command ? $0.ways.first?.gets : nil }
-        let until = Fmt.date(Date().addingTimeInterval(TimeInterval((days ?? 7) * 86_400)))
+        let until = Date().addingTimeInterval(TimeInterval((days ?? 7) * 86_400)).formatted(Date.FormatStyle(locale: Locale(identifier: "en_US")).day().month(.abbreviated))
         let p = Fmt.usd(price)
         let title = sell ? "Sell \(Fmt.num(amount, maxFraction: 8)) \(coin) at \(p) or more" : "Buy ≈ \(Fmt.num(coins, maxFraction: 6)) \(coin) at \(p) or less"
         return MoveRoute(title: title + " · limit",
-                         footer: "A limit order through NEAR Intents, private (Confidential Intents): one deposit from your own address on \(fromName) to the address 1Click binds to the order, checked with 1Click before signing — the pair, the price, your own addresses, private, only ihatecrypto's 0.05%. It rests until \(until) and fills, in parts too, when the market gets there. The \(sell ? "USDC" : coin) comes to your own address on \(toName) with no signature then. «cancel limit orders» brings back what hasn't filled. That address needs \(Presence.name) the first time. Press Confirm.",
-                         steps: [step(logo(from), "FROM · \(fromName.uppercased())", "\(Fmt.num(amount, maxFraction: 8)) \(paid)", "your own address there · rests with 1Click", fill(from), money: out),
+                         footer: "Checked with 1Click before signing. It fills by itself, in parts too, with no signature then. Fees: 1Click ≈ 0.2% and ours 0.05%. «cancel limit orders» brings back what hasn't filled. The deposit address needs \(Presence.name) the first time.",
+                         steps: [step(logo(from), "FROM · \(fromName.uppercased())", "\(Fmt.num(amount, maxFraction: 8)) \(paid)", "your own address", fill(from), money: out),
                                  step("near", "LIMIT ORDER · PRIVATE", "\(sell ? "Sell" : "Buy") \(coin) at \(p)",
-                                      (market.map { "\($0) · " } ?? "market: quoting… · ") + "until \(until) · 1Click ≈ 0.2% + our 0.05%", .near),
+                                      (market ?? "market: quoting") + " · until \(until)", .near),
                                  step(logo(to), "TO · \(toName.uppercased())", sell ? "≈ \(Fmt.num(amount * price, maxFraction: 2)) USDC" : "≈ \(Fmt.num(coins, maxFraction: 6)) \(coin)",
-                                      "when it fills · your own address there", fill(to))])
+                                      "when it fills", fill(to))])
     }
 
     /// Canceling limit orders: matching stops, what filled is paid out, the rest comes back. Nothing is signed.

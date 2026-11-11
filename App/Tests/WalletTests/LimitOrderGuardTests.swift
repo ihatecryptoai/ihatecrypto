@@ -2,6 +2,8 @@ import Foundation
 import OneClickKit
 import Testing
 import TxGuard
+import ExecutionCore
+@testable import TradeExecution
 
 // The test wallet's addresses from the public phrase «abandon … about» would do as well: any two strings stand for «ours».
 private let me = "2EUrWmf5xMmWER9BtDbXbGbZjoL7R3eTDMXYR6H6cKPj"
@@ -93,4 +95,13 @@ private func check(_ o: OneClick.Order, deposit sent: String = "100000000", most
     #expect(o["filledOut"] == "10000000")
     #expect(o.isOpen)
     #expect(!order { $0["fillStatus"] = "FILLED" }.isOpen)
+}
+
+@Test func theJournalFollowsAnOrderToItsPayout() {
+    // Seen after the move's three minutes, the deposit confirms the order; a final payout settles it; a cancel alone doesn't.
+    #expect(Executor.limitJournalStep(after: .signed, fillStatus: "OPEN", payoutFinal: false) == .confirmed)
+    #expect(Executor.limitJournalStep(after: .signed, fillStatus: "AWAITING_DEPOSIT", payoutFinal: false) == nil)
+    #expect(Executor.limitJournalStep(after: .confirmed, fillStatus: "PENDING_CANCEL", payoutFinal: false) == nil)
+    #expect(Executor.limitJournalStep(after: .confirmed, fillStatus: "CANCELED", payoutFinal: true) == .settled)
+    #expect(order { $0["isPayoutStatusFinal"] = true }["isPayoutStatusFinal"] == "true")
 }
