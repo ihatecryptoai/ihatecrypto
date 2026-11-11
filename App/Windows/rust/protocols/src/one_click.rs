@@ -360,6 +360,7 @@ pub fn parse_order(data: &Value) -> Option<Order> {
             if let Some(x) = s(v, k) { f.insert(k.into(), x.into()); }
         }
     }
+    if let Some(fin) = a.get("isPayoutStatusFinal").and_then(Value::as_bool) { f.insert("isPayoutStatusFinal".into(), fin.to_string()); }
     let fees: Vec<String> = a.get("appFees").and_then(Value::as_array).into_iter().flatten().map(|fee| {
         // NSNumber's intValue: a whole number, a fraction cut; anything else -1.
         let bps = fee.get("fee").and_then(|n| n.as_i64().or_else(|| n.as_f64().map(|x| x as i64))).unwrap_or(-1);

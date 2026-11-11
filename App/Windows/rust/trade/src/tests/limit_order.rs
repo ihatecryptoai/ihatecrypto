@@ -116,3 +116,15 @@ fn an_order_id_stays_one_path_segment() {
     assert!(one_click::parse_orders(br#"{"data":[]}"#, 200).unwrap().is_empty());
     assert!(one_click::parse_orders(br#"{"message":"Unauthorized"}"#, 401).is_err());
 }
+
+#[test]
+fn the_journal_follows_an_order_to_its_payout() {
+    use execution::Kind;
+    use crate::Executor;
+    // Seen after the move's three minutes, the deposit confirms the order; a final payout settles it; a cancel alone doesn't.
+    assert_eq!(Executor::limit_journal_step(Kind::Signed, "OPEN", false), Some(Kind::Confirmed));
+    assert_eq!(Executor::limit_journal_step(Kind::Signed, "AWAITING_DEPOSIT", false), None);
+    assert_eq!(Executor::limit_journal_step(Kind::Confirmed, "PENDING_CANCEL", false), None);
+    assert_eq!(Executor::limit_journal_step(Kind::Confirmed, "CANCELED", true), Some(Kind::Settled));
+    assert_eq!(order(|a| a["isPayoutStatusFinal"] = json!(true)).get("isPayoutStatusFinal"), Some("true"));
+}

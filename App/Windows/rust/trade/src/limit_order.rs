@@ -186,8 +186,35 @@ impl Executor {
         })
     }
 
+    /// What the journal learns about an order from 1Click now: confirmed once 1Click saw its deposit (it may see it after
+    /// the move's three minutes), settled once its payout is final (filled, canceled or expired, the money out). None:
+    /// nothing new for an entry last written as `kind`.
+    pub fn limit_journal_step(kind: Kind, fill_status: &str, payout_final: bool) -> Option<Kind> {
+        if payout_final { return Some(Kind::Settled) }
+        (kind == Kind::Signed && fill_status != "AWAITING_DEPOSIT").then_some(Kind::Confirmed)
+    }
+
+    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled: read with the board, so a
+    /// deposit seen late or a cancel's refund is written down when the orders are next read.
+    async fn sync_limit_journal(&self) {
+        let Ok(all) = self.journal.entries() else { return };
+        let (mut latest, mut order) = (std::collections::HashMap::<String, Kind>::new(), Vec::<String>::new());
+        for e in all.iter().filter(|e| e.chain == "1click-order") {
+            if !latest.contains_key(&e.id) { order.push(e.id.clone()) }
+            latest.insert(e.id.clone(), e.kind);
+        }
+        for id in order.iter().rev().filter(|id| latest.get(*id) != Some(&Kind::Settled)).take(20) {
+            let Ok(o) = one_click::order(id).await else { continue };
+            let fill = o.get("fillStatus").unwrap_or("").to_string();
+            let Some(step) = Self::limit_journal_step(latest[id], &fill, o.get("isPayoutStatusFinal") == Some("true")) else { continue };
+            let note = if step == Kind::Settled { format!("{fill} · payout {}", o.get("payoutStatus").unwrap_or("?")) } else { fill };
+            let _ = self.record("1click-order", id, step, &note);
+        }
+    }
+
     /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses.
     pub async fn limit_orders(&self, near: Option<&str>) -> Result<Vec<(Order, LimitOrderView)>> {
+        self.sync_limit_journal().await;
         let own: HashSet<String> = [self.wallet.solana.as_str(), self.wallet.evm.as_str(), near.unwrap_or("")].iter()
             .filter(|a| !a.is_empty()).map(|a| a.to_lowercase()).collect();
         let list = one_click::tokens().await.unwrap_or_default();
@@ -224,10 +251,7 @@ impl Executor {
         for v in &open {
             let line = format!("{} {} {} at {}", if v.sell { "sell" } else { "buy" }, Fmt::num(v.coins, 8), v.coin, Fmt::usd(v.price));
             match one_click::cancel_order(&v.id).await {
-                Ok(()) => {
-                    let _ = self.record("1click-order", &v.id, Kind::Settled, "cancel asked");
-                    done.push(line);
-                }
+                Ok(()) => done.push(line),
                 Err(e) => failed.push(format!("{line}: {e}")),
             }
         }
