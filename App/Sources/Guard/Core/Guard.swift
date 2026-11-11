@@ -785,3 +785,67 @@ public enum DepositGuard {
         return v
     }
 }
+
+/// A limit order's deposit goes only to an order 1Click itself holds as asked: read back from 1Click by its id, never taken
+/// from the answer that created it alone. Money then rests with 1Click and pays out later without another signature, so
+/// whatever this check lets through is the only check the order gets.
+public enum OrderGuard {
+    /// `bound`: the order as OneClick.order reads it. `deposit`: the units the wallet is about to send; `most`: the units
+    /// the user approved (a sale's coins, a buy's USDC). `fee`: ihatecrypto's own fee, the only one an order may carry.
+    public static func check(bound: [String: String], sell: Bool, base: String, quote: String, quantity: String, price: Decimal,
+                             depositAddress: String, recipient: String, refundTo: String, deposit: String, most: Decimal,
+                             fee: (recipient: String, bps: Int), deadline: Date, now: Date = Date()) -> Verdict {
+        var v = Verdict()
+        let expected = ["orderType": "LIMIT", "side": sell ? "SELL" : "BUY", "baseAsset": base, "quoteAsset": quote, "quantity": quantity,
+                        "depositAddress": depositAddress, "depositType": "ORIGIN_CHAIN", "recipient": recipient, "recipientType": "DESTINATION_CHAIN",
+                        "refundTo": refundTo, "refundType": "ORIGIN_CHAIN"]
+        for (field, value) in expected.sorted(by: { $0.key < $1.key }) where bound[field]?.lowercased() != value.lowercased() {
+            v.problems.append("1Click holds the order with a different \(field): \(bound[field] ?? "none") instead of \(value).")
+        }
+        if bound["price"].flatMap({ Decimal(string: $0) }) != price { v.problems.append("1Click holds the order at \(bound["price"] ?? "no") price, not \(price).") }
+        if !["basic", "advanced"].contains(bound["confidentiality"]?.lowercased() ?? "") {
+            v.problems.append("1Click didn't take the order as private (Confidential Intents): it says «\(bound["confidentiality"] ?? "nothing")».")
+        }
+        // A memo the transfer can't carry would leave the deposit unmatched.
+        if let memo = bound["depositMemo"], !memo.isEmpty { v.problems.append("1Click asks for a deposit memo this wallet can't send.") }
+        // 1Click lists its own platform fee among the order's fees (20 basis points to its account, seen 2026-11-11): that
+        // much is allowed besides ihatecrypto's, nothing more.
+        var others = 0
+        for f in (bound["appFees"] ?? "").split(separator: ",") {
+            let parts = f.split(separator: ":"), bps = parts.count == 2 ? Int(parts[1]) ?? -1 : -1
+            guard parts.count == 2, bps >= 0 else { v.problems.append("The order carries a fee 1Click doesn't spell out: \(f)."); continue }
+            if String(parts[0]) == fee.recipient {
+                if bps > fee.bps { v.problems.append("The order gives ihatecrypto \(bps) basis points, not \(fee.bps).") }
+            } else {
+                others += bps
+            }
+        }
+        if others > protocolBps { v.problems.append("The order carries \(others) basis points of fees besides ihatecrypto's, more than 1Click's own \(protocolBps).") }
+        // What 1Click's swap view takes is what the wallet sends, and never more than was approved.
+        let takes = bound[sell ? "amountIn" : "maxAmountIn"]
+        if takes != deposit { v.problems.append("1Click's order takes \(takes ?? "an unknown amount"), not the \(deposit) units about to be sent.") }
+        if sell, deposit != quantity { v.problems.append("A sale deposits its own quantity, \(quantity) units, not \(deposit).") }
+        if let d = Decimal(string: deposit), d > most || d <= 0 { v.problems.append("The deposit, \(deposit) units, is more than the \(most) approved.") }
+        if Decimal(string: deposit) == nil { v.problems.append("The deposit isn't a number of units: \(deposit).") }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let ends = bound["deadline"].flatMap { f.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+        if let ends {
+            if ends > deadline.addingTimeInterval(3600) { v.problems.append("1Click keeps the order until \(bound["deadline"] ?? ""), later than asked.") }
+            if ends < now.addingTimeInterval(600) { v.problems.append("The order runs out at \(bound["deadline"] ?? ""), before it could rest.") }
+        } else {
+            v.problems.append("1Click didn't say until when the order rests.")
+        }
+        if v.ok { v.checks.append("1Click holds the order as asked: the pair, side, amount and price, your own addresses, private, with only ihatecrypto's fee.") }
+        return v
+    }
+
+    /// 1Click's own fee on an order, as it lists it: 0.20%.
+    public static let protocolBps = 20
+
+    /// Whether the price is already through the market, so the order would fill at once — a swap at market, not a limit:
+    /// a sale at or under what one coin sells for now, a buy at or over what it costs.
+    public static func fillsAtOnce(sell: Bool, price: Decimal, market: Decimal) -> Bool {
+        market > 0 && (sell ? price <= market : price >= market)
+    }
+}

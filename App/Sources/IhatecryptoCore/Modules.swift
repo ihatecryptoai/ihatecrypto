@@ -311,6 +311,12 @@ public struct Modules: Equatable, Sendable {
         case .swapPrivately(_, let from, _, let to, _):
             return isOn(.swaps) ? r(.oneClick, via: [from, to].compactMap(ModuleNetwork.init(place:)))
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        // A limit order is a swap that waits: the Swaps switch, 1Click and both networks. Its list and cancel only read
+        // or stop orders already resting, and bring money back: never refused.
+        case .limitOrder(_, _, let on, _, _, let usdcOn, _):
+            return isOn(.swaps) ? r(.oneClick, via: [on, usdcOn].compactMap(ModuleNetwork.init(place:)))
+                : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."
+        case .limitOrders, .limitCancel: return nil
         case .crossSwap(_, let from, _, let to, _):
             return isOn(.swaps) ? r(.relay, via: [from, to].compactMap(ModuleNetwork.init(place:)))
                 : ru ? "\(ModuleKind.swaps.name) выключены в Settings › Modules." : "\(ModuleKind.swaps.name) is off in Settings › Modules."

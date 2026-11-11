@@ -185,7 +185,7 @@ public struct Block: Identifiable, Sendable, Equatable {
 
 public enum Plan {
     /// Hyperliquid rejects orders below $10 notional.
-    static let minNotional: Decimal = 10
+    public static let minNotional: Decimal = 10
 
     public static func evaluate(_ i: TradeIntent, market: Market?) -> Evaluation {
         var e = Evaluation()

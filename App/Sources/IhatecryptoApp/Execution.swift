@@ -235,6 +235,7 @@ extension Workspace {
         case "near": "https://nearblocks.io/txns/\(e.id)"
         case "relay": "Relay order \(e.id)"
         case "1click": "1Click deposit \(e.id)"
+        case "1click-order": "1Click limit order \(e.id) (say «show limit orders»)"
         case "x402": "x402 payment to \(e.note), signed and maybe still settling (authorization \(e.id.prefix(10))…)"
         case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
         case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
@@ -741,6 +742,25 @@ extension Workspace {
                 }
                 reply(try await e.intentSwap(a, on: from, for: b, on: to, amount: amount, near: near, confidential: true),
                       note: "NEAR Intents · private · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
+            case .limitOrder(let sell, let coin, let on, let price, let amount, let usdcOn, let days):
+                var near = nearAddress
+                if on == "near" || usdcOn == "near" {
+                    near = try await SignerClient().send(.nearAddress).nearAddress
+                    nearAddress = near
+                }
+                reply(try await e.limitOrder(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, days: days, near: near),
+                      note: "NEAR Intents · limit order · private")
+                limitOrderList = await ownLimitOrders(e)
+            case .limitOrders:
+                let list = await ownLimitOrders(e) ?? []
+                limitOrderList = list.isEmpty ? nil : list
+                reply(list.isEmpty ? say("No open limit orders.", "Открытых лимитных ордеров нет.")
+                      : say("Open limit orders: \(list.count). They're on the canvas.", "Открытых лимитных ордеров: \(list.count). Они на холсте."))
+                return
+            case .limitCancel(let coin):
+                if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
+                reply(try await e.cancelLimitOrders(coin, near: nearAddress), note: "NEAR Intents · limit orders")
+                limitOrderList = await ownLimitOrders(e)
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
             case .solanaTo("hyperliquid", let amount):
                 reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
@@ -897,12 +917,20 @@ extension Workspace {
         await refresh()
     }
 
+    /// This wallet's open limit orders for the board (nil: none, or 1Click didn't answer). The NEAR account, which only the
+    /// signer names, counts as one of its addresses.
+    func ownLimitOrders(_ e: Executor) async -> [Executor.LimitOrderView]? {
+        if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
+        let list = (try? await e.limitOrders(near: nearAddress))?.map(\.view)
+        return list?.isEmpty == false ? list : nil
+    }
+
     /// The two cards after a move the loss cap stopped: what they carry instead of a chat command.
     static let sendAnyway = "send anyway", leaveCostly = "leave it as is", sendPart = "send the part that moves the price about 1%"
 
     private func movesMoney(_ command: WalletCommand, confirmed: Bool) -> Bool {
         switch command {
-        case .yields, .sendTo, .receive, .schedule, .stopSchedules, .jupiterDCAOrders: false
+        case .yields, .sendTo, .receive, .schedule, .stopSchedules, .jupiterDCAOrders, .limitOrders: false
         case .allocate, .rebalance: confirmed
         default: true
         }
@@ -997,6 +1025,13 @@ extension Workspace {
             return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
         case .swapPrivately("NEAR", "near", _, _, let asked) where !inChain:
             return lacks(near, asked, "NEAR", "NEAR")
+        // A limit order's deposit: a buy's USDC from its network, a sale's NEAR from the NEAR account, SOL from Solana.
+        case .limitOrder(sell: false, coin: _, on: _, price: _, amount: let asked, usdcOn: let from, days: _) where !inChain:
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        case .limitOrder(sell: true, coin: "NEAR", on: "near", price: _, amount: let asked, usdcOn: _, days: _) where !inChain:
+            return lacks(near, asked, "NEAR", "NEAR")
+        case .limitOrder(sell: true, coin: "SOL", on: "solana", price: _, amount: let asked, usdcOn: _, days: _) where !inChain:
+            return lacks(solana?.sol, asked, "Solana", "SOL")
         case .usdt(let net, _, let asked, _) where !inChain:
             return lacks(heldUSDT(net), asked, WalletCommand.placeName(net), "USDT")
         // A buy that names where its money comes from («с арбитрума») pays from there or not at all: said before the card.
@@ -1139,6 +1174,20 @@ extension Workspace {
         }
         await refresh()
         return ok
+    }
+
+    /// A part of a position worth under Hyperliquid's $10 minimum can't be closed: said before any card, with closing it
+    /// all as a card. True when it was said.
+    func closeTooSmall(_ share: Decimal, coin: String, note: String? = nil) -> Bool {
+        guard let p = positions.first(where: { $0.coin == coin }), let m = markets[coin],
+              Executor.partialCloseRefusal(position: p.size, fraction: share, mark: m.markPx, szDecimals: m.szDecimals, asset: coin) != nil else { return false }
+        let name = IntentParser.pretty(coin), part = Fmt.usd(abs(p.size) * share * m.markPx), whole = Fmt.usd(abs(p.size) * m.markPx)
+        reply(say("Closing \(Fmt.pct(share * 100)) of \(name) is \(part): Hyperliquid won't take a close under $10. Close it all, \(whole), or a share worth $10 or more.",
+                  "\(Fmt.pct(share * 100)) позиции \(name) — это \(part): Hyperliquid не берёт закрытие меньше $10. Закрой её целиком, \(whole), или долю от $10."), note: note)
+        offerCards([ChatRouter.Option(title: say("Close it all · \(whole)", "Закрыть всё · \(whole)"),
+                                      comment: say("At the market, the stop and take-profit go with it", "По рынку, стоп и тейк уходят вместе с ней"),
+                                      command: "close \(coin.hasPrefix("xyz:") ? String(coin.dropFirst(4)) : coin)", recommended: true)])
+        return true
     }
 
     /// The card shows the position instead of a plan: just executed, or a position in this asset is already open

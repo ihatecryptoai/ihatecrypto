@@ -92,6 +92,18 @@ import WalletCore
     #expect(try Executor.partialCloseSize(position: btc, fraction: Decimal(1) / 3, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00005")!)
 }
 
+/// Hyperliquid's $10 minimum counts for a close too: a part under it is said before anything is sent, a part over it and
+/// the whole position go.
+@Test func aPartialCloseUnderTenDollarsIsRefused() {
+    let eth = Decimal(string: "0.004")!, mark: Decimal = 2650   // $10.6 in all
+    let why = Executor.partialCloseRefusal(position: eth, fraction: Decimal(string: "0.75")!, mark: mark, szDecimals: 4, asset: "ETH")
+    #expect(why?.contains("under Hyperliquid's $10 minimum") == true)
+    #expect(why?.contains("Close it all ($10.60)") == true)
+    #expect(Executor.partialCloseRefusal(position: -eth, fraction: Decimal(string: "0.5")!, mark: mark, szDecimals: 4, asset: "ETH") != nil)   // a short too
+    #expect(Executor.partialCloseRefusal(position: eth, fraction: 1, mark: mark, szDecimals: 4, asset: "ETH") == nil)
+    #expect(Executor.partialCloseRefusal(position: 1, fraction: Decimal(string: "0.5")!, mark: mark, szDecimals: 4, asset: "ETH") == nil)
+}
+
 @Test func gasTopUpTargetIsAWholeNumberOfWei() {
     // $1 at $3000 an ETH, 80% of it: 266,666,666,666,666 wei, not the 0 an unrounded quotient read as.
     #expect(Executor.gasExpected(usd: 1, price: 3000) == 266_666_666_666_666)

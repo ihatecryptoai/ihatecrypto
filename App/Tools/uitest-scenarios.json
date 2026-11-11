@@ -1673,5 +1673,37 @@
       ],
       "footer_contains": "1Click"
     }
+  },
+  {
+    "name": "limit order → a private 1Click card: the deposit from the wallet, the order at its price with the market beside it, where it lands when it fills",
+    "send": [
+      "выставь лимитку: купи SOL по 20 на 0.5 USDC"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "wait_quote": true,
+      "steps": [
+        "LIMIT ORDER · PRIVATE"
+      ],
+      "title_contains": "limit",
+      "footer_contains": "Confidential Intents",
+      "quote_contains": "away",
+      "command_contains": "limitOrder(sell: false"
+    },
+    "only_if": {
+      "balance": "solanaUSDC",
+      "at_least": 0.5
+    }
+  },
+  {
+    "name": "my limit orders → read from 1Click, said in the chat, no card",
+    "send": [
+      "мои лимитки"
+    ],
+    "expect": {
+      "no_pending": true,
+      "reply_contains": "лимитн"
+    }
   }
 ]

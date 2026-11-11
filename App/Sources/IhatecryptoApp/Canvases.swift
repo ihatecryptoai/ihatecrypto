@@ -1163,6 +1163,53 @@ struct JupiterDCABoard: View {
     }
 }
 
+/// This wallet's open limit orders on 1Click: each order's side, coin, price, how much filled and until when, with Cancel.
+struct LimitOrdersBoard: View {
+    @Environment(Workspace.self) private var ws
+    let orders: [Executor.LimitOrderView]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                TokenLogo(name: "near", size: 26)
+                Text("Limit orders").font(.ui(15, .bold))
+                Spacer()
+                StatusChip(text: orders.count == 1 ? "1 open" : "\(orders.count) open", tint: Brand.privacy)
+            }
+            ForEach(orders, id: \.id) { row($0) }
+            Text("Private, through NEAR Intents: 1Click fills them when the price comes, with ihatecrypto closed too. Cancel brings back what hasn't filled.")
+                .font(.ui(10)).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(width: RouteCards.width(3) + 32)
+        .background(RoundedRectangle(cornerRadius: 24).fill(Brand.card).shadow(color: .black.opacity(0.06), radius: 14, y: 8))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Brand.cardBorder))
+    }
+
+    private func row(_ o: Executor.LimitOrderView) -> some View {
+        let done = o.coins > 0 ? NSDecimalNumber(decimal: o.filled / o.coins).doubleValue : 0
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                AssetBadge(coin: o.coin, size: 22)
+                Text("\(o.sell ? "Sell" : "Buy") \(Fmt.num(o.coins, maxFraction: 6)) \(o.coin) at \(Fmt.usd(o.price))").font(.ui(13, .semibold))
+                Spacer()
+                if o.status != "PENDING_CANCEL" {
+                    Button("Cancel") { Task { await ws.send("cancel limit orders id \(o.id)") } }.buttonStyle(.borderless).foregroundStyle(Brand.loss)
+                }
+            }
+            ProgressView(value: min(max(done, 0), 1)).tint(Brand.privacy)
+            HStack {
+                Text("\(o.state) · filled \(Fmt.num(o.filled, maxFraction: 6)) of \(Fmt.num(o.coins, maxFraction: 6))").monospacedDigit()
+                Spacer()
+                if let until = o.until { Text("until \(Fmt.date(until))") }
+            }
+            .font(.ui(11.5)).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.04)))
+    }
+}
+
 extension Workspace {
     /// Why a plan can't go, in a few words for its status and a sentence for the chat. nil when nothing stops it (or a
     /// detail is still missing: that has its own «By the book»).
@@ -1383,6 +1430,9 @@ extension Workspace {
         case .swapOn(let place, let from, let to, let amount): pairRoute(place, from, to, amount)
         case .crossSwap(let a, let from, let b, let to, let amount): crossRoute(a, from, b, to, amount)
         case .swapPrivately(let a, let from, let b, let to, let amount): privateSwapRoute(command, a, from, b, to, amount)
+        case .limitOrder(let sell, let coin, let on, let price, let amount, let usdcOn, let days):
+            limitRoute(command, sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, days: days)
+        case .limitCancel(let coin): limitCancelRoute(coin)
         case .sweepDust(let under): dustRoute(under)
         case .revokeApproval(let place, let token, let spender, let permit2): revokeRoute(place, token, spender, permit2)
         case .hlSpotBuy(let symbol, let usdc?): hlSpotRoute(symbol, usdc: usdc, sell: nil)
@@ -2426,6 +2476,41 @@ extension Workspace {
                                  step(logo(to), "TO · \(toName.uppercased())", label(b), "your own address there", fill(to), money: into)])
     }
 
+    /// A limit order: the deposit from this wallet's own address, the order resting privately with 1Click at its price (the
+    /// market now beside it, once quoted), and where what it buys or brings lands when it fills. Nothing arrives at once.
+    private func limitRoute(_ command: WalletCommand, sell: Bool, coin: String, on: String, price: Decimal, amount: Decimal, usdcOn: String, days: Int?) -> MoveRoute {
+        let from = sell ? on : usdcOn, to = sell ? usdcOn : on
+        let fromName = WalletCommand.placeName(from), toName = WalletCommand.placeName(to)
+        func logo(_ p: String) -> String { ModuleNetwork(place: p)?.logo ?? p }
+        func fill(_ p: String) -> RouteFill { RouteFill(rawValue: p) ?? .check }
+        let paid = sell ? coin : "USDC"
+        let out = from == "near" && paid == "NEAR" ? nearMove(by: -amount) : moneyMove(paid, on: from, by: -amount)
+        let coins = sell ? amount : amount * Executor.limitBuyHeadroom / price
+        let market = swapQuote.flatMap { $0.command == command ? $0.ways.first?.gets : nil }
+        let until = Fmt.date(Date().addingTimeInterval(TimeInterval((days ?? 7) * 86_400)))
+        let p = Fmt.usd(price)
+        let title = sell ? "Sell \(Fmt.num(amount, maxFraction: 8)) \(coin) at \(p) or more" : "Buy ≈ \(Fmt.num(coins, maxFraction: 6)) \(coin) at \(p) or less"
+        return MoveRoute(title: title + " · limit",
+                         footer: "A limit order through NEAR Intents, private (Confidential Intents): one deposit from your own address on \(fromName) to the address 1Click binds to the order, checked with 1Click before signing — the pair, the price, your own addresses, private, only ihatecrypto's 0.05%. It rests until \(until) and fills, in parts too, when the market gets there. The \(sell ? "USDC" : coin) comes to your own address on \(toName) with no signature then. «cancel limit orders» brings back what hasn't filled. That address needs \(Presence.name) the first time. Press Confirm.",
+                         steps: [step(logo(from), "FROM · \(fromName.uppercased())", "\(Fmt.num(amount, maxFraction: 8)) \(paid)", "your own address there · rests with 1Click", fill(from), money: out),
+                                 step("near", "LIMIT ORDER · PRIVATE", "\(sell ? "Sell" : "Buy") \(coin) at \(p)",
+                                      (market.map { "\($0) · " } ?? "market: quoting… · ") + "until \(until) · 1Click ≈ 0.2% + our 0.05%", .near),
+                                 step(logo(to), "TO · \(toName.uppercased())", sell ? "≈ \(Fmt.num(amount * price, maxFraction: 2)) USDC" : "≈ \(Fmt.num(coins, maxFraction: 6)) \(coin)",
+                                      "when it fills · your own address there", fill(to))])
+    }
+
+    /// Canceling limit orders: matching stops, what filled is paid out, the rest comes back. Nothing is signed.
+    private func limitCancelRoute(_ coin: String?) -> MoveRoute {
+        let id = coin.flatMap { $0.hasPrefix("id:") ? String($0.dropFirst(3)) : nil }
+        let open = (limitOrderList ?? []).filter { o in id.map { o.id == $0 } ?? (coin == nil || o.coin.uppercased() == coin?.uppercased()) }
+        let coin = id == nil ? coin : open.first?.coin
+        let what = open.isEmpty ? (coin.map { "\($0) orders" } ?? "all open orders") : open.map { "\($0.sell ? "sell" : "buy") \($0.coin) at \(Fmt.usd($0.price))" }.joined(separator: " · ")
+        return MoveRoute(title: "Cancel limit orders" + (coin.map { " · \($0)" } ?? ""),
+                         footer: "1Click stops matching: what filled is paid out, the rest comes back to the address it came from in a few minutes. A last slice can still fill. Nothing is signed. Press Confirm.",
+                         steps: [step("near", "CANCEL · NEAR INTENTS", coin.map { "\($0) limit orders" } ?? "Limit orders", what, .near),
+                                 step("near", "BACK · YOUR OWN ADDRESS", "What hasn't filled", "where it came from", .check)])
+    }
+
     /// A coin to a saved address on a network only NEAR Intents reaches: the USDC it costs and where from (once quoted),
     /// 1Click's swap for exactly that much, and the saved address.
     /// The agent wallet on NEAR Intents: the rules the owner's NEAR key signs, money into it, or money out by its rules.
@@ -2607,6 +2692,7 @@ extension Workspace {
         case .swapOn(let p, let a, let b, let x): await quotePair(command, p, a, b, x); return
         case .crossSwap(let a, let from, let b, let to, let x): await quoteCross(command, a, from, b, to, x); return
         case .swapPrivately(let a, let from, let b, let to, let x): await quotePrivateSwap(command, a, from, b, to, x); return
+        case .limitOrder(let sell, let coin, let on, let price, let x, let usdcOn, _): await quoteLimit(command, sell, coin, on, price, x, usdcOn); return
         // A move between networks: what each bridge lands, costs and takes, the one it goes by first. Not a priced swap:
         // Confirm doesn't wait for it, and the executor asks them all again before signing.
         case .usdt(let from, let to, let x, let layerZero):
@@ -2766,6 +2852,7 @@ extension Workspace {
         guard let q = swapQuote, q.command == c, let best = q.ways.first else { return nil }
         if case .sendToken = c { return best.gets }   // a coin bought on the way: its cost in USDC, the fees, the time
         if case .sendPrivately = c { return best.gets }
+        if case .limitOrder = c { return best.gets }   // it rests: nothing is got now, the market is the line
         // A loan's card is quoted with its health and debt, not with a coin it gets: «You get ≈ ∞ → 3.82» was the health.
         switch c {
         case .kaminoBorrow, .aaveBorrow, .aaveCollateral:
@@ -2845,6 +2932,22 @@ extension Workspace {
             if let q { swapQuote = (command, [(q.way, q.gets, 0)]); return }
             if swapQuote?.command != command { swapQuote = (command, []) }
             try? await Task.sleep(for: .seconds(15))
+        }
+    }
+
+    /// A limit order's market: what 1Click gives for this size now, again every 30 s while the card waits — the order rests
+    /// at its own price, so Confirm doesn't wait for it, and the executor asks again and refuses a price through the market.
+    private func quoteLimit(_ command: WalletCommand, _ sell: Bool, _ coin: String, _ on: String, _ price: Decimal, _ amount: Decimal, _ usdcOn: String) async {
+        guard let wallet = previewWallet else { return }
+        while !Task.isCancelled {
+            if let plan = try? await executor(wallet).limitOrderText(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, near: nearAddress),
+               let market = plan.market {
+                guard !Task.isCancelled else { return }
+                let atOnce = Executor.limitFillsAtOnce(sell: sell, price: price, market: market)
+                let gap = (price - market) / market * 100
+                swapQuote = (command, [("1Click", "\(coin) ≈ \(Fmt.usd(market)) now" + (atOnce ? " · fills at once: that's a swap" : " · \(gap > 0 ? "+" : "")\(Fmt.num(gap, maxFraction: 1))% away"), 0)])
+            }
+            try? await Task.sleep(for: .seconds(30))
         }
     }
 
@@ -3420,7 +3523,7 @@ extension Workspace {
             switch command {
             case .sendPrivately(let name, let token, _, let network):
                 _ = try privateRecipient(name, token: token, network: network)
-            case .swapPrivately:
+            case .swapPrivately, .limitOrder, .limitOrders, .limitCancel:
                 return privateSwapRefusal(command)
             case .agentCreate:
                 // This Mac keeps one agent wallet (agentwallet.json): a second one was drawn as a card and refused only
@@ -3567,7 +3670,7 @@ extension Workspace {
             return
         }
         switch command {
-        case .yields, .allocate, .rebalance, .schedule, .stopSchedules, .jupiterDCAOrders:
+        case .yields, .allocate, .rebalance, .schedule, .stopSchedules, .jupiterDCAOrders, .limitOrders:
             // Read-only, or with a board and a step of their own.
             await move(command)
         default:

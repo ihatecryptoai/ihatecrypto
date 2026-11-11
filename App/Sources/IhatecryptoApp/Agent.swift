@@ -345,6 +345,11 @@ extension Workspace {
                 "\(Fmt.num(o.used))/\(Fmt.num(o.deposited)) USDC spent into \(SpotAsset.all.first { $0.mint == o.outputMint }?.symbol ?? o.outputMint), \(Fmt.num(o.perCycle)) every \(WalletCommand.everyText(o.every)), \(o.fills) fills"
             }.joined(separator: "; "))
         }
+        if let orders = limitOrderList, !orders.isEmpty {
+            out.append("limit orders board, open (private, on 1Click): " + orders.map { o in
+                "\(o.sell ? "sell" : "buy") \(Fmt.num(o.coins, maxFraction: 6)) \(o.coin) at $\(Fmt.num(o.price)), \(o.state), filled \(Fmt.num(o.filled, maxFraction: 6))"
+            }.joined(separator: "; "))
+        }
         if let a = serviceAnswer { out.append(a.forModel) }
         if let takes = takeChoices ?? heldAnswer?.takes { out.append("take-profit choices: " + takes.map { "\($0.title) — \($0.detail)" }.joined(separator: "; ")) }
         if let r = runningAction { out.append("running now: \(readable(r.title))" + (r.lines.isEmpty ? "" : " (\(r.lines.joined(separator: "; ")))")) }

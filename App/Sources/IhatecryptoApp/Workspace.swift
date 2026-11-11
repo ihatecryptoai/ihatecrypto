@@ -527,6 +527,8 @@ final class Workspace {
     /// The running Jupiter DCA orders as last read, drawn on the canvas once asked for («show Jupiter DCA») or after one
     /// is placed or cancelled; nil = not shown.
     var jupiterDCAs: [JupiterRecurring.Order]?
+    /// This wallet's open limit orders on 1Click, on the canvas after «show limit orders» or a new one.
+    var limitOrderList: [Executor.LimitOrderView]?
     /// Models being downloaded into Ollama from the model menu: name → 0…1.
     var modelDownloads: [String: Double] = [:]
     /// Whether Ollama and LM Studio answered when the menu last asked (provider id → up), and the download sizes, GB,
@@ -1399,6 +1401,8 @@ final class Workspace {
         if !positions.isEmpty || pendingEntry != nil, let command = PositionCommand.parse(text) {
             if let coin = targetCoin(for: text) {
                 switch command {
+                case .close(let share) where closeTooSmall(share, coin: coin):
+                    break
                 case .close, .cancelOrders:
                     // A close or a cancel can't be taken back: it waits for Confirm, as when a model reads it.
                     pendingAction = .position(command, coin: coin)
@@ -1997,6 +2001,7 @@ final class Workspace {
             return true
         }
         if let coin = targetCoin(for: canonical), let command = PositionCommand.parse(canonical) {
+            if case .close(let share) = command, closeTooSmall(share, coin: coin, note: note) { return true }
             pendingAction = .position(command, coin: coin)
             pendingText = canonical
             reply(say("Understood as “\(canonical)” for \(IntentParser.pretty(coin)). Press Confirm to go ahead.",

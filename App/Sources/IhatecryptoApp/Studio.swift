@@ -1416,8 +1416,9 @@ struct StudioCanvas: View {
                 if (ws.yieldOptions ?? ws.heldAnswer?.yields) == nil, ws.allocationPreview == nil, ws.rebalancePlan == nil {
                     ForEach(ws.schedules, id: \.symbol) { ScheduleBoard(schedule: $0).blockMenu("Recurring buy · \($0.symbol)") }
                     if let dca = ws.jupiterDCAs, !dca.isEmpty { JupiterDCABoard(orders: dca).blockMenu("Jupiter DCA") }
+                    if let orders = ws.limitOrderList, !orders.isEmpty { LimitOrdersBoard(orders: orders).blockMenu("Limit orders") }
                     // Under a running board (a chain's move done, its next step coming) the saved one would draw it twice.
-                    if let board, !ws.moveRunning { SavedBoard(canvas: board).blockMenu(ws.readable(board.title), radius: nil) } else if board == nil, positions.isEmpty, ws.schedules.isEmpty, ws.jupiterDCAs?.isEmpty ?? true, ws.pendingAction == nil, !ws.moveRunning, ws.chart == nil, ws.serviceAnswer == nil, ws.ledgerConnect == nil,
+                    if let board, !ws.moveRunning { SavedBoard(canvas: board).blockMenu(ws.readable(board.title), radius: nil) } else if board == nil, positions.isEmpty, ws.schedules.isEmpty, ws.jupiterDCAs?.isEmpty ?? true, ws.limitOrderList?.isEmpty ?? true, ws.pendingAction == nil, !ws.moveRunning, ws.chart == nil, ws.serviceAnswer == nil, ws.ledgerConnect == nil,
                               (ws.canvases.first { $0.id == ws.canvasID }?.earlier ?? []).isEmpty {
                         // Never blank while something is under way: whatever path left nothing live, the canvas's last
                         // board stays until the answer or the outcome takes its place. The empty canvas is for when nothing runs.
@@ -4421,10 +4422,11 @@ struct Receipt {
     static let networks: Set<String> = ["SOLANA", "BASE", "ARBITRUM", "ETHEREUM", "HYPERLIQUID", "POLYGON", "OPTIMISM", "BNB CHAIN", "BNB",
                                         "HYPEREVM", "ROBINHOOD", "ROBINHOOD CHAIN", "TEMPO", "NEAR"]
 
-    /// Our builder fee rides on Hyperliquid orders only (HLBuilder): a spot buy or sale, a swap on its book.
+    /// Our fee rides on Hyperliquid orders (HLBuilder): a spot buy or sale, a swap on its book; and on a limit order
+    /// through 1Click (OneClick.orderFee), the same 0.05%.
     static func ours(_ c: WalletCommand?) -> Bool {
         switch c {
-        case .hlSpotBuy?, .hlSpotSell?: true
+        case .hlSpotBuy?, .hlSpotSell?, .limitOrder?: true
         case .swapOn(let place, _, _, _)?: place == "hyperliquid"
         default: false
         }

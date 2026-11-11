@@ -37,7 +37,7 @@ extension Executor {
     }
 
     /// This wallet's own address on `place`: Solana's, the EVM one, or its NEAR account (`near`, from the signer).
-    private func intentAddress(_ place: String, near: String?) throws -> String {
+    func intentAddress(_ place: String, near: String?) throws -> String {
         if place == "near" {
             guard let near, near.wholeMatch(of: /[0-9a-f]{64}/) != nil else { throw ExecutionError("The signer has no NEAR account for this wallet.") }
             return near
@@ -102,28 +102,8 @@ extension Executor {
         }
         let gets = Decimal(string: live.quote.amountOutFormatted) ?? 0
         report("NEAR Intents\(confidential ? " (private)" : ""): \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) → ≈ \(Fmt.num(gets, maxFraction: 6)) \(live.destination.symbol) on \(WalletCommand.placeName(to)).")
-        // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.
-        var tx = ""
-        if from == "near" {
-            guard live.origin.symbol == "NEAR", let account = near else {
-                throw ExecutionError("From NEAR, ihatecrypto sends NEAR itself; its other tokens there can't be signed yet. Nothing was signed.")
-            }
-            let context = try await Near.txContext(account: account)
-            let yocto = UInt128(live.units) ?? 0
-            let keep = UInt128(context.storageBytes) * 10_000_000_000_000_000_000 + NearTransaction.intentDepositOverhead(gasPrice: UInt128(context.gasPrice) ?? 100_000_000)
-            let balance = UInt128(context.balance) ?? 0
-            guard yocto + keep <= balance else {
-                throw ExecutionError("\(NearTransaction.near(balance > keep ? balance - keep : 0)) NEAR can go: the account keeps \(NearTransaction.near(keep)) for its storage and the transaction.")
-            }
-            let signed = try await signer.signNearIntentDeposit(amount: yocto, depositAddress: deposit, nonce: context.nonce, blockHash: context.blockHash)
-            try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "\(live.origin.symbol)→\(live.destination.symbol) \(amount) near → \(to)"))
-            tx = try await Near.send(signed)
-        } else {
-            let sent = try await sendToken(a, amount: amount, on: from, to: deposit, label: "the 1Click deposit")
-            try journal.append(.init(chain: "1click", id: deposit, kind: .signed, note: "\(live.origin.symbol)→\(live.destination.symbol) \(amount) \(from) → \(to)"))
-            tx = String(sent.split(separator: "/").last ?? "").trimmingCharacters(in: .whitespaces)
-        }
-        if !tx.isEmpty { try? await OneClick.submitDeposit(txHash: tx, depositAddress: deposit) }
+        try await intentDeposit(a, symbol: live.origin.symbol, amount: amount, units: live.units, from: from, to: deposit, near: near,
+                                journal: ("1click", deposit, "\(live.origin.symbol)→\(live.destination.symbol) \(amount) \(from) → \(to)"))
         let started = Date()
         let s = try await oneClickSettled(deposit, refund: "\(live.origin.symbol) went back to \(WalletCommand.placeName(from))", estimate: live.quote.timeEstimate)
         let line = "Swapped \(Fmt.num(amount, maxFraction: 8)) \(live.origin.symbol) on \(WalletCommand.placeName(from)) for "
@@ -131,5 +111,34 @@ extension Executor {
             + "through NEAR Intents\(confidential ? "' Confidential Intents: the deposit and the payout can't be matched on chain," : "") in \(Int(Date().timeIntervalSince(started))) s — at your own address there."
         report(line)
         return line
+    }
+
+    /// A deposit to a 1Click address: native NEAR through the signer's wrap.near deposit (the account keeps its storage and
+    /// the transaction's cost), any other token as a plain transfer — which the signer asks to allow in person the first
+    /// time. Written to the journal once signed (`journal`: chain, id, note), then 1Click is told about it.
+    func intentDeposit(_ a: String, symbol: String, amount: Decimal, units: String, from: String, to deposit: String, near: String?,
+                       journal entry: (chain: String, id: String, note: String)) async throws {
+        var tx = ""
+        if from == "near" {
+            guard symbol == "NEAR", let account = near else {
+                throw ExecutionError("From NEAR, ihatecrypto sends NEAR itself; its other tokens there can't be signed yet. Nothing was signed.")
+            }
+            let context = try await Near.txContext(account: account)
+            let yocto = UInt128(units) ?? 0
+            let keep = UInt128(context.storageBytes) * 10_000_000_000_000_000_000 + NearTransaction.intentDepositOverhead(gasPrice: UInt128(context.gasPrice) ?? 100_000_000)
+            let balance = UInt128(context.balance) ?? 0
+            guard yocto + keep <= balance else {
+                throw ExecutionError("\(NearTransaction.near(balance > keep ? balance - keep : 0)) NEAR can go: the account keeps \(NearTransaction.near(keep)) for its storage and the transaction.")
+            }
+            let signed = try await signer.signNearIntentDeposit(amount: yocto, depositAddress: deposit, nonce: context.nonce, blockHash: context.blockHash)
+            try journal.append(.init(chain: entry.chain, id: entry.id, kind: .signed, note: entry.note))
+            tx = try await Near.send(signed)
+        } else {
+            let sent = try await sendToken(a, amount: amount, on: from, to: deposit, label: "the 1Click deposit")
+            // Sent: nothing after it may throw, or a Try again would pay twice.
+            try? journal.append(.init(chain: entry.chain, id: entry.id, kind: .signed, note: entry.note))
+            tx = String(sent.split(separator: "/").last ?? "").trimmingCharacters(in: .whitespaces)
+        }
+        if !tx.isEmpty { try? await OneClick.submitDeposit(txHash: tx, depositAddress: deposit) }
     }
 }

@@ -1083,6 +1083,9 @@ public actor Executor {
         }
         let size = try Self.partialCloseSize(position: position.size, fraction: fraction, szDecimals: market.szDecimals, asset: asset)
         guard size < abs(position.size) else { return try await close(asset: asset) }   // a share of 1 or more is the whole
+        if let why = Self.partialCloseRefusal(position: position.size, fraction: fraction, mark: market.markPx, szDecimals: market.szDecimals, asset: asset) {
+            throw ExecutionError(why)
+        }
         let buy = position.size < 0
         let px = HLAction.price(market.markPx * (buy ? 1 + 2 * Self.slippage : 1 - 2 * Self.slippage), szDecimals: market.szDecimals)
         let result = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: buy, price: px, size: size, reduceOnly: true,
@@ -1148,6 +1151,19 @@ public actor Executor {
 
     /// The size a partial close sends: the share in whole steps of the market's szDecimals, rounded down. A share smaller
     /// than one step is refused: it used to fall through to close(asset:), which closed the whole position and its stop.
+    /// Hyperliquid's $10 minimum order counts for a reduce-only close too: a part worth less is refused by the venue (seen
+    /// on mainnet: a 0.003 ETH close, $8, refused while the whole 0.004, $10.6, went). Said before anything is sent, with
+    /// the way that works; nil when the part reaches $10 or is the whole position.
+    public static func partialCloseRefusal(position: Decimal, fraction: Decimal, mark: Decimal, szDecimals: Int, asset: String) -> String? {
+        guard fraction < 1, mark > 0, let size = try? partialCloseSize(position: position, fraction: fraction, szDecimals: szDecimals, asset: asset),
+              size < abs(position) else { return nil }
+        let part = size * mark
+        guard part < Plan.minNotional else { return nil }
+        let name = asset.hasPrefix("xyz:") ? String(asset.dropFirst(4)) : asset
+        return "Closing \(Fmt.pct(fraction * 100)) of the \(name) position is \(Fmt.usd(part)), under Hyperliquid's $10 minimum order, which counts for a close too. "
+            + "Nothing was closed: the stop and take-profit stay. Close it all (\(Fmt.usd(abs(position) * mark))), or a share worth $10 or more."
+    }
+
     static func partialCloseSize(position: Decimal, fraction: Decimal, szDecimals: Int, asset: String) throws -> Decimal {
         // A third is 0.333…3: a third of 3 steps came to 0.99…9 steps and rounded down to none.
         var exact = abs(position) * fraction, wanted = Decimal()

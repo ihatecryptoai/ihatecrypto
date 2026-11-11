@@ -177,6 +177,7 @@ func moveMoney(_ text: String) async throws {
         guard let n = EVMNetwork.named(net) else { throw ExecutionError("ihatecrypto doesn't move money on \(net).") }
         print(try await executor.evmToSolana(n, usdc: amount))
     case .swapPrivately: throw ExecutionError("A private swap needs the wallet's NEAR account and the NEAR Intents key: it runs in the ihatecrypto app.")
+    case .limitOrder, .limitOrders, .limitCancel: throw ExecutionError("Limit orders belong to the NEAR Intents key: they run in the ihatecrypto app, where the key is.")
     case .sendTo, .sendNear, .closeNear, .sendSol, .sendToken, .sendPrivately, .agentCreate, .agentFund, .agentSend, .agentFreeze: throw ExecutionError("Sending to a saved address works in the ihatecrypto app, where the address book is.")
     case .buyStock(let symbol, let usdc): print(try await executor.buyStock(symbol, usdc: usdc ?? 1))
     case .sellStock(let symbol, let amount): print(try await executor.sellStock(symbol, amount: amount))

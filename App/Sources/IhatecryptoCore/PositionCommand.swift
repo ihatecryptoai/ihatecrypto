@@ -219,6 +219,17 @@ public enum WalletCommand: Equatable, Sendable {
     /// matched on chain. Places as in `crossSwap`, «near» for the NEAR account; always an amount, always this wallet's own
     /// addresses on both sides. «buy NEAR for 5 USDC privately» = USDC on Solana → NEAR on NEAR.
     case swapPrivately(from: String, on: String, to: String, at: String, amount: Decimal)
+    /// A limit order through NEAR Intents' 1Click, always private (Confidential Intents: 1Click takes no other): a sale of
+    /// `amount` `coin` held on `on` for USDC on `usdcOn` at `price` dollars or more for one, or a buy of `coin` (to `on`)
+    /// with `amount` USDC from `usdcOn` at `price` or less. It rests up to `days` days (nil = 7) and fills, in parts too,
+    /// when the market gets there, with no signature then; ihatecrypto adds its 0.05%. Places as in `swapPrivately`.
+    /// «limit sell 0.1 SOL at 200», «лимитка: купи SOL по 120 на 20 USDC».
+    case limitOrder(sell: Bool, coin: String, on: String, price: Decimal, amount: Decimal, usdcOn: String, days: Int?)
+    /// The open limit orders of this wallet, on the canvas.
+    case limitOrders
+    /// Cancels this wallet's open limit orders: nil = all, a coin = those on it, «id:<order id>» = that one order. What
+    /// hasn't filled comes back.
+    case limitCancel(String?)
     /// Money coming in from a network ihatecrypto has no wallet on — «receive 50 USDC from Sui», «получи 0.01 BTC с
     /// биткоина»: 1Click's deposit address there, what arrives swapped into USDC on Solana. `network` is the address
     /// book's («sui», «bitcoin», «tron», «xrp», «dogecoin», «zcash»); nil amount = ask.
@@ -296,6 +307,85 @@ public enum WalletCommand: Equatable, Sendable {
         return n.wholeMatch(of: /me|myself|main|my(?:\s+own)?(?:\s+main)?\s+(?:wallet|account|address)|себе|мне|основно\w*(?:\s+кошел\w*)?|(?:мой|мо\w+)\s+(?:основно\w*\s+)?(?:кошел\w*|счет\w*|адрес\w*)/) != nil
     }
 
+    /// «limit buy», «limit sell», «limit orders», «лимитка», «лимитный ордер»: not a plan's «limit 2650» (its entry price on
+    /// Hyperliquid), nor an agent wallet's «лимит 20$ в день».
+    /// The orders as a list: «limit orders», «лимитки», «лимитные ордера». One «limit order» («cancel the limit order»,
+    /// «отмени лимитку») is Hyperliquid's entry waiting to fill, a position command.
+    nonisolated(unsafe) static let limitOrdersWords = /(?i)\blimit\s+orders\b|\bлимитки\b|\bлимиток\b|\bлимитн\w*\s+(?:ордера|ордеров|ордерами|заявки|заявок)\b/
+
+    nonisolated(unsafe) static let limitWords = /(?i)\blimit\s+(?:buy|sell|orders?)\b|\b(?:buy|sell)\s+limit\b|\bлимитк\w*|\bлимитн\w*\s+(?:ордер|заявк)\w*/
+
+    /// «limit sell 0.1 SOL [on solana] at 200 [for USDC on base] [for 3 days]», «limit buy SOL [on solana] at 120 for 20
+    /// USDC [on base]», «show limit orders», «cancel limit orders [SOL]»; «лимитка: продай 0.1 SOL по 200», «лимитный ордер:
+    /// купи SOL по 120 на 20 USDC на 3 дня», «мои лимитки», «отмени лимитки». A buy or sale without its price or its amount
+    /// is nothing: the chat asks.
+    static func limit(_ text: String) -> WalletCommand? {
+        var q = IntentParser.plainNumbers(text).lowercased().replacingOccurrences(of: "ё", with: "е")
+        func dec(_ s: Substring) -> Decimal? { Decimal(string: String(s).replacingOccurrences(of: ",", with: ".")) }
+        let sell = q.contains(/\bsell\b|\bпрода\w*/), buy = q.contains(/\bbuy\b|\bкупи\w*|\bкупл\w*/)
+        guard sell != buy else {
+            if sell { return nil }
+            if q.contains(/\b(?:cancel|stop|close|remove|delete|withdraw)\b|\bотмен\w*|\bсним\w*|\bсними\b|\bубер\w*|\bудали\w*|\bзакр\w*/) {
+                // One order by its id, as the board's Cancel names it: «cancel limit orders id order_Ab1…». Ids are opaque and
+                // case-sensitive, so read from the text as written.
+                if let m = text.firstMatch(of: /(?i)\bid[:\s]+([A-Za-z0-9_\-.~]{4,80})\b/) { return .limitCancel("id:" + String(m.1)) }
+                let coin = q.firstMatch(of: /(?:orders?|ордер\w*|лимитк\w*)\s+(?:on\s+|for\s+|на\s+|по\s+)?\$?([a-zа-я][a-zа-я0-9]{1,9})\b/)
+                    .flatMap { limitCoin(String($0.1)) }
+                return .limitCancel(coin)
+            }
+            return q.contains(/\b(?:show|list|my|open|see|check)\b|\bмои\b|\bпокажи\b|\bкакие\b|\bоткрыт\w*|\bсписок\b|\bгде\b/) ? .limitOrders : nil
+        }
+        // The days first, then the price: what's left names the coin, its amount and the networks.
+        var days: Int?
+        if let m = q.firstMatch(of: /(?:\bfor\b|\bна\b|\bв\s+течение\b)\s+(\d{1,2})\s*(?:days?\b|дн\w*|день\b|суток\b)/) {
+            days = Int(m.1); q.replaceSubrange(m.range, with: " ")
+        } else if let m = q.firstMatch(of: /(?:\bfor\s+a\b|\bна\b)?\s*(?:\bweek\b|\bнеделю\b)/) {
+            days = 7; q.replaceSubrange(m.range, with: " ")
+        }
+        if let d = days, !(1...30).contains(d) { return nil }
+        guard let pm = q.firstMatch(of: /(?:\bat\b|@|\bпо\b(?:\s+цене)?|\bprice\b)\s*\$?\s*(\d+(?:[.,]\d+)?)\s*(?:\$|usdc\b|usd\b|долл\w*|бакс\w*)?/),
+              let price = dec(pm.1), price > 0 else { return nil }
+        q.replaceSubrange(pm.range, with: " ")
+        let net = #"(solana|солан\w*|near|неар\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|polygon|полигон\w*|ethereum|эфириум\w*|mainnet|optimism|оптимизм\w*|bnb(?:\s+chain)?|bsc|бнб\w*)"#
+        func place(_ w: Substring?) -> String? {
+            guard let w = w?.lowercased() else { return nil }
+            return w.hasPrefix("sol") || w.hasPrefix("сол") ? "solana" : w.hasPrefix("near") || w.hasPrefix("неар") ? "near" : network(w)
+        }
+        // «… USDC on base», «… USDC в бейсе»: where the dollars are or go.
+        let usdcPlace = (try? Regex<(Substring, Substring)>(#"usdc\s+(?:on|in|from|at|на|в|во|с|со|из)\s+"# + net)).flatMap { q.firstMatch(of: $0) }
+        let usdcOn = place(usdcPlace?.1)
+        if let r = usdcPlace?.range { q.replaceSubrange(r, with: " usdc ") }
+        let coin: String, amount: Decimal, coinPlace: Substring?
+        if sell {
+            // «sell 0.1 SOL [on solana]»: the count right before the coin.
+            guard let m = (try? Regex<(Substring, Substring, Substring, Substring?)>(#"(?:sell|прода\w*)\s+(\d+(?:[.,]\d+)?)\s*\$?([a-zа-я][a-zа-я0-9]{1,9})\b(?:\s+(?:on|in|на|в|во)\s+"# + net + ")?")).flatMap({ q.firstMatch(of: $0) }),
+                  let x = dec(m.1), let c = limitCoin(String(m.2)) else { return nil }
+            (coin, amount, coinPlace) = (c, x, m.3)
+        } else {
+            // «buy SOL [on solana] … for 20 USDC», «купи SOL … на 20 USDC»: the dollars it spends.
+            guard let m = (try? Regex<(Substring, Substring, Substring?)>(#"(?:buy|куп\w*)\s+\$?([a-zа-я][a-zа-я0-9]{1,9})\b(?:\s+(?:on|in|на|в|во)\s+"# + net + ")?")).flatMap({ q.firstMatch(of: $0) }),
+                  let c = limitCoin(String(m.1)),
+                  let u = (q.firstMatch(of: /\$\s*(\d+(?:[.,]\d+)?)/)?.1 ?? q.firstMatch(of: /(\d+(?:[.,]\d+)?)\s*(?:usdc\b|\$|долл\w*|бакс\w*|dollars?\b|bucks\b)/)?.1).flatMap(dec)
+            else { return nil }
+            (coin, amount, coinPlace) = (c, u, m.2)
+        }
+        guard amount > 0, coin != "USDC" else { return nil }
+        let on = place(coinPlace) ?? (coin == "NEAR" ? "near" : coin == "ETH" ? "base" : "solana")
+        // NEAR's account sends NEAR alone: a buy of NEAR pays from Solana's USDC unless another network is named.
+        return .limitOrder(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn ?? (on == "near" ? "solana" : on), days: days)
+    }
+
+    /// A coin a limit order names, as a ticker: Latin ones as they are, the Russian names of the usual ones; nil for a
+    /// word that isn't a coin («orders», «on»).
+    static func limitCoin(_ w: String) -> String? {
+        let names = ["сол": "SOL", "солану": "SOL", "солана": "SOL", "эфир": "ETH", "эфира": "ETH", "биткоин": "BTC", "биткоина": "BTC",
+                     "неар": "NEAR", "нир": "NEAR", "near": "NEAR"]
+        if let n = names[w] { return n }
+        guard w.wholeMatch(of: /[a-z][a-z0-9]{1,9}/) != nil,
+              !["on", "for", "at", "of", "the", "all", "my", "orders", "order", "limit", "usd", "dollars", "price", "and", "with", "in"].contains(w) else { return nil }
+        return w.uppercased()
+    }
+
     static func agent(_ text: String) -> WalletCommand? {
         let q = IntentParser.plainNumbers(text).lowercased()
         guard q.contains(agentWallet) else { return nil }
@@ -349,7 +439,7 @@ public enum WalletCommand: Equatable, Sendable {
         switch self {
         case .sendToken(let name, let token, let amount?, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
         case .sendTo(let name, let amount, let net): .sendPrivately(name: name, token: "USDC", amount: amount, network: net)
-        case .sendPrivately, .swapPrivately: self
+        case .sendPrivately, .swapPrivately, .limitOrder, .limitOrders, .limitCancel: self
         case .buyNear(let x?): .swapPrivately(from: "USDC", on: "solana", to: "NEAR", at: "near", amount: x)
         case .sellNear(let x?, let to): .swapPrivately(from: "NEAR", on: "near", to: "USDC", at: to ?? "solana", amount: x)
         case .swapOn("near", let a, let b, let x?): .swapPrivately(from: a, on: "near", to: b, at: "near", amount: x)
@@ -375,6 +465,12 @@ public enum WalletCommand: Equatable, Sendable {
         if let w = text.firstMatch(of: privacyWord) {
             let plain = String(text[..<w.range.lowerBound] + text[w.range.upperBound...]).replacing(/\s{2,}/, with: " ")
             return read(plain)?.madePrivate
+        }
+        // A limit order, its list and its cancel: only with the word «limit» («лимитка», «лимитный ордер»), so a plain buy
+        // or sale never rests by itself.
+        if text.contains(Self.limitWords), !text.contains(/(?i)\b(?:long|short)\b|\bлонг\w*|\bшорт\w*/),
+           text.contains(/(?i)\b(?:buy|sell)\b|\bкупи\w*|\bкупл\w*|\bпрода\w*/) || text.contains(Self.limitOrdersWords) {
+            return limit(text)
         }
         if let call = ContractCall.parse(text) { return .contractCall(call) }
         if let multisig = multisig(text) { return multisig }
@@ -1016,6 +1112,8 @@ extension WalletCommand {
         case .sendPrivately(let name, let token, _, let net): .sendPrivately(name: name, token: token, amount: amount, network: net)
         case .crossSwap(let from, let on, let to, let at, _): .crossSwap(from: from, on: on, to: to, at: at, amount: amount)
         case .swapPrivately(let from, let on, let to, let at, _): .swapPrivately(from: from, on: on, to: to, at: at, amount: amount)
+        case .limitOrder(let sell, let coin, let on, let price, _, let usdcOn, let days):
+            .limitOrder(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, days: days)
         default: self
         }
     }
@@ -1146,6 +1244,13 @@ extension WalletCommand {
             return "Jupiter DCA \(n(u)) USDC into \(a.symbol) in \(o ?? u.map(Self.jupiterDCAOrders) ?? 2) orders every \(Self.everyText(e))"
         case .jupiterDCACancel(let a): return "cancel Jupiter DCA" + (a.map { " \($0.symbol)" } ?? "")
         case .jupiterDCAOrders: return "show Jupiter DCA"
+        // The canonical form: it parses back to the same order.
+        case .limitOrder(let sell, let coin, let on, let price, let x, let usdcOn, let days):
+            let p = NSDecimalNumber(decimal: price).stringValue, a = NSDecimalNumber(decimal: x).stringValue
+            let left = sell ? "limit sell \(a) \(coin) on \(on) at \(p) for USDC on \(usdcOn)" : "limit buy \(coin) on \(on) at \(p) for \(a) USDC on \(usdcOn)"
+            return left + (days.map { " for \($0) days" } ?? "")
+        case .limitOrders: return "show limit orders"
+        case .limitCancel(let coin): return "cancel limit orders" + (coin.map { $0.hasPrefix("id:") ? " id \($0.dropFirst(3))" : " \($0)" } ?? "")
         case .withdrawToSolana(let u): return "withdraw \(n(u)) USDC from Hyperliquid to Solana"
         case .lendDeposit(let s, let x): return "deposit \(n(x)) \(s) into Jupiter Lend"
         case .lendWithdraw(let s, let x): return "withdraw \(n(x)) \(s) from Jupiter Lend"
