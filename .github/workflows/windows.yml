@@ -1,7 +1,8 @@
 # The Windows app on Windows: the Rust workspace (docs/windows-rust.md) — the engine, the signer, winsec linked into
 # both — and its tests, then the installer. Windows Hello itself can't be tried here (a runner has no PIN or TPM for
 # it); the tests that need its stand-in run off Windows only, and the real prompt is checked on a Windows machine.
-# Runs on pushes to the `windows` branch only: the Mac app is built and released from a Mac (release.sh).
+# Runs on pushes to the `windows` branch only: the Mac app is built and released from a Mac (release.sh). The tests
+# run on every push; the installer as its job says.
 name: Windows
 
 on:
@@ -11,6 +12,11 @@ on:
 
 permissions:
   contents: read
+
+# A newer push stops the run of the one before it on the same branch: its result no longer matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   core:
@@ -31,6 +37,10 @@ jobs:
   # Unsigned until the repository has a code-signing certificate (Windows/build.ps1 signs when WINDOWS_PFX is set).
   installer:
     needs: core
+    # Three quarters of the run's minutes. The public repository's runs are free and a release takes its x64 installer
+    # from there (docs/windows.md «A release»): built on every push. In the private one, whose minutes are paid, only
+    # on Run workflow.
+    if: github.repository == 'ihatecryptoai/ihatecrypto' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:

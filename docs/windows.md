@@ -165,7 +165,8 @@ the window in the background.
 On Windows, from `App/`: `pwsh Windows/build.ps1` builds the engine and the signer in release and makes the installer
 (`Windows/app/src-tauri/target/release/bundle/nsis/ihatecrypto_<version>_<x64|arm64>-setup.exe`). It needs Rust,
 Node (for the Tauri CLI) and Visual Studio's C++ tools. The GitHub workflow `windows.yml` does the same on every push
-to `windows` and keeps the installer as an artifact for two weeks.
+to `windows` in the public repository and keeps the installer as an artifact for two weeks. In the private one (paid
+minutes) a push runs only the tests: the installer there is built on Run workflow.
 
 ## Signing and updates
 
