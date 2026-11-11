@@ -322,5 +322,103 @@ pub fn deposit_charge(bound: &HashMap<String, String>, recipient: &str, refund_t
     v
 }
 
+/// A limit order's deposit goes only to an order 1Click itself holds as asked: read back from 1Click by its id, never taken
+/// from the answer that created it alone. Money then rests with 1Click and pays out later without another signature, so
+/// whatever this check lets through is the only check the order gets (`OrderGuard`).
+pub mod order {
+    use std::collections::HashMap;
+
+    use rust_decimal::Decimal;
+
+    use crate::Verdict;
+
+    /// 1Click's own fee on an order, as it lists it: 0.20%.
+    pub const PROTOCOL_BPS: i64 = 20;
+
+    fn dec(s: &str) -> Option<Decimal> { let s = s.trim(); s.parse::<Decimal>().ok().or_else(|| Decimal::from_scientific(s).ok()) }
+
+    /// What the order should be: `bound` as one_click::order reads it. `deposit`: the units the wallet is about to send;
+    /// `most`: the units the user approved (a sale's coins, a buy's USDC). `fee`: ihatecrypto's own fee (recipient, bps),
+    /// the only one an order may carry besides 1Click's. `deadline` and `now` in Unix seconds.
+    pub struct Asked<'a> {
+        pub sell: bool,
+        pub base: &'a str,
+        pub quote: &'a str,
+        pub quantity: &'a str,
+        pub price: Decimal,
+        pub deposit_address: &'a str,
+        pub recipient: &'a str,
+        pub refund_to: &'a str,
+        pub deposit: &'a str,
+        pub most: Decimal,
+        pub fee: (&'a str, i64),
+        pub deadline: i64,
+        pub now: i64,
+    }
+
+    pub fn check(bound: &HashMap<String, String>, a: &Asked) -> Verdict {
+        let mut v = Verdict::default();
+        let mut expected = [("orderType", "LIMIT"), ("side", if a.sell { "SELL" } else { "BUY" }), ("baseAsset", a.base), ("quoteAsset", a.quote),
+            ("quantity", a.quantity), ("depositAddress", a.deposit_address), ("depositType", "ORIGIN_CHAIN"), ("recipient", a.recipient),
+            ("recipientType", "DESTINATION_CHAIN"), ("refundTo", a.refund_to), ("refundType", "ORIGIN_CHAIN")];
+        expected.sort_by_key(|e| e.0);
+        for (field, value) in expected {
+            if bound.get(field).map(|b| b.to_lowercase()) == Some(value.to_lowercase()) { continue }
+            v.problems.push(format!("1Click holds the order with a different {field}: {} instead of {value}.", bound.get(field).map_or("none", String::as_str)));
+        }
+        if bound.get("price").and_then(|p| dec(p)) != Some(a.price) {
+            v.problems.push(format!("1Click holds the order at {} price, not {}.", bound.get("price").map_or("no", String::as_str), a.price.normalize()));
+        }
+        if !["basic", "advanced"].contains(&bound.get("confidentiality").map(|c| c.to_lowercase()).unwrap_or_default().as_str()) {
+            v.problems.push(format!("1Click didn't take the order as private (Confidential Intents): it says «{}».", bound.get("confidentiality").map_or("nothing", String::as_str)));
+        }
+        // A memo the transfer can't carry would leave the deposit unmatched.
+        if bound.get("depositMemo").is_some_and(|m| !m.is_empty()) { v.problems.push("1Click asks for a deposit memo this wallet can't send.".into()) }
+        // 1Click lists its own platform fee among the order's fees (20 basis points to its account, seen 2026-11-11): that
+        // much is allowed besides ihatecrypto's, nothing more.
+        let mut others = 0i64;
+        for f in bound.get("appFees").map(String::as_str).unwrap_or("").split(',').filter(|f| !f.is_empty()) {
+            let parts: Vec<&str> = f.split(':').filter(|p| !p.is_empty()).collect();
+            let bps = if parts.len() == 2 { parts[1].parse::<i64>().unwrap_or(-1) } else { -1 };
+            if parts.len() != 2 || bps < 0 { v.problems.push(format!("The order carries a fee 1Click doesn't spell out: {f}.")); continue }
+            if parts[0] == a.fee.0 {
+                if bps > a.fee.1 { v.problems.push(format!("The order gives ihatecrypto {bps} basis points, not {}.", a.fee.1)) }
+            } else {
+                others = others.saturating_add(bps);
+            }
+        }
+        if others > PROTOCOL_BPS {
+            v.problems.push(format!("The order carries {others} basis points of fees besides ihatecrypto's, more than 1Click's own {PROTOCOL_BPS}."));
+        }
+        // What 1Click's swap view takes is what the wallet sends, and never more than was approved.
+        let takes = bound.get(if a.sell { "amountIn" } else { "maxAmountIn" });
+        if takes.map(String::as_str) != Some(a.deposit) {
+            v.problems.push(format!("1Click's order takes {}, not the {} units about to be sent.", takes.map_or("an unknown amount", String::as_str), a.deposit));
+        }
+        if a.sell && a.deposit != a.quantity { v.problems.push(format!("A sale deposits its own quantity, {} units, not {}.", a.quantity, a.deposit)) }
+        match dec(a.deposit) {
+            Some(d) if d > a.most || d <= Decimal::ZERO => v.problems.push(format!("The deposit, {} units, is more than the {} approved.", a.deposit, a.most.normalize())),
+            Some(_) => {}
+            None => v.problems.push(format!("The deposit isn't a number of units: {}.", a.deposit)),
+        }
+        match bound.get("deadline").and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()) {
+            Some(ends) => {
+                let d = bound.get("deadline").map_or("", String::as_str);
+                if ends.timestamp() > a.deadline + 3600 { v.problems.push(format!("1Click keeps the order until {d}, later than asked.")) }
+                if ends.timestamp() < a.now + 600 { v.problems.push(format!("The order runs out at {d}, before it could rest.")) }
+            }
+            None => v.problems.push("1Click didn't say until when the order rests.".into()),
+        }
+        if v.ok() { v.checks.push("1Click holds the order as asked: the pair, side, amount and price, your own addresses, private, with only ihatecrypto's fee.".into()) }
+        v
+    }
+
+    /// Whether the price is already through the market, so the order would fill at once — a swap at market, not a limit:
+    /// a sale at or under what one coin sells for now, a buy at or over what it costs.
+    pub fn fills_at_once(sell: bool, price: Decimal, market: Decimal) -> bool {
+        market > Decimal::ZERO && if sell { price <= market } else { price >= market }
+    }
+}
+
 #[cfg(test)]
 mod tests;

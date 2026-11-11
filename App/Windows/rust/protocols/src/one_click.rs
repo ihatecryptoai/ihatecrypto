@@ -322,3 +322,113 @@ pub async fn settled_at(base: &str, deposit_address: &str, delays: &[Duration]) 
         }
     }).await
 }
+
+// Limit orders (/v0/orders, checked 2026-11-11)
+
+/// ihatecrypto's fee on a limit order: 5 basis points (0.05%, as on Hyperliquid) of what goes in, paid to the owner's
+/// NEAR Intents account. 1Click deducts it from the input; the guard refuses an order that carries any other fee.
+pub const ORDER_FEE: (&str, i64) = ("ihatecrypto.near", 5);
+
+/// A limit order as 1Click keeps it, flattened for the guard: `orderType`, `side`, `baseAsset`, `quoteAsset`,
+/// `quantity`, `price`, `depositAddress`, `depositType`, `recipient`, `recipientType`, `refundTo`, `refundType`,
+/// `confidentiality`, `fillStatus`, `payoutStatus`, `deadline`, `depositedAmount`, the swap view's `swapType` and
+/// `amountIn` / `maxAmountIn` / `minAmountOut` / `amountOut`, `filledIn` / `filledOut` (the fills' sums), and `appFees`
+/// as «recipient:bps» joined by «,».
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Order {
+    pub id: String,
+    pub fields: HashMap<String, String>,
+}
+
+impl Order {
+    pub fn get(&self, key: &str) -> Option<&str> { self.fields.get(key).map(String::as_str) }
+    /// Funded and resting, or waiting for its deposit: not filled, canceled or expired.
+    pub fn is_open(&self) -> bool {
+        ["AWAITING_DEPOSIT", "OPEN", "PARTIALLY_FILLED", "PENDING_CANCEL"].contains(&self.get("fillStatus").unwrap_or(""))
+    }
+}
+
+/// One order out of 1Click's JSON:API `data` object; None when it isn't one.
+pub fn parse_order(data: &Value) -> Option<Order> {
+    let id = s(data, "id")?;
+    let a = data.get("attributes").filter(|a| a.is_object())?;
+    let mut f: HashMap<String, String> = ["orderType", "side", "baseAsset", "quoteAsset", "quantity", "price", "depositAddress", "depositMemo",
+        "depositType", "recipient", "recipientType", "refundTo", "refundType", "confidentiality", "fillStatus", "payoutStatus", "deadline",
+        "createdAt", "depositedAmount"].iter().filter_map(|k| Some((k.to_string(), s(a, k)?.to_string()))).collect();
+    if let Some(v) = a.get("swapView").filter(|v| v.is_object()) {
+        for k in ["swapType", "amountIn", "maxAmountIn", "minAmountOut", "amountOut"] {
+            if let Some(x) = s(v, k) { f.insert(k.into(), x.into()); }
+        }
+    }
+    let fees: Vec<String> = a.get("appFees").and_then(Value::as_array).into_iter().flatten().map(|fee| {
+        // NSNumber's intValue: a whole number, a fraction cut; anything else -1.
+        let bps = fee.get("fee").and_then(|n| n.as_i64().or_else(|| n.as_f64().map(|x| x as i64))).unwrap_or(-1);
+        format!("{}:{bps}", s(fee, "recipient").unwrap_or("?"))
+    }).collect();
+    f.insert("appFees".into(), fees.join(","));
+    let fills = a.get("partialFills").and_then(Value::as_array).cloned().unwrap_or_default();
+    let sum = |k: &str| fills.iter().filter_map(|x| s(x, k).and_then(dec)).fold(Decimal::ZERO, |a, b| a.checked_add(b).unwrap_or(a)).normalize().to_string();
+    f.insert("filledIn".into(), sum("amountIn"));
+    f.insert("filledOut".into(), sum("amountOut"));
+    Some(Order { id: id.into(), fields: f })
+}
+
+fn order_from(data: &[u8]) -> Result<Order> {
+    serde_json::from_slice::<Value>(data).ok().and_then(|j| j.get("data").and_then(parse_order)).ok_or_else(|| error(data))
+}
+
+/// A limit order 1Click rests until the price comes, its deadline, or a cancel: `quantity` of the base in its smallest
+/// units, `price` in quote per one whole base. Always confidential (1Click takes no other: «Only confidential orders are
+/// supported»), funded from the origin chain (`depositAddress`), paid out at `recipient`, refunded to `refund_to`, with
+/// ihatecrypto's fee. Needs the partner key: the order belongs to it, and only it reads or cancels the order.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_order(sell: bool, base: &str, quote: &str, quantity: &str, price: &str, refund_to: &str, recipient: &str,
+                          deadline: chrono::DateTime<chrono::Utc>) -> Result<Order> {
+    if key().is_none() {
+        return Err(WalletError("1Click: A limit order needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.".into()));
+    }
+    let attributes = json!({
+        "orderType": "LIMIT", "baseAsset": base, "quoteAsset": quote, "quantity": quantity, "side": if sell { "SELL" } else { "BUY" }, "price": price,
+        "depositType": "ORIGIN_CHAIN", "refundTo": refund_to, "refundType": "ORIGIN_CHAIN", "recipient": recipient,
+        "recipientType": "DESTINATION_CHAIN", "confidentiality": "basic", "deadline": deadline.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        "appFees": [{"recipient": ORDER_FEE.0, "fee": ORDER_FEE.1}],
+    });
+    order_from(&post_json("/orders", &json!({"data": {"type": "orders", "attributes": attributes}})).await?)
+}
+
+/// An order id is opaque: anything but letters, digits and `-_.~` is escaped, so it stays one path segment.
+pub fn order_path(id: &str) -> String {
+    id.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// The order as 1Click holds it now: what the guard checks before the deposit, and its fills after.
+pub async fn order(id: &str) -> Result<Order> {
+    let (data, code) = get(&format!("{BASE}/orders/{}", order_path(id))).await.map_err(|e| WalletError(e.to_string()))?;
+    if !(200..300).contains(&code) { return Err(error(&data)) }
+    order_from(&data)
+}
+
+/// The partner key's orders whose payout isn't final yet, newest first (one page of 50: more open orders than that is
+/// not a wallet's).
+pub async fn open_orders() -> Result<Vec<Order>> {
+    if key().is_none() {
+        return Err(WalletError("1Click: Limit orders need a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.".into()));
+    }
+    let (data, code) = get(&format!("{BASE}/orders?filter%5BisPayoutStatusFinal%5D=false&page%5Bsize%5D=50")).await
+        .map_err(|e| WalletError(e.to_string()))?;
+    parse_orders(&data, code)
+}
+
+pub fn parse_orders(data: &[u8], code: u16) -> Result<Vec<Order>> {
+    let list = serde_json::from_slice::<Value>(data).ok().and_then(|j| j.get("data").and_then(Value::as_array).cloned());
+    match list {
+        Some(list) if (200..300).contains(&code) => Ok(list.iter().filter_map(parse_order).collect()),
+        _ => Err(error(data)),
+    }
+}
+
+/// Asks 1Click to cancel: matching stops, what filled is paid out, the rest comes back to the order's refund address.
+/// Asynchronous: a last slice can still fill.
+pub async fn cancel_order(id: &str) -> Result<()> {
+    post_json(&format!("/orders/{}/cancel", order_path(id)), &json!({})).await.map(|_| ())
+}

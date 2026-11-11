@@ -60,7 +60,7 @@ impl Executor {
     }
 
     /// This wallet's own address on `place`: Solana's, the EVM one, or its NEAR account (`near`, from the signer).
-    fn intent_address(&self, place: &str, near: Option<&str>) -> Result<String> {
+    pub(crate) fn intent_address(&self, place: &str, near: Option<&str>) -> Result<String> {
         if place == "near" {
             let Some(near) = near.filter(|n| n.len() == 64 && n.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) else {
                 return fail("The signer has no NEAR account for this wallet.");
@@ -127,28 +127,8 @@ impl Executor {
         let gets = dec(&live.quote.amount_out_formatted);
         self.report(&format!("NEAR Intents{}: {} {} on {} → ≈ {} {} on {}.", if confidential { " (private)" } else { "" }, Fmt::num(amount, 8), live.origin.symbol, place_name(from), Fmt::num(gets, 6),
                              live.destination.symbol, place_name(to)));
-        // The deposit: a transfer to 1Click's address, which the signer asks to allow in person the first time.
-        let tx = if from == "near" {
-            let (true, Some(account)) = (live.origin.symbol == "NEAR", near) else {
-                return fail("From NEAR, ihatecrypto sends NEAR itself. Its other tokens there can't be signed yet. Nothing was signed.");
-            };
-            let context = Near::tx_context(account).await?;
-            let yocto: u128 = live.units.parse().unwrap_or(0);
-            let keep = u128::from(context.storage_bytes).saturating_mul(10_000_000_000_000_000_000)
-                .saturating_add(near::intent_deposit_overhead(context.gas_price.parse().unwrap_or(100_000_000)));
-            let balance: u128 = context.balance.parse().unwrap_or(0);
-            if yocto.saturating_add(keep) > balance {
-                return fail(format!("{} NEAR can go: the account keeps {} for its storage and the transaction.", near::near(balance.saturating_sub(keep)), near::near(keep)));
-            }
-            let signed = self.signer.sign_near_intent_deposit(yocto, deposit.clone(), context.nonce, context.block_hash.clone()).await?;
-            self.record("1click", &deposit, Kind::Signed, &format!("{}→{} {} near → {to}", live.origin.symbol, live.destination.symbol, text(amount)))?;
-            Near::send(&signed).await?
-        } else {
-            let sent = self.send_token(a, Some(amount), from, &deposit, "the 1Click deposit").await?;
-            self.record("1click", &deposit, Kind::Signed, &format!("{}→{} {} {from} → {to}", live.origin.symbol, live.destination.symbol, text(amount)))?;
-            sent.split('/').filter(|s| !s.is_empty()).last().unwrap_or("").trim().to_string()
-        };
-        if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, &deposit).await; }
+        self.intent_deposit(a, &live.origin.symbol, amount, &live.units, from, &deposit, near,
+                            ("1click", &deposit, &format!("{}→{} {} {from} → {to}", live.origin.symbol, live.destination.symbol, text(amount)))).await?;
         let started = Instant::now();
         let s = self.one_click_settled(&deposit, &format!("{} went back to {}", live.origin.symbol, place_name(from)), live.quote.time_estimate).await?;
         let unlinked = if confidential { "' Confidential Intents: the deposit and the payout can't be matched on chain," } else { "" };
@@ -157,5 +137,36 @@ impl Executor {
                            place_name(to), started.elapsed().as_secs());
         self.report(&line);
         Ok(line)
+    }
+
+    /// A deposit to a 1Click address: native NEAR through the signer's wrap.near deposit (the account keeps its storage and
+    /// the transaction's cost), any other token as a plain transfer, which the signer asks to allow in person the first
+    /// time. Written to the journal once signed (`journal`: chain, id, note), then 1Click is told about it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn intent_deposit(&self, a: &str, symbol: &str, amount: Decimal, units: &str, from: &str, deposit: &str, near: Option<&str>,
+                                       journal: (&str, &str, &str)) -> Result<()> {
+        let tx = if from == "near" {
+            let (true, Some(account)) = (symbol == "NEAR", near) else {
+                return fail("From NEAR, ihatecrypto sends NEAR itself. Its other tokens there can't be signed yet. Nothing was signed.");
+            };
+            let context = Near::tx_context(account).await?;
+            let yocto: u128 = units.parse().unwrap_or(0);
+            let keep = u128::from(context.storage_bytes).saturating_mul(10_000_000_000_000_000_000)
+                .saturating_add(near::intent_deposit_overhead(context.gas_price.parse().unwrap_or(100_000_000)));
+            let balance: u128 = context.balance.parse().unwrap_or(0);
+            if yocto.saturating_add(keep) > balance {
+                return fail(format!("{} NEAR can go: the account keeps {} for its storage and the transaction.", near::near(balance.saturating_sub(keep)), near::near(keep)));
+            }
+            let signed = self.signer.sign_near_intent_deposit(yocto, deposit.into(), context.nonce, context.block_hash.clone()).await?;
+            self.record(journal.0, journal.1, Kind::Signed, journal.2)?;
+            Near::send(&signed).await?
+        } else {
+            let sent = self.send_token(a, Some(amount), from, deposit, "the 1Click deposit").await?;
+            // Sent: nothing after it may fail, or a Try again would pay twice.
+            let _ = self.record(journal.0, journal.1, Kind::Signed, journal.2);
+            sent.split('/').filter(|s| !s.is_empty()).last().unwrap_or("").trim().to_string()
+        };
+        if !tx.is_empty() { let _ = one_click::submit_deposit(&tx, deposit).await; }
+        Ok(())
     }
 }

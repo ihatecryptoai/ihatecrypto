@@ -680,9 +680,10 @@ impl Engine {
     /// Never keys or the user's own addresses.
     pub fn router_context(&self) -> Context {
         let mut c = Context { recent: self.recent_chat(), ..Context::default() };
-        let (intent, attached, also, boards, dca, alerts, tasks) = {
+        let (intent, attached, also, boards, dca, limits, alerts, tasks) = {
             let st = self.st();
-            (st.intent.clone(), st.attached.clone(), st.also_attached.clone(), st.boards().clone(), st.jupiter_dca.clone(), st.alerts.clone(), st.tasks.clone())
+            (st.intent.clone(), st.attached.clone(), st.also_attached.clone(), st.boards().clone(), st.jupiter_dca.clone(), st.limit_orders.clone(),
+             st.alerts.clone(), st.tasks.clone())
         };
         c.plan = (intent != TradeIntent::default()).then(|| intent.command());
         c.canvas.extend(self.move_facts());
@@ -693,6 +694,8 @@ impl Engine {
         // The Jupiter DCA board every canvas shows once its orders are read (the Mac's canvasBlocks, Agent.swift:343-347).
         // Only a board among the six told above stands in for it: one pinned further back would leave the model without them.
         if let Some(dca) = &dca && !six.iter().any(|b| b.title == "Jupiter DCA") { c.canvas.push(format!("block {}", self.block_facts(dca))) }
+        // The open limit orders as last read (Agent.swift's «limit orders board»).
+        if let Some(l) = &limits && !l.lines.is_empty() { c.canvas.push(format!("limit orders board, open (private, on 1Click): {}", l.lines.join("; "))) }
         c.canvas.extend(alerts.iter().map(|a| format!("price alert: {}", self.alert_text(a))));
         let schedule = if tasks.is_empty() { "nothing scheduled".to_string() } else { tasks.iter().map(|t| self.task_text(t)).collect::<Vec<_>>().join("; ") };
         c.canvas.push(format!("schedule: {schedule}"));

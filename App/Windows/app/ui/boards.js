@@ -1150,6 +1150,7 @@ function resultBlock(b) {
   if (d.movers) return moversBlock(b, d.movers);
   if (d.approvals) return approvalsBlock(b, d.approvals);
   if (d.dca) return dcaBlock(b, d.dca);
+  if (d.limits) return limitsBlock(b, d.limits);
   if (d.receive) return receiveBlock(b, d.receive);
   if (d.service) return serviceBlock(b, d.service);
   const rows = (b.lines || []).map((l) => l === "—" ? h("div", { class: "route-result-divider" }) : h("div", { class: "route-result-row selectable" }, l));
@@ -1604,6 +1605,27 @@ function dcaBlock(b, rows) {
           h("span", {}, t(`bought ${o.received} ${o.coin}`, `куплено ${o.received} ${o.coin}`))));
     }),
     h("div", { class: "secondary small" }, t("On-chain: Jupiter's keepers buy even with ihatecrypto closed. Cancel returns what wasn't spent and the rent.", "В сети: Jupiter покупает, даже когда ihatecrypto закрыт. Отмена вернёт непотраченное и ренту."))),
+  { width: 520, extra: refresh(b) });
+}
+
+/** Open limit orders on 1Click (LimitOrdersBoard): each order's side, coin, price, how much filled and until when, with
+ *  Cancel, whose card comes for Confirm. */
+function limitsBlock(b, rows) {
+  return blockFrame(b, t("Limit orders", "Лимитные ордера"), h("div", { class: "route-result" },
+    h("span", { class: "route-status-chip route-dca-chip" }, rows.length === 1 ? t("1 open", "1 открыт") : t(`${rows.length} open`, `открыто: ${rows.length}`)),
+    rows.map((o) => h("div", { class: "route-dca" },
+      h("div", { class: "route-dca-head" }, logo(o.coin, 22),
+        h("b", {}, o.sell ? t(`Sell ${o.coins} ${o.coin} at ${o.price}`, `Продать ${o.coins} ${o.coin} по ${o.price}`)
+          : t(`Buy ${o.coins} ${o.coin} at ${o.price}`, `Купить ${o.coins} ${o.coin} по ${o.price}`)), h("span", { class: "spacer" }),
+        o.status === "PENDING_CANCEL" ? null : h("button", { class: "link-btn loss", disabled: !!ui.state.thinking,
+          title: t("Its card comes for Confirm: what hasn't filled comes back", "Придёт карточка на подтверждение: вернётся то, что не исполнилось"),
+          onclick: () => act("send", { text: o.cancel }) }, t("Cancel", "Отменить"))),
+      h("div", { class: "route-progress" }, h("span", { style: `width:${(Math.min(Math.max(o.done || 0, 0), 1) * 100).toFixed(1)}%` })),
+      h("div", { class: "route-dca-foot secondary small num" },
+        h("span", {}, t(`${o.state} · filled ${o.filled} of ${o.coins}`, `${o.state} · исполнено ${o.filled} из ${o.coins}`)),
+        o.until ? h("span", {}, t(`until ${o.until}`, `до ${o.until}`)) : null))),
+    h("div", { class: "secondary small" }, t("Private, through NEAR Intents: 1Click fills them when the price comes, with ihatecrypto closed too. Cancel brings back what hasn't filled.",
+      "Приватно, через NEAR Intents: 1Click исполнит их, когда цена дойдёт, даже при закрытом ihatecrypto. Отмена вернёт то, что не исполнилось."))),
   { width: 520, extra: refresh(b) });
 }
 

@@ -189,6 +189,10 @@ impl Engine {
             // A private swap pays its USDC from the network named, its NEAR from the NEAR account: said before the card.
             W::SwapPrivately { from: a, on, amount, .. } if a.eq_ignore_ascii_case("USDC") => lacks(self.usdc_free(on), Some(*amount), &W::place_name(on), "USDC"),
             W::SwapPrivately { from: a, on, amount, .. } if a.eq_ignore_ascii_case("NEAR") && on == "near" => lacks(self.held_there("NEAR", "near"), Some(*amount), "NEAR", "NEAR"),
+            // A limit order's deposit: a buy's USDC from its network, a sale's NEAR from the NEAR account, SOL from Solana.
+            W::LimitOrder { sell: false, amount, usdc_on, .. } => lacks(self.usdc_free(usdc_on), Some(*amount), &W::place_name(usdc_on), "USDC"),
+            W::LimitOrder { sell: true, coin, on, amount, .. } if coin == "NEAR" && on == "near" => lacks(self.held_there("NEAR", "near"), Some(*amount), "NEAR", "NEAR"),
+            W::LimitOrder { sell: true, coin, on, amount, .. } if coin == "SOL" && on == "solana" => lacks(self.held_there("SOL", "solana"), Some(*amount), "Solana", "SOL"),
             W::BuyOn { usdc: Some(asked), from: Some(from), .. } if from != "solana" => {
                 lacks(self.usdc_free(from), Some(*asked), &W::place_name(from), dollar(from))
             }

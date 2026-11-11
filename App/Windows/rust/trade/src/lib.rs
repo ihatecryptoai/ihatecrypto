@@ -60,6 +60,7 @@ pub mod wallet;
 // G3: swaps.
 pub mod cross_swap;
 pub mod intent_swap;
+pub mod limit_order;
 pub mod stocks;
 pub mod swap;
 pub mod tempo_swap;

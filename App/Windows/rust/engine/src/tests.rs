@@ -433,12 +433,13 @@ fn sample_snapshot() -> Snapshot {
         build: Some("20261106.1200".into()), update_ready: Some("0.9.0".into()),
         journey: Some(crate::journey::Journey::new("2 USDC → Mom".into(), "solana", "base", true, Some(30), 1)),
         privacy: Some(crate::journey::PrivacyChoice { is_private: true, rows: vec![] }),
+        pending_private: true,
         tee: Some(crate::journey::TeeView { model: "m".into(), gateway_key: "k".into(), at: 1, reply: None, why: None }),
     }
 }
 
 /// Every key Swift's Snapshot writes, in its order: what App/Windows/app/ui/*.js reads.
-const SNAPSHOT_KEYS: [&str; 86] = [
+const SNAPSHOT_KEYS: [&str; 87] = [
     "signer", "wallets", "active", "addresses", "phrase", "portfolio", "positions", "chat", "sent", "thinking", "draft", "card", "site", "options",
     "running", "plan", "model", "providers", "modelChoices", "secondCheck", "jevOpenRouter", "language", "russian", "book", "history", "alerts", "tasks",
     "recurring", "jupiterDCA", "automation", "skills", "memory", "favorites", "canvases", "folders", "canvas", "boards", "runningBoard", "multisigs",
@@ -446,7 +447,7 @@ const SNAPSHOT_KEYS: [&str; 86] = [
     "context", "modelRunning", "agentStep", "optionsMessage", "retryBoard", "quote", "models", "lock", "modules", "trading", "nodes", "stepEdit",
     "schedulePaused", "scheduleRuns", "multisigHeld", "scheduleKey", "moves", "movesDay", "recentRequests", "automationBudget", "stuck", "places",
     "notices", "openAtLogin", "topUp", "appLanguage", "localSetup", "recentlyClosed", "addressExtras", "planAlertExample", "chipsPosition",
-    "lastBalance", "build", "updateReady", "journey", "privacy", "tee",
+    "lastBalance", "build", "updateReady", "journey", "privacy", "pendingPrivate", "tee",
 ];
 
 #[test]
@@ -484,9 +485,9 @@ fn the_state_has_the_keys_the_window_reads_and_leaves_out_what_is_nil() {
     (empty.automation_usd, empty.positions_pnl, empty.limit_waiting, empty.context, empty.agent_step, empty.options_message) = (None, None, None, None, None, None);
     (empty.retry_board, empty.quote, empty.step_edit, empty.schedule_key, empty.moves_day, empty.automation_budget) = (None, None, None, None, None, None);
     (empty.top_up, empty.plan_alert_example, empty.chips_position, empty.last_balance, empty.build, empty.update_ready) = (None, None, None, None, None, None);
-    (empty.journey, empty.privacy, empty.tee) = (None, None, None);
+    (empty.journey, empty.privacy, empty.tee, empty.pending_private) = (None, None, None, false);
     let lean: Value = serde_json::from_slice(&wire::window(&empty).unwrap()).unwrap();
-    assert_eq!(keys(&lean).len(), 86 - 33);
+    assert_eq!(keys(&lean).len(), 87 - 34);
 }
 
 #[test]

@@ -1151,6 +1151,7 @@ impl Executor {
         let sz = market.sz_decimals;
         let size = Self::partial_close_size(position.size, fraction, sz, asset)?;
         if size >= position.size.abs() { return self.close(asset).await }   // a share of 1 or more is the whole
+        if let Some(why) = Self::partial_close_refusal(position.size, fraction, market.mark_px, sz, asset) { return fail(why) }
         let buy = position.size < Decimal::ZERO;
         let two = SLIPPAGE * Decimal::TWO;
         let px = price(num(Num::of(market.mark_px) * if buy { Decimal::ONE + two } else { Decimal::ONE - two })?, sz);
@@ -1233,6 +1234,20 @@ impl Executor {
         let gap = (if long { Num::of(entry) - stop } else { Num::of(stop) - entry }).0?.max(Decimal::ZERO);
         let loss = (Num::of(gap) * size + Num::of(size) * (Num::of(entry) + stop) * RiskCalc::trade_fee()).0?;
         ((Num::of(loss) / equity * 100).0? > policy.max_risk_pct).then_some(loss)
+    }
+
+    /// Hyperliquid's $10 minimum order counts for a reduce-only close too: a part worth less is refused by the venue (seen
+    /// on mainnet: a 0.003 ETH close, $8, refused while the whole 0.004, $10.6, went). Said before anything is sent, with
+    /// the way that works. None when the part reaches $10 or is the whole position.
+    pub fn partial_close_refusal(position: Decimal, fraction: Decimal, mark: Decimal, sz_decimals: i64, asset: &str) -> Option<String> {
+        if fraction >= Decimal::ONE || mark <= Decimal::ZERO { return None }
+        let size = Self::partial_close_size(position, fraction, sz_decimals, asset).ok().filter(|s| *s < position.abs())?;
+        let part = (Num::of(size) * mark).0?;
+        if part >= Plan::MIN_NOTIONAL { return None }
+        let name = asset.strip_prefix("xyz:").unwrap_or(asset);
+        Some(format!("Closing {} of the {name} position is {}, under Hyperliquid's $10 minimum order, which counts for a close too. \
+                      Nothing was closed: the stop and take-profit stay. Close it all ({}), or a share worth $10 or more.",
+                     (Num::of(fraction) * 100).0.map_or("NaN%".into(), Fmt::pct), usd(part), (Num::of(position.abs()) * mark).0.map_or("$NaN".into(), usd)))
     }
 
     /// The size a partial close sends: the share in whole steps of the market's szDecimals, rounded down. A share smaller

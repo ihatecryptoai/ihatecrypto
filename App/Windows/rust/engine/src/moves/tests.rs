@@ -242,6 +242,36 @@ async fn the_coin_just_traded_is_the_one_a_position_command_means() {
     }).await;
 }
 
+/// Hyperliquid's $10 minimum counts for a close too: a part worth less is said before any card, with «Close it all» as
+/// a card; a part worth more waits for Confirm as before.
+#[tokio::test]
+async fn a_close_under_ten_dollars_is_said_with_close_it_all() {
+    run(async |e| {
+        e.st_mut().positions = vec![position("ETH", Decimal::new(4, 3))];
+        e.st_mut().markets.insert("ETH".into(), ihatecrypto_core::plan::Market::new("ETH", 2650.into(), 4, 25));
+        e.pend_position(ihatecrypto_core::position_command::PositionCommand::Close(Decimal::new(75, 2)), "ETH", "close 75% ETH");
+        assert!(e.st().pending.is_none());
+        assert!(last(&e).contains("Hyperliquid won't take a close under $10"), "{}", last(&e));
+        assert_eq!(e.st().options.iter().map(|o| o.command.as_str()).collect::<Vec<_>>(), ["close ETH"]);
+        e.st_mut().positions = vec![position("ETH", 1.into())];
+        e.pend_position(ihatecrypto_core::position_command::PositionCommand::Close(Decimal::new(5, 1)), "ETH", "close half ETH");
+        assert!(matches!(e.st().pending, Some(Pending::Position { .. })));
+    }).await;
+}
+
+/// Limit orders belong to the NEAR Intents partner key: without one, no card, no list, no cancel.
+#[tokio::test]
+async fn limit_orders_without_the_partner_key_are_refused_before_any_card() {
+    run(async |e| {
+        protocols::one_click::set_key(None);
+        for text in ["limit sell 0.1 SOL at 200", "show limit orders", "cancel limit orders"] {
+            e.handle_wallet(&WalletCommand::parse(text).unwrap(), None).await;
+            assert!(e.st().pending.is_none(), "{text}");
+            assert!(last(&e).contains("NEAR Intents key"), "{text}: {}", last(&e));
+        }
+    }).await;
+}
+
 #[tokio::test]
 async fn a_limit_waiting_counts_as_open() {
     run(async |e| {

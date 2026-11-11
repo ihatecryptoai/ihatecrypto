@@ -17,6 +17,7 @@ mod g2_fake;
 mod g4_fake;
 mod hl_spot;
 mod kamino_borrow;
+mod limit_order;
 mod multisig;
 mod one_click_bridge;
 mod send;

@@ -112,7 +112,7 @@ impl Engine {
         }
         if let Some(c) = command {
             return match c {
-                W::Receive | W::Yields(_) | W::ShowApprovals | W::JupiterDcaOrders | W::MultisigShow | W::StopSchedules | W::ReceiveAcross { .. } => ChainKind::Now,
+                W::Receive | W::Yields(_) | W::ShowApprovals | W::JupiterDcaOrders | W::LimitOrders | W::MultisigShow | W::StopSchedules | W::ReceiveAcross { .. } => ChainKind::Now,
                 W::Schedule { .. } => ChainKind::Later,
                 _ => ChainKind::Move(c.clone()),
             };

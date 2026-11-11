@@ -446,6 +446,8 @@ pub struct State {
     pub claim_owed: Option<ClaimOwed>,
     /// The Jupiter DCA orders as last read this session: drawn on every canvas with no plan (earn.rs); None when none run.
     pub jupiter_dca: Option<Board>,
+    /// This wallet's open limit orders on 1Click as last read this session (earn.rs); None when none are open.
+    pub limit_orders: Option<Board>,
     /// The Ledger's Hyperliquid trading key, and whether the account approved ihatecrypto's fee (trading_key.rs).
     pub ledger_agent: Option<SignerReply>,
     pub fee_approved: Option<bool>,
@@ -560,7 +562,7 @@ impl State {
             ledger: store::load("ledger.json"),
             ledger_connect: None, ledger_prompt: None, awaiting_amount: None, chain_state: ChainState::default(), dca_choice: None,
             open_via_1click: None, parked: HashMap::new(), route_way: None, way_quotes: None, unpriced: None, takes_at: None, claim_owed: None,
-            jupiter_dca: None, ledger_agent: None, fee_approved: None, costly: None, in_transit: vec![], intent: TradeIntent::default(),
+            jupiter_dca: None, limit_orders: None, ledger_agent: None, fee_approved: None, costly: None, in_transit: vec![], intent: TradeIntent::default(),
             plan_board: None, traded_plan: None,
             alerts: store::load("alerts.json").unwrap_or_default(),
             loan_guards: store::load("loanguards.json").unwrap_or_default(), guard_health: HashMap::new(),

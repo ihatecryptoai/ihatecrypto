@@ -52,6 +52,8 @@ pub struct BlockData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dca: Option<Vec<DcaRow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Vec<LimitRow>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receive: Option<ReceiveCard>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<ServiceCard>,
@@ -288,6 +290,26 @@ pub struct Approval {
     pub permit2: bool,
     /// The revoke's phrase, put in the chat field.
     pub revoke: String,
+}
+
+/// One open limit order on 1Click (LimitOrdersBoard): its side, coin, size and price, how much filled, until when, and
+/// the chat command its Cancel sends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitRow {
+    pub id: String,
+    pub sell: bool,
+    pub coin: String,
+    pub coins: String,
+    pub price: String,
+    pub filled: String,
+    /// 0…1 of the order filled.
+    pub done: f64,
+    pub status: String,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    pub cancel: String,
 }
 
 /// `BlockData.DCARow`: one Jupiter DCA order.

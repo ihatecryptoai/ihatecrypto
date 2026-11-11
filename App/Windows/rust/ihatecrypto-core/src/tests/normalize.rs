@@ -482,9 +482,9 @@ fn the_texts_are_mains_with_the_windows_lines() {
     assert!(system.contains("a Windows app — this chat") && system.contains("signer on this PC") && system.contains("the signer still asks for Windows Hello."));
     assert!(!system.contains("Mac") && !system.contains("Touch ID"));
     assert!(forms.contains(&format!("\n  {}\n", crate::stablecoins::brief())));
-    assert_eq!((forms.chars().count(), system.chars().count()), (33_960, 54_654));
+    assert_eq!((forms.chars().count(), system.chars().count()), (35_083, 55_777));
     let mut c = Context { now: "N".into(), ..Context::default() };
-    assert_eq!(R::brief("hi", &c), "Your instructions are about 13600 tokens, sent with every call along with this brief.\nPlan on the canvas: none\nOpen positions: none\nSafe search: ON — on Solana only Jupiter-verified tokens can be bought (by ticker: buy <TICKER> on solana). An unverified token by its mint needs Safe search off in Settings › General; offer to watch it instead.\nNow (local time): N\nReply language: English\nMessage: hi");
+    assert_eq!(R::brief("hi", &c), "Your instructions are about 13900 tokens, sent with every call along with this brief.\nPlan on the canvas: none\nOpen positions: none\nSafe search: ON — on Solana only Jupiter-verified tokens can be bought (by ticker: buy <TICKER> on solana). An unverified token by its mint needs Safe search off in Settings › General; offer to watch it instead.\nNow (local time): N\nReply language: English\nMessage: hi");
     c.memory = strings(&["no Ethereum"]);
     c.capital = Some("$30".into());
     c.safe_search = false;

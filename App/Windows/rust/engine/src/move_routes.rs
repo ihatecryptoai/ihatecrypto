@@ -256,8 +256,8 @@ impl Engine {
             if let Some(ways) = ways {
                 self.set_way_quotes(Some(WayQuotes { command: c.clone(), ways: ways.clone() }));
                 self.redraw_route(board, c);
-                if !matches!(c, WalletCommand::AaveBorrow { .. }) { return true }
-                self.liquidation_caution(board, &ways);
+                if !matches!(c, WalletCommand::AaveBorrow { .. } | WalletCommand::LimitOrder { .. }) { return true }
+                if matches!(c, WalletCommand::AaveBorrow { .. }) { self.liquidation_caution(board, &ways) }
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 continue;
             }
@@ -278,7 +278,7 @@ impl Engine {
             WalletCommand::Usdt { from, to, .. } | WalletCommand::Bridge { from, to, .. } => EvmNetwork::named(from).is_some() && EvmNetwork::named(to).is_some(),
             WalletCommand::SendToken { name, token, amount: Some(_), network } => matches!(self.across_recipient(name, token, network.as_deref()), Ok(Some(_))),
             WalletCommand::SendPrivately { name, token, network, .. } => self.private_recipient(name, token, network.as_deref()).is_ok(),
-            WalletCommand::SwapPrivately { .. } | WalletCommand::Intents { .. } => true,
+            WalletCommand::SwapPrivately { .. } | WalletCommand::Intents { .. } | WalletCommand::LimitOrder { .. } => true,
             _ => false,
         }
     }
@@ -323,6 +323,20 @@ impl Engine {
             }
             WalletCommand::SwapPrivately { from, on, to, at, amount } => {
                 e.intent_quote_text(from, on, to, at, *amount, near.as_deref(), true).await.ok().map(|(gets, way)| one(&way, &gets))
+            }
+            // A limit order's market: what 1Click gives for this size now. The order rests at its own price, and the executor
+            // asks again and refuses a price through the market.
+            WalletCommand::LimitOrder { sell, coin, on, price, amount, usdc_on, .. } => {
+                let market = e.limit_plan(*sell, coin, on, *price, *amount, usdc_on, near.as_deref()).await.ok()?.market?;
+                let gap = (Num::of(*price) - market) / market * 100;
+                let now = format!("{coin} ≈ {}", Fmt::usd(market));
+                let line = if guard::order::fills_at_once(*sell, *price, market) {
+                    self.say(&format!("{now} now · fills at once: that's a swap"), &format!("{now} сейчас · исполнится сразу: это обмен"))
+                } else {
+                    let gap = gap.0.map_or_else(|| "NaN".into(), |g| format!("{}{}", if g > Decimal::ZERO { "+" } else { "" }, Fmt::num(g, 1)));
+                    self.say(&format!("{now} now · {gap}% away"), &format!("{now} сейчас · до цены {gap}%"))
+                };
+                Some(one("1Click", &line))
             }
             WalletCommand::Intents { from, to, amount } => {
                 // What lands; the executor holds the move to it (within 1%).
@@ -469,6 +483,8 @@ impl Engine {
             WalletCommand::SwapOn { place, from, to, amount } => self.pair(c, place, from, to, *amount),
             WalletCommand::CrossSwap { from, on, to, at, amount } => Some(self.cross(c, from, on, to, at, *amount)),
             WalletCommand::SwapPrivately { from, on, to, at, amount } => Some(self.private_swap(c, from, on, to, at, *amount)),
+            WalletCommand::LimitOrder { sell, coin, on, price, amount, usdc_on, days } => Some(self.limit_route(c, *sell, coin, on, *price, *amount, usdc_on, *days)),
+            WalletCommand::LimitCancel(coin) => Some(self.limit_cancel_route(coin.as_deref())),
             WalletCommand::Intents { from, to, amount } => Some(self.intents_route(from, to, *amount)),
             WalletCommand::AgentCreate { .. } | WalletCommand::AgentFund { .. } | WalletCommand::AgentSend { .. } | WalletCommand::AgentFreeze(_) => self.agent_steps(c),
             WalletCommand::RevokeApproval { place, token, spender, permit2 } => {
@@ -813,6 +829,51 @@ impl Engine {
         vec![self.step(&self.label_from(src), &format!("{} {a_name}", Fmt::num(x, 8)), &own, out),
              self.step(&say("PRIVATE SWAP · CONFIDENTIAL INTENTS", "ПРИВАТНЫЙ ОБМЕН · CONFIDENTIAL INTENTS"), &to_name, &line, None),
              self.step(&self.label_to(dst), &to_name, &own, arrives)]
+    }
+
+    /// A limit order (the Mac's limitRoute): the deposit from this wallet's own address, the order resting privately with
+    /// 1Click at its price (the market now beside it, once quoted), and where what it buys or brings lands when it fills.
+    /// Nothing arrives at once.
+    #[allow(clippy::too_many_arguments)]
+    fn limit_route(&self, c: &WalletCommand, sell: bool, coin: &str, on: &str, price: Decimal, amount: Decimal, usdc_on: &str, days: Option<i64>) -> Vec<Step> {
+        let say = |a: &str, b: &str| self.say(a, b);
+        let (from, to) = if sell { (on, usdc_on) } else { (usdc_on, on) };
+        let paid = if sell { coin } else { "USDC" };
+        let out = if from == "near" && paid == "NEAR" { self.moved("NEAR", "near", Some(-amount), false) } else { self.moved(paid, from, Some(-amount), false) };
+        let coins = if sell { Some(amount) } else { (Num::of(amount) * trade::limit_order::LIMIT_BUY_HEADROOM / price).0 };
+        let market = self.quotes(c).and_then(|q| q.first().map(|w| w.gets.clone()));
+        let until = Fmt::date(chrono::Utc::now() + chrono::Duration::days(days.unwrap_or(7)));
+        let p = Fmt::usd(price);
+        let own = say("your own address there", "твой собственный адрес там");
+        let gets = if sell { (Num::of(amount) * price).0.map(|u| format!("≈ {} USDC", Fmt::num(u, 2))) } else { coins.map(|x| format!("≈ {} {coin}", Fmt::num(x, 6))) };
+        vec![self.step(&self.label_from(from), &format!("{} {paid}", Fmt::num(amount, 8)), &say(&format!("{own} · rests with 1Click"), &format!("{own} · ждёт в 1Click")), out),
+             self.step(&say("LIMIT ORDER · PRIVATE", "ЛИМИТНЫЙ ОРДЕР · ПРИВАТНО"),
+                       &if sell { say(&format!("Sell {coin} at {p}"), &format!("Продать {coin} по {p}")) } else { say(&format!("Buy {coin} at {p}"), &format!("Купить {coin} по {p}")) },
+                       &(market.map_or_else(|| say("market: quoting… · ", "рынок: считаю… · "), |m| format!("{m} · "))
+                         + &say(&format!("until {until} · 1Click ≈ 0.2% + our 0.05%"), &format!("до {until} · 1Click ≈ 0,2% + наши 0,05%"))), None),
+             self.step(&self.label_to(to), &gets.unwrap_or_else(|| "…".into()),
+                       &say("when it fills · your own address there", "когда исполнится · твой собственный адрес там"), None)]
+    }
+
+    /// Canceling limit orders (the Mac's limitCancelRoute): matching stops, what filled is paid out, the rest comes back.
+    /// Nothing is signed.
+    fn limit_cancel_route(&self, coin: Option<&str>) -> Vec<Step> {
+        let say = |a: &str, b: &str| self.say(a, b);
+        let id = coin.and_then(|c| c.strip_prefix("id:"));
+        let rows = self.st().limit_orders.as_ref().and_then(|b| b.data.as_ref()).and_then(|d| d.limits.clone()).unwrap_or_default();
+        let open: Vec<_> = rows.into_iter().filter(|o| match id {
+            Some(id) => o.id == id,
+            None => coin.is_none_or(|c| o.coin.eq_ignore_ascii_case(c)),
+        }).collect();
+        let coin = if id.is_none() { coin.map(str::to_string) } else { open.first().map(|o| o.coin.clone()) };
+        let what = if open.is_empty() {
+            coin.as_ref().map_or_else(|| say("all open orders", "все открытые ордера"), |c| say(&format!("{c} orders"), &format!("ордера по {c}")))
+        } else {
+            open.iter().map(|o| format!("{} {} {} {}", if o.sell { say("sell", "продажа") } else { say("buy", "покупка") }, o.coin, say("at", "по"), o.price)).collect::<Vec<_>>().join(" · ")
+        };
+        vec![self.step(&say("CANCEL · NEAR INTENTS", "ОТМЕНА · NEAR INTENTS"),
+                       &coin.map_or_else(|| say("Limit orders", "Лимитные ордера"), |c| say(&format!("{c} limit orders"), &format!("Лимитные ордера по {c}"))), &what, None),
+             self.step(&say("BACK · YOUR OWN ADDRESS", "НАЗАД · ТВОЙ АДРЕС"), &say("What hasn't filled", "Что не исполнилось"), &say("where it came from", "туда, откуда пришло"), None)]
     }
 
     /// USDC through NEAR Intents' 1Click asked for by name (the Mac's intentsRoute): the amount asked is the amount signed.
@@ -1262,6 +1323,15 @@ impl Engine {
                 Some(say(&format!("Through NEAR Intents' Confidential Intents: one deposit on {from} to the 1Click address bound to this quote, checked with 1Click before signing and refused unless 1Click holds it as private. That address needs Windows Hello the first time. {label} comes to your own address on {to}, and on chain the deposit and the payout can't be matched. A refund comes back to {from}."),
                          &format!("Через Confidential Intents от NEAR Intents: один депозит в {from} на адрес 1Click, привязанный к этой котировке, — сверяется с 1Click перед подписью и отклоняется, если 1Click не держит его приватным. Этому адресу в первый раз нужен Windows Hello. {label} придёт на твой же адрес в {to}, и в блокчейне депозит и выплату не связать. Возврат — обратно в {from}.")) + &confirm)
             }
+            WalletCommand::LimitOrder { sell, coin, on, usdc_on, days, .. } => {
+                let (from, to) = if *sell { (name(on), name(usdc_on)) } else { (name(usdc_on), name(on)) };
+                let until = Fmt::date(chrono::Utc::now() + chrono::Duration::days(days.unwrap_or(7)));
+                let lands = if *sell { "USDC" } else { coin.as_str() };
+                Some(say(&format!("A limit order through NEAR Intents, private (Confidential Intents): one deposit from your own address on {from} to the address 1Click binds to the order, checked with 1Click before signing — the pair, the price, your own addresses, private, only ihatecrypto's 0.05%. It rests until {until} and fills, in parts too, when the market gets there. The {lands} comes to your own address on {to} with no signature then. «cancel limit orders» brings back what hasn't filled. That address needs Windows Hello the first time."),
+                         &format!("Лимитный ордер через NEAR Intents, приватный (Confidential Intents): один депозит с твоего адреса в {from} на адрес, который 1Click привязывает к ордеру, — сверяется с 1Click перед подписью: пара, цена, твои адреса, приватность, только 0,05% ihatecrypto. Он ждёт до {until} и исполняется, частями тоже, когда рынок дойдёт до цены. {lands} придёт на твой же адрес в {to} без новой подписи. «отмени лимитки» вернёт то, что не исполнилось. Этому адресу в первый раз нужен Windows Hello.")) + &confirm)
+            }
+            WalletCommand::LimitCancel(_) => Some(say("1Click stops matching: what filled is paid out, the rest comes back to the address it came from in a few minutes. A last slice can still fill. Nothing is signed.",
+                                                      "1Click перестаёт исполнять: исполненное выплачивается, остальное вернётся на адрес, откуда пришло, за несколько минут. Последняя часть ещё может исполниться. Ничего не подписывается.") + &confirm),
             WalletCommand::Intents { from, to, .. } => {
                 let (a, b) = (name(from), name(to));
                 Some(say(&format!("NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays your own address on {b} and refunds to {a}. Its solvers deliver in about a minute."),

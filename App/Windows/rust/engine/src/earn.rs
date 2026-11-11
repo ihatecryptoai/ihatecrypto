@@ -1,5 +1,5 @@
 //! The rates, spreading money across them, rebalancing, Merkl's rewards, coins from networks without a wallet here,
-//! token approvals and Jupiter's DCA list (Earn.swift) — the Mac's, over the same Executor and DeFi modules. What moves
+//! token approvals, Jupiter's DCA list and 1Click's limit orders (Earn.swift, LimitOrdersBoard) — the Mac's, over the same Executor and DeFi modules. What moves
 //! money is a card; Confirm runs it.
 
 use std::time::Duration;
@@ -14,10 +14,11 @@ use protocols::recurring::Order;
 use rust_decimal::Decimal;
 use signer_api::SignerRequest;
 use tokio::task::JoinSet;
+use trade::limit_order::LimitOrderView;
 use trade::morpho::MorphoRates;
 use wallet::WalletError;
 
-use crate::blocks::{BlockData, RateRow, ReceiveCard};
+use crate::blocks::{BlockData, LimitRow, RateRow, ReceiveCard};
 use crate::canvas::{Action, Board, Step};
 use crate::engine::{Engine, Pending};
 use crate::from_core::RouterOption;
@@ -313,6 +314,73 @@ impl Engine {
         let Ok(orders) = e.jupiter_dca_orders().await else { return };
         let found = self.read_dca(&orders);
         if !found && placed && !orders.is_empty() { self.pin_dca(&orders) }
+    }
+
+    // MARK: Limit orders on 1Click
+
+    /// This wallet's open limit orders (None: 1Click didn't answer). The NEAR account, which only the signer names, counts
+    /// as one of its addresses.
+    async fn own_limit_orders(&self) -> Option<Vec<LimitOrderView>> {
+        let e = self.executor().ok()?;
+        let known = self.st().near_address();
+        let near = match known {
+            Some(n) => Some(n),
+            None => self.signer.send(&SignerRequest::NearAddress {}).await.ok().and_then(|r| r.near_address),
+        };
+        e.limit_orders(near.as_deref()).await.ok().map(|l| l.into_iter().map(|o| o.1).collect())
+    }
+
+    /// «show limit orders»: the board of open orders, Cancel on each.
+    pub async fn show_limit_orders(&self, note: Option<String>) {
+        let Some(list) = self.own_limit_orders().await else { return self.reply(&self.say("1Click didn't answer.", "1Click не ответил."), note) };
+        let here = self.read_limits(&list);
+        if !list.is_empty() && !here { self.pin_kind("result", "Limit orders", self.limit_lines(&list), None, None, Some(self.limit_data(&list))) }
+        let said = if list.is_empty() { self.say("No open limit orders.", "Открытых лимитных ордеров нет.") }
+            else { self.say(&format!("Open limit orders: {}. They're on the canvas.", list.len()), &format!("Открытых лимитных ордеров: {}. Они на холсте.", list.len())) };
+        self.reply(&said, Some(note.unwrap_or_else(|| "NEAR Intents · limit orders".into())));
+    }
+
+    /// After an order is placed or canceled: the board shows the orders as they are now; a placed one with no board here
+    /// gets one. 1Click not answering leaves the board as it was.
+    pub async fn refresh_limit_orders(&self, placed: bool) {
+        let Some(list) = self.own_limit_orders().await else { return };
+        let found = self.read_limits(&list);
+        if !found && placed && !list.is_empty() { self.pin_kind("result", "Limit orders", self.limit_lines(&list), None, None, Some(self.limit_data(&list))) }
+    }
+
+    /// The orders on every board pinned on any canvas, and the session's for the model. True when this canvas has one.
+    fn read_limits(&self, list: &[LimitOrderView]) -> bool {
+        let lines = if list.is_empty() { vec![self.say("No open limit orders.", "Открытых лимитных ордеров нет.")] } else { self.limit_lines(list) };
+        let data = (!list.is_empty()).then(|| self.limit_data(list));
+        let mut found = false;
+        {
+            let mut st = self.st_mut();
+            st.limit_orders = (!list.is_empty()).then(|| Board { id: "limit-orders".into(), lines: lines.clone(), data: data.clone(), ..Board::new("result", "Limit orders") });
+            let open = st.canvas_index();
+            for (c, canvas) in st.canvases.iter_mut().enumerate() {
+                for b in canvas.boards.iter_mut().filter(|b| b.kind == "result" && b.title == "Limit orders") {
+                    (b.lines, b.data) = (lines.clone(), data.clone());
+                    if c == open { found = true }
+                }
+            }
+        }
+        self.save_canvases();
+        self.changed();
+        found
+    }
+
+    fn limit_lines(&self, list: &[LimitOrderView]) -> Vec<String> {
+        list.iter().map(|o| format!("{} {} {} at ${}, {}, filled {}", if o.sell { "sell" } else { "buy" }, Fmt::num(o.coins, 6), o.coin, Fmt::num(o.price, 2), o.state(),
+                                    Fmt::num(o.filled, 6))).collect()
+    }
+
+    fn limit_data(&self, list: &[LimitOrderView]) -> BlockData {
+        let rows = list.iter().take(20).map(|o| LimitRow {
+            id: o.id.clone(), sell: o.sell, coin: o.coin.clone(), coins: Fmt::num(o.coins, 6), price: Fmt::usd(o.price), filled: Fmt::num(o.filled, 6),
+            done: if o.coins > Decimal::ZERO { (Num::of(o.filled) / o.coins).0.and_then(|x| x.to_string().parse::<f64>().ok()).unwrap_or(0.0).clamp(0.0, 1.0) } else { 0.0 },
+            status: o.status.clone(), state: o.state(), until: o.until.map(Fmt::date), cancel: format!("cancel limit orders id {}", o.id),
+        }).collect();
+        BlockData { limits: Some(rows), ..BlockData::default() }
     }
 }
 

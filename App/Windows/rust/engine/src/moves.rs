@@ -296,6 +296,11 @@ impl Engine {
             W::Intents { from, to, .. } => {
                 [from, to].iter().map(|p| if *p == "solana" { "solana".to_string() } else { "evm".into() }).collect::<BTreeSet<_>>().into_iter().collect()
             }
+            W::LimitOrder { on, usdc_on, .. } => {
+                [on, usdc_on].iter().map(|p| if *p == "solana" || *p == "near" { p.to_string() } else { "evm".into() }).collect::<BTreeSet<_>>().into_iter().collect()
+            }
+            // Read and canceled with the NEAR Intents key: nothing is signed.
+            W::LimitOrders | W::LimitCancel(_) => vec![],
             // The USDC comes from Solana, or from the EVM network holding it when Solana is short.
             W::SendPrivately { .. } => vec!["solana".into()],
             // The agent wallet's owner is this wallet's NEAR key; its funding leaves Solana.
@@ -371,6 +376,14 @@ impl Engine {
             W::AgentCreate { .. } | W::AgentFund { .. } | W::AgentSend { .. } | W::AgentFreeze(_) => {
                 if let Some(short) = self.agent_before_card(&command) { self.said(&short, note); return }
             }
+            // Limit orders belong to the NEAR Intents partner key: none, no order, no list, no cancel.
+            W::LimitOrder { .. } | W::LimitOrders | W::LimitCancel(_) if one_click::key().is_none() => {
+                self.said(&self.say("Limit orders go through NEAR Intents and belong to its partner key: add one in Settings › General › NEAR Intents key (made at https://partners.near-intents.org → API Keys).",
+                                    "Лимитные ордера идут через NEAR Intents и привязаны к его партнёрскому ключу: добавь ключ в Настройках › Общие › Ключ NEAR Intents (его делают на https://partners.near-intents.org → API Keys)."), note);
+                return;
+            }
+            // Read-only: the board of open orders, no card.
+            W::LimitOrders => { self.show_limit_orders(note.map(Into::into)).await; return }
             W::SendToken { name, token, amount, network } => {
                 let checked = match self.across_recipient(name, token, network.as_deref()) {
                     Ok(Some(_)) if amount.is_none() => Err(WalletError(format!("Say how much {}.", token.to_uppercase()))),
@@ -854,9 +867,31 @@ impl Engine {
     }
 
     pub fn pend_position(&self, command: PositionCommand, coin: &str, text: &str) {
+        if let PositionCommand::Close(share) = command && self.close_too_small(share, coin) { return }
         let pretty = IntentParser::pretty(coin);
         self.show(Pending::Position { command, coin: coin.into() }, &format!("{text} · {pretty}"), vec![], vec![], vec![]);
         self.reply(&self.say(&format!("“{text}” for {pretty}: press Confirm to go ahead."), &format!("«{text}» для {pretty}: нажми «Подтвердить».")), None);
+    }
+
+    /// A part of a position worth under Hyperliquid's $10 minimum can't be closed: said before any card, with closing it
+    /// all as a card. True when it was said.
+    fn close_too_small(&self, share: Decimal, coin: &str) -> bool {
+        let (size, market) = {
+            let st = self.st();
+            (st.positions.iter().find(|p| p.coin == coin).map(|p| p.size), st.markets.get(coin).cloned())
+        };
+        let (Some(size), Some(m)) = (size, market) else { return false };
+        if Executor::partial_close_refusal(size, share, m.mark_px, m.sz_decimals, coin).is_none() { return false }
+        let usd = |x: Num| x.0.map_or_else(|| "$NaN".into(), Fmt::usd);
+        let (name, pct) = (IntentParser::pretty(coin), (Num::of(share) * 100).0.map_or_else(|| "NaN%".into(), Fmt::pct));
+        let (part, whole) = (usd(Num::of(size.abs()) * share * m.mark_px), usd(Num::of(size.abs()) * m.mark_px));
+        self.reply(&self.say(&format!("Closing {pct} of {name} is {part}: Hyperliquid won't take a close under $10. Close it all, {whole}, or a share worth $10 or more."),
+                             &format!("{pct} позиции {name} — это {part}: Hyperliquid не берёт закрытие меньше $10. Закрой её целиком, {whole}, или долю от $10.")), None);
+        self.set_options(vec![RouterOption::new(&self.say(&format!("Close it all · {whole}"), &format!("Закрыть всё · {whole}")),
+                                                &self.say("At the market, the stop and take-profit go with it", "По рынку, стоп и тейк уходят вместе с ней"),
+                                                &format!("close {}", coin.strip_prefix("xyz:").unwrap_or(coin)), true)]);
+        self.changed();
+        true
     }
 
     /// A trade plan by the risk rules, prepared with a fresh quote and simulation: its signatures and what each balance
@@ -1096,7 +1131,8 @@ impl Engine {
             let explains = !matches!(error, trade::Error::Guard(_) | trade::Error::Costly(_));
             if explains && self.st().agent_goal.is_none() { self.explain_failure(title, &why).await }
         } else {
-            let ids = sent.iter().map(|e| format!("{} {}", e.chain, e.id).trim().to_string()).collect::<Vec<_>>().join(" · ");
+            let ids = sent.iter().map(|e| if e.chain == "1click-order" { format!("1Click limit order {} (say «show limit orders»)", e.id) } else { format!("{} {}", e.chain, e.id).trim().to_string() })
+                .collect::<Vec<_>>().join(" · ");
             self.reply(&(self.say("Sent, status unknown: ", "Отправлено, статус неизвестен: ") + &why + " "
                          + &self.say("Check before doing it again: ", "Проверь, прежде чем повторять: ") + &ids), None);
         }
@@ -1347,6 +1383,18 @@ impl Engine {
                 let near = if on == "near" || at == "near" { Some(near_account().await?) } else { self.st().near_address() };
                 reply(e.intent_swap(a, on, b, at, Some(*amount), near.as_deref(), true).await?,
                       &format!("NEAR Intents · private · {} → {}", W::place_name(on), W::place_name(at)));
+            }
+            W::LimitOrder { sell, coin, on, price, amount, usdc_on, days } => {
+                let near = if on == "near" || usdc_on == "near" { Some(near_account().await?) } else { self.st().near_address() };
+                reply(e.limit_order(*sell, coin, on, *price, *amount, usdc_on, *days, near.as_deref()).await?, "NEAR Intents · limit order · private");
+                self.refresh_limit_orders(true).await;
+            }
+            W::LimitOrders => self.show_limit_orders(None).await,
+            W::LimitCancel(coin) => {
+                let known = self.st().near_address();
+                let near = match known { Some(n) => Some(n), None => near_account().await.ok() };
+                reply(e.cancel_limit_orders(coin.as_deref(), near.as_deref()).await?, "NEAR Intents · limit orders");
+                self.refresh_limit_orders(false).await;
             }
             W::Intents { from, to, amount } => {
                 // What the card showed landing holds the move (within 1%); a chain's step without a card goes by its quote.

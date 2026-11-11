@@ -225,6 +225,10 @@ impl CommandRefusal for Modules {
                 if ways.iter().any(Option::is_none) { None } else { ways[0].clone() }
             }),
             W::SwapPrivately { on, at, .. } => swaps(&|| r(P::OneClick, &places([on, at]))),
+            // A limit order is a swap that waits: the Swaps switch, 1Click and both networks. Its list and cancel only read
+            // or stop orders already resting, and bring money back: never refused.
+            W::LimitOrder { on, usdc_on, .. } => swaps(&|| r(P::OneClick, &places([on, usdc_on]))),
+            W::LimitOrders | W::LimitCancel(_) => None,
             W::CrossSwap { on, at, .. } => swaps(&|| r(P::Relay, &places([on, at]))),
             // 1Click's other end: a buy pays with Solana USDC, what's received lands there, a sale pays out on `to` (nil: Solana).
             W::BuyNear { .. } | W::ReceiveAcross { .. } => r(P::OneClick, &[N::Solana]),

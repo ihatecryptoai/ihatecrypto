@@ -168,3 +168,16 @@ fn the_moves_can_run_on_their_own_task(e: &Executor, p: &crate::executor::Prepar
     send(e.evm_places());
     send(e.resolve_transit(chrono::Utc::now()));
 }
+
+/// Hyperliquid's $10 minimum counts for a close too: a part under it is said before anything is sent, a part over it and
+/// the whole position go.
+#[test]
+fn a_partial_close_under_ten_dollars_is_refused() {
+    let (eth, mark) = (d("0.004"), d("2650"));   // $10.6 in all
+    let why = Executor::partial_close_refusal(eth, d("0.75"), mark, 4, "ETH").unwrap();
+    assert!(why.contains("under Hyperliquid's $10 minimum"), "{why}");
+    assert!(why.contains("Close it all ($10.60)"), "{why}");
+    assert!(Executor::partial_close_refusal(-eth, d("0.5"), mark, 4, "ETH").is_some());   // a short too
+    assert!(Executor::partial_close_refusal(eth, Decimal::ONE, mark, 4, "ETH").is_none());
+    assert!(Executor::partial_close_refusal(Decimal::ONE, d("0.5"), mark, 4, "ETH").is_none());
+}

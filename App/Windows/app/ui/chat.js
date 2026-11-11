@@ -794,7 +794,7 @@ function composer(s) {
     h("div", { id: "chat-helper", class: "chat-helper-slot" }),
     // Without a model the bar says how to get one; plain commands still work in the field under it.
     s.model.connected || listening ? null : connectBar(s),
-    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting || site ? " chat-waiting" : "") + (waiting && s.privacy?.isPrivate ? " chat-private" : "")
+    listening ? voicePanel() : h("div", { class: "chat-field" + (waiting || site ? " chat-waiting" : "") + (waiting && (s.privacy?.isPrivate || s.pendingPrivate) ? " chat-private" : "")
         + (!waiting && s.journey ? " chat-journeying" : "") },
       site ? siteBar(site) : null,
       waiting ? waitingBar(waiting) : null,
@@ -857,7 +857,7 @@ function waitingBar(card) {
   const choice = s.runningBoard ? null : s.privacy;
   // Variant A «Receipt» (owner, 2026-11-05): what you pay and from where, what the blockchain keeps, what arrives.
   const r = s.runningBoard ? null : receipt(s.boards.find((b) => b.id === card.id));
-  return h("div", { class: "chat-waiting-bar" + (choice?.isPrivate ? " chat-private-bar" : "") + (r ? " chat-receipt" : "") },
+  return h("div", { class: "chat-waiting-bar" + (choice?.isPrivate || (!s.runningBoard && s.pendingPrivate) ? " chat-private-bar" : "") + (r ? " chat-receipt" : "") },
     // P3: the switch says which way it goes, so no header over it.
     r && !choice ? h("div", { class: "receipt-head" }, icon(r.icon, 11), h("span", { class: "one-line" }, r.header)) : null,
     h("div", { class: "chat-waiting-what" }, r ? null : h("span", { class: "chat-wait-dot" }),
@@ -893,7 +893,7 @@ function receipt(board) {
   const header = named ? (named.label.includes(" · ") ? named.label : named.label + " " + named.title.toUpperCase())
     : !last || !fromNetwork ? first.label : t("SEND", "ПЕРЕВОД");
   const up = header.toUpperCase();
-  const icn = starts(up, "PRIVATE", "ПРИВАТ") ? "lock"
+  const icn = starts(up, "PRIVATE", "ПРИВАТ", "LIMIT ORDER", "ЛИМИТНЫЙ ОРДЕР") ? "lock"
     : up.includes("INTENTS") || starts(up, "BRIDGE", "МОСТ", "SWAP", "BUY", "SELL", "ОБМЕН", "ПОКУПКА", "ПРОДАЖА") ? "arrow.left.arrow.right"
     : starts(up, "PAY", "ОПЛАТА") ? "creditcard"
     : starts(up, "REPAY", "BORROW", "DEPOSIT", "WITHDRAW", "ПОГАШ", "ЗАЁМ", "ВКЛАД", "ВЫВОД") ? "building.columns"
@@ -907,7 +907,8 @@ function receipt(board) {
   const paid = out && STABLES.has(out[1].toUpperCase()) ? out[0] : null;
   const got = isTo(last.label) && last.money && STABLES.has(last.money.symbol.toUpperCase()) ? amountOf(last.money.after) - amountOf(last.money.was) : null;
   const fee = paid && got && paid > got && got > 0 ? paid - got : null;
-  const ours = up.includes("SPOT") || up.includes("СПОТ");
+  // Our 0.05% rides on Hyperliquid's spot orders and on a 1Click limit order (OneClick.orderFee).
+  const ours = up.includes("SPOT") || up.includes("СПОТ") || starts(up, "LIMIT ORDER", "ЛИМИТНЫЙ ОРДЕР");
   return { header, icon: icn, then, cells: [
     [!isFrom(first.label) ? first.label : fromNetwork ? t("YOU PAY", "ПЛАТИШЬ") : t("FROM ", "ИЗ ") + payer,
       out ? `${+out[0].toFixed(6)} ${out[1]}` : first.title, note(first)],

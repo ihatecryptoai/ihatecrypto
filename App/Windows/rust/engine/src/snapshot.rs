@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use ihatecrypto_core::chat_language::SentHistory;
 use ihatecrypto_core::foundation::{Date, number};
 use ihatecrypto_core::intent::TradeIntent;
+use ihatecrypto_core::position_command::WalletCommand;
 use ihatecrypto_core::skills::Skill;
 use llm::catalog;
 use rust_decimal::Decimal;
@@ -19,7 +20,7 @@ use crate::blocks::{AddressExtra, ClosedTrade};
 use crate::canvas::Board;
 use crate::chat_turns::{ModelsView, QuoteView};
 use crate::consent::SiteAskView;
-use crate::engine::{Card, Engine, Message};
+use crate::engine::{Card, Engine, Message, Pending};
 use crate::favorites::FavoriteToken;
 use crate::folders::{CanvasIcon, FolderView};
 use crate::hidden_tokens::TransitView;
@@ -196,6 +197,9 @@ pub struct Snapshot {
     /// P3: Regular | Private over Confirm, with the rows of the one waiting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privacy: Option<crate::journey::PrivacyChoice>,
+    /// The private card's violet while a private send, a private swap or a limit order waits (the Mac's pendingIsPrivate).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pending_private: bool,
     /// T4: the private assistant's last enclave check.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tee: Option<crate::journey::TeeView>,
@@ -462,7 +466,8 @@ impl Engine {
             top_up: TopUpPage::view(), app_language, local_setup: self.local_setup_view(),
             recently_closed, address_extras: self.address_extras(), plan_alert_example: self.plan_alert_example(), chips_position: self.chips_position(),
             last_balance: self.last_full_balance(), build: crate::engine::build(), update_ready,
-            journey: self.st().journey.clone(), privacy: if self.st().running_board.is_some() { None } else { self.privacy_choice() }, tee: self.tee_view(),
+            journey: self.st().journey.clone(), privacy: if self.st().running_board.is_some() { None } else { self.privacy_choice() }, pending_private: matches!(self.st().pending,
+                Some(Pending::Wallet(WalletCommand::SendPrivately { .. } | WalletCommand::SwapPrivately { .. } | WalletCommand::LimitOrder { .. }))), tee: self.tee_view(),
         }
     }
 }

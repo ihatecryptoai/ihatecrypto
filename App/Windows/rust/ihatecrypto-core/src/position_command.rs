@@ -270,6 +270,17 @@ pub enum WalletCommand {
     /// matched on chain. Places as in `CrossSwap`, «near» for the NEAR account; always an amount, always this wallet's own
     /// addresses on both sides. «buy NEAR for 5 USDC privately» = USDC on Solana → NEAR on NEAR.
     SwapPrivately { from: String, on: String, to: String, at: String, amount: Decimal },
+    /// A limit order through NEAR Intents' 1Click, always private (Confidential Intents: 1Click takes no other): a sale of
+    /// `amount` `coin` held on `on` for USDC on `usdc_on` at `price` dollars or more for one, or a buy of `coin` (to `on`)
+    /// with `amount` USDC from `usdc_on` at `price` or less. It rests up to `days` days (None = 7) and fills, in parts too,
+    /// when the market gets there, with no signature then. ihatecrypto adds its 0.05%. Places as in `SwapPrivately`.
+    /// «limit sell 0.1 SOL at 200», «лимитка: купи SOL по 120 на 20 USDC».
+    LimitOrder { sell: bool, coin: String, on: String, price: Decimal, amount: Decimal, usdc_on: String, days: Option<i64> },
+    /// The open limit orders of this wallet, on the canvas.
+    LimitOrders,
+    /// Cancels this wallet's open limit orders: None = all, a coin = those on it, «id:<order id>» = that one order. What
+    /// hasn't filled comes back.
+    LimitCancel(Option<String>),
     /// Money coming in from a network ihatecrypto has no wallet on — «receive 50 USDC from Sui»: 1Click's deposit address
     /// there, what arrives swapped into USDC on Solana. `network` is the address book's («sui», «bitcoin», «tron», «xrp»,
     /// «dogecoin», «zcash»); nil amount = ask.
@@ -369,6 +380,16 @@ const SELL_WORDS: &str = r"\bsell\b|прода\w*|\bdump\b";
 const AGENT_WALLET: &str = r"agent(?:'s)?\s+wallet|кошел\w*\s+агента|агентск\w*\s+кошел";
 /// A word asking for a private send. Whole adverbs only: «Приватный кошелёк» or «Тайный» is a name, not a request.
 const PRIVACY_WORD: &str = r"(?i)\b(?:privately|confidentially|anonymously|secretly|приватно|анонимно|конфиденциально|тайно|втайне|скрытно|втихую)\b";
+/// The orders as a list: «limit orders», «лимитки», «лимитные ордера». One «limit order» («cancel the limit order»,
+/// «отмени лимитку») is Hyperliquid's entry waiting to fill, a position command.
+const LIMIT_ORDERS_WORDS: &str = r"(?i)\blimit\s+orders\b|\bлимитки\b|\bлимиток\b|\bлимитн\w*\s+(?:ордера|ордеров|ордерами|заявки|заявок)\b";
+/// «limit buy», «limit sell», «limit orders», «лимитка», «лимитный ордер»: not a plan's «limit 2650» (its entry price on
+/// Hyperliquid), nor an agent wallet's «лимит 20$ в день».
+const LIMIT_WORDS: &str = r"(?i)\blimit\s+(?:buy|sell|orders?)\b|\b(?:buy|sell)\s+limit\b|\bлимитк\w*|\bлимитн\w*\s+(?:ордер|заявк)\w*";
+/// The networks a limit order names, as one group.
+macro_rules! limit_net {
+    () => { r"(solana|солан\w*|near|неар\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|polygon|полигон\w*|ethereum|эфириум\w*|mainnet|optimism|оптимизм\w*|bnb(?:\s+chain)?|bsc|бнб\w*)" };
+}
 const INTENTS_WORDS: &str = r"near\s*intents|(?:ниар|неар|нир)\s*интент\w*|\b1\s*click\b";
 const INTENTS_ROUTE: &str = r"(?:\bfrom\b|\bиз\b|\bс\b|\bсо\b)\s+(?:the\s+|my\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)((?:[^.]|\.(?=\d))*?)(?:\bto\b|\binto\b|\bв\b|\bна\b)\s+(?:the\s+)?(solana|солан\w*|hyperevm|hyper\s+evm|хайперевм\w*|гиперевм\w*|optimism|оптимизм\w*|bnb(?:\s+(?:smart\s+)?chain)?|bsc|бнб\w*|base|бейс\w*|бейз\w*|arbitrum|арбитрум\w*|robinhood|робин[гх]уд\w*|polygon|полигон\w*|ethereum|эфириум\w*|tempo|темпо\w*|hyperliquid|гипер\w*|хайпер\w*)";
 
@@ -383,6 +404,13 @@ impl WalletCommand {
             let m = w.get(0).expect("a match");
             let plain = replacing(&format!("{}{}", &text[..m.start()], &text[m.end()..]), r"\s{2,}", |_| " ".into());
             return Self::parse(&plain)?.made_private();
+        }
+        // A limit order, its list and its cancel: only with the word «limit» («лимитка», «лимитный ордер»), so a plain buy
+        // or sale never rests by itself.
+        if has(text, LIMIT_WORDS) && !has(text, r"(?i)\b(?:long|short)\b|\bлонг\w*|\bшорт\w*")
+            && (has(text, r"(?i)\b(?:buy|sell)\b|\bкупи\w*|\bкупл\w*|\bпрода\w*") || has(text, LIMIT_ORDERS_WORDS))
+        {
+            return Self::limit(text);
         }
         if let Some(call) = ContractCall::parse(text) { return Some(Self::ContractCall(call)) }
         if let Some(multisig) = Self::multisig(text) { return Some(multisig) }
@@ -1058,6 +1086,84 @@ impl WalletCommand {
         None
     }
 
+    /// «limit sell 0.1 SOL [on solana] at 200 [for USDC on base] [for 3 days]», «limit buy SOL [on solana] at 120 for 20
+    /// USDC [on base]», «show limit orders», «cancel limit orders [SOL]»; «лимитка: продай 0.1 SOL по 200», «лимитный ордер:
+    /// купи SOL по 120 на 20 USDC на 3 дня», «мои лимитки», «отмени лимитки». A buy or sale without its price or its amount
+    /// is nothing: the chat asks.
+    pub(crate) fn limit(text: &str) -> Option<Self> {
+        let mut q = IntentParser::plain_numbers(text).to_lowercase().replace('ё', "е");
+        let sell = has(&q, r"\bsell\b|\bпрода\w*");
+        let buy = has(&q, r"\bbuy\b|\bкупи\w*|\bкупл\w*");
+        if sell == buy {
+            if sell { return None }
+            if has(&q, r"\b(?:cancel|stop|close|remove|delete|withdraw)\b|\bотмен\w*|\bсним\w*|\bсними\b|\bубер\w*|\bудали\w*|\bзакр\w*") {
+                // One order by its id, as the board's Cancel names it: «cancel limit orders id order_Ab1…». Ids are opaque and
+                // case-sensitive, so read from the text as written.
+                if let Some(m) = first(text, r"(?i)\bid[:\s]+([A-Za-z0-9_\-.~]{4,80})\b") { return Some(Self::LimitCancel(Some(format!("id:{}", group(&m, 1))))) }
+                let coin = first(&q, r"(?:orders?|ордер\w*|лимитк\w*)\s+(?:on\s+|for\s+|на\s+|по\s+)?\$?([a-zа-я][a-zа-я0-9]{1,9})\b")
+                    .and_then(|m| Self::limit_coin(group(&m, 1)));
+                return Some(Self::LimitCancel(coin));
+            }
+            return has(&q, r"\b(?:show|list|my|open|see|check)\b|\bмои\b|\bпокажи\b|\bкакие\b|\bоткрыт\w*|\bсписок\b|\bгде\b").then_some(Self::LimitOrders);
+        }
+        // The days first, then the price: what's left names the coin, its amount and the networks.
+        let mut days = None;
+        if let Some(m) = first(&q, r"(?:\bfor\b|\bна\b|\bв\s+течение\b)\s+(\d{1,2})\s*(?:days?\b|дн\w*|день\b|суток\b)") {
+            days = group(&m, 1).parse::<i64>().ok();
+            let m = m.get(0).expect("a match").range();
+            q.replace_range(m, " ");
+        } else if let Some(m) = first(&q, r"(?:\bfor\s+a\b|\bна\b)?\s*(?:\bweek\b|\bнеделю\b)") {
+            days = Some(7);
+            let m = m.get(0).expect("a match").range();
+            q.replace_range(m, " ");
+        }
+        if days.is_some_and(|d| !(1..=30).contains(&d)) { return None }
+        let pm = first(&q, r"(?:\bat\b|@|\bпо\b(?:\s+цене)?|\bprice\b)\s*\$?\s*(\d+(?:[.,]\d+)?)\s*(?:\$|usdc\b|usd\b|долл\w*|бакс\w*)?")?;
+        let price = num(group(&pm, 1)).filter(|p| *p > Decimal::ZERO)?;
+        let r = pm.get(0).expect("a match").range();
+        q.replace_range(r, " ");
+        let place = |w: Option<&str>| -> Option<String> {
+            let w = w?.to_lowercase();
+            if w.starts_with("sol") || w.starts_with("сол") { Some("solana".into()) }
+            else if w.starts_with("near") || w.starts_with("неар") { Some("near".into()) }
+            else { Self::network(&w) }
+        };
+        // «… USDC on base», «… USDC в бейсе»: where the dollars are or go.
+        let usdc_place = first(&q, concat!(r"usdc\s+(?:on|in|from|at|на|в|во|с|со|из)\s+", limit_net!())).map(|m| (opt(&m, 1).map(String::from), m.get(0).expect("a match").range()));
+        let usdc_on = place(usdc_place.as_ref().and_then(|u| u.0.as_deref()));
+        if let Some((_, r)) = usdc_place { q.replace_range(r, " usdc ") }
+        let (coin, amount, coin_place) = if sell {
+            // «sell 0.1 SOL [on solana]»: the count right before the coin.
+            let m = first(&q, concat!(r"(?:sell|прода\w*)\s+(\d+(?:[.,]\d+)?)\s*\$?([a-zа-я][a-zа-я0-9]{1,9})\b(?:\s+(?:on|in|на|в|во)\s+", limit_net!(), ")?"))?;
+            (Self::limit_coin(group(&m, 2))?, num(group(&m, 1))?, opt(&m, 3).map(String::from))
+        } else {
+            // «buy SOL [on solana] … for 20 USDC», «купи SOL … на 20 USDC»: the dollars it spends.
+            let m = first(&q, concat!(r"(?:buy|куп\w*)\s+\$?([a-zа-я][a-zа-я0-9]{1,9})\b(?:\s+(?:on|in|на|в|во)\s+", limit_net!(), ")?"))?;
+            let coin = Self::limit_coin(group(&m, 1))?;
+            let usdc = first(&q, r"\$\s*(\d+(?:[.,]\d+)?)").or_else(|| first(&q, r"(\d+(?:[.,]\d+)?)\s*(?:usdc\b|\$|долл\w*|бакс\w*|dollars?\b|bucks\b)"))
+                .and_then(|u| num(group(&u, 1)))?;
+            (coin, usdc, opt(&m, 2).map(String::from))
+        };
+        if amount <= Decimal::ZERO || coin == "USDC" { return None }
+        let on = place(coin_place.as_deref()).unwrap_or_else(|| match coin.as_str() { "NEAR" => "near", "ETH" => "base", _ => "solana" }.into());
+        // NEAR's account sends NEAR alone: a buy of NEAR pays from Solana's USDC unless another network is named.
+        let usdc_on = usdc_on.unwrap_or_else(|| if on == "near" { "solana".into() } else { on.clone() });
+        Some(Self::LimitOrder { sell, coin, on, price, amount, usdc_on, days })
+    }
+
+    /// A coin a limit order names, as a ticker: Latin ones as they are, the Russian names of the usual ones. None for a
+    /// word that isn't a coin («orders», «on»).
+    pub(crate) fn limit_coin(w: &str) -> Option<String> {
+        let named = match w {
+            "сол" | "солану" | "солана" => Some("SOL"), "эфир" | "эфира" => Some("ETH"), "биткоин" | "биткоина" => Some("BTC"),
+            "неар" | "нир" | "near" => Some("NEAR"), _ => None,
+        };
+        if let Some(n) = named { return Some(n.into()) }
+        if whole(w, r"[a-z][a-z0-9]{1,9}").is_none()
+            || ["on", "for", "at", "of", "the", "all", "my", "orders", "order", "limit", "usd", "dollars", "price", "and", "with", "in"].contains(&w) { return None }
+        Some(w.to_uppercase())
+    }
+
     /// A payee that is the wallet itself — «me», «my wallet», «Main», «себе», «мой кошелёк» — or the active wallet's own
     /// name: the agent wallet's rules allow its own addresses from the start, no saved entry needed.
     pub fn is_own_wallet(name: &str, label: Option<&str>) -> bool {
@@ -1095,7 +1201,7 @@ impl WalletCommand {
                 Self::SendPrivately { name: name.clone(), token: token.clone(), amount: *x, network: network.clone() }
             }
             Self::SendTo { name, amount, network } => Self::SendPrivately { name: name.clone(), token: "USDC".into(), amount: *amount, network: network.clone() },
-            Self::SendPrivately { .. } | Self::SwapPrivately { .. } => self.clone(),
+            Self::SendPrivately { .. } | Self::SwapPrivately { .. } | Self::LimitOrder { .. } | Self::LimitOrders | Self::LimitCancel(_) => self.clone(),
             Self::BuyNear { usdc: Some(x) } => swap("USDC", "solana", "NEAR", "near", *x),
             Self::SellNear { amount: Some(x), to } => swap("NEAR", "near", "USDC", to.as_deref().unwrap_or("solana"), *x),
             Self::SwapOn { place, from, to, amount: Some(x) } if place == "near" => swap(from, "near", to, "near", *x),
@@ -1128,7 +1234,7 @@ impl WalletCommand {
             | Self::Stake(a) | Self::SolanaTo(_, a) | Self::ReceiveAcross { amount: a, .. } | Self::AaveBorrow { amount: a, .. }
             | Self::KaminoBorrow { amount: a, .. } | Self::AaveCollateral { amount: a, .. } | Self::Sell { amount: a, .. } | Self::SellOn { amount: a, .. }
             | Self::SwapOn { amount: a, .. } | Self::SendToken { amount: a, .. } | Self::CrossSwap { amount: a, .. } => *a = x,
-            Self::SendPrivately { amount: a, .. } | Self::SwapPrivately { amount: a, .. } => *a = amount,
+            Self::SendPrivately { amount: a, .. } | Self::SwapPrivately { amount: a, .. } | Self::LimitOrder { amount: a, .. } => *a = amount,
             _ => {}
         }
         next
@@ -1280,6 +1386,14 @@ impl WalletCommand {
             ),
             Self::JupiterDcaCancel(a) => format!("cancel Jupiter DCA{}", a.as_ref().map_or(String::new(), |a| format!(" {}", a.symbol))),
             Self::JupiterDcaOrders => "show Jupiter DCA".into(),
+            // The canonical form: it parses back to the same order.
+            Self::LimitOrder { sell, coin, on, price, amount, usdc_on, days } => {
+                let (p, a) = (decimal_text(*price), decimal_text(*amount));
+                let left = if *sell { format!("limit sell {a} {coin} on {on} at {p} for USDC on {usdc_on}") } else { format!("limit buy {coin} on {on} at {p} for {a} USDC on {usdc_on}") };
+                left + &days.map_or(String::new(), |d| format!(" for {d} days"))
+            }
+            Self::LimitOrders => "show limit orders".into(),
+            Self::LimitCancel(coin) => format!("cancel limit orders{}", coin.as_deref().map_or(String::new(), |c| c.strip_prefix("id:").map_or(format!(" {c}"), |id| format!(" id {id}")))),
             Self::WithdrawToSolana(u) => format!("withdraw {} USDC from Hyperliquid to Solana", n(u)),
             Self::LendDeposit(s, x) => format!("deposit {} {s} into Jupiter Lend", n(x)),
             Self::LendWithdraw(s, x) => format!("withdraw {} {s} from Jupiter Lend", n(x)),
