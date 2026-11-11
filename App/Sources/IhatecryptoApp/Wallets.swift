@@ -103,6 +103,7 @@ extension Workspace {
             }
             LedgerAccount.active = wallet.kind == "ledger"
             await loadSigner()
+            limitOrderList = nil   // the last wallet's orders: «show limit orders» reads this one's
             self.reply("Now signing with «\(wallet.label)»: \(Self.describe(wallet)).", note: note)
             await refresh()
         } catch {

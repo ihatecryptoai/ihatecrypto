@@ -168,7 +168,7 @@ extension Executor {
 
     /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled: read with the board, so a
     /// deposit seen late or a cancel's refund is written down when the orders are next read.
-    func syncLimitJournal() async {
+    public func syncLimitJournal() async {
         guard let all = try? journal.entries() else { return }
         var latest: [String: Journal.Entry] = [:], order: [String] = []
         for e in all where e.chain == "1click-order" {
@@ -183,8 +183,8 @@ extension Executor {
     }
 
     /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses.
-    public func limitOrders(near: String?) async throws -> [(order: OneClick.Order, view: LimitOrderView)] {
-        await syncLimitJournal()
+    public func limitOrders(near: String?, sync: Bool = true) async throws -> [(order: OneClick.Order, view: LimitOrderView)] {
+        if sync { await syncLimitJournal() }
         let own = Set([wallet.solana, wallet.evm, near ?? ""].filter { !$0.isEmpty }.map { $0.lowercased() })
         let tokens = (try? await OneClick.tokens()) ?? []
         let f = ISO8601DateFormatter()
@@ -203,6 +203,9 @@ extension Executor {
                                       price: Decimal(string: o["price"] ?? "") ?? 0, filled: filled, status: o["fillStatus"] ?? "", until: until))
         }
     }
+
+    /// One order's 1Click status now (FILLED, EXPIRED, CANCELED…), nil when 1Click doesn't answer.
+    public func limitOrderStatus(_ id: String) async -> String? { (try? await OneClick.order(id))?["fillStatus"] }
 
     /// Cancels this wallet's open orders, those on `coin` only when it's named. What hasn't filled comes back to the
     /// address it came from; a last slice can still fill.

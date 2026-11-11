@@ -925,6 +925,35 @@ extension Workspace {
         return list?.isEmpty == false ? list : nil
     }
 
+    /// While the board shows orders, the loop reads them again: an order that filled or expired leaves the board and is
+    /// said in the chat, so a fill with ihatecrypto open is seen without asking. A canceled one isn't: the cancel said it.
+    func followLimitOrders() async {
+        guard let shown = limitOrderList, !shown.isEmpty, let w = previewWallet else { return }
+        let e = executor(w)
+        // The journal is synced only when an order left: not twenty reads of 1Click every tick.
+        guard let now = try? await e.limitOrders(near: nearAddress, sync: false).map(\.view) else { return }
+        var left: [(Executor.LimitOrderView, String)] = []
+        for o in shown where !now.contains(where: { $0.id == o.id }) {
+            // Unread: the board stays as it was and the next tick asks again, so a fill is never missed.
+            guard let status = await e.limitOrderStatus(o.id) else { return }
+            left.append((o, status))
+        }
+        // Changed meanwhile (a cancel, a new order, another wallet): this read is the old one's.
+        guard limitOrderList == shown, previewWallet?.solana == w.solana else { return }
+        limitOrderList = now.isEmpty ? nil : now
+        if !left.isEmpty { await e.syncLimitJournal() }
+        for (o, status) in left {
+            let what = "\(o.sell ? say("sell", "продажа") : say("buy", "покупка")) \(Fmt.num(o.coins, maxFraction: 8)) \(o.coin) \(say("at", "по")) \(Fmt.usd(o.price))"
+            switch status {
+            case "FILLED": reply(say("Limit order filled: \(what). The \(o.sell ? "USDC" : o.coin) comes to your own address.",
+                                     "Лимитка исполнилась: \(what). \(o.sell ? "USDC" : o.coin) придут на твой адрес."), note: "NEAR Intents · limit order")
+            case "EXPIRED": reply(say("Limit order expired: \(what). What didn't fill comes back to the address it came from.",
+                                      "Лимитка истекла: \(what). Что не исполнилось, вернётся на адрес, откуда пришло."), note: "NEAR Intents · limit order")
+            default: break
+            }
+        }
+    }
+
     /// The two cards after a move the loss cap stopped: what they carry instead of a chat command.
     static let sendAnyway = "send anyway", leaveCostly = "leave it as is", sendPart = "send the part that moves the price about 1%"
 
@@ -1336,6 +1365,12 @@ extension Workspace {
             checkAlerts()
             await checkLoanGuards()
             await guardPositions()
+            if limitFollow == nil, limitOrderList != nil {
+                limitFollow = Task { [weak self] in
+                    await self?.followLimitOrders()
+                    self?.limitFollow = nil
+                }
+            }
             // A scheduled buy can wait on Touch ID with no one at the Mac: it runs beside the loop, so refreshes and alerts
             // go on meanwhile (the 2026-10-22 review). While it signs, `executing` keeps other moves from starting.
             if scheduledRun == nil {

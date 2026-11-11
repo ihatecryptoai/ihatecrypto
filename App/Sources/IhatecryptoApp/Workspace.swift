@@ -89,6 +89,8 @@ final class Workspace {
     @ObservationIgnored var holdingsLoading = false
     /// The scheduled buys' and tasks' run, beside the watch loop: one at a time, and a Touch ID left unanswered holds only it.
     @ObservationIgnored var scheduledRun: Task<Void, Never>?
+    /// followLimitOrders() beside the loop: 1Click slow to answer never holds up the stops and alerts.
+    @ObservationIgnored var limitFollow: Task<Void, Never>?
     /// Solana tokens a swap named, as Jupiter resolved them (TokensUI.solanaAsset): the card and the run read them again.
     @ObservationIgnored var spotAssets: [String: SpotAsset] = [:]
     /// Every token beyond the balances read one by one, Solana's first. Stock tokens the Robinhood card already shows

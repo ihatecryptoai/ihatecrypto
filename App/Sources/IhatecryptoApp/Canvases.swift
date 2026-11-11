@@ -1197,6 +1197,7 @@ struct LimitOrdersBoard: View {
                     Button("Cancel") { Task { await ws.send("cancel limit orders id \(o.id)") } }.buttonStyle(.borderless).foregroundStyle(Brand.loss)
                 }
             }
+            if let market = ws.markets[o.coin.uppercased()]?.markPx, market > 0 { distance(o, market: market) }
             ProgressView(value: min(max(done, 0), 1)).tint(Brand.privacy)
             HStack {
                 Text("\(o.state) · filled \(Fmt.num(o.filled, maxFraction: 6)) of \(Fmt.num(o.coins, maxFraction: 6))").monospacedDigit()
@@ -1207,6 +1208,28 @@ struct LimitOrdersBoard: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.04)))
+    }
+
+    /// The market now (Hyperliquid's mark) against the order's price: a line and a track, the dot where the price is, the
+    /// tick where the order fills (10% away or more sits at the end).
+    private func distance(_ o: Executor.LimitOrderView, market: Decimal) -> some View {
+        let gap = NSDecimalNumber(decimal: (o.price - market) / market * 100).doubleValue
+        let there = (o.sell ? gap <= 0 : gap >= 0) || abs(gap) < 0.05
+        let words = there ? "at the order's price now" : "fills \(Fmt.num(Decimal(abs(gap)), maxFraction: 1))% \(gap > 0 ? "higher" : "lower")"
+        return VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { g in
+                let mid = g.size.width / 2, x = mid + CGFloat(min(max(gap / 10, -1), 1)) * mid * 0.9
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.08)).frame(height: 4)
+                    Capsule().fill(Brand.privacy.opacity(0.35)).frame(width: abs(x - mid), height: 4).offset(x: min(x, mid))
+                    Circle().fill(Color.primary).frame(width: 10, height: 10).offset(x: mid - 5)
+                    RoundedRectangle(cornerRadius: 1.5).fill(Brand.privacy).frame(width: 3, height: 14).offset(x: x - 1.5)
+                }
+                .frame(height: 14)
+            }
+            .frame(height: 14)
+            Text("\(o.coin) ≈ \(Fmt.usd(market)) now · \(words)").font(.ui(11.5)).foregroundStyle(.secondary).monospacedDigit()
+        }
     }
 }
 
