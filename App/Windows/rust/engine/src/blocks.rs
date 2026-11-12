@@ -310,6 +310,11 @@ pub struct LimitRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<String>,
     pub cancel: String,
+    /// 1Click's price for what's left of it now, and how far the order's price is from it in percent (positive: higher).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub market: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<f64>,
 }
 
 /// `BlockData.DCARow`: one Jupiter DCA order.

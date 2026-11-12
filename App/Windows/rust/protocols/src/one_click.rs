@@ -144,8 +144,11 @@ pub struct Quote {
     pub amount_in_formatted: String,
     /// Present for EXACT_OUTPUT: the input without the slippage reserve.
     pub min_amount_in: Option<String>,
+    /// What arrives: the payout's network fee (`withdraw_fee`) is already taken off it.
     pub amount_out_formatted: String,
     pub min_amount_out: Option<String>,
+    /// The payout's network fee in the output's smallest units: a fixed sum, a percent and more of a small order.
+    pub withdraw_fee: Option<String>,
     pub deadline: Option<String>,
     pub time_estimate: Option<i64>,
     /// What goes in and what comes out, in dollars as 1Click prices them: their gap is its fee and the network's.
@@ -207,7 +210,7 @@ pub fn parse_quote(data: &[u8]) -> Result<Quote> {
     Ok(Quote {
         deposit_address: opt("depositAddress"), amount_in: amount_in.into(),
         amount_in_formatted: opt("amountInFormatted").unwrap_or_else(|| amount_in.into()), min_amount_in: opt("minAmountIn"),
-        amount_out_formatted: opt("amountOutFormatted").unwrap_or_else(|| "?".into()), min_amount_out: opt("minAmountOut"),
+        amount_out_formatted: opt("amountOutFormatted").unwrap_or_else(|| "?".into()), min_amount_out: opt("minAmountOut"), withdraw_fee: opt("withdrawFee"),
         deadline: opt("deadline"), time_estimate: q.get("timeEstimate").and_then(Value::as_f64).map(|t| t as i64),
         amount_in_usd: s(q, "amountInUsd").and_then(dec), amount_out_usd: s(q, "amountOutUsd").and_then(dec),
     })
@@ -354,7 +357,7 @@ pub fn parse_order(data: &Value) -> Option<Order> {
     let a = data.get("attributes").filter(|a| a.is_object())?;
     let mut f: HashMap<String, String> = ["orderType", "side", "baseAsset", "quoteAsset", "quantity", "price", "depositAddress", "depositMemo",
         "depositType", "recipient", "recipientType", "refundTo", "refundType", "confidentiality", "fillStatus", "payoutStatus", "deadline",
-        "createdAt", "depositedAmount"].iter().filter_map(|k| Some((k.to_string(), s(a, k)?.to_string()))).collect();
+        "createdAt", "depositedAmount", "estimatedWithdrawFee"].iter().filter_map(|k| Some((k.to_string(), s(a, k)?.to_string()))).collect();
     if let Some(v) = a.get("swapView").filter(|v| v.is_object()) {
         for k in ["swapType", "amountIn", "maxAmountIn", "minAmountOut", "amountOut"] {
             if let Some(x) = s(v, k) { f.insert(k.into(), x.into()); }

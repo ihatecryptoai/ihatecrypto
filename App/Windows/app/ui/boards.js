@@ -1620,13 +1620,38 @@ function limitsBlock(b, rows) {
         o.status === "PENDING_CANCEL" ? null : h("button", { class: "link-btn loss", disabled: !!ui.state.thinking,
           title: t("Its card comes for Confirm: what hasn't filled comes back", "Придёт карточка на подтверждение: вернётся то, что не исполнилось"),
           onclick: () => act("send", { text: o.cancel }) }, t("Cancel", "Отменить"))),
-      h("div", { class: "route-progress" }, h("span", { style: `width:${(Math.min(Math.max(o.done || 0, 0), 1) * 100).toFixed(1)}%` })),
-      h("div", { class: "route-dca-foot secondary small num" },
-        h("span", {}, t(`${o.state} · filled ${o.filled} of ${o.coins}`, `${o.state} · исполнено ${o.filled} из ${o.coins}`)),
+      o.market ? limitTrack(o) : h("div", { class: "limit-words" }, t("1Click gives no price for it now", "1Click сейчас не даёт цену на него")),
+      // Only once something filled: an empty bar under the price track read as a placeholder.
+      (o.done || 0) > 0 ? h("div", { class: "route-progress limit-progress" }, h("span", { style: `width:${(Math.min(Math.max(o.done, 0), 1) * 100).toFixed(1)}%` })) : null,
+      h("div", { class: "route-dca-foot limit-words num" },
+        h("span", {}, (o.done || 0) > 0 ? t(`${o.state} · filled ${o.filled} of ${o.coins}`, `${o.state} · исполнено ${o.filled} из ${o.coins}`) : o.state),
         o.until ? h("span", {}, t(`until ${o.until}`, `до ${o.until}`)) : null))),
-    h("div", { class: "secondary small" }, t("Private, through NEAR Intents: 1Click fills them when the price comes, with ihatecrypto closed too. Cancel brings back what hasn't filled.",
-      "Приватно, через NEAR Intents: 1Click исполнит их, когда цена дойдёт, даже при закрытом ihatecrypto. Отмена вернёт то, что не исполнилось."))),
+    h("div", { class: "limit-words" }, t("Private, through NEAR Intents. 1Click fills them with ihatecrypto closed too. Cancel brings back what hasn't filled.",
+      "Приватно, через NEAR Intents. 1Click исполнит их и при закрытом ihatecrypto. Отмена вернёт то, что не исполнилось."))),
   { width: 520, extra: refresh(b) });
+}
+
+/** 1Click's price for an order now against the order's own (the Mac's LimitOrdersBoard.distance): a track with the dot
+ *  where the price is («now») and the tick where the order fills (10% away or more sits at the end), and how far. Not
+ *  Hyperliquid's mark: 1Click fills by its own price. */
+function limitTrack(o) {
+  const gap = o.gap || 0;
+  const there = (o.sell ? gap <= 0 : gap >= 0) || Math.abs(gap) < 0.05;
+  const x = 50 + Math.min(Math.max(gap / 10, -1), 1) * 45;
+  const pct = Math.abs(gap).toFixed(1).replace(/\.0$/, "");
+  return h("div", { class: "limit-distance" },
+    h("div", { class: "limit-track" },
+      h("span", { class: "limit-rail" }),
+      h("span", { class: "limit-span", style: `left:${Math.min(x, 50)}%;width:${Math.abs(x - 50)}%` }),
+      h("span", { class: "limit-now", style: "left:50%" }),
+      h("span", { class: "limit-tick", style: `left:${x}%` }),
+      h("span", { class: "limit-label num", style: "left:50%" }, t(`now ${o.market}`, `сейчас ${o.market}`)),
+      // Two labels a few points apart would overlap (a BTC price is wide): the order's price is in the row's title anyway.
+      // Kept 44 px inside the ends, as the Mac's.
+      Math.abs(x - 50) > 23 ? h("span", { class: "limit-label limit-label-order num", style: `left:clamp(44px, ${x}%, calc(100% - 44px))` }, o.price) : null),
+    h("div", { class: "limit-words" }, there ? t("1Click is at the order's price: it fills soon", "1Click на цене ордера: скоро исполнится")
+      : t(`1Click's price for this order · fills when it's ${pct}% ${gap > 0 ? "higher" : "lower"}`,
+          `Цена 1Click для этого ордера · исполнится, когда она будет на ${pct}% ${gap > 0 ? "выше" : "ниже"}`)));
 }
 
 /** Coins from a network without a wallet here (ReceiveAcrossBoard): the address, its QR, the least it takes, until when,

@@ -448,6 +448,14 @@ pub struct State {
     pub jupiter_dca: Option<Board>,
     /// This wallet's open limit orders on 1Click as last read this session (earn.rs); None when none are open.
     pub limit_orders: Option<Board>,
+    /// The orders behind that board and the wallet (its Solana address) they're this one's for: what the loop follows.
+    pub limit_views: Option<(String, Vec<trade::limit_order::LimitOrderView>)>,
+    /// The wallet whose limit orders the loop has read once since launch or the switch to it (earn.rs follow_limit_orders).
+    pub limit_followed: Option<String>,
+    /// Orders that left the board, until the journal holds their payout as settled: id → ticks left to ask.
+    pub limit_payouts: HashMap<String, u32>,
+    /// A follow runs: the 30 s loop starts no second one.
+    pub limit_following: bool,
     /// The Ledger's Hyperliquid trading key, and whether the account approved ihatecrypto's fee (trading_key.rs).
     pub ledger_agent: Option<SignerReply>,
     pub fee_approved: Option<bool>,
@@ -562,7 +570,7 @@ impl State {
             ledger: store::load("ledger.json"),
             ledger_connect: None, ledger_prompt: None, awaiting_amount: None, chain_state: ChainState::default(), dca_choice: None,
             open_via_1click: None, parked: HashMap::new(), route_way: None, way_quotes: None, unpriced: None, takes_at: None, claim_owed: None,
-            jupiter_dca: None, limit_orders: None, ledger_agent: None, fee_approved: None, costly: None, in_transit: vec![], intent: TradeIntent::default(),
+            jupiter_dca: None, limit_orders: None, limit_views: None, limit_followed: None, limit_payouts: HashMap::new(), limit_following: false, ledger_agent: None, fee_approved: None, costly: None, in_transit: vec![], intent: TradeIntent::default(),
             plan_board: None, traded_plan: None,
             alerts: store::load("alerts.json").unwrap_or_default(),
             loan_guards: store::load("loanguards.json").unwrap_or_default(), guard_health: HashMap::new(),

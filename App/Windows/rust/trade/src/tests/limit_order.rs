@@ -128,3 +128,29 @@ fn the_journal_follows_an_order_to_its_payout() {
     assert_eq!(Executor::limit_journal_step(Kind::Confirmed, "CANCELED", true), Some(Kind::Settled));
     assert_eq!(order(|a| a["isPayoutStatusFinal"] = json!(true)).get("isPayoutStatusFinal"), Some("true"));
 }
+
+// 1Click's quote has the payout's network fee off its output: the price it matches at puts it back (0.7 USDC → SOL,
+// 2026-11-12: 0.008365867 SOL out, 121581 lamports fee, $83.67 as quoted, $82.47 matched).
+#[test]
+fn limit_match_price_puts_the_payout_fee_back() {
+    use crate::limit_order::match_price;
+    let buy = match_price(false, d("0.7"), "0.008365867", Some("121581"), 9).unwrap();
+    assert!((buy - d("82.4747")).abs() < d("0.001"), "{buy}");
+    // A sale: 0.012 SOL brings 0.98 USDC and the fee's 0.01 USDC goes back on top.
+    assert_eq!(match_price(true, d("0.012"), "0.98", Some("10000"), 6).unwrap().round_dp(6), (d("0.99") / d("0.012")).round_dp(6));
+    assert_eq!(match_price(false, Decimal::ONE, "?", None, 9), None);
+}
+
+// The buy that filled on the Mac's Dev wallet (2026-11-12), as 1Click's order read: 0.6979 USDC in, 0.008372599 SOL
+// matched, 123398 lamports estimated for the payout. 0.008247143 SOL arrived on chain.
+#[test]
+fn limit_end_takes_the_payout_fee_off() {
+    use crate::limit_order::limit_end;
+    let o = one_click::parse_order(&json!({"id": "o1", "attributes": {"side": "BUY", "fillStatus": "FILLED", "estimatedWithdrawFee": "123398",
+        "partialFills": [{"amountIn": "697900", "amountOut": "8372599"}]}})).unwrap();
+    let end = limit_end(&o, false, 9, 6);
+    assert_eq!((end.status.as_str(), end.spent, end.got), ("FILLED", d("0.6979"), d("0.008249201")));
+    assert!((end.price.unwrap() - d("84.6023")).abs() < d("0.001"));
+    let none = limit_end(&one_click::parse_order(&json!({"id": "o2", "attributes": {"side": "SELL", "fillStatus": "EXPIRED"}})).unwrap(), true, 9, 6);
+    assert_eq!((none.got, none.price), (Decimal::ZERO, None));
+}

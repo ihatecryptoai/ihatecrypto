@@ -468,6 +468,18 @@
 .route-progress { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .route-progress > span { display: block; height: 100%; border-radius: 3px; background: var(--profit); }
 .route-dca-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; }
+/* The limit orders board (limitsBlock): 12 px words in a grey that still reads on the card, and the price track with its
+   «now» dot and the order's tick, labelled under it. */
+.limit-words { font-size: 12px; color: color-mix(in srgb, var(--text) 68%, transparent); }
+.limit-distance { display: flex; flex-direction: column; gap: 6px; }
+.limit-track { position: relative; height: 34px; margin: 0 4px; --limit: #b9a6ff; }
+.limit-rail { position: absolute; left: 0; right: 0; top: 5px; height: 4px; border-radius: 2px; background: var(--fill-strong); }
+.limit-span { position: absolute; top: 5px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--limit) 45%, transparent); }
+.limit-now { position: absolute; top: 2px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--text); }
+.limit-tick { position: absolute; top: 0; width: 3px; height: 14px; margin-left: -1.5px; border-radius: 1.5px; background: var(--limit); }
+.limit-label { position: absolute; top: 18px; transform: translateX(-50%); white-space: nowrap; font-size: 11.5px; color: color-mix(in srgb, var(--text) 68%, transparent); }
+.limit-label-order { font-weight: 600; color: var(--text); }
+.limit-progress > span { background: #b9a6ff; }
 
 /* Coins from a network without a wallet here (ReceiveAcrossBoard). */
 .route-receive { display: flex; gap: 14px; align-items: flex-start; }

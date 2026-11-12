@@ -66,3 +66,31 @@ async fn every_pinned_dca_block_shows_the_orders_as_they_are() {
         assert_eq!(saved[0].boards[0].lines, ["No Jupiter DCA is running."]);
     }).await;
 }
+
+fn limit_view(sell: bool, coins: &str, price: &str) -> trade::limit_order::LimitOrderView {
+    trade::limit_order::LimitOrderView { id: "o1".into(), sell, coin: "SOL".into(), coins: coins.parse().unwrap(), price: price.parse().unwrap(),
+                                         filled: Decimal::ZERO, status: "OPEN".into(), until: None, market: None }
+}
+
+// The fill said as what came and its price with the fees, beside the order's own price, in English and Russian (the
+// Mac's LimitEndWordsTests).
+#[test]
+fn limit_end_words_say_what_came() {
+    use trade::limit_order::LimitOrderEnd;
+    let o = limit_view(false, "0.00833811", "83.7");
+    let (en, ru) = super::limit_end_words(&o, &LimitOrderEnd { status: "FILLED".into(), spent: "0.6979".parse().unwrap(), got: "0.008249201".parse().unwrap(),
+                                                                  price: Some("84.6023".parse().unwrap()) });
+    assert_eq!(en, "Limit order filled: bought ≈ 0.008249 SOL for 0.6979 USDC, $84.60 a SOL with 1Click's fees and the network's (the order's price $83.70). The SOL comes to your own address.");
+    assert!(ru.starts_with("Лимитка исполнилась: куплено ≈ 0.008249 SOL за 0.6979 USDC, $84.60 за SOL"), "{ru}");
+    let (en, _) = super::limit_end_words(&o, &LimitOrderEnd { status: "EXPIRED".into(), spent: Decimal::ZERO, got: Decimal::ZERO, price: None });
+    assert_eq!(en, "Limit order expired: buy 0.00833811 SOL at $83.70. What didn't fill comes back to the address it came from.");
+}
+
+// «my limit orders» names each order, not only how many.
+#[test]
+fn limit_list_words_name_each_order() {
+    let sell = limit_view(true, "0.012", "84.3");
+    assert_eq!(super::limit_list_words(&[sell.clone()]).unwrap().1, "Один открытый лимитный ордер: продажа 0.012 SOL по $84.30. Он на холсте.");
+    assert_eq!(super::limit_list_words(&[sell.clone(), sell]).unwrap().0, "2 open limit orders: sell 0.012 SOL at $84.30 · sell 0.012 SOL at $84.30. They're on the canvas.");
+    assert!(super::limit_list_words(&[]).is_none());
+}

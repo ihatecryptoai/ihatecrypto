@@ -330,6 +330,8 @@ impl Engine {
                 me.offer_trading_key();
                 me.refresh_live().await;
                 me.read_closed().await;
+                // Limit orders on 1Click, beside the loop: a slow 1Click never holds the next refresh (earn.rs).
+                me.follow_limit_orders();
                 me.start_scheduled_run();
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }

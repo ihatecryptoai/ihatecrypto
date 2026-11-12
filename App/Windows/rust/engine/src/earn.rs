@@ -2,6 +2,7 @@
 //! token approvals, Jupiter's DCA list and 1Click's limit orders (Earn.swift, LimitOrdersBoard) — the Mac's, over the same Executor and DeFi modules. What moves
 //! money is a card; Confirm runs it.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use defi::yields::{self, YieldOption};
@@ -14,7 +15,8 @@ use protocols::recurring::Order;
 use rust_decimal::Decimal;
 use signer_api::SignerRequest;
 use tokio::task::JoinSet;
-use trade::limit_order::LimitOrderView;
+use trade::limit_order::{LimitOrderEnd, LimitOrderView};
+use crate::notices::Notice;
 use trade::morpho::MorphoRates;
 use wallet::WalletError;
 
@@ -327,7 +329,67 @@ impl Engine {
             Some(n) => Some(n),
             None => self.signer.send(&SignerRequest::NearAddress {}).await.ok().and_then(|r| r.near_address),
         };
-        e.limit_orders(near.as_deref()).await.ok().map(|l| l.into_iter().map(|o| o.1).collect())
+        e.limit_orders(near.as_deref(), true).await.ok().map(|l| l.into_iter().map(|o| o.1).collect())
+    }
+
+    /// The 30 s loop's look at limit orders (the Mac's followLimitOrders). The wallet's orders are read once when the
+    /// journal holds one not settled (at launch, after a wallet switch), so they're followed with no «show limit orders».
+    /// Then an order that filled or expired leaves the board and is said in the chat and as a notification, with what came
+    /// and its price after the fees. A canceled one isn't: the cancel said it. What left is written down in the journal as
+    /// settled once its payout is final, asked at most 20 ticks.
+    pub fn follow_limit_orders(&self) {
+        if std::mem::replace(&mut self.st_mut().limit_following, true) { return }
+        let me = self.rc();
+        tokio::task::spawn_local(async move {
+            me.follow_limits_once().await;
+            me.st_mut().limit_following = false;
+        });
+    }
+
+    async fn follow_limits_once(&self) {
+        let Ok(e) = self.executor() else { return };
+        let Some(wallet) = self.st().solana_address() else { return };
+        let (views, followed) = { let st = self.st(); (st.limit_views.clone(), st.limit_followed.clone()) };
+        let mine = views.as_ref().filter(|(w, _)| *w == wallet).map(|(_, v)| v.clone());
+        // This wallet's board already shows (read by «show limit orders»): it's followed from here.
+        if mine.is_some() && followed.as_deref() != Some(wallet.as_str()) { self.st_mut().limit_followed = Some(wallet.clone()) }
+        else if followed.as_deref() != Some(wallet.as_str()) {
+            // Another wallet's board stays only until this one's orders are read.
+            if views.is_none() && !e.follows_limit_orders() { self.st_mut().limit_followed = Some(wallet); return }
+            // Unread (1Click silent): asked again next tick.
+            let Some(list) = self.own_limit_orders().await else { return };
+            if self.st().solana_address().as_deref() != Some(wallet.as_str()) { return }
+            self.st_mut().limit_followed = Some(wallet);
+            self.read_limits(&list);
+            return;
+        }
+        let payouts: HashSet<String> = self.st().limit_payouts.keys().cloned().collect();
+        if !payouts.is_empty() {
+            let settled = e.sync_limit_journal(Some(&payouts)).await;
+            self.st_mut().limit_payouts.retain(|id, ticks| { *ticks = ticks.saturating_sub(1); !settled.contains(id) && *ticks > 0 });
+        }
+        let Some(shown) = mine.filter(|v| !v.is_empty()) else { return };
+        let near = self.st().near_address();
+        let Ok(now) = e.limit_orders(near.as_deref(), false).await else { return };
+        let now: Vec<LimitOrderView> = now.into_iter().map(|o| o.1).collect();
+        let mut left = vec![];
+        for o in shown.iter().filter(|o| !now.iter().any(|n| n.id == o.id)) {
+            // Unread: the board stays as it was and the next tick asks again, so a fill is never missed.
+            let Some(end) = e.limit_order_end(&o.id).await else { return };
+            left.push((o.clone(), end));
+        }
+        // Changed meanwhile (a cancel, a new order, another wallet): this read is the old one's.
+        if self.st().limit_views.as_ref().is_none_or(|(w, v)| *w != wallet || *v != shown) { return }
+        self.read_limits(&now);
+        for (o, _) in &left { self.st_mut().limit_payouts.insert(o.id.clone(), 20); }
+        for (o, end) in left.iter().filter(|(_, end)| end.status == "FILLED" || end.status == "EXPIRED") {
+            let (en, ru) = limit_end_words(o, end);
+            let body = self.say(&en, &ru);
+            self.reply(&body, Some("NEAR Intents · limit order".into()));
+            let title = if end.status == "FILLED" { self.say(&format!("Limit order filled: {}", o.coin), &format!("Лимитка исполнилась: {}", o.coin)) }
+                else { self.say(&format!("Limit order expired: {}", o.coin), &format!("Лимитка истекла: {}", o.coin)) };
+            self.notify(Notice::Orders, &title, &body, false, false, Some(false), Some(format!("limit:{}", o.coin)));
+        }
     }
 
     /// «show limit orders»: the board of open orders, Cancel on each.
@@ -335,15 +397,15 @@ impl Engine {
         let Some(list) = self.own_limit_orders().await else { return self.reply(&self.say("1Click didn't answer.", "1Click не ответил."), note) };
         let here = self.read_limits(&list);
         if !list.is_empty() && !here { self.pin_kind("result", "Limit orders", self.limit_lines(&list), None, None, Some(self.limit_data(&list))) }
-        let said = if list.is_empty() { self.say("No open limit orders.", "Открытых лимитных ордеров нет.") }
-            else { self.say(&format!("Open limit orders: {}. They're on the canvas.", list.len()), &format!("Открытых лимитных ордеров: {}. Они на холсте.", list.len())) };
+        let said = limit_list_words(&list).map_or_else(|| self.say("No open limit orders.", "Открытых лимитных ордеров нет."), |(en, ru)| self.say(&en, &ru));
         self.reply(&said, Some(note.unwrap_or_else(|| "NEAR Intents · limit orders".into())));
     }
 
     /// After an order is placed or canceled: the board shows the orders as they are now; a placed one with no board here
     /// gets one. 1Click not answering leaves the board as it was.
     pub async fn refresh_limit_orders(&self, placed: bool) {
-        let Some(list) = self.own_limit_orders().await else { return };
+        // A failed read here: the loop reads them again.
+        let Some(list) = self.own_limit_orders().await else { self.st_mut().limit_followed = None; return };
         let found = self.read_limits(&list);
         if !found && placed && !list.is_empty() { self.pin_kind("result", "Limit orders", self.limit_lines(&list), None, None, Some(self.limit_data(&list))) }
     }
@@ -356,6 +418,7 @@ impl Engine {
         {
             let mut st = self.st_mut();
             st.limit_orders = (!list.is_empty()).then(|| Board { id: "limit-orders".into(), lines: lines.clone(), data: data.clone(), ..Board::new("result", "Limit orders") });
+            st.limit_views = st.solana_address().map(|w| (w, list.to_vec()));
             let open = st.canvas_index();
             for (c, canvas) in st.canvases.iter_mut().enumerate() {
                 for b in canvas.boards.iter_mut().filter(|b| b.kind == "result" && b.title == "Limit orders") {
@@ -370,8 +433,8 @@ impl Engine {
     }
 
     fn limit_lines(&self, list: &[LimitOrderView]) -> Vec<String> {
-        list.iter().map(|o| format!("{} {} {} at ${}, {}, filled {}", if o.sell { "sell" } else { "buy" }, Fmt::num(o.coins, 6), o.coin, Fmt::num(o.price, 2), o.state(),
-                                    Fmt::num(o.filled, 6))).collect()
+        list.iter().map(|o| format!("{} {} {} at ${}, {}, filled {}{}", if o.sell { "sell" } else { "buy" }, Fmt::num(o.coins, 6), o.coin, Fmt::num(o.price, 2), o.state(),
+                                    Fmt::num(o.filled, 6), o.market.map_or_else(String::new, |m| format!(", 1Click's price for it now ${}", Fmt::num(m, 2))))).collect()
     }
 
     fn limit_data(&self, list: &[LimitOrderView]) -> BlockData {
@@ -379,9 +442,42 @@ impl Engine {
             id: o.id.clone(), sell: o.sell, coin: o.coin.clone(), coins: Fmt::num(o.coins, 6), price: Fmt::usd(o.price), filled: Fmt::num(o.filled, 6),
             done: if o.coins > Decimal::ZERO { (Num::of(o.filled) / o.coins).0.and_then(|x| x.to_string().parse::<f64>().ok()).unwrap_or(0.0).clamp(0.0, 1.0) } else { 0.0 },
             status: o.status.clone(), state: o.state(), until: o.until.map(Fmt::date), cancel: format!("cancel limit orders id {}", o.id),
+            market: o.market.filter(|m| *m > Decimal::ZERO).map(Fmt::usd),
+            gap: o.market.filter(|m| *m > Decimal::ZERO).and_then(|m| (Num::of(o.price - m) / m * Decimal::ONE_HUNDRED).0).and_then(|g| g.to_string().parse::<f64>().ok()),
         }).collect();
         BlockData { limits: Some(rows), ..BlockData::default() }
     }
+}
+
+/// The open orders said in the chat: each one, not only their count. None for none.
+pub(crate) fn limit_list_words(list: &[LimitOrderView]) -> Option<(String, String)> {
+    if list.is_empty() { return None }
+    let en = list.iter().map(|o| format!("{} {} {} at {}", if o.sell { "sell" } else { "buy" }, Fmt::num(o.coins, 6), o.coin, Fmt::usd(o.price))).collect::<Vec<_>>().join(" · ");
+    let ru = list.iter().map(|o| format!("{} {} {} по {}", if o.sell { "продажа" } else { "покупка" }, Fmt::num(o.coins, 6), o.coin, Fmt::usd(o.price))).collect::<Vec<_>>().join(" · ");
+    Some(if list.len() == 1 { (format!("One open limit order: {en}. It's on the canvas."), format!("Один открытый лимитный ордер: {ru}. Он на холсте."))
+         } else { (format!("{} open limit orders: {en}. They're on the canvas.", list.len()), format!("Открытые лимитные ордера, {}: {ru}. Они на холсте.", list.len())) })
+}
+
+/// A filled or expired limit order in words: what went in and what comes out, at what price with every fee in.
+pub(crate) fn limit_end_words(o: &LimitOrderView, end: &LimitOrderEnd) -> (String, String) {
+    let (coin, limit) = (&o.coin, Fmt::usd(o.price));
+    let cash = if o.sell { "USDC" } else { coin.as_str() };
+    let order = format!("{} {} {coin} at {limit}", if o.sell { "sell" } else { "buy" }, Fmt::num(o.coins, 8));
+    let order_ru = format!("{} {} {coin} по {limit}", if o.sell { "продажа" } else { "покупка" }, Fmt::num(o.coins, 8));
+    let (mut en, mut ru) = (String::new(), String::new());
+    if let Some(price) = end.price {
+        let (gave, got) = (Fmt::num(end.spent, 8), Fmt::num(end.got, if o.sell { 2 } else { 6 }));
+        en = if o.sell { format!("sold {gave} {coin} for ≈ {got} USDC") } else { format!("bought ≈ {got} {coin} for {gave} USDC") };
+        ru = if o.sell { format!("продано {gave} {coin} за ≈ {got} USDC") } else { format!("куплено ≈ {got} {coin} за {gave} USDC") };
+        en += &format!(", {} a {coin} with 1Click's fees and the network's (the order's price {limit})", Fmt::usd(price));
+        ru += &format!(", {} за {coin} с комиссиями 1Click и сети (цена ордера {limit})", Fmt::usd(price));
+    }
+    if end.status == "FILLED" {
+        return if en.is_empty() { (format!("Limit order filled: {order}. The {cash} comes to your own address."), format!("Лимитка исполнилась: {order_ru}. {cash} придут на твой адрес."))
+               } else { (format!("Limit order filled: {en}. The {cash} comes to your own address."), format!("Лимитка исполнилась: {ru}. {cash} придут на твой адрес.")) };
+    }
+    (format!("Limit order expired: {order}.{} What didn't fill comes back to the address it came from.", if en.is_empty() { String::new() } else { format!(" Before that it {en}.") }),
+     format!("Лимитка истекла: {order_ru}.{} Что не исполнилось, вернётся на адрес, откуда пришло.", if ru.is_empty() { String::new() } else { format!(" До этого {ru}.") }))
 }
 
 #[cfg(test)]

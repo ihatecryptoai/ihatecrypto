@@ -36,7 +36,8 @@ pub struct LimitPlan {
     pub dollars: Decimal,
 }
 
-/// An open order in words for the board: the coin, side, its size and price, how much filled, until when.
+/// An open order in words for the board: the coin, side, its size and price, how much filled, until when, and 1Click's
+/// price for what's left of it now (match_price; None while unquoted).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LimitOrderView {
     pub id: String,
@@ -47,6 +48,55 @@ pub struct LimitOrderView {
     pub filled: Decimal,
     pub status: String,
     pub until: Option<Date>,
+    pub market: Option<Decimal>,
+}
+
+/// How an order that left the board ended: 1Click's status, what went in, and what comes out once the payout's network
+/// fee (1Click's estimate) is off. `spent` and `got` are 0 for an order nothing filled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LimitOrderEnd {
+    pub status: String,
+    pub spent: Decimal,
+    pub got: Decimal,
+    /// Dollars for one coin with every fee in: what the order cost, above a buy's limit and under a sale's.
+    pub price: Option<Decimal>,
+}
+
+/// The price 1Click matches an order at, from a dry quote of its size: dollars for one coin with the payout's network fee
+/// put back. The quote's output has that fee taken off, and the fee is fixed: on 0.7 USDC of SOL it read 1.4% over the
+/// market (2026-11-12), while the order fills at its price before it. None without an output.
+pub fn match_price(sell: bool, paid: Decimal, out: &str, withdraw_fee: Option<&str>, out_decimals: u32) -> Option<Decimal> {
+    let out = decimal(out).filter(|o| *o > Decimal::ZERO)?;
+    if paid <= Decimal::ZERO { return None }
+    let got = (Num::of(out) + Num::of(withdraw_fee.and_then(decimal).unwrap_or_default()) / scale(out_decimals)).0?;
+    (if sell { Num::of(got) / paid } else { Num::of(paid) / got }).0
+}
+
+/// A filled or expired order's sums from 1Click's order: the fills' input gross, their output less the payout's fee.
+pub fn limit_end(o: &Order, sell: bool, base_decimals: u32, quote_decimals: u32) -> LimitOrderEnd {
+    let n = |k: &str| dec(o.get(k).unwrap_or(""));
+    let (in_unit, out_unit) = if sell { (scale(base_decimals), scale(quote_decimals)) } else { (scale(quote_decimals), scale(base_decimals)) };
+    let spent = (Num::of(n("filledIn")) / in_unit).0.unwrap_or_default();
+    let out = n("filledOut");
+    let got = if out > Decimal::ZERO { (Num::of((out - n("estimatedWithdrawFee")).max(Decimal::ZERO)) / out_unit).0.unwrap_or_default() } else { Decimal::ZERO };
+    let price = if spent > Decimal::ZERO && got > Decimal::ZERO { (if sell { Num::of(got) / spent } else { Num::of(spent) / got }).0 } else { None };
+    LimitOrderEnd { status: o.get("fillStatus").unwrap_or("").into(), spent: spent.normalize(), got: got.normalize(), price }
+}
+
+/// The price 1Click would match an order's rest at now (match_price), quoted for that rest between its own addresses.
+async fn limit_market(o: &Order, list: &[one_click::Token]) -> Option<Decimal> {
+    let base = list.iter().find(|t| Some(t.asset_id.as_str()) == o.get("baseAsset"))?;
+    let quote = list.iter().find(|t| Some(t.asset_id.as_str()) == o.get("quoteAsset"))?;
+    let (recipient, refund) = (o.get("recipient")?, o.get("refundTo")?);
+    let sell = o.get("side") == Some("SELL");
+    let n = |k: &str| dec(o.get(k).unwrap_or(""));
+    let rest = n(if sell { "quantity" } else { "maxAmountIn" }) - n("filledIn");
+    if rest <= Decimal::ZERO { return None }
+    let (origin, destination) = if sell { (&base.asset_id, &quote.asset_id) } else { (&quote.asset_id, &base.asset_id) };
+    let q = one_click::quote(&one_click::Ask::new(true, origin, destination, &text(rest), refund, recipient)).await.ok()?;
+    let (paid_decimals, out_decimals) = if sell { (base.decimals, quote.decimals) } else { (quote.decimals, base.decimals) };
+    let paid = (Num::of(rest) / scale(u32::try_from(paid_decimals).ok()?)).0?;
+    match_price(sell, paid, &q.amount_out_formatted, q.withdraw_fee.as_deref(), u32::try_from(out_decimals).ok()?)
 }
 
 impl LimitOrderView {
@@ -102,9 +152,10 @@ impl Executor {
         let market = match (self.intent_address(if sell { on } else { usdc_on }, near_or_zero), self.intent_address(if sell { usdc_on } else { on }, near_or_zero)) {
             (Ok(refund), Ok(recipient)) => {
                 let (origin, destination) = if sell { (&base.asset, &quote.asset) } else { (&quote.asset, &base.asset) };
-                one_click::quote(&one_click::Ask::new(true, origin, destination, &probe, &refund, &recipient)).await.ok()
-                    .and_then(|q| decimal(&q.amount_out_formatted)).filter(|out| *out > Decimal::ZERO)
-                    .and_then(|out| (if sell { Num::of(out) / coins } else { Num::of(deposit) / out }).0)
+                one_click::quote(&one_click::Ask::new(true, origin, destination, &probe, &refund, &recipient)).await.ok().and_then(|q| {
+                    match_price(sell, if sell { coins } else { deposit }, &q.amount_out_formatted, q.withdraw_fee.as_deref(),
+                                if sell { quote.decimals } else { base.decimals })
+                })
             }
             _ => None,
         };
@@ -194,32 +245,62 @@ impl Executor {
         (kind == Kind::Signed && fill_status != "AWAITING_DEPOSIT").then_some(Kind::Confirmed)
     }
 
-    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled: read with the board, so a
-    /// deposit seen late or a cancel's refund is written down when the orders are next read.
-    async fn sync_limit_journal(&self) {
-        let Ok(all) = self.journal.entries() else { return };
+    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled (`only` those, when named): read
+    /// with the board, so a deposit seen late or a cancel's refund is written down when the orders are next read. Returns
+    /// those of `only` the journal now holds as settled.
+    pub async fn sync_limit_journal(&self, only: Option<&HashSet<String>>) -> HashSet<String> {
+        let Ok(all) = self.journal.entries() else { return HashSet::new() };
         let (mut latest, mut order) = (std::collections::HashMap::<String, Kind>::new(), Vec::<String>::new());
         for e in all.iter().filter(|e| e.chain == "1click-order") {
             if !latest.contains_key(&e.id) { order.push(e.id.clone()) }
             latest.insert(e.id.clone(), e.kind);
         }
-        for id in order.iter().rev().filter(|id| latest.get(*id) != Some(&Kind::Settled)).take(20) {
+        let named = |id: &String| only.is_none_or(|ids| ids.contains(id));
+        let mut settled: HashSet<String> = order.iter().filter(|id| latest.get(*id) == Some(&Kind::Settled) && only.is_some_and(|ids| ids.contains(*id))).cloned().collect();
+        for id in order.iter().rev().filter(|id| latest.get(*id) != Some(&Kind::Settled) && named(id)).take(20) {
             let Ok(o) = one_click::order(id).await else { continue };
             let fill = o.get("fillStatus").unwrap_or("").to_string();
             let Some(step) = Self::limit_journal_step(latest[id], &fill, o.get("isPayoutStatusFinal") == Some("true")) else { continue };
-            let note = if step == Kind::Settled { format!("{fill} · payout {}", o.get("payoutStatus").unwrap_or("?")) } else { fill };
+            if step == Kind::Settled { settled.insert(id.clone()); }
+            // Another read (the board's, the loop's) may have written it while this one waited on 1Click.
+            let last = self.journal.entries().unwrap_or_default().into_iter().rev().find(|e| e.chain == "1click-order" && &e.id == id).map(|e| e.kind);
+            if last == Some(step) { continue }
+            let amounts = format!("in {} · out {} · withdraw fee {}", o.get("filledIn").unwrap_or("?"), o.get("filledOut").unwrap_or("?"),
+                                  o.get("estimatedWithdrawFee").unwrap_or("?"));
+            let note = if step == Kind::Settled { format!("{fill} · payout {} · {amounts}", o.get("payoutStatus").unwrap_or("?")) } else { fill };
             let _ = self.record("1click-order", id, step, &note);
         }
+        settled
     }
 
-    /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses.
-    pub async fn limit_orders(&self, near: Option<&str>) -> Result<Vec<(Order, LimitOrderView)>> {
-        self.sync_limit_journal().await;
+    /// The journal holds an order whose payout isn't final: one to follow, with the board or without.
+    pub fn follows_limit_orders(&self) -> bool {
+        let mut latest = std::collections::HashMap::<String, Kind>::new();
+        for e in self.journal.entries().unwrap_or_default().into_iter().filter(|e| e.chain == "1click-order") { latest.insert(e.id, e.kind); }
+        latest.values().any(|k| *k != Kind::Settled)
+    }
+
+    /// How one order ended, None when 1Click doesn't answer.
+    pub async fn limit_order_end(&self, id: &str) -> Option<LimitOrderEnd> {
+        let o = one_click::order(id).await.ok()?;
+        o.get("fillStatus")?;
+        let list = one_click::tokens().await.unwrap_or_default();
+        let find = |k: &str| list.iter().find(|t| Some(t.asset_id.as_str()) == o.get(k)).and_then(|t| u32::try_from(t.decimals).ok());
+        Some(match (find("baseAsset"), find("quoteAsset")) {
+            (Some(b), Some(q)) => limit_end(&o, o.get("side") == Some("SELL"), b, q),
+            _ => LimitOrderEnd { status: o.get("fillStatus").unwrap_or("").into(), spent: Decimal::ZERO, got: Decimal::ZERO, price: None },
+        })
+    }
+
+    /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses, each
+    /// with 1Click's price for its rest. `sync`: the journal brought up to date first (the board's read, not the loop's).
+    pub async fn limit_orders(&self, near: Option<&str>, sync: bool) -> Result<Vec<(Order, LimitOrderView)>> {
+        if sync { self.sync_limit_journal(None).await; }
         let own: HashSet<String> = [self.wallet.solana.as_str(), self.wallet.evm.as_str(), near.unwrap_or("")].iter()
             .filter(|a| !a.is_empty()).map(|a| a.to_lowercase()).collect();
         let list = one_click::tokens().await.unwrap_or_default();
         let mine = |key: &str, o: &Order| own.contains(&o.get(key).unwrap_or("").to_lowercase());
-        Ok(one_click::open_orders().await?.into_iter().filter(|o| o.is_open() && (mine("recipient", o) || mine("refundTo", o))).map(|o| {
+        let mut out: Vec<(Order, LimitOrderView)> = one_click::open_orders().await?.into_iter().filter(|o| o.is_open() && (mine("recipient", o) || mine("refundTo", o))).map(|o| {
             let t = list.iter().find(|t| Some(t.asset_id.as_str()) == o.get("baseAsset"));
             let decimals = t.map_or(0, |t| u32::try_from(t.decimals).unwrap_or(0));
             let sell = o.get("side") == Some("SELL");
@@ -228,17 +309,25 @@ impl Executor {
             let coin = t.map_or_else(|| o.get("baseAsset").unwrap_or("?").to_string(), |t| if t.symbol == "wNEAR" { "NEAR".into() } else { t.symbol.clone() });
             let view = LimitOrderView {
                 id: o.id.clone(), sell, coin, coins: tokens(dec(o.get("quantity").unwrap_or("")), decimals), price: dec(o.get("price").unwrap_or("")),
-                filled, status: o.get("fillStatus").unwrap_or("").into(), until: o.get("deadline").and_then(date),
+                filled, status: o.get("fillStatus").unwrap_or("").into(), until: o.get("deadline").and_then(date), market: None,
             };
             (o, view)
-        }).collect())
+        }).collect();
+        // 1Click's price for what each order has left, side by side: the board's market, not Hyperliquid's.
+        let mut group = tokio::task::JoinSet::new();
+        for (i, (o, _)) in out.iter().enumerate() {
+            let (o, list) = (o.clone(), list.clone());
+            group.spawn(async move { (i, limit_market(&o, &list).await) });
+        }
+        for (i, m) in group.join_all().await { out[i].1.market = m }
+        Ok(out)
     }
 
     /// Cancels this wallet's open orders, those on `coin` only when it's named («id:<order id>»: that one order). What
     /// hasn't filled comes back to the address it came from. A last slice can still fill.
     pub async fn cancel_limit_orders(&self, coin: Option<&str>, near: Option<&str>) -> Result<String> {
         let id = coin.and_then(|c| c.strip_prefix("id:"));
-        let open: Vec<LimitOrderView> = self.limit_orders(near).await?.into_iter().map(|o| o.1).filter(|v| {
+        let open: Vec<LimitOrderView> = self.limit_orders(near, true).await?.into_iter().map(|o| o.1).filter(|v| {
             v.status != "PENDING_CANCEL" && match id {
                 Some(id) => v.id == id,
                 None => coin.is_none_or(|c| v.coin.eq_ignore_ascii_case(c)),

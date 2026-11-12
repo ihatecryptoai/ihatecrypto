@@ -254,6 +254,9 @@ impl Engine {
         st.solana_holdings.clear();
         st.place_facts.hyperliquid = None;
         st.recently_closed.clear();
+        // The last wallet's limit orders (the Mac's switch sets limitOrderList to nil): `limit_views` stays, so the loop
+        // reads this one's on its next tick.
+        st.limit_orders = None;
         st.notice_positions = None;
         st.notice_entries.clear();
     }
