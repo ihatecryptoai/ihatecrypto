@@ -1706,5 +1706,20 @@
       "limit_orders_priced": true,
       "reply_contains": "лимитн"
     }
+  },
+  {
+    "name": "risk over the limit with «Ask me» → the plan isn't stopped, the checklist says the sheet asks to accept the loss",
+    "send": [
+      "long ETH risk $40 stop 3% take 6% leverage 2x"
+    ],
+    "defaults": {
+      "overLimitTest": "ask"
+    },
+    "expect": {
+      "plan": "ETH",
+      "reply_contains": "accept the loss",
+      "reply_lacks": "✗ Rules",
+      "no_pending": true
+    }
   }
 ]

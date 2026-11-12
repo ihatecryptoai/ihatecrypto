@@ -2188,7 +2188,7 @@ extension Workspace {
             if let s = sizing {
                 let pct = equity.flatMap { $0 > 0 ? (s.lossAtStopUSD / $0 * 100).rounded(1, .plain) : nil }
                 lines.append(row("risk", Fmt.usd(s.lossAtStopUSD) + (pct.map { " · \(Fmt.num($0))%" } ?? "")))
-                lines.append(row("limit", "\(Fmt.num(policy.maxRiskPct))% a trade"))
+                lines.append(row("limit", policy.maxRiskPct >= RiskPolicy.noLimit ? "none" : "\(Fmt.num(policy.maxRiskPct))% a trade"))
                 if let profit = s.profitAtTakeUSD, s.lossAtStopUSD > 0 { lines.append(row("reward/risk", "1:\(Fmt.num((profit / s.lossAtStopUSD).rounded(1, .plain)))")) }
             }
             // A rule it breaks, in its own words, first.

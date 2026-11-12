@@ -33,6 +33,20 @@ enum SignerSelfTest {
             check(imported.solanaAddress == "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk", "Solana address matches the reference")
             check(try await signer.send(.status).hasWallet == true, "key is in the Keychain")
 
+            // The trading rules live in the signer: saved, read back, a wrong one refused, an older sender keeps them.
+            var limits = try await signer.send(.status).limits ?? .standard
+            let before = limits
+            limits.trading = TradingRules(riskPct: 5, openRiskPct: 10, minRewardRisk: 1, leverage: 3, overLimit: "ask")
+            check(try await signer.send(.setLimits(limits: limits)).limits?.trading?.leverage == 3, "trading rules saved in the signer")
+            var wrong = limits
+            wrong.trading?.leverage = 51
+            check((try? await signer.send(.setLimits(limits: wrong)))?.ok != true, "leverage over 50× refused as a limit")
+            var older = limits
+            older.trading = nil
+            check(try await signer.send(.setLimits(limits: older)).limits?.trading?.leverage == 3, "a sender without trading rules leaves them")
+            // ponytail: trading rules can't be cleared once saved (nil keeps them); this copy is thrown away after.
+            _ = try await signer.send(.setLimits(limits: before))
+
             // The app derives the same public test keys only to build transactions and compare signatures.
             let seed = try Mnemonic.seed(phrase)
             let solanaKey = try Derivation.ed25519(seed: seed, path: WalletPath.solana(0))

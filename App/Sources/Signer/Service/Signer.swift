@@ -377,7 +377,7 @@ enum Signer {
             guard verdict.ok else { return refused(verdict) }
             // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
             let opening = HLAction.opening(action)
-            if let why = try agentTake(opening) {
+            if let why = try pastLeverage(action) ?? agentTake(opening) {
                 var v = Verdict()
                 v.problems.append("The Ledger's trading key: \(why). \(ledgerDevice)")
                 return refused(v)
@@ -411,14 +411,22 @@ enum Signer {
             r.sessionLength = seconds
             return r
 
-        case .setLimits(let limits):
+        case .setLimits(var limits):
+            let was = Limits.current
+            // A sender that doesn't know the trading rules (an older app) leaves them as they are.
+            if limits.trading == nil { limits.trading = was.trading }
             if let problem = limits.problem { throw WalletError(problem) }
-            let looser = limits.looser(than: Limits.current)
+            let looser = limits.looser(than: was)
+            // The trading rules ask on any change, lowered too (the owner, 2026-11-12): only the person sets them.
+            let rules = limits.trading?.changes(from: was.trading) ?? []
             // In person even with no wallet yet: limits set silently then would hold for every wallet added later.
-            if !looser.isEmpty, !holdsPublicTestWallet {
-                try SeedStore.confirm("loosen your limits:\n" + looser.joined(separator: "\n"))
+            if !looser.isEmpty || !rules.isEmpty, !holdsPublicTestWallet {
+                try SeedStore.confirm(((looser.isEmpty ? [] : ["loosen your limits:"] + looser)
+                                       + (rules.isEmpty ? [] : ["change your trading rules:"] + rules)).joined(separator: "\n"))
                 SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
             }
+            // Another change saved while the prompt was up: this one was asked against limits no longer in force.
+            guard Limits.current == was else { throw WalletError("The limits changed while you were asked: nothing was saved. Look at them again.") }
             Limits.save(limits)
             var r = SignerReply(ok: true)
             r.limits = Limits.current
@@ -758,8 +766,10 @@ enum Signer {
             let opening = HLAction.opening(action)
             var agent = agentOn && fresh ? AgentStore.load() : nil
             defer { if agent != nil { SeedStore.wipe(&agent!) } }
+            // Leverage past the person's limit is set only in person, by the main key.
+            let leverage = pastLeverage(action)
             // Taken from the day in the same step as the check, before signing; given back if the signature fails.
-            let over = agent != nil ? try agentTake(opening) : nil
+            let over = agent != nil ? try leverage ?? agentTake(opening) : nil
             if let key = agent, over == nil {
                 do { r.signature = try HLSigner.signL1(action, privateKey: key, nonce: nonce, mainnet: mainnet) }
                 catch { if case .dollars(let d) = opening { Limits.refund(.agent, d) }; throw error }
@@ -781,8 +791,10 @@ enum Signer {
                 // Renewing the trading key's days, an order past its limits, and a vault deposit (money locked for days), ask
                 // in person afresh.
                 let deposit = type == "vaultTransfer" && { if case .map(let p) = action { p.contains { $0.0 == "isDeposit" && $0.1 == .bool(true) } } else { false } }()
-                if stale || over != nil || deposit { try confirmAfresh(prompt(what, verdict)) }
-                r.signature = try withKey("evm", reason: prompt(what, verdict)) {
+                // Leverage past the cap names itself, and the renewal too when this prompt also renews the key's days.
+                let asked = leverage.map { "sign a Hyperliquid order: \($0)" + (stale ? "; the trading key's \(agentDaysText) are over, and this renews them" : "") } ?? what
+                if stale || over != nil || deposit || leverage != nil { try confirmAfresh(prompt(asked, verdict)) }
+                r.signature = try withKey("evm", reason: prompt(asked, verdict)) {
                     try HLSigner.signL1(action, privateKey: $0, nonce: nonce, mainnet: mainnet)
                 }
                 if stale { renewAgent(agentRenewedKey) }
@@ -926,6 +938,9 @@ enum Signer {
     static var agentDaysText: String { let d = Limits.current.agentDays; return d == 1 ? "1 day" : "\(d) days" }
     static func agentFresh(_ key: String) -> Bool { Date().timeIntervalSince1970 - ((defaults.object(forKey: key) as? Double) ?? 0) < agentSpan }
     /// Why the trading key can't sign `opening` on its own, or nil — and then its dollars are taken from the day.
+    /// An updateLeverage past the person's leverage limit (Settings › Trading agent), in words; else nil.
+    static func pastLeverage(_ action: MsgPack) -> String? { HLGuard.leverage(action, over: Limits.current.leverageCap) }
+
     static func agentTake(_ opening: HLAction.Opening) throws -> String? {
         switch opening {
         case .person(let why): why

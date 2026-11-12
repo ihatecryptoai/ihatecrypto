@@ -166,6 +166,8 @@ final class Workspace {
     var sessionLength = SignerSession.standard
     /// The person's limits as the signer keeps them (Settings › Wallet › Limits).
     var limits = SignerLimits.standard
+    /// Trading rules saved by `saveRules`: a `loadSigner` that read the status before one leaves the limits alone.
+    var rulesSaves = 0
 
     // Execution
     var prepared: Executor.Prepared? {
@@ -1416,7 +1418,19 @@ final class Workspace {
                     reply(say("“\(text)” for \(IntentParser.pretty(coin)): press Confirm to go ahead.",
                               "«\(text)» для \(IntentParser.pretty(coin)): нажми Confirm."))
                 default:
-                    await manage(command, coin: coin)
+                    // «Ask me» over the risk limit waits on a card; «Just warn» moves and says the loss.
+                    if let over = stopOverLimit(command, coin: coin) {
+                        if policy.limitMode == .ask {
+                            pendingAction = .position(command, coin: coin)
+                            pendingText = text
+                            reply(say("\(over) Press Confirm to move the stop.", "\(over) Нажми Confirm, чтобы переставить стоп."))
+                        } else {
+                            await manage(command, coin: coin)
+                            reply(over)
+                        }
+                    } else {
+                        await manage(command, coin: coin)
+                    }
                 }
             } else {
                 let open = positions.map { "\($0.size > 0 ? "long" : "short") \(IntentParser.pretty($0.coin))" }.joined(separator: ", ")
@@ -2010,8 +2024,9 @@ final class Workspace {
             if case .close(let share) = command, closeTooSmall(share, coin: coin, note: note) { return true }
             pendingAction = .position(command, coin: coin)
             pendingText = canonical
-            reply(say("Understood as “\(canonical)” for \(IntentParser.pretty(coin)). Press Confirm to go ahead.",
-                      "Понял как «\(canonical)» для \(IntentParser.pretty(coin)). Нажми Confirm."), note: note)
+            let over = stopOverLimit(command, coin: coin).map { " " + $0 } ?? ""
+            reply(say("Understood as “\(canonical)” for \(IntentParser.pretty(coin)).\(over) Press Confirm to go ahead.",
+                      "Понял как «\(canonical)» для \(IntentParser.pretty(coin)).\(over) Нажми Confirm."), note: note)
             return true
         }
         // «close ETH», «move stop to breakeven» with no such position: never a new plan («close ETH» names ETH).
@@ -2462,6 +2477,7 @@ final class Workspace {
     }
 
     func loadSigner() async {
+        let rulesAt = rulesSaves
         guard SignerClient.isAvailable, let status = try? await SignerClient().send(.status) else { return }
         AppLock.shared.update(codeSet: status.codeSet == true)
         if tasksTampered {
@@ -2508,7 +2524,14 @@ final class Workspace {
         agentAddress = onLedger ? agent?.agentAddress : status.agentAddress
         agentActive = onLedger ? agent?.agentActive ?? false : status.agentActive ?? false
         sessionLength = status.sessionLength ?? SignerSession.standard
-        limits = status.limits ?? .standard
+        if rulesAt == rulesSaves { limits = status.limits ?? .standard }
+        // The signer's trading rules are the ones in force: the app's own copy only follows them. A save that went in
+        // after this status was read has the newer ones already.
+        if rulesAt == rulesSaves, let t = limits.trading {
+            var p = policy
+            p.take(t)
+            if p != policy { policy = p }
+        }
         confirmedAddresses = (try? await SignerClient().send(.addressBook))?.addresses ?? confirmedAddresses
         // NEAR's balance is read with Solana's.
         if nearChanged { await loadSolana() }
@@ -2557,4 +2580,40 @@ nonisolated enum Keychain {
         known.withLock { $0[account] = added ? .some(credential) : nil }
     }
 
+}
+
+extension RiskPolicy {
+    /// The limits the signer keeps (SignerLimits.trading).
+    var tradingRules: TradingRules {
+        TradingRules(riskPct: maxRiskPct, openRiskPct: maxOpenRiskPct, minRewardRisk: minRewardRisk,
+                     leverage: NSDecimalNumber(decimal: maxLeverage).intValue, overLimit: (overLimit ?? .block).rawValue)
+    }
+
+    /// The signer's limits in place of these, with the rules that hang on them kept in line.
+    mutating func take(_ t: TradingRules) {
+        (maxRiskPct, maxOpenRiskPct, minRewardRisk, maxLeverage) = (t.riskPct, t.openRiskPct, t.minRewardRisk, Decimal(t.leverage))
+        overLimit = OverLimit(rawValue: t.overLimit)
+        defaultRiskPct = min(defaultRiskPct, maxRiskPct)
+        defaultRewardRisk = max(defaultRewardRisk, minRewardRisk)
+    }
+}
+
+extension Workspace {
+    /// A new policy whose limits changed: the signer keeps them and asks for the person on any change (Touch ID or
+    /// the Mac's password, the passcode where it signs). In force only once the signer took them. nil = saved, else why not.
+    func saveRules(_ p: RiskPolicy) async -> String? {
+        var wanted = limits
+        wanted.trading = p.tradingRules
+        if wanted.trading != limits.trading {
+            do {
+                let reply = try await SignerClient().send(.setLimits(limits: wanted))
+                guard reply.ok else { return reply.error ?? "The signer didn't take the new limits." }
+                // What the signer saved, at once: a status read before it must not bring the old rules back.
+                rulesSaves += 1
+                limits = reply.limits ?? wanted
+            } catch { return error.localizedDescription }
+        }
+        policy = p
+        return nil
+    }
 }

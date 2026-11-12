@@ -478,6 +478,16 @@ extension Workspace {
     /// `confirm`: a model read the message, so the new orders wait on a card for Confirm, like any other model reading
     /// that touches a position. Every chat message goes through the model, so a typed «stop 2%» waits too; only the
     /// no-model path (`confirm: false`) moves them at once.
+    /// «stop at $X» past the per-trade limit, in «Ask me» or «Just warn»: the sentence its card or reply says. nil when it's
+    /// within the limit, when it isn't a stop move, or in «Block» (the executor refuses it there).
+    func stopOverLimit(_ command: PositionCommand, coin: String) -> String? {
+        guard policy.limitMode != .block, case .stopTo(let stop) = command,
+              let p = positions.first(where: { $0.coin == coin && $0.size != 0 }), let equity, equity > 0 else { return nil }
+        let loss = max(0, p.size > 0 ? p.entry - stop : stop - p.entry) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
+        guard loss / equity * 100 > policy.maxRiskPct else { return nil }
+        return "A stop at \(Fmt.price(stop)) means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct))."
+    }
+
     func editExecuted(from before: TradeIntent, to next: TradeIntent, confirm: Bool = false) async -> Bool {
         guard let p = positions.first(where: { $0.coin == before.asset }) else { return false }
         var same = next
@@ -487,28 +497,33 @@ extension Workspace {
         let dir: Decimal = long ? 1 : -1
         let resolvedNext = Plan.resolve(next, market: market, equity: equity, policy: policy).intent
         var moves: [PositionCommand] = []
+        var overLimit = ""
         if let stopPct = resolvedNext.stopPct, stopPct != before.stopPct {
             let stop = p.entry * (1 - dir * stopPct / 100)
             // A wider stop may not break the per-trade limit. A hedge's stop loses what the coins it covers gain.
             let loss = abs(p.entry - stop) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
             if !before.isHedge, let equity, equity > 0, loss / equity * 100 > policy.maxRiskPct {
-                reply("A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
-                return true
+                let said = "A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct))."
+                if policy.limitMode == .block { reply(said + " Stop not moved."); return true }
+                // «Ask me» and «Just warn»: the move goes, its card says the loss first.
+                overLimit = " " + said
             }
             moves.append(.stopTo(stop))
         }
         if let takePct = resolvedNext.takePct, takePct != before.takePct {
             moves.append(.takeTo(p.entry * (1 + dir * takePct / 100)))
         }
-        if confirm, !moves.isEmpty {
+        // «Ask me» over the limit waits on a card even on the no-model path.
+        if confirm || (policy.limitMode == .ask && !overLimit.isEmpty), !moves.isEmpty {
             let what = moves.map { "\(Self.describe($0))" }.joined(separator: ", ")
             pendingAction = .orders(moves, coin: p.coin, intent: next)
             pendingText = "\(IntentParser.pretty(p.coin)): \(what)"
-            reply(say("\(IntentParser.pretty(p.coin)): \(what). Press Confirm to move the orders.",
-                      "\(IntentParser.pretty(p.coin)): \(what). Нажми Confirm, чтобы переставить ордера."))
+            reply(say("\(IntentParser.pretty(p.coin)): \(what).\(overLimit) Press Confirm to move the orders.",
+                      "\(IntentParser.pretty(p.coin)): \(what).\(overLimit) Нажми Confirm, чтобы переставить ордера."))
             return true
         }
         for move in moves { await manage(move, coin: p.coin) }
+        if !overLimit.isEmpty { reply(String(overLimit.dropFirst())) }
         intent = next
         executed = next
         return true
@@ -1763,10 +1778,11 @@ struct ConfirmSheet: View {
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Capsule().fill(.fill.tertiary))
                 } else if ws.prepared != nil {
-                    Text(concern ? "check the warning" : "all checks passed").font(.ui(10, .semibold))
-                        .foregroundStyle(concern ? Color.orange : Brand.profit)
+                    let warned = concern || ws.prepared?.overLimit.isEmpty == false
+                    Text(warned ? "check the warning" : "all checks passed").font(.ui(10, .semibold))
+                        .foregroundStyle(warned ? Color.orange : Brand.profit)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill((concern ? Color.orange : Brand.profit).opacity(0.12)))
+                        .background(Capsule().fill((warned ? Color.orange : Brand.profit).opacity(0.12)))
                 }
             }
             if let p = ws.prepared {
@@ -1822,6 +1838,18 @@ struct ConfirmSheet: View {
                         }
                     }
                 }
+                // Variant D (owner, 2026-11-12): over a risk limit the sheet says it in amber; with «Ask me» Sign waits for a tick.
+                if !p.overLimit.isEmpty {
+                    Label(p.overLimit.joined(separator: " "), systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Brand.jevInk).fixedSize(horizontal: false, vertical: true)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
+                    if p.mustAccept {
+                        Toggle("I accept losing \(Fmt.usd(p.sizing.lossAtStopUSD)) at the stop on this trade",
+                               isOn: Binding(get: { ws.prepared?.accepted ?? false }, set: { ws.prepared?.accepted = $0 }))
+                            .disabled(ws.preparing)
+                    }
+                }
                 if concern {
                     Toggle("I understand the second check's warning and execute anyway", isOn: $acknowledged)
                         // Ticked while Jev still reads, it would pass a signature warning nobody has seen yet.
@@ -1868,7 +1896,8 @@ struct ConfirmSheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Brand.accent)
                     .controlSize(.large)
-                    .disabled(ws.prepared == nil || ws.preparing || (concern && !acknowledged) || ws.executing)
+                    .disabled(ws.prepared == nil || ws.preparing || (concern && !acknowledged) || ws.executing
+                               || (ws.prepared.map { $0.mustAccept && !$0.accepted } ?? false))
                 }
             }
         }

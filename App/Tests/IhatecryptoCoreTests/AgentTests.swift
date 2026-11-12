@@ -444,12 +444,12 @@ private final class Script: LLMClient, @unchecked Sendable {
 }
 
 @Test func leverageAboveWhatTheSignerTakesIsRefusedInThePlan() throws {
-    // BTC allows 40×, the signer refuses over 20× (HLGuard): a 25× plan says so before any money moves to Hyperliquid.
-    let m = Market(name: "BTC", markPx: 84000, szDecimals: 5, maxLeverage: 40)
+    // A market that allowed 60×: the signer refuses over 50× (HLGuard), so a 55× plan says so before any money moves.
+    let m = Market(name: "BTC", markPx: 84000, szDecimals: 5, maxLeverage: 60)
     var i = TradeIntent()
-    (i.asset, i.riskUSD, i.stopPct, i.leverage) = ("BTC", 1, 1, 25)
-    #expect(Plan.evaluate(i, market: m).problem == "Leverage for BTC: 1× to 20×.")
-    i.leverage = 20
+    (i.asset, i.riskUSD, i.stopPct, i.leverage) = ("BTC", 1, 1, 55)
+    #expect(Plan.evaluate(i, market: m).problem == "Leverage for BTC: 1× to 50×.")
+    i.leverage = 50
     #expect(Plan.evaluate(i, market: m).problem?.hasPrefix("Leverage") != true)
 }
 

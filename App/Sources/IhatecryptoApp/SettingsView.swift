@@ -22,6 +22,10 @@ struct SettingsView: View {
     @AppStorage(SettingsView.tabKey) private var tab = Tab.general
     @AppStorage(Executor.batchKey) private var batches = false
     @AppStorage(ContractCallGuard.capKey) private var contractCap = 50.0
+    /// Trading › Limits edited but not saved: the signer takes them in person (Workspace.saveRules).
+    @State private var rulesDraft: RiskPolicy?
+    @State private var rulesError: String?
+    @State private var rulesSaving = false
 
     /// Raw values also serve links from the chat and the networks menu.
     enum Tab: String, CaseIterable {
@@ -219,7 +223,10 @@ struct SettingsView: View {
 
     /// A style sets every rule at once; a number changed after it makes the policy «Custom».
     private var style: some View {
-        let current = AgentStyle.allCases.first { $0.policy == ws.policy }
+        // «Over a limit» is the user's own, not part of a style.
+        var mine = ws.policy
+        mine.overLimit = nil
+        let current = AgentStyle.allCases.first { $0.policy == mine }
         return SettingsSection(icon: "dial.medium", title: "Style",
                                line: current == nil ? "Custom: your own numbers below. A style resets them." : "Sets every rule below at once. Change any number after.") {
             HStack(spacing: 10) {
@@ -229,7 +236,12 @@ struct SettingsView: View {
     }
 
     private func styleCard(_ s: AgentStyle, selected: Bool) -> some View {
-        Button { ws.policy = s.policy } label: {
+        Button {
+            var p = s.policy
+            p.overLimit = ws.policy.overLimit
+            rulesSaving = true
+            Task { rulesError = await ws.saveRules(p); rulesDraft = nil; rulesSaving = false }
+        } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top) {
                     SettingsIcon(icon: s.icon, size: 34)
@@ -252,7 +264,7 @@ struct SettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Brand.accent : Brand.cardBorder, lineWidth: selected ? 1.5 : 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
+        .buttonStyle(.plain).disabled(rulesSaving).accessibilityAddTraits(selected ? [.isSelected] : [])
         .help(selected ? "\(s.name) — in use" : "Use \(s.name): sets all the rules below")
     }
 
@@ -264,27 +276,61 @@ struct SettingsView: View {
     }
 
     private var limits: some View {
-        let p = ws.policy
-        return SettingsSection(icon: "shield.lefthalf.filled", title: "Limits", line: "A plan that breaks one is not executed. Crypto only.") {
+        let p = rulesDraft ?? ws.policy
+        return SettingsSection(icon: "shield.lefthalf.filled", title: "Limits", line: "What a trade may risk, and what happens to a plan over a limit. Any change asks for \(Presence.name). Crypto only.") {
             SettingsGroup {
-                SettingsRow("Risk per trade", icon: "chart.bar", info: "The most one trade may lose at its stop, as a share of your capital.") {
+                SettingsRow("Over a limit", icon: "hand.raised", info: "Block: the plan isn't executed. Ask me: before signing, the sheet asks you to tick that you accept the loss at the stop. Just warn: a warning line only.") {
+                    Picker("Over a limit", selection: Binding(get: { p.limitMode }, set: { m in updateRules { $0.overLimit = m } })) {
+                        Text("Block").tag(RiskPolicy.OverLimit.block)
+                        Text("Ask me").tag(RiskPolicy.OverLimit.ask)
+                        Text("Just warn").tag(RiskPolicy.OverLimit.warn)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize().tint(nil)
+                }
+                // Variant B (owner, 2026-11-12): the scale goes past 10% to 15, 25, 50 and «No limit».
+                SettingsRow("Risk per trade", icon: "chart.bar", info: "The most one trade may lose at its stop, as a share of your capital. «No limit» takes the limit off, and the one for all positions together with it.") {
+                    let steps = RiskPolicy.riskSteps
+                    let at = CGFloat(steps.lastIndex { $0 <= p.maxRiskPct } ?? 0) / CGFloat(steps.count - 1)
                     GeometryReader { g in
                         Capsule().fill(Color.primary.opacity(0.1))
-                            .overlay(alignment: .leading) {
-                                Capsule().fill(Brand.accent).frame(width: g.size.width * min(max(CGFloat(NSDecimalNumber(decimal: p.maxRiskPct).doubleValue / 10), 0), 1))
-                            }
+                            .overlay(alignment: .leading) { Capsule().fill(Brand.accent).frame(width: g.size.width * at) }
                     }
                     .frame(width: 70, height: 6).accessibilityHidden(true)
-                    stepper(Fmt.pct(p.maxRiskPct), "risk per trade", down: p.maxRiskPct > 0.5, up: p.maxRiskPct < 10) { $0.maxRiskPct += $1 * Self.half }
+                    ladder(p.maxRiskPct, RiskPolicy.riskSteps, "risk per trade", floor: 0) { v in updateRules { $0.maxRiskPct = v } }
                 }
                 SettingsRow("All open positions together", icon: "square.stack.3d.up", info: "Their combined loss at the stops can't go over this share of capital. It's never below the risk per trade.") {
-                    stepper(Fmt.pct(p.maxOpenRiskPct), "for all positions", down: p.maxOpenRiskPct > p.maxRiskPct, up: p.maxOpenRiskPct < 30) { $0.maxOpenRiskPct += $1 }
+                    ladder(p.maxOpenRiskPct, RiskPolicy.openRiskSteps, "for all positions", floor: p.maxRiskPct) { v in updateRules { $0.maxOpenRiskPct = v } }
                 }
                 SettingsRow("Reward / risk at least", icon: "arrow.up.right", info: "The planned profit must be at least this many times the planned loss.") {
-                    stepper(Fmt.num(p.minRewardRisk), "reward per risk", down: p.minRewardRisk > 1, up: p.minRewardRisk < 5) { $0.minRewardRisk += $1 * Self.tenth }
+                    stepper(Fmt.num(p.minRewardRisk), "reward per risk", down: p.minRewardRisk > 1, up: p.minRewardRisk < 5, rules: true) { $0.minRewardRisk += $1 * Self.tenth }
                 }
-                SettingsRow("Leverage up to", icon: "multiply", info: "Borrowed exposure makes gains and losses larger. The assistant never trades above this.") {
-                    stepper("\(Fmt.num(p.maxLeverage))×", "leverage", down: p.maxLeverage > 1, up: p.maxLeverage < 20) { $0.maxLeverage += $1 }
+                SettingsRow("Leverage up to", icon: "multiply", info: "Borrowed exposure makes gains and losses larger. The trading key never sets more: above it, every leverage change asks for \(Presence.name).") {
+                    let down = RiskPolicy.step(p.maxLeverage, in: RiskPolicy.leverageSteps, up: false)
+                    let up = RiskPolicy.step(p.maxLeverage, in: RiskPolicy.leverageSteps, up: true)
+                    stepper("\(Fmt.num(p.maxLeverage))×", "leverage", down: down != nil, up: up != nil, rules: true) { p, dir in
+                        if let to = dir > 0 ? up : down { p.maxLeverage = to }
+                    }
+                }
+                if rulesDraft != nil || rulesError != nil {
+                    HStack(spacing: 10) {
+                        if let rulesError { Text(rulesError).font(.ui(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                        Spacer()
+                        Button("Undo") { rulesDraft = nil; rulesError = nil }.disabled(rulesSaving)
+                        if let draft = rulesDraft {
+                            Button("Save with \(Presence.short)") {
+                                rulesSaving = true
+                                Task {
+                                    var p = ws.policy
+                                    p.take(draft.tradingRules)
+                                    rulesError = await ws.saveRules(p)
+                                    if rulesError == nil { rulesDraft = nil }
+                                    rulesSaving = false
+                                }
+                            }
+                            .buttonStyle(.borderedProminent).tint(Brand.accent).disabled(rulesSaving)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
         }
@@ -295,7 +341,7 @@ struct SettingsView: View {
         return SettingsSection(icon: "book.closed", title: "By the book", line: "What «by the book» uses when you name no numbers.") {
             SettingsGroup {
                 SettingsRow("Risk", icon: "chart.bar", info: "The share of capital a trade risks at its stop when you don't say how much. Never above the risk per trade.") {
-                    stepper(Fmt.pct(p.defaultRiskPct), "default risk", down: p.defaultRiskPct > Self.quarter, up: p.defaultRiskPct < p.maxRiskPct) { $0.defaultRiskPct += $1 * Self.quarter }
+                    stepper(Fmt.pct(p.defaultRiskPct), "default risk", down: p.defaultRiskPct > Self.quarter, up: p.defaultRiskPct < min(p.maxRiskPct, 10)) { $0.defaultRiskPct += $1 * Self.quarter }
                 }
                 SettingsRow("Take-profit", icon: "flag.checkered", info: "How far the take is, as a multiple of the stop's distance: 2R takes twice what the stop would lose. Never below the reward / risk limit.") {
                     stepper("\(Fmt.num(p.defaultRewardRisk))R", "take-profit", down: p.defaultRewardRisk > p.minRewardRisk, up: p.defaultRewardRisk < 10) { $0.defaultRewardRisk += $1 * Self.half }
@@ -307,15 +353,37 @@ struct SettingsView: View {
         }
     }
 
+    /// − value + over fixed steps (RiskPolicy.riskSteps): the top one reads «No limit». `floor`: the value may not go below it.
+    private func ladder(_ value: Decimal, _ steps: [Decimal], _ what: String, floor: Decimal, set: @escaping (Decimal) -> Void) -> some View {
+        let down = RiskPolicy.step(value, in: steps, up: false).flatMap { $0 >= floor ? $0 : nil }
+        let up = RiskPolicy.step(value, in: steps, up: true)
+        return HStack(spacing: 8) {
+            step("minus", "Less \(what)", enabled: down != nil) { if let down { set(down) } }
+            Text(value >= RiskPolicy.noLimit ? "No limit" : Fmt.pct(value)).font(.ui(15, .bold)).monospacedDigit().frame(minWidth: 72)
+            step("plus", "More \(what)", enabled: up != nil) { if let up { set(up) } }
+        }
+    }
+
     private static let tenth = Decimal(string: "0.1")!, quarter = Decimal(string: "0.25")!, half = Decimal(string: "0.5")!
 
     /// − value +: `change` gets −1 or +1; the rules that depend on each other are kept in line after it.
-    private func stepper(_ value: String, _ what: String, down: Bool, up: Bool, change: @escaping (inout RiskPolicy, Decimal) -> Void) -> some View {
+    /// `rules`: a limit, edited in the draft that Save gives the signer.
+    private func stepper(_ value: String, _ what: String, down: Bool, up: Bool, rules: Bool = false,
+                         change: @escaping (inout RiskPolicy, Decimal) -> Void) -> some View {
         HStack(spacing: 8) {
-            step("minus", "Less \(what)", enabled: down) { update { change(&$0, -1) } }
+            step("minus", "Less \(what)", enabled: down) { rules ? updateRules { change(&$0, -1) } : update { change(&$0, -1) } }
             Text(value).font(.ui(15, .bold)).monospacedDigit().frame(minWidth: 58)
-            step("plus", "More \(what)", enabled: up) { update { change(&$0, 1) } }
+            step("plus", "More \(what)", enabled: up) { rules ? updateRules { change(&$0, 1) } : update { change(&$0, 1) } }
         }
+    }
+
+    /// A limit changed in the draft: in force only after Save, in person.
+    private func updateRules(_ change: (inout RiskPolicy) -> Void) {
+        var p = rulesDraft ?? ws.policy
+        change(&p)
+        p.maxOpenRiskPct = max(p.maxOpenRiskPct, p.maxRiskPct)
+        rulesError = nil
+        rulesDraft = p.tradingRules == ws.policy.tradingRules ? nil : p
     }
 
     private func update(_ change: (inout RiskPolicy) -> Void) {

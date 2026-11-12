@@ -425,6 +425,7 @@ struct ContentView: View {
             Executor.swapTailTest = UserDefaults.standard.bool(forKey: "swapTailTest")
             Executor.stopMoveFailTest = UserDefaults.standard.integer(forKey: "stopMoveFailTest")
             TokenResearch.busyTest = { UserDefaults.standard.bool(forKey: "jupiterBusyTest") }
+            RiskPolicy.limitModeTest = { UserDefaults.standard.string(forKey: "overLimitTest").flatMap(RiskPolicy.OverLimit.init) }
             let executeTimeout = UserDefaults.standard.double(forKey: "jupiterExecuteTimeout")
             if executeTimeout > 0 { Jupiter.executeTimeout = executeTimeout }
             #endif

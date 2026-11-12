@@ -1059,21 +1059,43 @@ private struct RulesStep: View {
     let next: () -> Void
     let back: () -> Void
 
+    /// The per-trade limit picked here, saved on Continue: the signer keeps it and asks for the person once.
+    @State private var risk: Decimal?
+    @State private var problem: String?
+    @State private var saving = false
+
+    private func setRisk(_ v: Decimal) { risk = v; problem = nil }
+
+    private func done() {
+        guard !saving else { return }
+        guard let risk, risk != ws.policy.maxRiskPct else { next(); return }
+        saving = true
+        var p = ws.policy
+        p.maxRiskPct = risk
+        p.defaultRiskPct = min(p.defaultRiskPct, risk)
+        p.maxOpenRiskPct = max(p.maxOpenRiskPct, risk)
+        Task {
+            problem = await ws.saveRules(p)
+            saving = false
+            if problem == nil { next() }
+        }
+    }
+
     var body: some View {
         @Bindable var ws = ws
-        let p = ws.policy
+        let p = { var p = ws.policy; if let risk { p.maxRiskPct = risk }; return p }()
         OnboardingCard(mood: .idle, title: "Rules every trade passes",
-                       subtitle: "Because Hyperliquid is on. Checked in code before a trade is signed, not by the model.",
-                       primary: "Continue", action: next) {
+                       subtitle: problem ?? "Because Hyperliquid is on. Checked in code before a trade is signed, not by the model.",
+                       primary: risk.map { $0 != ws.policy.maxRiskPct } == true ? "Continue · \(Presence.short)" : "Continue", action: done) {
             VStack(spacing: 8) {
                 Tile {
-                    rule("At most \(Fmt.num(p.maxRiskPct))% of the account at risk", "What one trade may lose at its stop")
-                    Stepper("", value: Binding(get: { (p.maxRiskPct as NSDecimalNumber).doubleValue },
-                                               set: { ws.policy.maxRiskPct = Decimal($0) }), in: 0.5...10, step: 0.5).labelsHidden()
+                    rule(p.maxRiskPct >= RiskPolicy.noLimit ? "No limit on the account at risk" : "At most \(Fmt.num(p.maxRiskPct))% of the account at risk", "What one trade may lose at its stop")
+                    Stepper("", onIncrement: { RiskPolicy.step(p.maxRiskPct, in: RiskPolicy.riskSteps, up: true).map(setRisk) },
+                            onDecrement: { RiskPolicy.step(p.maxRiskPct, in: RiskPolicy.riskSteps, up: false).map(setRisk) }).labelsHidden()
                 }
                 Tile { rule("By the book: \(Fmt.num(p.defaultRiskPct))% risk, take at \(Fmt.num(p.defaultRewardRisk))R", "When you say «by the book» and name no amount") }
                 Tile { rule("Reward at least \(Fmt.num(p.minRewardRisk))× the risk", "A plan that pays less is stopped") }
-                Tile { rule("Stop by volatility: \(Fmt.num(p.atrStopMultiple))× the 4-hour ATR", "Leverage up to \(Fmt.num(p.maxLeverage))×; all open positions together at most \(Fmt.num(p.maxOpenRiskPct))%") }
+                Tile { rule("Stop by volatility: \(Fmt.num(p.atrStopMultiple))× the 4-hour ATR", "Leverage up to \(Fmt.num(p.maxLeverage))×; all open positions together: \(p.maxOpenRiskPct >= RiskPolicy.noLimit ? "no limit" : "at most \(Fmt.num(p.maxOpenRiskPct))%")") }
                 Tile {
                     rule("Second check", "Another model reads every plan before you confirm it")
                     Toggle("Second check", isOn: $ws.jevScreening).labelsHidden().toggleStyle(AccentSwitch())

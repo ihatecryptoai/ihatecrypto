@@ -609,8 +609,16 @@ public enum SimulationDrift {
 public enum HLGuard {
     /// Hyperliquid's own market-making vault; the only vault money may go to without the user naming it.
     public static let hlpVault = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303"
-    /// The top of Settings › Trading's leverage stepper (SettingsView, `p.maxLeverage < 20`).
-    public static let maxLeverage: UInt64 = 20
+    /// The top of Settings › Trading's leverage stepper (RiskPolicy.leverageSteps): 50×, the most any Hyperliquid market gives.
+    /// Past the person's own limit (SignerLimits.leverageCap) the trading key doesn't sign it: the main key does, in person.
+    public static let maxLeverage: UInt64 = 50
+
+    /// «leverage 30× is above your 10× limit» for an updateLeverage past `cap`, else nil.
+    public static func leverage(_ action: MsgPack, over cap: Int) -> String? {
+        guard case .map(let pairs) = action, case .string("updateLeverage")? = pairs.first(where: { $0.0 == "type" })?.1,
+              case .uint(let n)? = pairs.first(where: { $0.0 == "leverage" })?.1, n > UInt64(max(cap, 1)) else { return nil }
+        return "leverage \(n)× is above your \(cap)× limit"
+    }
 
     /// Orders and cancels trade inside the account. Anything that moves money must go to an approved address.
     public static func check(_ action: MsgPack, owner: String, recipients: Set<String>, agent: String? = nil) -> Verdict {

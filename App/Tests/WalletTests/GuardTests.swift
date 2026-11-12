@@ -1,4 +1,5 @@
 import Foundation
+import IhatecryptoCore
 import HyperliquidSigning
 @testable import SolanaChain
 import Testing
@@ -116,8 +117,14 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(!HLGuard.check(action("approveAgent", [("agentAddress", .string("0xBAD"))]), owner: owner, recipients: [], agent: "0xGOOD").ok)
     // The trading key sets leverage without Touch ID: at most the risk rules' top, never Hyperliquid's own 40–50×.
     #expect(HLGuard.check(action("updateLeverage", [("asset", .uint(0)), ("isCross", .bool(false)), ("leverage", .uint(5))]), owner: owner, recipients: []).ok)
-    #expect(HLGuard.check(action("updateLeverage", [("leverage", .uint(20))]), owner: owner, recipients: []).ok)
-    #expect(!HLGuard.check(action("updateLeverage", [("leverage", .uint(21))]), owner: owner, recipients: []).ok)
+    #expect(HLGuard.check(action("updateLeverage", [("leverage", .uint(50))]), owner: owner, recipients: []).ok)
+    #expect(!HLGuard.check(action("updateLeverage", [("leverage", .uint(51))]), owner: owner, recipients: []).ok)
+    #expect(RiskPolicy.leverageSteps.last == Decimal(HLGuard.maxLeverage))
+    #expect(TradingRules.maxLeverage == Int(HLGuard.maxLeverage) && TradingRules.noLimit == RiskPolicy.noLimit)
+    // Past the person's limit the trading key doesn't set it: the signer asks in person.
+    #expect(HLGuard.leverage(action("updateLeverage", [("leverage", .uint(10))]), over: 10) == nil)
+    #expect(HLGuard.leverage(action("updateLeverage", [("leverage", .uint(11))]), over: 10) == "leverage 11× is above your 10× limit")
+    #expect(HLGuard.leverage(action("order", [("leverage", .uint(40))]), over: 10) == nil)
     #expect(!HLGuard.check(action("updateLeverage", [("leverage", .uint(0))]), owner: owner, recipients: []).ok)
     #expect(!HLGuard.check(action("updateLeverage"), owner: owner, recipients: []).ok)
 }
@@ -678,4 +685,28 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     #expect(DepositGuard.confidential(bound: ["confidentiality": "basic"]).ok)
     #expect(!DepositGuard.confidential(bound: ["confidentiality": "public"]).ok)
     #expect(!DepositGuard.confidential(bound: [:]).ok)
+}
+
+@Test func tradingRulesAskOnEveryChangeAndOldLimitsStillDecode() throws {
+    let old = TradingRules(riskPct: 2, openRiskPct: 6, minRewardRisk: Decimal(string: "1.5")!, leverage: 5, overLimit: "block")
+    #expect(old.changes(from: old).isEmpty)
+    var lower = old
+    lower.leverage = 3
+    #expect(lower.changes(from: old) == ["leverage up to 3× (was 5×)"])                 // lowered asks too
+    var free = old
+    (free.riskPct, free.openRiskPct, free.overLimit) = (TradingRules.noLimit, TradingRules.noLimit, "ask")
+    #expect(free.changes(from: old) == ["risk per trade no limit (was 2%)", "all positions together no limit (was 6%)", "over a limit: ask me (was block the plan)"])
+    #expect(old.changes(from: nil).count == 5)                                           // first save names every line
+    #expect(free.problem == nil)
+    var bad = old
+    bad.leverage = 51
+    #expect(bad.problem != nil)
+    bad = old
+    bad.openRiskPct = 1
+    #expect(bad.problem != nil)
+    // Limits the signer saved before trading rules decode with none, and the app's default 5× cap.
+    let saved = try JSONEncoder().encode(SignerLimits.standard)
+    #expect(!String(decoding: saved, as: UTF8.self).contains("trading"))
+    let back = try JSONDecoder().decode(SignerLimits.self, from: saved)
+    #expect(back.trading == nil && back.leverageCap == 5 && back.problem == nil)
 }

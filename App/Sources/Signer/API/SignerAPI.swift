@@ -290,6 +290,13 @@ public struct SignerLimits: Codable, Sendable, Equatable {
     public var automationWeek: Int
     /// The slippage a swap may allow before it asks for Touch ID afresh, in basis points.
     public var slippageBps: Int
+    /// Settings › Trading agent › Limits, kept here so that any change of them asks for the person. Optional: limits
+    /// saved before them decode, and nil until the person first saves them.
+    public var trading: TradingRules?
+
+    /// The most leverage the trading key sets without the person: theirs once saved, else the app's default 5×
+    /// (RiskPolicy), so a screen that says 5× before any save is true.
+    public var leverageCap: Int { trading?.leverage ?? 5 }
 
     public init(agentOrder: Int, agentDay: Int, agentDays: Int, automationDay: Int, automationWeek: Int, slippageBps: Int) {
         (self.agentOrder, self.agentDay, self.agentDays, self.automationDay, self.automationWeek, self.slippageBps)
@@ -306,7 +313,7 @@ public struct SignerLimits: Codable, Sendable, Equatable {
         if automationWeek < automationDay { return "The automation wallet's week can't be less than its day." }
         if !(1...Self.maxAgentDays).contains(agentDays) { return "The trading key works 1 to \(Self.maxAgentDays) days after \(Presence.name)." }
         if !(1...5000).contains(slippageBps) { return "Slippage is 0.01% to 50%." }
-        return nil
+        return trading?.problem
     }
 
     /// The lines of `self` that are looser than `old`, in words for a Touch ID prompt.
@@ -323,6 +330,48 @@ public struct SignerLimits: Codable, Sendable, Equatable {
 
     /// 300 → «3%», 50 → «0.5%».
     public static func percent(_ bps: Int) -> String { "\(NSDecimalNumber(decimal: Decimal(bps) / 100).stringValue)%" }
+}
+
+/// The trading rules' limits (the app's RiskPolicy). The signer checks `leverage` itself: the trading key sets no more
+/// without the person. The rest the app checks with every plan; they live here so that changing them asks in person.
+public struct TradingRules: Codable, Sendable, Equatable {
+    /// Per trade and for all open positions together, % of capital at the stops; `noLimit` = none.
+    public var riskPct: Decimal
+    public var openRiskPct: Decimal
+    public var minRewardRisk: Decimal
+    public var leverage: Int
+    /// «block», «ask» or «warn»: what a plan over a limit gets.
+    public var overLimit: String
+
+    public init(riskPct: Decimal, openRiskPct: Decimal, minRewardRisk: Decimal, leverage: Int, overLimit: String) {
+        (self.riskPct, self.openRiskPct, self.minRewardRisk, self.leverage, self.overLimit) = (riskPct, openRiskPct, minRewardRisk, leverage, overLimit)
+    }
+
+    /// The same sentinel as RiskPolicy.noLimit.
+    public static let noLimit: Decimal = 1000
+    /// The most any Hyperliquid market gives, and the top of Settings' steps.
+    public static let maxLeverage = 50
+
+    public var problem: String? {
+        if riskPct <= 0 || riskPct > Self.noLimit { return "Risk per trade is above 0%." }
+        if openRiskPct < riskPct || openRiskPct > Self.noLimit { return "All positions together can't be less than one trade." }
+        if minRewardRisk < 1 || minRewardRisk > 5 { return "Reward / risk is 1 to 5." }
+        if !(1...Self.maxLeverage).contains(leverage) { return "Leverage is 1× to \(Self.maxLeverage)×." }
+        if !["block", "ask", "warn"].contains(overLimit) { return "Over a limit is block, ask or warn." }
+        return nil
+    }
+
+    /// Every line that differs from `old`, in words for the prompt: raised and lowered alike.
+    public func changes(from old: TradingRules?) -> [String] {
+        func pct(_ v: Decimal) -> String { v >= Self.noLimit ? "no limit" : "\(NSDecimalNumber(decimal: v).stringValue)%" }
+        func mode(_ v: String) -> String { ["block": "block the plan", "ask": "ask me", "warn": "just warn"][v] ?? v }
+        func line(_ what: String, _ now: String, _ was: String?) -> String? { was == now ? nil : "\(what) \(now)" + (was.map { " (was \($0))" } ?? "") }
+        return [line("risk per trade", pct(riskPct), old.map { pct($0.riskPct) }),
+                line("all positions together", pct(openRiskPct), old.map { pct($0.openRiskPct) }),
+                line("reward / risk at least", NSDecimalNumber(decimal: minRewardRisk).stringValue, old.map { NSDecimalNumber(decimal: $0.minRewardRisk).stringValue }),
+                line("leverage up to", "\(leverage)×", old.map { "\($0.leverage)×" }),
+                line("over a limit:", mode(overLimit), old.map { mode($0.overLimit) })].compactMap { $0 }
+    }
 }
 
 public struct SignerReply: Codable, Sendable {

@@ -71,6 +71,10 @@ import WalletCore
     #expect(Executor.stopBreaksRule(long: false, entry: 120_000, size: Decimal(string: "0.01")!, stop: 121_000, current: 122_000, equity: 1000, policy: policy) == nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: nil, equity: 1000, policy: policy) == nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: 118_000, equity: nil, policy: policy) == nil)
+    // «Ask me» and «Just warn» let it through: the chat's card says the loss before Confirm.
+    var asks = policy
+    asks.overLimit = .ask
+    #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: 118_000, equity: 1000, policy: asks) == nil)
     // 117000 is −$31.07 with fees: 3.1% of $1000 is refused, 1.6% of $2000 is within the rule.
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 1000, policy: policy) != nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 2000, policy: policy) == nil)
