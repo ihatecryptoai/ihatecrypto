@@ -1537,6 +1537,7 @@ struct StudioCanvas: View {
         guard hasRoute else { return board.map { $0.outcome.map { $0.ok ? "executed" : "failed" } ?? "saved canvas" } ?? "waiting for a task" }
         if ws.managesPosition { return ws.positions.contains { $0.coin == ws.intent.asset } ? "position open" : "done · position closed" }
         if nodes.contains(where: { $0.status == .blocked }) { return ws.planBlocker.map { ws.say("stopped: ", "стоп: ") + $0.short } ?? "stopped by the rules" }
+        if ws.planIsReady, ws.policy.limitMode == .ask, ws.overRiskLimit { return ws.say("over the limit · asks first", "выше лимита · спросит") }
         return ws.planIsReady ? "ready to sign" : "needs details"
     }
 
@@ -1545,6 +1546,7 @@ struct StudioCanvas: View {
         if !hasRoute, let o = board?.outcome { return o.ok ? Brand.profit : Brand.loss }
         guard hasRoute, !ws.assembling else { return .secondary }
         if nodes.contains(where: { $0.status == .blocked }) { return Brand.blockedInk }
+        if ws.planIsReady, ws.policy.limitMode == .ask, ws.overRiskLimit { return Brand.jevInk }
         return ws.planIsReady || ws.managesPosition ? Brand.profit : Brand.jevInk
     }
 }

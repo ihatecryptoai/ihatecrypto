@@ -1257,6 +1257,12 @@ struct LimitOrdersBoard: View {
 extension Workspace {
     /// Why a plan can't go, in a few words for its status and a sentence for the chat. nil when nothing stops it (or a
     /// detail is still missing: that has its own «By the book»).
+    /// The plan's loss at the stop is past the risk-per-trade limit.
+    var overRiskLimit: Bool {
+        guard let s = evaluation.sizing, let equity, equity > 0 else { return false }
+        return s.lossAtStopUSD / equity * 100 > policy.maxRiskPct
+    }
+
     var planBlocker: (short: String, sentence: String)? {
         guard intent != TradeIntent(), !managesPosition, missingDetails == nil else { return nil }
         let b = blocks, e = evaluation
@@ -1269,7 +1275,7 @@ extension Workspace {
             let place = fundingNet?.name ?? "Solana"
             return (say("not enough USDC", "не хватает USDC"), say("\(short) on \(place).", "\(short.replacingOccurrences(of: "Short by", with: "Не хватает")) на \(place)."))
         }
-        if policy.limitMode == .block, let s = e.sizing, let equity, equity > 0, s.lossAtStopUSD / equity * 100 > policy.maxRiskPct {
+        if policy.limitMode == .block, overRiskLimit, let s = e.sizing, let equity {
             return (say("risk over the \(Fmt.pct(policy.maxRiskPct)) limit", "риск выше лимита \(Fmt.pct(policy.maxRiskPct))"),
                     say("At the stop \(Fmt.usd(s.lossAtStopUSD)) is lost, over the limit of \(Fmt.pct(policy.maxRiskPct)) of capital (\(Fmt.usd(equity * policy.maxRiskPct / 100))).",
                         "На стопе теряется \(Fmt.usd(s.lossAtStopUSD)) — больше лимита \(Fmt.pct(policy.maxRiskPct)) капитала (\(Fmt.usd(equity * policy.maxRiskPct / 100)))."))

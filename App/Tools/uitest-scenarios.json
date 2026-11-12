@@ -1710,7 +1710,7 @@
   {
     "name": "risk over the limit with «Ask me» → the plan isn't stopped, the checklist says the sheet asks to accept the loss",
     "send": [
-      "long ETH risk $40 stop 3% take 6% leverage 2x"
+      "long ETH risk $1.2 stop 10% take 20% leverage 5x"
     ],
     "defaults": {
       "overLimitTest": "ask"
