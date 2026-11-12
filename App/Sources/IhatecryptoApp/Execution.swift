@@ -750,17 +750,18 @@ extension Workspace {
                 }
                 reply(try await e.limitOrder(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, days: days, near: near),
                       note: "NEAR Intents · limit order · private")
-                limitOrderList = await ownLimitOrders(e)
+                limitOrderList = await ownLimitOrders(e).flatMap { $0.isEmpty ? nil : $0 }
+                limitFollowed = nil   // a failed read here: the loop reads them again
             case .limitOrders:
                 let list = await ownLimitOrders(e) ?? []
                 limitOrderList = list.isEmpty ? nil : list
-                reply(list.isEmpty ? say("No open limit orders.", "Открытых лимитных ордеров нет.")
-                      : say("Open limit orders: \(list.count). They're on the canvas.", "Открытых лимитных ордеров: \(list.count). Они на холсте."))
+                reply(Self.limitListWords(list).map { say($0.en, $0.ru) } ?? say("No open limit orders.", "Открытых лимитных ордеров нет."))
                 return
             case .limitCancel(let coin):
                 if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
                 reply(try await e.cancelLimitOrders(coin, near: nearAddress), note: "NEAR Intents · limit orders")
-                limitOrderList = await ownLimitOrders(e)
+                limitOrderList = await ownLimitOrders(e).flatMap { $0.isEmpty ? nil : $0 }
+                limitFollowed = nil
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
             case .solanaTo("hyperliquid", let amount):
                 reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
@@ -917,41 +918,84 @@ extension Workspace {
         await refresh()
     }
 
-    /// This wallet's open limit orders for the board (nil: none, or 1Click didn't answer). The NEAR account, which only the
-    /// signer names, counts as one of its addresses.
+    /// This wallet's open limit orders for the board: empty for none, nil when 1Click didn't answer. The NEAR account,
+    /// which only the signer names, counts as one of its addresses.
     func ownLimitOrders(_ e: Executor) async -> [Executor.LimitOrderView]? {
         if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
-        let list = (try? await e.limitOrders(near: nearAddress))?.map(\.view)
-        return list?.isEmpty == false ? list : nil
+        return (try? await e.limitOrders(near: nearAddress))?.map(\.view)
     }
 
-    /// While the board shows orders, the loop reads them again: an order that filled or expired leaves the board and is
-    /// said in the chat, so a fill with ihatecrypto open is seen without asking. A canceled one isn't: the cancel said it.
+    /// The loop's look at limit orders. The wallet's orders are read once when its journal holds one not settled (at launch,
+    /// after a wallet switch), so they're followed with no «show limit orders». Then, while the board shows them: an order
+    /// that filled or expired leaves the board and is said in the chat and as a notification, with what came and its price
+    /// after the fees. A canceled one isn't: the cancel said it. The journal is brought up to date for what left.
     func followLimitOrders() async {
-        guard let shown = limitOrderList, !shown.isEmpty, let w = previewWallet else { return }
+        guard let w = previewWallet else { return }
         let e = executor(w)
-        // The journal is synced only when an order left: not twenty reads of 1Click every tick.
-        guard let now = try? await e.limitOrders(near: nearAddress, sync: false).map(\.view) else { return }
-        var left: [(Executor.LimitOrderView, String)] = []
+        if limitOrderList == nil, limitFollowed != w.solana {
+            guard await e.followsLimitOrders else { limitFollowed = w.solana; return }
+            // Unread (1Click silent): asked again next tick. This read also brings the journal up to date.
+            guard let list = await ownLimitOrders(e), previewWallet?.solana == w.solana else { return }
+            limitFollowed = w.solana
+            if limitOrderList == nil, !list.isEmpty { limitOrderList = list }
+            return
+        }
+        // What left the board is written down once its payout is final (it comes seconds after the fill): only those,
+        // for at most 20 ticks each, so a payout 1Click never finishes isn't asked about forever.
+        if !limitPayouts.isEmpty {
+            let settled = await e.syncLimitJournal(only: Set(limitPayouts.keys))
+            for (id, ticks) in limitPayouts { limitPayouts[id] = settled.contains(id) || ticks <= 1 ? nil : ticks - 1 }
+        }
+        guard let shown = limitOrderList, !shown.isEmpty,
+              let now = try? await e.limitOrders(near: nearAddress, sync: false).map(\.view) else { return }
+        var left: [(Executor.LimitOrderView, Executor.LimitOrderEnd)] = []
         for o in shown where !now.contains(where: { $0.id == o.id }) {
             // Unread: the board stays as it was and the next tick asks again, so a fill is never missed.
-            guard let status = await e.limitOrderStatus(o.id) else { return }
-            left.append((o, status))
+            guard let end = await e.limitOrderEnd(o.id) else { return }
+            left.append((o, end))
         }
         // Changed meanwhile (a cancel, a new order, another wallet): this read is the old one's.
         guard limitOrderList == shown, previewWallet?.solana == w.solana else { return }
         limitOrderList = now.isEmpty ? nil : now
-        if !left.isEmpty { await e.syncLimitJournal() }
-        for (o, status) in left {
-            let what = "\(o.sell ? say("sell", "продажа") : say("buy", "покупка")) \(Fmt.num(o.coins, maxFraction: 8)) \(o.coin) \(say("at", "по")) \(Fmt.usd(o.price))"
-            switch status {
-            case "FILLED": reply(say("Limit order filled: \(what). The \(o.sell ? "USDC" : o.coin) comes to your own address.",
-                                     "Лимитка исполнилась: \(what). \(o.sell ? "USDC" : o.coin) придут на твой адрес."), note: "NEAR Intents · limit order")
-            case "EXPIRED": reply(say("Limit order expired: \(what). What didn't fill comes back to the address it came from.",
-                                      "Лимитка истекла: \(what). Что не исполнилось, вернётся на адрес, откуда пришло."), note: "NEAR Intents · limit order")
-            default: break
-            }
+        for (o, _) in left { limitPayouts[o.id] = 20 }
+        for (o, end) in left where ["FILLED", "EXPIRED"].contains(end.status) {
+            let lines = Self.limitEndWords(o, end)
+            let body = say(lines.en, lines.ru)
+            reply(body, note: "NEAR Intents · limit order")
+            notify(.orders, end.status == "FILLED" ? say("Limit order filled: \(o.coin)", "Лимитка исполнилась: \(o.coin)")
+                                                   : say("Limit order expired: \(o.coin)", "Лимитка истекла: \(o.coin)"),
+                   body, record: false, schedule: "limit:\(o.coin)")
         }
+    }
+
+    /// The open orders said in the chat: each one, not only their count. nil for none.
+    nonisolated static func limitListWords(_ list: [Executor.LimitOrderView]) -> (en: String, ru: String)? {
+        guard !list.isEmpty else { return nil }
+        let en = list.map { "\($0.sell ? "sell" : "buy") \(Fmt.num($0.coins, maxFraction: 6)) \($0.coin) at \(Fmt.usd($0.price))" }.joined(separator: " · ")
+        let ru = list.map { "\($0.sell ? "продажа" : "покупка") \(Fmt.num($0.coins, maxFraction: 6)) \($0.coin) по \(Fmt.usd($0.price))" }.joined(separator: " · ")
+        return list.count == 1 ? ("One open limit order: \(en). It's on the canvas.", "Один открытый лимитный ордер: \(ru). Он на холсте.")
+            : ("\(list.count) open limit orders: \(en). They're on the canvas.", "Открытые лимитные ордера, \(list.count): \(ru). Они на холсте.")
+    }
+
+    /// A filled or expired limit order in words: what went in and what comes out, at what price with every fee in.
+    nonisolated static func limitEndWords(_ o: Executor.LimitOrderView, _ end: Executor.LimitOrderEnd) -> (en: String, ru: String) {
+        let coin = o.coin, cash = o.sell ? "USDC" : coin, limit = Fmt.usd(o.price)
+        let order = "\(o.sell ? "sell" : "buy") \(Fmt.num(o.coins, maxFraction: 8)) \(coin) at \(limit)"
+        let orderRU = "\(o.sell ? "продажа" : "покупка") \(Fmt.num(o.coins, maxFraction: 8)) \(coin) по \(limit)"
+        var en = "", ru = ""
+        if let price = end.price {
+            let gave = Fmt.num(end.spent, maxFraction: 8), got = Fmt.num(end.got, maxFraction: o.sell ? 2 : 6)
+            en = o.sell ? "sold \(gave) \(coin) for ≈ \(got) USDC" : "bought ≈ \(got) \(coin) for \(gave) USDC"
+            ru = o.sell ? "продано \(gave) \(coin) за ≈ \(got) USDC" : "куплено ≈ \(got) \(coin) за \(gave) USDC"
+            en += ", \(Fmt.usd(price)) a \(coin) with 1Click's fees and the network's (the order's price \(limit))"
+            ru += ", \(Fmt.usd(price)) за \(coin) с комиссиями 1Click и сети (цена ордера \(limit))"
+        }
+        if end.status == "FILLED" {
+            return en.isEmpty ? ("Limit order filled: \(order). The \(cash) comes to your own address.", "Лимитка исполнилась: \(orderRU). \(cash) придут на твой адрес.")
+                : ("Limit order filled: \(en). The \(cash) comes to your own address.", "Лимитка исполнилась: \(ru). \(cash) придут на твой адрес.")
+        }
+        return ("Limit order expired: \(order)." + (en.isEmpty ? "" : " Before that it \(en).") + " What didn't fill comes back to the address it came from.",
+                "Лимитка истекла: \(orderRU)." + (ru.isEmpty ? "" : " До этого \(ru).") + " Что не исполнилось, вернётся на адрес, откуда пришло.")
     }
 
     /// The two cards after a move the loss cap stopped: what they carry instead of a chat command.
@@ -1365,7 +1409,7 @@ extension Workspace {
             checkAlerts()
             await checkLoanGuards()
             await guardPositions()
-            if limitFollow == nil, limitOrderList != nil {
+            if limitFollow == nil {
                 limitFollow = Task { [weak self] in
                     await self?.followLimitOrders()
                     self?.limitFollow = nil

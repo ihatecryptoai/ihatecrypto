@@ -1703,6 +1703,7 @@
     ],
     "expect": {
       "no_pending": true,
+      "limit_orders_priced": true,
       "reply_contains": "лимитн"
     }
   }

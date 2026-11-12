@@ -1177,14 +1177,17 @@ struct LimitOrdersBoard: View {
                 StatusChip(text: orders.count == 1 ? "1 open" : "\(orders.count) open", tint: Brand.privacy)
             }
             ForEach(orders, id: \.id) { row($0) }
-            Text("Private, through NEAR Intents: 1Click fills them when the price comes, with ihatecrypto closed too. Cancel brings back what hasn't filled.")
-                .font(.ui(10)).foregroundStyle(.secondary)
+            Text("Private, through NEAR Intents. 1Click fills them with ihatecrypto closed too. Cancel brings back what hasn't filled.")
+                .font(.ui(11.5)).foregroundStyle(quiet)
         }
         .padding(16)
         .frame(width: RouteCards.width(3) + 32)
         .background(RoundedRectangle(cornerRadius: 24).fill(Brand.card).shadow(color: .black.opacity(0.06), radius: 14, y: 8))
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Brand.cardBorder))
     }
+
+    /// Grey that still reads on the white card (the design review: .secondary at 11 pt was too faint).
+    private let quiet = Color.primary.opacity(0.68)
 
     private func row(_ o: Executor.LimitOrderView) -> some View {
         let done = o.coins > 0 ? NSDecimalNumber(decimal: o.filled / o.coins).doubleValue : 0
@@ -1197,39 +1200,57 @@ struct LimitOrdersBoard: View {
                     Button("Cancel") { Task { await ws.send("cancel limit orders id \(o.id)") } }.buttonStyle(.borderless).foregroundStyle(Brand.loss)
                 }
             }
-            if let market = ws.markets[o.coin.uppercased()]?.markPx, market > 0 { distance(o, market: market) }
-            ProgressView(value: min(max(done, 0), 1)).tint(Brand.privacy)
+            if let market = o.market, market > 0 {
+                distance(o, market: market)
+            } else {
+                Text("1Click gives no price for it now").font(.ui(12)).foregroundStyle(quiet)
+            }
+            // Only once something filled: an empty bar under the price track read as a placeholder.
+            if o.filled > 0 {
+                ProgressView(value: min(max(done, 0), 1)).tint(Brand.privacy)
+            }
             HStack {
-                Text("\(o.state) · filled \(Fmt.num(o.filled, maxFraction: 6)) of \(Fmt.num(o.coins, maxFraction: 6))").monospacedDigit()
+                Text(o.filled > 0 ? "\(o.state) · filled \(Fmt.num(o.filled, maxFraction: 6)) of \(Fmt.num(o.coins, maxFraction: 6))" : o.state).monospacedDigit()
                 Spacer()
                 if let until = o.until { Text("until \(Fmt.date(until))") }
             }
-            .font(.ui(11.5)).foregroundStyle(.secondary)
+            .font(.ui(12)).foregroundStyle(quiet)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.primary.opacity(0.04)))
     }
 
-    /// The market now (Hyperliquid's mark) against the order's price: a line and a track, the dot where the price is, the
-    /// tick where the order fills (10% away or more sits at the end).
+    /// 1Click's price for this order now against the order's own: a track with the dot where the price is («now») and the
+    /// tick where the order fills (its price; 10% away or more sits at the end), and a line with how far. Not Hyperliquid's
+    /// mark: 1Click fills by its own price, and a buy at $83.70 rested while Hyperliquid read $83.72, then filled at
+    /// ≈ $82.6 there (2026-11-12).
     private func distance(_ o: Executor.LimitOrderView, market: Decimal) -> some View {
         let gap = NSDecimalNumber(decimal: (o.price - market) / market * 100).doubleValue
         let there = (o.sell ? gap <= 0 : gap >= 0) || abs(gap) < 0.05
-        let words = there ? "at the order's price now" : "fills \(Fmt.num(Decimal(abs(gap)), maxFraction: 1))% \(gap > 0 ? "higher" : "lower")"
+        let words = there ? "1Click is at the order's price: it fills soon"
+            : "1Click's price for this order · fills when it's \(Fmt.num(Decimal(abs(gap)), maxFraction: 1))% \(gap > 0 ? "higher" : "lower")"
         return VStack(alignment: .leading, spacing: 6) {
             GeometryReader { g in
                 let mid = g.size.width / 2, x = mid + CGFloat(min(max(gap / 10, -1), 1)) * mid * 0.9
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.primary.opacity(0.08)).frame(height: 4)
-                    Capsule().fill(Brand.privacy.opacity(0.35)).frame(width: abs(x - mid), height: 4).offset(x: min(x, mid))
-                    Circle().fill(Color.primary).frame(width: 10, height: 10).offset(x: mid - 5)
+                ZStack(alignment: .topLeading) {
+                    Capsule().fill(Color.primary.opacity(0.08)).frame(height: 4).offset(y: 5)
+                    Capsule().fill(Brand.privacy.opacity(0.35)).frame(width: abs(x - mid), height: 4).offset(x: min(x, mid), y: 5)
+                    Circle().fill(Color.primary).frame(width: 10, height: 10).offset(x: mid - 5, y: 2)
                     RoundedRectangle(cornerRadius: 1.5).fill(Brand.privacy).frame(width: 3, height: 14).offset(x: x - 1.5)
+                    trackLabel("now \(Fmt.usd(market))", at: mid, width: g.size.width)
+                    // Two labels a few points apart would overlap: the order's price is in the row's title anyway.
+                    if abs(x - mid) > 110 { trackLabel(Fmt.usd(o.price), at: x, width: g.size.width, bold: true) }
                 }
-                .frame(height: 14)
             }
-            .frame(height: 14)
-            Text("\(o.coin) ≈ \(Fmt.usd(market)) now · \(words)").font(.ui(11.5)).foregroundStyle(.secondary).monospacedDigit()
+            .frame(height: 33)
+            Text(words).font(.ui(12)).foregroundStyle(quiet)
         }
+    }
+
+    /// A price under the track, kept inside the card at its ends.
+    private func trackLabel(_ text: String, at x: CGFloat, width: CGFloat, bold: Bool = false) -> some View {
+        Text(text).font(.ui(11.5, bold ? .semibold : .regular)).foregroundStyle(bold ? Color.primary : quiet).monospacedDigit()
+            .fixedSize().position(x: min(max(x, 44), width - 44), y: 25)
     }
 }
 

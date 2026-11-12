@@ -347,7 +347,7 @@ extension Workspace {
         }
         if let orders = limitOrderList, !orders.isEmpty {
             out.append("limit orders board, open (private, on 1Click): " + orders.map { o in
-                "\(o.sell ? "sell" : "buy") \(Fmt.num(o.coins, maxFraction: 6)) \(o.coin) at $\(Fmt.num(o.price)), \(o.state), filled \(Fmt.num(o.filled, maxFraction: 6))"
+                "\(o.sell ? "sell" : "buy") \(Fmt.num(o.coins, maxFraction: 6)) \(o.coin) at $\(Fmt.num(o.price)), \(o.state), filled \(Fmt.num(o.filled, maxFraction: 6))" + (o.market.map { ", 1Click's price for it now $\(Fmt.num($0))" } ?? "")
             }.joined(separator: "; "))
         }
         if let a = serviceAnswer { out.append(a.forModel) }

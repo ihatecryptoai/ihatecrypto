@@ -116,8 +116,11 @@ public enum OneClick {
         public let amountInFormatted: String
         /// Present for EXACT_OUTPUT: the input without the slippage reserve.
         public let minAmountIn: String?
+        /// What arrives: the payout's network fee (`withdrawFee`) is already taken off it.
         public let amountOutFormatted: String
         public let minAmountOut: String?
+        /// The payout's network fee in the output's smallest units: a fixed sum, a percent and more of a small order.
+        public var withdrawFee: String? = nil
         public let deadline: String?
         public let timeEstimate: Int?
         /// What goes in and what comes out, in dollars as 1Click prices them: their gap is its fee and the network's.
@@ -153,7 +156,7 @@ public enum OneClick {
             depositAddress: q["depositAddress"] as? String, amountIn: amountIn,
             amountInFormatted: q["amountInFormatted"] as? String ?? amountIn, minAmountIn: q["minAmountIn"] as? String,
             amountOutFormatted: q["amountOutFormatted"] as? String ?? "?", minAmountOut: q["minAmountOut"] as? String,
-            deadline: q["deadline"] as? String, timeEstimate: (q["timeEstimate"] as? NSNumber)?.intValue,
+            withdrawFee: q["withdrawFee"] as? String, deadline: q["deadline"] as? String, timeEstimate: (q["timeEstimate"] as? NSNumber)?.intValue,
             amountInUSD: (q["amountInUsd"] as? String).flatMap { Decimal(string: $0) }, amountOutUSD: (q["amountOutUsd"] as? String).flatMap { Decimal(string: $0) }
         )
     }
@@ -249,7 +252,8 @@ public enum OneClick {
     /// A limit order as 1Click keeps it, flattened for the guard: `orderType`, `side`, `baseAsset`, `quoteAsset`,
     /// `quantity`, `price`, `depositAddress`, `depositType`, `recipient`, `recipientType`, `refundTo`, `refundType`,
     /// `confidentiality`, `fillStatus`, `payoutStatus`, `deadline`, `depositedAmount`, the swap view's `swapType` and
-    /// `amountIn` / `maxAmountIn` / `minAmountOut` / `amountOut`, `filledIn` / `filledOut` (the fills' sums), and `appFees`
+    /// `amountIn` / `maxAmountIn` / `minAmountOut` / `amountOut`, `filledIn` / `filledOut` (the fills' sums: input gross, output
+    /// net of the fees but before the payout's own network fee, `estimatedWithdrawFee` in the output's units), and `appFees`
     /// as «recipient:bps» joined by «,».
     public struct Order: Sendable, Equatable {
         public let id: String
@@ -265,7 +269,7 @@ public enum OneClick {
         var f: [String: String] = [:]
         for key in ["orderType", "side", "baseAsset", "quoteAsset", "quantity", "price", "depositAddress", "depositMemo", "depositType",
                     "recipient", "recipientType", "refundTo", "refundType", "confidentiality", "fillStatus", "payoutStatus",
-                    "deadline", "createdAt", "depositedAmount"] {
+                    "deadline", "createdAt", "depositedAmount", "estimatedWithdrawFee"] {
             if let v = a[key] as? String { f[key] = v }
         }
         if let v = a["swapView"] as? [String: Any] {

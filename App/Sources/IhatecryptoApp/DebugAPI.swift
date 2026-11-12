@@ -485,7 +485,8 @@ final class DebugAPI {
         }
         if ws.showReceive { out["receive"] = true }
         if let orders = ws.limitOrderList, !orders.isEmpty {
-            out["limitOrders"] = orders.map { ["id": $0.id, "sell": $0.sell, "coin": $0.coin, "price": NSDecimalNumber(decimal: $0.price).doubleValue, "status": $0.status] as [String: Any] }
+            out["limitOrders"] = orders.map { ["id": $0.id, "sell": $0.sell, "coin": $0.coin, "price": NSDecimalNumber(decimal: $0.price).doubleValue, "status": $0.status,
+                                              "market": $0.market.map { NSDecimalNumber(decimal: $0).doubleValue } ?? NSNull()] as [String: Any] }
         }
         // «Add block» in the top right corner, off the chat: past the column the canvas fits its boards in, so never on a
         // board's × (Studio, variant A).

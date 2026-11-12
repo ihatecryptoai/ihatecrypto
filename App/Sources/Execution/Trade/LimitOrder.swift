@@ -27,6 +27,15 @@ extension Executor {
         public let dollars: Decimal
     }
 
+    /// The price 1Click matches an order at, from a dry quote of its size: dollars for one coin with the payout's network fee
+    /// put back. The quote's output has that fee taken off, and the fee is fixed: on 0.7 USDC of SOL it read 1.4% over the
+    /// market (2026-11-12), while the order fills at its price before it. nil without an output.
+    static func matchPrice(sell: Bool, paid: Decimal, out: String, withdrawFee: String?, outDecimals: Int) -> Decimal? {
+        guard paid > 0, let out = Decimal(string: out), out > 0 else { return nil }
+        let got = out + (Decimal(string: withdrawFee ?? "") ?? 0) / pow(Decimal(10), outDecimals)
+        return sell ? got / paid : paid / got
+    }
+
     /// The headroom a buy keeps under the USDC asked: 1Click's swap view rounds up and takes its fees from the input.
     public static let limitBuyHeadroom = Decimal(string: "0.997")!
 
@@ -57,8 +66,8 @@ extension Executor {
                                          refundTo: try intentAddress(sell ? on : usdcOn, near: near ?? String(repeating: "0", count: 64)),
                                          recipient: try intentAddress(sell ? usdcOn : on, near: near ?? String(repeating: "0", count: 64)))
         let market: Decimal? = q.flatMap { q in
-            guard let out = Decimal(string: q.amountOutFormatted), out > 0 else { return nil }
-            return sell ? out / coins : deposit / out
+            Self.matchPrice(sell: sell, paid: sell ? coins : deposit, out: q.amountOutFormatted, withdrawFee: q.withdrawFee,
+                            outDecimals: sell ? quote.decimals : base.decimals)
         }
         return LimitPlan(coin: base, usdc: quote, quantity: "\(quantity)", deposit: deposit, market: market, coins: coins, dollars: coins * price)
     }
@@ -155,6 +164,8 @@ extension Executor {
         public let filled: Decimal
         public let status: String
         public let until: Date?
+        /// 1Click's price for what's left of it now (matchPrice), nil while unquoted.
+        public var market: Decimal? = nil
         public var state: String { Executor.orderWords[status] ?? status.lowercased() }
     }
 
@@ -166,20 +177,28 @@ extension Executor {
         return kind == .signed && fillStatus != "AWAITING_DEPOSIT" ? .confirmed : nil
     }
 
-    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled: read with the board, so a
-    /// deposit seen late or a cancel's refund is written down when the orders are next read.
-    public func syncLimitJournal() async {
-        guard let all = try? journal.entries() else { return }
+    /// Brings the journal's orders up to date with 1Click, the newest 20 not yet settled (`ids` only, when named): read
+    /// with the board, so a deposit seen late or a cancel's refund is written down when the orders are next read. Returns
+    /// those of `ids` the journal now holds as settled.
+    @discardableResult
+    public func syncLimitJournal(only ids: Set<String>? = nil) async -> Set<String> {
+        guard let all = try? journal.entries() else { return [] }
         var latest: [String: Journal.Entry] = [:], order: [String] = []
         for e in all where e.chain == "1click-order" {
             if latest[e.id] == nil { order.append(e.id) }
             latest[e.id] = e
         }
-        for id in order.reversed().filter({ latest[$0]?.kind != .settled }).prefix(20) {
+        var settled = Set(order.filter { latest[$0]?.kind == .settled && ids?.contains($0) == true })
+        for id in order.reversed().filter({ latest[$0]?.kind != .settled && ids?.contains($0) ?? true }).prefix(20) {
             guard let last = latest[id], let o = try? await OneClick.order(id), let fill = o["fillStatus"],
                   let step = Self.limitJournalStep(after: last.kind, fillStatus: fill, payoutFinal: o["isPayoutStatusFinal"] == "true") else { continue }
-            try? journal.append(.init(chain: "1click-order", id: id, kind: step, note: step == .settled ? "\(fill) · payout \(o["payoutStatus"] ?? "?")" : fill))
+            if step == .settled { settled.insert(id) }
+            // Another read (the board's, the loop's) may have written it while this one waited on 1Click.
+            if (try? journal.entries())?.last(where: { $0.chain == "1click-order" && $0.id == id })?.kind == step { continue }
+            let amounts = "in \(o["filledIn"] ?? "?") · out \(o["filledOut"] ?? "?") · withdraw fee \(o["estimatedWithdrawFee"] ?? "?")"
+            try? journal.append(.init(chain: "1click-order", id: id, kind: step, note: step == .settled ? "\(fill) · payout \(o["payoutStatus"] ?? "?") · \(amounts)" : fill))
         }
+        return settled
     }
 
     /// This wallet's open orders: those of the partner key that pay out to or refund to one of its own addresses.
@@ -189,7 +208,7 @@ extension Executor {
         let tokens = (try? await OneClick.tokens()) ?? []
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return try await OneClick.openOrders().filter { o in
+        let list: [(order: OneClick.Order, view: LimitOrderView)] = try await OneClick.openOrders().filter { o in
             o.isOpen && (own.contains(o["recipient"]?.lowercased() ?? "") || own.contains(o["refundTo"]?.lowercased() ?? ""))
         }.map { o in
             let t = tokens.first { $0.assetId == o["baseAsset"] }
@@ -202,10 +221,63 @@ extension Executor {
             return (o, LimitOrderView(id: o.id, sell: sell, coin: coin, coins: (Decimal(string: o["quantity"] ?? "") ?? 0) / unit,
                                       price: Decimal(string: o["price"] ?? "") ?? 0, filled: filled, status: o["fillStatus"] ?? "", until: until))
         }
+        // 1Click's price for what each order has left, side by side: the board's market, not Hyperliquid's.
+        return await withTaskGroup(of: (Int, Decimal?).self) { g in
+            for (i, item) in list.enumerated() { g.addTask { (i, await Self.limitMarket(item.order, tokens: tokens)) } }
+            var out = list
+            for await (i, market) in g { out[i].view.market = market }
+            return out
+        }
     }
 
-    /// One order's 1Click status now (FILLED, EXPIRED, CANCELED…), nil when 1Click doesn't answer.
-    public func limitOrderStatus(_ id: String) async -> String? { (try? await OneClick.order(id))?["fillStatus"] }
+    /// The price 1Click would match an order's rest at now (matchPrice), quoted for that rest between its own addresses.
+    static func limitMarket(_ o: OneClick.Order, tokens: [OneClick.Token]) async -> Decimal? {
+        guard let base = tokens.first(where: { $0.assetId == o["baseAsset"] }), let quote = tokens.first(where: { $0.assetId == o["quoteAsset"] }),
+              let recipient = o["recipient"], let refund = o["refundTo"] else { return nil }
+        let sell = o["side"] == "SELL"
+        func n(_ key: String) -> Decimal { Decimal(string: o[key] ?? "") ?? 0 }
+        let rest = (sell ? n("quantity") : n("maxAmountIn")) - n("filledIn")
+        guard rest > 0, let q = try? await OneClick.quote(dry: true, origin: sell ? base.assetId : quote.assetId, destination: sell ? quote.assetId : base.assetId,
+                                                         amount: "\(rest)", refundTo: refund, recipient: recipient) else { return nil }
+        return matchPrice(sell: sell, paid: rest / pow(Decimal(10), (sell ? base : quote).decimals), out: q.amountOutFormatted,
+                          withdrawFee: q.withdrawFee, outDecimals: (sell ? quote : base).decimals)
+    }
+
+    /// How an order that left the board ended: 1Click's status, what went in, and what comes out once the payout's network
+    /// fee (1Click's estimate) is off. `spent` and `got` are 0 for an order nothing filled.
+    public struct LimitOrderEnd: Sendable, Equatable {
+        public let status: String
+        public let spent: Decimal
+        public let got: Decimal
+        /// Dollars for one coin with every fee in: what the order cost, above a buy's limit and under a sale's.
+        public let price: Decimal?
+    }
+
+    static func limitEnd(_ o: OneClick.Order, sell: Bool, baseDecimals: Int, quoteDecimals: Int) -> LimitOrderEnd {
+        func n(_ key: String) -> Decimal { Decimal(string: o[key] ?? "") ?? 0 }
+        let inUnit = pow(Decimal(10), sell ? baseDecimals : quoteDecimals), outUnit = pow(Decimal(10), sell ? quoteDecimals : baseDecimals)
+        let spent = n("filledIn") / inUnit, out = n("filledOut")
+        let got = out > 0 ? max(out - n("estimatedWithdrawFee"), 0) / outUnit : 0
+        let price: Decimal? = spent > 0 && got > 0 ? (sell ? got / spent : spent / got) : nil
+        return LimitOrderEnd(status: o["fillStatus"] ?? "", spent: spent, got: got, price: price)
+    }
+
+    /// How one order ended, nil when 1Click doesn't answer.
+    public func limitOrderEnd(_ id: String) async -> LimitOrderEnd? {
+        guard let o = try? await OneClick.order(id), o["fillStatus"] != nil else { return nil }
+        let tokens = (try? await OneClick.tokens()) ?? []
+        guard let base = tokens.first(where: { $0.assetId == o["baseAsset"] }), let quote = tokens.first(where: { $0.assetId == o["quoteAsset"] }) else {
+            return LimitOrderEnd(status: o["fillStatus"] ?? "", spent: 0, got: 0, price: nil)
+        }
+        return Self.limitEnd(o, sell: o["side"] == "SELL", baseDecimals: base.decimals, quoteDecimals: quote.decimals)
+    }
+
+    /// The journal holds an order whose payout isn't final: one to follow, with the board or without.
+    public var followsLimitOrders: Bool {
+        var latest: [String: Journal.Entry.Kind] = [:]
+        for e in (try? journal.entries()) ?? [] where e.chain == "1click-order" { latest[e.id] = e.kind }
+        return latest.values.contains { $0 != .settled }
+    }
 
     /// Cancels this wallet's open orders, those on `coin` only when it's named. What hasn't filled comes back to the
     /// address it came from; a last slice can still fill.

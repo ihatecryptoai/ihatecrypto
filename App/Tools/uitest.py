@@ -156,6 +156,11 @@ def check(expect, state, replies):
             present = [k for k in want if b.get(k)]
             if present:
                 why.append(f"unexpected boards: {present}")
+        elif key == "limit_orders_priced":
+            # Each open order on the board carries 1Click's price for it (none open: nothing to check).
+            unpriced = [o.get("id") for o in b.get("limitOrders") or [] if not o.get("market")]
+            if unpriced:
+                why.append(f"limit orders without 1Click's price: {unpriced}")
         elif key == "detail_contains" and want.lower() not in (b.get("detail") or "").lower():
             why.append(f"canvas block {b.get('detail')}, expected «{want}»")
         elif key == "token_card_contains" and want.lower() not in (b.get("tokenCard") or "").lower():

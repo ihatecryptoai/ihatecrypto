@@ -91,6 +91,10 @@ final class Workspace {
     @ObservationIgnored var scheduledRun: Task<Void, Never>?
     /// followLimitOrders() beside the loop: 1Click slow to answer never holds up the stops and alerts.
     @ObservationIgnored var limitFollow: Task<Void, Never>?
+    /// The wallet (its Solana address) whose limit orders the loop has read once since launch or the switch to it.
+    @ObservationIgnored var limitFollowed: String?
+    /// Orders that left the board, until the journal holds their payout as settled: id → ticks left to ask.
+    @ObservationIgnored var limitPayouts: [String: Int] = [:]
     /// Solana tokens a swap named, as Jupiter resolved them (TokensUI.solanaAsset): the card and the run read them again.
     @ObservationIgnored var spotAssets: [String: SpotAsset] = [:]
     /// Every token beyond the balances read one by one, Solana's first. Stock tokens the Robinhood card already shows

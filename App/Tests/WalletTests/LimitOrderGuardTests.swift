@@ -105,3 +105,27 @@ private func check(_ o: OneClick.Order, deposit sent: String = "100000000", most
     #expect(Executor.limitJournalStep(after: .confirmed, fillStatus: "CANCELED", payoutFinal: true) == .settled)
     #expect(order { $0["isPayoutStatusFinal"] = true }["isPayoutStatusFinal"] == "true")
 }
+
+// 1Click's quote has the payout's network fee off its output: the price it matches at puts it back (0.7 USDC → SOL,
+// 2026-11-12: 0.008365867 SOL out, 121581 lamports fee, $83.67 as quoted, $82.47 matched).
+@Test func limitMatchPricePutsThePayoutFeeBack() {
+    let buy = Executor.matchPrice(sell: false, paid: Decimal(string: "0.7")!, out: "0.008365867", withdrawFee: "121581", outDecimals: 9)!
+    #expect(abs(buy - Decimal(string: "82.4747")!) < Decimal(string: "0.001")!)
+    // A sale: 0.012 SOL brings 0.98 USDC and the fee's 0.01 USDC goes back on top.
+    #expect(Executor.matchPrice(sell: true, paid: Decimal(string: "0.012")!, out: "0.98", withdrawFee: "10000", outDecimals: 6) == Decimal(string: "0.99")! / Decimal(string: "0.012")!)
+    #expect(Executor.matchPrice(sell: false, paid: 1, out: "?", withdrawFee: nil, outDecimals: 9) == nil)
+}
+
+// The buy that filled on the Dev wallet (2026-11-12), as 1Click's order read: 0.6979 USDC in, 0.008372599 SOL matched,
+// 123398 lamports estimated for the payout. 0.008247143 SOL arrived on chain: the estimate was 2,058 lamports short.
+@Test func limitEndTakesThePayoutFeeOff() {
+    let o = OneClick.parseOrder(["id": "o1", "attributes": [
+        "side": "BUY", "fillStatus": "FILLED", "estimatedWithdrawFee": "123398",
+        "partialFills": [["amountIn": "697900", "amountOut": "8372599"]],
+    ] as [String: Any]])!
+    let end = Executor.limitEnd(o, sell: false, baseDecimals: 9, quoteDecimals: 6)
+    #expect(end.status == "FILLED" && end.spent == Decimal(string: "0.6979")! && end.got == Decimal(string: "0.008249201")!)
+    #expect(abs(end.price! - Decimal(string: "84.6023")!) < Decimal(string: "0.001")!)
+    let none = Executor.limitEnd(OneClick.parseOrder(["id": "o2", "attributes": ["side": "SELL", "fillStatus": "EXPIRED"]])!, sell: true, baseDecimals: 9, quoteDecimals: 6)
+    #expect(none.got == 0 && none.price == nil)
+}
