@@ -29,7 +29,13 @@ nonisolated struct XPCTradeSigner: TradeSigner {
     var asWallet: String?
 
     private func send(_ request: SignerRequest) async throws -> SignerReply {
+        #if DEBUG_API
+        let changed = Tamper.apply(request)
+        let reply = try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: changed ?? request) } ?? changed ?? request)
+        return try Tamper.judged(reply, request: request, changed: changed != nil)
+        #else
         try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: request) } ?? request)
+        #endif
     }
 
     /// Counts the signature while the signer has it: Touch ID or the password may be up, and the canvas says so.

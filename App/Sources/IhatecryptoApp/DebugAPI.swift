@@ -203,8 +203,20 @@ final class DebugAPI {
                 await SignerClient.$untrusted.withValue(true) { await ws.send("cancel") }
             }
             return (200, "application/json", json(state(ws, since: before)))
+        case ("POST", "/tamper"):
+            // The attack drill (Tamper.swift): {"kind":"payee"|"amount"|"relay"} changes the next signature request on its
+            // way to the signer; {"kind":"off"} disarms. /restore disarms too, so a drill never outlives its run.
+            let kind = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["kind"] as? String ?? ""
+            guard kind == "off" || Tamper.Kind(rawValue: kind) != nil else {
+                return (400, "text/plain", Data("kind: \(Tamper.Kind.allCases.map(\.rawValue).joined(separator: ", ")) or off\n".utf8))
+            }
+            Tamper.arm(Tamper.Kind(rawValue: kind))
+            return (200, "application/json", json(tamperState()))
+        case ("GET", "/tamper"):
+            return (200, "application/json", json(tamperState()))
         case ("POST", "/restore"):
             guard !ws.busy, !ws.executing else { return (409, "text/plain", Data("busy\n".utf8)) }
+            Tamper.arm(nil)
             let back = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["canvas"] as? String).flatMap(UUID.init(uuidString:))
             if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.newCanvas() }
@@ -355,6 +367,11 @@ final class DebugAPI {
         default:
             return (404, "text/plain", Data("GET /state · POST /send {\"text\":…} · GET /screenshot · GET /crashes · POST /reset · POST /cancel · POST /restore {\"canvas\":…}\n".utf8))
         }
+    }
+
+    private func tamperState() -> [String: Any] {
+        let s = Tamper.status
+        return ["armed": s.armed?.rawValue ?? NSNull(), "changed": s.did ?? NSNull(), "signer": s.signer ?? NSNull()]
     }
 
     private func dropTestTasks(_ ws: Workspace) {
