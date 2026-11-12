@@ -1,5 +1,31 @@
 [
   {
+    "version": "0.8.7",
+    "date": "2026-11-12",
+    "stories": [
+      {
+        "title": "Go past a risk limit when you choose",
+        "text": "Settings › Limits has «Over a limit»: Block, as before, Ask me or Just warn. With Ask me a plan past your risk per trade isn't stopped. The sheet shows the loss at the stop, and Sign waits until you tick «I accept losing $40.00 at the stop on this trade». Risk per trade and all positions together go up to «no limit», leverage up to 50×.",
+        "symbol": "slider.horizontal.3",
+        "color": "FF7A2F",
+        "try": "long ETH risk $5 stop 3% take 6%"
+      },
+      {
+        "title": "Limits change only with you",
+        "text": "Every change of a trading limit or of leverage asks for Touch ID, the Mac's password or the passcode, and the signing process keeps the limits itself. An order with more leverage than you saved is signed with the main key, after asking you again.",
+        "symbol": "lock.shield.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "Limit orders, always private",
+        "text": "«limit buy SOL at 120 for 20 USDC» or «limit sell 0.1 SOL at 200» leaves an order with NEAR Intents' 1Click for 7 days, or as many as you say. It fills when the market reaches the price, in parts too, with nothing more to sign, and every order is private. «show limit orders» lists them with the market beside each and a Cancel. The chat and a notification say when one fills or runs out, with what came and its price after the fees.",
+        "symbol": "clock.fill",
+        "color": "0A84FF",
+        "try": "show limit orders"
+      }
+    ]
+  },
+  {
     "version": "0.8.6",
     "date": "2026-11-10",
     "stories": [

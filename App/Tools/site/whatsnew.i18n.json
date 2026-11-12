@@ -1,5 +1,17 @@
 {
  "es": {
+  "4750929b1c73": {
+   "title": "Superar el límite de riesgo cuando tú lo decidas",
+   "text": "En Settings › Limits está «Over a limit»: Block, como antes, Ask me o Just warn. Con Ask me, un plan que pasa tu riesgo por operación no se detiene. La ventana de firma muestra la pérdida en el stop, y Sign espera a que marques «I accept losing $40.00 at the stop on this trade». El riesgo por operación y el de todas las posiciones llegan hasta «no limit», el apalancamiento hasta 50×."
+  },
+  "ebe78f7c8dd0": {
+   "title": "Los límites cambian solo contigo",
+   "text": "Cada cambio de un límite de trading o del apalancamiento pide Touch ID, la contraseña del Mac o el código, y el proceso de firma guarda los límites por su cuenta. Una orden con más apalancamiento del guardado se firma con la clave principal, después de preguntarte otra vez."
+  },
+  "71e7977c6a0c": {
+   "title": "Órdenes límite, siempre privadas",
+   "text": "«limit buy SOL at 120 for 20 USDC» o «limit sell 0.1 SOL at 200» deja una orden en 1Click de NEAR Intents durante 7 días, o los que digas. Se ejecuta cuando el mercado llega al precio, también por partes, sin nada más que firmar, y cada orden es privada. «show limit orders» las lista con el mercado al lado de cada una y un Cancel. El chat y una notificación avisan cuando una se ejecuta o vence, con lo que llegó y su precio después de las comisiones."
+  },
   "63324585935c": {
    "title": "Si un modelo no responde, el chat dice por qué",
    "text": "Cuando el servicio de un modelo se niega, el chat dice qué pasó y qué hacer, no el texto de error del servicio: «NEAR AI Cloud dice que la cuenta no tiene saldo o que la clave no tiene límite de gasto. Añade saldo o fija el límite en tu cuenta en cloud.near.ai». Distingue un plan agotado, demasiadas solicitudes, una clave que no sirvió, una sesión caducada, un modelo que no existe, un servicio caído y un programa que no está abierto."
@@ -638,6 +650,18 @@
   }
  },
  "ru": {
+  "4750929b1c73": {
+   "title": "Лимит риска можно превысить, если сам решил",
+   "text": "В Settings › Limits появилось «Over a limit»: Block, как раньше, Ask me или Just warn. С Ask me план с риском выше лимита на сделку не останавливается. Окно подписи показывает убыток на стопе, а Sign ждёт, пока ты поставишь галочку «I accept losing $40.00 at the stop on this trade». Риск на сделку и на все позиции вместе можно поднять до «no limit», плечо — до 50×."
+  },
+  "ebe78f7c8dd0": {
+   "title": "Лимиты меняешь только ты",
+   "text": "Любая смена торгового лимита или плеча спрашивает Touch ID, пароль Mac или код-пароль, а процесс подписи сам хранит лимиты. Ордер с плечом выше сохранённого подписывается основным ключом и только после повторного вопроса."
+  },
+  "71e7977c6a0c": {
+   "title": "Лимитные ордера, всегда приватные",
+   "text": "«limit buy SOL at 120 for 20 USDC» или «limit sell 0.1 SOL at 200» оставляет ордер в 1Click от NEAR Intents на 7 дней или на сколько скажешь. Он исполняется, когда рынок дойдёт до цены, можно и частями, без новых подписей, и каждый ордер приватный. «show limit orders» показывает их списком: рядом с каждым рынок и кнопка Cancel. Когда ордер исполнится или истечёт, об этом скажут чат и уведомление: что пришло и по какой цене после комиссий."
+  },
   "63324585935c": {
    "title": "Модель не ответила — чат говорит почему",
    "text": "Когда сервис модели отказывает, чат пишет, что случилось и что сделать, а не текст ошибки сервиса: «NEAR AI Cloud пишет, что на счёте нет денег или для ключа не задан лимит расходов. Пополни баланс или задай лимит в кабинете на cloud.near.ai». Он различает исчерпанный лимит подписки, слишком частые запросы, ключ, который не подошёл, истёкшую сессию, модель, которой нет, сервис, который лежит, и программу, которая не запущена."
