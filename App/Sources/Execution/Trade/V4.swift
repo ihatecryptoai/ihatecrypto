@@ -2,6 +2,7 @@ import EVMChain
 import Foundation
 import IhatecryptoCore
 import RelayBridge
+import SignerAPI
 
 /// Uniswap v4 on Robinhood Chain, for the stock and token buys and sales (Stocks.swift): the pool without hooks for a
 /// pair, its quote, and the swap — the input to Permit2 (exact), Permit2 to the Universal Router (exact, for half an hour),
@@ -159,8 +160,9 @@ extension Executor {
     }
 
     /// The swap itself; returns its transaction. `rpc`: the network's node (Robinhood Chain's by default), or a fork in a test.
+    /// `cap`: the card its right to the coin (and a batch, or a native swap's coins) is held to at the signer.
     func v4Swap(_ route: V4Route, tokenIn: String, units: Decimal, minOut: Decimal, what: String, note: String,
-                rpc: EVMRPC = .robinhood) async throws -> String {
+                rpc: EVMRPC = .robinhood, cap: SignerCap? = nil) async throws -> String {
         guard let router = UniswapV4.on(rpc.chainId)?.router else { throw ExecutionError("No Uniswap v4 on network \(rpc.chainId). Nothing was signed.") }
         let me = wallet.evm
         // Permit2's own allowance for the router: exactly this much, for half an hour, unless one that covers it is still on.
@@ -174,7 +176,7 @@ extension Executor {
         // only into this swap, exactly its input: EVMCall.returnsCoins).
         if tokenIn.lowercased() == UniswapV4.native {
             guard units > 0, units <= Decimal(UInt64.max) else { throw ExecutionError("At most 18 \(EVMRPC.coin(rpc.chainId)) at once. Nothing was signed.") }
-            return try await sendEVM(rpc, to: router, data: swap, note: note, value: NSDecimalNumber(decimal: units).uint64Value)
+            return try await sendEVM(rpc, to: router, data: swap, note: note, value: NSDecimalNumber(decimal: units).uint64Value, cap: cap)
         }
         // The three as one transaction where it batches: the approve to Permit2, Permit2's to the router, the swap.
         if canBatch(rpc) {
@@ -185,15 +187,15 @@ extension Executor {
             if current.amount < units || current.until < now + 120 {
                 calls.append(.init(to: UniswapV4.permit2, data: try UniswapV4.permit2Approve(token: tokenIn, spender: router, amount: units, expiration: now + 1800)))
             }
-            guard calls.isEmpty else { return try await sendEVM(rpc, to: me, data: Data(), note: note, batch: calls + [.init(to: router, data: swap)]) }
+            guard calls.isEmpty else { return try await sendEVM(rpc, to: me, data: Data(), note: note, batch: calls + [.init(to: router, data: swap)], cap: cap) }
             return try await sendEVM(rpc, to: router, data: swap, note: note)
         }
-        try await approve(rpc, token: tokenIn, spender: UniswapV4.permit2, units: units, note: "Approve exactly \(what) to Permit2")
+        try await approve(rpc, token: tokenIn, spender: UniswapV4.permit2, units: units, note: "Approve exactly \(what) to Permit2", cap: cap)
         let current = try await allowed()
         if current.amount < units || current.until < now + 120 {
             _ = try await sendEVM(rpc, to: UniswapV4.permit2,
                                   data: try UniswapV4.permit2Approve(token: tokenIn, spender: router, amount: units, expiration: now + 1800),
-                                  note: "Permit2: let Uniswap's router take exactly \(what), for 30 minutes")
+                                  note: "Permit2: let Uniswap's router take exactly \(what), for 30 minutes", cap: cap)
             var seen = false
             for _ in 0..<15 where !seen {
                 let a = try await allowed()

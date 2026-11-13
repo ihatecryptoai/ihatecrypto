@@ -4,6 +4,7 @@ import Foundation
 import HyperliquidSigning
 import IhatecryptoCore
 import RelayBridge
+import SignerAPI
 import SolanaChain
 import Synchronization
 import TxGuard
@@ -279,6 +280,8 @@ public actor Executor {
         public var opening: Decimal = 0
         /// The journal's words for the order, when it isn't Solana's USDC (a cross-network swap).
         public var note: String?
+        /// The card the deposit's signature is held to at the signer (what goes in, at most, for the order's payee).
+        public var cap: SignerCap?
     }
 
     /// Everything the user confirms: what will be signed, in order, and what it does to each balance.
@@ -1403,14 +1406,19 @@ public actor Executor {
             let coin = EVMNetwork.all.first { $0.relayChain == chain }?.gasCoin ?? "ETH"
             changes.append("Gas for the destination: +\(Fmt.num(gas, maxFraction: 6)) \(coin) arrives with the USDC.")
         }
+        // Held at the signer to the deposit checked here: this much of Solana's USDC, for an order paying this wallet.
+        let there = EVMNetwork.all.first { $0.relayChain == chain }?.name ?? "Hyperliquid"
+        let cap = SignerCap(asset: usdcMint, units: spendUnits, payee: wallet.evm, card: "\(usdc(spendUnits)) USDC to \(there)")
         return (BridgeStep(requestId: quote.requestId, unsigned: unsigned, accounts: message.staticKeys, tokenOwners: owners,
-                           lastValid: lastValid, spend: spend, arriving: arriving, feesUSD: quote.feesUSD, chain: chain, opening: opening), changes)
+                           lastValid: lastValid, spend: spend, arriving: arriving, feesUSD: quote.feesUSD, chain: chain, opening: opening, cap: cap), changes)
     }
 
     /// Returns the Solana transaction's signature.
     @discardableResult
     func sendBridge(_ b: BridgeStep) async throws -> String {
-        let signed = try await signer.signSolana(b.unsigned, accounts: b.accounts, recipients: [], tokenOwners: b.tokenOwners)
+        let signed = try await SignerCap.$current.withValue(b.cap) {
+            try await signer.signSolana(b.unsigned, accounts: b.accounts, recipients: [], tokenOwners: b.tokenOwners)
+        }
         guard signed.count == b.unsigned.count, signed.subdata(in: 65..<signed.count) == b.unsigned.subdata(in: 65..<b.unsigned.count) else {
             throw GuardStop("What was signed isn't what was checked.")
         }

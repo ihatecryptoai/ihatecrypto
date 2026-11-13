@@ -4,6 +4,7 @@ import Foundation
 import IhatecryptoCore
 import OneClickKit
 import RelayBridge
+import SignerAPI
 import WalletCore
 
 /// A bridge that can make a move, as its card lists it: what it lands, what it costs and how long it takes («≈ 99.97
@@ -105,6 +106,7 @@ extension Executor {
             report("Not enough \(from.gasCoin) on \(from.name) for LayerZero's fee and the gas: bringing some first.")
             _ = try await topUpGas(from, usd: min(max(from.topupUSD, q.feeUSD * 3, Decimal(string: "0.1")!), 20))
         }
+        let cap = SignerCap(asset: a.token.lowercased(), units: units, payee: me, card: "\(show(units)) USDT to \(to.name)")
         if a.approves {
             // Ethereum's USDT changes an allowance only from zero.
             func allowance() async throws -> Decimal { ABI.decimal(in: try await rpc.read(a.token, try ERC20.allowance(owner: me, spender: a.oft)), word: 0) ?? 0 }
@@ -117,11 +119,11 @@ extension Executor {
                     waited += 1
                 }
             }
-            try await approve(rpc, token: a.token, spender: a.oft, amount: units, note: "Approve exactly \(show(units)) USDT to the USDT0 bridge")
+            try await approve(rpc, token: a.token, spender: a.oft, units: Decimal(units), note: "Approve exactly \(show(units)) USDT to the USDT0 bridge", cap: cap)
         }
         let before = try await to.rpc.tokenBalance(b.token, owner: me)
         let hash = try await sendEVM(rpc, to: a.oft, data: try USDT0.send(to: b.eid, recipient: me, units: units, min: q.arrives, fee: q.fee, refund: me),
-                                     note: "USDT0: \(show(units)) USDT from \(from.name) to \(to.name)", value: q.fee)
+                                     note: "USDT0: \(show(units)) USDT from \(from.name) to \(to.name)", value: q.fee, cap: cap)
         try journal.append(.init(chain: "layerzero", id: hash, kind: .signed, note: "\(from.name) USDT→\(to.name) \(show(units)) (USDT0), tx \(hash)"))
         // Minutes away (from Polygon) it's waited for; a longer way stays in transit on the portfolio until it lands.
         let started = Date()

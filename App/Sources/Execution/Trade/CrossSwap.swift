@@ -3,6 +3,7 @@ import ExecutionCore
 import Foundation
 import IhatecryptoCore
 import RelayBridge
+import SignerAPI
 import SolanaChain
 import TxGuard
 import WalletCore
@@ -194,6 +195,7 @@ extension Executor {
         var step = BridgeStep(requestId: quote.requestId, unsigned: unsigned, accounts: message.staticKeys, tokenOwners: owners, lastValid: lastValid,
                               spend: 0, arriving: 0, feesUSD: quote.feesUSD, chain: chain)
         step.note = what
+        step.cap = SignerCap(asset: origin.coin ? "SOL" : origin.currency, units: units.whole, payee: quote.recipient, card: what)
         return try await sendBridge(step)
     }
 

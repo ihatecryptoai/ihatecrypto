@@ -1134,34 +1134,35 @@ enum Signer {
         throw WalletError("No wallet imported.")
     }
 
-    /// Why `request` goes past the card, read from its bytes as its own checks read them: only a transfer's or a swap's
-    /// signature, whose programs (Solana) or calls (EVM) are ones whose money the signer reads in full, so a move it
-    /// can't count (a deposit, an unread call) never passes as «fits the card». nil: it fits.
+    /// Why `request` goes past the card, read from its bytes as its own checks read them: only a transfer's, a swap's or a
+    /// bridge's signature, whose programs (Solana) or calls (EVM) are ones whose money the signer reads in full, so a move
+    /// it can't count (a deposit, an unread call) never passes as «fits the card». nil: it fits.
     static func pastCard(_ cap: SignerCap, _ request: SignerRequest) throws -> String? {
         var flows: [(asset: String, units: Decimal, to: String?)] = []
-        func evm(_ chainId: UInt64, to: String, value: UInt64, data: Data) -> String? {
-            switch EVMCall.decode(data) {
-            case .transfer: break
-            case _ where data.isEmpty: break
-            default: return "a call the card doesn't make goes with it."
-            }
-            Automation.evm(chainId, to: to, value: value, data: data) { asset, units, _, payee, _ in flows.append((asset, units, payee)) }
-            return nil
+        func evm(_ chainId: UInt64, _ calls: [(to: String, value: UInt64, data: Data)]) throws -> String? {
+            EVMCall.cardFlows(chainId, calls, payee: cap.payee, owner: try address("evm"), order: RelayOrders.order, into: &flows)
         }
         switch request {
         case .signSolana(let wire, let accounts, let recipients, let tokenOwners, _, let sponsor):
             let message = try SolanaMessage.parse(transaction: wire)
             let called = Set(message.instructions.map { $0.programIndex < accounts.count ? accounts[$0.programIndex] : "?" })
-            if let other = called.subtracting(Automation.solanaPrograms).sorted().first { return "it calls \(other), which the card doesn't." }
+            let read = Automation.solanaPrograms.union([SolanaGuard.relayDepository])
+            if let other = called.subtracting(read).sorted().first { return "it calls \(other), which the card doesn't." }
             var policy = SolanaPolicy(owner: try address("solana"), recipients: Set(recipients), trustLookupTables: false, sponsor: sponsor)
             policy.mints = [cap.asset]
             flows = SolanaGuard.check(message, accounts: accounts, policy: policy, tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
                 .outflows.map { ($0.asset, Decimal($0.units), $0.to) }
         case .signEVMTransaction(let chainId, _, _, _, _, let to, let value, let data, _):
-            if let why = evm(chainId, to: to, value: value, data: data) { return why }
+            if let why = try evm(chainId, [(to, value, data)]) { return why }
         case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
-            for c in calls { if let why = evm(chainId, to: c.to, value: 0, data: c.data) { return why } }
-        default: return "a card's limits go only with a transfer's or a swap's signature."
+            if let why = try evm(chainId, calls.map { ($0.to, 0, $0.data) }) { return why }
+        case .signRelayMulticallPermit(let chainId, let token, let value, let validBefore, let relayer, let refundTo, let nftRecipient, let metadata, let calls):
+            let m = RelayMulticallPermit(chainId: chainId, token: token, from: try address("evm"), value: value, validBefore: validBefore, relayer: relayer,
+                                         refundTo: refundTo, nftRecipient: nftRecipient, metadata: metadata,
+                                         calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
+            guard let order = m.depositID.flatMap(RelayOrders.order) else { return "a Relay deposit for an order the signer hasn't checked goes with it." }
+            flows.append((token.lowercased(), Decimal(value), order.recipient))
+        default: return "a card's limits go only with a transfer's, a swap's or a bridge's signature."
         }
         return cap.refusal(flows)
     }
@@ -1171,6 +1172,29 @@ enum Signer {
         v.problems = ["Past the card: " + pastCard]
         return refused(v)
     }
+            // A Relay deposit: its amount and coin from the instruction — deposit_native SOL, deposit_token the mint (account
+            // 4) out of this wallet's own account for it (account 5) — and its payee from the order the signer checked
+            // (RelayOrders), which must take that same coin. SolanaGuard checked the deposit is from this wallet.
+            let owner = try address("solana")
+            for ix in message.instructions where ix.programIndex < accounts.count && accounts[ix.programIndex] == SolanaGuard.relayDepository {
+                let d = Data(ix.data), keys = ix.accounts.map { $0 < accounts.count ? accounts[$0] : "?" }
+                guard d.count >= 48, let order = RelayOrders.order(Data(d[16..<48])) else { return "a Relay deposit for an order the signer hasn't checked goes with it." }
+                let amount = d[8..<16].reversed().reduce(Decimal()) { $0 * 256 + Decimal($1) }
+                let coin: String
+                switch d.prefix(8).hex {
+                case "0d9e0ddf5fd51c06": coin = "SOL"
+                case "0b9c60da27a3b413":
+                    guard keys.count > 5, let mine = try? [SPL.associatedAccount(owner: owner, mint: keys[4]),
+                                                           SPL.associatedAccount(owner: owner, mint: keys[4], program: SPL.token2022Program)],
+                          mine.contains(keys[5]) else { return "a Relay deposit from an account that isn't this wallet's own for its coin goes with it." }
+                    coin = keys[4]
+                default: return "a Relay call that isn't a deposit goes with it."
+                }
+                guard coin == (order.inputCurrency == "11111111111111111111111111111111" ? "SOL" : order.inputCurrency) else {
+                    return "a Relay deposit of \(coin) goes for an order that takes \(order.inputCurrency)."
+                }
+                flows.append((coin, amount, order.recipient))
+            }
 
     static func refused(_ verdict: Verdict) -> SignerReply {
         var r = SignerReply(ok: false, error: "The guard refused to sign.")

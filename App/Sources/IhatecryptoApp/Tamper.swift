@@ -93,6 +93,17 @@ nonisolated enum Tamper {
             guard let (t, v, d, did) = evm(to: to, value: value, data: data, kind) else { return nil }
             return (.signEVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFee: tip, maxFee: fee, gasLimit: gas, to: t, value: v,
                                         data: d, recipients: recipients), did)
+        case (.signEVMBatch(let chainId, let nonce, let tip, let fee, let gas, let calls, let recipients), .payee),
+             (.signEVMBatch(let chainId, let nonce, let tip, let fee, let gas, let calls, let recipients), .amount):
+            // The first call it can change: an approve in a swap's batch, a transfer.
+            for (i, c) in calls.enumerated() {
+                guard let (t, _, d, did) = evm(to: c.to, value: 0, data: c.data, kind) else { continue }
+                var changed = calls
+                changed[i] = SignerCall(to: t, data: d)
+                return (.signEVMBatch(chainId: chainId, nonce: nonce, maxPriorityFee: tip, maxFee: fee, gasLimit: gas, calls: changed,
+                                      recipients: recipients), "call \(i + 1): " + did)
+            }
+            return nil
         case (.relayOrder(let json), .relay):
             guard var o = try? JSONSerialization.jsonObject(with: json) as? [String: Any], var output = o["output"] as? [String: Any],
                   var payments = output["payments"] as? [[String: Any]], !payments.isEmpty, let chain = output["chainId"] as? String,
@@ -109,7 +120,7 @@ nonisolated enum Tamper {
     }
 
     /// The first transfer of SOL or a token, or Jupiter v2 swap, whose payee is a static account: its payee replaced in
-    /// the message and in the account list (the app's own list would name it too), or its amount doubled.
+    /// the message and in the account list (the app's own list would name it too), or its amount doubled (a Relay deposit's too).
     static func solana(_ wire: Data, _ accounts: [String], _ kind: Kind) -> (Data, [String], String)? {
         guard let m = try? SolanaMessage.parse(transaction: wire) else { return nil }
         for ix in m.instructions where ix.programIndex < m.staticKeys.count {
@@ -121,6 +132,8 @@ nonisolated enum Tamper {
             }
             // SolanaGuard.jupiterRoutes' output accounts: route_v2, shared_accounts_route_v2.
             else if program == SolanaGuard.jupiterSwap { to = ["bb64facc31c4af14": 2, "d19853937cfed8e9": 5][data.prefix(8).hex] }
+            // A Relay deposit's amount (deposit_token/deposit_native: 8 bytes after the discriminator); its payee is the order's.
+            else if program == SolanaGuard.relayDepository, kind == .amount, data.count >= 48 { to = 0; amount = 8..<16 }
             guard let to, to < ix.accounts.count else { continue }
             var w = wire, a = accounts
             switch kind {
@@ -146,9 +159,9 @@ nonisolated enum Tamper {
         return nil
     }
 
-    /// A coin or an ERC-20 `transfer`: its payee replaced, or its amount doubled.
+    /// A coin, an ERC-20 `transfer` or `approve`: its payee (spender) replaced, or its amount doubled.
     static func evm(to: String, value: UInt64, data: Data, _ kind: Kind) -> (String, UInt64, Data, String)? {
-        if data.count >= 68, data.prefix(4).hex == "a9059cbb" {
+        if data.count >= 68, ["a9059cbb", "095ea7b3"].contains(data.prefix(4).hex) {
             var d = data
             switch kind {
             case .payee:

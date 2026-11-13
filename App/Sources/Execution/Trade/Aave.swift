@@ -325,7 +325,9 @@ extension Executor {
                            what: "Relay")
         let before = try await relayLanded(dest, hyperliquid: hyperliquid)
         let hash = try await approveAndSend(base, token: usdc, spender: depository, units: net.raw(amount), approveNote: "Approve exactly \(show(amount)) USDC to Relay",
-                                            to: deposit.to, data: deposit.data, note: "Relay deposit \(show(amount)) USDC on \(net.name)")
+                                            to: deposit.to, data: deposit.data, note: "Relay deposit \(show(amount)) USDC on \(net.name)",
+                                            cap: SignerCap(asset: usdc.lowercased(), units: net.raw(amount), payee: recipient, card: "\(show(amount)) USDC to \(there)"),
+                                            capCall: true)
         try journal.append(.init(chain: "relay", id: quote.requestId, kind: .signed, note: "\(net.name) USDC→\(there) \(show(amount)), tx \(hash)"))
         let requestId = quote.requestId, gas = topup != nil, sent = show(amount)
         let landing: @Sendable () async throws -> String = { [self] in
@@ -420,7 +422,8 @@ extension Executor {
         try Self.checkLoss(spend - worth - (topup ?? 0), paid: spend, cap: min(max(worth * Decimal(string: "0.03")!, Decimal(string: "0.15")!), 1), what: "Relay")
         let before = sol ? try await rpc.balance(wallet.solana) : try await relayLanded(dest, hyperliquid: hyperliquid)
         if let v32, let m = quote.multicall {
-            let signatures = try await signer.signRelayMulticallPermit(v32)
+            let cap = SignerCap(asset: net.usdc.lowercased(), units: units, payee: recipient, card: "\(show(amount)) USDC to \(there)")
+            let signatures = try await SignerCap.$current.withValue(cap) { try await signer.signRelayMulticallPermit(v32) }
             try journal.append(.init(chain: "relay", id: quote.requestId, kind: .signed, note: "\(net.name) USDC→\(there) \(show(amount)) by signature (v3.2)"))
             // Relay takes the MulticallAuthorization first; the EIP-3009 one before it is refused.
             try await Relay.postSignature(endpoint: m.endpoint, body: m.body, signature: hex(signatures[0]))
@@ -531,12 +534,13 @@ extension Executor {
     }
 
     /// The same for any amount (256-bit words): a thousand tokens of 18 decimals don't fit 64 bits.
-    func approve(_ rpc: EVMRPC, token: String, spender: String, units amount: Decimal, note: String, recipients: [String] = []) async throws {
+    func approve(_ rpc: EVMRPC, token: String, spender: String, units amount: Decimal, note: String, recipients: [String] = [],
+                 cap: SignerCap? = nil) async throws {
         func allowance() async throws -> Decimal {
             ABI.decimal(in: try await rpc.read(token, try ERC20.allowance(owner: wallet.evm, spender: spender)), word: 0) ?? 0
         }
         guard try await allowance() < amount else { return }
-        _ = try await sendEVM(rpc, to: token, data: try ERC20.approve(spender: spender, units: amount), note: note, recipients: recipients)
+        _ = try await sendEVM(rpc, to: token, data: try ERC20.approve(spender: spender, units: amount), note: note, recipients: recipients, cap: cap)
         for _ in 0..<15 {
             if try await allowance() >= amount { return }
             try await Task.sleep(for: .seconds(1))
@@ -559,22 +563,25 @@ extension Executor {
     /// Touch ID, dry-run together first, so a call that would fail stops before anything is signed; elsewhere the approve,
     /// its wait, then the call, as before. `value`: wei of the network's coin sent with the call. A batch carries none
     /// (Batch7702.Call), so then the approve goes on its own first and the call with its coins after it.
+    /// `cap`: the card the approve (and a batch) is held to at the signer; the call alone too with `capCall`, when the signer
+    /// reads what it pulls (a bridge's burn or deposit), never a swap's, which it reads only beside its right (EVMCall.cardFlows).
     func approveAndSend(_ rpc: EVMRPC, token: String, spender: String, units: Decimal, approveNote: String,
-                        to: String, data: Data, note: String, recipients: [String] = [], value: UInt64 = 0) async throws -> String {
+                        to: String, data: Data, note: String, recipients: [String] = [], value: UInt64 = 0,
+                        cap: SignerCap? = nil, capCall: Bool = false) async throws -> String {
         if value == 0, canBatch(rpc) {
             let allowance = ABI.decimal(in: try await rpc.read(token, try ERC20.allowance(owner: wallet.evm, spender: spender)), word: 0) ?? 0
             if allowance < units {
                 let calls = [Batch7702.Call(to: token, data: try ERC20.approve(spender: spender, units: units)), Batch7702.Call(to: to, data: data)]
-                return try await sendEVM(rpc, to: wallet.evm, data: Data(), note: "\(approveNote) + \(note)", recipients: recipients, batch: calls)
+                return try await sendEVM(rpc, to: wallet.evm, data: Data(), note: "\(approveNote) + \(note)", recipients: recipients, batch: calls, cap: cap)
             }
         } else {
             // sendEVM's own rule for coins, before the approve: on a network paying fees in a token it would sign for nothing.
             guard value == 0 || EVMNetwork.of(chainId: rpc.chainId)?.feeToken == nil else {
                 throw ExecutionError("Coins go only with a single call on a network that pays its fees in them. Nothing was signed.")
             }
-            try await approve(rpc, token: token, spender: spender, units: units, note: approveNote, recipients: recipients)
+            try await approve(rpc, token: token, spender: spender, units: units, note: approveNote, recipients: recipients, cap: cap)
         }
-        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients, value: value)
+        return try await sendEVM(rpc, to: to, data: data, note: note, recipients: recipients, value: value, cap: capCall ? cap : nil)
     }
 
     /// One EVM transaction: dry run by eth_estimateGas (a call that would revert stops here), the fee within the ETH

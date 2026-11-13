@@ -2,6 +2,7 @@ import EVMChain
 import ExecutionCore
 import Foundation
 import IhatecryptoCore
+import SignerAPI
 import WalletCore
 
 /// USDC between EVM networks through Circle's CCTP v2 with its Forwarding Service, beside Relay and 1Click: one
@@ -48,7 +49,8 @@ extension Executor {
         let burn = try await approveAndSend(from.rpc, token: from.usdc, spender: CCTP.tokenMessenger, units: Decimal(units),
                                             approveNote: "Approve exactly \(label) to Circle's CCTP", to: CCTP.tokenMessenger,
                                             data: try CCTP.burn(units: units, to: destination, recipient: wallet.evm, usdc: from.usdc, maxFee: maxFee),
-                                            note: "CCTP: burn \(label) on \(from.name), minted on \(to.name)")
+                                            note: "CCTP: burn \(label) on \(from.name), minted on \(to.name)",
+                                            cap: SignerCap(asset: from.usdc.lowercased(), units: units, payee: wallet.evm, card: "\(label) to \(to.name)"), capCall: true)
         try journal.append(.init(chain: "cctp", id: "\(source):\(burn)", kind: .signed, note: "\(from.name) USDC→\(to.name) \(Fmt.num(Decimal(units) / 1_000_000)) (CCTP), tx \(burn)"))
         let started = Date()
         var mint: String?

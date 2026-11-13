@@ -3,6 +3,7 @@ import ExecutionCore
 import Foundation
 import IhatecryptoCore
 import RelayBridge
+import SignerAPI
 import TxGuard
 import WalletCore
 
@@ -180,23 +181,24 @@ extension Executor {
     /// 0.5% to 3% by its price impact), paying only this wallet: v3's exactInput or v2's router with its exact approve, or
     /// v4's swap through Permit2 (v4Swap); batched where the wallet can (EIP-7702). `rpc`: the network's node, or a fork in a test.
     func swapUniswap(_ route: UniRoute, on net: EVMNetwork, _ uni: UniswapV3.Deployment, tokenIn: String, units: Decimal, what: String,
-                     note: String, rpc: EVMRPC? = nil) async throws -> String {
+                     note: String, rpc: EVMRPC? = nil, card: String? = nil) async throws -> String {
         let rpc = rpc ?? net.rpc
+        let cap = card.map { SignerCap(asset: tokenIn.lowercased() == UniswapV4.native ? "native" : tokenIn.lowercased(), units: units.whole, payee: nil, card: $0) }
         let minOut = (route.out * (1 - route.tolerance)).whole
         if let v4 = route.v4 {
-            return try await v4Swap(v4, tokenIn: tokenIn, units: units, minOut: minOut, what: what, note: note + " on Uniswap v4", rpc: rpc)
+            return try await v4Swap(v4, tokenIn: tokenIn, units: units, minOut: minOut, what: what, note: note + " on Uniswap v4", rpc: rpc, cap: cap)
         }
         if let path = route.v2 {
             guard let v2 = UniswapV2.on(rpc.chainId) else { throw ExecutionError("No Uniswap v2 on \(net.name). Nothing was signed.") }
             let swap = try UniswapV2.swapExactTokens(amountIn: units, amountOutMin: minOut, path: path, to: wallet.evm,
                                                      deadline: UInt64(Date().timeIntervalSince1970) + 600)
             return try await approveAndSend(rpc, token: tokenIn, spender: v2.router, units: units, approveNote: "Approve exactly \(what) to Uniswap v2",
-                                            to: v2.router, data: swap, note: note + " on Uniswap v2")
+                                            to: v2.router, data: swap, note: note + " on Uniswap v2", cap: cap)
         }
         guard let v3 = route.v3 else { throw ExecutionError("Uniswap's route went away. Nothing was signed.") }
         return try await approveAndSend(rpc, token: tokenIn, spender: uni.router, units: units, approveNote: "Approve exactly \(what) to Uniswap",
                                         to: uni.router, data: try UniswapV3.exactInput(path: v3.path, recipient: wallet.evm, amountIn: units, amountOutMinimum: minOut),
-                                        note: note + " on Uniswap")
+                                        note: note + " on Uniswap", cap: cap)
     }
 
     /// What `gas` units cost on the chain now, in USD (ETH priced through Uniswap's WETH/USDC pool).
@@ -294,7 +296,7 @@ extension Executor {
         guard let uni = UniswapV3.on(net.rpc.chainId) else { throw ExecutionError("ihatecrypto swaps on Solana, Base, Arbitrum, Polygon, Ethereum, Optimism, BNB Chain and HyperEVM.") }
         let token = try await evmToken(ref, on: net), me = wallet.evm
         let units = NSDecimalNumber(decimal: (usdc * 1_000_000).rounded(0, .down)).uint64Value
-        guard units >= 500_000 else { throw ExecutionError("At least 0.5 USDC: less isn't worth the bridge.") }
+        guard units > 0 else { throw ExecutionError("No USDC to buy with. Nothing was signed.") }
         let scale = Decimal(sign: .plus, exponent: token.decimals, significand: 1)
         func amount(_ raw: Decimal) -> String { "\(Fmt.num(raw / scale, maxFraction: 6)) \(token.symbol)" }
         // Solana short and the network without the USDC: it comes straight from the EVM network that holds it (the card
@@ -319,6 +321,8 @@ extension Executor {
             }
             return try await buyThere(net, token, units: spend, uni, only: [Self.family(here.pair.title)], cost: usdc)
         }
+        // From Solana only: a buy with the USDC already there (above) bridges nothing, and another network's bridge has its own.
+        guard units >= 500_000 else { throw ExecutionError("At least 0.5 USDC: less isn't worth the bridge.") }
         let (ways, bridged) = try await buyWays(net, token, units: units, uni)
         guard let way = Self.pick(ways, prefer: prefer) else {
             throw ExecutionError(Self.unquoted(prefer, "\(token.symbol) on \(net.name)")
@@ -740,7 +744,7 @@ extension Executor {
     /// of exactly `units` of the token in for the token out, paying only this wallet, no fee to anyone, at most the route's
     /// tolerance under its quote (UniRoute.tolerance, by its impact); then an exact approve to its router, and the call.
     func kyberSwap(_ net: EVMNetwork, _ route: KyberSwap.Route, tokenIn: EVMTokens.Token, tokenOut: EVMTokens.Token, units: Decimal,
-                   what: String, rpc: EVMRPC? = nil) async throws -> String {
+                   what: String, rpc: EVMRPC? = nil, card: String? = nil) async throws -> String {
         let rpc = rpc ?? net.rpc, me = wallet.evm
         let tolerance = UniRoute.tolerance(impact: route.impact)
         let call = try await KyberSwap.build(route, chainId: net.rpc.chainId, sender: me, slippageBps: NSDecimalNumber(decimal: tolerance * 10_000).intValue)
@@ -749,7 +753,8 @@ extension Executor {
             throw ExecutionError("KyberSwap's call isn't the swap it quoted (this wallet, these tokens, this amount, its floor). Nothing was signed.")
         }
         return try await approveAndSend(rpc, token: tokenIn.address, spender: KyberSwap.router, units: units, approveNote: "Approve exactly \(what) to KyberSwap",
-                                        to: KyberSwap.router, data: call, note: "KyberSwap: swap \(what) for \(tokenOut.symbol) on \(net.name)")
+                                        to: KyberSwap.router, data: call, note: "KyberSwap: swap \(what) for \(tokenOut.symbol) on \(net.name)",
+                                        cap: card.map { SignerCap(asset: tokenIn.address.lowercased(), units: units.whole, payee: nil, card: $0) })
     }
 
     /// Relay's swap on one network, from and to this wallet: its quote, checked — the sender and the recipient are this
@@ -830,6 +835,8 @@ extension Executor {
         let rpc = net.rpc, wrappedName = "W" + net.gasCoin
         let wei = p.coinIn ? NSDecimalNumber(decimal: p.units).uint64Value : 0
         func show(_ raw: Decimal, _ t: EVMTokens.Token) -> String { "\(Fmt.num(raw / Decimal(sign: .plus, exponent: t.decimals, significand: 1), maxFraction: 8)) \(t.symbol)" }
+        // The card the swap's own signatures are held to at the signer: what goes in, at most this much, back to this wallet.
+        let card = "\(what) → \(p.tokenOut.symbol)"
         // The coin wrapped into its WETH, then what spends it; a failure after the wrap says where the money is now. One
         // sent with no outcome yet (a receipt that didn't come) is said as it is: the WETH may be swapped already.
         func wrapThen<T>(_ spend: () async throws -> T) async throws -> T {
@@ -850,26 +857,28 @@ extension Executor {
             let last = try await wrapThen {
                 try await approveAndSend(rpc, token: p.tokenIn.address, spender: q.proxy, units: p.units,
                                          approveNote: "Approve exactly \(p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what) to Relay",
-                                         to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)")
+                                         to: q.call.to, data: q.call.data, note: "Relay: swap \(what) for \(p.tokenOut.symbol) on \(net.name)",
+                                         cap: SignerCap(asset: p.tokenIn.address.lowercased(), units: p.units.whole, payee: nil, card: card))
             }
             try journal.append(.init(chain: "relay", id: q.quote.requestId, kind: .signed, note: "\(net.name) \(p.tokenIn.symbol)→\(p.tokenOut.symbol), tx \(last)"))
             return (last, nil)
         }
         if let k = p.kyber {
             report("\(what) → \(p.tokenOut.symbol) on \(net.name) through KyberSwap: ≈ \(show(k.out, p.tokenOut))\(p.impactText).")
-            return (try await kyberSwap(net, k, tokenIn: p.tokenIn, tokenOut: p.tokenOut, units: p.units, what: what), nil)
+            return (try await kyberSwap(net, k, tokenIn: p.tokenIn, tokenOut: p.tokenOut, units: p.units, what: what, card: card), nil)
         }
         if let route = p.route {
             report("\(what) → \(p.tokenOut.symbol) on \(net.name), on \(route.title)\(p.direct ? " (\(net.gasCoin) itself, no wrap)" : ""): ≈ \(show(route.out, p.tokenOut))\(route.impactText).")
             if p.direct {
-                let last = try await swapUniswap(route, on: net, uni, tokenIn: p.coinIn ? UniswapV4.native : p.tokenIn.address, units: p.units, what: what, note: note)
+                let last = try await swapUniswap(route, on: net, uni, tokenIn: p.coinIn ? UniswapV4.native : p.tokenIn.address, units: p.units, what: what, note: note,
+                                                 card: card)
                 return (last, p.coinOut ? route.out : nil)
             }
             let wethBefore = p.coinOut ? try await balance(weth, on: rpc) : 0
             // The coin is its wrapped token by then: that's what the approve lets Uniswap take.
             var last = try await wrapThen {
                 try await swapUniswap(route, on: net, uni, tokenIn: p.tokenIn.address, units: p.units,
-                                      what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what, note: note)
+                                      what: p.coinIn ? "\(Fmt.num(p.units / 1e18, maxFraction: 8)) \(wrappedName)" : what, note: note, card: card)
             }
             guard p.coinOut else { return (last, nil) }
             // A node can answer from before the swap's block: it said 0, the unwrap was skipped and the WETH stayed in the

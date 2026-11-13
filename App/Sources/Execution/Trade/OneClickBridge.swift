@@ -4,6 +4,7 @@ import Foundation
 import IhatecryptoCore
 import OneClickKit
 import RelayBridge
+import SignerAPI
 import TxGuard
 import WalletCore
 
@@ -45,7 +46,8 @@ extension Executor {
         if let from, let net = EVMNetwork.named(from) {
             try await ensureEVM(net, usdc: units)
             tx = try await sendEVM(net.rpc, to: net.usdc, data: try ERC20.transfer(to: deposit, amount: units),
-                                   note: "Send \(label) to the 1Click deposit", recipients: [deposit])
+                                   note: "Send \(label) to the 1Click deposit", recipients: [deposit],
+                                   cap: SignerCap(asset: net.usdc.lowercased(), units: units, payee: deposit, card: "\(label) to 1Click"))
         } else {
             tx = String(try await sendSolanaUSDC(units, to: deposit, label: "the 1Click deposit").split(separator: "/").last ?? "")
         }

@@ -973,6 +973,89 @@ public enum EVMCall: Equatable, Sendable {
             && s.amountIn == Decimal(value) && s.settleMax == s.amountIn
         // A plain send through one of USDT0's own OFTs: the value is LayerZero's message fee, and what it doesn't take
         // goes to `refund`, a payee of its own.
+    /// What EVM `calls` move out, into `flows`, or why they can't go under a card. What leaves the wallet itself (a transfer,
+    /// coins, a send that burns its own tokens) counts as it goes. A contract pulls tokens only by the right to spend them, so
+    /// a right given in this signature (approve, Permit2) counts in full — to a spender ihatecrypto knows, never more — and
+    /// what that spender's own call pulls counts only for its payee. A call pulling by a right given before counts by its
+    /// readable amount (a CCTP burn, a Relay deposit, USDT0's adapter); one that can't be read (a swap) goes only to a
+    /// spender given its right here (earlier in the batch), and only under a swap's card (`payee` nil). The guard holds a readable
+    /// swap's output to this wallet; a call to an unread swap contract (Relay's proxy) is bounded here only by what goes in.
+    /// A right counts toward the card's own payee: whom it pays is the spender's call, checked where it's made.
+    /// ponytail: a right left over from before to the same spender for another token isn't seen; exact approves keep none.
+    /// `order`: the Relay orders the signer checked, by id.
+    public static func cardFlows(_ chainId: UInt64, _ calls: [(to: String, value: UInt64, data: Data)], payee: String?, owner: String,
+                                 order: (Data) -> RelayOrder?, into flows: inout [(asset: String, units: Decimal, to: String?)]) -> String? {
+        let swap = payee == nil
+        func units(_ word: Data) -> Decimal { word.reduce(Decimal()) { $0 * 256 + Decimal($1) } }
+        func key(_ a: String) -> String { a.lowercased() }
+        let known = EVMCall.knownSpenders(chainId: chainId)
+        var grants: [(asset: String, units: Decimal, spender: String, permit2: Bool)] = []
+        var pulled: [(asset: String, units: Decimal, to: String?)] = []
+        // A pull counts as nothing only by a right given earlier in this signature: one given after it can't bound it.
+        func pull(_ asset: String, _ amount: Decimal, _ to: String?, by: String) {
+            pulled.append((asset, grants.contains { $0.spender == by } ? 0 : amount, to))
+        }
+        // The router Permit2 serves: reached through Permit2's own right when this signature gives the token's right to Permit2.
+        func reaches(_ spender: String) -> Bool {
+            grants.contains { $0.spender == spender }
+                || (spender == UniswapV4.on(chainId)?.router.lowercased() && grants.contains { $0.spender == UniswapV4.permit2 && !$0.permit2 })
+        }
+        for c in calls {
+            let to = key(c.to), call = EVMCall.decode(c.data)
+            if c.value > 0 {
+                if case .oftSend = call {
+                    // LayerZero's fee: what it doesn't take goes back to `refund`, held to this wallet below.
+                } else if c.data.isEmpty {
+                    flows.append(("native", Decimal(c.value), to))
+                } else if call.returnsCoins(to: to, value: c.value, chainId: chainId) {
+                    if case .wrap = call { return "a wrap goes with it, which the card doesn't make." }
+                    flows.append(("native", Decimal(c.value), nil))
+                } else { return "coins go with a call the card doesn't make." }
+            }
+            if c.data.isEmpty { continue }
+            switch call {
+            case .transfer(let r, let a): flows.append((to, units(a), key(r)))
+            case .approve(let s, let a):
+                guard known.contains(key(s)) else { return "it lets \(s) spend, which the card doesn't." }
+                grants.append((to, units(a), key(s), false))
+            case .permit2Approve(let t, let s, let a, _):
+                guard to == UniswapV4.permit2, known.contains(key(s)) else { return "it lets \(s) spend through Permit2, which the card doesn't." }
+                grants.append((key(t), units(a), key(s), true))
+            case .cctpBurn(let r?, _, let a):
+                let args = Data(c.data.dropFirst(4))
+                guard let token = ABI.address(in: args, word: 3) else { return "a CCTP burn of a coin the signer can't read goes with it." }
+                pull(key(token), units(a), key(r), by: to)
+            case .oftSend(let r?, _, let a, true, let refund):
+                guard let d = USDT0.on(chainId), key(d.oft) == to, key(refund) == key(owner) else { return "a LayerZero send the card doesn't make goes with it." }
+                if d.approves { pull(key(d.token), units(a), key(r), by: to) } else { flows.append((key(d.token), units(a), key(r))) }
+            default:
+                if let id = EVMCall.relayDepositID(to: to, data: c.data) {
+                    // depositErc20(depositor, token, amount, id); the two-word one deposits all the right allows.
+                    let args = Data(c.data.dropFirst(4))
+                    guard let order = order(id), args.count == 4 * 32, let token = ABI.address(in: args, word: 1),
+                          let amount = ABI.decimal(in: args, word: 2) else { return "a Relay deposit the signer can't count goes with it." }
+                    pull(key(token), amount, order.recipient, by: to)
+                } else if swap, c.value == 0, reaches(to) {
+                    // An unread swap, bounded by its right above.
+                } else if swap, c.value > 0 {
+                    // A native v4 swap, its coins counted above.
+                } else { return "a call the card doesn't make goes with it." }
+            }
+        }
+        // Permit2's own right to a token and Permit2's right for the router are one road: the larger of the two counts.
+        let viaPermit2 = Set(grants.filter(\.permit2).map(\.asset))
+        for g in grants where !viaPermit2.contains(g.asset) { flows.append((g.asset, g.units, payee)) }
+        for asset in viaPermit2.sorted() {
+            func sum(_ permit2: Bool) -> Decimal {
+                grants.filter { $0.asset == asset && $0.permit2 == permit2 && (permit2 || $0.spender == UniswapV4.permit2) }.reduce(0) { $0 + $1.units }
+            }
+            let others = grants.filter { $0.asset == asset && !$0.permit2 && $0.spender != UniswapV4.permit2 }.reduce(Decimal()) { $0 + $1.units }
+            flows.append((asset, max(sum(true), sum(false)) + others, payee))
+        }
+        flows += pulled
+        return nil
+    }
+
         case .oftSend(_, _, _, let plain, _): plain && USDT0.on(chainId)?.oft == to.lowercased()
         default: false
         }
