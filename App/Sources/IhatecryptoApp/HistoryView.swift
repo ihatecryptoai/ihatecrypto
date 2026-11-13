@@ -83,7 +83,9 @@ struct HistoryView: View {
         }
         ForEach(Array(items)) { ActivityCard(activity: $0) }
         if !earlier.isEmpty {
-            Label("Earlier — from the signature journal. The chat of that time wasn’t kept; from now on every request is.", systemImage: "clock.arrow.circlepath")
+            // The journal is a plain file: another program on this Mac can add a line that reads like ihatecrypto's own
+            // (the 2026-11-13 review), so the section says what it can't vouch for.
+            Label("Earlier — from the signature journal. Not verified: it’s a file, and another program on this Mac could have added lines to it. The chat of that time wasn’t kept. From now on every request is.", systemImage: "clock.arrow.circlepath")
                 .font(.ui(10)).foregroundStyle(.secondary).padding(.top, 6)
             ForEach(earlier) { ActivityCard(activity: $0) }
         }
@@ -156,7 +158,9 @@ struct HistoryView: View {
             }
             rows.append(Row(id: "j\(e.at.timeIntervalSince1970)\(e.id)\(e.kind.rawValue)", at: e.at, icon: e.kind == .failed ? "xmark.octagon" : "signature",
                             tint: e.kind == .failed ? Brand.loss : .secondary,
-                            text: "\(e.kind == .settled ? "Settled" : e.kind == .failed ? "Failed" : "Signed") · \(e.chain.capitalized): \(Self.english(e.note))", link: link))
+                            text: "\(e.kind == .settled ? "Settled" : e.kind == .failed ? "Failed" : "Signed") · \(e.chain.capitalized): \(Self.english(e.note))",
+                            // Among the app's own rows and the exchange's, these come from the file («Earlier» says why).
+                            detail: "From the journal file, not verified", link: link))
         }
         return rows.sorted { $0.at > $1.at }.prefix(400).map { $0 }
     }

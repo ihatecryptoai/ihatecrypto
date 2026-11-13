@@ -54,8 +54,10 @@ public final class LoopbackServer: @unchecked Sendable {
         self.queries = queries
     }
 
-    /// `port` 0 picks a free one. `path` is the redirect path, e.g. "/callback".
-    public static func start(port: UInt16 = 0, path: String) async throws -> LoopbackServer {
+    /// `port` 0 picks a free one. `path` is the redirect path, e.g. "/callback". With `state`, a request that doesn't
+    /// bring it back isn't this sign-in's answer: any program on this Mac can reach the port first with a code of its
+    /// own (the 2026-11-13 review), so it gets «Not found» and the wait goes on.
+    public static func start(port: UInt16 = 0, path: String, state: String? = nil) async throws -> LoopbackServer {
         // Bound to 127.0.0.1 itself, not just filtered by interface: nothing on the network can connect.
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
@@ -70,10 +72,12 @@ public final class LoopbackServer: @unchecked Sendable {
                 // First line of the request: "GET /callback?code=…&state=… HTTP/1.1"
                 let target = String(decoding: data ?? Data(), as: UTF8.self).split(separator: " ").dropFirst().first.map(String.init) ?? ""
                 let url = URLComponents(string: "http://localhost" + target)
-                let hit = url?.path == path
+                let query = Dictionary((url?.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
+                // A «no» at the service comes back with no state and no code: it ends the wait, it can't sign anyone in.
+                let hit = url?.path == path && (state == nil || query["state"] == state || query["code"] == nil)
                 connection.send(content: page(hit), completion: .contentProcessed { _ in connection.cancel() })
                 if hit {
-                    sink.yield(Dictionary((url?.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a }))
+                    sink.yield(query)
                     sink.finish()
                 }
             }

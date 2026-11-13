@@ -427,6 +427,43 @@ func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
     #expect(!SiteCheck.listed(host: "", blocked: blocked, allowed: allowed))
 }
 
+@Test func eachLocalPageIsItsOwnOrigin() {
+    // Every file: page was «file://», so connecting one connected them all (the 2026-11-13 review).
+    let a = SiteCheck.origin(scheme: "file", host: "", port: nil, path: "/Users/me/a.html")
+    #expect(a == "file:///Users/me/a.html" && a.hasPrefix("file://"))
+    #expect(a != SiteCheck.origin(scheme: "file", host: "", port: nil, path: "/Users/me/b.html"))
+    // A site's origin is what it was: no path, the port only when it names one.
+    #expect(SiteCheck.origin(scheme: "https", host: "jup.ag", port: nil, path: "/swap") == "https://jup.ag")
+    #expect(SiteCheck.origin(scheme: "http", host: "localhost", port: 3000, path: "/") == "http://localhost:3000")
+    #expect(SiteCheck.origin(scheme: "about", host: "", port: nil, path: "blank") == "about://")
+}
+
+@Test func feeReadAfterSignIsHeldToTheOneShown() {
+    // 100 units of gas shown at 10 each: the fee at signing is taken as read up to 15 a unit, and held there past it.
+    #expect(SiteCheck.feeHeld(shown: 1000, gas: 100, maxFee: 10, maxPriority: 2)! == (2, 10))
+    #expect(SiteCheck.feeHeld(shown: 1000, gas: 100, maxFee: 15, maxPriority: 2)! == (2, 15))
+    #expect(SiteCheck.feeHeld(shown: 1000, gas: 100, maxFee: 40, maxPriority: 30)! == (15, 15))
+    // More gas at signing than in the window: the price of a unit comes down, the whole fee stays within 1.5 times.
+    #expect(SiteCheck.feeHeld(shown: 1000, gas: 300, maxFee: 40, maxPriority: 1)! == (1, 5))
+    #expect(SiteCheck.feeHeld(shown: 0, gas: 100, maxFee: 10, maxPriority: 2) == nil && SiteCheck.feeHeld(shown: 1000, gas: 0, maxFee: 10, maxPriority: 2) == nil)
+}
+
+@Test func solanaFeeIsTheSignaturesAndTheComputeBudget() {
+    func le(_ tag: UInt8, _ n: UInt64, _ bytes: Int) -> Data { Data([tag] + (0..<bytes).map { UInt8(n >> (8 * UInt64($0)) & 0xff) }) }
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: []) == 5_000)
+    #expect(SiteCheck.solanaFee(signatures: 2, budget: []) == 10_000)
+    // 300,000 units at 50,000 micro-lamports each: 15,000 lamports. In either order, and rounded up.
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(2, 300_000, 4), le(3, 50_000, 8)]) == 20_000)
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(3, 50_000, 8), le(2, 300_000, 4)]) == 20_000)
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(2, 3, 4), le(3, 1, 8)]) == 5_001)
+    // A price with no limit: the guard's 200,000 units. A limit past Solana's 1.4 million is charged as 1.4 million.
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(3, 1_000_000, 8)]) == 205_000)
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(2, 4_000_000_000, 4), le(3, 1_000_000, 8)]) == 1_405_000)
+    // Cut short or past 64 bits: read as nothing, never a trap.
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [Data([3, 1]), Data()]) == 5_000)
+    #expect(SiteCheck.solanaFee(signatures: 1, budget: [le(3, .max, 8)]) == 0)
+}
+
 @Test func riskFollowedByACommaIsStillRead() throws {
     // Found live: «риск $1, стоп…» lost the risk because the comma looked like a decimal separator.
     #expect(IntentParser.apply("шорт нефти риск $1, стоп и тейк как учат", to: TradeIntent(), markets: ["xyz:CL", "ETH"])?.riskUSD == 1)

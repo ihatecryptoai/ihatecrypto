@@ -24,12 +24,16 @@ public struct OpenRouter: LLMProvider {
 
     public func signIn(open: OpenURL) async throws -> Credential {
         let pkce = PKCE.make()
-        let server = try await LoopbackServer.start(path: "/callback")
+        // OpenRouter returns `state` unchanged on the callback (its OAuth guide, read 2026-11-13). A callback without
+        // it is another program's, with a code for an account of its own, and is ignored (the 2026-11-13 review).
+        let state = PKCE.make().verifier
+        let server = try await LoopbackServer.start(path: "/callback", state: state)
         var url = URLComponents(string: "https://openrouter.ai/auth")!
         url.queryItems = [
             URLQueryItem(name: "callback_url", value: "http://localhost:\(server.port)/callback"),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: state),
         ]
         open(url.url!)
         guard let code = try await server.waitForCallback()["code"] else { throw LLMError("OpenRouter sign-in cancelled.") }

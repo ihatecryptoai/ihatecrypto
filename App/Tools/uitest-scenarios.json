@@ -1731,5 +1731,16 @@
       "reply_lacks": "✗ Rules",
       "no_pending": true
     }
+  },
+  {
+    "name": "favorite a token a lookup found → a card to press, never done by itself",
+    "send": [
+      "find the token BRETT on base and add it to my favorite tokens"
+    ],
+    "expect": {
+      "no_pending": true,
+      "favorites_lack": "BRETT",
+      "cards_contain": "favorites"
+    }
   }
 ]

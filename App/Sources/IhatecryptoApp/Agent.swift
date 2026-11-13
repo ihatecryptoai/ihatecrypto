@@ -196,6 +196,9 @@ extension Workspace {
     /// and arguments prepareContractCall checks against the user's own words and the explorer.
     nonisolated static func foundAllowed(_ command: String) -> Bool { displays(command) || ContractCall.parse(command) != nil }
 
+    /// The same for a command that runs with no press: not one that makes a favorite (TokenCommand.addsFavorite).
+    nonisolated static func foundRuns(_ command: String) -> Bool { foundAllowed(command) && !TokenCommand.addsFavorite(command) }
+
     /// Contracts a command may name without the user writing them: tokens they hold, their favorites, and each network's
     /// dollars (USDC and the big stablecoins) — tokens, never recipients (money goes to an address-book name or this wallet).
     var knownContracts: [String] {

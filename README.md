@@ -118,7 +118,8 @@ model) and `IhatecryptoApp` (the window). See [docs/architecture.md](docs/archit
 
 **Debug API** (development builds only, never in a release): Settings › Debugging › Local debug API turns on a local
 HTTP API (127.0.0.1, a bearer token that changes on every start) that the UI tests drive (`Tools/uitest.py`). It reads
-the state and types into the chat; it never signs, so a move still waits for Confirm and Touch ID.
+the state and types into the chat; it never signs for a wallet that asks in person, so a move still waits for Confirm
+and Touch ID (a test wallet, which signs without asking, does sign there).
 
 Run `./lint.sh` and `swift test` before sending changes. See [CONTRIBUTING.md](CONTRIBUTING.md), and
 [AGENTS.md](AGENTS.md) if you work with a coding agent.

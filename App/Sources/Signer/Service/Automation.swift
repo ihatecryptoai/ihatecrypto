@@ -86,6 +86,7 @@ enum Automation {
         case .signRelayNonceMapping, .relayOrder, .signReceiveAuthorization: break
         default: others.append("a request a task doesn't make")
         }
+        if let uncounted = try Allowances.read(request).uncounted { others.append(uncounted) }
         // Taken from the day and week at once (two tasks at the same moment can't both fit in what's left); past them, or
         // for anything that isn't dollars, the person allows it and it's counted all the same.
         if let why = try others.isEmpty ? Limits.takeAutomation(dollars) : "the automation wallet spends without you only dollars, not " + others.joined(separator: ", ") {
@@ -111,6 +112,65 @@ enum Automation {
         case .permit2Approve(let t, let s, let a, _): add(t.lowercased(), units(a), dollarDecimals(t), s, "a right to \(units(a)) units of \(t.prefix(8))…")
         case .cctpBurn(let r, _, let a), .oftSend(let r, _, let a, _, _): add(token, units(a), decimals, r, "\(units(a)) units sent across")
         default: break
+        }
+    }
+
+    /// A swap or a deposit spends what an approval gave its contract, and the budget counts the approval. So a call that
+    /// spends must fit an approval this signer counted: the same spender, the same token, no more than it gave. One the
+    /// signer never counted (from before the limits, or of another token) is the person's to allow (the 2026-11-13
+    /// review). The last approval of each token to each spender is kept with the signer's settings, not used up: the
+    /// token itself lets a spender take an approval only once, and a swap that failed must be free to go again.
+    enum Allowances {
+        private static let lock = NSLock()
+        static let key = "automationAllowances"
+
+        /// The request's calls read in order, starting from `kept`. `uncounted`: why a call's spending fits no counted
+        /// approval, or nil. `after`: what to keep once the request is signed.
+        static func read(_ request: SignerRequest, from kept: [String: String]) throws -> (uncounted: String?, after: [String: String]) {
+            if case .within(_, let inner) = request { return try read(inner, from: kept) }
+            var kept = kept, uncounted: String?
+            func units(_ word: Data) -> Decimal { word.reduce(Decimal()) { $0 * 256 + Decimal($1) } }
+            func given(_ k: String) -> Decimal { kept[k].flatMap { Decimal(string: $0) } ?? 0 }
+            let owner = try Signer.address("evm").lowercased()
+            func call(_ chainId: UInt64, _ to: String, _ data: Data) {
+                let decoded = EVMCall.decode(data), prefix = "\(owner):\(chainId):"
+                func entry(_ token: String, _ spender: String) -> String { prefix + token.lowercased() + ":" + spender.lowercased() }
+                switch decoded {
+                case .approve(let s, let a): kept[entry(to, s)] = "\(units(a))"
+                case .increaseAllowance(let s, let a): kept[entry(to, s)] = "\(given(entry(to, s)) + units(a))"
+                case .permit2Approve(let t, let s, let a, _): kept[entry(t, s)] = "\(units(a))"
+                // A swap whose amounts the signer can't read (several in one multicall) could sell a token no counted
+                // approval names: never covered. ihatecrypto's own swaps are one swap each.
+                case .swap(_, nil): uncounted = "a swap whose amounts the signer can't read"
+                default:
+                    guard let pull = decoded.pulls(to: to, data: data, chainId: chainId) else { return }
+                    let spender = ":" + to.lowercased()
+                    // The token unread (a vault's asset, an unread call): any one approval to that spender must cover it.
+                    let most = pull.token.map { given(entry($0, to)) }
+                        ?? kept.filter { $0.key.hasPrefix(prefix) && $0.key.hasSuffix(spender) }.values.compactMap { Decimal(string: $0) }.max() ?? 0
+                    if most <= 0 || pull.units.map({ $0 > most }) == true { uncounted = "a swap or a deposit on an approval the signer didn't count" }
+                }
+            }
+            switch request {
+            case .signEVMTransaction(let chainId, _, _, _, _, let to, _, let data, _): call(chainId, to, data)
+            case .signEVMBatch(let chainId, _, _, _, _, let calls, _): for c in calls { call(chainId, c.to, c.data) }
+            default: break
+            }
+            return (uncounted, kept)
+        }
+
+        static func read(_ request: SignerRequest) throws -> (uncounted: String?, after: [String: String]) {
+            try read(request, from: lock.withLock { Signer.defaults.object(forKey: key) as? [String: String] ?? [:] })
+        }
+
+        /// After the request was signed: the approvals it gave are kept. Read and written in one step, so two tasks'
+        /// approvals signed at the same moment both stay.
+        static func signed(_ request: SignerRequest) {
+            lock.withLock {
+                let kept = Signer.defaults.object(forKey: key) as? [String: String] ?? [:]
+                guard let after = try? read(request, from: kept).after, after != kept else { return }
+                _ = Signer.defaults.set(after, forKey: key)
+            }
         }
     }
 

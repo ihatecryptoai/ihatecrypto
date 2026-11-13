@@ -112,6 +112,11 @@ targets:
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "What you say in the chat becomes text in its field, recognized on this Mac when your language's model is installed."
         # A Ledger Nano X, Stax or Flex over Bluetooth (Sources/Wallet/Ledger/BLE.swift).
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "ihatecrypto talks to your Ledger over Bluetooth to read its addresses and ask it to sign. Every signature is approved on the Ledger itself."
+      configs:
+        # build-app.sh's IHATECRYPTO_PROFILE=1 (xctrace on a Dev copy): the app alone becomes attachable. The signer keeps
+        # its own NO below and the helper the project's.
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: $(PROFILE_ENTITLEMENTS:default=NO)
   # Sandboxed, no network entitlement: it can only answer the app over XPC and read its own Keychain group.
   # Its Touch ID prompt names it and shows its icon: «ihatecrypto is trying to send 0.18 USDC to 0x060b…9Ff0 on Tempo»
   # with the coin, not «Signer» with a blank bundle's icon. The module keeps a name of its own: «Signer» is its main type.

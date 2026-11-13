@@ -168,10 +168,12 @@ public enum SolanaGuard {
     /// Jupiter's exact-in v2 swaps by discriminator (route_v2, shared_accounts_route_v2): where the arguments start
     /// (in_amount u64, quoted_out_amount u64, slippage_bps u16, platform_fee_bps u16, positive_slippage_bps u16, then the
     /// route), the account and mint that go in, the account the output lands in, the one that replaces it when set, and
-    /// the output mint. Checked 2026-11-08 on mainnet swaps: in_amount is what left the source account.
-    static let jupiterRoutes: [String: (args: Int, source: Int, inMint: Int, to: Int, instead: Int?, mint: Int)] = [
-        "bb64facc31c4af14": (8, 1, 3, 2, 7, 4),
-        "d19853937cfed8e9": (9, 2, 6, 5, nil, 7),
+    /// the output mint. Checked 2026-11-08 on mainnet swaps: in_amount is what left the source account. Last, the account
+    /// a platform fee is paid to: the first one after those the IDL names, where /build puts `feeAccount`. Checked
+    /// 2026-11-13 on 41 mainnet swaps with a fee: its balance grew in 39, and the other two had no output to take one from.
+    static let jupiterRoutes: [String: (args: Int, source: Int, inMint: Int, to: Int, instead: Int?, mint: Int, fee: Int)] = [
+        "bb64facc31c4af14": (8, 1, 3, 2, 7, 4, 10),
+        "d19853937cfed8e9": (9, 2, 6, 5, nil, 7, 12),
     ]
     /// Jupiter's other swaps: v1 (route, shared_accounts_route, their token-ledger and exact-out kinds) put the amounts
     /// after the route, and reading that takes Jupiter's whole list of pools, which grows every few weeks; exact-out v2
@@ -386,7 +388,7 @@ public enum SolanaGuard {
                 }
             case jupiterLend:
                 let kind = ix.data.prefix(8).hex, deposit = jupiterLendDeposits.contains(kind)
-                guard deposit || jupiterLendWithdrawals.contains(kind) else {
+                guard deposit ? ix.data.count >= 16 : jupiterLendWithdrawals.contains(kind) else {
                     v.problems.append("Instruction \(n + 1): a Jupiter Lend instruction ihatecrypto doesn't use (\(kind)).")
                     continue
                 }
@@ -395,12 +397,25 @@ public enum SolanaGuard {
                     v.problems.append("Instruction \(n + 1): Jupiter Lend would \(deposit ? "credit the deposit to" : "pay") someone else's account.")
                     continue
                 }
-                v.checks.append("Jupiter Lend \(deposit ? "deposit: the shares" : "withdrawal: the money") → your account. The balance simulation checks the amount.")
+                guard deposit else {
+                    v.checks.append("Jupiter Lend withdrawal: the money → your account. The balance simulation checks the amount.")
+                    continue
+                }
+                // What a deposit takes goes on the prompt, read here: it named no amount (the 2026-11-13 review). Its data
+                // opens with the coins put in, or, for mint and mint_with_max_assets, with the shares to mint at the vault's
+                // price, and u64.max is all of the account they leave, account 1 (fluid-solana-programs lib.rs and
+                // utils/deposit.rs, and a 1 USDC deposit Jupiter built 2026-10-23). The coin: the one that account is this
+                // wallet's own for, else the mint the instruction names, account 3.
+                let raw = le64(ix.data, 8)
+                let coin = (mintNames.keys + policy.mints).first { ownTokenAccount(account(1), owner: policy.owner, mint: $0) } ?? account(3) ?? "?"
+                let symbol = mintNames[coin]?.symbol ?? "\(coin.prefix(6))…"
+                let what = raw == .max ? "all your \(symbol)" : ["3339e12fb69289a6", "065e457a1eb392ab"].contains(kind) ? "\(symbol) for \(raw) share units" : units(raw, coin)
+                v.checks.append("Jupiter Lend deposit of \(what): the shares → your account. The balance simulation checks the amount.")
             case jupiterDCA:
                 let kind = ix.data.prefix(8).hex
                 let mine = kind == jupiterDCAOpen
                     // dca 0, user 1, payer 2, inputMint 3, outputMint 4, userAta 5, inAta 6, outAta 7: the order's own ATAs.
-                    ? account(1) == policy.owner && account(2) == policy.owner && ownTokenAccount(account(5), owner: policy.owner, mint: account(3))
+                    ? ix.data.count >= 32 && account(1) == policy.owner && account(2) == policy.owner && ownTokenAccount(account(5), owner: policy.owner, mint: account(3))
                         && account(0).map { ownTokenAccount(account(6), owner: $0, mint: account(3)) && ownTokenAccount(account(7), owner: $0, mint: account(4)) } == true
                     // user 0, dca 1, inputMint 2, outputMint 3, …, userInAta 6, userOutAta 7: what's left comes back here.
                     : kind == jupiterDCAClose && account(0) == policy.owner && ownTokenAccount(account(6), owner: policy.owner, mint: account(2))
@@ -410,7 +425,14 @@ public enum SolanaGuard {
                     v.problems.append("Instruction \(n + 1): a Jupiter DCA instruction that isn't your own order's opening or closing (\(kind)).")
                     continue
                 }
-                v.checks.append(kind == jupiterDCAOpen ? "Jupiter DCA order of yours: what it buys is yours." : "Closes your Jupiter DCA order: what's left comes back to you.")
+                // What an opening takes goes on the prompt, read here: it named no amount (the 2026-11-13 review). Its data:
+                // application_idx, in_amount, in_amount_per_cycle, each a u64, then the interval and the limits (its IDL, and
+                // a 100 USDC order in two swaps Jupiter built 2026-10-23). The coin is account 3, proven above to be the mint
+                // of this wallet's account the money leaves.
+                let coin = account(3) ?? "?"
+                v.checks.append(kind == jupiterDCAOpen
+                    ? "Jupiter DCA order of yours: \(units(le64(ix.data, 16), coin)) → the order, \(units(le64(ix.data, 24), coin)) a swap, and what it buys is yours."
+                    : "Closes your Jupiter DCA order: what's left comes back to you.")
             case kaminoLend, kaminoVault, kaminoFarms:
                 let kind = ix.data.prefix(8).hex
                 if program == kaminoVault ? !kaminoVaultAllowed.contains(kind) : program == kaminoFarms ? !kaminoFarmsAllowed.contains(kind)
@@ -502,7 +524,9 @@ public enum SolanaGuard {
                 v.checks.append("Jupiter swap: \(units(inAmount, given)) → at least \(units(least, got)), your account (slippage \(percent(slippage))"
                                 + (fee > 0 ? ", a \(percent(fee)) fee to the site" : "") + ")")
                 if slippage > policy.maxSlippageBps { v.askAfresh.append("slippage \(percent(slippage)) is over your \(percent(policy.maxSlippageBps))") }
-                if fee > 0 { v.askAfresh.append("the site takes a \(percent(fee)) fee") }
+                // The account the fee is paid to, in full: the prompt named none (the 2026-11-13 review). Jupiter's own id in
+                // its place, or nothing there, is no fee account.
+                if fee > 0 { v.askAfresh.append("the site takes a \(percent(fee)) fee, " + (account(layout.fee).flatMap { $0 == jupiterSwap ? nil : "paid to \($0)" } ?? "no fee account")) }
                 // Counted as that coin only when it leaves this wallet's own account for it.
                 let sourceOwn = account(layout.source).map { mine($0) || ownTokenAccount($0, owner: policy.owner, mint: given) } ?? false
                 v.outflows.append(.init(asset: sourceOwn ? given : "?", units: inAmount, to: nil))

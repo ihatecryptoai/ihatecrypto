@@ -644,6 +644,65 @@ public struct EVMSimulation: Equatable, Sendable {
     }
 }
 
+/// What a Uniswap v2 or v3 swap trades, read from its calldata where the router reads it. `sells` and `amountIn` nil:
+/// the network's coin sent with the call. `exactIn`: `amountOut` is the least that comes back, else `amountIn` is the
+/// most that is taken.
+public struct SwapTerms: Equatable, Sendable {
+    public let sells: String?, buys: String
+    public let amountIn: Data?, amountOut: Data
+    public let exactIn: Bool
+
+    /// nil: not one of these swaps, or a path that runs out of the data (the swap is still asked about, with no amounts).
+    static func read(_ selector: String, _ args: Data) -> SwapTerms? {
+        func word(_ i: Int) -> Data? { (0..<args.count / 32).contains(i) ? args.subdata(in: (i * 32)..<((i + 1) * 32)) : nil }
+        func address(_ i: Int) -> String? { word(i).map { "0x" + $0.suffix(20).hex } }
+        func offset(_ i: Int) -> Int? { ABI.uint(in: args, word: i).flatMap { $0 % 32 == 0 && $0 < UInt64(args.count) ? Int($0 / 32) : nil } }
+        // v2's path: address[] behind the offset in word `i`, the token sold first.
+        func v2(_ i: Int) -> (String, String)? {
+            guard let at = offset(i), let n = ABI.uint(in: args, word: at), (2...8).contains(n),
+                  let first = address(at + 1), let last = address(at + Int(n)) else { return nil }
+            return (first, last)
+        }
+        // v3's path: bytes behind the tuple's own offset (the tuple starts at word 1): token, then (fee, token) per hop.
+        // Hops are counted as the router counts them (one pool, and one more while 66 bytes or more are left), so bytes
+        // after the last whole hop, which the router never reads, don't move the last token.
+        func v3() -> (String, String)? {
+            guard let at = offset(1), let n = ABI.uint(in: args, word: 1 + at), n >= 43, n <= 20 + 23 * 8 + 22,
+                  args.count >= (2 + at) * 32 + Int(n) else { return nil }
+            let path = args.subdata(in: ((2 + at) * 32)..<((2 + at) * 32 + Int(n))), hops = (Int(n) - 43) / 23 + 1
+            return ("0x" + path.prefix(20).hex, "0x" + path.subdata(in: (23 * hops)..<(23 * hops + 20)).hex)
+        }
+        func terms(_ pair: (String, String)?, in i: Int?, out o: Int, exactIn: Bool) -> SwapTerms? {
+            guard let pair, let out = word(o) else { return nil }
+            guard let i else { return SwapTerms(sells: nil, buys: pair.1, amountIn: nil, amountOut: out, exactIn: exactIn) }
+            guard let amountIn = word(i) else { return nil }
+            return SwapTerms(sells: pair.0, buys: pair.1, amountIn: amountIn, amountOut: out, exactIn: exactIn)
+        }
+        func single() -> (String, String)? { address(0).flatMap { a in address(1).map { (a, $0) } } }
+        // An exact-output path is written backwards: the token bought first.
+        func backwards(_ p: (String, String)?) -> (String, String)? { p.map { ($0.1, $0.0) } }
+        return switch selector {
+        // exactInputSingle and exactOutputSingle: SwapRouter02's, then the first SwapRouter's (a deadline before the amounts).
+        case "04e45aaf": terms(single(), in: 4, out: 5, exactIn: true)
+        case "5023b4df": terms(single(), in: 5, out: 4, exactIn: false)
+        case "414bf389": terms(single(), in: 5, out: 6, exactIn: true)
+        case "db3e2198": terms(single(), in: 6, out: 5, exactIn: false)
+        // exactInput and exactOutput((path, recipient, [deadline,] amount, limit)).
+        case "b858183f": terms(v3(), in: 3, out: 4, exactIn: true)
+        case "09b81346": terms(backwards(v3()), in: 4, out: 3, exactIn: false)
+        case "c04b8d59": terms(v3(), in: 4, out: 5, exactIn: true)
+        case "f28c0498": terms(backwards(v3()), in: 5, out: 4, exactIn: false)
+        // v2: (amountIn, amountOutMin, path, to…) and (amountOut, amountInMax, path, to…).
+        case "38ed1739", "5c11d795", "18cbafe5", "791ac947", "472b43f3": terms(v2(2), in: 0, out: 1, exactIn: true)
+        case "8803dbee", "4a25d94a", "42712a67": terms(v2(2), in: 1, out: 0, exactIn: false)
+        // The coin in, as the call's value: (amountOutMin, path, to, deadline) and (amountOut, path, to, deadline).
+        case "7ff36ab5", "b6f9de95": terms(v2(1), in: nil, out: 0, exactIn: true)
+        case "fb3bdb41": terms(v2(1), in: nil, out: 0, exactIn: false)
+        default: nil
+        }
+    }
+}
+
 /// What an EVM transaction's calldata asks for, as far as token safety goes. The drainers' tools — unlimited
 /// approvals, operator rights over all NFTs, permit calls, pulling tokens out of the sender — are refused.
 public enum EVMCall: Equatable, Sendable {
@@ -656,8 +715,9 @@ public enum EVMCall: Equatable, Sendable {
     case setApprovalForAll(operator: String, approved: Bool)
     case permit
     /// Any other contract function, by selector.
-    /// A Uniswap swap (v3's SwapRouter02 exactInput/exactInputSingle, v2's Router02): who gets what comes out.
-    case swap(recipient: String)
+    /// A Uniswap swap (v3's SwapRouter02 exactInput/exactInputSingle, v2's Router02): who gets what comes out, and what
+    /// it trades when the signer can read that (nil: a multicall of several swaps).
+    case swap(recipient: String, terms: SwapTerms? = nil)
     /// An ERC-4626 vault (Morpho): who gets the shares or the assets, and whose shares are spent (nil for a deposit).
     case vault(receiver: String, owner: String?)
     /// A lending pool (Aave's supply, deposit or withdraw): who gets the aTokens or the withdrawn asset.
@@ -704,7 +764,7 @@ public enum EVMCall: Equatable, Sendable {
         // SwapRouter02 does): the output would be lost, so it isn't read as a swap paying this wallet.
         func payee(_ i: Int, literal: Bool = false) -> EVMCall? {
             guard let r = address(i), !literal || r.lowercased() != Self.msgSender else { return nil }
-            return .swap(recipient: r)
+            return .swap(recipient: r, terms: SwapTerms.read(selector, Data(args)))
         }
         switch selector {
         case "095ea7b3": if let s = address(0), let a = word(1) { return .approve(spender: s, amount: a) }
@@ -735,7 +795,7 @@ public enum EVMCall: Equatable, Sendable {
         // SwapRouter02's multicall(bytes[]), with a deadline or a previous block hash: read only when every call in it is
         // a swap or a payout this decoder knows; then it is the swap paying whoever its calls pay.
         case "ac9650d8", "5ae401dc", "1f0464d1":
-            if let r = Self.multicallRecipient(Data(args), arrayWord: selector == "ac9650d8" ? 0 : 1) { return .swap(recipient: r) }
+            if let swap = Self.multicallSwap(Data(args), arrayWord: selector == "ac9650d8" ? 0 : 1) { return .swap(recipient: swap.recipient, terms: swap.terms) }
         case "6e553f65": if let r = address(1) { return .vault(receiver: r, owner: nil) }
         case "b460af94", "ba087652": if let r = address(1), let o = address(2) { return .vault(receiver: r, owner: o) }
         // Aave: supply/deposit(asset, amount, onBehalfOf, referral) and withdraw(asset, amount, to): the third word.
@@ -771,9 +831,11 @@ public enum EVMCall: Equatable, Sendable {
     /// caller. nil when a call in it is one this decoder doesn't know, or when anything is left in the router (a swap to
     /// ADDRESS_THIS, wrapETH, pull): whether a later payout takes that same token isn't read here, and a decoy payout
     /// (refundETH, an unwrap of nothing) would leave it for anyone to sweep. It stays a plain contract call then.
-    static func multicallRecipient(_ args: Data, arrayWord: Int) -> String? {
+    /// `terms`: the amounts of its one swap; of several, none. A multicall inside a multicall isn't read: the router's
+    /// own calls never nest, and reading one inside another, level after level, ran a page's transaction out of stack.
+    static func multicallSwap(_ args: Data, arrayWord: Int) -> (recipient: String, terms: SwapTerms?)? {
         guard let calls = ABI.bytesArray(args, at: arrayWord * 32), !calls.isEmpty else { return nil }
-        var payees: [String] = []
+        var payees: [String] = [], swaps: [SwapTerms?] = []
         for call in calls {
             guard call.count >= 4 else { return nil }
             let inner = call.dropFirst(4)
@@ -784,18 +846,20 @@ public enum EVMCall: Equatable, Sendable {
             case "df2ab5bb": guard let r = address(2) else { return nil }; payees.append(r)
             // unwrapWETH9(min), sweepToken(token, min), refundETH(): to the caller.
             case "49616997", "e90a182f", "12210e8a": payees.append(msgSender)
-            // wrapETH(value), pull(token, value): into the router, from the caller.
-            case "1c58db4f", "f2d5d56b": return nil
+            // wrapETH(value), pull(token, value): into the router, from the caller. Another multicall: not read.
+            case "1c58db4f", "f2d5d56b", "ac9650d8", "5ae401dc", "1f0464d1": return nil
             default:
-                guard case .swap(let r) = decode(Data(call)), r.lowercased() != addressThis else { return nil }
+                guard case .swap(let r, let t) = decode(Data(call)), r.lowercased() != addressThis else { return nil }
                 payees.append(r)
+                swaps.append(t)
             }
         }
         // Read whole (the 2026-10-24 review): a multicall paying this wallet in one swap and someone else in the next names
         // two payees besides the caller, and comes back as «several payees» — never this wallet — so the swap check refuses it.
         let named = Set(payees.map { $0.lowercased() }).subtracting([msgSender])
-        if named.count > 1 { return "several payees" }
-        return named.first ?? msgSender
+        let terms = swaps.count == 1 ? swaps[0] : nil
+        if named.count > 1 { return ("several payees", terms) }
+        return (named.first ?? msgSender, terms)
     }
 
     /// What the transaction does, in words for the Touch ID prompt, which reads «ihatecrypto is trying to <this>»:
@@ -814,22 +878,36 @@ public enum EVMCall: Equatable, Sendable {
         }
         let coins = "\(units(wei, 18)) \(EVMRPC.coin(chainId))"
         if case .plain = self { return "send \(coins) to \(short(to)) \(net)" }
-        // A token the signer can't name shows its raw units: an amount on the prompt, never none.
+        // A token the signer can't name shows its raw units: an amount on the prompt, never none. The network's coin (v4's
+        // zero currency) and its wrapped form (the one Uniswap's v2 router uses there) are named: 18 decimals, by design.
         func amount(_ word: Data, of token: String) -> String {
-            EVMRPC.dollars[token.lowercased()].map { "\(units(word, EVMRPC.dollarDecimals(token))) \($0)" } ?? "\(units(word, 0)) units of the token \(short(token))"
+            let t = token.lowercased()
+            if t == UniswapV4.native { return "\(units(word, 18)) \(EVMRPC.coin(chainId))" }
+            if t == UniswapV2.on(chainId)?.weth { return "\(units(word, 18)) W\(EVMRPC.coin(chainId))" }
+            return EVMRPC.dollars[t].map { "\(units(word, EVMRPC.dollarDecimals(token))) \($0)" } ?? "\(units(word, 0)) units of the token \(short(token))"
+        }
+        func word(_ n: Decimal) -> Data { (try? ABI.word(n)) ?? Data(count: 32) }
+        // What a swap trades, from its own calldata: the rate is the person's to judge, so both amounts are on the prompt.
+        func trade(_ t: SwapTerms) -> String {
+            let sold = t.amountIn.map { amount($0, of: t.sells ?? UniswapV4.native) } ?? coins
+            return (t.exactIn ? "\(sold) for at least " : "at most \(sold) for ") + amount(t.amountOut, of: t.buys)
         }
         // Coins that go into a wrap or a native swap are its input, not a payment: said once, in the sentence.
         switch self {
         case .wrap: return "wrap \(coins) into W\(EVMRPC.coin(chainId)) \(net)"
-        case .v4Swap where paid: return "swap \(coins) on Uniswap v4 \(net), paying this wallet"
+        case .v4Swap(let s) where paid: return "swap \(coins) for at least \(amount(word(s.takeMin), of: s.takeCurrency)) on Uniswap v4 \(net), paying this wallet"
+        case .swap(_, let t?) where t.amountIn == nil: return "swap \(trade(t)) on Uniswap \(net), paying this wallet"
+        // Several swaps in one multicall, or a path past what the signer reads: said, so no amount isn't taken for none asked.
+        case .swap(_, nil): return "swap\(paid ? " \(coins)" : "") on Uniswap \(net), paying this wallet. The signer can't read its amounts"
         default: break
         }
         let what = switch self {
         case .transfer(let recipient, let a): "send \(amount(a, of: to)) to \(short(recipient)) \(net)"
         case .approve(let spender, let a): "let \(short(spender)) spend exactly \(amount(a, of: to)) \(net)"
         case .increaseAllowance(let spender, let a): "let \(short(spender)) spend \(amount(a, of: to)) more \(net)"
+        case .swap(_, let t?): "swap \(trade(t)) on Uniswap \(net), paying this wallet"
         case .swap: "swap on Uniswap \(net), paying this wallet"
-        case .v4Swap: "swap on Uniswap v4 \(net), paying this wallet"
+        case .v4Swap(let s): "swap \(amount(word(s.amountIn), of: s.currencyIn)) for at least \(amount(word(s.takeMin), of: s.takeCurrency)) on Uniswap v4 \(net), paying this wallet"
         case .kyberSwap(let k): "swap \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), of: k.srcToken)) on KyberSwap \(net) for at least "
             + "\(amount((try? ABI.word(k.minReturn)) ?? Data(count: 32), of: k.dstToken)), paying this wallet"
         case .permit2Approve(let token, let spender, let a, _): "let \(short(spender)) spend exactly \(amount(a, of: token)) through Permit2 \(net)"
@@ -853,126 +931,49 @@ public enum EVMCall: Equatable, Sendable {
         return paid ? what + ", paying \(coins)" : what
     }
 
+    /// Whom a Uniswap v2 or v3 swap pays; nil for anything else.
+    public var swapRecipient: String? { if case .swap(let r, _) = self { r } else { nil } }
+
+    /// What this call takes from the wallet by a right to spend given before it: nil when it takes nothing that way, else
+    /// the token and how much at most, each nil when the signer can't read it. For the automation wallet's budget, which
+    /// counts the approval (Automation.Allowances): the call that spends must fit one that was counted.
+    public func pulls(to: String, data: Data, chainId: UInt64) -> (token: String?, units: Decimal?)? {
+        func units(_ word: Data) -> Decimal { word.reduce(Decimal()) { $0 * 256 + Decimal($1) } }
+        let args = Data(data.dropFirst(4))
+        switch self {
+        case .swap(_, let terms?): return terms.sells.map { ($0.lowercased(), terms.amountIn.map(units)) }
+        case .swap: return (nil, nil)
+        case .v4Swap(let s): return s.currencyIn.lowercased() == UniswapV4.native ? nil : (s.currencyIn.lowercased(), s.settleMax)
+        case .kyberSwap(let k): return k.srcToken.lowercased() == EVMSimulation.native ? nil : (k.srcToken.lowercased(), k.amount)
+        // An ERC-4626 deposit(assets, receiver): the vault's own asset, which the call doesn't name.
+        case .vault(_, nil): return (nil, ABI.decimal(in: args, word: 0))
+        // Aave's supply and deposit(asset, amount, …); its withdraw (69328dec) takes nothing of the wallet's.
+        case .lending: return data.prefix(4).hex == "69328dec" ? nil : (ABI.address(in: args, word: 0)?.lowercased(), ABI.decimal(in: args, word: 1))
+        // «All of the debt» is the largest number: no amount to hold it to.
+        case .repay(let asset, let a, _): return (asset.lowercased(), a.allSatisfy { $0 == 0xff } ? nil : units(a))
+        case .contract:
+            if Self.relayDepositID(to: to, data: data) != nil {
+                return args.count == 128 ? (ABI.address(in: args, word: 1)?.lowercased(), ABI.decimal(in: args, word: 2)) : nil
+            }
+            // A call the signer can't read, at a contract that holds rights to spend (Relay's proxies, Tempo's exchange).
+            return Self.knownSpenders(chainId: chainId).contains(to.lowercased()) ? (nil, nil) : nil
+        default: return nil
+        }
+    }
+
+    /// A swap: its rate is the person's to judge, so the signer asks about each one afresh, whatever session is open.
+    public var swaps: Bool {
+        switch self {
+        case .swap, .v4Swap, .kyberSwap: true
+        default: false
+        }
+    }
+
     /// An allowance none of ihatecrypto's own approvals reaches: ≥ 2⁹⁶ units (79 billion tokens of 18 decimals). Drainers
     /// ask for the maximum, 2¹²⁸ − 1 or 10³⁰ — past any balance; the old ≥ 2¹²⁸ line let the last two through.
     /// ponytail: more than 79 billion of an 18-decimal token can't be approved in one go; compare with the balance if that matters.
     static func unlimited(_ amount: Data) -> Bool { amount.prefix(20).contains { $0 != 0 } }
 
-    /// Contracts ihatecrypto itself lets spend its tokens on a network: Uniswap's routers (v2, v3, and v4's with Permit2),
-    /// Aave's pools, Morpho's vaults, Relay's depository and approval proxy (one address on every network, api.relay.link/chains
-    /// 2026-10-03), Circle's CCTP TokenMessenger, USDT0's adapter on Ethereum, Tempo's exchange. An approve to any other spender
-    /// needs it approved in person, like a recipient.
-    public static func knownSpenders(chainId: UInt64) -> Set<String> {
-        // Relay's depository and its approval proxies (v3, and v3.2 from 2026-10-26).
-        var s = ["0x4cd00e387622c35bddb9b4c962c136462338bc31"] + Permit3009.relayProxies
-        s += AaveV3.markets.filter { $0.rpc.chainId == chainId }.map(\.pool) + MorphoVault.vaults.filter { $0.rpc.chainId == chainId }.map(\.address)
-        if CCTP.domain(chainId) != nil { s.append(CCTP.tokenMessenger) }
-        if let usdt0 = USDT0.on(chainId), usdt0.approves { s.append(usdt0.oft) }
-        if chainId == EVMRPC.tempo.chainId { s.append(Tempo.exchange) }
-        if let uni = UniswapV3.on(chainId) { s.append(uni.router) }
-        if let v2 = UniswapV2.on(chainId) { s.append(v2.router) }
-        if chainId == EVMRPC.robinhood.chainId { s.append(UniswapV3.robinhoodRouter) }
-        if let v4 = UniswapV4.on(chainId) { s += [v4.router, UniswapV4.permit2] }
-        if KyberSwap.chains[chainId] != nil { s.append(KyberSwap.router) }
-        return Set(s.map { $0.lowercased() })
-    }
-
-    /// Contracts ihatecrypto's own moves call with calldata the signer doesn't read: Relay's depository and approval proxies
-    /// (a quote's call), Tempo's exchange and fee manager, Safe's factory. Uniswap's routers, Permit2, Aave and the rest get
-    /// only calls the decoder reads from ihatecrypto; an unread one there (a site's) could spend what was approved to them.
-    static let ownUnreadCallees: Set<String> = Set([RelayMulticallPermit.depository, Tempo.exchange, Tempo.feeManager, Safe.factory].map { $0.lowercased() })
-        .union(Permit3009.relayProxies)
-
-    /// The contract of a call the signer can't read, to be allowed in person once, whoever asks for it (a site, the chat's
-    /// `call`): nil when the call is read, pays that contract (then it's a recipient), or is one of ihatecrypto's own.
-    public func unreadTarget(to: String, value: UInt64, chainId: UInt64) -> String? {
-        let target = to.lowercased()
-        guard !payees(to: to, value: value, chainId: chainId).contains(where: { $0.lowercased() == target }) else { return nil }
-        // A protocol's call read by its selector alone (a swap, a vault, a claim…) is that protocol's only at its own
-        // contract: at another, the selector is the contract's word for whatever it does — asked about like an unread call.
-        let byProtocol = switch self {
-        case .swap, .v4Swap, .kyberSwap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
-        default: false
-        }
-        if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
-        guard case .contract = self, !Self.ownUnreadCallees.contains(target) else { return nil }
-        return target
-    }
-
-    /// The contracts whose calls ihatecrypto reads by protocol: its known spenders (routers, pools, vaults, CCTP, Permit2),
-    /// Merkl's distributor and USDT0's own OFT.
-    static func protocolContracts(chainId: UInt64) -> Set<String> {
-        knownSpenders(chainId: chainId).union([Merkl.distributor.lowercased()]).union([USDT0.on(chainId)?.oft].compactMap { $0?.lowercased() })
-    }
-
-    /// What the contract called makes wrong with this call, beyond the call itself: Relay's depository takes only deposits
-    /// naming this wallet as the depositor (depositNative, depositErc20 with or without an amount), and a Safe's
-    /// execTransaction must be a plain payout (Safe.execRefusal) — the 2026-10-24 review.
-    public static func targetRefusal(to: String, data: Data, sender: String) -> String? {
-        // KyberSwap's router gets only the swap the signer reads (an exact approve to it goes to the token, not here).
-        if to.lowercased() == KyberSwap.router, KyberSwap.decode(data) == nil {
-            return "A call to KyberSwap's router that isn't the swap ihatecrypto reads. ihatecrypto only swaps there."
-        }
-        if to.lowercased() == RelayMulticallPermit.depository {
-            let selector = data.prefix(4).hex
-            guard relayDeposits.contains(selector) else { return "A call to Relay's depository that isn't a deposit. ihatecrypto only deposits there." }
-            guard ABI.address(in: Data(data.dropFirst(4)), word: 0)?.lowercased() == sender.lowercased() else {
-                return "The Relay deposit names someone else as the depositor."
-            }
-        }
-        return Safe.execRefusal(data, safe: to)
-    }
-
-    /// The Relay order id a call into Relay's depository deposits for: its last word (depositNative, both depositErc20).
-    public static func relayDepositID(to: String, data: Data) -> Data? {
-        guard to.lowercased() == RelayMulticallPermit.depository, relayDeposits.contains(data.prefix(4).hex), data.count >= 4 + 64,
-              (data.count - 4) % 32 == 0 else { return nil }
-        return Data(data.suffix(32))
-    }
-
-    static let relayDeposits: Set<String> = Set(["depositNative(address,bytes32)", "depositErc20(address,address,uint256,bytes32)",
-                                                 "depositErc20(address,address,bytes32)"].map { Keccak.hash256(Data($0.utf8)).prefix(4).hex })
-
-    /// Who gets money, or the right to spend it, from this call: `to` when it carries coins (unless they come straight back,
-    /// `returnsCoins`), a token's or NFT's recipient, and a spender that isn't one of `knownSpenders`. The signer signs only
-    /// when each is the wallet's own or approved in person.
-    public func payees(to: String, value: UInt64, chainId: UInt64) -> [String] {
-        var out = value > 0 && !returnsCoins(to: to, value: value, chainId: chainId) ? [to] : []
-        switch self {
-        case .transfer(let r, _), .nftTransfer(_, let r): out.append(r)
-        // Someone else's tokens this wallet may spend, sent on: whoever gets them is a payee too.
-        case .transferFrom(_, let r, _): out.append(r)
-        // What CCTP mints goes to its recipient: this wallet, or an address allowed in person.
-        case .cctpBurn(let r?, _, _): out.append(r)
-        // What an OFT sends goes to its recipient on the other network, and the fee it didn't need to `refund`.
-        case .oftSend(let r?, _, _, _, let refund): out += [r, refund]
-        // What the multisig pays out: the coins it sends (a word past 64 bits pays `target` too) and its call's own payees.
-        case .multisigExec(let target, let v, let d, _):
-            let coins = ABI.uint(in: v, word: 0)
-            if coins != 0 { out.append(target) }
-            out += EVMCall.decode(d).payees(to: target, value: 0, chainId: chainId)
-        // approve(spender, 0) is an ERC-20 revoke, or an NFT's token id 0 handed over (ERC-721 shares the selector): its
-        // spender is always one to allow, unless it's nobody (the zero address clears an NFT's approval).
-        case .approve(let s, _):
-            if s.lowercased() != "0x" + String(repeating: "0", count: 40), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
-        // An increase or a Permit2 allowance of zero gives nobody anything: no one to allow for it.
-        case .increaseAllowance(let s, let a), .permit2Approve(_, let s, let a, _):
-            if a.contains(where: { $0 != 0 }), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
-        default: break
-        }
-        return out
-    }
-
-    /// Coins sent with this call that come back to the sender, so `to` isn't paid: a wrap by the network's own WETH (the one
-    /// Uniswap's v2 router uses there), or a v4 swap of the network's coin through its Universal Router whose input is exactly
-    /// that value (SETTLE_ALL in the zero currency; the router keeps nothing over, TAKE_ALL pays the caller).
-    public func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
-        switch self {
-        case .wrap: to.lowercased() == UniswapV2.on(chainId)?.weth
-        case .v4Swap(let s): to.lowercased() == UniswapV4.on(chainId)?.router && s.currencyIn == UniswapV4.native
-            && s.amountIn == Decimal(value) && s.settleMax == s.amountIn
-        // A plain send through one of USDT0's own OFTs: the value is LayerZero's message fee, and what it doesn't take
-        // goes to `refund`, a payee of its own.
     /// What EVM `calls` move out, into `flows`, or why they can't go under a card. What leaves the wallet itself (a transfer,
     /// coins, a send that burns its own tokens) counts as it goes. A contract pulls tokens only by the right to spend them, so
     /// a right given in this signature (approve, Permit2) counts in full — to a spender ihatecrypto knows, never more — and
@@ -1056,6 +1057,151 @@ public enum EVMCall: Equatable, Sendable {
         return nil
     }
 
+    /// Contracts ihatecrypto itself lets spend its tokens on a network: Uniswap's routers (v2, v3, and v4's with Permit2),
+    /// Aave's pools, Morpho's vaults, Relay's depository and approval proxy (one address on every network, api.relay.link/chains
+    /// 2026-10-03), Circle's CCTP TokenMessenger, USDT0's adapter on Ethereum, Tempo's exchange. An approve to any other spender
+    /// needs it approved in person, like a recipient.
+    public static func knownSpenders(chainId: UInt64) -> Set<String> {
+        // Relay's depository and its approval proxies (v3, and v3.2 from 2026-10-26).
+        var s = ["0x4cd00e387622c35bddb9b4c962c136462338bc31"] + Permit3009.relayProxies
+        s += AaveV3.markets.filter { $0.rpc.chainId == chainId }.map(\.pool) + MorphoVault.vaults.filter { $0.rpc.chainId == chainId }.map(\.address)
+        if CCTP.domain(chainId) != nil { s.append(CCTP.tokenMessenger) }
+        if let usdt0 = USDT0.on(chainId), usdt0.approves { s.append(usdt0.oft) }
+        if chainId == EVMRPC.tempo.chainId { s.append(Tempo.exchange) }
+        if let uni = UniswapV3.on(chainId) { s.append(uni.router) }
+        if let v2 = UniswapV2.on(chainId) { s.append(v2.router) }
+        if chainId == EVMRPC.robinhood.chainId { s.append(UniswapV3.robinhoodRouter) }
+        if let v4 = UniswapV4.on(chainId) { s += [v4.router, UniswapV4.permit2] }
+        if KyberSwap.chains[chainId] != nil { s.append(KyberSwap.router) }
+        return Set(s.map { $0.lowercased() })
+    }
+
+    /// Contracts ihatecrypto's own moves call with calldata the signer doesn't read: Relay's depository and approval proxies
+    /// (a quote's call), Tempo's exchange and fee manager, Safe's factory. Uniswap's routers, Permit2, Aave and the rest get
+    /// only calls the decoder reads from ihatecrypto; an unread one there (a site's) could spend what was approved to them.
+    static let ownUnreadCallees: Set<String> = Set([RelayMulticallPermit.depository, Tempo.exchange, Tempo.feeManager, Safe.factory].map { $0.lowercased() })
+        .union(Permit3009.relayProxies)
+
+    /// The contract of a call the signer can't read, to be allowed in person once, whoever asks for it (a site, the chat's
+    /// `call`): nil when the call is read, pays that contract (then it's a recipient), or is one of ihatecrypto's own.
+    /// `site`: the call is a page's, not one of ihatecrypto's own moves. Relay's approval proxies run whatever calls they
+    /// are handed with what was approved to them, so a page's call to one is asked about like any other contract's (the
+    /// 2026-11-13 review). The browser says so for its own window, and names the proxy among the recipients for the signer.
+    public func unreadTarget(to: String, value: UInt64, chainId: UInt64, site: Bool = false) -> String? {
+        let target = to.lowercased()
+        guard !payees(to: to, value: value, chainId: chainId).contains(where: { $0.lowercased() == target }) else { return nil }
+        // A protocol's call read by its selector alone (a swap, a vault, a claim…) is that protocol's only at its own
+        // contract: at another, the selector is the contract's word for whatever it does — asked about like an unread call.
+        let byProtocol = switch self {
+        case .swap, .v4Swap, .kyberSwap, .vault, .lending, .claim, .borrow, .repay, .cctpBurn, .oftSend, .permit2Approve: true
+        default: false
+        }
+        if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
+        guard case .contract = self else { return nil }
+        if Self.ownUnreadCallees.contains(target), !(site && Permit3009.relayProxies.contains(target)) { return nil }
+        return target
+    }
+
+    /// The contracts whose calls ihatecrypto reads by protocol: its known spenders (routers, pools, vaults, CCTP, Permit2),
+    /// Merkl's distributor and USDT0's own OFT.
+    static func protocolContracts(chainId: UInt64) -> Set<String> {
+        knownSpenders(chainId: chainId).union([Merkl.distributor.lowercased()]).union([USDT0.on(chainId)?.oft].compactMap { $0?.lowercased() })
+    }
+
+    /// What the contract called makes wrong with this call, beyond the call itself: Relay's depository takes only deposits
+    /// naming this wallet as the depositor (depositNative, depositErc20 with or without an amount), and a Safe's
+    /// execTransaction must be a plain payout (Safe.execRefusal) — the 2026-10-24 review.
+    public static func targetRefusal(to: String, data: Data, sender: String) -> String? {
+        // KyberSwap's router gets only the swap the signer reads (an exact approve to it goes to the token, not here).
+        if to.lowercased() == KyberSwap.router, KyberSwap.decode(data) == nil {
+            return "A call to KyberSwap's router that isn't the swap ihatecrypto reads. ihatecrypto only swaps there."
+        }
+        if to.lowercased() == RelayMulticallPermit.depository {
+            let selector = data.prefix(4).hex
+            guard relayDeposits[selector] != nil else { return "A call to Relay's depository that isn't a deposit. ihatecrypto only deposits there." }
+            guard relayDepositID(to: to, data: data) != nil else { return "A Relay deposit with more or less data than a deposit has: the order it names can't be read." }
+            // depositErc20 without an amount takes all that was approved to the depository: nothing here holds that to its order.
+            guard relayDeposits[selector] != 3 else { return "A Relay deposit that names no amount takes all that was approved. ihatecrypto deposits only a named amount." }
+            guard ABI.address(in: Data(data.dropFirst(4)), word: 0)?.lowercased() == sender.lowercased() else {
+                return "The Relay deposit names someone else as the depositor."
+            }
+        }
+        return Safe.execRefusal(data, safe: to)
+    }
+
+    /// The Relay order id a call into Relay's depository deposits for: its last word (depositNative, both depositErc20) —
+    /// of exactly the words that deposit has. The depository reads the id at its own place and ignores anything after
+    /// it, so with one more word at the end the signer checked the order named there while the money went to the one
+    /// before it, someone else's (found 2026-11-13).
+    public static func relayDepositID(to: String, data: Data) -> Data? {
+        guard to.lowercased() == RelayMulticallPermit.depository, let words = relayDeposits[data.prefix(4).hex], data.count == 4 + words * 32 else { return nil }
+        return Data(data.suffix(32))
+    }
+
+    /// Relay's deposits by selector, with how many words each one's arguments are.
+    static let relayDeposits: [String: Int] = Dictionary(uniqueKeysWithValues: [("depositNative(address,bytes32)", 2),
+        ("depositErc20(address,address,uint256,bytes32)", 4), ("depositErc20(address,address,bytes32)", 3)]
+        .map { (Keccak.hash256(Data($0.0.utf8)).prefix(4).hex, $0.1) })
+
+    /// Why a deposit into Relay's depository isn't the one its order names, or nil. The order says the coin and how much,
+    /// and Relay's own deposit carries exactly that (three live quotes, 2026-11-13): another coin or amount for the same
+    /// order would leave the difference in the depository (the 2026-11-13 review). depositErc20 without an amount is
+    /// refused before this (targetRefusal).
+    /// ponytail: the order's network isn't compared with the transaction's. A deposit on another one names an order Relay
+    /// doesn't fill there, so it comes back as a refund; map Relay's network names to chain ids if that ever pays someone.
+    public static func relayDepositProblem(to: String, value: UInt64, data: Data, order: RelayOrder) -> String? {
+        guard relayDepositID(to: to, data: data) != nil else { return nil }
+        let args = Data(data.dropFirst(4)), native = args.count == 64
+        let currency = native ? "0x" + String(repeating: "0", count: 40) : ABI.address(in: args, word: 1)?.lowercased() ?? ""
+        let amount = native ? Decimal(value) : args.count == 128 ? ABI.decimal(in: args, word: 2) : nil
+        guard currency == order.inputCurrency.lowercased() else { return "The Relay deposit is in \(currency), the order it names takes \(order.inputCurrency)." }
+        if !native, value > 0 { return "Coins go with a Relay deposit of a token: the depository would keep them." }
+        if let amount, amount != Decimal(string: order.inputAmount) {
+            return "The Relay deposit is \(NSDecimalNumber(decimal: amount).stringValue) units, the order it names takes \(order.inputAmount)."
+        }
+        return nil
+    }
+
+    /// Who gets money, or the right to spend it, from this call: `to` when it carries coins (unless they come straight back,
+    /// `returnsCoins`), a token's or NFT's recipient, and a spender that isn't one of `knownSpenders`. The signer signs only
+    /// when each is the wallet's own or approved in person.
+    public func payees(to: String, value: UInt64, chainId: UInt64) -> [String] {
+        var out = value > 0 && !returnsCoins(to: to, value: value, chainId: chainId) ? [to] : []
+        switch self {
+        case .transfer(let r, _), .nftTransfer(_, let r): out.append(r)
+        // Someone else's tokens this wallet may spend, sent on: whoever gets them is a payee too.
+        case .transferFrom(_, let r, _): out.append(r)
+        // What CCTP mints goes to its recipient: this wallet, or an address allowed in person.
+        case .cctpBurn(let r?, _, _): out.append(r)
+        // What an OFT sends goes to its recipient on the other network, and the fee it didn't need to `refund`.
+        case .oftSend(let r?, _, _, _, let refund): out += [r, refund]
+        // What the multisig pays out: the coins it sends (a word past 64 bits pays `target` too) and its call's own payees.
+        case .multisigExec(let target, let v, let d, _):
+            let coins = ABI.uint(in: v, word: 0)
+            if coins != 0 { out.append(target) }
+            out += EVMCall.decode(d).payees(to: target, value: 0, chainId: chainId)
+        // approve(spender, 0) is an ERC-20 revoke, or an NFT's token id 0 handed over (ERC-721 shares the selector): its
+        // spender is always one to allow, unless it's nobody (the zero address clears an NFT's approval).
+        case .approve(let s, _):
+            if s.lowercased() != "0x" + String(repeating: "0", count: 40), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
+        // An increase or a Permit2 allowance of zero gives nobody anything: no one to allow for it.
+        case .increaseAllowance(let s, let a), .permit2Approve(_, let s, let a, _):
+            if a.contains(where: { $0 != 0 }), !Self.knownSpenders(chainId: chainId).contains(s.lowercased()) { out.append(s) }
+        default: break
+        }
+        return out
+    }
+
+    /// Coins sent with this call that come back to the sender, so `to` isn't paid: a wrap by the network's own WETH (the one
+    /// Uniswap's v2 router uses there), or a v4 swap of the network's coin through its Universal Router whose input is exactly
+    /// that value (SETTLE_ALL in the zero currency; the router keeps nothing over, TAKE_ALL pays the caller).
+    public func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
+        switch self {
+        case .wrap: to.lowercased() == UniswapV2.on(chainId)?.weth
+        case .v4Swap(let s): to.lowercased() == UniswapV4.on(chainId)?.router && s.currencyIn == UniswapV4.native
+            && s.amountIn == Decimal(value) && s.settleMax == s.amountIn
+        // A plain send through one of USDT0's own OFTs: the value is LayerZero's message fee, and what it doesn't take
+        // goes to `refund`, a payee of its own.
         case .oftSend(_, _, _, let plain, _): plain && USDT0.on(chainId)?.oft == to.lowercased()
         default: false
         }
@@ -1065,7 +1211,7 @@ public enum EVMCall: Equatable, Sendable {
     /// run a hook Uniswap's registry vouches for there (UniswapV4.allowsHooks): without it, no hook at all.
     public func refusal(sender: String, chainId: UInt64? = nil) -> String? {
         // MSG_SENDER pays the caller on SwapRouter02; on another contract it is address 1, where the output is lost to everyone.
-        if case .swap(let recipient) = self, recipient.lowercased() != sender.lowercased(), recipient.lowercased() != Self.msgSender {
+        if case .swap(let recipient, _) = self, recipient.lowercased() != sender.lowercased(), recipient.lowercased() != Self.msgSender {
             return "The swap would pay \(recipient), not this wallet."
         }
         if case .lending(let beneficiary) = self, beneficiary.lowercased() != sender.lowercased() {

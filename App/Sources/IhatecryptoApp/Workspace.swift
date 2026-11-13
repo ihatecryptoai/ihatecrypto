@@ -569,9 +569,12 @@ final class Workspace {
     /// Only for the canvas; `taskQueue` is what runs.
     var chainAhead: (canvas: UUID?, steps: [String])?
     /// Exit rules the app keeps for open positions (breakeven after the partial take, trailing), by coin.
-    var exitRules: [String: ExitRules] = (UserDefaults.standard.data(forKey: Workspace.scoped("exitRules")).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) }) ?? [:] {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(exitRules), forKey: Workspace.scoped("exitRules", activeWalletID)) }
+    /// Sealed like the tasks (TaskSeal): the guardian moves a stop by them with the trading key, no one asked.
+    var exitRules: [String: ExitRules] = TaskSeal.exitRules(forKey: Workspace.scoped("exitRules")).rules {
+        didSet { TaskSeal.save(try? JSONEncoder().encode(exitRules), forKey: Workspace.scoped("exitRules", activeWalletID)) }
     }
+    /// The exit rules were changed outside ihatecrypto (TaskSeal) and weren't loaded: said once in the chat.
+    @ObservationIgnored var exitRulesTampered = TaskSeal.exitRules(forKey: Workspace.scoped("exitRules")).tampered
     /// The half at 1R per coin: failures so far and when the next try may go; `.distantFuture` while one is under way,
     /// so a second guardian pass doesn't send it too. Not saved: after a restart the pending flag starts it afresh.
     @ObservationIgnored var partialTries: [String: Guardian.Tries] = [:]
@@ -1708,7 +1711,16 @@ final class Workspace {
             // A new command takes the place of the card that waited; a chart or the rates beside it don't.
             if !Self.displays(canonical) { dropWaiting(keepAction: typed != nil) }
             guard ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts, found: reading?.found ?? [],
-                                              displays: Self.foundAllowed, markets: Set(markets.keys)) else {
+                                              displays: Self.foundRuns, markets: Set(markets.keys)) else {
+                // A favorite of an address a lookup found: theirs to press, never done for them.
+                if TokenCommand.addsFavorite(canonical), ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts,
+                                                                                    found: reading?.found ?? [], displays: Self.foundAllowed, markets: Set(markets.keys)) {
+                    reply(say("That address came from a lookup, not from you, so adding it to your favorites is yours to press.",
+                              "Этот адрес пришёл из поиска, а не от тебя, поэтому в избранное он попадёт только по твоему нажатию."), note: model)
+                    offerCards([ChatRouter.Option(title: say("Add to favorites", "Добавить в избранное"), comment: "", command: canonical)],
+                               userText: said ?? text, found: reading?.found ?? [])
+                    return
+                }
                 reply(say("I read that as “\(canonical)”, but its address is neither in your message nor among your favorites, so I won’t use it. Paste the address itself.",
                           "Я понял это как «\(canonical)», но этого адреса нет ни в твоём сообщении, ни в избранном, поэтому я его не использую. Вставь сам адрес."), note: model)
                 return
@@ -2484,6 +2496,11 @@ final class Workspace {
             tasksTampered = false
             reply(say("The scheduled tasks were changed outside ihatecrypto, so every one is paused. Check them in the Schedule and switch on only the ones you made.",
                       "Задачи по расписанию изменили вне ihatecrypto, поэтому все они на паузе. Проверь их в Schedule и включи только свои."))
+        }
+        if exitRulesTampered {
+            exitRulesTampered = false
+            reply(say("The exit rules of your open positions (breakeven, trailing) were changed outside ihatecrypto, so they are off. The stops on the exchange stay where they are. Set the rules again if you want them.",
+                      "Правила выхода по открытым позициям (безубыток, трейлинг) изменили вне ihatecrypto, поэтому они выключены. Стопы на бирже остались на месте. Задай правила заново, если они нужны."))
         }
         // The switch first, before anything can wait: the old wallet's card, rules and positions go at once.
         // A connected Ledger is one more wallet in the list; while it is the active one, its addresses are «ours» and

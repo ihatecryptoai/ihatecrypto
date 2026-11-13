@@ -73,6 +73,15 @@ import EVMChain
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.rulesShown([store], policy: nil) }
     try AgentOwner.rulesShown([store], policy: Data(#"{"frozen":true}"#.utf8))
     try AgentOwner.rulesShown([.functionCall(method: "freeze_wallet", args: Data("{}".utf8), gas: 1, deposit: 0)], policy: nil)
+    // The prompt says whose word the rules are, and names the hash the call carries (the 2026-11-13 review): the signer
+    // can't read the encrypted policy the call stores, so it doesn't speak as if it had.
+    let storing = AgentOwner.Delegate(receiver: "custody", actions: [store], doing: "store wallet policy")
+    #expect(AgentOwner.prompt(storing, rules: "at most $5 a day") == "agent wallet on NEAR Intents: store wallet policy\n"
+        + "rules as ihatecrypto showed them: at most $5 a day\nthe signer can't read the stored policy to check it says the same. Its hash: 2021a689")
+    let noHash = AgentOwner.Delegate(receiver: "custody", actions: [.functionCall(method: "store_wallet_policy", args: Data(#"{"agent_policy_hash":"<b>x"}"#.utf8), gas: 1, deposit: 0)], doing: "store wallet policy")
+    #expect(AgentOwner.prompt(noHash, rules: "frozen").hasSuffix("Its hash: not given"))
+    let freeze = AgentOwner.Delegate(receiver: "custody", actions: [.functionCall(method: "freeze_wallet", args: Data("{}".utf8), gas: 1, deposit: 0)], doing: "freeze the agent wallet")
+    #expect(AgentOwner.prompt(freeze, rules: nil) == "agent wallet on NEAR Intents: freeze the agent wallet")
     // A grant for longer than a month isn't signed.
     let far = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60 * 86400))
     #expect(throws: NearOwnerSigning.Problem.self) { try AgentOwner.message(payload(#"{"type":"grant_issue","agent_id":"a","expires_at":"\#(far)"}"#)) }

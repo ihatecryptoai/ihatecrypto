@@ -205,7 +205,7 @@ import WalletCore
     // exactInput pays whoever the tuple names: the signer's decoder finds that recipient behind the offset.
     let me = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7", thief = "0x000000000000000000000000000000000000dead"
     let mine = try UniswapV3.exactInput(path: path, recipient: me, amountIn: 5_000_000, amountOutMinimum: Decimal(string: "6000000000000000000")!)
-    #expect(mine.prefix(4).hex == "b858183f" && EVMCall.decode(mine) == .swap(recipient: me))
+    #expect(mine.prefix(4).hex == "b858183f" && EVMCall.decode(mine).swapRecipient == me)
     #expect(EVMCall.decode(mine).refusal(sender: me) == nil)
     let theirs = try UniswapV3.exactInput(path: path, recipient: thief, amountIn: 5_000_000, amountOutMinimum: 1)
     #expect(EVMCall.decode(theirs).refusal(sender: me) != nil)
@@ -614,7 +614,7 @@ import WalletCore
     #expect(EVMCall.decode(multicall([try exactInputSingle(to: routerStandIn), refundETH])) == .contract(selector: "0xac9650d8"))
     #expect(EVMCall.decode(multicall([pull])) == .contract(selector: "0xac9650d8"))
     // Paid straight to the wallet, with an ETH refund after: a swap paying this wallet; to someone else: refused.
-    #expect(EVMCall.decode(multicall([try exactInputSingle(to: me), refundETH])) == .swap(recipient: me))
+    #expect(EVMCall.decode(multicall([try exactInputSingle(to: me), refundETH])).swapRecipient == me)
     #expect(EVMCall.decode(multicall([try exactInputSingle(to: thief), refundETH])).refusal(sender: me) != nil)
     // MSG_SENDER is the caller.
     #expect(EVMCall.decode(multicall([try exactInputSingle(to: callerStandIn)])).refusal(sender: me) == nil)
@@ -628,17 +628,65 @@ import WalletCore
     #expect(EVMCall.decode(interface.prefix(100)) == .contract(selector: "0x5ae401dc"))
     // v2's exact-output and ETH-in swaps, v3's exactOutput: the recipient is found and checked.
     let v2Exact = call("8803dbee", [ABI.uint(1), ABI.uint(5), ABI.uint(160), try ABI.address(thief), ABI.uint(1_800_000_000), ABI.uint(2), try ABI.address(usdc), try ABI.address(weth)])
-    #expect(EVMCall.decode(v2Exact) == .swap(recipient: thief) && EVMCall.decode(v2Exact).refusal(sender: me) != nil)
+    #expect(EVMCall.decode(v2Exact).swapRecipient == thief && EVMCall.decode(v2Exact).refusal(sender: me) != nil)
     let v2ETHIn = call("7ff36ab5", [ABI.uint(1), ABI.uint(128), try ABI.address(me), ABI.uint(1_800_000_000), ABI.uint(2), try ABI.address(weth), try ABI.address(usdc)])
-    #expect(EVMCall.decode(v2ETHIn) == .swap(recipient: me))
+    #expect(EVMCall.decode(v2ETHIn).swapRecipient == me)
     let path = try UniswapV3.path([usdc, weth], fees: [500])
     let exactOutput = call("09b81346", [ABI.uint(32), ABI.uint(128), try ABI.address(thief), ABI.uint(1), ABI.uint(5), ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
-    #expect(EVMCall.decode(exactOutput) == .swap(recipient: thief) && EVMCall.decode(exactOutput).refusal(sender: me) != nil)
+    #expect(EVMCall.decode(exactOutput).swapRecipient == thief && EVMCall.decode(exactOutput).refusal(sender: me) != nil)
     // The tuple's offset pointed past word 2 (the review's case): Solidity reads the recipient there, so word 2 naming this
     // wallet proves nothing. Only the app's own 0x20 is read.
     let lying = call("b858183f", [ABI.uint(96), ABI.uint(0), try ABI.address(me), ABI.uint(160), try ABI.address(thief), ABI.uint(5_000_000), ABI.uint(1),
                                   ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
     #expect(EVMCall.decode(lying) == .contract(selector: "0xb858183f"))
+    // What each form trades is read where the router reads it, for the prompt (the 2026-11-13 review): the token sold and
+    // its amount, the token bought and the least of it — or, for an exact output, the most sold.
+    func terms(_ data: Data) -> SwapTerms? { if case .swap(_, let t) = EVMCall.decode(data) { t } else { nil } }
+    #expect(terms(try exactInputSingle(to: me)) == SwapTerms(sells: usdc, buys: weth, amountIn: ABI.uint(5_000_000), amountOut: ABI.uint(1), exactIn: true))
+    #expect(terms(multicall([try exactInputSingle(to: me), refundETH])) == terms(try exactInputSingle(to: me)))
+    // Two swaps in one multicall name no amounts: each is still asked about.
+    #expect(terms(multicall([try exactInputSingle(to: me), try exactInputSingle(to: me)])) == nil)
+    let v1 = call("414bf389", [try ABI.address(usdc), try ABI.address(weth), ABI.uint(500), try ABI.address(me), ABI.uint(1_800_000_000), ABI.uint(5_000_000), ABI.uint(7), ABI.uint(0)])
+    #expect(terms(v1) == SwapTerms(sells: usdc, buys: weth, amountIn: ABI.uint(5_000_000), amountOut: ABI.uint(7), exactIn: true))
+    #expect(terms(v2Exact) == SwapTerms(sells: usdc, buys: weth, amountIn: ABI.uint(5), amountOut: ABI.uint(1), exactIn: false))
+    #expect(terms(v2ETHIn) == SwapTerms(sells: nil, buys: usdc, amountIn: nil, amountOut: ABI.uint(1), exactIn: true))
+    // An exact-output path is written backwards: the first token in it is the one bought.
+    #expect(terms(exactOutput) == SwapTerms(sells: weth, buys: usdc, amountIn: ABI.uint(5), amountOut: ABI.uint(1), exactIn: false))
+    let exactInput = call("b858183f", [ABI.uint(32), ABI.uint(128), try ABI.address(me), ABI.uint(5_000_000), ABI.uint(9), ABI.uint(UInt64(path.count)), path + Data(count: 32 - path.count % 32)])
+    #expect(terms(exactInput) == SwapTerms(sells: usdc, buys: weth, amountIn: ABI.uint(5_000_000), amountOut: ABI.uint(9), exactIn: true))
+    // A path that runs out of the data: still a swap paying this wallet, with no amounts to name.
+    #expect(EVMCall.decode(exactInput.prefix(4 + 6 * 32)).swapRecipient == me && terms(exactInput.prefix(4 + 6 * 32)) == nil)
+    // A byte after the last whole hop is one the router never reads: the token bought is still the one it pays out.
+    let longer = path + Data([0xff])
+    let trailing = call("b858183f", [ABI.uint(32), ABI.uint(128), try ABI.address(me), ABI.uint(5_000_000), ABI.uint(9), ABI.uint(UInt64(longer.count)), longer + Data(count: 32 - longer.count % 32)])
+    #expect(terms(trailing) == terms(exactInput))
+    // A multicall inside a multicall isn't read as a swap, however deep: a plain contract call, asked about as one.
+    let single = try exactInputSingle(to: me)
+    var nested = multicall([single])
+    for _ in 0..<200 { nested = multicall([nested]) }
+    #expect(EVMCall.decode(nested) == .contract(selector: "0xac9650d8") && EVMCall.decode(multicall([multicall([single])])) == .contract(selector: "0xac9650d8"))
+    // Amounts the signer can't read are said so, never left out in silence.
+    let two = EVMCall.decode(multicall([single, single]))
+    #expect(two.summary(chainId: 8453, to: thief, value: 0) == "swap on Uniswap on Base, paying this wallet. The signer can't read its amounts")
+    // What a call takes by an approval given before it (the automation wallet's budget counts that approval): a swap's
+    // sold token and amount, nothing for a swap of the coin, a deposit's token and amount, an unread call at a spender.
+    func pulls(_ data: Data, to: String = thief) -> (String?, Decimal?)? { EVMCall.decode(data).pulls(to: to, data: data, chainId: 8453).map { ($0.token, $0.units) } }
+    #expect(pulls(exactInput)! == (usdc, 5_000_000) && pulls(exactOutput)! == (weth, 5))
+    let approval = try ERC20.approve(spender: thief, amount: 5)
+    #expect(pulls(v2ETHIn) == nil && pulls(approval) == nil && pulls(Data()) == nil)
+    #expect(pulls(multicall([single, single]))! == (nil, nil))
+    let supply = call("617ba037", [try ABI.address(usdc), ABI.uint(7), try ABI.address(me), ABI.uint(0)])
+    let withdraw = call("69328dec", [try ABI.address(usdc), ABI.uint(7), try ABI.address(me)])
+    #expect(pulls(supply)! == (usdc, 7) && pulls(withdraw) == nil)
+    let unread = Data(hex: "f9e4bab4")! + Data(count: 64)
+    #expect(pulls(unread, to: Permit3009.relayProxies.first!)! == (nil, nil) && pulls(unread) == nil)
+    // The prompt says both amounts, the dollar and the wrapped coin by name; an unknown token by its raw units.
+    #expect(EVMCall.decode(exactInput).summary(chainId: 8453, to: thief, value: 0) == "swap 5 USDC for at least 0.000000000000000009 WETH on Uniswap on Base, paying this wallet")
+    #expect(EVMCall.decode(exactOutput).summary(chainId: 8453, to: thief, value: 0) == "swap at most 0.000000000000000005 WETH for 0.000001 USDC on Uniswap on Base, paying this wallet")
+    #expect(EVMCall.decode(v2ETHIn).summary(chainId: 8453, to: thief, value: 1_000_000_000_000_000) == "swap 0.001 ETH for at least 0.000001 USDC on Uniswap on Base, paying this wallet")
+    // Every swap the signer reads is one it asks about afresh; an approval or a transfer isn't.
+    #expect(EVMCall.decode(exactInput).swaps && EVMCall.decode(v2ETHIn).swaps)
+    #expect(!EVMCall.decode(try ERC20.approve(spender: thief, amount: 5)).swaps && !EVMCall.decode(Data()).swaps)
 }
 
 /// A call the decoder can't read is asked about in person once, whoever sends it — except to the contracts ihatecrypto's own
@@ -647,6 +695,13 @@ import WalletCore
     let unread = EVMCall.decode(Data([0xde, 0xad, 0xbe, 0xef]) + Data(count: 32))
     let site = "0x1111111111111111111111111111111111111111"
     #expect(unread.unreadTarget(to: site, value: 0, chainId: 8453) == site)
+    // Relay's approval proxies run whatever calls they're handed: ihatecrypto's own move calls one unasked, a page's call
+    // to one is asked about like any contract's (the 2026-11-13 review). Its depository takes only deposits: never asked.
+    for proxy in Permit3009.relayProxies {
+        #expect(unread.unreadTarget(to: proxy, value: 0, chainId: 8453) == nil)
+        #expect(unread.unreadTarget(to: proxy, value: 0, chainId: 8453, site: true) == proxy)
+    }
+    #expect(unread.unreadTarget(to: RelayMulticallPermit.depository, value: 0, chainId: 8453, site: true) == nil)
     // Coins sent with it make the contract a recipient instead: asked about as one, not as a call.
     #expect(unread.unreadTarget(to: site, value: 1, chainId: 8453) == nil)
     #expect(unread.unreadTarget(to: "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be", value: 0, chainId: 8453) == nil)   // Relay's approval proxy
@@ -675,6 +730,14 @@ import WalletCore
     #expect(open.refusal(owner: me) != nil)            // the zero address is anyone: an open order
     // Any number beside someone else's address, whatever it's called; a meta-transaction's bytes; a nonce and a time pass.
     #expect(try typed("Payout", [("dst", "address", thief), ("total", "uint256", "5")]).refusal(owner: me) != nil)
+    // A time's or a nonce's word inside an amount's name doesn't make it one (the 2026-11-13 review): whole words only.
+    for name in ["validAmount", "timelyValue", "saltedTotal", "noncents", "validity", "version2amount"] {
+        #expect(!TypedData.notAnAmount(name), "\(name)")
+        #expect(try typed("Payout", [("dst", "address", thief), (name, "uint256", "5")]).refusal(owner: me) != nil, "\(name)")
+    }
+    for name in ["nonce", "deadline", "sigDeadline", "validAfter", "validBefore", "validUntil", "expiry", "expiration", "chainId", "startTime", "end_time", "salt", "choice", "timestamp"] {
+        #expect(TypedData.notAnAmount(name), "\(name)")
+    }
     #expect(try typed("MetaTransaction", [("nonce", "uint256", "1"), ("from", "address", #""\#(me)""#), ("functionSignature", "bytes", #""0xa9059cbb""#)]).refusal(owner: me) != nil)
     #expect(try typed("Delegation", [("delegatee", "address", thief), ("nonce", "uint256", "1"), ("expiry", "uint256", "9")]).refusal(owner: me) == nil)
     let login = try typed("Login", [("wallet", "address", #""\#(me)""#), ("nonce", "uint256", "7")])
@@ -709,6 +772,31 @@ import WalletCore
     let theirs = Data(erc20) + (try word(thief)) + (try word(usdc)) + ABI.uint(5) + id
     #expect(EVMCall.targetRefusal(to: depository, data: theirs, sender: me) != nil)
     #expect(EVMCall.targetRefusal(to: depository, data: Data(hex: "deadbeef")!, sender: me) != nil)
+    // The depository reads the id where its arguments put it and ignores what follows. One more word at the end named the
+    // order the signer had checked while the money went to the one before it (found 2026-11-13): no order is read, refused.
+    let native = Keccak.hash256(Data("depositNative(address,bytes32)".utf8)).prefix(4), other = Data(repeating: 9, count: 32)
+    for swapped in [Data(native) + (try word(me)) + other + id, mine + id, mine.dropLast(32)] {
+        #expect(EVMCall.relayDepositID(to: depository, data: Data(swapped)) == nil)
+        #expect(EVMCall.targetRefusal(to: depository, data: Data(swapped), sender: me) != nil)
+    }
+    #expect(EVMCall.relayDepositID(to: depository, data: Data(native) + (try word(me)) + id) == id)
+    // A deposit is the coin and the amount its order names (the 2026-11-13 review).
+    func order(_ currency: String, _ amount: String) -> RelayOrder {
+        RelayOrder(id: id, inputChain: "base", inputCurrency: currency, inputAmount: amount, outputChain: "arbitrum", outputCurrency: usdc, recipient: me,
+                   minimumAmount: "1", deadline: 2_000_000_000)
+    }
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 0, data: mine, order: order(usdc, "5")) == nil)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 0, data: mine, order: order(usdc, "4")) != nil)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 0, data: mine, order: order(thief, "5")) != nil)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 1, data: mine, order: order(usdc, "5")) != nil)
+    let coins = Data(native) + (try word(me)) + id, zero = "0x" + String(repeating: "0", count: 40)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 7, data: coins, order: order(zero, "7")) == nil)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 8, data: coins, order: order(zero, "7")) != nil)
+    #expect(EVMCall.relayDepositProblem(to: depository, value: 7, data: coins, order: order(usdc, "7")) != nil)
+    // The deposit with no amount of its own takes all that was approved: refused, whatever order it names.
+    let all = Data(Keccak.hash256(Data("depositErc20(address,address,bytes32)".utf8)).prefix(4)) + (try word(me)) + (try word(usdc)) + id
+    #expect(EVMCall.relayDepositID(to: depository, data: all) == id && EVMCall.targetRefusal(to: depository, data: all, sender: me) != nil)
+    #expect(EVMCall.decode(mine).pulls(to: depository, data: mine, chainId: 8453).map { $0.units } == 5)
     // A Safe's execTransaction sent from this wallet: a payout passes; a call into the multisig itself or a gas refund doesn't.
     let safe = "0x" + String(repeating: "ab", count: 20)
     let pay = Safe.Move(chainId: 8453, safe: safe, to: usdc, value: 0, data: try ERC20.transfer(to: me, amount: 5), nonce: 0)

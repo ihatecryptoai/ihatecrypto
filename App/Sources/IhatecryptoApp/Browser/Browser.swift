@@ -33,6 +33,9 @@ struct TxReview {
     var closed: Set<Int> = []
     /// SOL those accounts held as rent, which may come back to the wallet: shown as rent, not as a gain.
     var rentBack: Decimal = 0
+    /// The most it can cost in SOL: Solana's fee for its signatures and its own Compute Budget, and the rent of the token
+    /// accounts it opens for the wallet. One signature's fee until the review counts it.
+    var feeAndRent = Decimal(SiteCheck.solanaFee(signatures: 1, budget: [])) / 1_000_000_000
     /// Every program it calls, by name, and whether it is on the list ihatecrypto signs for without asking.
     var programs: [(name: String, known: Bool)] = []
     let checks: [String]
@@ -55,9 +58,11 @@ struct TxReview {
     }
 
     /// The wallet's SOL beside a real move that only pays the fee and new accounts' rent, or is the rent of an account it
-    /// closes coming back: shown with that note, never as a send or a gain.
+    /// closes coming back: shown with that note, never as a send or a gain. SOL leaving is that only within `feeAndRent`:
+    /// anything under 0.05 SOL was, so a site could take that much beside the headline (the 2026-11-13 review).
     func feeLike(_ d: (symbol: String, mint: String, amount: Decimal)) -> Bool {
-        d.mint == Self.nativeSOL && deltas.count > 1 && (d.amount < 0 ? -d.amount < Decimal(string: "0.05")! : d.amount > 0 && d.amount <= rentBack)
+        d.mint == Self.nativeSOL && deltas.count > 1
+            && (d.amount < 0 ? -d.amount <= min(feeAndRent, Decimal(string: "0.05")!) : d.amount > 0 && d.amount <= rentBack)
     }
 
     /// «You send 5 USDC to Kamino Vault»: what leaves, what arrives, and the program it's for — fee-sized SOL left out.
@@ -101,6 +106,8 @@ struct EVMReview {
     /// is simulated again after Sign and held to it.
     var simulation: EVMSimulation?
     var names: [String: String] = [:]
+    /// The «Network fee up to» the window shows, in wei (nil: no such line). The fee read again after Sign is held to it.
+    var fee: Decimal?
 }
 
 @Observable
@@ -147,7 +154,7 @@ final class Browser {
 
     /// The open page's origin, as WebKit names it for the page's requests.
     private var origin: String? {
-        URL(string: address).flatMap { u in u.host().map { "\(u.scheme ?? "https")://\($0)\(u.port.map { ":\($0)" } ?? "")" } }
+        URL(string: address).map { SiteCheck.origin(scheme: $0.scheme ?? "https", host: $0.host() ?? "", port: $0.port, path: $0.path) }
     }
     /// The open site has the wallet (Solana or EVM) in this session.
     var connectedHere: Bool { origin.map { connected.contains($0) || connectedEVM.contains($0) } ?? false }
@@ -218,7 +225,7 @@ final class Browser {
             let send = method == "signAndSendTransaction"
             var review = try await review(wire, owner: owner)
             if let ws = workspace, ws.jevScreening, let key = ws.jevKey {
-                review.jev = try? await JevReviewer.site(host: host.isEmpty ? origin : host, title: title, programs: review.programNames, changes: review.changes, apiKey: key)
+                review.jev = try? await JevReviewer.site(host: host.isEmpty ? self.host(origin) : host, title: title, programs: review.programNames, changes: review.changes, apiKey: key)
                 if review.jev == nil { review.jevNote = "The second check didn't answer — the code checks decide." }
             } else {
                 review.jevNote = "The second check isn't connected (Settings › Second check). The code checks decide."
@@ -335,7 +342,14 @@ final class Browser {
                 throw SiteError("4001|Nothing signed: \(why)")
             }
             let nonce = try await rpc.nonce(address)
-            let fees = try await rpc.fees()
+            let read = try await rpc.fees()
+            // The fee is read again here, and this one is signed (the 2026-11-13 review): held to 1.5 times the window's
+            // «Network fee up to» (SiteCheck.feeHeld). A window with no such line signs nothing, and evmReview shows none
+            // without saying why.
+            guard let fees = review.fee.flatMap({ SiteCheck.feeHeld(shown: $0, gas: again.gas, maxFee: read.maxFee, maxPriority: read.maxPriority) }) else {
+                workspace?.reply("Site \(origin): EVM transaction, nothing signed — the window showed no network fee. Ask the site for it again.", note: "browser")
+                throw SiteError("4001|Nothing signed: the window showed no network fee.")
+            }
             let reply = try await SignerClient().send(.signEVMTransaction(chainId: chain, nonce: nonce, maxPriorityFee: fees.maxPriority, maxFee: fees.maxFee,
                                                                          gasLimit: again.gas, to: to, value: value, data: data,
                                                                          recipients: again.recipients))
@@ -362,7 +376,8 @@ final class Browser {
         }
     }
 
-    private func host(_ origin: String) -> String { URL(string: origin)?.host ?? origin }
+    /// The site's name for the second check. A local page's origin carries its file's path, which stays on this Mac.
+    private func host(_ origin: String) -> String { URL(string: origin)?.host ?? (origin.hasPrefix("file://") ? "file://" : origin) }
 
     /// A JSON-RPC quantity ("0x…") as UInt64; nil when it does not fit.
     static func quantity(_ v: Any?) -> UInt64? {
@@ -385,7 +400,7 @@ final class Browser {
         // The same payees the signer checks: each foreign one needs the tick here and Touch ID there. A contract whose call
         // ihatecrypto can't read is allowed the same way, once: the signer asks with its address on the prompt.
         var payees = call.payees(to: to, value: value, chainId: rpc.chainId)
-        if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId) { payees.append(target) }
+        if let target = call.unreadTarget(to: to, value: value, chainId: rpc.chainId, site: true) { payees.append(target) }
         var recipients = Array(Set(payees.map { $0.lowercased() }.filter { $0 != from.lowercased() })).sorted()
         // The contract and everyone it pays or lets spend, asked of GoPlus Security (SlowMist's and ScamSniffer's data)
         // while it's simulated. ihatecrypto's own protocols and this wallet aren't asked.
@@ -401,7 +416,10 @@ final class Browser {
             let symbol = (try? await rpc.call("eth_call", [["to": to, "data": "0x95d89b41"], "latest"]) as? String).flatMap { hex -> String? in
                 guard let d = Data(hex: hex), d.count >= 96 else { return nil }
                 let length = Int(d[d.startIndex + 63])
-                return String(data: d.dropFirst(64).prefix(length), encoding: .utf8)
+                // Whoever deployed it wrote it (the 2026-11-13 review): a line break, a bidi mark or a paragraph of text
+                // rewrote the window's lines. Cleaned and cut to 12 characters, and one with nothing left is no name.
+                let name = String(data: d.dropFirst(64).prefix(length), encoding: .utf8).map { Holding.plain($0, max: 12) }
+                return name?.isEmpty == false ? name : nil
             } ?? "token \(to.prefix(8))…"
             return (to, symbol, ABI.decimals(try? await rpc.read(to, Data([0x31, 0x3c, 0xe5, 0x67]))))
         }
@@ -445,8 +463,16 @@ final class Browser {
             lines.append("\(on ? "Rights to all NFTs" : "Revoke NFT rights") for \(op).")
         case .permit:
             lines.append("Call to permit (permission to spend).")
-        case .swap(let r):
-            lines.append("Uniswap swap paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
+        case .swap(let r, let terms):
+            // What it trades, from the calldata the signer reads too: the amounts its own prompt then names.
+            var trade = ""
+            if let terms {
+                let out = sum(terms.amountOut, await token(terms.buys))
+                var sold = "the \(native) sent with it"
+                if let amount = terms.amountIn, let sells = terms.sells { sold = sum(amount, await token(sells)) }
+                trade = terms.exactIn ? " of \(sold) for at least \(out)" : " of at most \(sold) for \(out)"
+            }
+            lines.append("Uniswap swap\(trade) paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
         case .kyberSwap(let k):
             let t = await token(k.srcToken)
             lines.append("KyberSwap swap of \(sum((try? ABI.word(k.amount)) ?? Data(count: 32), t)) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")
@@ -540,19 +566,21 @@ final class Browser {
             if case .reported(let why) = v { problems.append("\(a): \(why.en). ihatecrypto doesn't sign for it.") }
         }
         if verdicts.values.contains(.unchecked) { lines.append("Scam check: GoPlus Security didn't answer this time.") }
-        var gas: UInt64 = 0
+        var gas: UInt64 = 0, fee: Decimal?
         if problems.isEmpty {
             do {
                 gas = try await rpc.estimateGas(from: from, to: to, value: value, data: data) * 12 / 10
-                if let fees = try? await rpc.fees() {
-                    lines.append("Network fee up to \(Fmt.num(Decimal(gas) * Decimal(fees.maxFee) / 1_000_000_000_000_000_000, maxFraction: 8)) \(native).")
-                }
+                // No fee to show is no Sign: the fee signed later is held to this line.
+                let fees = try await rpc.fees()
+                let most = Decimal(gas) * Decimal(fees.maxFee)
+                lines.append("Network fee up to \(Fmt.num(most / 1_000_000_000_000_000_000, maxFraction: 8)) \(native).")
+                fee = most
             } catch {
-                problems.append("Couldn't estimate gas: \(error.localizedDescription)")
+                problems.append("Couldn't estimate gas or read the network fee: \(error.localizedDescription)")
             }
         }
         return EVMReview(chain: rpc.chainId, to: to, value: value, data: data, lines: lines, changes: changes, recipients: recipients, gas: gas,
-                         problems: problems, simulation: simulation, names: names)
+                         problems: problems, simulation: simulation, names: names, fee: fee)
     }
 
     private func ask(_ kind: SiteRequest.Kind, origin: String, site: SiteCheck.Verdict) async -> Bool {
@@ -604,9 +632,17 @@ final class Browser {
         let simulation = try await rpc.simulate(wire, watch: watch, sigVerify: false)
         var problems = verdict.problems
         var balances = Balances()
+        // What it can cost (the 2026-11-13 review): the fee its signatures and its own Compute Budget set and, added below,
+        // the rent of each token account it opens for the wallet, at the node's rate for its size (one read each). SOL
+        // leaving past that is sent, not a fee.
+        var cost = SiteCheck.solanaFee(signatures: message.requiredSignatures, budget: message.instructions
+            .filter { $0.programIndex < accounts.count && accounts[$0.programIndex] == SolanaGuard.computeBudget }.map(\.data))
         if let error = simulation.error {
             problems.append("Simulation failed: \(error).")
         } else {
+            for (address, r) in simulation.rights where r.owner == owner && tokens[address] == nil {
+                cost += (try? await rpc.rentMinimum(bytes: r.space)) ?? 0
+            }
             balances = Self.balances(owner: owner, solBefore: solBefore, touched: touched, after: simulation.after)
             problems += balances.problems
             // Rights no balance shows (research E-1): the wallet handed to a program, a token account's new owner or delegate.
@@ -625,6 +661,7 @@ final class Browser {
         review.deltas = balances.deltas
         review.closed = balances.closed
         review.rentBack = balances.rentBack
+        review.feeAndRent = Decimal(cost) / 1_000_000_000
         review.programs = named
         return review
     }
@@ -700,7 +737,8 @@ final class Browser {
                 return (nil, "Request not accepted.")
             }
             let o = message.frameInfo.securityOrigin
-            let origin = o.host.isEmpty ? "\(o.protocol)://" : "\(o.protocol)://\(o.host)\(o.port > 0 ? ":\(o.port)" : "")"
+            // A local page has no host: the path of the frame's own file, from WebKit too, tells one from another.
+            let origin = SiteCheck.origin(scheme: o.protocol, host: o.host, port: o.port > 0 ? o.port : nil, path: message.frameInfo.request.url?.path ?? "")
             do {
                 return (try await browser.handle(method, body["params"] as? [String: Any] ?? [:], origin: origin, host: o.host), nil)
             } catch {
@@ -1069,9 +1107,10 @@ struct ApprovalSheet: View {
     private func line(_ text: String) -> some View { Text(text).fixedSize(horizontal: false, vertical: true) }
     private func note(_ text: String) -> some View { Text(text).font(.ui(10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
 
-    /// The domain without «www.», the part a phishing copy changes.
+    /// The domain without «www.», the part a phishing copy changes. A local page: its file's name, the path is the line below.
     private var host: String {
-        let host = URL(string: request.origin)?.host ?? request.origin
+        let url = URL(string: request.origin), file = url?.lastPathComponent ?? ""
+        let host = url?.host ?? (file.isEmpty ? request.origin : file)
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 

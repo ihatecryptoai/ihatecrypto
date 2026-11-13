@@ -408,7 +408,7 @@ struct SettingsView: View {
     private var debugging: some View {
         SettingsSection(icon: "terminal", title: "Local debug API", line: "For Claude Code and local developer tools.") {
             SettingsGroup {
-                SettingsRow("Allow local debug access", icon: "terminal", info: "Reads state, types into the chat and captures the window. It never signs: money moves still need Confirm and \(Presence.name) in the app. Access requires a token that changes each time the API starts.") {
+                SettingsRow("Allow local debug access", icon: "terminal", info: "Reads state, types into the chat and captures the window. It never signs for a wallet that asks for \(Presence.name): its money moves still need Confirm in the app. A test wallet signs there. Access requires a token that changes each time the API starts.") {
                     Toggle("Local debug API", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "debugAPI") },
                         set: { on in

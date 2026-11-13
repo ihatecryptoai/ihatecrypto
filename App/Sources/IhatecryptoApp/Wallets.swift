@@ -61,7 +61,9 @@ extension Workspace {
         tasks = loaded.tasks
         if loaded.tampered { tasksTampered = true }
         taskQueue = nil
-        exitRules = UserDefaults.standard.data(forKey: Self.scoped("exitRules", id)).flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) } ?? [:]
+        let rules = TaskSeal.exitRules(forKey: Self.scoped("exitRules", id))
+        exitRules = rules.rules
+        if rules.tampered { exitRulesTampered = true }
         partialTries = [:]
         stopTries = [:]
         equityHistory = LocalStore.load(Self.scoped("equity", id) + ".json") ?? []

@@ -6,6 +6,7 @@ import Foundation
 @testable import LLMChatGPT
 @testable import LLMClaudeCode
 import LLMCore
+import LLMOpenRouter
 import Testing
 
 // MARK: Core
@@ -33,6 +34,36 @@ import Testing
     #expect((response as? HTTPURLResponse)?.statusCode == 200)
     #expect(String(decoding: data, as: UTF8.self).contains("Signed in"))
     #expect(try await query == ["code": "abc", "state": "xyz"])
+}
+
+/// Any program on this Mac can reach the port first with a code of its own (the 2026-11-13 review): a callback without
+/// this sign-in's state gets «Not found», and the server waits on for the one that brings it.
+@Test func loopbackServerIgnoresACallbackWithoutItsState() async throws {
+    let server = try await LoopbackServer.start(path: "/callback", state: "s3")
+    async let query = server.waitForCallback(timeout: 10)
+    for wrong in ["code=evil", "code=evil&state=other"] {
+        let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(server.port)/callback?\(wrong)")!)
+        #expect((response as? HTTPURLResponse)?.statusCode == 404)
+    }
+    _ = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(server.port)/callback?code=abc&state=s3")!)
+    #expect(try await query == ["code": "abc", "state": "s3"])
+}
+
+/// OpenRouter's sign-in asks for its own state back, a new one each time, and a callback without it doesn't end the wait.
+@Test func openRouterSignInIgnoresACallbackWithoutItsState() async throws {
+    func signIn() async throws -> (state: String, status: Int?) {
+        let (opened, sink) = AsyncStream.makeStream(of: URL.self)
+        let waiting = Task { try await OpenRouter().signIn(open: { sink.yield($0) }) }
+        defer { waiting.cancel() }
+        var urls = opened.makeAsyncIterator()
+        let items = URLComponents(url: try #require(await urls.next()), resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let callback = try #require(items.first { $0.name == "callback_url" }?.value)
+        let (_, response) = try await URLSession.shared.data(from: URL(string: callback.replacingOccurrences(of: "localhost", with: "127.0.0.1") + "?code=evil")!)
+        return (items.first { $0.name == "state" }?.value ?? "", (response as? HTTPURLResponse)?.statusCode)
+    }
+    let (first, second) = (try await signIn(), try await signIn())
+    #expect(first.state.count == 43 && first.state != second.state)
+    #expect(first.status == 404 && second.status == 404)
 }
 
 // MARK: ChatGPT subscription

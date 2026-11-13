@@ -18,9 +18,10 @@ final class SignerPrefs: @unchecked Sendable {
         ]
     }
 
-    /// The keys the preferences file held before; nothing else of it is read.
+    /// The keys the preferences file held before; nothing else of it is read. Not the session length: the file could
+    /// name 30 minutes no one chose, so it starts at the standard minute and the person picks again (the 2026-11-13 review).
     static func carried(_ key: String) -> Bool {
-        ["wallets", "activeWallet", "solana", "evm", "near", "sessionLength"].contains(key) || key.hasPrefix("agentActive")
+        ["wallets", "activeWallet", "solana", "evm", "near"].contains(key) || key.hasPrefix("agentActive")
     }
 
     private let lock = NSLock()

@@ -260,8 +260,8 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     // route_v2's accounts: user, source, user destination, source mint, destination mint, two token programs, destination
     // (the program's id: none), event authority, program.
     let keys = [me, SPL.tokenProgram, source, out, jup, wsol, event, theirs, usdcMint]
-    func v2(_ dest: Int, instead: Int = 4, _ data: [UInt8]) throws -> Verdict {
-        let (m, accounts) = try message(keys, [(4, [0, 2, dest, 8, 5, 1, 1, instead, 6, 4], data)])
+    func v2(_ dest: Int, instead: Int = 4, more: [Int] = [], _ data: [UInt8]) throws -> Verdict {
+        let (m, accounts) = try message(keys, [(4, [0, 2, dest, 8, 5, 1, 1, instead, 6, 4] + more, data)])
         return SolanaGuard.check(m, accounts: accounts, policy: policy, tokenOwners: [:])
     }
     // The output account is this wallet's own for the mint (derived here, no claim needed), and the prompt names what goes
@@ -275,9 +275,11 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     let loose = try v2(3, routeV2 + args(slippage: 500))
     #expect(loose.ok && loose.askAfresh == ["slippage 5% is over your 3%"])
     #expect(try v2(3, routeV2 + args(slippage: 10_001)).ok == false)
-    // A site's fee is named, and asked about afresh; over 10% it's refused.
-    let fee = try v2(3, routeV2 + args(fee: 20))
-    #expect(fee.checks.contains { $0.hasSuffix("(slippage 0.5%, a 0.2% fee to the site)") } && fee.askAfresh == ["the site takes a 0.2% fee"])
+    // A site's fee is named with the account it's paid to, the first after the named ones, and asked about afresh. With
+    // none there, or Jupiter's own id in its place, the prompt says so. Over 10% it's refused.
+    let fee = try v2(3, more: [7], routeV2 + args(fee: 20))
+    #expect(fee.checks.contains { $0.hasSuffix("(slippage 0.5%, a 0.2% fee to the site)") } && fee.askAfresh == ["the site takes a 0.2% fee, paid to \(theirs)"])
+    for none in [[], [4]] { #expect(try v2(3, more: none, routeV2 + args(fee: 20)).askAfresh == ["the site takes a 0.2% fee, no fee account"]) }
     #expect(!(try v2(3, routeV2 + args(fee: 1_001))).ok)
     // The output sent to someone else's account, as the user destination or through the optional destination: refused.
     #expect(!(try v2(7, routeV2 + args())).ok)
@@ -291,6 +293,8 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     let (s, sAccounts) = try message(sharedKeys, [(8, [2, 0, 3, 4, 4, 5, 6, 7, 1, 1, 9, 8], sharedV2 + args())])
     let sharedOK = SolanaGuard.check(s, accounts: sAccounts, policy: policy, tokenOwners: [:])
     #expect(sharedOK.ok && sharedOK.checks.contains("Jupiter swap: 1 USDC → at least 0.009339574 SOL, your account (slippage 0.5%)"), "\(sharedOK)")
+    let (sFee, sFeeAccounts) = try message(sharedKeys, [(8, [2, 0, 3, 4, 4, 5, 6, 7, 1, 1, 9, 8, 4], sharedV2 + args(fee: 20))])
+    #expect(SolanaGuard.check(sFee, accounts: sFeeAccounts, policy: policy, tokenOwners: [:]).askAfresh == ["the site takes a 0.2% fee, paid to \(theirs)"])
     let (sTheirs, sTheirsAccounts) = try message(sharedKeys, [(8, [2, 0, 3, 4, 4, 4, 6, 7, 1, 1, 9, 8], sharedV2 + args())])
     #expect(!SolanaGuard.check(sTheirs, accounts: sTheirsAccounts, policy: policy, tokenOwners: [:]).ok)
     // v1 routes put the amounts after the route, which takes Jupiter's whole list of pools to read: refused by name, as
@@ -528,6 +532,32 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         let at = try #require(wire.range(of: key))
         wire.replaceSubrange(at, with: Data(repeating: 9, count: 32))
         #expect(try !verdict(wire).ok)
+    }
+}
+
+/// The prompt names what a Jupiter Lend deposit and a Jupiter DCA order take, read from the instruction (the 2026-11-13
+/// review): the 1 USDC, and the 100 USDC in two swaps, of the transactions above.
+@Test func jupiterLendDepositsAndDCAOrdersNameTheirAmounts() throws {
+    func verdict(_ wire: Data) throws -> Verdict {
+        let m = try SolanaMessage.parse(transaction: wire)
+        return SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk", trustLookupTables: false), tokenOwners: [:])
+    }
+    let lend = try #require(Data(base64Encoded: jupiterLendDeposit)), order = try #require(Data(base64Encoded: jupiterDCAOrder))
+    #expect(try verdict(lend).checks.contains("Jupiter Lend deposit of 1 USDC: the shares → your account. The balance simulation checks the amount."))
+    #expect(try verdict(order).checks.contains("Jupiter DCA order of yours: 100 USDC → the order, 50 USDC a swap, and what it buys is yours."))
+    // u64.max deposits the whole balance, and a mint's number counts shares: neither reads as that many USDC.
+    let kind = Data([0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6]), mintKind = Data([0x33, 0x39, 0xe1, 0x2f, 0xb6, 0x92, 0x89, 0xa6])
+    var all = lend, mint = lend
+    all.replaceSubrange(try #require(all.range(of: kind)).upperBound..<all.endIndex, with: Data(repeating: 0xff, count: 8))
+    mint.replaceSubrange(try #require(mint.range(of: kind)), with: mintKind)
+    #expect(try verdict(all).checks.contains { $0.hasPrefix("Jupiter Lend deposit of all your USDC: the shares → ") })
+    #expect(try verdict(mint).checks.contains { $0.hasPrefix("Jupiter Lend deposit of USDC for 1000000 share units: the shares → ") })
+    // Too short to hold its amounts (the instruction is the message's last: its length byte, then its data): refused.
+    for (wire, keep) in [(lend, 8), (order, 24)] {
+        let data = try #require(try SolanaMessage.parse(transaction: wire).instructions.last?.data.count)
+        var short = wire.dropLast(data - keep)
+        short[short.endIndex - keep - 1] = UInt8(keep)
+        #expect(try !verdict(Data(short)).ok)
     }
 }
 

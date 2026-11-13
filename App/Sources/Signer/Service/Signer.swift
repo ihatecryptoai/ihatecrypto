@@ -21,7 +21,8 @@ enum Signer {
     /// The app's words, so only one line of them: no control characters (a token's symbol comes from its contract).
     static var cardLine: String {
         card.map { c in
-            let words = String(c.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) && !"«»;".unicodeScalars.contains($0) }.prefix(120).map(Character.init))
+            // Control and format characters (bidi, zero-width) and every kind of line break: U+2028 and U+2029 aren't controls.
+            let words = String(c.unicodeScalars.filter { !CharacterSet.controlCharacters.union(.newlines).contains($0) && !"«»;".unicodeScalars.contains($0) }.prefix(120).map(Character.init))
             return "\nfits the card «\(words)»: nothing more leaves, to no one else"
         } ?? ""
     }
@@ -230,7 +231,7 @@ enum Signer {
                 let dollars = try Automation.spend(inner)
                 do {
                     let reply = try handle(inner)
-                    if !reply.ok { Limits.refund(.automation, dollars) }
+                    if reply.ok { Automation.Allowances.signed(inner) } else { Limits.refund(.automation, dollars) }
                     return reply
                 } catch {
                     Limits.refund(.automation, dollars)
@@ -499,7 +500,7 @@ enum Signer {
                 let known = RecipientStore.all().union(AddressBookStore.all().map(\.address))
                 return try AgentOwner.policy(json, owner: owner, own: OwnStore.all(), known: known)
             }
-            let doing = "agent wallet on NEAR Intents: \(d.doing)" + (rules.map { " — \($0)" } ?? "")
+            let doing = AgentOwner.prompt(d, rules: rules)
             try confirmAfresh(doing)
             var r = SignerReply(ok: true)
             r.signedRaw = try withNearKey(reason: doing) { secret, _ in
@@ -586,6 +587,7 @@ enum Signer {
             if let refusal = Batch7702.selfCall(to: to, data: data, owner: owner) { v.problems.append(refusal) }
             let deposit = EVMCall.relayDepositID(to: to, data: data), relayOrder = deposit.flatMap(RelayOrders.order)
             if deposit != nil, relayOrder == nil { v.problems.append(RelayOrders.unchecked) }
+            if let relayOrder, let why = EVMCall.relayDepositProblem(to: to, value: value, data: data, order: relayOrder) { v.problems.append(why) }
             if let fee = tx.feeProblem { v.problems.append(fee) }
             // Coins (calldata or not), tokens, NFTs and spending rights go only to this wallet or an address approved in person.
             for payee in call.payees(to: to, value: value, chainId: chainId) where !approved.contains(payee.lowercased()) {
@@ -595,9 +597,14 @@ enum Signer {
             // A contract whose call can't be read is asked about in person once, whether or not the app named it: it's
             // allowed as a call, apart from money recipients (a site's contract comes as a recipient only to be asked about).
             let doing = call.summary(chainId: chainId, to: to, value: value) + RelayOrders.line(relayOrder.map { [$0] } ?? []) + "\nnetwork fee " + tx.feeText
-            let target = call.unreadTarget(to: to, value: value, chainId: chainId)
+            // A page's call to one of Relay's proxies comes named among the recipients (the browser's): asked about as a call.
+            let target = call.unreadTarget(to: to, value: value, chainId: chainId, site: recipients.contains { RecipientStore.key($0) == to.lowercased() })
             try approve(recipients.filter { RecipientStore.key($0) != target } + (relayOrder.map { [$0.recipient] } ?? []), doing: doing)
             if let target { try approve([target], calls: true, doing: doing) }
+            // A swap a person signs gets a prompt of its own, whatever session is open, as on Solana: with none, any
+            // open session signed a swap of the whole balance at any rate, unseen (the 2026-11-13 review). The automation
+            // wallet's is held to what its approval counted (Automation.spend).
+            if call.swaps, Wallets.signing == nil { try confirmAfresh(doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
                 try tx.signed(privateKey: $0).raw
@@ -635,7 +642,10 @@ enum Signer {
                     v.problems.append("Money or the right to spend it goes to an unapproved address \(payee).")
                 }
                 if let id = EVMCall.relayDepositID(to: c.to, data: c.data) {
-                    if let order = RelayOrders.order(id) { relayOrders.append(order) } else { v.problems.append(RelayOrders.unchecked) }
+                    if let order = RelayOrders.order(id) {
+                        relayOrders.append(order)
+                        if let why = EVMCall.relayDepositProblem(to: c.to, value: 0, data: c.data, order: order) { v.problems.append(why) }
+                    } else { v.problems.append(RelayOrders.unchecked) }
                 }
             }
             guard v.ok else { return refused(v) }
@@ -647,10 +657,13 @@ enum Signer {
                 + "\nas one transaction: this wallet runs the audited batch account on \(net) (EIP-7702)\nnetwork fee " + fee.feeText
             // Each unread contract is asked about once, as in a single call; one another call lets spend (an exact approve
             // for the chat's `call`) is a money recipient, and that approval covers its call too.
-            let targets = calls.compactMap { EVMCall.decode($0.data).unreadTarget(to: $0.to, value: 0, chainId: chainId) }
+            let named = Set(recipients.map(RecipientStore.key))
+            let targets = calls.compactMap { EVMCall.decode($0.data).unreadTarget(to: $0.to, value: 0, chainId: chainId, site: named.contains($0.to.lowercased())) }
             let payees = Set(calls.flatMap { EVMCall.decode($0.data).payees(to: $0.to, value: 0, chainId: chainId) }.map(RecipientStore.key))
             try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayOrders.map(\.recipient), doing: doing)
             if !targets.isEmpty { try approve(targets, calls: true, doing: doing) }
+            // A batch with a swap in it asks afresh like the swap alone.
+            if calls.contains(where: { EVMCall.decode($0.data).swaps }), Wallets.signing == nil { try confirmAfresh(doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
                 try Batch7702.signed(chainId: chainId, nonce: nonce, maxPriorityFee: maxPriorityFee, maxFee: maxFee, gasLimit: gasLimit,
@@ -721,7 +734,7 @@ enum Signer {
             }
             // Each payment confirmed in person with its amount and payee; the payee isn't saved as a recipient, so it
             // can't receive anything else later without its own prompt.
-            let name = String(service.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(60).map(Character.init))
+            let name = String(service.unicodeScalars.filter { !CharacterSet.controlCharacters.union(.newlines).contains($0) }.prefix(60).map(Character.init))
             let doing = a.summary + " · \(name)"
             try confirmAfresh(doing)
             let digest = try a.typed().parts().digest
@@ -752,12 +765,13 @@ enum Signer {
                                          calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
             guard let id = m.depositID else { throw WalletError(RelayOrders.unchecked) }
             let order = try RelayOrders.require(id)
-            try approve([order.recipient], doing: order.summary)
             if let refusal = m.refusal(owner: owner, now: UInt64(Date().timeIntervalSince1970)) {
                 var v = Verdict()
                 v.problems.append(refusal)
                 return refused(v)
             }
+            // After the checks: a request that is refused leaves no address among the approved ones (the 2026-11-13 review).
+            try approve([order.recipient], doing: order.summary)
             let permit = try m.permit()
             let digests = [try m.digest(), try permit.typed().parts().digest]
             var r = SignerReply(ok: true)
@@ -830,13 +844,13 @@ enum Signer {
 
         case .signRelayNonceMapping(let wallet, let depositor, let id, let nonce):
             let order = try RelayOrders.require(id)
-            try approve([order.recipient], doing: order.summary)
             let owner = try address("evm").lowercased()
             guard wallet.lowercased() == owner, depositor.lowercased() == owner else {
                 var v = Verdict()
                 v.problems.append("The deposit mapping isn't for your wallet: \(wallet), \(depositor).")
                 return refused(v)
             }
+            try approve([order.recipient], doing: order.summary)
             let digest = try HLSigner.relayNonceMappingDigest(wallet: wallet, depositor: depositor, id: id, nonce: nonce)
             var r = SignerReply(ok: true)
             r.signature = try withKey("evm", reason: "link a Hyperliquid withdrawal to a Relay order" + RelayOrders.line([order])) {
@@ -851,9 +865,9 @@ enum Signer {
             let (type, fields) = try HLSigner.userAction(action)
             let what = type != "ApproveBuilderFee" ? "sign a Hyperliquid transfer"
                 : HLAction.text(action, "maxFeeRate") == HLBuilder.revoke ? "take back ihatecrypto's fee approval" : "approve ihatecrypto's fee on your Hyperliquid trades"
-            try approve(recipients, doing: prompt(what, verdict))
             // Approving ihatecrypto's fee is the user's own opt-in: a fresh prompt, never an open session (a revoke needs none).
             if type == "ApproveBuilderFee", HLAction.text(action, "maxFeeRate") != HLBuilder.revoke { try confirmAfresh(prompt(what, verdict)) }
+            try approve(recipients, doing: prompt(what, verdict))
             var r = SignerReply(ok: true)
             r.signature = try withKey("evm", reason: prompt(what, verdict)) {
                 try HLSigner.signUserAction(type, fields: fields, privateKey: $0, mainnet: mainnet)
@@ -1152,26 +1166,6 @@ enum Signer {
             policy.mints = [cap.asset]
             flows = SolanaGuard.check(message, accounts: accounts, policy: policy, tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
                 .outflows.map { ($0.asset, Decimal($0.units), $0.to) }
-        case .signEVMTransaction(let chainId, _, _, _, _, let to, let value, let data, _):
-            if let why = try evm(chainId, [(to, value, data)]) { return why }
-        case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
-            if let why = try evm(chainId, calls.map { ($0.to, 0, $0.data) }) { return why }
-        case .signRelayMulticallPermit(let chainId, let token, let value, let validBefore, let relayer, let refundTo, let nftRecipient, let metadata, let calls):
-            let m = RelayMulticallPermit(chainId: chainId, token: token, from: try address("evm"), value: value, validBefore: validBefore, relayer: relayer,
-                                         refundTo: refundTo, nftRecipient: nftRecipient, metadata: metadata,
-                                         calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
-            guard let order = m.depositID.flatMap(RelayOrders.order) else { return "a Relay deposit for an order the signer hasn't checked goes with it." }
-            flows.append((token.lowercased(), Decimal(value), order.recipient))
-        default: return "a card's limits go only with a transfer's, a swap's or a bridge's signature."
-        }
-        return cap.refusal(flows)
-    }
-
-    static func refused(_ pastCard: String) -> SignerReply {
-        var v = Verdict()
-        v.problems = ["Past the card: " + pastCard]
-        return refused(v)
-    }
             // A Relay deposit: its amount and coin from the instruction — deposit_native SOL, deposit_token the mint (account
             // 4) out of this wallet's own account for it (account 5) — and its payee from the order the signer checked
             // (RelayOrders), which must take that same coin. SolanaGuard checked the deposit is from this wallet.
@@ -1195,6 +1189,26 @@ enum Signer {
                 }
                 flows.append((coin, amount, order.recipient))
             }
+        case .signEVMTransaction(let chainId, _, _, _, _, let to, let value, let data, _):
+            if let why = try evm(chainId, [(to, value, data)]) { return why }
+        case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
+            if let why = try evm(chainId, calls.map { ($0.to, 0, $0.data) }) { return why }
+        case .signRelayMulticallPermit(let chainId, let token, let value, let validBefore, let relayer, let refundTo, let nftRecipient, let metadata, let calls):
+            let m = RelayMulticallPermit(chainId: chainId, token: token, from: try address("evm"), value: value, validBefore: validBefore, relayer: relayer,
+                                         refundTo: refundTo, nftRecipient: nftRecipient, metadata: metadata,
+                                         calls: calls.map { .init(target: $0.target, allowFailure: $0.allowFailure, value: $0.value, callData: $0.data) })
+            guard let order = m.depositID.flatMap(RelayOrders.order) else { return "a Relay deposit for an order the signer hasn't checked goes with it." }
+            flows.append((token.lowercased(), Decimal(value), order.recipient))
+        default: return "a card's limits go only with a transfer's, a swap's or a bridge's signature."
+        }
+        return cap.refusal(flows)
+    }
+
+    static func refused(_ pastCard: String) -> SignerReply {
+        var v = Verdict()
+        v.problems = ["Past the card: " + pastCard]
+        return refused(v)
+    }
 
     static func refused(_ verdict: Verdict) -> SignerReply {
         var r = SignerReply(ok: false, error: "The guard refused to sign.")

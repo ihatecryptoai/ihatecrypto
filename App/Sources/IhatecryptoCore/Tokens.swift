@@ -170,4 +170,11 @@ public enum TokenCommand: Equatable, Sendable {
               !q.contains(/\bas\s|\bcalled\b|\bnamed\b|\bкак\s|под\s+именем/) else { return nil }
         return .favorite(address: address, chain: chain)
     }
+
+    /// A favorite is a contract a later buy may name without the user writing it (the app's known contracts). So an
+    /// address a lookup found becomes one only by the user's press on its card, or from their own words, never by a
+    /// command that runs by itself: a trap token's listing got it there, and then a card to buy it (the 2026-11-13 review).
+    public static func addsFavorite(_ command: String) -> Bool {
+        if case .favorite? = parse(command) { true } else { false }
+    }
 }

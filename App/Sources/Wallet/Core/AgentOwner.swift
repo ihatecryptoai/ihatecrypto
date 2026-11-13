@@ -113,6 +113,22 @@ public enum AgentOwner {
         if stores && policy == nil { throw NearOwnerSigning.Problem("The rules this call stores weren't shown to the signer: not signed.") }
     }
 
+    /// What the owner confirms for a delegate action. Rules stored by it are named as what they are: the app's showing.
+    /// The signer checked those rules as written (`policy`), but the call stores them encrypted for the custody under a
+    /// hash of the custody's own, so it can't tell the two are the same (the 2026-11-13 review: the prompt read as if
+    /// it had). The hash the call carries is on the prompt, to compare with the agent wallet's page afterwards.
+    public static func prompt(_ d: Delegate, rules: String?) -> String {
+        let what = "agent wallet on NEAR Intents: \(d.doing)"
+        guard let rules else { return what }
+        var stored: String?
+        for case .functionCall("store_wallet_policy", let args, _, _) in d.actions {
+            let hash = ((try? JSONSerialization.jsonObject(with: args)) as? [String: Any])?["agent_policy_hash"] as? String ?? ""
+            stored = !hash.isEmpty && hash.allSatisfy(\.isHexDigit) ? String(hash.prefix(16)) : "not given"
+        }
+        return what + "\nrules as ihatecrypto showed them: \(rules)"
+            + (stored.map { "\nthe signer can't read the stored policy to check it says the same. Its hash: \($0)" } ?? "")
+    }
+
     /// yoctoNEAR as NEAR, to 5 decimals.
     static func near(_ yocto: UInt128) -> String {
         let micro = yocto / 10_000_000_000_000_000_000   // 1e19: hundred-thousandths of a NEAR

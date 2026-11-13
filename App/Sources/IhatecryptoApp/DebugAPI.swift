@@ -529,6 +529,8 @@ final class DebugAPI {
                          checks: ["Only your wallet signs and pays the fee.", "Creates a token account owned by your wallet."], problems: [],
                          jev: JevReview(label: "ok", confidence: 0.9, concern: false, text: "An ordinary action for this kind of site."))
         r.deltas = [("SOL", TxReview.nativeSOL, Decimal(string: "-0.006865555")!), ("USDC", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", -5)]
+        // The sample's SOL is its fee and the rent of the token account it opens: within that it reads as a fee, not a send.
+        r.feeAndRent = Decimal(string: "0.007")!
         r.programs = [("Associated Token", true), ("Compute Budget", true), ("Kamino Farms", false), ("Kamino Vault", false)]
         return r
     }

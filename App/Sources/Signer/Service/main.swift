@@ -43,6 +43,7 @@ final class SignerService: NSObject, SignerXPC {
     }
 }
 
+SeedStore.watchPresence()
 let delegate = ServiceDelegate()
 let listener = NSXPCListener.service()
 listener.delegate = delegate

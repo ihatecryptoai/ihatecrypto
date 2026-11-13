@@ -57,7 +57,8 @@ Build, test and run only the Dev copy. Never replace, quit or drive an installed
 Only the copies `build-app.sh` makes (and `swift run`) have it: a release is built without it (`DEBUG_API`, project.yml).
 The user turns it on in Settings › Debugging › Local debug API. It listens on 127.0.0.1, and the token is in
 `debug-token` in the copy's data folder. Endpoints are listed at the top of `App/Sources/IhatecryptoApp/DebugAPI.swift`
-(`/state`, `/send`, `/screenshot`, `/reset`, `/cancel`, `/pick`, `/restore`). It never signs.
+(`/state`, `/send`, `/screenshot`, `/reset`, `/cancel`, `/pick`, `/restore`). It signs only from a test wallet, never
+from one that asks in person.
 
 `python3 App/Tools/uitest.py [word…]` runs the scenarios in `App/Tools/uitest-scenarios.json` against the Dev copy.
 Each one gets a fresh test canvas and is cleaned up afterwards. Add a scenario for a change in what the chat or the

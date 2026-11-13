@@ -1,3 +1,6 @@
+import CoreGraphics
+import IOKit
+import os
 import Foundation
 import LocalAuthentication
 import Security
@@ -155,6 +158,7 @@ enum SeedStore {
             guard useSession else { return (fresh, false) }
             // A code session counts only where the code signs: with Touch ID the sensor signs, whatever was typed.
             let wanted = scope ?? []
+            endIfAway()
             let alive = session.flatMap { Date().timeIntervalSince($0.since) < TimeInterval(sessionLength) && (!$0.byCode || CodeStore.signs) ? $0 : nil }
             // A session no signature has used yet was opened by a prompt for a move (a new address, with the move on it)
             // or by the passcode typed for this very request. A site's text takes only the second: after a move's
@@ -178,8 +182,8 @@ enum SeedStore {
                 context.localizedReason = reason
             }
             if let sealed = sealed(account(id)) { return try open(sealed, context: context) }
-            guard id == SignerWallet.firstID, let seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
-            sealLegacy(seed, id: id)
+            guard id == SignerWallet.firstID, var seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
+            try sealLegacy(&seed, id: id)
             return seed
         } catch {
             // A cancelled or failed prompt must not be reused; a code session stays when only another wallet's prompt failed.
@@ -191,16 +195,59 @@ enum SeedStore {
     /// A wallet's seed opened with a context that is already confirmed in person (`.setCode` seals it again).
     static func openSeed(id: String, context: LAContext) throws -> Data {
         if let sealed = sealed(account(id)) { return try open(sealed, context: context) }
-        guard id == SignerWallet.firstID, let seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
-        sealLegacy(seed, id: id)
+        guard id == SignerWallet.firstID, var seed = read(legacyAccount, context: context) else { throw WalletError("No wallet imported.") }
+        try sealLegacy(&seed, id: id)
         return seed
     }
 
     /// A seed kept from before sealing (until 2026-09-28) is sealed to the Secure Enclave the first time it opens, as every
     /// wallet is; save writes the seal first and only then removes the unsealed item, so a failure leaves the old one.
-    private static func sealLegacy(_ seed: Data, id: String) {
-        try? save(seed, requirePresence: true, id: id)
+    /// A seal that failed used to be let go, and the seed went on opening unsealed, signature after signature: now
+    /// nothing is signed until it seals (the 2026-11-13 review).
+    /// `inout`: the caller's own bytes are wiped when it fails, not a copy of them.
+    private static func sealLegacy(_ seed: inout Data, id: String) throws {
+        do { try save(seed, requirePresence: true, id: id) } catch {
+            wipe(&seed)
+            throw WalletError("This wallet's key couldn't be sealed to the Secure Enclave (\(error.localizedDescription)), so nothing was signed. Try again.")
+        }
     }
+
+    /// The screen is locked, or the Mac slept since `since`: read by the signer itself. The app tells it too (endSession),
+    /// but a program that took the app over wouldn't, and the session would outlast the person's leaving (the
+    /// 2026-11-13 review).
+    static func away(since: Date) -> Bool {
+        if screenLocked == true { return true }
+        var woke = timeval(), size = MemoryLayout<timeval>.size
+        return sysctlbyname("kern.waketime", &woke, &size, nil, 0) == 0 && TimeInterval(woke.tv_sec) > since.timeIntervalSince1970
+    }
+
+    /// The window server's word for this login session, or, where the signer isn't in that session, the console's in the
+    /// I/O registry. nil: neither can be read here, and only sleep is seen (the app's own endSession still comes).
+    static var screenLocked: Bool? {
+        if let session = CGSessionCopyCurrentDictionary() as? [String: Any] { return session["CGSSessionScreenIsLocked"] as? Bool == true }
+        let root = IORegistryGetRootEntry(kIOMainPortDefault)
+        return IORegistryEntryCreateCFProperty(root, "IOConsoleLocked" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
+    }
+
+    /// Call with `lock` held: ends a session the person walked away from.
+    private static func endIfAway() {
+        guard let s = session, away(since: s.since) else { return }
+        s.context.invalidate()
+        session = nil
+    }
+
+    /// Looks every two seconds while the signer runs, so a session ends when the screen locks, not at its next use.
+    static func watchPresence() {
+        // Said once in the log, in the open: whether this signer can see the lock at all is a fact about where it runs.
+        Logger(subsystem: "app.ihatecrypto.signer", category: "presence")
+            .notice("the screen's lock \(screenLocked == nil ? "can't be read here, sleep alone ends a session early" : "is read by the signer", privacy: .public)")
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { lock.withLock { endIfAway() } }
+        timer.resume()
+        watch = timer
+    }
+    nonisolated(unsafe) private static var watch: DispatchSourceTimer?
 
     /// A wallet's seed opened with no prompt, or nil: only one sealed without Touch ID (a test or the automation wallet)
     /// opens so. What the settings say about a wallet is held to this wherever it would skip a prompt.
@@ -264,7 +311,7 @@ enum SeedStore {
     }
 
     /// The context the last `confirm` opened, while its session lasts.
-    static var confirmed: LAContext? { lock.withLock { session.flatMap { $0.byCode ? nil : $0.context } } }
+    static var confirmed: LAContext? { lock.withLock { endIfAway(); return session.flatMap { $0.byCode ? nil : $0.context } } }
 
     /// The right passcode opened `context`: signatures go on with it as after Touch ID, for the same session length.
     static func startCodeSession(_ context: LAContext) {

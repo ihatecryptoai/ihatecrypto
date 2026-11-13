@@ -15,7 +15,9 @@ copy=${IHATECRYPTO_COPY:-Dev}
 name="ihatecrypto $copy"
 id=app.ihatecrypto.mac.${copy:l}
 # IHATECRYPTO_PROFILE=1 keeps get-task-allow in Release, so xctrace can attach (never for a copy holding real money).
-EXTRA=${IHATECRYPTO_PROFILE:+CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES}
+# Only the app takes it (project.yml reads PROFILE_ENTITLEMENTS for that target): set on the command line as the build
+# setting itself, it reached the signer and the helper too, over the signer's own NO (the 2026-11-13 review).
+EXTRA=${IHATECRYPTO_PROFILE:+PROFILE_ENTITLEMENTS=YES}
 xcodegen generate --quiet
 log=$(mktemp -t ihatecrypto-build)
 if ! xcodebuild -project ihatecrypto.xcodeproj -scheme ihatecrypto -configuration "${1:-Release}" -derivedDataPath ../.build/xcode \

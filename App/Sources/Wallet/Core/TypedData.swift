@@ -55,12 +55,28 @@ public struct TypedData: Sendable {
             return "\(primaryType) gives \(other.value) («\(other.name)») rights over your account («\(flag.name)»): Morpho's and Compound's "
                 + "Authorization work like this. ihatecrypto doesn't sign it for a site."
         }
-        let notAmounts = ["nonce", "deadline", "expir", "valid", "time", "chainid", "salt", "version", "choice"]
-        let amount = fields.first { f in
-            f.type.hasPrefix("uint") && f.value != "0" && !notAmounts.contains { f.name.lowercased().contains($0) }
-        }
+        let amount = fields.first { f in f.type.hasPrefix("uint") && f.value != "0" && !Self.notAnAmount(f.name) }
         guard let other = others.first, let amount else { return nil }
         return "\(primaryType) names \(other.value) («\(other.name)») beside a number («\(amount.name)»): a signature like that can move money. ihatecrypto doesn't sign it for a site."
+    }
+
+    /// A number's name that says it is a nonce, a time or a choice, by its whole words: «validAfter», «sigDeadline»,
+    /// «chainId». Matched anywhere in the name, «validAmount» and «timelyValue» passed as times (the 2026-11-13 review);
+    /// a name with an amount's word in it is never one of these.
+    public static func notAnAmount(_ name: String) -> Bool {
+        var words: [String] = [], word = ""
+        for c in name {
+            if !c.isLetter || (c.isUppercase && word.last?.isLowercase == true) { if !word.isEmpty { words.append(word.lowercased()) }; word = "" }
+            if c.isLetter { word.append(c) }
+        }
+        if !word.isEmpty { words.append(word.lowercased()) }
+        if words.contains(where: ["amount", "amt", "value", "total", "qty", "quantity", "price", "sum", "units", "wad"].contains) { return false }
+        let times = ["after", "before", "until", "from", "to", "at", "since", "time"]
+        return words.enumerated().contains { i, w in
+            ["nonce", "deadline", "salt", "version", "choice", "time", "timestamp", "chainid"].contains(w) || w.hasPrefix("expir")
+                || (w == "chain" && words.dropFirst(i + 1).first == "id")
+                || (w == "valid" && words.dropFirst(i + 1).first.map(times.contains) == true)
+        }
     }
 
     /// The prompt shows every field; one with more than this many is refused rather than half shown.

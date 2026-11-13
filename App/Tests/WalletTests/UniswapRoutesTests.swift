@@ -35,7 +35,7 @@ private let baseUSDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
         #expect(EVMCall.knownSpenders(chainId: chain).contains(v2.router))
         for toETH in [false, true] {
             let mine = try UniswapV2.swapExactTokens(amountIn: 1, amountOutMin: 1, path: [baseUSDC, aero], to: me, deadline: 1, toETH: toETH)
-            #expect(EVMCall.decode(mine) == .swap(recipient: me))
+            #expect(EVMCall.decode(mine).swapRecipient == me)
             #expect(EVMCall.decode(mine).refusal(sender: me) == nil)
             let theirs = try UniswapV2.swapExactTokens(amountIn: 1, amountOutMin: 1, path: [baseUSDC, aero], to: baseWETH, deadline: 1, toETH: toETH)
             #expect(EVMCall.decode(theirs).refusal(sender: me) != nil)
@@ -44,7 +44,7 @@ private let baseUSDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
     // The plain forms (no fee-on-transfer) share the layout: the recipient is still read and checked.
     var plain = try UniswapV2.swapExactTokens(amountIn: 1, amountOutMin: 1, path: [baseUSDC, aero], to: baseWETH, deadline: 1)
     plain.replaceSubrange(0..<4, with: Data([0x38, 0xed, 0x17, 0x39]))
-    #expect(EVMCall.decode(plain) == .swap(recipient: baseWETH) && EVMCall.decode(plain).refusal(sender: me) != nil)
+    #expect(EVMCall.decode(plain).swapRecipient == baseWETH && EVMCall.decode(plain).refusal(sender: me) != nil)
     #expect(!EVMCall.knownSpenders(chainId: 8453).contains(baseWETH))
 }
 
@@ -132,7 +132,7 @@ private struct QuoteOnly: TradeSigner {
     #expect(EVMCall.decode(ethIn).payees(to: router, value: wei, chainId: 8453).isEmpty)
     #expect(EVMCall.decode(ethIn).payees(to: router, value: wei + 1, chainId: 8453) == [router])
     #expect(EVMCall.decode(ethIn).payees(to: aero, value: wei, chainId: 8453) == [aero])
-    #expect(EVMCall.decode(ethIn).summary(chainId: 8453, to: router, value: wei) == "swap 0.001 ETH on Uniswap v4 on Base, paying this wallet")
+    #expect(EVMCall.decode(ethIn).summary(chainId: 8453, to: router, value: wei) == "swap 0.001 ETH for at least 1 units of the token \(aero.prefix(6))…\(aero.suffix(4)) on Uniswap v4 on Base, paying this wallet")
     // Coins with a swap that pays in a token: the router would keep them.
     let tokenIn = try UniswapV4.execute(native, zeroForOne: false, amountIn: Decimal(wei), amountOutMinimum: 1, deadline: 1)
     #expect(EVMCall.decode(tokenIn).payees(to: router, value: wei, chainId: 8453) == [router])

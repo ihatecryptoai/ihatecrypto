@@ -49,6 +49,8 @@ nonisolated final class DecimalsNode: URLProtocol {
         case ("eth_call", "0x313ce567"): Self.decimals.map { #""0x\#(word($0))""# }
         case ("eth_call", _): #""0x""#
         case ("eth_estimateGas", _): #""0xea60""#
+        // The window's «Network fee up to» line: without it the review is a refusal (the fee signed is held to it).
+        case ("eth_gasPrice", _), ("eth_maxPriorityFeePerGas", _): #""0x3b9aca00""#
         case ("eth_simulateV1", _): Self.simulated
         default: nil
         }

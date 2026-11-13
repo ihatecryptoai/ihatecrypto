@@ -21,6 +21,15 @@ import Testing
     // The address in the user's own words, or a favorite's, goes anywhere.
     #expect(allowed("chart token \(a) on base then buy token \(a) on base for 5 USDC", "купи \(a) на 5 баксов"))
     #expect(ChatRouter.addressesAllowed("buy token \(a) on base for 5 USDC", userText: "", known: [a.lowercased()], found: [], displays: shows, markets: []))
+    // A favorite is known from then on, so a found address may not become one by a command that runs by itself (the
+    // 2026-11-13 review): the rule for those leaves it out, in English and Russian; the user's own address still goes.
+    let runs: (String) -> Bool = { ($0.hasPrefix("chart") || TokenCommand.addsFavorite($0)) && !TokenCommand.addsFavorite($0) }
+    for favorite in ["favorite token \(a) on base", "watch token \(a)", "добавь в избранное токен \(a) на бейсе"] {
+        #expect(TokenCommand.addsFavorite(favorite), "\(favorite)")
+        #expect(!ChatRouter.addressesAllowed(favorite, userText: "добавь его в избранное", known: [], found: [a], displays: runs, markets: []), "\(favorite)")
+        #expect(ChatRouter.addressesAllowed(favorite, userText: "добавь \(a) в избранное", known: [], found: [a], displays: runs, markets: []), "\(favorite)")
+    }
+    #expect(!TokenCommand.addsFavorite("chart token \(a) on base") && !TokenCommand.addsFavorite("buy token \(a) on base for 5 USDC"))
 }
 
 /// The chat asks «How much SOL?» again (naming `amountAsset`) when the reply is an amount, but not one for this question.

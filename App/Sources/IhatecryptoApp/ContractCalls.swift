@@ -310,8 +310,10 @@ extension Workspace {
 
     /// A token's symbol and decimals, read from it. No decimals when decimals() didn't answer, never 18: an approve counted
     /// in 18 decimals for a 6-decimal token is a trillion times the amount, and the cap would see a trillionth of what leaves.
+    /// The symbol is whatever its maker wrote (the 2026-11-13 review): cleaned and cut to 12 characters for the card.
     func tokenMeta(_ token: String, _ net: EVMNetwork) async -> (symbol: String, decimals: Int?) {
-        let symbol = (try? await net.rpc.read(token, Data([0x95, 0xd8, 0x9b, 0x41]))).flatMap(ABI.string) ?? "\(token.prefix(6))…"
+        let symbol = (try? await net.rpc.read(token, Data([0x95, 0xd8, 0x9b, 0x41]))).flatMap(ABI.string)
+            .flatMap { Holding.plain($0, max: 12).nilIfEmpty } ?? "\(token.prefix(6))…"
         return (symbol, ABI.decimals(try? await net.rpc.read(token, Data([0x31, 0x3c, 0xe5, 0x67]))))
     }
 }
