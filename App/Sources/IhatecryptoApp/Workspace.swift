@@ -2531,6 +2531,10 @@ final class Workspace {
             var p = policy
             p.take(t)
             if p != policy { policy = p }
+        } else if rulesAt == rulesSaves, status.limits != nil, policy.maxLeverage > Decimal(limits.leverageCap) {
+            // Rules saved before the signer kept them (a style's 10×): the trading key's cap is what holds, so the screen
+            // and the plans say it until the person saves theirs.
+            policy.maxLeverage = Decimal(limits.leverageCap)
         }
         confirmedAddresses = (try? await SignerClient().send(.addressBook))?.addresses ?? confirmedAddresses
         // NEAR's balance is read with Solana's.
