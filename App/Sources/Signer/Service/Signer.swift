@@ -792,7 +792,7 @@ enum Signer {
                 // in person afresh.
                 let deposit = type == "vaultTransfer" && { if case .map(let p) = action { p.contains { $0.0 == "isDeposit" && $0.1 == .bool(true) } } else { false } }()
                 // Leverage past the cap names itself, and the renewal too when this prompt also renews the key's days.
-                let asked = leverage.map { "sign a Hyperliquid order: \($0)" + (stale ? "; the trading key's \(agentDaysText) are over, and this renews them" : "") } ?? what
+                let asked = leverage.map { "sign a Hyperliquid order: \($0)" + (stale ? ". The trading key's \(agentDaysText) are over, and this renews them" : "") } ?? what
                 if stale || over != nil || deposit || leverage != nil { try confirmAfresh(prompt(asked, verdict)) }
                 r.signature = try withKey("evm", reason: prompt(asked, verdict)) {
                     try HLSigner.signL1(action, privateKey: $0, nonce: nonce, mainnet: mainnet)
