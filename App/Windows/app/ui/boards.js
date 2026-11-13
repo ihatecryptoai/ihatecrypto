@@ -210,6 +210,9 @@ function moveBoard(b, newest, onChart) {
     : planStatus(b) || (siteHere ? [t("waiting for your answer", "ждёт твоего ответа"), "route-accent"]
     // An address to save signs nothing: the Mac's «waiting for your confirmation».
     : waitingHere && /^(SAVE|СОХРАНИТЬ) ·/.test(steps[0]?.label || "") ? [t("waiting for your confirmation", "ждёт твоего подтверждения"), "profit"]
+    // «Ask me» over a risk limit: the card asks to accept the loss first (the engine's over_limit_tick).
+    : waitingHere && (s.card?.ticks || []).some((k) => k.id === "overLimit") ? [t("over the limit · asks first", "выше лимита · спросит"), "route-amber"]
+    : waitingHere && s.card?.overLimit ? [t("over the limit · check the warning", "выше лимита · смотри предупреждение"), "route-amber"]
     : waitingHere ? [t("ready to sign", "готово к подписи"), "profit"] : runningHere ? [t("in progress", "выполняется"), "route-accent"]
     : { done: [t("executed", "выполнено"), "profit"], failed: [t("failed", "не вышло"), "loss"], unknown: [t("sent, status unknown", "отправлено, статус неизвестен"), "route-amber"],
       nothing: [t("nothing to do", "нечего делать"), "secondary"], cancelled: [t("not signed", "не подписано"), "secondary"] }[b.state] || [b.state || "", "secondary"]);

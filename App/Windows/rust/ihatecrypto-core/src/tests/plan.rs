@@ -47,16 +47,16 @@ fn missing_risk_and_stop_ask_for_input() {
 
 #[test]
 fn checks_that_stop_a_plan() {
-    // ETH allows 25×; the signer takes at most 20× (HLGuard), so the plan says 20×.
-    assert!(Plan::evaluate(&intent("10", "3", Some("50")), Some(&eth())).problem.unwrap().contains("20×"));
+    // ETH allows 25×: a 50× plan says the market's top.
+    assert!(Plan::evaluate(&intent("10", "3", Some("50")), Some(&eth())).problem.unwrap().contains("25×"));
     // 20× on a 4% stop: liquidation (~3% away) comes first.
     assert!(Plan::evaluate(&intent("10", "4", Some("20")), Some(&eth())).problem.unwrap().contains("Liquidation"));
     assert!(Plan::evaluate(&intent("0.2", "3", None), Some(&eth())).problem.unwrap().contains("$10"));
-    // BTC allows 40×, the signer refuses over 20× (HLGuard): a 25× plan says so before any money moves to Hyperliquid.
-    let btc = Market::new("BTC", d("84000"), 5, 40);
-    let mut i = TradeIntent { asset: "BTC".into(), ..intent("1", "1", Some("25")) };
-    assert_eq!(Plan::evaluate(&i, Some(&btc)).problem.as_deref(), Some("Leverage for BTC: 1× to 20×."));
-    i.leverage = Some(d("20"));
+    // A market past 50×, the signer refuses over 50× (HLGuard): a 60× plan says so before any money moves to Hyperliquid.
+    let btc = Market::new("BTC", d("84000"), 5, 60);
+    let mut i = TradeIntent { asset: "BTC".into(), ..intent("1", "0.5", Some("60")) };
+    assert_eq!(Plan::evaluate(&i, Some(&btc)).problem.as_deref(), Some("Leverage for BTC: 1× to 50×."));
+    i.leverage = Some(d("40"));
     assert!(!Plan::evaluate(&i, Some(&btc)).problem.is_some_and(|p| p.starts_with("Leverage")));
     i.leverage = Some(d("2.5"));
     assert_eq!(Plan::evaluate(&i, Some(&btc)).problem.as_deref(), Some("Leverage on Hyperliquid is a whole number: 2× or 3×."));

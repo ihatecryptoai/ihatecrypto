@@ -73,7 +73,7 @@ fn card(e: &Engine, c: &WalletCommand) -> String {
     let id = e.pin(Board { steps: Some(steps), state: Some("waiting".into()), ..Board::new("move", &c.summary()) });
     let mut st = e.st_mut();
     st.pending = Some(pending);
-    st.card = Some(Card { id: id.clone(), title: c.summary(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+    st.card = Some(Card { id: id.clone(), title: c.summary(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
     id
 }
 

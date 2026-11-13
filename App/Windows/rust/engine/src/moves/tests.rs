@@ -294,7 +294,7 @@ async fn cancel_takes_the_steps_held_behind_its_card() {
         {
             let mut st = e.st_mut();
             st.pending = Some(Pending::Address(address("Mom", "base", MOM, "")));
-            st.card = Some(Card { id: id.clone(), title: "Save Mom".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+            st.card = Some(Card { id: id.clone(), title: "Save Mom".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
             let canvas = st.canvas_id.clone();
             st.chain_state.after_call = Some(AfterCall { board: id.clone(), canvas, rest: vec!["chart SOL".into()], since: Utc::now() });
         }

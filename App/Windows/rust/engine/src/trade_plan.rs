@@ -24,7 +24,7 @@ use ihatecrypto_core::network::{Amount, Bridge, Hyperliquid, Origin};
 use ihatecrypto_core::normalize::{ChatRouter, Route};
 use ihatecrypto_core::plan::{Block, BlockStatus, BridgeQuote, Evaluation, Live, Market, MarketGroup, Plan, RiskCalc, Sizing};
 use ihatecrypto_core::position_command::PositionCommand;
-use ihatecrypto_core::risk::{Level, RiskRules};
+use ihatecrypto_core::risk::{Level, OverLimit, RiskPolicy, RiskRules};
 use ihatecrypto_core::take_style::TakeStyle;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -309,7 +309,7 @@ impl Engine {
                          self.say(&format!("{short} on {from}."), &format!("{} на {from}.", short.replace("Short by", "Не хватает")))));
         }
         let policy = self.policy();
-        if let Some(s) = &e.sizing && let Some(equity) = equity && equity > Decimal::ZERO
+        if policy.limit_mode() == OverLimit::Block && let Some(s) = &e.sizing && let Some(equity) = equity && equity > Decimal::ZERO
             && (Num::of(s.loss_at_stop_usd) / equity * 100).0.is_some_and(|x| x > policy.max_risk_pct) {
             let (max, loss, limit) = (Fmt::pct(policy.max_risk_pct), Fmt::usd(s.loss_at_stop_usd), usd(Num::of(equity) * policy.max_risk_pct / 100));
             return Some((self.say(&format!("risk over the {max} limit"), &format!("риск выше лимита {max}")),
@@ -578,8 +578,8 @@ impl Engine {
                 let policy = self.policy();
                 let share = self.rule_equity().filter(|eq| *eq > Decimal::ZERO).map(|eq| num((Num::of(s.loss_at_stop_usd) / eq * 100).rounded(1, Rounding::Plain)));
                 lines.push(row(&say("risk", "риск"), &(Fmt::usd(s.loss_at_stop_usd) + &share.map(|p| format!(" · {p}%")).unwrap_or_default())));
-                let max = Fmt::num(policy.max_risk_pct, 2);
-                lines.push(row(&say("limit", "лимит"), &say(&format!("{max}% a trade"), &format!("{max}% на сделку"))));
+                let (max, max_ru) = (RiskPolicy::limit(policy.max_risk_pct, false), RiskPolicy::limit(policy.max_risk_pct, true));
+                lines.push(row(&say("limit", "лимит"), &say(&format!("{max} a trade"), &format!("{max_ru} на сделку"))));
                 if let Some(profit) = s.profit_at_take_usd && s.loss_at_stop_usd > Decimal::ZERO {
                     lines.push(row(&say("reward/risk", "прибыль/риск"), &format!("1:{}", num((Num::of(profit) / s.loss_at_stop_usd).rounded(1, Rounding::Plain)))));
                 }
@@ -790,11 +790,21 @@ impl Engine {
                     self.draw_plan(&title, steps, view, &r, &e, market);
                 } else {
                     let replaced = self.st().plan_board.clone();
-                    self.show(Pending::Trade(Box::new(p.clone())), &title, [p.steps.clone(), p.changes.clone()].concat(), warnings.clone(), vec![]);
-                    // The second check's doubt, or a money mismatch code found: ticked before Confirm counts (the Mac's Execute sheet).
-                    if let Some(review) = &review {
-                        let tick = Self::trade_tick(review, |en, ru| self.say(en, ru));
-                        if let Some(card) = self.st_mut().card.as_mut() { card.ticks = vec![tick] }
+                    // A broken limit in «Just warn» is on the card too, not only in the chat («Ask me» has its tick).
+                    let mut card_warnings = warnings.clone();
+                    if !p.must_accept { card_warnings.extend(if self.st().russian() { p.over_limit_ru.clone() } else { p.over_limit.clone() }) }
+                    self.show(Pending::Trade(Box::new(p.clone())), &title, [p.steps.clone(), p.changes.clone()].concat(), card_warnings, vec![]);
+                    // Over a risk limit with «Ask me», the second check's doubt, or a money mismatch code found: ticked before
+                    // Confirm counts (the Mac's Execute sheet).
+                    let mut ticks = vec![];
+                    if p.must_accept {
+                        let detail = if self.st().russian() { &p.over_limit_ru } else { &p.over_limit };
+                        ticks.push(Self::over_limit_tick(&detail.join(" "), p.sizing.loss_at_stop_usd, |en, ru| self.say(en, ru)));
+                    }
+                    if let Some(review) = &review { ticks.push(Self::trade_tick(review, |en, ru| self.say(en, ru))) }
+                    if let Some(card) = self.st_mut().card.as_mut() {
+                        card.over_limit = !p.over_limit.is_empty();
+                        if !ticks.is_empty() { card.ticks = ticks }
                     }
                     let card = self.st().card.as_ref().map(|c| c.id.clone());
                     self.update_board(card.as_deref(), |b| { b.steps = Some(steps); b.plan = Some(view) });
@@ -942,18 +952,27 @@ impl Engine {
         }
         let (equity, policy) = (self.rule_equity(), self.policy());
         let resolved = Plan::resolve(next, market.as_ref(), equity, &policy, None).0;
-        let (moves, too_wide) = Self::order_edit(before, next, &resolved, p.size, p.entry, equity, policy.max_risk_pct);
+        let (mut moves, too_wide) = Self::order_edit(before, next, &resolved, p.size, p.entry, equity, policy.max_risk_pct);
+        let mut over = None;
         if let Some(loss) = too_wide && let Some(equity) = equity && let Some(stop_pct) = resolved.stop_pct {
             let (share, stop, lost, max) = (pct((Num::of(loss) / equity * 100).rounded(1, Rounding::Plain)), Fmt::pct(stop_pct), Fmt::usd(loss), Fmt::pct(policy.max_risk_pct));
-            self.reply(&self.say(&format!("A {stop} stop means −{lost}, {share} of capital. The rule: at most {max}. Stop not moved."),
-                                 &format!("Стоп {stop} — это −{lost}, {share} капитала. Правило: не больше {max}. Стоп не сдвинут.")), note.map(String::from));
-            return true;
+            if policy.limit_mode() == OverLimit::Block {
+                self.reply(&self.say(&format!("A {stop} stop means −{lost}, {share} of capital. The rule: at most {max}. Stop not moved."),
+                                     &format!("Стоп {stop} — это −{lost}, {share} капитала. Правило: не больше {max}. Стоп не сдвинут.")), note.map(String::from));
+                return true;
+            }
+            // «Ask me» and «Just warn»: the card says the loss, and Confirm moves it.
+            moves = Self::order_edit(before, next, &resolved, p.size, p.entry, None, RiskPolicy::NO_LIMIT).0;
+            over = Some(self.say(&format!(" Over your limit: a {stop} stop means −{lost}, {share} of capital, the limit is {max}."),
+                                 &format!(" Выше твоего лимита: стоп {stop} — это −{lost}, {share} капитала, лимит {max}.")));
         }
         if moves.is_empty() { return false }
         let what = moves.iter().map(|m| self.describe_order(m)).collect::<Vec<_>>().join(", ");
         let name = IntentParser::pretty(&p.coin);
-        self.show(Pending::Orders { commands: moves, coin: p.coin.clone(), intent: next.clone() }, &format!("{name}: {what}"), vec![], vec![], vec![]);
-        self.reply(&self.say(&format!("{name}: {what}. Press Confirm to move the orders."), &format!("{name}: {what}. Нажми «Подтвердить», чтобы переставить ордера.")),
+        let warnings = over.iter().map(|o| o.trim().to_string()).collect();
+        self.show(Pending::Orders { commands: moves, coin: p.coin.clone(), intent: next.clone() }, &format!("{name}: {what}"), vec![], warnings, vec![]);
+        let over = over.unwrap_or_default();
+        self.reply(&self.say(&format!("{name}: {what}.{over} Press Confirm to move the orders."), &format!("{name}: {what}.{over} Нажми «Подтвердить», чтобы переставить ордера.")),
                    note.map(String::from));
         true
     }

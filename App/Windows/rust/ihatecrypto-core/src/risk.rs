@@ -34,13 +34,56 @@ pub struct RiskPolicy {
     /// All open positions together may lose at most this share of capital at their stops ("portfolio heat").
     #[serde(with = "number")]
     pub max_open_risk_pct: Decimal,
+    /// What a plan over the risk limits gets. None in a policy saved before it (= block).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_limit: Option<OverLimit>,
+}
+
+/// What a plan over the risk limits gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverLimit {
+    /// Not executed, as before.
+    #[default]
+    Block,
+    /// Executed only after the person ticks that they accept the loss at the stop, in the sheet.
+    Ask,
+    /// A warning line only.
+    Warn,
+}
+
+impl RiskPolicy {
+    pub fn limit_mode(&self) -> OverLimit { self.over_limit.unwrap_or_default() }
+
+    /// «No limit»: a share of capital no stop reaches.
+    // ponytail: a sentinel instead of an Option limit, so every `pct > max_risk_pct` stays as it is.
+    pub const NO_LIMIT: Decimal = Decimal::from_parts(1000, 0, 0, false, 0);
+
+    /// The steps of the per-trade limit in Settings: half a percent up to 10, then 15, 25, 50 and no limit.
+    pub fn risk_steps() -> Vec<Decimal> {
+        (1..=20).map(|n| Decimal::from(n) / Decimal::TWO).chain([15, 25, 50].map(Decimal::from)).chain([Self::NO_LIMIT]).collect()
+    }
+    /// The steps of the leverage limit: up to 10 one by one, then to 50×, the most any Hyperliquid market gives.
+    pub fn leverage_steps() -> Vec<Decimal> { (1..=10).chain([15, 20, 25, 30, 40, 50]).map(Decimal::from).collect() }
+    /// The steps of the limit for all open positions together.
+    pub fn open_risk_steps() -> Vec<Decimal> { (1..=30).chain([50, 100]).map(Decimal::from).chain([Self::NO_LIMIT]).collect() }
+
+    /// The next step from `value` in `steps`, up or down; None past the ends.
+    pub fn step(value: Decimal, steps: &[Decimal], up: bool) -> Option<Decimal> {
+        if up { steps.iter().find(|s| **s > value).copied() } else { steps.iter().rev().find(|s| **s < value).copied() }
+    }
+
+    /// «5%», or «no limit» (`ru`: «без лимита»).
+    pub fn limit(pct: Decimal, ru: bool) -> String {
+        if pct >= Self::NO_LIMIT { (if ru { "без лимита" } else { "no limit" }).into() } else { Fmt::pct(pct) }
+    }
 }
 
 impl Default for RiskPolicy {
     fn default() -> Self {
         Self {
             max_risk_pct: Decimal::TWO, default_risk_pct: Decimal::ONE, min_reward_risk: dec("1.5"), default_reward_risk: Decimal::TWO,
-            max_leverage: Decimal::from(5), atr_stop_multiple: dec("1.5"), max_open_risk_pct: Decimal::from(6),
+            max_leverage: Decimal::from(5), atr_stop_multiple: dec("1.5"), max_open_risk_pct: Decimal::from(6), over_limit: None,
         }
     }
 }
@@ -58,10 +101,26 @@ pub struct Advice {
     pub text: String,
     /// The same in Russian, for a chat in Russian (the Windows engine's plan checklist).
     pub ru: String,
+    /// A risk limit is broken (per trade or all positions together), whatever `level` the policy gives it.
+    pub over_limit: bool,
 }
 
 impl Advice {
-    pub fn new(level: Level, text: impl Into<String>, ru: impl Into<String>) -> Self { Self { level, text: text.into(), ru: ru.into() } }
+    pub fn new(level: Level, text: impl Into<String>, ru: impl Into<String>) -> Self { Self { level, text: text.into(), ru: ru.into(), over_limit: false } }
+
+    /// A broken limit: stops the plan, asks before signing, or only warns, as the person set it. `then` follows the rule
+    /// only when it blocks.
+    fn over(p: &RiskPolicy, text: (String, String), limit: (String, String), then: (&str, &str)) -> Self {
+        let ((t, tr), (l, lr)) = (text, limit);
+        let mut a = match p.limit_mode() {
+            OverLimit::Block => Self::new(Level::Block, format!("{t} Rule: {l}{}", then.0), format!("{tr} Правило: {lr}{}", then.1)),
+            OverLimit::Ask => Self::new(Level::Warn, format!("{t} Over your limit: {l} The card asks you to accept the loss before Confirm."),
+                                        format!("{tr} Выше твоего лимита: {lr} Перед «Подтвердить» карточка попросит согласиться с убытком.")),
+            OverLimit::Warn => Self::new(Level::Warn, format!("{t} Over your limit: {l}"), format!("{tr} Выше твоего лимита: {lr}")),
+        };
+        a.over_limit = true;
+        a
+    }
 }
 
 pub struct RiskRules;
@@ -87,13 +146,14 @@ impl RiskRules {
                 let total = (Num::of(at_stops) / equity * 100).0?;
                 if open > zero && total > p.max_open_risk_pct {
                     let (stops, share, limit) = (Fmt::usd(at_stops), Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct));
-                    out.push(Advice::new(Level::Block,
-                        format!("With open positions, −{stops} at the stops: {share} of capital. Rule: all positions together at most {limit}."),
-                        format!("С открытыми позициями на стопах −{stops}: {share} капитала. Правило: все позиции вместе не больше {limit}.")));
+                    out.push(Advice::over(p, (format!("With open positions, −{stops} at the stops: {share} of capital."),
+                                                format!("С открытыми позициями на стопах −{stops}: {share} капитала.")),
+                                             (format!("all positions together at most {limit}."), format!("все позиции вместе не больше {limit}.")), ("", "")));
                 } else if open > zero {
-                    let (share, limit) = (Fmt::pct(rounded(total, 1, Rounding::Plain)), Fmt::pct(p.max_open_risk_pct));
+                    let share = Fmt::pct(rounded(total, 1, Rounding::Plain));
+                    let (limit, limit_ru) = (RiskPolicy::limit(p.max_open_risk_pct, false), RiskPolicy::limit(p.max_open_risk_pct, true));
                     out.push(Advice::new(Level::Ok, format!("All positions together: {share} of capital at the stops, limit {limit}."),
-                                         format!("Все позиции вместе: на стопах {share} капитала, лимит {limit}.")));
+                                         format!("Все позиции вместе: на стопах {share} капитала, лимит {limit_ru}.")));
                 }
             } else {
                 out.push(Advice::new(Level::Warn, "An open position has no stop: total risk is unlimited.", "У открытой позиции нет стопа: общий риск ничем не ограничен."));
@@ -107,9 +167,12 @@ impl RiskRules {
                 let allowed = (Num::of(equity) * p.max_risk_pct / 100).rounded(2, Rounding::Down).0?;
                 let (lost, pct, capital, max, allowed) = (Fmt::usd(s.loss_at_stop_usd), Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::usd(equity),
                                                           Fmt::pct(p.max_risk_pct), Fmt::usd(allowed));
-                out.push(Advice::new(Level::Block,
-                    format!("At the stop −{lost}: {pct} of {capital} capital. Rule: at most {max} per trade, i.e. up to {allowed}. Lower the risk or top up. The limit is in Settings."),
-                    format!("На стопе −{lost}: {pct} от капитала {capital}. Правило: не больше {max} на сделку, то есть до {allowed}. Уменьши риск или пополни баланс. Лимит — в настройках.")));
+                out.push(Advice::over(p, (format!("At the stop −{lost}: {pct} of {capital} capital."), format!("На стопе −{lost}: {pct} от капитала {capital}.")),
+                    (format!("at most {max} per trade, i.e. up to {allowed}."), format!("не больше {max} на сделку, то есть до {allowed}.")),
+                    (" Lower the risk or top up. The limit is in Settings.", " Уменьши риск или пополни баланс. Лимит — в настройках.")));
+            } else if p.max_risk_pct >= RiskPolicy::NO_LIMIT {
+                let pct = Fmt::pct(rounded(share, 1, Rounding::Plain));
+                out.push(Advice::new(Level::Ok, format!("Risk {pct} of capital, no limit set."), format!("Риск {pct} капитала, лимит не задан.")));
             } else {
                 let (pct, max) = (Fmt::pct(rounded(share, 1, Rounding::Plain)), Fmt::pct(p.max_risk_pct));
                 out.push(Advice::new(Level::Ok, format!("Risk {pct} of capital, within {max}."), format!("Риск {pct} капитала, в пределах {max}.")));

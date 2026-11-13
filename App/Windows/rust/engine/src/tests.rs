@@ -377,7 +377,7 @@ fn sample_snapshot() -> Snapshot {
             summary: Some("s".into()), guardian: Some("g".into()), ruler: Some(PositionRuler { points: vec![], now: Some(1.0), now_text: None, guard_line: None }),
             market: Some("ETH".into()) }],
         chat: canvases[0].messages.clone(), sent: vec!["buy sol for 5".into()], thinking: false, draft: Some("d".into()),
-        card: Some(Card { id: "B1".into(), title: "Buy".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] }),
+        card: Some(Card { id: "B1".into(), title: "Buy".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false }),
         site: Some(SiteAskView { id: "S".into(), origin: "https://a".into(), host: "a".into(), check: "known".into(), real: None, title: "Sign".into(),
                                  lines: vec![], warnings: vec![], ticks: vec![], approve: "Sign".into(), canvas: "C1".into(), lead: None, balances: vec![],
                                  checks: vec![], note: None }),

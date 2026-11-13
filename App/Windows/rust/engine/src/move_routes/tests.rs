@@ -105,7 +105,7 @@ fn waiting(e: &Engine, pending: Pending, title: &str, lines: &[&str]) -> String 
     let mut st = e.st_mut();
     st.pending = Some(pending);
     st.card = Some(Card { id: id.clone(), title: title.into(), lines: lines.iter().map(|l| l.to_string()).collect(), warnings: vec![], confirm: "Confirm".into(),
-                          ticks: vec![] });
+                          ticks: vec![], over_limit: false });
     id
 }
 

@@ -57,7 +57,7 @@ fn last(e: &Engine) -> Message { e.st().messages().last().cloned().expect("a mes
 fn wait_with(e: &Engine, command: WalletCommand) {
     let mut st = e.st_mut();
     st.pending = Some(Pending::Wallet(command));
-    st.card = Some(Card { id: "C1".into(), title: "Receive".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+    st.card = Some(Card { id: "C1".into(), title: "Receive".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
 }
 
 #[tokio::test]

@@ -160,8 +160,13 @@ fn hyperliquid_guard_allows_trading_and_only_approved_withdrawals() {
     assert!(hl::check(&hl_action("approveAgent", vec![("agentAddress", MsgPack::str("0xgood"))]), owner, &set(&[]), Some("0xGOOD")).ok());
     // The trading key sets leverage without a prompt: at most the risk rules' top.
     assert!(check(hl_action("updateLeverage", vec![("asset", MsgPack::Uint(0)), ("isCross", MsgPack::Bool(false)), ("leverage", MsgPack::Uint(5))]), &[]));
-    assert!(check(hl_action("updateLeverage", vec![("leverage", MsgPack::Uint(20))]), &[]));
-    assert!(!check(hl_action("updateLeverage", vec![("leverage", MsgPack::Uint(21))]), &[]));
+    assert!(check(hl_action("updateLeverage", vec![("leverage", MsgPack::Uint(50))]), &[]));
+    assert!(!check(hl_action("updateLeverage", vec![("leverage", MsgPack::Uint(51))]), &[]));
+    // Past the person's own limit the trading key doesn't sign it: the signer names it for the main key's prompt.
+    let lev = |n| MsgPack::map(vec![("type", MsgPack::str("updateLeverage")), ("asset", MsgPack::Uint(0)), ("isCross", MsgPack::Bool(true)), ("leverage", MsgPack::Uint(n))]);
+    assert_eq!(hl::leverage_over(&lev(30), 10).as_deref(), Some("leverage 30× is above your 10× limit"));
+    assert_eq!(hl::leverage_over(&lev(10), 10), None);
+    assert_eq!(hl::leverage_over(&MsgPack::map(vec![("type", MsgPack::str("order"))]), 1), None);
     assert!(!check(hl_action("updateLeverage", vec![("leverage", MsgPack::Uint(0))]), &[]));
     assert!(!check(hl_action("updateLeverage", vec![]), &[]));
     assert_eq!(hl::check(&MsgPack::str("order"), owner, &set(&[]), None).problems, ["Unrecognized action."]);

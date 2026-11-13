@@ -253,3 +253,43 @@ fn every_rules_line_has_its_russian() {
                                 Some(d("1000")), &policy(), Some(Decimal::ZERO));
     assert!(fine.iter().any(|a| a.ru.starts_with("Прибыль к риску 1:") && a.ru.contains("тейк слишком близко. Обычный минимум — 1:")), "{fine:?}");
 }
+
+#[test]
+fn over_a_limit_blocks_asks_or_warns_as_the_person_set_it() {
+    let i = TradeIntent { risk_usd: Some(d("10")), stop_pct: Some(d("3")), take_pct: Some(d("6")), leverage: Some(d("2")), ..TradeIntent::default() };
+    let s = Plan::evaluate(&i, Some(&eth())).sizing.unwrap();
+    let with = |mode| RiskRules::check(&i, &s, &eth(), Some(d("200")), &RiskPolicy { over_limit: mode, ..policy() }, Some(Decimal::ZERO));
+    // Nothing set is «Block»: $10 of $200 is 5% > 2%.
+    let blocked = with(None);
+    assert!(blocked.iter().any(|a| a.level == Level::Block && a.over_limit && a.text.contains("Rule: at most 2% per trade") && a.ru.contains("Правило")));
+    let asked = with(Some(OverLimit::Ask));
+    assert!(!blocks(&asked));
+    let over = asked.iter().find(|a| a.over_limit).unwrap();
+    assert!(over.level == Level::Warn && over.text.contains("Over your limit: at most 2% per trade") && over.text.contains("accept the loss"), "{}", over.text);
+    let warned = with(Some(OverLimit::Warn));
+    assert!(!blocks(&warned) && warned.iter().any(|a| a.over_limit && !a.text.contains("accept")));
+    // All positions together too.
+    let open = RiskRules::check(&i, &s, &eth(), Some(d("1000")), &RiskPolicy { over_limit: Some(OverLimit::Ask), ..policy() }, Some(d("60")));
+    assert!(!blocks(&open) && open.iter().any(|a| a.over_limit && a.text.contains("all positions together")));
+    // No limit set: nothing is over it.
+    let free = RiskRules::check(&i, &s, &eth(), Some(d("200")), &RiskPolicy { max_risk_pct: RiskPolicy::NO_LIMIT, ..policy() }, Some(Decimal::ZERO));
+    assert!(!free.iter().any(|a| a.over_limit) && free.iter().any(|a| a.text.contains("no limit set")));
+}
+
+#[test]
+fn the_limits_steps_reach_no_limit_and_fifty_x() {
+    let risk = RiskPolicy::risk_steps();
+    assert_eq!((risk[0], *risk.last().unwrap()), (d("0.5"), RiskPolicy::NO_LIMIT));
+    assert_eq!(RiskPolicy::step(d("10"), &risk, true), Some(d("15")));
+    assert_eq!(RiskPolicy::step(d("50"), &risk, true), Some(RiskPolicy::NO_LIMIT));
+    assert_eq!(RiskPolicy::step(RiskPolicy::NO_LIMIT, &risk, true), None);
+    assert_eq!(RiskPolicy::step(d("0.5"), &risk, false), None);
+    assert_eq!(*RiskPolicy::leverage_steps().last().unwrap(), d("50"));
+    assert_eq!(*RiskPolicy::open_risk_steps().last().unwrap(), RiskPolicy::NO_LIMIT);
+    assert_eq!((RiskPolicy::limit(RiskPolicy::NO_LIMIT, false), RiskPolicy::limit(d("2"), false)), ("no limit".to_string(), "2%".to_string()));
+    // A policy saved before «Over a limit» reads as «Block».
+    let old: RiskPolicy = serde_json::from_str(r#"{"maxRiskPct":2,"defaultRiskPct":1,"minRewardRisk":1.5,"defaultRewardRisk":2,"maxLeverage":5,"atrStopMultiple":1.5,"maxOpenRiskPct":6}"#).unwrap();
+    assert_eq!((old.over_limit, old.limit_mode()), (None, OverLimit::Block));
+    let ask: RiskPolicy = serde_json::from_str(&serde_json::to_string(&RiskPolicy { over_limit: Some(OverLimit::Ask), ..policy() }).unwrap()).unwrap();
+    assert_eq!(ask.limit_mode(), OverLimit::Ask);
+}

@@ -176,6 +176,9 @@ pub struct Card {
     pub confirm: String,
     /// What Confirm needs ticked first (a trade the second check doubts, the Mac's acknowledgement; consent.rs).
     pub ticks: Vec<SiteTick>,
+    /// A trade past a risk limit the person lets through («Ask me» or «Just warn»): the header says so.
+    #[serde(rename = "overLimit", skip_serializing_if = "std::ops::Not::not")]
+    pub over_limit: bool,
 }
 
 // MARK: The state's labelled pieces (Swift's labelled tuples)

@@ -272,7 +272,7 @@ async fn confirm_refuses_a_twap_once_the_key_is_off() {
         {
             let mut st = e.st_mut();
             st.pending = Some(Pending::Trade(Box::new(p)));
-            st.card = Some(crate::engine::Card { id: "card".into(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+            st.card = Some(crate::engine::Card { id: "card".into(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
         }
         e.confirm(None, &[]).await;
         let st = e.st();

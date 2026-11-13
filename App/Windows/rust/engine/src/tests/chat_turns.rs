@@ -43,7 +43,7 @@ fn option(title: &str, command: &str) -> RouterOption { RouterOption::new(title,
 fn waiting(e: &Engine, pending: Pending) {
     let mut st = e.st_mut();
     st.pending = Some(pending);
-    st.card = Some(Card { id: "B1".into(), title: "2 steps, one Confirm".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+    st.card = Some(Card { id: "B1".into(), title: "2 steps, one Confirm".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
 }
 
 #[tokio::test]
@@ -264,7 +264,7 @@ async fn the_models_next_step_shows_pale_on_the_waiting_card() {
         let mut goal = crate::agent::AgentGoal::new("buy SOL and set an alert", "buy SOL for 5 USDC", 0, 0);
         goal.next = Some("an alert 5% under the price you get".into());
         e.st_mut().agent_goal = Some(goal);
-        e.st_mut().card = Some(Card { id: id.clone(), title: "Buy SOL".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+        e.st_mut().card = Some(Card { id: id.clone(), title: "Buy SOL".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
         let shown = e.boards_shown();
         let step: &Step = shown.iter().find(|b| b.id == id).and_then(|b| b.steps.as_ref()?.last()).unwrap();
         assert_eq!((step.label.as_str(), step.title.as_str(), step.status.as_deref()), ("NEXT · AFTER THIS", "an alert 5% under the price you get", Some("then")));

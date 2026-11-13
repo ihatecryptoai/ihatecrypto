@@ -13,7 +13,7 @@ use serde_json::Value;
 use signer::trusted::{self, Pref, State};
 use signer::vault::{self, agents, recipients, seeds};
 use signer::core;
-use signer_api::{SignerAddress, SignerLimits, SignerReply, SignerRequest, SignerWallet};
+use signer_api::{OverLimit, SignerAddress, SignerLimits, SignerReply, SignerRequest, SignerWallet, TradingRules};
 use wallet::Result;
 
 /// Hardhat's public test phrase: not the «abandon … about» one, which the signer lets through without prompts.
@@ -442,6 +442,39 @@ fn the_trading_key_signs_only_within_the_limits_and_the_rest_asks_in_person() {
     assert_eq!(hl(order(1, true, "100", "6"), 5).unwrap_err().0, CANCELLED);
     // Stops and closes always go.
     assert!(hl(action::cancel(&[(1, 7)]), 6).unwrap().signature.is_some());
+}
+
+#[test]
+fn the_trading_rules_change_only_with_windows_hello_and_cap_the_trading_keys_leverage() {
+    let _turn = fresh();
+    import();
+    send(SignerRequest::EnableAgent {}).unwrap();
+    send(SignerRequest::SetAgentActive { active: true }).unwrap();
+    let lev = |n| MsgPack::map(vec![("type", MsgPack::str("updateLeverage")), ("asset", MsgPack::Uint(0)), ("isCross", MsgPack::Bool(true)), ("leverage", MsgPack::Uint(n))]);
+    vault::end_session();
+    hello(false);
+    // Before any save the cap is 5×: past it the main key, in person.
+    assert!(hl(lev(5), 1).unwrap().signature.is_some());
+    assert_eq!(hl(lev(10), 2).unwrap_err().0, CANCELLED);
+    // Any change of the rules asks, a lowered one too, and nothing is kept on a no.
+    let rules = TradingRules { risk_pct: 1.0, open_risk_pct: 6.0, min_reward_risk: 1.5, leverage: 20, over_limit: OverLimit::Ask };
+    let with = SignerLimits { trading: Some(rules), ..SignerLimits::STANDARD };
+    assert_eq!(send(SignerRequest::SetLimits { limits: with }).unwrap_err().0, CANCELLED);
+    assert_eq!(limits().trading, None);
+    hello(true);
+    assert_eq!(send(SignerRequest::SetLimits { limits: with }).unwrap().limits.unwrap().trading, Some(rules));
+    vault::end_session();
+    hello(false);
+    assert!(hl(lev(20), 3).unwrap().signature.is_some());
+    assert_eq!(hl(lev(21), 4).unwrap_err().0, CANCELLED);
+    assert_eq!(send(SignerRequest::SetLimits { limits: SignerLimits { trading: Some(TradingRules { leverage: 3, ..rules }), ..SignerLimits::STANDARD } }).unwrap_err().0, CANCELLED);
+    // A sender that doesn't know the rules leaves them as they are, and the same rules again ask nothing.
+    assert_eq!(send(SignerRequest::SetLimits { limits: SignerLimits { agent_order: 500, ..SignerLimits::STANDARD } }).unwrap().limits.unwrap().trading, Some(rules));
+    assert!(send(SignerRequest::SetLimits { limits: SignerLimits { agent_order: 500, trading: Some(rules), ..SignerLimits::STANDARD } }).unwrap().ok);
+    // Past 50× not even in person.
+    hello(true);
+    let refused = hl(lev(51), 5).unwrap();
+    assert!(!refused.ok && refused.signature.is_none());
 }
 
 #[test]

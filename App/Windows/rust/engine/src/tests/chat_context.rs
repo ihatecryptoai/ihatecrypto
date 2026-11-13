@@ -112,7 +112,7 @@ async fn the_model_reads_the_cards_route_and_how_moves_ended() {
         let id = card.id.clone();
         // The newest on top, as pin() puts them.
         e.set_boards(|b| *b = vec![card, unknown, done]);
-        e.st_mut().card = Some(Card { id, title: "send 5 USDC to Mom".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+        e.st_mut().card = Some(Card { id, title: "send 5 USDC to Mom".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
         let facts = e.move_facts();
         let waiting = facts.iter().find(|f| f.starts_with("waiting for Confirm")).cloned().unwrap_or_default();
         assert!(waiting.contains("FROM · BASE 5 USDC (Base 20 → 15 USDC) (fee ≈ $0.01) → TO · MOM ≈ 5 USDC; its plan:"), "{waiting}");

@@ -46,6 +46,23 @@ releases = json.load(open(src, encoding="utf-8"))
 # the Mac versions it matched (0.9.2 = 0.8.4, 0.9.1 = 0.8.3, 0.9.0 with 0.8.2), and 0.8.6 holds the Mac's 0.8.5 and
 # 0.8.6 as the PC has them. The Mac's file on this branch ends at 0.8.2: newer entries are written here.
 PC_ONLY = [
+    {"version": "0.8.7", "date": "2026-11-13", "stories": [
+        {"title": "Go past a risk limit when you choose", "symbol": "slider.horizontal.3", "color": "FF7A2F",
+         "text": "Settings › Trading agent › Limits has «Over a limit»: Block, as before, Ask me or Just warn. With Ask me a plan "
+                 "past your risk per trade isn't stopped. Its card shows the loss at the stop, and Confirm waits until you tick "
+                 "«I accept losing $40.00 at the stop on this trade». Risk per trade and all positions together go up to «No "
+                 "limit», leverage up to 50×.",
+         "try": "long ETH risk $5 stop 3% take 6%"},
+        {"title": "Limits change only with you", "symbol": "lock.shield.fill", "color": "34C759",
+         "text": "Every change of a trading limit or of leverage asks for Windows Hello, and the signer keeps the limits itself. "
+                 "An order with more leverage than you saved is signed with the main key, after asking you again."},
+        {"title": "Limit orders, always private", "symbol": "clock.fill", "color": "0A84FF",
+         "text": "«limit buy SOL at 120 for 20 USDC» or «limit sell 0.1 SOL at 200» leaves an order with NEAR Intents' 1Click "
+                 "for 7 days, or as many as you say. It fills when the market reaches the price, in parts too, with nothing "
+                 "more to sign, and every order is private. «show limit orders» lists them with the market beside each and a "
+                 "Cancel. The chat and a notification say when one fills or runs out, with what came and its price after the fees.",
+         "try": "show limit orders"},
+    ]},
     {"version": "0.8.6", "date": "2026-11-10", "stories": [
         {"title": "A model that didn't answer says why", "symbol": "exclamationmark.bubble.fill", "color": "FF9F0A",
          "text": "When a model's service refuses, the chat says what happened and what to do, not the service's error text: "

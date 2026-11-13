@@ -55,7 +55,7 @@ fn waiting(e: &Engine, pending: Pending, title: &str) -> String {
     e.set_boards(|b| b.push(board));
     let mut st = e.st_mut();
     st.pending = Some(pending);
-    st.card = Some(Card { id: id.clone(), title: title.into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+    st.card = Some(Card { id: id.clone(), title: title.into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
     id
 }
 

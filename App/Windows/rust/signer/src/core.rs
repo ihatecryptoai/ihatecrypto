@@ -63,6 +63,14 @@ fn agent_take(opening: &Opening) -> Result<std::result::Result<Option<limits::Ho
     })
 }
 
+/// An updateLeverage past the person's leverage limit (Settings › Trading agent), in words; else None.
+fn past_leverage(act: &MsgPack) -> Option<String> { hl::leverage_over(act, limits::current().leverage_cap()) }
+
+/// What the trading key may take for `act`: nothing past the person's leverage limit, else `agent_take`.
+fn agent_take_for(act: &MsgPack) -> Result<std::result::Result<Option<limits::Hold>, String>> {
+    match past_leverage(act) { Some(why) => Ok(Err(why)), None => agent_take(&action::opening(act)) }
+}
+
 fn reply() -> SignerReply { SignerReply::ok() }
 
 /// Every request runs with its recipients and coins as the session's scope (`vault::with_move_scope`).
@@ -421,7 +429,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             let verdict = hl::check(&act, &owner, &HashSet::new(), None);
             if !verdict.ok() { return Ok(refused(verdict)) }
             // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
-            let held = match agent_take(&action::opening(&act))? {
+            let held = match agent_take_for(&act)? {
                 Ok(held) => held,
                 Err(why) => return Ok(refused(problem(&format!("The Ledger's trading key: {why}. {LEDGER_DEVICE}")))),
             };
@@ -448,13 +456,23 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             Ok(SignerReply { session_length: Some(seconds), ..reply() })
         }
 
-        R::SetLimits { limits: wanted } => {
+        R::SetLimits { limits: mut wanted } => {
+            let was = limits::current();
+            // A sender that doesn't know the trading rules leaves them as they are.
+            if wanted.trading.is_none() { wanted.trading = was.trading }
             if let Some(p) = wanted.problem() { return fail(p) }
-            let looser = wanted.looser(&limits::current());
+            let looser = wanted.looser(&was);
+            // The trading rules ask on any change, lowered too (the owner, 2026-11-12): only the person sets them.
+            let rules = wanted.trading.map(|t| t.changes(was.trading.as_ref())).unwrap_or_default();
             // In person even with no wallet yet: limits set silently then would hold for every wallet added later.
-            if !looser.is_empty() && !holds_public_test_wallet() {
-                vault::confirm(&format!("loosen your limits:\n{}", looser.join("\n")), None)?;
+            if (!looser.is_empty() || !rules.is_empty()) && !holds_public_test_wallet() {
+                let mut lines: Vec<String> = vec![];
+                if !looser.is_empty() { lines.push("loosen your limits:".into()); lines.extend(looser) }
+                if !rules.is_empty() { lines.push("change your trading rules:".into()); lines.extend(rules) }
+                vault::confirm(&lines.join("\n"), None)?;
                 vault::end_session(); // a confirmation, not a move: it leaves no session for an unrelated signature
+                // Another change saved while the prompt was up: this one was asked against limits no longer in force.
+                if limits::current() != was { return fail("The limits changed while you were asked: nothing was saved. Look at them again.") }
             }
             limits::save(&wanted);
             Ok(SignerReply { limits: Some(limits::current()), ..reply() })
@@ -761,7 +779,7 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             if agent_on && fresh && agents::has(&id) {
                 // A key that's there but wasn't opened: refused, never handed to the main key.
                 let Some(agent) = agents::load(&id) else { return fail(agents::unopened()) };
-                match agent_take(&action::opening(&act))? {
+                match agent_take_for(&act)? {
                     Err(why) => over = Some(why),
                     Ok(held) => {
                         let signature = hls::sign_l1(&act, &agent, None, nonce, None, mainnet)?;
@@ -777,16 +795,21 @@ fn handle_request(request: SignerRequest) -> Result<SignerReply> {
             if kind == "twapOrder" && !key_on {
                 return Ok(refused(problem("A TWAP needs the Hyperliquid trading key on: locked or off, nothing could stop it unattended.")));
             }
-            let what = match kind {
+            // Leverage past the person's limit is set only in person, by the main key: it names itself, and the renewal too
+            // when this prompt also renews the key's days.
+            let leverage = past_leverage(&act);
+            let what = if let Some(l) = &leverage {
+                format!("sign a Hyperliquid order: {l}") + &if stale { format!(". The trading key's {} are over, and this renews them", agent_days_text()) } else { String::new() }
+            } else { match kind {
                 "setReferrer" => "use ihatecrypto's referral code on Hyperliquid: 4% off its fees".to_string(),
                 "vaultTransfer" => "move money between your Hyperliquid account and a vault".into(),
                 _ if stale => format!("sign a Hyperliquid order: the trading key's {} are over, and this renews them", agent_days_text()),
                 _ => over.as_ref().map_or("sign a Hyperliquid order".into(), |why| format!("sign a Hyperliquid order: {why}")),
-            };
+            } };
             // Renewing the trading key's days, an order past its limits, and a vault deposit (money locked for days), ask
             // in person afresh.
             let deposit = kind == "vaultTransfer" && act.get("isDeposit") == Some(&MsgPack::Bool(true));
-            if stale || over.is_some() || deposit { confirm_afresh(&prompt(&what, &verdict))? }
+            if stale || over.is_some() || deposit || leverage.is_some() { confirm_afresh(&prompt(&what, &verdict))? }
             let signature = with_key("evm", &prompt(&what, &verdict), |k| hls::sign_l1(&act, k, None, nonce, None, mainnet))?;
             if stale { renew_agent(&agent_renewed_key()) }
             Ok(SignerReply { signature: Some(signature), checks: verdict.checks, ..reply() })

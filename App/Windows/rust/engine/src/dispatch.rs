@@ -226,7 +226,7 @@ impl Engine {
             "secondCheck" => self.set_settings(|s| s.second_check = Some(r.test.unwrap_or(true))),
             "jevOpenRouter" => self.set_settings(|s| s.jev_open_router = Some(r.test.unwrap_or(false))),
             "module" => self.set_module(r.name.as_deref(), on)?,
-            "policy" => self.set_policy(r.policy.clone())?,
+            "policy" => boxed(|| self.set_policy(r.policy.clone())).await?,
             "safeSearch" => self.set_settings(|s| s.safe_search = (r.test == Some(false)).then_some(false)),
             "batches" => self.set_settings(|s| s.batches = on.then_some(true)),
             "contractCap" => self.set_contract_cap(r.value)?,

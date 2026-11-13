@@ -97,6 +97,7 @@ const tabs = [
 // model's picked way and its unsaved key, Skills' «Read the text», Notifications' «Which events».
 let shownTab = null;
 function closePanels() {
+  rulesDraft = null;
   Object.assign(secretForm, { open: null, text: "", problem: null, checking: false });
   removing = null;
   renaming = null;
@@ -709,7 +710,8 @@ function limitsSection(s, w) {
   const looser = LIMIT_KEYS.some((k) => draft[k] > saved[k]);
   const save = async () => {
     limitsForm.saving = true; render();
-    const wanted = { ...draft };
+    // The wallet's own limits only: the trading rules aren't this tab's, and the signer keeps them when they're left out.
+    const wanted = Object.fromEntries(LIMIT_KEYS.map((k) => [k, draft[k]]));
     const done = await engine("limits", { limits: wanted }).then(() => null, (e) => e.message);
     limitsForm.saving = false;
     limitsForm.problem = done;
@@ -838,6 +840,45 @@ const samePolicy = (a, b) => ruleKeys.every((k) => Math.abs(a[k] - b[k]) < 1e-9)
 const n2 = (v) => String(Number(Number(v).toFixed(2)));
 const pctText = (v) => n2(v) + "%";
 
+// The limits: the signer keeps them and any change asks for Windows Hello, so they change in a draft saved at once.
+const NO_LIMIT = 1000;
+const riskSteps = [...Array(20)].map((_, i) => (i + 1) / 2).concat([15, 25, 50, NO_LIMIT]);
+const openRiskSteps = [...Array(30)].map((_, i) => i + 1).concat([50, 100, NO_LIMIT]);
+const leverageSteps = [...Array(10)].map((_, i) => i + 1).concat([15, 20, 25, 30, 40, 50]);
+const stepIn = (steps, v, d) => (d > 0 ? steps.find((x) => x > v + 1e-9) : [...steps].reverse().find((x) => x < v - 1e-9)) ?? v;
+const limitText = (v) => (v >= NO_LIMIT ? t("No limit", "Без лимита") : pctText(v));
+const limitKeys = ["maxRiskPct", "maxOpenRiskPct", "minRewardRisk", "maxLeverage"];
+const mode = (p) => p.overLimit || "block";
+const sameLimits = (a, b) => mode(a) === mode(b) && limitKeys.every((k) => Math.abs(a[k] - b[k]) < 1e-9);
+let rulesDraft = null, rulesSaving = false;
+
+/** The draft of the limits after `change`; none when it comes back to what is saved. */
+function draftLimits(change) {
+  const saved = ui.state.trading.policy, q = { ...(rulesDraft || saved) };
+  change(q);
+  q.minRewardRisk = Math.round(q.minRewardRisk * 10) / 10;
+  q.maxOpenRiskPct = Math.max(q.maxOpenRiskPct, q.maxRiskPct);
+  rulesDraft = sameLimits(q, saved) ? null : q;
+  render();
+}
+
+async function saveLimits() {
+  const d = rulesDraft;
+  rulesSaving = true;
+  render();
+  const ok = await act("policy", { policy: { ...ui.state.trading.policy, ...Object.fromEntries(limitKeys.map((k) => [k, d[k]])), overLimit: mode(d) } });
+  rulesSaving = false;
+  if (ok !== null && rulesDraft === d) rulesDraft = null;
+  render();
+}
+
+/** − value + on the draft of the limits. */
+function limitStepper(value, what, down, up, change) {
+  const step = (sym, help, enabled, d) => h("button", { class: "pg-agent-step", title: help, "aria-label": help, disabled: !enabled || rulesSaving,
+    onclick: () => draftLimits((q) => change(q, d)) }, icon(sym, 11));
+  return h("span", { class: "pg-agent-stepper" }, step("minus", t("Less ", "Меньше: ") + what, down, -1), h("b", { class: "num" }, value), step("plus", t("More ", "Больше: ") + what, up, 1));
+}
+
 /** A rule changed by a step: the ones that depend on each other kept in line after it (the Mac's update). */
 function changeRule(change) {
   const p = { ...ui.state.trading.policy };
@@ -857,13 +898,13 @@ function stepper(value, what, down, up, change) {
 
 function agentTab(s) {
   if (!s.trading) return [];
-  const tr = s.trading, p = tr.policy;
+  const tr = s.trading, p = tr.policy, l = rulesDraft || p;
   const current = tr.styles.find((x) => samePolicy(x.policy, p));
   const card = (x) => {
     const [ico, name, line] = styleWords[x.id];
     const on = x === current;
     return h("button", { class: "pg-agent-style" + (on ? " on" : ""), "aria-pressed": String(on), title: on ? t(`${name()} — in use`, `${name()} — сейчас`) : t(`Use ${name()}: sets all the rules below`, `Выбрать «${name()}»: задаёт все правила ниже`),
-      onclick: () => act("policy", { policy: x.policy }) },
+      disabled: rulesSaving, onclick: () => { rulesDraft = null; act("policy", { policy: x.policy }) } },
       h("div", { class: "pg-agent-style-top" }, tile(ico, 34), h("span", { class: "spacer" }), icon(on ? "check" : "circle", 15)),
       h("div", {}, h("b", {}, name()), h("div", { class: "secondary small" }, line())),
       h("div", { class: "pg-agent-figures" },
@@ -874,21 +915,33 @@ function agentTab(s) {
     section("dial", t("Style", "Стиль"), current ? t("Sets every rule below at once. Change any number after.", "Задаёт все правила ниже сразу. Любое число можно поменять потом.")
       : t("Custom: your own numbers below. A style resets them.", "Свои: твои числа ниже. Стиль их сбросит."),
       h("div", { class: "pg-agent-styles" }, tr.styles.map(card))),
-    section("shield", t("Limits", "Лимиты"), t("A plan that breaks one is not executed. Crypto only.", "План, который нарушает хоть один, не исполняется. Только крипта."),
+    section("shield", t("Limits", "Лимиты"), {
+        block: t("A plan that breaks one is not executed. Crypto only.", "План, который нарушает хоть один, не исполняется. Только крипта."),
+        ask: t("A plan that breaks one asks you to accept the loss before signing. Crypto only.", "План, который нарушает хоть один, перед подписью попросит согласиться с убытком. Только крипта."),
+        warn: t("A plan that breaks one gets a warning only. Crypto only.", "План, который нарушает хоть один, получает только предупреждение. Только крипта."),
+      }[mode(l)],
       group(
+        row({ label: t("Over a limit", "Сверх лимита"), ico: "exclamationmark.triangle", about: t("Block: the plan is not executed. Ask me: the sheet shows the loss at the stop and signs only after you tick that you accept it. Just warn: a warning line only. The limit stays yours, you go past it trade by trade.", "Запретить: план не исполняется. Спросить: окно подписи покажет убыток на стопе и подпишет, только когда ты отметишь, что согласен с ним. Предупредить: только строка с предупреждением. Лимит остаётся твоим, ты превышаешь его по одной сделке.") },
+          segmented([["block", t("Block", "Запретить")], ["ask", t("Ask me", "Спросить")], ["warn", t("Just warn", "Предупредить")]], mode(l),
+            (v) => { if (!rulesSaving) draftLimits((q) => (q.overLimit = v)) }, "pg-set-seg")),
         row({ label: t("Risk per trade", "Риск на сделку"), ico: "chart.bar", about: t("The most one trade may lose at its stop, as a share of your capital.", "Сколько одна сделка может потерять на стопе — в доле от капитала.") },
-          h("span", { class: "pg-agent-bar", "aria-hidden": "true" }, h("i", { style: `width:${Math.min(100, Math.max(0, p.maxRiskPct * 10))}%` })),
-          stepper(pctText(p.maxRiskPct), t("risk per trade", "риск на сделку"), p.maxRiskPct > 0.5, p.maxRiskPct < 10, (q, d) => (q.maxRiskPct += d * 0.5))),
+          h("span", { class: "pg-agent-bar", "aria-hidden": "true" }, h("i", { style: `width:${Math.min(100, Math.max(0, l.maxRiskPct * 10))}%` })),
+          limitStepper(limitText(l.maxRiskPct), t("risk per trade", "риск на сделку"), l.maxRiskPct > 0.5, l.maxRiskPct < NO_LIMIT, (q, d) => (q.maxRiskPct = stepIn(riskSteps, q.maxRiskPct, d)))),
         row({ label: t("All open positions together", "Все открытые позиции вместе"), ico: "square.stack", about: t("Their combined loss at the stops can't go over this share of capital. It's never below the risk per trade.", "Их общий убыток на стопах не может быть больше этой доли капитала. Он никогда не меньше риска на сделку.") },
-          stepper(pctText(p.maxOpenRiskPct), t("for all positions", "для всех позиций"), p.maxOpenRiskPct > p.maxRiskPct, p.maxOpenRiskPct < 30, (q, d) => (q.maxOpenRiskPct += d))),
+          limitStepper(limitText(l.maxOpenRiskPct), t("for all positions", "для всех позиций"), l.maxOpenRiskPct > l.maxRiskPct, l.maxOpenRiskPct < NO_LIMIT,
+            (q, d) => (q.maxOpenRiskPct = Math.max(q.maxRiskPct, stepIn(openRiskSteps, q.maxOpenRiskPct, d))))),
         row({ label: t("Reward / risk at least", "Прибыль к риску не меньше"), ico: "arrow.up.right", about: t("The planned profit must be at least this many times the planned loss.", "Плановая прибыль должна быть хотя бы во столько раз больше планового убытка.") },
-          stepper(n2(p.minRewardRisk), t("reward per risk", "прибыль к риску"), p.minRewardRisk > 1, p.minRewardRisk < 5, (q, d) => (q.minRewardRisk += d * 0.1))),
-        row({ label: t("Leverage up to", "Плечо до"), ico: "multiply", about: t("Borrowed exposure makes gains and losses larger. The assistant never trades above this.", "Заёмные деньги увеличивают и прибыль, и убыток. Выше этого ассистент не торгует.") },
-          stepper(n2(p.maxLeverage) + "×", t("leverage", "плечо"), p.maxLeverage > 1, p.maxLeverage < 20, (q, d) => (q.maxLeverage += d))))),
+          limitStepper(n2(l.minRewardRisk), t("reward per risk", "прибыль к риску"), l.minRewardRisk > 1, l.minRewardRisk < 5, (q, d) => (q.minRewardRisk += d * 0.1))),
+        row({ label: t("Leverage up to", "Плечо до"), ico: "multiply", about: t("Borrowed exposure makes gains and losses larger. The assistant never trades above this, and past it the trading key doesn't sign: the main key does, after Windows Hello.", "Заёмные деньги увеличивают и прибыль, и убыток. Выше этого ассистент не торгует, а торговый ключ не подписывает: подписывает основной ключ, после Windows Hello.") },
+          limitStepper(n2(l.maxLeverage) + "×", t("leverage", "плечо"), l.maxLeverage > 1, l.maxLeverage < 50, (q, d) => (q.maxLeverage = stepIn(leverageSteps, q.maxLeverage, d))))),
+      rulesDraft ? h("div", { class: "pg-agent-save" },
+        h("span", { class: "secondary small" }, t("Limits change only with Windows Hello.", "Лимиты меняются только через Windows Hello.")), h("span", { class: "spacer" }),
+        h("button", { class: "btn small", disabled: rulesSaving, onclick: () => { rulesDraft = null; render(); } }, t("Undo", "Отменить")),
+        h("button", { class: "btn small primary", disabled: rulesSaving, onclick: saveLimits }, t("Save with Windows Hello", "Сохранить через Windows Hello"))) : null),
     section("book", t("By the book", "По правилам"), t("What «by the book» uses when you name no numbers.", "Что берут «по правилам», если ты не назвал чисел."),
       group(
         row({ label: t("Risk", "Риск"), ico: "chart.bar", about: t("The share of capital a trade risks at its stop when you don't say how much. Never above the risk per trade.", "Доля капитала, которой сделка рискует на стопе, если ты не назвал сумму. Никогда не больше риска на сделку.") },
-          stepper(pctText(p.defaultRiskPct), t("default risk", "риск по умолчанию"), p.defaultRiskPct > 0.25, p.defaultRiskPct < p.maxRiskPct, (q, d) => (q.defaultRiskPct += d * 0.25))),
+          stepper(pctText(p.defaultRiskPct), t("default risk", "риск по умолчанию"), p.defaultRiskPct > 0.25, p.defaultRiskPct < Math.min(p.maxRiskPct, 10), (q, d) => (q.defaultRiskPct += d * 0.25))),
         row({ label: t("Take-profit", "Тейк-профит"), ico: "flag", about: t("How far the take is, as a multiple of the stop's distance: 2R takes twice what the stop would lose. Never below the reward / risk limit.", "Как далеко тейк — в кратных расстоянию до стопа: 2R забирает вдвое больше, чем потерял бы стоп. Никогда не меньше лимита прибыли к риску.") },
           stepper(n2(p.defaultRewardRisk) + "R", t("take-profit", "тейк-профит"), p.defaultRewardRisk > p.minRewardRisk, p.defaultRewardRisk < 10, (q, d) => (q.defaultRewardRisk += d * 0.5))),
         row({ label: t("Stop", "Стоп"), ico: "hand.raised", about: t("How far the stop is, in 4-hour ATRs — the coin's usual move over four hours. Wider stops are hit less often but lose more when they are.", "Как далеко стоп — в 4-часовых ATR, обычном движении монеты за четыре часа. Широкий стоп срабатывает реже, но теряет больше.") },

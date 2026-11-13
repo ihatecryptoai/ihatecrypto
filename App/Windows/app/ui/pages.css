@@ -173,6 +173,7 @@ button.pg-set-way:hover { background: var(--fill); }
 .pg-agent-figures > span { display: flex; flex-direction: column; gap: 1px; }
 .pg-agent-figures .secondary { font-size: 10px; }
 .pg-agent-figures b { font-size: 13px; font-weight: 600; }
+.pg-agent-save { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--fill); }
 .pg-agent-stepper { display: inline-flex; align-items: center; gap: 8px; }
 .pg-agent-stepper b { font-size: 15px; min-width: 58px; text-align: center; }
 .pg-agent-step { width: 26px; height: 26px; border-radius: 6px; border: none; background: var(--fill-strong); color: var(--text); padding: 0;

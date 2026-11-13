@@ -787,26 +787,40 @@ function rulesStep() {
   if (!p) return wordsGoneStep();
   const n = (v) => String(Number(v));
   const rule = (title, line, end) => tile(false, tileText(title, line), h("span", { class: "spacer" }), end || null);
-  const risk = (d) => {
-    const v = Math.min(10, Math.max(0.5, Number(p.maxRiskPct) + d));
-    act("policy", { policy: { ...p, maxRiskPct: v } });
+  // A draft saved on Continue: the signer asks Windows Hello once for it, not at every step.
+  const shown = flow.risk ?? Number(p.maxRiskPct);
+  // The same steps as Settings: half a percent to 10, then 15, 25, 50 and no limit.
+  const steps = [...Array(20)].map((_, i) => (i + 1) / 2).concat([15, 25, 50, 1000]);
+  const risk = (d) => { flow.risk = (d > 0 ? steps.find((x) => x > shown) : [...steps].reverse().find((x) => x < shown)) ?? shown; render(); };
+  const changed = flow.risk != null && flow.risk !== Number(p.maxRiskPct);
+  const go = async () => {
+    if (changed) {
+      flow.busy = true;
+      render();
+      const ok = await act("policy", { policy: { ...p, maxRiskPct: flow.risk } });
+      flow.busy = false;
+      if (ok === null) { render(); return }
+    }
+    flow.risk = null;
+    finish();
   };
   return stepCard({
     mood: "idle", title: t("Rules every trade passes", "Правила, которые проходит каждая сделка"),
     subtitle: t("Because Hyperliquid is on. Checked in code before a trade is signed, not by the model.", "Потому что Hyperliquid включён. Проверяются кодом до подписи сделки, а не моделью."),
     content: h("div", { class: "ob-content" }, h("div", { class: "ob-tiles tight" },
-      rule(t(`At most ${n(p.maxRiskPct)}% of the account at risk`, `Под риском не больше ${n(p.maxRiskPct)}% счёта`), t("What one trade may lose at its stop", "Сколько одна сделка может потерять на стопе"),
+      rule(Number(shown) >= 1000 ? t("No limit on the risk of one trade", "Без лимита на риск одной сделки") : t(`At most ${n(shown)}% of the account at risk`, `Под риском не больше ${n(shown)}% счёта`),
+        t("What one trade may lose at its stop", "Сколько одна сделка может потерять на стопе"),
         h("span", { class: "ob-stepper" },
-          h("button", { class: "btn small", disabled: Number(p.maxRiskPct) <= 0.5, onclick: () => risk(-0.5), "aria-label": t("Less", "Меньше") }, "−"),
-          h("button", { class: "btn small", disabled: Number(p.maxRiskPct) >= 10, onclick: () => risk(0.5), "aria-label": t("More", "Больше") }, "+"))),
+          h("button", { class: "btn small", disabled: flow.busy || shown <= 0.5, onclick: () => risk(-0.5), "aria-label": t("Less", "Меньше") }, "−"),
+          h("button", { class: "btn small", disabled: flow.busy || shown >= 1000, onclick: () => risk(0.5), "aria-label": t("More", "Больше") }, "+"))),
       rule(t(`By the book: ${n(p.defaultRiskPct)}% risk, take at ${n(p.defaultRewardRisk)}R`, `По правилам: риск ${n(p.defaultRiskPct)}%, тейк на ${n(p.defaultRewardRisk)}R`), t("When you say «by the book» and name no amount", "Когда говоришь «по правилам» и не называешь сумму")),
       rule(t(`Reward at least ${n(p.minRewardRisk)}× the risk`, `Прибыль не меньше ${n(p.minRewardRisk)}× риска`), t("A plan that pays less is stopped", "План, который платит меньше, остановится")),
       rule(t(`Stop by volatility: ${n(p.atrStopMultiple)}× the 4-hour ATR`, `Стоп по волатильности: ${n(p.atrStopMultiple)}× 4-часового ATR`),
         t(`Leverage up to ${n(p.maxLeverage)}×, all open positions together at most ${n(p.maxOpenRiskPct)}%`, `Плечо до ${n(p.maxLeverage)}×, все открытые позиции вместе — не больше ${n(p.maxOpenRiskPct)}%`)),
       rule(t("Second check", "Вторая проверка"), t("Another model reads every plan before you confirm it", "Другая модель перечитывает каждый план, прежде чем ты его подтвердишь"),
         toggle("ob-second", !!s.secondCheck, (v) => act("secondCheck", { test: v }))))),
-    primary: t("Continue", "Дальше"), onPrimary: finish,
-    quiet: quietButton(t("Back", "Назад"), back),
+    primary: changed ? t("Continue · Windows Hello", "Дальше · Windows Hello") : t("Continue", "Дальше"), onPrimary: go, busy: flow.busy,
+    quiet: quietButton(t("Back", "Назад"), () => { flow.risk = null; back(); }),
   });
 }
 

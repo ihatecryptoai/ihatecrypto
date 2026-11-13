@@ -292,8 +292,9 @@ impl Plan {
             refuse("Take-profit is out of range.".into());
             return e;
         }
-        // The signer refuses more than 20× whatever the market allows (HLGuard.maxLeverage): said here, before money moves.
-        let max_lev = m.max_leverage.min(20);
+        // The signer refuses more than the top of the leverage steps whatever the market allows (HLGuard::MAX_LEVERAGE):
+        // said here, before money moves.
+        let max_lev = m.max_leverage.min(50);
         if lev < Decimal::ONE || lev > Decimal::from(max_lev) { refuse(format!("Leverage for {}: 1× to {max_lev}×.", m.name)); return e }
         if lev != rounded(lev, 0, Rounding::Down) {
             refuse(format!("Leverage on Hyperliquid is a whole number: {}× or {}×.", Fmt::num(rounded(lev, 0, Rounding::Down), 2),

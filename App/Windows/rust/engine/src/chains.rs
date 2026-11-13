@@ -704,8 +704,9 @@ impl Engine {
                 self.reply(&self.trail(&coin, pct), Some("Hyperliquid".into()));
             } else {
                 let (policy, equity) = (self.policy(), self.rule_equity());
+                let over = self.stop_over_limit(&p, &coin);
                 let said = self.executor()?.manage(&p, &coin, &policy, equity).await?;
-                self.reply(&said, Some("Hyperliquid".into()));
+                self.reply(&over.map_or(said.clone(), |o| format!("{said} {o}")), Some("Hyperliquid".into()));
             }
             return Ok(true);
         }

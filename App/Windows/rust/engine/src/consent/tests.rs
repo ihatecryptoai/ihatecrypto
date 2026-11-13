@@ -122,7 +122,7 @@ fn a_doubted_card_confirms_only_with_its_tick() {
     with_engine(|e| {
         assert_eq!(e.unticked_on_card(&[]), None);
         let doubt = Engine::trade_tick("The plan risks $50, the message named $5.", en);
-        e.st_mut().card = Some(Card { id: "B1".into(), title: "Long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![doubt] });
+        e.st_mut().card = Some(Card { id: "B1".into(), title: "Long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![doubt], over_limit: false });
         assert_eq!(e.unticked_on_card(&[]).unwrap(), "Tick «I understand the second check's warning and execute anyway» on the card first, or cancel it.");
         assert!(e.unticked_on_card(&ticks(&["other"])).is_some());
         assert_eq!(e.unticked_on_card(&ticks(&["doubt"])), None);

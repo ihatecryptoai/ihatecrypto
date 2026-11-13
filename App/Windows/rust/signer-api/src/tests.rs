@@ -138,3 +138,27 @@ fn frames() {
     assert_eq!(read_frame(&mut too_long.as_slice()), None);
     assert_eq!(read_frame(&mut [5u8, 0, 0, 0, 1].as_slice()), None); // cut short
 }
+
+#[test]
+fn trading_rules_ask_on_any_change_and_cap_the_leverage() {
+    let rules = TradingRules { risk_pct: 2.0, open_risk_pct: 6.0, min_reward_risk: 1.5, leverage: 5, over_limit: OverLimit::Block };
+    assert_eq!(rules.problem(), None);
+    assert_eq!(TradingRules { leverage: 51, ..rules }.problem().as_deref(), Some("Leverage is 1× to 50×."));
+    assert!(TradingRules { open_risk_pct: 1.0, ..rules }.problem().is_some());
+    assert!(TradingRules { risk_pct: 1001.0, open_risk_pct: 1001.0, ..rules }.problem().is_some());
+    assert_eq!(TradingRules { risk_pct: TradingRules::NO_LIMIT, open_risk_pct: TradingRules::NO_LIMIT, ..rules }.problem(), None);
+    // Lowered or raised, every changed line is named.
+    let next = TradingRules { risk_pct: TradingRules::NO_LIMIT, open_risk_pct: TradingRules::NO_LIMIT, leverage: 3, over_limit: OverLimit::Ask, ..rules };
+    assert_eq!(next.changes(Some(&rules)), ["risk per trade no limit (was 2%)", "all positions together no limit (was 6%)", "leverage up to 3× (was 5×)",
+                                              "over a limit: ask me (was block the plan)"]);
+    assert_eq!(rules.changes(None).len(), 5);
+    assert!(rules.changes(Some(&rules)).is_empty());
+    // The cap before any save is the rules' default 5×; limits saved before the rules still decode.
+    assert_eq!(SignerLimits::STANDARD.leverage_cap(), 5);
+    assert_eq!(SignerLimits { trading: Some(TradingRules { leverage: 20, ..rules }), ..SignerLimits::STANDARD }.leverage_cap(), 20);
+    let old: SignerLimits = serde_json::from_value(json!({"agentOrder": 1000, "agentDay": 5000, "agentDays": 2, "automationDay": 100, "automationWeek": 500, "slippageBps": 300})).unwrap();
+    assert_eq!(old, SignerLimits::STANDARD);
+    assert!(SignerLimits { trading: Some(TradingRules { leverage: 0, ..rules }), ..SignerLimits::STANDARD }.problem().is_some());
+    let wire = serde_json::to_value(TradingRules { over_limit: OverLimit::Warn, ..rules }).unwrap();
+    assert_eq!(wire["overLimit"], "warn");
+}

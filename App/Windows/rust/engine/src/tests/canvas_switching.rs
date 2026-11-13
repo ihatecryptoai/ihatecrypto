@@ -130,7 +130,7 @@ async fn a_waiting_card_left_without_confirm_is_cancelled_or_parked() {
         let card = e.pin(Board { state: Some("waiting".into()), ..Board::new("move", "Send 5 USDC to Mom") });
         // A card with nothing pending behind it can't wait elsewhere: cancelled, and said so on its block.
         e.st_mut().card = Some(crate::engine::Card { id: card.clone(), title: "Send 5 USDC to Mom".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(),
-                                                     ticks: vec![] });
+                                                     ticks: vec![], over_limit: false });
         e.new_canvas(false).unwrap();
         let b = e.st().canvases.iter().flat_map(|c| &c.boards).find(|b| b.id == card).cloned().unwrap();
         assert_eq!(b.state.as_deref(), Some("cancelled"));

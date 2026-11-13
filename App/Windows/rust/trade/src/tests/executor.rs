@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use ihatecrypto_core::position_command::PositionCommand;
-use ihatecrypto_core::risk::RiskPolicy;
+use ihatecrypto_core::risk::{OverLimit, RiskPolicy};
 use rust_decimal::Decimal;
 
 use super::d;
@@ -102,6 +102,11 @@ fn a_wider_stop_is_held_to_the_per_trade_rule() {
     // 117000 is −$31.07 with fees: 3.1% of $1000 is refused, 1.6% of $2000 is within the rule.
     assert!(rule(true, "117000", Some("118000"), Some("1000")).is_some());
     assert_eq!(rule(true, "117000", Some("118000"), Some("2000")), None);
+    // «Ask me» and «Just warn» let a wider stop through: the chat's card says the loss before Confirm.
+    for mode in [OverLimit::Ask, OverLimit::Warn] {
+        let p = RiskPolicy { over_limit: Some(mode), ..RiskPolicy::default() };
+        assert_eq!(Executor::stop_breaks_rule(true, d("120000"), d("0.01"), d("90000"), Some(d("118000")), Some(d("1000")), &p), None);
+    }
 }
 
 #[test]
@@ -180,4 +185,21 @@ fn a_partial_close_under_ten_dollars_is_refused() {
     assert!(Executor::partial_close_refusal(-eth, d("0.5"), mark, 4, "ETH").is_some());   // a short too
     assert!(Executor::partial_close_refusal(eth, Decimal::ONE, mark, 4, "ETH").is_none());
     assert!(Executor::partial_close_refusal(Decimal::ONE, d("0.5"), mark, 4, "ETH").is_none());
+}
+
+/// «Ask me» over a risk limit: nothing is signed, nothing even read, until the person ticked that they accept the loss.
+#[tokio::test]
+async fn ask_me_signs_nothing_until_the_loss_is_accepted() {
+    use std::sync::Arc;
+    use execution::trade_signer::TradeWallet;
+    use ihatecrypto_core::intent::{Side, TradeIntent};
+    use ihatecrypto_core::plan::{Market, Plan};
+    let e = Executor::new(TradeWallet { solana: String::new(), evm: "0x0".into() }, Arc::new(super::fake_hl::ZeroSigner::default()), super::fake_hl::journal("ask"), |_| {});
+    let i = TradeIntent { asset: "ETH".into(), side: Side::Long, risk_usd: Some(d("10")), stop_pct: Some(d("3")), leverage: Some(d("2")), ..TradeIntent::default() };
+    let m = Market::new("ETH", d("2000"), 4, 25);
+    let s = Plan::evaluate(&i, Some(&m)).sizing.unwrap();
+    let mut p = crate::executor::Prepared::new(i, m, s, 2, None, vec![], vec![], chrono::Utc::now());
+    p.must_accept = true;
+    let refused = e.execute(&p).await;
+    assert!(matches!(&refused, Err(Error::Execution(m)) if m.contains("tick that you accept the loss")), "{refused:?}");
 }

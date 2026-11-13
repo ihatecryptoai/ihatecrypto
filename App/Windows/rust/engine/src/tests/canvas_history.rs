@@ -219,7 +219,7 @@ async fn a_requests_history_card_is_the_canvas_frozen_as_it_was_handled() {
         // A card waiting for Confirm: its title and route, frozen.
         let step = |l: &str| Step { label: l.into(), title: "5 USDC".into(), lines: vec![], money: None, status: None };
         let id = e.pin(Board { steps: Some(vec![step("FROM · Solana"), step("BUY · Base")]), state: Some("waiting".into()), ..Board::new("move", "Buy AERO for 5 USDC") });
-        e.st_mut().card = Some(Card { id, title: "Buy AERO for 5 USDC".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+        e.st_mut().card = Some(Card { id, title: "Buy AERO for 5 USDC".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
         let waiting = Message::new(true, "is that safe?", None);
         e.snapshot_canvas(&waiting);
         let snap = shown(&e, &waiting).unwrap();
@@ -325,7 +325,7 @@ async fn a_plan_waiting_for_confirm_falls_to_the_rates_and_the_ways_asked_over_i
             st.intent = intent;
             st.positions = vec![];
             st.pending = Some(crate::engine::Pending::Trade(Box::new(p)));
-            st.card = Some(Card { id: id.clone(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+            st.card = Some(Card { id: id.clone(), title: "Plan · long ETH".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
             st.plan_board = Some(id.clone());
         }
         // The plan's own request: its title and route, as before.

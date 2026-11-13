@@ -17,7 +17,7 @@ use ihatecrypto_core::intent::{Fmt, Side, TradeIntent};
 use ihatecrypto_core::network::{Amount, Bridge, Hyperliquid, Origin};
 use ihatecrypto_core::plan::{BridgeQuote, Market, Plan, RiskCalc, Sizing};
 use ihatecrypto_core::position_command::{PositionCommand, SpotAsset};
-use ihatecrypto_core::risk::{Level, RiskPolicy, RiskRules};
+use ihatecrypto_core::risk::{Level, OverLimit, RiskPolicy, RiskRules};
 use net::solana_rpc::{Outcome, SolanaRpc};
 use protocols::relay;
 use rust_decimal::Decimal;
@@ -240,13 +240,19 @@ pub struct Prepared {
     pub prepared_at: DateTime<Utc>,
     /// The first trade asks to approve ihatecrypto's fee: one signature more than the plan's steps.
     pub asks_fee: bool,
+    /// The risk limits this plan breaks, in the rules' words, when the policy asks or warns instead of blocking.
+    pub over_limit: Vec<String>,
+    pub over_limit_ru: Vec<String>,
+    /// «Ask me»: nothing is signed until the person ticks that they accept the loss at the stop (`accepted`).
+    pub must_accept: bool,
+    pub accepted: bool,
 }
 
 impl Prepared {
     pub fn new(intent: TradeIntent, market: Market, sizing: Sizing, leverage: i64, bridge: Option<BridgeStep>, changes: Vec<String>,
                steps: Vec<String>, prepared_at: DateTime<Utc>) -> Self {
         Self { intent, market, sizing, leverage, bridge, dex_transfer: None, fund_from: None, open_via_1click: None, changes, steps, prepared_at,
-               asks_fee: false }
+               asks_fee: false, over_limit: vec![], over_limit_ru: vec![], must_accept: false, accepted: false }
     }
 
     /// The bridge transaction's blockhash lives about a minute; after that the preview is redone.
@@ -317,8 +323,9 @@ impl Executor {
         let marks: HashMap<String, Decimal> = markets.iter().map(|(k, m)| (k.clone(), m.mark_px)).collect();
         let open_risk = HyperliquidAccount::risk_at_stops(&positions, &orders, &spot)
             .and_then(|at| HyperliquidAccount::twap_risk(&twaps, &positions, &orders, &marks).and_then(|t| (Num::of(at) + t).0));
-        let blocked: Vec<String> = RiskRules::check(&intent, &sizing, &market, Some(equity), policy, open_risk).into_iter()
-            .filter(|a| a.level == Level::Block).map(|a| a.text).collect();
+        let advice = RiskRules::check(&intent, &sizing, &market, Some(equity), policy, open_risk);
+        let blocked: Vec<String> = advice.iter().filter(|a| a.level == Level::Block).map(|a| a.text.clone()).collect();
+        let (over_limit, over_limit_ru): (Vec<String>, Vec<String>) = advice.into_iter().filter(|a| a.over_limit).map(|a| (a.text, a.ru)).unzip();
         if !blocked.is_empty() { return fail(blocked.join(" ")) }
         let leverage = intent.leverage.unwrap_or(Decimal::ONE).trunc().to_i64().unwrap_or(0);
 
@@ -459,6 +466,9 @@ impl Executor {
         p.fund_from = fund.map(|f| (f.0.clone(), f.1));
         p.open_via_1click = opening;
         p.asks_fee = asks_fee;
+        p.must_accept = policy.limit_mode() == OverLimit::Ask && !over_limit.is_empty();
+        p.over_limit = over_limit;
+        p.over_limit_ru = over_limit_ru;
         Ok(p)
     }
 
@@ -483,6 +493,7 @@ impl Executor {
     /// Signs and sends what `prepare` showed. Prices may move inside the approved limits; outside them it stops.
     pub async fn execute(&self, p: &Prepared) -> Result<Opened> {
         if !p.is_fresh() { return fail("This confirmation is stale: the numbers need a refresh.") }
+        if p.must_accept && !p.accepted { return fail("Over your risk limit: tick that you accept the loss at the stop first. Nothing was signed.") }
         let moved = |m: &Market| (Num::of(m.mark_px) - p.market.mark_px).abs() / p.market.mark_px;
         let mut market = hl_markets().await?.remove(&p.market.name).unwrap_or_else(|| p.market.clone());
         if moved(&market).0.is_none_or(|x| x > SLIPPAGE) {
@@ -1233,7 +1244,8 @@ impl Executor {
         let equity = equity.filter(|e| *e > Decimal::ZERO)?;
         let gap = (if long { Num::of(entry) - stop } else { Num::of(stop) - entry }).0?.max(Decimal::ZERO);
         let loss = (Num::of(gap) * size + Num::of(size) * (Num::of(entry) + stop) * RiskCalc::trade_fee()).0?;
-        ((Num::of(loss) / equity * 100).0? > policy.max_risk_pct).then_some(loss)
+        // «Ask me» and «Just warn» let a wider stop through: the chat's card says the loss before Confirm.
+        (policy.limit_mode() == OverLimit::Block && (Num::of(loss) / equity * 100).0? > policy.max_risk_pct).then_some(loss)
     }
 
     /// Hyperliquid's $10 minimum order counts for a reduce-only close too: a part worth less is refused by the venue (seen

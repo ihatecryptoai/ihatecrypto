@@ -17,6 +17,9 @@ use crate::chains::ChainState;
 use crate::engine::{Engine, Message, Pending};
 use crate::moves::{LEAVE_COSTLY, SEND_ANYWAY};
 
+/// The id of the tick «I accept losing $X at the stop» (`over_limit_tick`).
+pub const OVER_LIMIT_TICK: &str = "overLimit";
+
 /// What a site's request still needs the person's word for before it can be approved (the Mac's ApprovalSheet `ask`):
 /// a lookalike address, programs off the list, a payee or contract that isn't theirs, the second check's concern.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -130,6 +133,13 @@ impl Engine {
     pub fn trade_tick(concern: &str, say: impl Fn(&str, &str) -> String) -> SiteTick {
         SiteTick { id: "doubt".into(), title: say("The second check has a concern", "У второй проверки есть сомнение"), detail: concern.into(),
                    toggle: say("I understand the second check's warning and execute anyway", "Понимаю предупреждение второй проверки и выполняю всё равно") }
+    }
+
+    /// «Ask me» over a risk limit: Sign stays grey until the person accepts the loss at the stop (the Mac's sheet toggle).
+    pub fn over_limit_tick(detail: &str, loss: rust_decimal::Decimal, say: impl Fn(&str, &str) -> String) -> SiteTick {
+        let lost = ihatecrypto_core::intent::Fmt::usd(loss);
+        SiteTick { id: OVER_LIMIT_TICK.into(), title: say("Over your risk limit", "Выше твоего лимита риска"), detail: detail.into(),
+                   toggle: say(&format!("I accept losing {lost} at the stop on this trade"), &format!("Согласен потерять {lost} на стопе в этой сделке")) }
     }
 
     /// What the waiting card still needs ticked, said; None when Confirm may go.

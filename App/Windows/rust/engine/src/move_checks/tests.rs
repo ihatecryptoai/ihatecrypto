@@ -248,7 +248,7 @@ async fn a_waiting_card_waits_on_its_canvas() {
         let e = engine();
         let mom = SignerAddress { name: "Mom".into(), network: "base".into(), address: MOM.into(), memo: String::new() };
         let board = Board::new("move", "Send 1 USDC to Mom");
-        let card = Card { id: board.id.clone(), title: board.title.clone(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] };
+        let card = Card { id: board.id.clone(), title: board.title.clone(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false };
         e.set_boards(|b| b.push(board.clone()));
         let wait = |e: &Engine| {
             let mut st = e.st_mut();

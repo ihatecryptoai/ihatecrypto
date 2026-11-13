@@ -17,7 +17,8 @@ use execution::{Journal, Kind};
 use fancy_regex::Regex;
 use crate::chat::JevPost;
 use ihatecrypto_core::address_book_command::AddressBookCommand;
-use ihatecrypto_core::foundation::{Date, Num};
+use ihatecrypto_core::foundation::{Date, Num, Rounding};
+use ihatecrypto_core::risk::OverLimit;
 use ihatecrypto_core::intent::{Fmt, IntentParser, TradeIntent};
 use ihatecrypto_core::modules::{ModuleNetwork, ModuleProtocol};
 use ihatecrypto_core::normalize::ChatRouter;
@@ -232,7 +233,7 @@ impl Engine {
         self.st_mut().unpriced = None;
         let confirm = if warnings.is_empty() { self.say("Confirm", "Подтвердить") } else { self.say("Confirm despite the warning", "Подтвердить, несмотря на предупреждение") };
         let all: Vec<String> = warnings.into_iter().chain(cautions).collect();
-        self.st_mut().card = Some(Card { id: id.clone(), title: title.into(), lines: lines.clone(), warnings: all.clone(), confirm, ticks: vec![] });
+        self.st_mut().card = Some(Card { id: id.clone(), title: title.into(), lines: lines.clone(), warnings: all.clone(), confirm, ticks: vec![], over_limit: false });
         let steps = self.steps(&pending, title, &lines);
         self.pin(Board { id: id.clone(), lines: all.iter().map(|w| format!("⚠ {w}")).collect(), steps: Some(steps), state: Some("waiting".into()), ..Board::new("move", title) });
         self.notice_card(title);
@@ -869,8 +870,26 @@ impl Engine {
     pub fn pend_position(&self, command: PositionCommand, coin: &str, text: &str) {
         if let PositionCommand::Close(share) = command && self.close_too_small(share, coin) { return }
         let pretty = IntentParser::pretty(coin);
-        self.show(Pending::Position { command, coin: coin.into() }, &format!("{text} · {pretty}"), vec![], vec![], vec![]);
-        self.reply(&self.say(&format!("“{text}” for {pretty}: press Confirm to go ahead."), &format!("«{text}» для {pretty}: нажми «Подтвердить».")), None);
+        let over = self.stop_over_limit(&command, coin);
+        self.show(Pending::Position { command, coin: coin.into() }, &format!("{text} · {pretty}"), vec![], over.iter().cloned().collect(), vec![]);
+        let over = over.map(|o| format!(" {o}")).unwrap_or_default();
+        self.reply(&self.say(&format!("“{text}” for {pretty}:{over} Press Confirm to go ahead."), &format!("«{text}» для {pretty}:{over} Нажми «Подтвердить».")), None);
+    }
+
+    /// «stop at $X» past the per-trade limit in «Ask me» or «Just warn» (the executor lets it through then): the loss said,
+    /// for the card and the chat. None in «Block» (the executor refuses it) or within the limit.
+    pub fn stop_over_limit(&self, command: &PositionCommand, coin: &str) -> Option<String> {
+        let (policy, equity) = (self.policy(), self.rule_equity().filter(|e| *e > Decimal::ZERO)?);
+        let PositionCommand::StopTo(stop) = *command else { return None };
+        if policy.limit_mode() == OverLimit::Block { return None }
+        let (size, entry) = self.st().positions.iter().find(|p| p.coin == coin && p.size != Decimal::ZERO).map(|p| (p.size, p.entry))?;
+        let gap = (if size > Decimal::ZERO { Num::of(entry) - stop } else { Num::of(stop) - entry }).0?.max(Decimal::ZERO);
+        let loss = (Num::of(gap) * size.abs() + Num::of(size.abs()) * (Num::of(entry) + stop) * RiskCalc::trade_fee()).0?;
+        let share = (Num::of(loss) / equity * 100).rounded(1, Rounding::Plain).0?;
+        if share <= policy.max_risk_pct { return None }
+        let (at, lost, share, max) = (Fmt::price(stop), Fmt::usd(loss), Fmt::pct(share), Fmt::pct(policy.max_risk_pct));
+        Some(self.say(&format!("Over your limit: a stop at {at} means −{lost}, {share} of capital, the limit is {max}."),
+                      &format!("Выше твоего лимита: стоп на {at} — это −{lost}, {share} капитала, лимит {max}.")))
     }
 
     /// A part of a position worth under Hyperliquid's $10 minimum can't be closed: said before any card, with closing it
@@ -967,13 +986,14 @@ impl Engine {
     pub async fn confirm(&self, card: Option<&str>, ticks: &[String]) {
         let current = self.card_id();
         if let Some(id) = card && Some(id) != current.as_deref() { return }
-        let (waiting, title) = {
+        let (mut waiting, title) = {
             let st = self.st();
             let (Some(waiting), Some(card)) = (st.pending.clone(), st.card.as_ref()) else { return };
             (waiting, card.title.clone())
         };
         // The card's ticks first (a trade the second check doubts): the engine holds it, not only the button.
         if let Some(missing) = self.unticked_on_card(ticks) { self.reply(&missing, None); return }
+        if let Pending::Trade(p) = &mut waiting { p.accepted = ticks.iter().any(|t| t == crate::consent::OVER_LIMIT_TICK) }
         self.st_mut().retry = None;
         // Settings › Modules switched off since the card was drawn: refused now too.
         if let Some(off) = self.confirm_refusal(&waiting) {

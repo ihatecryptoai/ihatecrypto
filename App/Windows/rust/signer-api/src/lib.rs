@@ -290,7 +290,7 @@ pub const LEDGER_DEVICE: &str = "Sign this one on the Ledger.";
 
 /// What signs without the person, set by them in Settings and kept by the signer: lowering one is immediate, raising
 /// one asks for Windows Hello. Dollars are whole dollars.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignerLimits {
     /// One opening order the trading key signs, at its own price × size.
@@ -304,10 +304,19 @@ pub struct SignerLimits {
     pub automation_week: i64,
     /// The slippage a swap may allow before it asks for Windows Hello afresh, in basis points.
     pub slippage_bps: i64,
+    /// Settings › Trading agent › Limits, kept here so that any change of them asks for the person. None in limits saved
+    /// before them, and until the person first saves them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trading: Option<TradingRules>,
 }
 
 impl SignerLimits {
-    pub const STANDARD: SignerLimits = SignerLimits { agent_order: 1000, agent_day: 5000, agent_days: 2, automation_day: 100, automation_week: 500, slippage_bps: 300 };
+    pub const STANDARD: SignerLimits = SignerLimits { agent_order: 1000, agent_day: 5000, agent_days: 2, automation_day: 100, automation_week: 500, slippage_bps: 300,
+                                                      trading: None };
+
+    /// The most leverage the trading key sets without the person: theirs once saved, else the risk rules' default 5×, so
+    /// a screen that says 5× before any save is true.
+    pub fn leverage_cap(&self) -> i64 { self.trading.map_or(5, |t| t.leverage) }
     pub const MAX_AGENT_DAYS: i64 = 7;
 
     /// Why these can't be limits, or None.
@@ -321,7 +330,7 @@ impl SignerLimits {
             return Some(format!("The trading key works 1 to {} days after {PRESENCE}.", Self::MAX_AGENT_DAYS));
         }
         if !(1..=5000).contains(&self.slippage_bps) { return Some("Slippage is 0.01% to 50%.".into()) }
-        None
+        self.trading.and_then(|t| t.problem())
     }
 
     /// The lines of `self` that are looser than `old`, in words for a Windows Hello prompt.
@@ -348,6 +357,64 @@ impl SignerLimits {
     pub fn percent(bps: i64) -> String {
         let (whole, part) = (bps / 100, bps % 100);
         if part == 0 { format!("{whole}%") } else { format!("{whole}.{}%", format!("{part:02}").trim_end_matches('0')) }
+    }
+}
+
+/// What a plan over a risk limit gets: stopped, asked about in the sheet, or a warning line only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverLimit {
+    #[default]
+    Block,
+    Ask,
+    Warn,
+}
+
+impl OverLimit {
+    pub fn words(self) -> &'static str { match self { Self::Block => "block the plan", Self::Ask => "ask me", Self::Warn => "just warn" } }
+}
+
+/// The trading rules' limits (the engine's RiskPolicy). The signer checks `leverage` itself: the trading key sets no more
+/// without the person. The rest the engine checks with every plan; they live here so that changing them asks in person.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradingRules {
+    /// Per trade and for all open positions together, % of capital at the stops; `NO_LIMIT` = none.
+    pub risk_pct: f64,
+    pub open_risk_pct: f64,
+    pub min_reward_risk: f64,
+    pub leverage: i64,
+    pub over_limit: OverLimit,
+}
+
+impl TradingRules {
+    /// The same sentinel as RiskPolicy::NO_LIMIT.
+    pub const NO_LIMIT: f64 = 1000.0;
+    /// The most any Hyperliquid market gives, and the top of Settings' steps.
+    pub const MAX_LEVERAGE: i64 = 50;
+
+    pub fn problem(&self) -> Option<String> {
+        let ok = |v: f64| v.is_finite() && v > 0.0 && v <= Self::NO_LIMIT;
+        if !ok(self.risk_pct) { return Some("Risk per trade is above 0%.".into()) }
+        if !ok(self.open_risk_pct) || self.open_risk_pct < self.risk_pct { return Some("All positions together can't be less than one trade.".into()) }
+        if !(1.0..=5.0).contains(&self.min_reward_risk) { return Some("Reward / risk is 1 to 5.".into()) }
+        if !(1..=Self::MAX_LEVERAGE).contains(&self.leverage) { return Some(format!("Leverage is 1× to {}×.", Self::MAX_LEVERAGE)) }
+        None
+    }
+
+    /// Every line that differs from `old`, in words for the prompt: raised and lowered alike.
+    pub fn changes(&self, old: Option<&TradingRules>) -> Vec<String> {
+        fn pct(v: f64) -> String { if v >= TradingRules::NO_LIMIT { "no limit".into() } else { format!("{v}%") } }
+        fn line(what: &str, now: String, was: Option<String>) -> Option<String> {
+            if was.as_ref() == Some(&now) { return None }
+            Some(format!("{what} {now}") + &was.map(|w| format!(" (was {w})")).unwrap_or_default())
+        }
+        [line("risk per trade", pct(self.risk_pct), old.map(|o| pct(o.risk_pct))),
+         line("all positions together", pct(self.open_risk_pct), old.map(|o| pct(o.open_risk_pct))),
+         line("reward / risk at least", format!("{}", self.min_reward_risk), old.map(|o| format!("{}", o.min_reward_risk))),
+         line("leverage up to", format!("{}×", self.leverage), old.map(|o| format!("{}×", o.leverage))),
+         line("over a limit:", self.over_limit.words().into(), old.map(|o| o.over_limit.words().into()))]
+            .into_iter().flatten().collect()
     }
 }
 

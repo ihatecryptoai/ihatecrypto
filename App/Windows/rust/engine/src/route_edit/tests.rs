@@ -34,7 +34,7 @@ fn waiting(e: &Engine, command: WalletCommand) -> String {
     e.set_boards(|b| b.insert(0, board));
     let mut st = e.st_mut();
     st.pending = Some(Pending::Wallet(command));
-    st.card = Some(Card { id: id.clone(), title: "Buy".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![] });
+    st.card = Some(Card { id: id.clone(), title: "Buy".into(), lines: vec![], warnings: vec![], confirm: "Confirm".into(), ticks: vec![], over_limit: false });
     id
 }
 

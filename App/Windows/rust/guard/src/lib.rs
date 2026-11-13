@@ -111,8 +111,19 @@ pub mod hl {
 
     /// Hyperliquid's own market-making vault; the only vault money may go to without the person naming it.
     pub const HLP_VAULT: &str = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303";
-    /// The top of Settings › Trading's leverage stepper.
-    pub const MAX_LEVERAGE: u64 = 20;
+    /// The top of Settings › Trading's leverage steps (RiskPolicy::LEVERAGE_STEPS): 50×, the most any Hyperliquid market
+    /// gives. Past the person's own limit (SignerLimits::leverage_cap) the trading key doesn't sign it: the main key does,
+    /// in person.
+    pub const MAX_LEVERAGE: u64 = 50;
+
+    /// «leverage 30× is above your 10× limit» for an updateLeverage past `cap`, else None.
+    pub fn leverage_over(action: &MsgPack, cap: i64) -> Option<String> {
+        if string(action.get("type")) != Some("updateLeverage") { return None }
+        match action.get("leverage") {
+            Some(MsgPack::Uint(n)) if *n > cap.max(1) as u64 => Some(format!("leverage {n}× is above your {cap}× limit")),
+            _ => None,
+        }
+    }
 
     fn string(v: Option<&MsgPack>) -> Option<&str> { match v { Some(MsgPack::String(s)) => Some(s), _ => None } }
 
