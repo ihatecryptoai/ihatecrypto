@@ -1,5 +1,6 @@
 import ExecutionCore
 import Foundation
+import HelperAPI
 import IhatecryptoCore
 import SwiftUI
 import TradeExecution
@@ -174,7 +175,7 @@ struct HistoryView: View {
         loadError = nil
         // Signatures from the app and from the terminal tool, which trades from the same wallet.
         let appJournal = LocalStore.url("journal.jsonl")
-        let cliJournal = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".ihatecrypto/journal.jsonl")
+        let cliJournal = Helper.home.appending(path: ".ihatecrypto/journal.jsonl")
         // Off the main thread: every signature ever, a JSON line each.
         let files = [appJournal, cliJournal]
         journal = await Task.detached { files.flatMap { (try? Journal(url: $0).entries()) ?? [] } }.value
@@ -443,7 +444,8 @@ struct HistoryBubble: View {
     var body: some View {
         Group {
             if let step = bubble.routeStep {
-                RouteCard(step: step, state: .plain, width: 210)
+                // As tall as the canvas card less what the narrower picture gives back: its words are the same size.
+                RouteCard(step: step, state: .plain, width: 210, height: RouteCards.cardHeight - 140 * (RouteCards.cardWidth - 210) / 340)
             } else {
                 generic
             }

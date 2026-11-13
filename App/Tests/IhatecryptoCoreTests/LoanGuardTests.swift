@@ -55,6 +55,18 @@ import Testing
     #expect(WalletCommand.parse(LoanGuard(loan: "kamino").repayCommand(d("3.5"))) == .kaminoRepay(d("3.5")))
 }
 
+/// Kamino holds two loans, Backpack's against stocks and the main market's against SOL: the guard shows the riskier,
+/// and the repay it prepares for the SOL one names that market («borrow … against SOL then guard my loan» guarded Backpack's).
+@Test func loanGuardWatchesBothKaminoLoans() {
+    let d = { Decimal(string: $0)! }
+    let backpack = LoanGuard.Read(health: d("3.85"), debt: d("0.65")), sol = LoanGuard.Read(against: "SOL", health: d("1.4"), debt: 1)
+    #expect(LoanGuard.riskiest([backpack, sol]) == sol)
+    #expect(LoanGuard.riskiest([LoanGuard.Read(health: nil, debt: 0), LoanGuard.Read(against: "SOL", health: nil, debt: 0)]).health == nil)
+    let repay = LoanGuard(loan: "kamino").repayCommand(d("0.2"), against: "SOL")
+    #expect(repay == "repay 0.2 USDC on kamino against SOL")
+    #expect(WalletCommand.parse(repay) == .kaminoRepay(d("0.2"), against: "SOL"))
+}
+
 /// The forms as the router writes them land on the guard, in runCanonical's order, and its neighbours don't.
 @Test func loanGuardFormsReadAsTheGuard() {
     #expect(read("guard my loan on kamino") == .loanGuard(.set(loan: "kamino", network: nil, below: nil)))

@@ -63,7 +63,7 @@ public enum EIP712 {
         switch value {
         case .string(let s): return Keccak.hash256(Data(s.utf8))
         case .address(let a):
-            guard let bytes = Data(hex: a), bytes.count == 20 else { throw WalletError("Invalid address: \(a)") }
+            guard let bytes = Data(evmAddress: a) else { throw WalletError("Invalid address: \(a)") }
             return Data(count: 12) + bytes
         case .uint(let n): return Data(count: 24) + withUnsafeBytes(of: n.bigEndian) { Data($0) }
         case .bool(let b): return try encode(.uint(b ? 1 : 0))

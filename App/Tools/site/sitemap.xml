@@ -36,4 +36,22 @@
     <xhtml:link rel="alternate" hreflang="ru" href="https://ihatecrypto.ai/ru/manifesto/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://ihatecrypto.ai/manifesto/"/>
   </url>
+  <url><loc>https://ihatecrypto.ai/whats-new/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ihatecrypto.ai/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://ihatecrypto.ai/es/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://ihatecrypto.ai/ru/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ihatecrypto.ai/whats-new/"/>
+  </url>
+  <url><loc>https://ihatecrypto.ai/es/whats-new/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ihatecrypto.ai/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://ihatecrypto.ai/es/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://ihatecrypto.ai/ru/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ihatecrypto.ai/whats-new/"/>
+  </url>
+  <url><loc>https://ihatecrypto.ai/ru/whats-new/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ihatecrypto.ai/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://ihatecrypto.ai/es/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://ihatecrypto.ai/ru/whats-new/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ihatecrypto.ai/whats-new/"/>
+  </url>
 </urlset>

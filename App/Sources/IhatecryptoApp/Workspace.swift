@@ -7,6 +7,7 @@ import EVMChain
 import ExecutionCore
 import Foundation
 import GuardJev
+import HelperAPI
 import IhatecryptoCore
 import JupiterSwap
 import LLMCatalog
@@ -88,6 +89,12 @@ final class Workspace {
     @ObservationIgnored var holdingsLoading = false
     /// The scheduled buys' and tasks' run, beside the watch loop: one at a time, and a Touch ID left unanswered holds only it.
     @ObservationIgnored var scheduledRun: Task<Void, Never>?
+    /// followLimitOrders() beside the loop: 1Click slow to answer never holds up the stops and alerts.
+    @ObservationIgnored var limitFollow: Task<Void, Never>?
+    /// The wallet (its Solana address) whose limit orders the loop has read once since launch or the switch to it.
+    @ObservationIgnored var limitFollowed: String?
+    /// Orders that left the board, until the journal holds their payout as settled: id → ticks left to ask.
+    @ObservationIgnored var limitPayouts: [String: Int] = [:]
     /// Solana tokens a swap named, as Jupiter resolved them (TokensUI.solanaAsset): the card and the run read them again.
     @ObservationIgnored var spotAssets: [String: SpotAsset] = [:]
     /// Every token beyond the balances read one by one, Solana's first. Stock tokens the Robinhood card already shows
@@ -157,6 +164,10 @@ final class Workspace {
     var feeApproved: Bool?
     /// Seconds one Touch ID confirmation keeps signing open (the signer's setting).
     var sessionLength = SignerSession.standard
+    /// The person's limits as the signer keeps them (Settings › Wallet › Limits).
+    var limits = SignerLimits.standard
+    /// Trading rules saved by `saveRules`: a `loadSigner` that read the status before one leaves the limits alone.
+    var rulesSaves = 0
 
     // Execution
     var prepared: Executor.Prepared? {
@@ -524,6 +535,8 @@ final class Workspace {
     /// The running Jupiter DCA orders as last read, drawn on the canvas once asked for («show Jupiter DCA») or after one
     /// is placed or cancelled; nil = not shown.
     var jupiterDCAs: [JupiterRecurring.Order]?
+    /// This wallet's open limit orders on 1Click, on the canvas after «show limit orders» or a new one.
+    var limitOrderList: [Executor.LimitOrderView]?
     /// Models being downloaded into Ollama from the model menu: name → 0…1.
     var modelDownloads: [String: Double] = [:]
     /// Whether Ollama and LM Studio answered when the menu last asked (provider id → up), and the download sizes, GB,
@@ -550,7 +563,8 @@ final class Workspace {
     @ObservationIgnored var tasksTampered = TaskSeal.tasks(forKey: Workspace.scoped("tasks")).tampered
     /// A running task's steps after one that waits for Confirm, and the canvas it runs on: they go when that move is done.
     /// `brought`: networks the steps before delivered USDC to, so a step there waits for the money (runSteps).
-    var taskQueue: (canvas: UUID?, steps: [String], since: Date, brought: Set<String>)?
+    /// `confirmed`: Confirm was pressed on the card they wait behind — only then do they run (continueTask).
+    var taskQueue: (canvas: UUID?, steps: [String], since: Date, brought: Set<String>, confirmed: Bool)?
     /// While a confirmed chain runs, its steps after the one under way: drawn after its cards (Workspace.chainSteps).
     /// Only for the canvas; `taskQueue` is what runs.
     var chainAhead: (canvas: UUID?, steps: [String])?
@@ -920,7 +934,10 @@ final class Workspace {
 
     func useExistingLogin(_ id: String? = nil) {
         let id = id ?? providerID
-        guard let login = provider(id).existingLogin() else { llmStatus = "No sign-in found on this Mac."; return }
+        guard let login = provider(id).existingLogin() else {
+            llmStatus = "No sign-in found on this Mac."
+            return
+        }
         setCredential(login, for: id)
         llmStatus = "Connected."
     }
@@ -1213,7 +1230,7 @@ final class Workspace {
         let asksModel = !confirms && !declines && client != nil
         if let pending = pendingAllocation, !asksModel {
             pendingAllocation = nil
-            if confirms { await move(pending, confirmed: true); return }
+            if confirms { chainConfirmed(); await move(pending, confirmed: true); chainConfirmed(after: true); return }
             if declines {
                 allocationPreview = nil
                 rebalancePlan = nil
@@ -1230,7 +1247,9 @@ final class Workspace {
                 return
             }
             if confirms {
+                chainConfirmed()
                 await carryOut(pending)
+                chainConfirmed(after: true)
                 return
             }
         }
@@ -1390,6 +1409,8 @@ final class Workspace {
         if !positions.isEmpty || pendingEntry != nil, let command = PositionCommand.parse(text) {
             if let coin = targetCoin(for: text) {
                 switch command {
+                case .close(let share) where closeTooSmall(share, coin: coin):
+                    break
                 case .close, .cancelOrders:
                     // A close or a cancel can't be taken back: it waits for Confirm, as when a model reads it.
                     pendingAction = .position(command, coin: coin)
@@ -1397,7 +1418,19 @@ final class Workspace {
                     reply(say("“\(text)” for \(IntentParser.pretty(coin)): press Confirm to go ahead.",
                               "«\(text)» для \(IntentParser.pretty(coin)): нажми Confirm."))
                 default:
-                    await manage(command, coin: coin)
+                    // «Ask me» over the risk limit waits on a card; «Just warn» moves and says the loss.
+                    if let over = stopOverLimit(command, coin: coin) {
+                        if policy.limitMode == .ask {
+                            pendingAction = .position(command, coin: coin)
+                            pendingText = text
+                            reply(say("\(over) Press Confirm to move the stop.", "\(over) Нажми Confirm, чтобы переставить стоп."))
+                        } else {
+                            await manage(command, coin: coin)
+                            reply(over)
+                        }
+                    } else {
+                        await manage(command, coin: coin)
+                    }
                 }
             } else {
                 let open = positions.map { "\($0.size > 0 ? "long" : "short") \(IntentParser.pretty($0.coin))" }.joined(separator: ", ")
@@ -1636,11 +1669,21 @@ final class Workspace {
             let why = missing
                 ? (provider.info.id == "ollama" ? say("it isn't downloaded — run «ollama pull \(model)» in Terminal", "она не скачана — выполни в Терминале «ollama pull \(model)»")
                                                  : say("it isn't downloaded in \(provider.info.name)", "она не скачана в \(provider.info.name)"))
-                : String(failure.prefix(140))
+                : LLMFailure.words(failure)
+            // What happened in the person's words (no credits, too many requests, a key that didn't fit…), never the
+            // service's JSON: «NEAR AI: {"error":{"message":"No spending limit configured…» said nothing to do.
+            let known = missing ? nil : modelFailureWords(failure, provider: provider.info, model: model)
             // What reads the same without a model — a chart, a token, P/L — still shows; nothing that could move money.
             if typed == nil, said == nil, await readWithoutModel(text) {
-                reply(say("\(model) isn't answering (\(why)), so I read this one myself. Pick another model above for the rest.",
-                          "\(model) не отвечает (\(why)), поэтому это я прочитал сам. Для остального выбери другую модель сверху."), note: model)
+                reply(known.map { say("\(model) didn’t answer. \($0.why) So I read this one myself. \($0.fix)",
+                                      "\(model) не ответил. \($0.why) Поэтому это я прочитал сам. \($0.fix)",
+                                      "\(model) no respondió. \($0.why) Así que esto lo leí yo. \($0.fix)") }
+                      ?? say("\(model) isn't answering (\(why)), so I read this one myself. Pick another model above for the rest.",
+                             "\(model) не отвечает (\(why)), поэтому это я прочитал сам. Для остального выбери другую модель сверху."), note: model)
+            } else if let known {
+                reply(say("\(model) didn’t answer. \(known.why) \(known.fix) I didn’t act on this — nothing moved.",
+                          "\(model) не ответил. \(known.why) \(known.fix) Ничего не сделал — ничего не ушло.",
+                          "\(model) no respondió. \(known.why) \(known.fix) No hice nada: no se movió nada."), note: model)
             } else {
                 reply(say("I couldn’t reach \(model) (\(why)), so I didn’t act on this — nothing moved. Send it again, or pick another model above.",
                           "Не достучался до \(model) (\(why)), поэтому ничего не сделал — ничего не ушло. Отправь ещё раз или выбери другую модель сверху."), note: model)
@@ -1978,10 +2021,12 @@ final class Workspace {
             return true
         }
         if let coin = targetCoin(for: canonical), let command = PositionCommand.parse(canonical) {
+            if case .close(let share) = command, closeTooSmall(share, coin: coin, note: note) { return true }
             pendingAction = .position(command, coin: coin)
             pendingText = canonical
-            reply(say("Understood as “\(canonical)” for \(IntentParser.pretty(coin)). Press Confirm to go ahead.",
-                      "Понял как «\(canonical)» для \(IntentParser.pretty(coin)). Нажми Confirm."), note: note)
+            let over = stopOverLimit(command, coin: coin).map { " " + $0 } ?? ""
+            reply(say("Understood as “\(canonical)” for \(IntentParser.pretty(coin)).\(over) Press Confirm to go ahead.",
+                      "Понял как «\(canonical)» для \(IntentParser.pretty(coin)).\(over) Нажми Confirm."), note: note)
             return true
         }
         // «close ETH», «move stop to breakeven» with no such position: never a new plan («close ETH» names ETH).
@@ -2432,6 +2477,7 @@ final class Workspace {
     }
 
     func loadSigner() async {
+        let rulesAt = rulesSaves
         guard SignerClient.isAvailable, let status = try? await SignerClient().send(.status) else { return }
         AppLock.shared.update(codeSet: status.codeSet == true)
         if tasksTampered {
@@ -2478,6 +2524,18 @@ final class Workspace {
         agentAddress = onLedger ? agent?.agentAddress : status.agentAddress
         agentActive = onLedger ? agent?.agentActive ?? false : status.agentActive ?? false
         sessionLength = status.sessionLength ?? SignerSession.standard
+        if rulesAt == rulesSaves { limits = status.limits ?? .standard }
+        // The signer's trading rules are the ones in force: the app's own copy only follows them. A save that went in
+        // after this status was read has the newer ones already.
+        if rulesAt == rulesSaves, let t = limits.trading {
+            var p = policy
+            p.take(t)
+            if p != policy { policy = p }
+        } else if rulesAt == rulesSaves, status.limits != nil, policy.maxLeverage > Decimal(limits.leverageCap) {
+            // Rules saved before the signer kept them (a style's 10×): the trading key's cap is what holds, so the screen
+            // and the plans say it until the person saves theirs.
+            policy.maxLeverage = Decimal(limits.leverageCap)
+        }
         confirmedAddresses = (try? await SignerClient().send(.addressBook))?.addresses ?? confirmedAddresses
         // NEAR's balance is read with Solana's.
         if nearChanged { await loadSolana() }
@@ -2526,4 +2584,40 @@ nonisolated enum Keychain {
         known.withLock { $0[account] = added ? .some(credential) : nil }
     }
 
+}
+
+extension RiskPolicy {
+    /// The limits the signer keeps (SignerLimits.trading).
+    var tradingRules: TradingRules {
+        TradingRules(riskPct: maxRiskPct, openRiskPct: maxOpenRiskPct, minRewardRisk: minRewardRisk,
+                     leverage: NSDecimalNumber(decimal: maxLeverage).intValue, overLimit: (overLimit ?? .block).rawValue)
+    }
+
+    /// The signer's limits in place of these, with the rules that hang on them kept in line.
+    mutating func take(_ t: TradingRules) {
+        (maxRiskPct, maxOpenRiskPct, minRewardRisk, maxLeverage) = (t.riskPct, t.openRiskPct, t.minRewardRisk, Decimal(t.leverage))
+        overLimit = OverLimit(rawValue: t.overLimit)
+        defaultRiskPct = min(defaultRiskPct, maxRiskPct)
+        defaultRewardRisk = max(defaultRewardRisk, minRewardRisk)
+    }
+}
+
+extension Workspace {
+    /// A new policy whose limits changed: the signer keeps them and asks for the person on any change (Touch ID or
+    /// the Mac's password, the passcode where it signs). In force only once the signer took them. nil = saved, else why not.
+    func saveRules(_ p: RiskPolicy) async -> String? {
+        var wanted = limits
+        wanted.trading = p.tradingRules
+        if wanted.trading != limits.trading {
+            do {
+                let reply = try await SignerClient().send(.setLimits(limits: wanted))
+                guard reply.ok else { return reply.error ?? "The signer didn't take the new limits." }
+                // What the signer saved, at once: a status read before it must not bring the old rules back.
+                rulesSaves += 1
+                limits = reply.limits ?? wanted
+            } catch { return error.localizedDescription }
+        }
+        policy = p
+        return nil
+    }
 }

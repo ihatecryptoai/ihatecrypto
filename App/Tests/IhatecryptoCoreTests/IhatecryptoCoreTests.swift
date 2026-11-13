@@ -125,8 +125,8 @@ private func intent(risk: String = "10", stop: String = "3", lev: String? = nil)
 }
 
 @Test func leverageAboveMarketMaxIsBlocked() {
-    // ETH allows 25×; the signer takes at most 20× (HLGuard), so the plan says 20×.
-    #expect(Plan.evaluate(intent(lev: "50"), market: eth).problem?.contains("20×") == true)
+    // ETH allows 25×, under the signer's 50× (HLGuard): the plan says the market's 25×.
+    #expect(Plan.evaluate(intent(lev: "50"), market: eth).problem?.contains("25×") == true)
 }
 
 @Test func liquidationBeforeStopIsBlocked() {
@@ -497,4 +497,54 @@ func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
         #expect(IntentParser.apply(plan.command, to: TradeIntent(), markets: markets) == plan, "\(plan.command)")
     }
     #expect(a.command == "long SOL risk $0.295 stop 3% take 6% leverage 2x")
+}
+
+@Test func overLimitBlocksAsksOrWarnsAsTheUserSet() throws {
+    var i = TradeIntent()
+    i.riskUSD = 10; i.stopPct = 3; i.takePct = 6; i.leverage = 2
+    let s = try #require(Plan.evaluate(i, market: eth).sizing)
+    var p = RiskPolicy()
+    #expect(RiskRules.check(i, s, market: eth, equity: 200, policy: p).contains { $0.level == .block && $0.overLimit })  // 5% > 2%
+    p.overLimit = .ask
+    let asked = RiskRules.check(i, s, market: eth, equity: 200, policy: p)
+    #expect(!asked.contains { $0.level == .block })
+    #expect(asked.contains { $0.overLimit && $0.level == .warn && $0.text.contains("accept the loss") })
+    p.overLimit = .warn
+    #expect(RiskRules.check(i, s, market: eth, equity: 200, policy: p).contains { $0.overLimit && $0.level == .warn && !$0.text.contains("accept") })
+    // All positions together follows the same setting.
+    p.maxRiskPct = 10
+    #expect(RiskRules.check(i, s, market: eth, equity: 200, policy: p, openRisk: 10).contains { $0.overLimit && $0.text.contains("all positions together") })
+    // No limit: nothing over it.
+    var free = RiskPolicy()
+    free.maxRiskPct = RiskPolicy.noLimit; free.maxOpenRiskPct = RiskPolicy.noLimit
+    let none = RiskRules.check(i, s, market: eth, equity: 200, policy: free, openRisk: 100)
+    #expect(!none.contains { $0.overLimit })
+    #expect(none.contains { $0.text.contains("no limit set") })
+}
+
+@Test func riskLimitStepsGoPastTenToNoLimit() {
+    #expect(RiskPolicy.step(10, in: RiskPolicy.riskSteps, up: true) == 15)
+    #expect(RiskPolicy.step(50, in: RiskPolicy.riskSteps, up: true) == RiskPolicy.noLimit)
+    #expect(RiskPolicy.step(RiskPolicy.noLimit, in: RiskPolicy.riskSteps, up: true) == nil)
+    #expect(RiskPolicy.step(RiskPolicy.noLimit, in: RiskPolicy.riskSteps, up: false) == 50)
+    #expect(RiskPolicy.step(Decimal(string: "0.5")!, in: RiskPolicy.riskSteps, up: false) == nil)
+    #expect(RiskPolicy.step(2, in: RiskPolicy.riskSteps, up: true) == Decimal(string: "2.5")!)
+}
+
+@Test func aPolicySavedBeforeOverLimitStillDecodes() throws {
+    var old = RiskPolicy()
+    old.maxRiskPct = 5
+    let json = try #require(String(data: JSONEncoder().encode(old), encoding: .utf8))
+    #expect(!json.contains("overLimit"))
+    let back = try JSONDecoder().decode(RiskPolicy.self, from: Data(json.utf8))
+    #expect(back.maxRiskPct == 5 && back.limitMode == .block)
+}
+
+@Test func leverageAboveTwentyIsAPlanWhenTheMarketAllowsIt() {
+    var i = TradeIntent()
+    i.riskUSD = 5; i.stopPct = 1; i.leverage = 40
+    let btc = Market(name: "BTC", markPx: 100_000, szDecimals: 5, maxLeverage: 40)
+    #expect(Plan.evaluate(i, market: btc).problem == nil)
+    i.leverage = 41
+    #expect(Plan.evaluate(i, market: btc).problem?.contains("1× to 40×") == true)
 }

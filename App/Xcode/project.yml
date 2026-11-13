@@ -48,6 +48,7 @@ targets:
         product: IhatecryptoKit
       - package: Sparkle
       - target: IhatecryptoSigner
+      - target: IhatecryptoHelper
     # Xcode writes the build Mac's macOS build into Info.plist; without it a release rebuilds byte for byte on any Mac
     # with the same Xcode (verify-release.sh). The phase runs before code signing, after Xcode writes the file.
     postBuildScripts:
@@ -55,6 +56,41 @@ targets:
         script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
         # The written Info.plist as an input: the phase runs after Xcode writes it (without it, on GitHub's Mac it ran first).
         inputFiles: [$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)]
+        basedOnDependencyAnalysis: false
+      # The App Sandbox's two files, named for this copy. Keep running's launch agent (KeepRunning in Tasks.swift),
+      # registered with SMAppService: this app's own binary at login and every minute. And the container migration:
+      # on the first sandboxed launch macOS moves this copy's data folder (Flavor.folder), settings and web data into
+      # its container, so an update from a copy before the sandbox keeps its chats, canvases and settings. The dApp
+      # browser's data has another place in a container: WebKit/WebsiteData, not WebKit/<bundle id>/WebsiteData.
+      - name: Launch agent and container migration
+        script: |
+          agents="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library/LaunchAgents"
+          mkdir -p "$agents"
+          cat > "$agents/$PRODUCT_BUNDLE_IDENTIFIER.agent.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>Label</key><string>$PRODUCT_BUNDLE_IDENTIFIER.agent</string>
+          <key>BundleProgram</key><string>Contents/MacOS/$EXECUTABLE_NAME</string>
+          <key>ProgramArguments</key><array><string>$EXECUTABLE_NAME</string><string>--keep-running-check</string></array>
+          <key>RunAtLoad</key><true/>
+          <key>StartInterval</key><integer>60</integer>
+          <key>ProcessType</key><string>Background</string>
+          <key>AssociatedBundleIdentifiers</key><array><string>$PRODUCT_BUNDLE_IDENTIFIER</string></array>
+          </dict></plist>
+          EOF
+          case $PRODUCT_BUNDLE_IDENTIFIER in app.ihatecrypto.mac) folder=ihatecrypto;; app.ihatecrypto.mac.metal) folder=ihatecrypto-metal;; *) folder=ihatecrypto-dev;; esac
+          cat > "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/container-migration.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict><key>Move</key><array>
+          <string>\${ApplicationSupport}/$folder</string>
+          <string>\${Library}/Preferences/\${BundleId}.plist</string>
+          <array><string>\${Library}/WebKit/\${BundleId}/WebsiteData</string><string>\${Library}/WebKit/WebsiteData</string></array>
+          <string>\${Library}/HTTPStorages/\${BundleId}</string>
+          <string>\${Library}/HTTPStorages/\${BundleId}.binarycookies</string>
+          </array></dict></plist>
+          EOF
         basedOnDependencyAnalysis: false
     settings:
       base:
@@ -70,7 +106,7 @@ targets:
         SPARKLE_FEED_URL: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
-        # The chat's microphone: speech becomes text in the field, which the person reads and sends.
+        # In the App Sandbox (the file says what each entitlement is for); the signer and the helper are its XPC services.
         CODE_SIGN_ENTITLEMENTS: ihatecrypto.entitlements
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "After you click the chat's microphone, ihatecrypto listens and types what you say into the field. Nothing is sent until you send it."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "What you say in the chat becomes text in its field, recognized on this Mac when your language's model is installed."
@@ -113,3 +149,33 @@ targets:
         # No get-task-allow in any configuration: a Debug signer shares the Release Keychain group, so a debugger attached
         # to it could read the address book, approved addresses and opened keys. Only the app stays debuggable.
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  # Outside the App Sandbox, no entitlements: what the sandboxed app can't do itself, each thing fixed in its code
+  # (Sources/Helper: run Claude Code with no tools, install it, open its sign-in, remove the pre-sandbox Keep running
+  # agent). It takes only the app it's built into as a caller, checked by code signature like the signer.
+  IhatecryptoHelper:
+    type: xpc-service
+    platform: macOS
+    sources: [../Sources/Helper/Service]
+    info:
+      path: Helper-Info.plist
+      properties:
+        # Without it launchd doesn't take the bundle as the app's service («failed lookup … No such process»). In the
+        # app's security session: Claude Code reads its login from the user's Keychain, which a new session can't open
+        # («Not logged in», CSSMERR_CSP_NO_USER_INTERACTION).
+        XPCService:
+          ServiceType: Application
+          JoinExistingSession: true
+    dependencies:
+      - package: ihatecrypto
+        product: IhatecryptoHelperKit
+    postBuildScripts:
+      - name: Info.plist without the build Mac's macOS
+        script: /usr/libexec/PlistBuddy -c "Delete :BuildMachineOSBuild" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+        inputFiles: [$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)]
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_ID).helper
+        PRODUCT_NAME: Helper
+        PRODUCT_MODULE_NAME: IhatecryptoHelper
+        GENERATE_INFOPLIST_FILE: NO

@@ -20,6 +20,7 @@ dependencies point inward: chains and protocols know nothing about the window or
 | `Execution`, `Execution/Trade` | The write-before-send journal; running an approved plan |
 | `Guard/Core`, `Guard/Jev` | The transaction guard and injection screening; the optional Jev classifier |
 | `Signer/API`, `Signer/Service` | The XPC protocol and the signing process |
+| `Helper/API`, `Helper/Service` | The XPC service outside the App Sandbox: runs Claude Code for the sandboxed app |
 
 The Windows app is `App/Windows` (not part of the Swift package): the window in `app` (Tauri) and the engine and signer
 in `rust`, a Cargo workspace that ports the core above ([docs/windows.md](docs/windows.md)).
@@ -50,8 +51,10 @@ The signer self-test needs a Debug build and `open`: launched directly, the app 
 ## Two copies of the app
 
 `build-app.sh` makes «ihatecrypto Dev.app» (bundle id `app.ihatecrypto.mac.dev`). It has its own Keychain group and
-wallets, settings, model logins, data folder (`~/Library/Application Support/ihatecrypto-dev`) and debug API port
-(51790). An installed ihatecrypto.app uses `app.ihatecrypto.mac`, `Application Support/ihatecrypto` and port 51789.
+wallets, settings, model logins, data folder (`Application Support/ihatecrypto-dev` in its App Sandbox container,
+`~/Library/Containers/app.ihatecrypto.mac.dev/Data/Library/…`) and debug API port (51790). An installed ihatecrypto.app
+uses `app.ihatecrypto.mac`, `Application Support/ihatecrypto` (in its container once it runs a sandboxed release) and
+port 51789.
 Build, test and run only the Dev copy. Never replace, quit or drive an installed ihatecrypto.app unless the user asks.
 
 ## Debug API and UI tests
@@ -75,8 +78,8 @@ canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that on
    review the window after each one. Green writes `App/.build/done/summary.json`. A change that none of this covers
    (docs, the site): `App/done.sh --skip "why"`. The Stop hook in `.claude/settings.json` reminds you while App/Sources
    or App/Tests changed after the last green.
-3. Have the diff reviewed by a fresh eye: a new subagent given only your diff and the plan, and Codex too when it's
-   installed (`codex review --uncommitted`; in a shared checkout tell it which files are yours). Fix what you confirm.
+3. Have the diff reviewed by a fresh eye: a new subagent given only your diff and the plan (in a shared checkout tell
+   it which files are yours). Fix what you confirm.
 4. Commit only your own files.
 
 ## Conventions
@@ -90,6 +93,9 @@ canvas shows. `IHATECRYPTO_APP=work` points it at the installed app; use that on
   `SolanaGuard.knownPrograms`, and balance rules for the simulation check.
 - The chat model rewrites a request as one English form (`ChatRouter.forms` in `IhatecryptoCore/Normalize.swift`);
   code parses the form. A new command gets a form there and parser tests in English and Russian.
+- UI text is never cut with «…»: shorten the words first (drop what a header or color already says), else let it take a
+  second line. Look for «…» in every screenshot of a change. The one exception is a canvas's name in the rail: one
+  line that runs past like a ticker under the pointer (the owner's pick).
 - UI text never says «Touch ID» directly: use `Presence.name`, `Presence.short` and `Presence.icon`, since a Mac
   without Touch ID asks for its password.
 - Launch flags that drive the app (`-signerSelfTest`, `-openBrowser`) stay inside `#if DEBUG`.

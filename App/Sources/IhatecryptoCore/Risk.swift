@@ -15,6 +15,40 @@ public struct RiskPolicy: Codable, Sendable, Equatable {
     public var atrStopMultiple: Decimal = Decimal(string: "1.5")!
     /// All open positions together may lose at most this share of capital at their stops ("portfolio heat").
     public var maxOpenRiskPct: Decimal = 6
+    /// What a plan over the risk limits gets. Optional: a saved policy from before it decodes (nil = block).
+    public var overLimit: OverLimit?
+
+    public enum OverLimit: String, Codable, Sendable, CaseIterable {
+        /// Not executed, as before.
+        case block
+        /// Executed only after the user ticks that they accept the loss at the stop, in the sheet.
+        case ask
+        /// A warning line only.
+        case warn
+    }
+
+    public var limitMode: OverLimit { Self.limitModeTest?() ?? overLimit ?? .block }
+    /// The Dev copy's uitest «Over a limit» (`overLimitTest`, read at each check), set by the app's debug build only.
+    nonisolated(unsafe) public static var limitModeTest: (() -> OverLimit?)?
+
+    /// «No limit»: a share of capital no stop reaches.
+    // ponytail: a sentinel instead of an Optional limit, so every `pct > maxRiskPct` stays as it is.
+    public static let noLimit: Decimal = 1000
+
+    /// The steps of the per-trade limit in Settings: half a percent up to 10, then 15, 25, 50 and no limit.
+    public static let riskSteps: [Decimal] = (1...20).map { Decimal($0) / 2 } + [15, 25, 50, noLimit]
+    /// The steps of the leverage limit: up to 10 one by one, then to 50×, the most any Hyperliquid market gives.
+    public static let leverageSteps: [Decimal] = (1...10).map { Decimal($0) } + [15, 20, 25, 30, 40, 50]
+    /// The steps of the limit for all open positions together.
+    public static let openRiskSteps: [Decimal] = (1...30).map { Decimal($0) } + [50, 100, noLimit]
+
+    /// The next step from `value` in `steps`, up or down; nil past the ends.
+    public static func step(_ value: Decimal, in steps: [Decimal], up: Bool) -> Decimal? {
+        up ? steps.first { $0 > value } : steps.last { $0 < value }
+    }
+
+    /// «5%», or «no limit».
+    public static func limit(_ pct: Decimal) -> String { pct >= noLimit ? "no limit" : Fmt.pct(pct) }
 
     public init() {}
 }
@@ -23,10 +57,13 @@ public struct Advice: Sendable, Equatable {
     public enum Level: Sendable { case ok, warn, block }
     public let level: Level
     public let text: String
+    /// A risk limit is broken (per trade or all positions together), whatever `level` the policy gives it.
+    public var overLimit = false
 
-    public init(_ level: Level, _ text: String) {
+    public init(_ level: Level, _ text: String, overLimit: Bool = false) {
         self.level = level
         self.text = text
+        self.overLimit = overLimit
     }
 }
 
@@ -37,14 +74,23 @@ public enum RiskRules {
                              openRisk: Decimal? = 0) -> [Advice] {
         var out: [Advice] = []
         let long = i.side == .long
+        // A broken limit: stops the plan, asks before signing, or only warns, as the user set it.
+        func over(_ text: String, _ limit: String, then: String = "") -> Advice {
+            switch p.limitMode {
+            case .block: Advice(.block, text + " Rule: " + limit + then, overLimit: true)
+            case .ask: Advice(.warn, text + " Over your limit: " + limit + " The sheet asks you to accept the loss before signing.", overLimit: true)
+            case .warn: Advice(.warn, text + " Over your limit: " + limit, overLimit: true)
+            }
+        }
 
         if let equity, equity > 0 {
             if let open = openRisk {
                 let total = (open + s.lossAtStopUSD) / equity * 100
                 if open > 0, total > p.maxOpenRiskPct {
-                    out.append(Advice(.block, "With open positions, −\(Fmt.usd(open + s.lossAtStopUSD)) at the stops: \(Fmt.pct(total.rounded(1, .plain))) of capital. Rule: all positions together at most \(Fmt.pct(p.maxOpenRiskPct))."))
+                    out.append(over("With open positions, −\(Fmt.usd(open + s.lossAtStopUSD)) at the stops: \(Fmt.pct(total.rounded(1, .plain))) of capital.",
+                                    "all positions together at most \(Fmt.pct(p.maxOpenRiskPct))."))
                 } else if open > 0 {
-                    out.append(Advice(.ok, "All positions together: \(Fmt.pct(total.rounded(1, .plain))) of capital at the stops, limit \(Fmt.pct(p.maxOpenRiskPct))."))
+                    out.append(Advice(.ok, "All positions together: \(Fmt.pct(total.rounded(1, .plain))) of capital at the stops, limit \(RiskPolicy.limit(p.maxOpenRiskPct))."))
                 }
             } else {
                 out.append(Advice(.warn, "An open position has no stop: total risk is unlimited."))
@@ -56,9 +102,12 @@ public enum RiskRules {
             let pct = s.lossAtStopUSD / equity * 100
             if pct > p.maxRiskPct {
                 let allowed = (equity * p.maxRiskPct / 100).rounded(2, .down)
-                out.append(Advice(.block, "At the stop −\(Fmt.usd(s.lossAtStopUSD)): \(Fmt.pct(pct.rounded(1, .plain))) of \(Fmt.usd(equity)) capital. Rule: at most \(Fmt.pct(p.maxRiskPct)) per trade, i.e. up to \(Fmt.usd(allowed)). Lower the risk or top up; the limit is in Settings."))
+                out.append(over("At the stop −\(Fmt.usd(s.lossAtStopUSD)): \(Fmt.pct(pct.rounded(1, .plain))) of \(Fmt.usd(equity)) capital.",
+                                "at most \(Fmt.pct(p.maxRiskPct)) per trade, i.e. up to \(Fmt.usd(allowed)).",
+                                then: " Lower the risk or top up; the limit is in Settings."))
             } else {
-                out.append(Advice(.ok, "Risk \(Fmt.pct(pct.rounded(1, .plain))) of capital, within \(Fmt.pct(p.maxRiskPct))."))
+                out.append(Advice(.ok, p.maxRiskPct >= RiskPolicy.noLimit ? "Risk \(Fmt.pct(pct.rounded(1, .plain))) of capital, no limit set."
+                                  : "Risk \(Fmt.pct(pct.rounded(1, .plain))) of capital, within \(Fmt.pct(p.maxRiskPct))."))
             }
             if s.margin > equity / 2 {
                 out.append(Advice(.warn, "Margin takes \(Fmt.pct((s.margin / equity * 100).rounded(0, .plain))) of capital: little is left for other trades."))

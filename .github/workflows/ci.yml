@@ -4,16 +4,31 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push stops the run of the one before it on the same branch: its result no longer matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    # A macOS minute costs ten Linux ones, and every commit to main has passed App/done.sh on the Mac before it: a push
+    # is checked again only in the public repository, where the minutes are free. Pull requests and Run workflow
+    # everywhere.
+    if: github.repository == 'ihatecryptoai/ihatecrypto' || github.event_name != 'push'
     # Xcode 27: the app reaches macOS 27 APIs (Private Cloud Compute) behind #available, so it needs that SDK.
     runs-on: xcode-27
     defaults:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build
         run: swift build --build-tests
       - name: Test

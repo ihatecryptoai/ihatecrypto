@@ -1199,43 +1199,46 @@ extension Workspace {
         return named.first(where: fits) ?? named.first ?? ownWallet(key) ?? multisigEntry(key, network: network) ?? near.first(where: fits) ?? near.first
     }
 
-    /// `quiet`: a step of a chain — its card shows, and a confirmed chain signs it at once: no «Sign it» line.
-    func prepareTransfer(_ amount: Decimal, to name: String, network: String? = nil, note: String? = nil, quiet: Bool = false) {
+    /// The saved address a plain USDC transfer goes to, on the network it will use; throws why it can't, in the chat's
+    /// words. It reads no balance, so a chain asks it of a later step before its first card (Workspace.unrunnableStep).
+    func transferRecipient(_ amount: Decimal, to name: String, network: String?) throws -> SavedAddress {
         let key = name.lowercased()
         // «test wallet» saved on Base and on Solana, «send 3 USDC to test wallet on Solana»: the Solana entry, not the first.
         guard var entry = savedEntry(name, network: network) else {
-            reply("There’s no “\(name)” in Addresses. Add it there first (the book button in the rail), then send by its name."
-                  + (key.contains("solana") || key.contains("солан") ? " To bring money to your own Solana wallet, say “withdraw \(Fmt.num(amount)) USDC to Solana”." : ""), note: note)
-            return
+            throw ExecutionError("There’s no “\(name)” in Addresses. Add it there first (the book button in the rail), then send by its name."
+                + (key.contains("solana") || key.contains("солан") ? " To bring money to your own Solana wallet, say “withdraw \(Fmt.num(amount)) USDC to Solana”." : ""))
         }
         guard entry.network != .near else {
-            reply("“\(entry.name)” is a NEAR account: ihatecrypto sends it NEAR, not USDC — e.g. “send 0.1 NEAR to \(entry.name)”.", note: note)
-            return
+            throw ExecutionError("“\(entry.name)” is a NEAR account: ihatecrypto sends it NEAR, not USDC — e.g. “send 0.1 NEAR to \(entry.name)”.")
         }
         // Bitcoin, TRON, Sui…: NEAR Intents pays out there, in the coin named.
         if let assets = OneClick.Asset.across[entry.network.rawValue] {
             let usdc = assets.contains { $0.symbol == "USDC" }
-            reply(say("“\(entry.name)” is a \(entry.network.title) address: NEAR Intents delivers there — say “send \(usdc ? "\(Fmt.num(amount)) USDC on \(entry.network.rawValue)" : "<amount> \(assets[0].symbol)") to \(entry.name)”.",
-                      "«\(entry.name)» — адрес в \(entry.network.title): туда доставляет NEAR Intents — скажи «send \(usdc ? "\(Fmt.num(amount)) USDC on \(entry.network.rawValue)" : "<сумма> \(assets[0].symbol)") to \(entry.name)»."), note: note)
-            return
+            throw ExecutionError(say("“\(entry.name)” is a \(entry.network.title) address: NEAR Intents delivers there — say “send \(usdc ? "\(Fmt.num(amount)) USDC on \(entry.network.rawValue)" : "<amount> \(assets[0].symbol)") to \(entry.name)”.",
+                                     "«\(entry.name)» — адрес в \(entry.network.title): туда доставляет NEAR Intents — скажи «send \(usdc ? "\(Fmt.num(amount)) USDC on \(entry.network.rawValue)" : "<сумма> \(assets[0].symbol)") to \(entry.name)»."))
         }
-        do { try requireConfirmed(entry) } catch { reply(error.localizedDescription, note: note); return }
+        try requireConfirmed(entry)
         // The network the message names wins, Ethereum mainnet too (the user's call, 2026-10-01: «мне пофиг что дорого»).
         // A 0x address saved on one EVM network is the same address on another; the card says it was saved elsewhere.
         if let net = network.flatMap(AddressCheck.Network.init(rawValue:)), net != entry.network {
             let evm: Set<AddressCheck.Network> = [.base, .arbitrum, .ethereum, .polygon, .robinhood, .tempo, .hyperliquid, .hyperevm, .optimism, .bnb]
             guard evm.contains(net), evm.contains(entry.network) else {
-                reply(say("“\(entry.name)” is a \(entry.network.title) address: it can't receive on \(net.title).",
-                          "«\(entry.name)» — адрес в \(entry.network.title), в \(net.title) он получить не может."), note: note)
-                return
+                throw ExecutionError(say("“\(entry.name)” is a \(entry.network.title) address: it can't receive on \(net.title).",
+                                         "«\(entry.name)» — адрес в \(entry.network.title), в \(net.title) он получить не может."))
             }
             entry.network = net
         }
         if !entry.memo.isEmpty, entry.network == .solana {
-            reply("“\(entry.name)” needs a memo / tag, and ihatecrypto can’t add one to a Solana transfer yet — send it from the exchange’s app instead.", note: note)
-            return
+            throw ExecutionError("“\(entry.name)” needs a memo / tag, and ihatecrypto can’t add one to a Solana transfer yet — send it from the exchange’s app instead.")
         }
-        if let off = transferRefusal(entry) { reply(off, note: note); return }
+        if let off = transferRefusal(entry) { throw ExecutionError(off) }
+        return entry
+    }
+
+    /// `quiet`: a step of a chain — its card shows, and a confirmed chain signs it at once: no «Sign it» line.
+    func prepareTransfer(_ amount: Decimal, to name: String, network: String? = nil, note: String? = nil, quiet: Bool = false) {
+        let entry: SavedAddress
+        do { entry = try transferRecipient(amount, to: name, network: network) } catch { reply(error.localizedDescription, note: note); return }
         // Not inside a chain: a step before it may have just brought the money.
         if !quiet, let short = transferShortfall(entry.network.rawValue, amount) {
             reply(short, note: note)

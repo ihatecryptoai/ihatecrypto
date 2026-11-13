@@ -26,7 +26,7 @@ struct DebugBadge: View {
 
 /// A local door for driving ihatecrypto from a terminal, e.g. Claude Code with curl:
 ///
-///     T=$(cat ~/Library/Application\ Support/ihatecrypto/debug-token)
+///     T=$(cat ~/Library/Containers/app.ihatecrypto.mac/Data/Library/Application\ Support/ihatecrypto/debug-token)
 ///     curl -s -H "Authorization: Bearer $T" 127.0.0.1:51789/state
 ///     curl -s -H "Authorization: Bearer $T" -d '{"text":"выведи всё из Aave"}' 127.0.0.1:51789/send
 ///     curl -s -H "Authorization: Bearer $T" 127.0.0.1:51789/screenshot -o ihatecrypto.png
@@ -203,8 +203,20 @@ final class DebugAPI {
                 await SignerClient.$untrusted.withValue(true) { await ws.send("cancel") }
             }
             return (200, "application/json", json(state(ws, since: before)))
+        case ("POST", "/tamper"):
+            // The attack drill (Tamper.swift): {"kind":"payee"|"amount"|"relay"} changes the next signature request on its
+            // way to the signer; {"kind":"off"} disarms. /restore disarms too, so a drill never outlives its run.
+            let kind = ((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["kind"] as? String ?? ""
+            guard kind == "off" || Tamper.Kind(rawValue: kind) != nil else {
+                return (400, "text/plain", Data("kind: \(Tamper.Kind.allCases.map(\.rawValue).joined(separator: ", ")) or off\n".utf8))
+            }
+            Tamper.arm(Tamper.Kind(rawValue: kind))
+            return (200, "application/json", json(tamperState()))
+        case ("GET", "/tamper"):
+            return (200, "application/json", json(tamperState()))
         case ("POST", "/restore"):
             guard !ws.busy, !ws.executing else { return (409, "text/plain", Data("busy\n".utf8)) }
+            Tamper.arm(nil)
             let back = (((try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any])?["canvas"] as? String).flatMap(UUID.init(uuidString:))
             if let before = providerBefore { ws.providerID = before; providerBefore = nil }
             if let id = ws.canvasID, testCanvases.contains(id) { ws.newCanvas() }
@@ -357,6 +369,11 @@ final class DebugAPI {
         }
     }
 
+    private func tamperState() -> [String: Any] {
+        let s = Tamper.status
+        return ["armed": s.armed?.rawValue ?? NSNull(), "changed": s.did ?? NSNull(), "signer": s.signer ?? NSNull()]
+    }
+
     private func dropTestTasks(_ ws: Workspace) {
         // A loan guard a test message set (every one sent here is untrusted) would watch the Dev wallet's loan for real.
         let tests = ws.loanGuards.filter { $0.untrusted == true }
@@ -423,7 +440,7 @@ final class DebugAPI {
     /// running and its step, finished ones, and the other boards.
     private func boards(_ ws: Workspace, _ canvas: CanvasSession?) -> [String: Any] {
         func steps(_ bubbles: [ActivityBubble]) -> [[String: Any]] {
-            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines] as [String: Any] }
+            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines, "wholeAddress": $0.address != nil] as [String: Any] }
         }
         var out: [String: Any] = [:]
         switch ws.pendingAction {
@@ -484,6 +501,10 @@ final class DebugAPI {
                            "steps": steps(ws.planRoute(StudioNode.build(ws)).steps)] as [String: Any]
         }
         if ws.showReceive { out["receive"] = true }
+        if let orders = ws.limitOrderList, !orders.isEmpty {
+            out["limitOrders"] = orders.map { ["id": $0.id, "sell": $0.sell, "coin": $0.coin, "price": NSDecimalNumber(decimal: $0.price).doubleValue, "status": $0.status,
+                                              "market": $0.market.map { NSDecimalNumber(decimal: $0).doubleValue } ?? NSNull()] as [String: Any] }
+        }
         // «Add block» in the top right corner, off the chat: past the column the canvas fits its boards in, so never on a
         // board's × (Studio, variant A).
         if let width = NSApp.windows.first(where: { $0.title == AppMain.mainTitle })?.contentView?.bounds.width, ws.addBlockFrame != .zero {

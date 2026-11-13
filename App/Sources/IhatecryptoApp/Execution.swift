@@ -29,7 +29,13 @@ nonisolated struct XPCTradeSigner: TradeSigner {
     var asWallet: String?
 
     private func send(_ request: SignerRequest) async throws -> SignerReply {
+        #if DEBUG_API
+        let changed = Tamper.apply(request)
+        let reply = try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: changed ?? request) } ?? changed ?? request)
+        return try Tamper.judged(reply, request: request, changed: changed != nil)
+        #else
         try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: request) } ?? request)
+        #endif
     }
 
     /// Counts the signature while the signer has it: Touch ID or the password may be up, and the canvas says so.
@@ -235,6 +241,7 @@ extension Workspace {
         case "near": "https://nearblocks.io/txns/\(e.id)"
         case "relay": "Relay order \(e.id)"
         case "1click": "1Click deposit \(e.id)"
+        case "1click-order": "1Click limit order \(e.id) (say «show limit orders»)"
         case "x402": "x402 payment to \(e.note), signed and maybe still settling (authorization \(e.id.prefix(10))…)"
         case "layerzero": "https://layerzeroscan.com/tx/\(e.id)"
         case "cctp": TransitDetails.links(e).first?.url.absoluteString ?? "CCTP \(e.id)"
@@ -477,6 +484,16 @@ extension Workspace {
     /// `confirm`: a model read the message, so the new orders wait on a card for Confirm, like any other model reading
     /// that touches a position. Every chat message goes through the model, so a typed «stop 2%» waits too; only the
     /// no-model path (`confirm: false`) moves them at once.
+    /// «stop at $X» past the per-trade limit, in «Ask me» or «Just warn»: the sentence its card or reply says. nil when it's
+    /// within the limit, when it isn't a stop move, or in «Block» (the executor refuses it there).
+    func stopOverLimit(_ command: PositionCommand, coin: String) -> String? {
+        guard policy.limitMode != .block, case .stopTo(let stop) = command,
+              let p = positions.first(where: { $0.coin == coin && $0.size != 0 }), let equity, equity > 0 else { return nil }
+        let loss = max(0, p.size > 0 ? p.entry - stop : stop - p.entry) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
+        guard loss / equity * 100 > policy.maxRiskPct else { return nil }
+        return "A stop at \(Fmt.price(stop)) means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct))."
+    }
+
     func editExecuted(from before: TradeIntent, to next: TradeIntent, confirm: Bool = false) async -> Bool {
         guard let p = positions.first(where: { $0.coin == before.asset }) else { return false }
         var same = next
@@ -486,28 +503,33 @@ extension Workspace {
         let dir: Decimal = long ? 1 : -1
         let resolvedNext = Plan.resolve(next, market: market, equity: equity, policy: policy).intent
         var moves: [PositionCommand] = []
+        var overLimit = ""
         if let stopPct = resolvedNext.stopPct, stopPct != before.stopPct {
             let stop = p.entry * (1 - dir * stopPct / 100)
             // A wider stop may not break the per-trade limit. A hedge's stop loses what the coins it covers gain.
             let loss = abs(p.entry - stop) * abs(p.size) + abs(p.size) * (p.entry + stop) * RiskCalc.tradeFee
             if !before.isHedge, let equity, equity > 0, loss / equity * 100 > policy.maxRiskPct {
-                reply("A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct)). Stop not moved.")
-                return true
+                let said = "A \(Fmt.pct(stopPct)) stop means −\(Fmt.usd(loss)), \(Fmt.pct((loss / equity * 100).rounded(1, .plain))) of capital. The rule: at most \(Fmt.pct(policy.maxRiskPct))."
+                if policy.limitMode == .block { reply(said + " Stop not moved."); return true }
+                // «Ask me» and «Just warn»: the move goes, its card says the loss first.
+                overLimit = " " + said
             }
             moves.append(.stopTo(stop))
         }
         if let takePct = resolvedNext.takePct, takePct != before.takePct {
             moves.append(.takeTo(p.entry * (1 + dir * takePct / 100)))
         }
-        if confirm, !moves.isEmpty {
+        // «Ask me» over the limit waits on a card even on the no-model path.
+        if confirm || (policy.limitMode == .ask && !overLimit.isEmpty), !moves.isEmpty {
             let what = moves.map { "\(Self.describe($0))" }.joined(separator: ", ")
             pendingAction = .orders(moves, coin: p.coin, intent: next)
             pendingText = "\(IntentParser.pretty(p.coin)): \(what)"
-            reply(say("\(IntentParser.pretty(p.coin)): \(what). Press Confirm to move the orders.",
-                      "\(IntentParser.pretty(p.coin)): \(what). Нажми Confirm, чтобы переставить ордера."))
+            reply(say("\(IntentParser.pretty(p.coin)): \(what).\(overLimit) Press Confirm to move the orders.",
+                      "\(IntentParser.pretty(p.coin)): \(what).\(overLimit) Нажми Confirm, чтобы переставить ордера."))
             return true
         }
         for move in moves { await manage(move, coin: p.coin) }
+        if !overLimit.isEmpty { reply(String(overLimit.dropFirst())) }
         intent = next
         executed = next
         return true
@@ -741,6 +763,26 @@ extension Workspace {
                 }
                 reply(try await e.intentSwap(a, on: from, for: b, on: to, amount: amount, near: near, confidential: true),
                       note: "NEAR Intents · private · \(WalletCommand.placeName(from)) → \(WalletCommand.placeName(to))")
+            case .limitOrder(let sell, let coin, let on, let price, let amount, let usdcOn, let days):
+                var near = nearAddress
+                if on == "near" || usdcOn == "near" {
+                    near = try await SignerClient().send(.nearAddress).nearAddress
+                    nearAddress = near
+                }
+                reply(try await e.limitOrder(sell: sell, coin: coin, on: on, price: price, amount: amount, usdcOn: usdcOn, days: days, near: near),
+                      note: "NEAR Intents · limit order · private")
+                limitOrderList = await ownLimitOrders(e).flatMap { $0.isEmpty ? nil : $0 }
+                limitFollowed = nil   // a failed read here: the loop reads them again
+            case .limitOrders:
+                let list = await ownLimitOrders(e) ?? []
+                limitOrderList = list.isEmpty ? nil : list
+                reply(Self.limitListWords(list).map { say($0.en, $0.ru) } ?? say("No open limit orders.", "Открытых лимитных ордеров нет."))
+                return
+            case .limitCancel(let coin):
+                if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
+                reply(try await e.cancelLimitOrders(coin, near: nearAddress), note: "NEAR Intents · limit orders")
+                limitOrderList = await ownLimitOrders(e).flatMap { $0.isEmpty ? nil : $0 }
+                limitFollowed = nil
             case .robinhoodToSolana(let amount): reply(try await e.evmToSolana(.robinhood, usdc: amount), note: "Relay · Robinhood → Solana")
             case .solanaTo("hyperliquid", let amount):
                 reply(try await e.solanaToHyperliquid(usdc: amount ?? 0), note: "Relay · Solana → Hyperliquid")
@@ -897,12 +939,92 @@ extension Workspace {
         await refresh()
     }
 
+    /// This wallet's open limit orders for the board: empty for none, nil when 1Click didn't answer. The NEAR account,
+    /// which only the signer names, counts as one of its addresses.
+    func ownLimitOrders(_ e: Executor) async -> [Executor.LimitOrderView]? {
+        if nearAddress == nil { nearAddress = try? await SignerClient().send(.nearAddress).nearAddress }
+        return (try? await e.limitOrders(near: nearAddress))?.map(\.view)
+    }
+
+    /// The loop's look at limit orders. The wallet's orders are read once when its journal holds one not settled (at launch,
+    /// after a wallet switch), so they're followed with no «show limit orders». Then, while the board shows them: an order
+    /// that filled or expired leaves the board and is said in the chat and as a notification, with what came and its price
+    /// after the fees. A canceled one isn't: the cancel said it. The journal is brought up to date for what left.
+    func followLimitOrders() async {
+        guard let w = previewWallet else { return }
+        let e = executor(w)
+        if limitOrderList == nil, limitFollowed != w.solana {
+            guard await e.followsLimitOrders else { limitFollowed = w.solana; return }
+            // Unread (1Click silent): asked again next tick. This read also brings the journal up to date.
+            guard let list = await ownLimitOrders(e), previewWallet?.solana == w.solana else { return }
+            limitFollowed = w.solana
+            if limitOrderList == nil, !list.isEmpty { limitOrderList = list }
+            return
+        }
+        // What left the board is written down once its payout is final (it comes seconds after the fill): only those,
+        // for at most 20 ticks each, so a payout 1Click never finishes isn't asked about forever.
+        if !limitPayouts.isEmpty {
+            let settled = await e.syncLimitJournal(only: Set(limitPayouts.keys))
+            for (id, ticks) in limitPayouts { limitPayouts[id] = settled.contains(id) || ticks <= 1 ? nil : ticks - 1 }
+        }
+        guard let shown = limitOrderList, !shown.isEmpty,
+              let now = try? await e.limitOrders(near: nearAddress, sync: false).map(\.view) else { return }
+        var left: [(Executor.LimitOrderView, Executor.LimitOrderEnd)] = []
+        for o in shown where !now.contains(where: { $0.id == o.id }) {
+            // Unread: the board stays as it was and the next tick asks again, so a fill is never missed.
+            guard let end = await e.limitOrderEnd(o.id) else { return }
+            left.append((o, end))
+        }
+        // Changed meanwhile (a cancel, a new order, another wallet): this read is the old one's.
+        guard limitOrderList == shown, previewWallet?.solana == w.solana else { return }
+        limitOrderList = now.isEmpty ? nil : now
+        for (o, _) in left { limitPayouts[o.id] = 20 }
+        for (o, end) in left where ["FILLED", "EXPIRED"].contains(end.status) {
+            let lines = Self.limitEndWords(o, end)
+            let body = say(lines.en, lines.ru)
+            reply(body, note: "NEAR Intents · limit order")
+            notify(.orders, end.status == "FILLED" ? say("Limit order filled: \(o.coin)", "Лимитка исполнилась: \(o.coin)")
+                                                   : say("Limit order expired: \(o.coin)", "Лимитка истекла: \(o.coin)"),
+                   body, record: false, schedule: "limit:\(o.coin)")
+        }
+    }
+
+    /// The open orders said in the chat: each one, not only their count. nil for none.
+    nonisolated static func limitListWords(_ list: [Executor.LimitOrderView]) -> (en: String, ru: String)? {
+        guard !list.isEmpty else { return nil }
+        let en = list.map { "\($0.sell ? "sell" : "buy") \(Fmt.num($0.coins, maxFraction: 6)) \($0.coin) at \(Fmt.usd($0.price))" }.joined(separator: " · ")
+        let ru = list.map { "\($0.sell ? "продажа" : "покупка") \(Fmt.num($0.coins, maxFraction: 6)) \($0.coin) по \(Fmt.usd($0.price))" }.joined(separator: " · ")
+        return list.count == 1 ? ("One open limit order: \(en). It's on the canvas.", "Один открытый лимитный ордер: \(ru). Он на холсте.")
+            : ("\(list.count) open limit orders: \(en). They're on the canvas.", "Открытые лимитные ордера, \(list.count): \(ru). Они на холсте.")
+    }
+
+    /// A filled or expired limit order in words: what went in and what comes out, at what price with every fee in.
+    nonisolated static func limitEndWords(_ o: Executor.LimitOrderView, _ end: Executor.LimitOrderEnd) -> (en: String, ru: String) {
+        let coin = o.coin, cash = o.sell ? "USDC" : coin, limit = Fmt.usd(o.price)
+        let order = "\(o.sell ? "sell" : "buy") \(Fmt.num(o.coins, maxFraction: 8)) \(coin) at \(limit)"
+        let orderRU = "\(o.sell ? "продажа" : "покупка") \(Fmt.num(o.coins, maxFraction: 8)) \(coin) по \(limit)"
+        var en = "", ru = ""
+        if let price = end.price {
+            let gave = Fmt.num(end.spent, maxFraction: 8), got = Fmt.num(end.got, maxFraction: o.sell ? 2 : 6)
+            en = o.sell ? "sold \(gave) \(coin) for ≈ \(got) USDC" : "bought ≈ \(got) \(coin) for \(gave) USDC"
+            ru = o.sell ? "продано \(gave) \(coin) за ≈ \(got) USDC" : "куплено ≈ \(got) \(coin) за \(gave) USDC"
+            en += ", \(Fmt.usd(price)) a \(coin) with 1Click's fees and the network's (the order's price \(limit))"
+            ru += ", \(Fmt.usd(price)) за \(coin) с комиссиями 1Click и сети (цена ордера \(limit))"
+        }
+        if end.status == "FILLED" {
+            return en.isEmpty ? ("Limit order filled: \(order). The \(cash) comes to your own address.", "Лимитка исполнилась: \(orderRU). \(cash) придут на твой адрес.")
+                : ("Limit order filled: \(en). The \(cash) comes to your own address.", "Лимитка исполнилась: \(ru). \(cash) придут на твой адрес.")
+        }
+        return ("Limit order expired: \(order)." + (en.isEmpty ? "" : " Before that it \(en).") + " What didn't fill comes back to the address it came from.",
+                "Лимитка истекла: \(orderRU)." + (ru.isEmpty ? "" : " До этого \(ru).") + " Что не исполнилось, вернётся на адрес, откуда пришло.")
+    }
+
     /// The two cards after a move the loss cap stopped: what they carry instead of a chat command.
     static let sendAnyway = "send anyway", leaveCostly = "leave it as is", sendPart = "send the part that moves the price about 1%"
 
     private func movesMoney(_ command: WalletCommand, confirmed: Bool) -> Bool {
         switch command {
-        case .yields, .sendTo, .receive, .schedule, .stopSchedules, .jupiterDCAOrders: false
+        case .yields, .sendTo, .receive, .schedule, .stopSchedules, .jupiterDCAOrders, .limitOrders: false
         case .allocate, .rebalance: confirmed
         default: true
         }
@@ -997,6 +1119,13 @@ extension Workspace {
             return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
         case .swapPrivately("NEAR", "near", _, _, let asked) where !inChain:
             return lacks(near, asked, "NEAR", "NEAR")
+        // A limit order's deposit: a buy's USDC from its network, a sale's NEAR from the NEAR account, SOL from Solana.
+        case .limitOrder(sell: false, coin: _, on: _, price: _, amount: let asked, usdcOn: let from, days: _) where !inChain:
+            return lacks(from == "solana" ? solana?.usdc : usdc(on: from), asked, WalletCommand.placeName(from))
+        case .limitOrder(sell: true, coin: "NEAR", on: "near", price: _, amount: let asked, usdcOn: _, days: _) where !inChain:
+            return lacks(near, asked, "NEAR", "NEAR")
+        case .limitOrder(sell: true, coin: "SOL", on: "solana", price: _, amount: let asked, usdcOn: _, days: _) where !inChain:
+            return lacks(solana?.sol, asked, "Solana", "SOL")
         case .usdt(let net, _, let asked, _) where !inChain:
             return lacks(heldUSDT(net), asked, WalletCommand.placeName(net), "USDT")
         // A buy that names where its money comes from («с арбитрума») pays from there or not at all: said before the card.
@@ -1139,6 +1268,20 @@ extension Workspace {
         }
         await refresh()
         return ok
+    }
+
+    /// A part of a position worth under Hyperliquid's $10 minimum can't be closed: said before any card, with closing it
+    /// all as a card. True when it was said.
+    func closeTooSmall(_ share: Decimal, coin: String, note: String? = nil) -> Bool {
+        guard let p = positions.first(where: { $0.coin == coin }), let m = markets[coin],
+              Executor.partialCloseRefusal(position: p.size, fraction: share, mark: m.markPx, szDecimals: m.szDecimals, asset: coin) != nil else { return false }
+        let name = IntentParser.pretty(coin), part = Fmt.usd(abs(p.size) * share * m.markPx), whole = Fmt.usd(abs(p.size) * m.markPx)
+        reply(say("Closing \(Fmt.pct(share * 100)) of \(name) is \(part): Hyperliquid won't take a close under $10. Close it all, \(whole), or a share worth $10 or more.",
+                  "\(Fmt.pct(share * 100)) позиции \(name) — это \(part): Hyperliquid не берёт закрытие меньше $10. Закрой её целиком, \(whole), или долю от $10."), note: note)
+        offerCards([ChatRouter.Option(title: say("Close it all · \(whole)", "Закрыть всё · \(whole)"),
+                                      comment: say("At the market, the stop and take-profit go with it", "По рынку, стоп и тейк уходят вместе с ней"),
+                                      command: "close \(coin.hasPrefix("xyz:") ? String(coin.dropFirst(4)) : coin)", recommended: true)])
+        return true
     }
 
     /// The card shows the position instead of a plan: just executed, or a position in this asset is already open
@@ -1287,6 +1430,12 @@ extension Workspace {
             checkAlerts()
             await checkLoanGuards()
             await guardPositions()
+            if limitFollow == nil {
+                limitFollow = Task { [weak self] in
+                    await self?.followLimitOrders()
+                    self?.limitFollow = nil
+                }
+            }
             // A scheduled buy can wait on Touch ID with no one at the Mac: it runs beside the loop, so refreshes and alerts
             // go on meanwhile (the 2026-10-22 review). While it signs, `executing` keeps other moves from starting.
             if scheduledRun == nil {
@@ -1635,10 +1784,11 @@ struct ConfirmSheet: View {
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Capsule().fill(.fill.tertiary))
                 } else if ws.prepared != nil {
-                    Text(concern ? "check the warning" : "all checks passed").font(.ui(10, .semibold))
-                        .foregroundStyle(concern ? Color.orange : Brand.profit)
+                    let warned = concern || ws.prepared?.overLimit.isEmpty == false
+                    Text(warned ? "check the warning" : "all checks passed").font(.ui(10, .semibold))
+                        .foregroundStyle(warned ? Color.orange : Brand.profit)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill((concern ? Color.orange : Brand.profit).opacity(0.12)))
+                        .background(Capsule().fill((warned ? Color.orange : Brand.profit).opacity(0.12)))
                 }
             }
             if let p = ws.prepared {
@@ -1694,6 +1844,18 @@ struct ConfirmSheet: View {
                         }
                     }
                 }
+                // Variant D (owner, 2026-11-12): over a risk limit the sheet says it in amber; with «Ask me» Sign waits for a tick.
+                if !p.overLimit.isEmpty {
+                    Label(p.overLimit.joined(separator: " "), systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Brand.jevInk).fixedSize(horizontal: false, vertical: true)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.12)))
+                    if p.mustAccept {
+                        Toggle("I accept losing \(Fmt.usd(p.sizing.lossAtStopUSD)) at the stop on this trade",
+                               isOn: Binding(get: { ws.prepared?.accepted ?? false }, set: { ws.prepared?.accepted = $0 }))
+                            .disabled(ws.preparing)
+                    }
+                }
                 if concern {
                     Toggle("I understand the second check's warning and execute anyway", isOn: $acknowledged)
                         // Ticked while Jev still reads, it would pass a signature warning nobody has seen yet.
@@ -1740,7 +1902,8 @@ struct ConfirmSheet: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Brand.accent)
                     .controlSize(.large)
-                    .disabled(ws.prepared == nil || ws.preparing || (concern && !acknowledged) || ws.executing)
+                    .disabled(ws.prepared == nil || ws.preparing || (concern && !acknowledged) || ws.executing
+                               || (ws.prepared.map { $0.mustAccept && !$0.accepted } ?? false))
                 }
             }
         }

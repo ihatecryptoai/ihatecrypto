@@ -302,6 +302,11 @@ public actor Executor {
         public let preparedAt: Date
         /// The first trade asks to approve ihatecrypto's fee: one signature more than the plan's steps.
         public var asksFee = false
+        /// The risk limits this plan breaks, in the rules' words, when the policy asks or warns instead of blocking.
+        public var overLimit: [String] = []
+        /// «Ask me»: nothing is signed until the user ticks that they accept the loss at the stop (`accepted`).
+        public var mustAccept = false
+        public var accepted = false
 
         /// The bridge transaction's blockhash lives about a minute; after that the preview is redone.
         public var isFresh: Bool { Date().timeIntervalSince(preparedAt) < 45 }
@@ -352,8 +357,10 @@ public actor Executor {
         }
         let openRisk = HyperliquidAccount.riskAtStops(positions: positions, orders: orders, spot: spot)
             .flatMap { at in HyperliquidAccount.twapRisk(twaps, positions: positions, orders: orders, marks: markets.mapValues(\.markPx)).map { at + $0 } }
-        let blocked = RiskRules.check(intent, sizing, market: market, equity: equity, policy: policy, openRisk: openRisk).filter { $0.level == .block }
+        let advice = RiskRules.check(intent, sizing, market: market, equity: equity, policy: policy, openRisk: openRisk)
+        let blocked = advice.filter { $0.level == .block }
         guard blocked.isEmpty else { throw ExecutionError(blocked.map(\.text).joined(separator: " ")) }
+        let overLimit = advice.filter(\.overLimit).map(\.text)
         let leverage = NSDecimalNumber(decimal: intent.leverage ?? 1).intValue
 
         // HIP-3 markets («xyz:CL») keep margin on their own exchange: what is free there counts, and the rest
@@ -464,6 +471,8 @@ public actor Executor {
         p.fundFrom = fund.map { ($0.net, $0.usdc) }
         p.openVia1Click = opening
         p.asksFee = asksFee
+        p.overLimit = overLimit
+        p.mustAccept = policy.limitMode == .ask && !overLimit.isEmpty
         return p
     }
 
@@ -488,6 +497,7 @@ public actor Executor {
     /// Signs and sends what `prepare` showed. Prices may move inside the approved limits; outside them it stops.
     public func execute(_ p: Prepared) async throws -> Opened {
         guard p.isFresh else { throw ExecutionError("This confirmation is stale: the numbers need a refresh.") }
+        guard !p.mustAccept || p.accepted else { throw ExecutionError("Over your risk limit: tick that you accept the loss at the stop first. Nothing was signed.") }
         var market = try await Hyperliquid.markets()[p.market.name] ?? p.market
         guard abs(market.markPx - p.market.markPx) / p.market.markPx <= Self.slippage else {
             throw ExecutionError("\(market.name) moved more than 1% since you confirmed. Nothing was signed.")
@@ -1083,6 +1093,9 @@ public actor Executor {
         }
         let size = try Self.partialCloseSize(position: position.size, fraction: fraction, szDecimals: market.szDecimals, asset: asset)
         guard size < abs(position.size) else { return try await close(asset: asset) }   // a share of 1 or more is the whole
+        if let why = Self.partialCloseRefusal(position: position.size, fraction: fraction, mark: market.markPx, szDecimals: market.szDecimals, asset: asset) {
+            throw ExecutionError(why)
+        }
         let buy = position.size < 0
         let px = HLAction.price(market.markPx * (buy ? 1 + 2 * Self.slippage : 1 - 2 * Self.slippage), szDecimals: market.szDecimals)
         let result = try await post(try HLAction.order([HLOrder(asset: market.index, isBuy: buy, price: px, size: size, reduceOnly: true,
@@ -1143,11 +1156,25 @@ public actor Executor {
         if let current, long ? stop >= current : stop <= current { return nil }
         guard current != nil, let equity, equity > 0 else { return nil }
         let loss = max(0, long ? entry - stop : stop - entry) * size + size * (entry + stop) * RiskCalc.tradeFee
-        return loss / equity * 100 > policy.maxRiskPct ? loss : nil
+        // «Ask me» and «Just warn» let a wider stop through: the chat's card says the loss before Confirm.
+        return policy.limitMode == .block && loss / equity * 100 > policy.maxRiskPct ? loss : nil
     }
 
     /// The size a partial close sends: the share in whole steps of the market's szDecimals, rounded down. A share smaller
     /// than one step is refused: it used to fall through to close(asset:), which closed the whole position and its stop.
+    /// Hyperliquid's $10 minimum order counts for a reduce-only close too: a part worth less is refused by the venue (seen
+    /// on mainnet: a 0.003 ETH close, $8, refused while the whole 0.004, $10.6, went). Said before anything is sent, with
+    /// the way that works; nil when the part reaches $10 or is the whole position.
+    public static func partialCloseRefusal(position: Decimal, fraction: Decimal, mark: Decimal, szDecimals: Int, asset: String) -> String? {
+        guard fraction < 1, mark > 0, let size = try? partialCloseSize(position: position, fraction: fraction, szDecimals: szDecimals, asset: asset),
+              size < abs(position) else { return nil }
+        let part = size * mark
+        guard part < Plan.minNotional else { return nil }
+        let name = asset.hasPrefix("xyz:") ? String(asset.dropFirst(4)) : asset
+        return "Closing \(Fmt.pct(fraction * 100)) of the \(name) position is \(Fmt.usd(part)), under Hyperliquid's $10 minimum order, which counts for a close too. "
+            + "Nothing was closed: the stop and take-profit stay. Close it all (\(Fmt.usd(abs(position) * mark))), or a share worth $10 or more."
+    }
+
     static func partialCloseSize(position: Decimal, fraction: Decimal, szDecimals: Int, asset: String) throws -> Decimal {
         // A third is 0.333…3: a third of 3 steps came to 0.99…9 steps and rounded down to none.
         var exact = abs(position) * fraction, wanted = Decimal()

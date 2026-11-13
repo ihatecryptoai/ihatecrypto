@@ -354,3 +354,55 @@ func waitSaysExpiredOnMainnetForASignatureThatNeverWas() async throws {
     #expect(try await rpc.waitForConfirmation(signature, lastValidBlockHeight: height - 1, timeout: 30) == .expired)
     #expect(Date().timeIntervalSince(started) < 10)
 }
+
+/// A node that turns a call away passes it to the next, through SolanaRPC itself: each of Pocket's refusals (its words,
+/// 2026-11-09) — a 400 for token accounts by program, a 400 when its budget runs out, a 200 with -32010 from a backend
+/// without the token index — ends in the next node's answer. With one node the refusal is the answer, at once.
+@Test func aCallTurnedAwayGoesToTheNextNode() async throws {
+    _ = RefusingNode.installed
+    let next = ScriptedRPC.node("next", statuses: []).url   // answers null to these calls
+    for refusal in ["400/-32602/getTokenAccountsByOwner requires a mint filter on this endpoint", "400/-38026/request budget exhausted",
+                    "200/-32010/TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA excluded from account secondary indexes"] {
+        let node = URL(string: "https://refuse.stub/" + refusal.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)!
+        #expect(try await SolanaRPC(nodes: [node, next]).call("getTokenAccountsByOwner", []) is NSNull, "\(refusal)")
+        await #expect(throws: WalletError.self) { try await SolanaRPC(url: node).call("getTokenAccountsByOwner", []) }
+    }
+    #expect(SolanaNodes.passesOn(status: 401, body: Data()) && SolanaNodes.passesOn(status: 403, body: Data()))
+    #expect(!SolanaNodes.passesOn(status: 400, body: Data(#"{"error":{"message":"Invalid params: invalid type"}}"#.utf8)))
+}
+
+/// A node that turns every call away as one of Pocket's backends does: https://refuse.stub/<HTTP status>/<code>/<message>.
+private final class RefusingNode: URLProtocol {
+    static let installed = URLProtocol.registerClass(RefusingNode.self)
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "refuse.stub" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let part = request.url!.pathComponents   // ["/", status, code, message]
+        client!.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Int(part[1])!, httpVersion: nil, headerFields: nil)!,
+                            cacheStoragePolicy: .notAllowed)
+        client!.urlProtocol(self, didLoad: Data(#"{"jsonrpc":"2.0","id":1,"error":{"code":\#(part[2]),"message":"\#(part[3])"}}"#.utf8))
+        client!.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Live (IHATECRYPTO_NET=1, reads only): Pocket is mainnet, and each token-account read it turns away (by program on
+/// every backend, by mint on some) is in words passesOn knows — new words would leave the read failing there instead
+/// of going back to the public node. Five rounds, since its backends differ.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["IHATECRYPTO_NET"] == "1"))
+func pocketTurnsTokenReadsAwayInWordsWeKnow() async throws {
+    #expect(try await SolanaRPC(url: SolanaNodes.pocket).call("getGenesisHash", []) as? String == SolanaNodes.mainnetGenesis)
+    for _ in 0..<5 {
+        for filter in [["programId": SPL.tokenProgram], ["mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]] {
+            var request = URLRequest(url: SolanaNodes.pocket)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": "getTokenAccountsByOwner",
+                                                                           "params": ["11111111111111111111111111111111", filter, ["encoding": "jsonParsed"]]] as [String: Any])
+            let (body, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let answered = status == 200 && ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["result"] != nil
+            #expect(answered || SolanaNodes.passesOn(status: status, body: body), "\(filter) \(status) \(String(decoding: body.prefix(200), as: UTF8.self))")
+        }
+    }
+}

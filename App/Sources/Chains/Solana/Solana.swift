@@ -6,15 +6,17 @@ import WalletCore
 public struct SolanaRPC: Sendable {
     /// The node asked first.
     public let url: URL
-    /// Made for one node (a check, a test): no other is asked.
-    let pinned: Bool
+    /// The nodes asked when made for some (a check, a test); nil: SolanaNodes.
+    let fixed: [URL]?
 
-    /// SolanaNodes, read at each call: the user's own node first when set, the public one after it.
-    public init() { (url, pinned) = (SolanaNodes.urls[0], false) }
-    public init(url: URL) { (self.url, pinned) = (url, true) }
+    /// SolanaNodes, read at each call: the user's own node first when set, then the public ones.
+    public init() { (url, fixed) = (SolanaNodes.urls[0], nil) }
+    /// One node and no other (a check, a test).
+    public init(url: URL) { (self.url, fixed) = (url, [url]) }
+    init(nodes: [URL]) { (url, fixed) = (nodes[0], nodes) }
 
     public func call(_ method: String, _ params: [Any]) async throws -> Any {
-        let nodes = pinned ? [url] : SolanaNodes.urls
+        let nodes = fixed ?? SolanaNodes.urls
         var attempt = 0
         var request = URLRequest(url: nodes[0], timeoutInterval: 30)
         request.httpMethod = "POST"
@@ -22,14 +24,14 @@ public struct SolanaRPC: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": method, "params": params])
         // The public RPC answers 429 under bursts and drops a connection now and then: backed-off retries (RPCRetry),
         // each to the next node, then a clear error. A resent transaction is the same one (its signature), so sends
-        // retry too. The user's node refusing its key (401, 403: expired, over its plan) passes the call to the next.
+        // retry too. A node refusing its key or the call (SolanaNodes.passesOn) passes the call to the next.
         return try await RPCRetry.run {
             request.url = nodes[attempt % nodes.count]
             attempt += 1
             return try await URLSession.shared.data(for: request)
         } answer: { data, status in
             guard (200..<300).contains(status) else {
-                let next = (status == 401 || status == 403) && nodes.count > 1
+                let next = SolanaNodes.passesOn(status: status, body: data) && nodes.count > 1
                 throw RPCRetry.Again(status == 429 || status >= 500 || next, WalletError("Solana RPC \(method): HTTP \(status) \(String(decoding: data.prefix(120), as: UTF8.self))"))
             }
             guard let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
@@ -37,7 +39,8 @@ public struct SolanaRPC: Sendable {
             }
             if let error = reply["error"] as? [String: Any] {
                 let message = error["message"] as? String ?? "\(error)"
-                throw RPCRetry.Again(RPCRetry.transient(message), WalletError("Solana RPC \(method): \(message)"))
+                let next = SolanaNodes.passesOn(status: status, body: Data(message.utf8)) && nodes.count > 1
+                throw RPCRetry.Again(RPCRetry.transient(message) || next, WalletError("Solana RPC \(method): \(message)"))
             }
             return reply["result"] ?? NSNull()
         }
@@ -62,14 +65,25 @@ public struct SolanaRPC: Sendable {
     /// What `owner`'s own token account for `mint` holds, in whole tokens; 0 without one. Two light reads (the mint's
     /// program, the account's balance), never getTokenAccountsByOwner, which the public node throttles right after a swap.
     public func ownedAmount(owner: String, mint: String) async throws -> Decimal {
+        try await amount(owner: owner, mint: mint, commitment: "finalized") ?? 0
+    }
+
+    /// What one token account holds, in whole tokens, at a commitment of the caller's: «confirmed» counts a move the
+    /// moment it is through, some 13 s before the finalized balance shows it. One light read. nil when the node didn't
+    /// answer or there is no account — never 0 for a read that failed: a wait hangs on it.
+    public func accountAmount(_ account: String, commitment: String) async -> Decimal? {
+        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": commitment]]) as? [String: Any])?["value"] as? [String: Any],
+              let units = (value["amount"] as? String).flatMap({ Decimal(string: $0) }), let decimals = (value["decimals"] as? NSNumber)?.intValue else { return nil }
+        return units / pow(Decimal(10), decimals)
+    }
+
+    private func amount(owner: String, mint: String, commitment: String) async throws -> Decimal? {
         let info = try await call("getAccountInfo", [mint, ["encoding": "base64", "commitment": "finalized"]]) as? [String: Any]
         guard let program = (info?["value"] as? [String: Any])?["owner"] as? String, [SPL.tokenProgram, SPL.token2022Program].contains(program) else {
             throw WalletError("\(mint) isn't a token mint on Solana.")
         }
         let account = try SPL.associatedAccount(owner: owner, mint: mint, program: program)
-        guard let value = (try? await call("getTokenAccountBalance", [account, ["commitment": "finalized"]]) as? [String: Any])?["value"] as? [String: Any],
-              let units = (value["amount"] as? String).flatMap({ Decimal(string: $0) }), let decimals = (value["decimals"] as? NSNumber)?.intValue else { return 0 }
-        return units / pow(Decimal(10), decimals)
+        return await accountAmount(account, commitment: commitment)
     }
 
     /// Raw units of an SPL token held by `owner` across its accounts.
@@ -360,6 +374,63 @@ extension SolanaTransaction {
             message += compact(ix.data.count) + ix.data
         }
         guard message.count + 65 <= 1232 else { throw WalletError("The transaction is over 1232 bytes") }
+        return message
+    }
+}
+
+extension SolanaTransaction {
+    /// The v0 message for `instructions` as they come (their own compute budget included), fee payer first, with accounts
+    /// that `tables` (lookup table → its addresses) hold loaded through them — except signers, programs and `keepStatic`
+    /// (the wallet's own accounts: the signer lets money land only in an account the message names itself).
+    public static func compileV0(_ instructions: [SolanaInstruction], payer: String, blockhash: String,
+                                 tables: [(address: String, entries: [String])], keepStatic: Set<String> = []) throws -> Data {
+        var flags: [String: (signer: Bool, writable: Bool)] = [payer: (true, true)]
+        var order = [payer], programs = Set<String>()
+        func add(_ key: String, signer: Bool, writable: Bool) {
+            if let f = flags[key] { flags[key] = (f.signer || signer, f.writable || writable) }
+            else { flags[key] = (signer, writable); order.append(key) }
+        }
+        for ix in instructions {
+            for a in ix.accounts { add(a.pubkey, signer: a.isSigner, writable: a.isWritable) }
+            add(ix.program, signer: false, writable: false)
+            programs.insert(ix.program)
+        }
+        let signers = order.filter { flags[$0]!.signer }
+        guard signers == [payer] else { throw WalletError("The instructions need other signers: \(signers.filter { $0 != payer })") }
+        // Each loadable account from the first table that has it.
+        var loaded: [String: (table: Int, index: Int)] = [:]
+        for key in order where key != payer && !programs.contains(key) && !keepStatic.contains(key) {
+            for (t, table) in tables.enumerated() {
+                if let i = table.entries.firstIndex(of: key), i < 256 { loaded[key] = (t, i); break }
+            }
+        }
+        let statics = order.filter { loaded[$0] == nil }
+        let keys = [payer] + statics.filter { $0 != payer && flags[$0]!.writable } + statics.filter { $0 != payer && !flags[$0]!.writable }
+        let readonlyUnsigned = keys.filter { !flags[$0]!.writable }.count
+        // The full list the instructions index: static keys, then every table's writable entries, then their readonly ones.
+        var lookups: [(table: String, writable: [UInt8], readonly: [UInt8], w: [String], r: [String])] = []
+        for (t, table) in tables.enumerated() {
+            let mine = order.filter { loaded[$0]?.table == t }
+            let w = mine.filter { flags[$0]!.writable }, r = mine.filter { !flags[$0]!.writable }
+            if !mine.isEmpty { lookups.append((table.address, w.map { UInt8(loaded[$0]!.index) }, r.map { UInt8(loaded[$0]!.index) }, w, r)) }
+        }
+        let full = keys + lookups.flatMap(\.w) + lookups.flatMap(\.r)
+        guard full.count <= 256 else { throw WalletError("The transaction names more than 256 accounts.") }
+        let index = Dictionary(uniqueKeysWithValues: full.enumerated().map { ($1, $0) })
+
+        var message = Data([0x80, 1, 0, UInt8(readonlyUnsigned)]) + compact(keys.count)
+        for key in keys { message += try Base58.decode(key) }
+        message += try Base58.decode(blockhash)
+        message += compact(instructions.count)
+        for ix in instructions {
+            message += Data([UInt8(index[ix.program]!)]) + compact(ix.accounts.count) + Data(ix.accounts.map { UInt8(index[$0.pubkey]!) })
+            message += compact(ix.data.count) + ix.data
+        }
+        message += compact(lookups.count)
+        for l in lookups {
+            message += try Base58.decode(l.table) + compact(l.writable.count) + Data(l.writable) + compact(l.readonly.count) + Data(l.readonly)
+        }
+        guard message.count + 65 <= 1232 else { throw WalletError("The transaction is \(message.count + 65) bytes, over Solana's limit of 1232") }
         return message
     }
 }

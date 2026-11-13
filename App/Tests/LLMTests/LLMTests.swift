@@ -98,6 +98,11 @@ private func jwt(_ claims: [String: Any]) -> String {
     #expect(!args.contains("секретный текст"))
     #expect(args[args.firstIndex(of: "--system-prompt")! + 1] == "Отвечай JSON.")
     #expect(ClaudeCodeClient.arguments(LLMRequest(model: "m", messages: [LLMMessage(.user, "x")])).contains("--system-prompt"))
+    // What the sandboxed app sends the helper can only be a model's name and the prompt, never a flag.
+    #expect(ClaudeCodeClient.isModelName("claude-opus-5-5") && ClaudeCodeClient.isModelName("claude-sonnet-4-5[1m]"))
+    #expect(!ClaudeCodeClient.isModelName("--dangerously-skip-permissions") && !ClaudeCodeClient.isModelName("x --tools Bash") && !ClaudeCodeClient.isModelName(""))
+    let flagged = ClaudeCodeClient.arguments(model: "m", system: "--tools Bash", thinking: false)
+    #expect(flagged[flagged.firstIndex(of: "--system-prompt")! + 1] == " --tools Bash")
 }
 
 /// A hung `claude -p` is stopped after its timeout, or when the chat's task is cancelled; it never keeps the chat busy.
@@ -332,7 +337,7 @@ nonisolated final class AnthropicStub: URLProtocol {
     #expect(chat?.message.contains("platform.claude.com/settings/keys › Create key") == true && AnthropicStub.asked.count == 1)
     let list = await #expect(throws: LLMError.self) { try await AnthropicClient(key: "k").models() }
     #expect(list?.message == AnthropicAPI.noWorkspace)
-    #expect(AnthropicAPI().info.note.contains("platform.claude.com/settings/keys"))
+    #expect(AnthropicAPI().info.keyURL?.absoluteString == "https://platform.claude.com/settings/keys")
 
     // The fallback field goes with its beta header. If Anthropic refuses them (the beta renamed or ended), the request
     // is asked again without them, thinking and length as before, even when the refusal names max_tokens: the
@@ -386,6 +391,7 @@ nonisolated final class AnthropicStub: URLProtocol {
         "gpt-6-sol": "GPT 6 SOL", "gpt-6.1-sol": "GPT 6.1 SOL", "gpt-6-astra": "GPT 6 Astra", "claude-opus-5-5": "Claude Opus 5.5", "claude-fable-5-1": "Claude Fable 5.1", "grok-4.7": "Grok 4.7", "claude-haiku-4-5": "Claude Haiku 4.5", "deepseek-flash": "DeepSeek Flash",
         "deepseek/deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "gemini-3.8-flash": "Gemini 3.8 Flash",
         "grok-4.3": "Grok 4.3", "qwen3.5:9b": "Qwen3.5 9B", "gpt-6-pro": "GPT 6 Pro",
+        "deepseek-ai/DeepSeek-V4.1-Flash-1017": "DeepSeek V4.1 Flash", "Qwen/Qwen3.6-35B-A3B-FP8": "Qwen3.6 35B A3B FP8",
     ]
     for (id, name) in names { #expect(LLMCatalog.displayName(model: id) == name) }
 }

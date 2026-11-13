@@ -235,7 +235,7 @@ public struct LedgerDevice: Sendable {
         switch value {
         case .string(let s): return Data(s.utf8)
         case .address(let a):
-            guard let bytes = Data(hex: a), bytes.count == 20 else { throw LedgerError("Invalid address: \(a)") }
+            guard let bytes = Data(evmAddress: a) else { throw LedgerError("Invalid address: \(a)") }
             return bytes
         case .uint(let n):
             let be = withUnsafeBytes(of: n.bigEndian) { Data($0) }

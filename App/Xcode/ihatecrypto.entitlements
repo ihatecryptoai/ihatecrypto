@@ -2,11 +2,45 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hardened runtime: the chat's microphone (speech to text in the field). -->
+	<!-- The App Sandbox: the app reaches only its own container and what is listed here. What it can't do inside goes
+	     through Helper.xpc (Sources/Helper); the signer is a sandboxed XPC service of its own. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- RPC nodes, exchanges, model APIs, the dApp browser, a local Ollama or Speculos. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Listeners on 127.0.0.1 only: the ChatGPT and OpenRouter sign-in callbacks, the Top up page (TopUpPage.swift), the
+	     local debug API of the copies build-app.sh makes (a release has none). -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- The chat's microphone (speech to text in the field). -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
-	<!-- A Ledger over USB (Ledger.swift): the app reads its addresses and asks it to sign. -->
+	<!-- A Ledger over USB (HID.swift) and over Bluetooth (BLE.swift): the app reads its addresses and asks it to sign. -->
 	<key>com.apple.security.device.usb</key>
 	<true/>
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+	<!-- Files the person picks in an Open panel (skills, address icons). -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Ollama goes to Downloads for the person to drag into Applications (LocalModels.swift). -->
+	<key>com.apple.security.files.downloads.read-write</key>
+	<true/>
+	<!-- Read only: crash reports of the app and the signer (Crashes.swift), the terminal tool's journal
+	     (~/.ihatecrypto, HistoryView.swift), and Codex CLI's ChatGPT login for «Use the Codex CLI login»
+	     (ChatGPTSubscription.swift): that one file, which Codex refreshes itself, not the rest of ~/.codex. -->
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Logs/DiagnosticReports/</string>
+		<string>/.ihatecrypto/</string>
+		<string>/.codex/auth.json</string>
+	</array>
+	<!-- Sparkle's installer for a sandboxed app (SUEnableInstallerLauncherService in ihatecrypto-Info.plist). -->
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spki</string>
+	</array>
 </dict>
 </plist>

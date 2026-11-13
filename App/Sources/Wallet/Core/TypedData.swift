@@ -171,9 +171,12 @@ public struct TypedData: Sendable {
             guard let d = Data(hex: String(repeating: "0", count: text.count % 2) + text), d.count <= 32 else { throw WalletError("Number out of uint256 range.") }
             return Data(count: 32 - d.count) + d
         }
-        guard !text.isEmpty, text.allSatisfy(\.isNumber) else { throw WalletError("Not a number: \(text).") }
+        // The digits 0–9 and nothing else: `isNumber` also takes a digit with an invisible mark on it (a joiner, an
+        // accent) and other scripts' numerals, which were then dropped or read — the number hashed wasn't the one a
+        // prompt showed from the same text (the 2026-11-10 review).
+        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }) else { throw WalletError("Not a number: \(text).") }
         var bytes = [UInt8](repeating: 0, count: 32)
-        for digit in text.compactMap(\.wholeNumberValue) {
+        for digit in text.utf8.map({ Int($0) - 48 }) {
             // bytes = bytes × 10 + digit, big-endian
             var carry = digit
             for i in (0..<32).reversed() {

@@ -33,6 +33,20 @@ enum SignerSelfTest {
             check(imported.solanaAddress == "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk", "Solana address matches the reference")
             check(try await signer.send(.status).hasWallet == true, "key is in the Keychain")
 
+            // The trading rules live in the signer: saved, read back, a wrong one refused, an older sender keeps them.
+            var limits = try await signer.send(.status).limits ?? .standard
+            let before = limits
+            limits.trading = TradingRules(riskPct: 5, openRiskPct: 10, minRewardRisk: 1, leverage: 3, overLimit: "ask")
+            check(try await signer.send(.setLimits(limits: limits)).limits?.trading?.leverage == 3, "trading rules saved in the signer")
+            var wrong = limits
+            wrong.trading?.leverage = 51
+            check((try? await signer.send(.setLimits(limits: wrong)))?.ok != true, "leverage over 50× refused as a limit")
+            var older = limits
+            older.trading = nil
+            check(try await signer.send(.setLimits(limits: older)).limits?.trading?.leverage == 3, "a sender without trading rules leaves them")
+            // ponytail: trading rules can't be cleared once saved (nil keeps them); this copy is thrown away after.
+            _ = try await signer.send(.setLimits(limits: before))
+
             // The app derives the same public test keys only to build transactions and compare signatures.
             let seed = try Mnemonic.seed(phrase)
             let solanaKey = try Derivation.ed25519(seed: seed, path: WalletPath.solana(0))
@@ -117,6 +131,16 @@ enum SignerSelfTest {
             let unlimited = Data(hex: "095ea7b3")! + word(String(repeating: "5c", count: 20)) + Data(repeating: 0xff, count: 32)
             check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
                                                             to: arbitrumUSDC, value: 0, data: unlimited, recipients: [])).ok == false, "unlimited approve not signed")
+            // The 2026-11-10 review: the wallet's own address without its «0x» (the text checks missed it, the bytes are
+            // the same), and setApprovalForAll with a flag of 2, which older NFT contracts read as yes.
+            let batch = try Batch7702.executeBatch([.init(to: arbitrumUSDC, data: unlimited)])
+            check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
+                                                            to: String((imported.evmAddress ?? "").dropFirst(2)), value: 0, data: batch, recipients: [])).ok == false,
+                  "a call into this wallet's own address written without 0x not signed")
+            let allNFTs = Data(hex: "a22cb465")! + word(String(repeating: "5c", count: 20)) + word("02")
+            check(try await signer.send(.signEVMTransaction(chainId: 42161, nonce: 0, maxPriorityFee: 1, maxFee: 20_000_000, gasLimit: 60_000,
+                                                            to: arbitrumUSDC, value: 0, data: allNFTs, recipients: [scamEVM])).ok == false,
+                  "setApprovalForAll with a flag of 2 not signed")
 
             // NEAR → 1Click: the signer builds the wrap.near transaction itself; it must equal the reference and verify.
             let nearPublic = try Curve25519.Signing.PrivateKey(rawRepresentation: Derivation.ed25519(seed: seed, path: WalletPath.near(0))).publicKey

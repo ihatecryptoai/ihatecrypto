@@ -68,7 +68,7 @@ public enum UniswapV3 {
         guard tokens.count == fees.count + 1 else { throw WalletError("A Uniswap path needs one fee between each two tokens.") }
         var out = Data()
         for (i, token) in tokens.enumerated() {
-            guard let bytes = Data(hex: token), bytes.count == 20 else { throw WalletError("Invalid address: \(token)") }
+            guard let bytes = Data(evmAddress: token) else { throw WalletError("Invalid address: \(token)") }
             out += bytes
             if i < fees.count { out += withUnsafeBytes(of: UInt32(fees[i]).bigEndian) { Data($0.dropFirst()) } }
         }

@@ -8,7 +8,7 @@ APIKey/      OpenAI-compatible APIs: DeepSeek, OpenAI, xAI, Gemini, Ollama, LM S
 Anthropic/   an Anthropic key on the Messages API: the instructions cached, effort from «Think before answering», a declined request answered by Anthropic's recommended fallback
 OpenRouter/  browser sign-in (OAuth PKCE) or a key; every model through one account
 ChatGPT/     Plus/Pro subscription through the Codex backend; sign in via the browser or from ~/.codex/auth.json
-ClaudeCode/  Claude subscription through the installed Claude Code (`claude -p` with no tools)
+ClaudeCode/  Claude subscription through the installed Claude Code (`claude -p` with no tools; the sandboxed app has Helper.xpc run it)
 Apple/       Apple Intelligence (Foundation Models): on this Mac, or Private Cloud Compute with Apple's entitlement
 Catalog/     every provider, including unavailable ones with the reason (Grok, Gemini by subscription)
 Check/       `swift run LLMCheck <id> "text"` — checks one provider from the terminal

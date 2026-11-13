@@ -28,10 +28,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # The development copy («ihatecrypto Dev», build-app.sh) by default: tests never open canvases in the working app.
 # IHATECRYPTO_APP=work runs them against the working ihatecrypto.app (a release's smoke test).
 WORK = os.environ.get("IHATECRYPTO_APP") == "work"
-TOKEN = open(os.path.expanduser("~/Library/Application Support/ihatecrypto" + ("" if WORK else "-dev") + "/debug-token")).read().strip()
+DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
+# The data folder is in the App Sandbox's container; a copy from before the sandbox kept it in Application Support.
+# `defaults` finds a sandboxed copy's settings by its domain.
+FOLDER = "Library/Application Support/ihatecrypto" + ("" if WORK else "-dev")
+TOKEN = open(next(p for p in [os.path.expanduser(f"~/Library/Containers/{DOMAIN}/Data/{FOLDER}/debug-token"), os.path.expanduser(f"~/{FOLDER}/debug-token")]
+                  if os.path.exists(p))).read().strip()
 BASE = "http://127.0.0.1:" + ("51789" if WORK else "51790")
 SHOTS = os.environ.get("UITEST_SHOTS")
-DOMAIN = "app.ihatecrypto.mac" + ("" if WORK else ".dev")
 
 
 def settings(values):
@@ -102,6 +106,8 @@ def check(expect, state, replies):
                 why.append(f"steps {labels}, expected {want}")
         elif key == "steps_lack" and any(want.upper() in s["label"].upper() for s in (pending or {}).get("steps", [])):
             why.append(f"steps {[s['label'] for s in (pending or {}).get('steps', [])]} name «{want}»")
+        elif key == "step_address" and not any(s.get("wholeAddress") for s in (pending or {}).get(want, [])):
+            why.append(f"no step of «{want}» carries its whole address for the opened details: {text((pending or {}).get(want))}")
         elif key == "pending_name" and (pending or {}).get("name") != want:
             why.append(f"the card saves «{(pending or {}).get('name')}», expected «{want}»")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):
@@ -150,6 +156,11 @@ def check(expect, state, replies):
             present = [k for k in want if b.get(k)]
             if present:
                 why.append(f"unexpected boards: {present}")
+        elif key == "limit_orders_priced":
+            # Each open order on the board carries 1Click's price for it (none open: nothing to check).
+            unpriced = [o.get("id") for o in b.get("limitOrders") or [] if not o.get("market")]
+            if unpriced:
+                why.append(f"limit orders without 1Click's price: {unpriced}")
         elif key == "detail_contains" and want.lower() not in (b.get("detail") or "").lower():
             why.append(f"canvas block {b.get('detail')}, expected «{want}»")
         elif key == "token_card_contains" and want.lower() not in (b.get("tokenCard") or "").lower():

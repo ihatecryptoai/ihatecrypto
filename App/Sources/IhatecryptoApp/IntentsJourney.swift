@@ -307,6 +307,13 @@ extension Workspace {
 
     /// Why a private swap can't be drawn: Confidential Intents needs the NEAR Intents partner key.
     func privateSwapRefusal(_ c: WalletCommand) -> String? {
+        switch c {
+        case .limitOrder, .limitOrders, .limitCancel:
+            guard OneClick.key == nil else { return nil }
+            return say("Limit orders go through NEAR Intents and belong to its partner key: add one in Settings › General › NEAR Intents key (made at https://partners.near-intents.org → API Keys).",
+                       "Лимитные ордера идут через NEAR Intents и привязаны к его партнёрскому ключу: добавь ключ в Settings › General › NEAR Intents key (его делают на https://partners.near-intents.org → API Keys).")
+        default: break
+        }
         guard case .swapPrivately = c, OneClick.key == nil else { return nil }
         return say("A private swap needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.",
                    "Для приватного обмена нужен партнёрский ключ NEAR Intents: добавь его в Settings › General › NEAR Intents key.")
@@ -315,7 +322,7 @@ extension Workspace {
     /// The private card's violet: the field and its head while a private send waits.
     var pendingIsPrivate: Bool {
         switch pendingAction {
-        case .wallet(.sendPrivately)?, .wallet(.swapPrivately)?: return true
+        case .wallet(.sendPrivately)?, .wallet(.swapPrivately)?, .wallet(.limitOrder)?: return true
         default: return false
         }
     }

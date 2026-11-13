@@ -59,6 +59,12 @@ id() { /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.
   && codesign -d --entitlements - --xml "$app/Contents/XPCServices/Signer.xpc" 2>/dev/null | grep -q ">N78L833HCS.app.ihatecrypto.mac.signer<" \
   || { echo "not the working copy's bundle ids or Keychain group: nothing is published."; exit 1; }
 [[ -z $site || $(/usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$app/Contents/Info.plist") == $site/appcast.xml ]] || { echo "the feed didn't make it into Info.plist"; exit 1; }
+# The App Sandbox on the app, and the helper outside it, signed by the team (Sources/Helper takes only this app).
+codesign -d --entitlements - --xml "$app" 2>/dev/null | grep -q "com.apple.security.app-sandbox" \
+  && [[ $(id "$app/Contents/XPCServices/Helper.xpc") == app.ihatecrypto.mac.helper ]] \
+  && ! codesign -d --entitlements - --xml "$app/Contents/XPCServices/Helper.xpc" 2>/dev/null | grep -q "app-sandbox" \
+  && codesign -dv "$app/Contents/XPCServices/Helper.xpc" 2>&1 | grep -q "TeamIdentifier=N78L833HCS" \
+  || { echo "the app isn't sandboxed or Helper.xpc isn't the team's: nothing is published."; exit 1; }
 
 step "notarize (a few minutes)"
 ditto -c -k --keepParent "$app" $out/notarize.zip
@@ -111,7 +117,8 @@ $sparkle/generate_appcast --download-url-prefix "$site/" $out/site
 # The landing (Tools/site) shares the folder: ihatecrypto.ai downloads this release's disk image.
 # The page and its manifesto in English, Spanish and Russian (/, /es/, /ru/ and manifesto/ under each), each in its own words for search engines.
 python3 Tools/site/build.py "$version" $out/site >/dev/null
-cp Tools/site/{_headers,icon.png,favicon.png,og.png,llms.txt,robots.txt,sitemap.xml,three.min.js} $out/site/
+# The 7f53….txt file is the site's IndexNow key: Bing and Yandex check it when told the pages changed.
+cp Tools/site/{_headers,icon.png,favicon.png,og.png,llms.txt,robots.txt,sitemap.xml,three.min.js,7f535856533c875fb6e3a0ec47efbfc1.txt} $out/site/
 cp -R Tools/site/{fonts,mf} $out/site/
 cp $dmg $out/site/ihatecrypto.dmg
 rm -rf "$log" $root

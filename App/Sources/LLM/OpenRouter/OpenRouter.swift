@@ -17,7 +17,8 @@ public struct OpenRouter: LLMProvider {
             // A few current ones from its list (checked 2026-11-05); Settings loads all of them.
             models: ["deepseek/deepseek-v4.1-flash", "openai/gpt-6.1-sol", "openai/gpt-6.1-terra", "anthropic/claude-sonnet-5.5",
                      "anthropic/claude-opus-5.5", "anthropic/claude-haiku-5.5", "google/gemini-3.8-flash", "google/gemini-4-argon",
-                     "x-ai/grok-4.7", "qwen/qwen3.8-flash"]
+                     "x-ai/grok-4.7", "qwen/qwen3.8-flash"],
+            keyURL: "https://openrouter.ai/settings/keys", keySteps: "Create key, add credits in Credits."
         )
     }
 

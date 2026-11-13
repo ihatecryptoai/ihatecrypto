@@ -16,7 +16,9 @@ import json, os, re, subprocess, sys, threading, time, urllib.request
 from collections import Counter
 
 PORT = 51791
-TOKEN = open(os.path.expanduser('~/Library/Application Support/ihatecrypto-metal/debug-token')).read().strip()
+# In the App Sandbox's container, or outside it for a copy from before the sandbox.
+TOKEN = open(next(p for p in map(os.path.expanduser, ['~/Library/Containers/app.ihatecrypto.mac.metal/Data/Library/Application Support/ihatecrypto-metal/debug-token',
+                                                     '~/Library/Application Support/ihatecrypto-metal/debug-token']) if os.path.exists(p))).read().strip()
 CANVAS = '5A7FD128-98EF-4BB8-BB68-C6260F1C7ADA'  # «Spread USDC across the best rates»: a route of 12 cards
 
 

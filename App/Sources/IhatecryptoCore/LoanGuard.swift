@@ -6,7 +6,7 @@ import Foundation
 /// health is back over `rearm`, halfway to `target`, so a repay that lands just short of the target still re-arms it.
 public struct LoanGuard: Codable, Equatable, Sendable, Identifiable {
     public var id = UUID()
-    /// "kamino" (its Backpack market) or "aave".
+    /// "kamino" (both its loans: Backpack's against stocks and the main market's against SOL) or "aave".
     public let loan: String
     /// The Aave network ("base", "arbitrum", "polygon", "ethereum"); nil on Kamino.
     public let network: String?
@@ -36,9 +36,22 @@ public struct LoanGuard: Codable, Equatable, Sendable, Identifiable {
 
     public var rearm: Decimal { below + (target - below) / 2 }
 
-    /// The repay as the router's command.
-    public func repayCommand(_ usdc: Decimal) -> String {
-        "repay \(usdc) USDC on " + (loan == "aave" ? "Aave on \(network ?? "base")" : "kamino")
+    /// The repay as the router's command; `against` «SOL» is the loan on Kamino's main market.
+    public func repayCommand(_ usdc: Decimal, against: String? = nil) -> String {
+        "repay \(usdc) USDC on " + (loan == "aave" ? "Aave on \(network ?? "base")" : "kamino" + (against.map { " against \($0)" } ?? ""))
+    }
+
+    /// One loan a guard reads: `against` «SOL» for Kamino's main market, nil for Backpack's (or Aave); `health` nil: no debt.
+    public struct Read: Equatable, Sendable {
+        public let against: String?
+        public let health: Decimal?
+        public let debt: Decimal
+        public init(against: String? = nil, health: Decimal?, debt: Decimal) { (self.against, self.health, self.debt) = (against, health, debt) }
+    }
+
+    /// The health a guard shows and re-arms on among the loans it watches: the lowest. None with a debt reads as no loan.
+    public static func riskiest(_ reads: [Read]) -> Read {
+        reads.filter { $0.health != nil }.min { $0.health! < $1.health! } ?? Read(health: nil, debt: 0)
     }
 
     /// The USDC to repay so the health rises from `health` to `target`. With one debt asset the health is a fixed amount

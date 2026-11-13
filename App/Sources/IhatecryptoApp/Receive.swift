@@ -489,7 +489,8 @@ struct AddressLines: View {
     var copy = true
 
     var body: some View {
-        let counts = (2...6).sorted { (address.count % $0 == 0 ? 0 : 1, $0) < (address.count % $1 == 0 ? 0 : 1, $1) }
+        // A short one (a NEAR name, «alice.near») stays on one line where it fits.
+        let counts = (address.count <= 24 ? [1] : []) + (2...6).sorted { (address.count % $0 == 0 ? 0 : 1, $0) < (address.count % $1 == 0 ? 0 : 1, $1) }
         VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) { ForEach(counts, id: \.self) { block($0) } }
                 .font(.system(size: size, design: .monospaced))

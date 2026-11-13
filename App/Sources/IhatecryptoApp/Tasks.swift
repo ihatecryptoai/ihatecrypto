@@ -1,5 +1,7 @@
 import AppKit
+import HelperAPI
 import IhatecryptoCore
+import ServiceManagement
 import SignerAPI
 import SolanaChain
 import SwiftUI
@@ -289,9 +291,18 @@ extension Workspace {
                 showNext(step)
                 if let landings, !(await landed(landings, before: command, step: step)) { stopped = true; break }
                 // Money a move before brought to Solana: this step waits until Solana's balance shows it.
-                if arrived.contains("solana"), let c = command, Self.spends(c) == "solana", let need = Self.solanaUSDC(c) {
-                    await waitForDeposit(need, then: step)
+                if arrived.contains("solana"), let c = command, Self.spendsOnSolana(c) {
+                    await waitForDeposit(Self.solanaUSDC(c), then: step)
                 }
+            }
+            // A later step that can never run stops the chain before its first card: one Confirm would move the money of
+            // the steps before it and stop there.
+            if k == 0, !confirmed, TaskRun.automation == nil, let stop = unrunnableStep(steps) {
+                reply(say("The chain doesn’t start because of step \(stop.number): \(stop.why)",
+                          "Цепочку не начинаю из-за шага \(stop.number): \(stop.why)",
+                          "No empiezo la cadena por el paso \(stop.number): \(stop.why)"))
+                noteFailure(steps.joined(separator: " then "), ExecutionError(stop.why))
+                break
             }
             // The first step reads the balances as they are now: one that can't be paid is said before any card
             // («Move 0 USDC · Ethereum → Arbitrum» was drawn). Later steps wait for the money the ones before bring.
@@ -359,7 +370,7 @@ extension Workspace {
         }
         snapshotCanvas()
         saveCanvas()
-        taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived)
+        taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived, false)
         // A confirmed chain is through (or stopped): the model goes on with the request it was a step of.
         if confirmed { await afterMove() }
     }
@@ -398,22 +409,42 @@ extension Workspace {
         } else {
             there = nil
         }
-        guard let there, there < asked, asked - there <= max(1, asked * Decimal(string: "0.02")!) else { return step }
+        guard let there, Self.fitsArrival(asked: asked, there: there) else { return step }
         let fitted = c.with(amount: there.rounded(2, .down))
         // Run again from its words: only a command that reads back the same.
         return WalletCommand.parse(fitted.summary) == fitted ? fitted.summary : step
+    }
+
+    /// A step asked for `asked` with `there` to spend: short by little enough to spend what is there. Up to a dollar
+    /// (Ethereum's fee) or 2%, but never more than a quarter of the amount: with a balance read before the money
+    /// showed, «deposit 1» became «deposit 0.1» (2026-11-10). A bigger gap is left for the step's own refusal.
+    static func fitsArrival(asked: Decimal, there: Decimal) -> Bool {
+        there < asked && asked - there <= max(min(1, asked / 4), asked * Decimal(string: "0.02")!)
     }
 
     /// When a move finishes: the rest of a scheduled task, if the move was on its canvas, went through, and came
     /// within half an hour (a card waits 15 minutes; a later move on that canvas is something else).
     func continueTask() {
         guard let q = taskQueue else { return }
+        // Only the Confirm on the chain's own card starts the rest. Another move that goes through on this canvas while
+        // that card waits (a position closed from its card) isn't that Confirm: the steps ran «as confirmed» after it,
+        // the trading key's without a prompt (the 2026-11-10 review). They keep waiting with the card.
+        if !q.confirmed, q.canvas == canvasID, pendingAction != nil || pendingAllocation != nil || awaitingAmount != nil,
+           Date().timeIntervalSince(q.since) < 1800 { return }
         taskQueue = nil
-        guard q.canvas == canvasID, finishedAction?.outcome.ok == true, Date().timeIntervalSince(q.since) < 1800, let first = q.steps.first else { return }
+        guard q.confirmed, q.canvas == canvasID, finishedAction?.outcome.ok == true, Date().timeIntervalSince(q.since) < 1800,
+              let first = q.steps.first else { return }
         // The next step's board in the same breath as the move's goes: no frame where the chain's cards are gone.
         chainAhead = (q.canvas, Array(q.steps.dropFirst()))
         showNext(first)
         Task { await runSteps(q.steps, confirmed: true, brought: q.brought) }
+    }
+
+    /// Confirm on the card a chain's steps wait behind (this canvas's): its move, once through, starts them. `after`:
+    /// that Confirm is over — steps still armed never started (it ended without a move: an address saved, a module
+    /// off, no trading key), and no later move may start them.
+    func chainConfirmed(after: Bool = false) {
+        if after { if taskQueue?.confirmed == true { taskQueue = nil } } else if taskQueue?.canvas == canvasID { taskQueue?.confirmed = true }
     }
 
     /// The step a confirmed chain goes to, lit, before its move's own board takes its place.
@@ -421,25 +452,66 @@ extension Workspace {
         runningAction = (say("Next: ", "Дальше: ", "Siguiente: ") + readable(ScheduleCanvas.readable(step)), chainSteps(of: [step]), [], Date())
     }
 
+    /// A step that spends USDC held on Solana: one that names it (`spends`), or a spread of the free USDC wherever it
+    /// is. A deposit of another coin («lend 2 SOL») spends none.
+    static func spendsOnSolana(_ c: WalletCommand) -> Bool {
+        switch c {
+        case .allocate(let asset, maxShare: _, amount: _, without: _, from: nil): asset.uppercased() == "USDC"
+        case .lendDeposit(let symbol, _), .kamino(deposit: true, symbol: let symbol, amount: _): symbol.uppercased() == "USDC"
+        default: spends(c) == "solana"
+        }
+    }
+
+    /// The wait for money a move brought to Solana is over. Balances are read at «finalized» and a move ends at
+    /// «confirmed», some 13 s earlier, so the money is counted before it shows. With the step's amount there it is
+    /// over. Without one («then move all»), or when the move brings less than the step asks (the rest comes from
+    /// another network), it is over once the finalized balance equals the confirmed one — equal, not «at least»: what
+    /// an earlier step spent is confirmed before it is final too — and that one has read the same several times in a
+    /// row: three when it stands above `entry`, the balance the wait began with (the money is seen coming), eight when
+    /// it doesn't (it had landed already, or a node a little behind still answers the old balance). No confirmed read
+    /// at all: only the step's own amount ends it.
+    static func depositShown(need: Decimal?, finalized: Decimal, confirmed: Decimal?, steady: Int, entry: Decimal) -> Bool {
+        if let need, finalized >= need { return true }
+        guard let confirmed else { return false }
+        return finalized == confirmed && steady >= (confirmed > entry ? 3 : 8)
+    }
+
     /// A step that spends on Solana what a move before it brought: a card of its own («ARRIVES · SOLANA») until
-    /// Solana's balance shows the money, two minutes at most; then the step goes on and its own check says what's short.
-    private func waitForDeposit(_ need: Decimal, then step: String) async {
-        guard let have = solana?.usdc, have < need else { return }
+    /// Solana's balance shows the money (`depositShown`), two minutes at most; then the step goes on and its own check
+    /// says what's short. `need`: the step's amount, nil when it names none («move all», a spread) — it read the old
+    /// balance then, and a step asking for more than the move brought waited the whole two minutes (2026-11-10).
+    private func waitForDeposit(_ need: Decimal?, then step: String) async {
+        guard let have = solana?.usdc, need.map({ have < $0 }) ?? true,
+              let account = try? SPL.associatedAccount(owner: solanaAddress, mint: SpotAsset.usdc.mint) else { return }
+        let rpc = SolanaRPC()
+        var confirmed = await rpc.accountAmount(account, commitment: "confirmed"), steady = 0, now = have, unread = 0
         func card(_ have: Decimal) -> ActivityBubble {
-            ActivityBubble(kind: "step", label: "ARRIVES · SOLANA", title: "\(Fmt.num(need)) USDC",
-                           lines: [say("on Solana now", "на Solana сейчас", "en Solana ahora") + "\t\(Fmt.num(have)) USDC",
-                                   say("then", "потом", "luego") + "\t" + readable(ScheduleCanvas.readable(step))],
-                           logo: "sol", fill: .solana)
+            // What the step asks for, else what is seen coming.
+            let coming = need ?? confirmed.flatMap { $0 > have ? $0 - have : nil }
+            return ActivityBubble(kind: "step", label: "ARRIVES · SOLANA", title: coming.map { "\(Fmt.num($0)) USDC" } ?? "USDC",
+                                  lines: [say("on Solana now", "на Solana сейчас", "en Solana ahora") + "\t\(Fmt.num(have)) USDC",
+                                          say("then", "потом", "luego") + "\t" + readable(ScheduleCanvas.readable(step))],
+                                  logo: "sol", fill: .solana)
         }
         runningAction = (say("Waiting for the deposit on Solana", "Жду депозит на Solana", "Esperando el depósito en Solana"),
                          [card(have)] + chainSteps(of: [step]), [], Date())
-        for _ in 0..<60 {
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline, !Self.depositShown(need: need, finalized: now, confirmed: confirmed, steady: steady, entry: have) {
+            // No amount to wait for and the node says nothing of what is counted: nothing to wait on.
+            if need == nil, confirmed == nil, unread >= 5 { break }
             try? await Task.sleep(for: .seconds(2))
-            await loadSolana()
-            let now = solana?.usdc ?? 0
-            if now >= need { break }
+            // The one account, two light reads: the whole portfolio every two seconds (loadSolana) spent Jupiter's five
+            // calls per ten seconds, and the step's own call after the wait got «too many requests» (2026-11-10).
+            if let finalized = await rpc.accountAmount(account, commitment: "finalized") { now = finalized }
+            // A read that failed says nothing: it neither counts toward «the same» nor starts the count again.
+            if let again = await rpc.accountAmount(account, commitment: "confirmed") {
+                steady = again == confirmed ? steady + 1 : 0
+                confirmed = again
+            } else { unread += 1 }
             runningAction?.steps[0] = card(now)
         }
+        // Once, for the step's own checks, which read the portfolio.
+        await loadSolana()
     }
 
     /// The USDC a step spends on Solana: what it waits for when a move before it brings the money.
@@ -518,49 +590,58 @@ extension Workspace {
     }
 }
 
-/// Settings › General › Keep running: a launch agent that starts ihatecrypto at login and again within a minute after
-/// it quits or crashes, so scheduled tasks, stops and alerts keep going. It starts the app only when no copy runs, and
-/// hidden (`open -g -j`): the window stays closed, the coin is in the menu bar.
+/// Settings › General › Keep running: a launch agent that starts ihatecrypto at login and again within a minute after it
+/// quits or crashes, so scheduled tasks, stops and alerts keep going. It's this app's own binary run with
+/// `--keep-running-check` (Launch, `check`), registered with SMAppService from Contents/Library/LaunchAgents (the plist is
+/// written by project.yml): it starts the app only when no copy runs, and hidden — the window stays closed, the coin is
+/// in the menu bar. Quit Completely and an update rest it (`pause`) until the app opens again or the Mac restarts.
 enum KeepRunning {
-    static let label = Flavor.id + ".keeprunning"
-    static var plist: URL { FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/LaunchAgents/\(label).plist") }
-    static var isOn: Bool { FileManager.default.fileExists(atPath: plist.path) }
+    static let checkFlag = "--keep-running-check"
+    static let agent = SMAppService.agent(plistName: Flavor.id + ".agent.plist")
+    private static let pausedKey = "keepRunningPausedAt"
+    static var isOn: Bool { agent.status == .enabled }
 
     static func set(_ on: Bool) throws {
-        let domain = "gui/\(getuid())"
-        launchctl("bootout", "\(domain)/\(label)")
-        guard on else { try? FileManager.default.removeItem(at: plist); return }
-        let job: [String: Any] = [
-            "Label": label,
-            // The app as it is now; a moved or rebuilt copy elsewhere re-registers when the switch is set again.
-            "ProgramArguments": ["/bin/sh", "-c", "/usr/bin/pgrep -qx '\(ProcessInfo.processInfo.processName)' || /usr/bin/open -g -j '\(Bundle.main.bundlePath)'"],
-            "RunAtLoad": true,
-            "StartInterval": 60,
-            "ProcessType": "Background",
-            "AssociatedBundleIdentifiers": [Flavor.id],
-        ]
-        try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try PropertyListSerialization.data(fromPropertyList: job, format: .xml, options: 0).write(to: plist)
-        guard launchctl("bootstrap", domain, plist.path) == 0 else {
-            try? FileManager.default.removeItem(at: plist)
-            throw WalletError("macOS didn’t accept the background item. Check System Settings › General › Login Items.")
+        guard on else { try? agent.unregister(); return }
+        try? agent.register()
+        guard isOn else {
+            SMAppService.openSystemSettingsLoginItems()
+            throw WalletError("macOS keeps ihatecrypto's background item off. Turn it on in System Settings › General › Login Items & Extensions › Allow in the Background.")
         }
     }
 
-    /// Sparkle is about to swap the app: the agent rests, or it could open the old copy mid-swap (Updater.swift).
-    static func pause() { launchctl("bootout", "gui/\(getuid())/\(label)") }
-    /// At launch of a copy that updates itself: the agent runs again if the switch is on (already running is fine).
-    static func resume() { if isOn { launchctl("bootstrap", "gui/\(getuid())", plist.path) } }
+    /// Sparkle is about to swap the app, or Quit Completely: the agent rests (the check reads this, the app shares its
+    /// settings), or it could open the old copy mid-swap (Updater.swift) or bring back a copy quit for good.
+    static func pause() { UserDefaults.standard.set(Date(), forKey: pausedKey) }
 
-    @discardableResult private static func launchctl(_ args: String...) -> Int32 {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = args
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return -1 }
-        p.waitUntilExit()
-        return p.terminationStatus
+    /// At launch: the agent works again. The first sandboxed launch also moves Keep running from before the sandbox,
+    /// a plist in ~/Library/LaunchAgents the app can no longer reach: the helper removes it and this agent takes over.
+    static func resume() {
+        UserDefaults.standard.removeObject(forKey: pausedKey)
+        guard Helper.sandboxed, !UserDefaults.standard.bool(forKey: "keepRunningMoved") else { return }
+        Task {
+            guard let had = try? await Helper.removeOldKeepRunning() else { return }
+            if had { try? agent.register() }
+            UserDefaults.standard.set(true, forKey: "keepRunningMoved")
+        }
+    }
+
+    /// The agent's run, before any window: opens ihatecrypto hidden unless a copy runs or it rests since this boot.
+    static func check() -> Never {
+        var boot = timeval(), size = MemoryLayout<timeval>.size
+        sysctlbyname("kern.boottime", &boot, &size, nil, 0)
+        let resting = (UserDefaults.standard.object(forKey: pausedKey) as? Date).map { $0.timeIntervalSince1970 > Double(boot.tv_sec) } ?? false
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: Flavor.id).contains { $0.processIdentifier != getpid() }
+        if !resting, !running {
+            let hidden = NSWorkspace.OpenConfiguration()
+            hidden.activates = false
+            hidden.hides = true
+            hidden.addsToRecentItems = false
+            let opened = DispatchSemaphore(value: 0)
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: hidden) { _, _ in opened.signal() }
+            _ = opened.wait(timeout: .now() + 20)
+        }
+        exit(0)
     }
 }
 

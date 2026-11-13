@@ -6,54 +6,21 @@
 </p>
 
 <p align="center">
-  Say what you want done with your crypto. ihatecrypto lays the move out as cards, and nothing moves until you confirm with Touch ID.
+  <b>A crypto harness for Mac and Windows: between your AI model and your money.</b><br>
+  Say what you want done with your crypto. ihatecrypto lays the move out as cards, and nothing moves until you confirm
+  with Touch ID or Windows Hello.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
-  <img alt="Platform: macOS 26" src="https://img.shields.io/badge/platform-macOS%2026-lightgrey">
+  <img alt="Platform: macOS 26, Windows 10 and 11" src="https://img.shields.io/badge/platform-macOS%2026%20%7C%20Windows%2010%2F11-lightgrey">
   <a href="https://ihatecrypto.ai"><img alt="Site: ihatecrypto.ai" src="https://img.shields.io/badge/site-ihatecrypto.ai-FF7A2F"></a>
 </p>
 
-ihatecrypto is a self-custody Mac wallet you talk to. Write «buy $10 of Tesla» or «put my USDC where it earns most»
+ihatecrypto is a self-custody crypto wallet you talk to, for Mac and Windows. Write «buy $10 of Tesla» or «put my USDC where it earns most»
 in English, Spanish or Russian. It looks up prices and balances, picks a route across networks and shows where the
 money comes from, how it gets there and what you end up with. The model never holds a key: a separate signing
 process checks every transaction in code and signs only after you press Confirm.
-
-## NEAR HACKATHON (November 1–14, 2026)
-
-ihatecrypto existed before the hackathon: swaps, bridges and sends through NEAR Intents' 1Click and a NEAR account
-derived from the wallet's phrase are baseline (tag `pre-hackathon`). Everything below was built in the window, on the
-branch `near-hackathon`: [the whole diff](../../compare/pre-hackathon...near-hackathon). Tracks: Privacy & Private AI,
-AI Security & Defense, Agent Economy, Real-World Money, Unstoppable DeFi.
-
-| What | NEAR's role | Try it (Dev build, see Install) | Check without a wallet |
-| --- | --- | --- | --- |
-| **Private sends** | Confidential Intents: on chain the deposit and the payout can't be matched | «send 2 USDC privately to Mom» → a card «PRIVATE · CONFIDENTIAL INTENTS» → Confirm → Mom gets exactly 2 USDC. Any USDC send to a saved address offers «Regular \| Private» over Confirm, with both ways' fees and times | `swift test --filter privateSend` |
-| **Private swaps** | Confidential Intents swaps between this wallet's own addresses | «buy NEAR for 1 USDC privately» or «обменяй приватно 1 USDC на NEAR» → a card «PRIVATE SWAP · CONFIDENTIAL INTENTS» → Confirm → NEAR on your NEAR account. Refused before anything is sent unless 1Click itself holds the deposit as private | `swift test --filter privateSwap` |
-| **Private chat model** | NEAR AI Cloud runs the model in Intel TDX + NVIDIA enclaves | Pick «NEAR AI Cloud (private)» → every message waits for the enclave check → each reply's exact bytes are checked against the model key the attestation verified → the chat's header reads «Private assistant» with a lock, and Proof shows what was checked | `swift run LLMCheck nearai --attest` (no key: checks the live enclaves down to Intel's root) |
-| **«Won't let you get liquidated»** | The USDC a repay lacks comes only through NEAR Intents, from whichever network has it | «guard my loan on kamino below 1.6» → under the line «move N USDC from Base to Solana via NEAR Intents» and a repay back to 1.8 wait for one Confirm | `swift test --filter 'LoanGuard\|aGuardsTopUp\|viaNEARIntents'` |
-| **Pay any API: MPP through NEAR Intents, and x402** | MPP's NEAR Intents charge ([draft](https://paymentauth.org/draft-nearintents-charge-01)): the service's 402 names a 1Click deposit address, and 1Click delivers exactly what the service asked on its own network | «pay GET <a service that takes MPP's nearintents charge>» → a card «PAY · NEAR INTENTS» saying what the service receives, where, and where a refund goes → Confirm. Before signing, 1Click itself must hold the deposit for the service's recipient, its exact output and refund address, at no more than 1Click's own price. Then the request goes again with the deposit's hash. x402: «pay GET https://api.402rates.com/v1/ping» → an EIP-3009 signature, Base's USDC brought from Solana through NEAR Intents when short | `swift test --filter 'nearIntentsCharge\|anMPPCharge\|tempoComesFirst\|x402\|X402'` |
-| **Agent wallet** | Agent API: NEAR Intents enforces the owner-signed policy | «create an agent wallet with $20 a day» → your NEAR key signs the rules (NEP-366) and a grant (NEP-413) → «send 1 USDC from the agent wallet to Mom» goes without your key; over the limit NEAR Intents refuses | `swift test --filter 'agentWallet\|NearOwnerSigning\|agentOwner'` |
-| **Every move through NEAR Intents, after Confirm** | 1Click's own states | The chat field shows the money's way: paid on the source network, a solver filling it on NEAR, landed, with the time left and the move on NEAR Intents' explorer. Refunds and «still on its way» are said as such | `swift test --filter 'Journey\|aRefundIsSaid'` |
-
-The signer checks what it signs itself: a private send or swap goes out only when 1Click itself holds the deposit as
-confidential. The agent wallet's policy goes on chain encrypted for NEAR Intents' custody (`store_wallet_policy` on
-`outlayer.near`), so the signer can't read it there: it signs only that method, only to that contract, with at most
-0.05 NEAR for storage (said in words, and that its refund goes to NEAR Intents' relayer), and the app signs only when
-the policy the API previews is the one asked, under the hash the API names (sha256 of its JSON with sorted keys); after
-it's applied, the applied hash must be that one.
-
-Run live on mainnet (2026-11-02…07): a private send (2.02 Solana USDC → exactly 2 USDC on Base in 89 s), an x402 call
-paid by signature, the NEAR AI reply signature check (`teeReply: model` in the UI test), a move «via NEAR Intents»
-(6.19 USDC Solana → Base in 99 s), the loan guard's repay, the agent wallet funded, paying its own wallet and frozen,
-a private swap (1 USDC on Solana → 0.26964 NEAR in 100 s), and an MPP NEAR Intents charge to a test merchant on
-NEAR's own SDK (`@defuse-protocol/nearintents-mpp-sdk`): 1.020228 USDC from Base, 1 USDC delivered on Solana, the
-service's receipt back.
-
-**Not yet:** the agent wallet's grant lives on this Mac only. The on-chain `agent_policy_hash` is the custody's own hash
-of the encrypted policy and isn't recomputed here. MPP's directory lists no service taking the NEAR Intents charge yet,
-so the live run used a merchant of our own.
 
 ## What it does
 
@@ -89,8 +56,8 @@ so the live run used a merchant of our own.
       the limit in Settings). The stop and the take go in with the order. Price alerts and scheduled buys keep
       running from the menu bar when the window is closed.</p>
       <h3>Bring your own model</h3>
-      <p>A ChatGPT Plus or Pro plan, a Claude plan through Claude Code, OpenRouter, an API key, or a model on your Mac
-      through Ollama. ihatecrypto has no model of its own, and your chat goes from the Mac to the model you pick.</p>
+      <p>A ChatGPT Plus or Pro plan, a Claude plan through Claude Code, OpenRouter (Qwen, DeepSeek, Llama and others),
+      an API key, or a model on your own computer through Ollama or LM Studio. ihatecrypto has no model of its own, and your chat goes from the Mac to the model you pick.</p>
     </td>
   </tr>
 </table>
@@ -99,6 +66,21 @@ so the live run used a merchant of our own.
 Tempo and NEAR; Bitcoin and others through NEAR Intents.
 **Protocols:** Jupiter, Uniswap, Relay, NEAR Intents, CCTP, USDT0, Aave, Kamino, Jupiter Lend, JitoSOL, Morpho and
 Hyperliquid's HLP.
+
+**NEAR Hackathon:** private sends and swaps, the private assistant, the loan guard, paying APIs and the agent wallet
+were built for it. See [docs/near-hackathon.md](docs/near-hackathon.md).
+
+## Windows (preview)
+
+The same app for Windows 10 and 11, rebuilt in Rust (Tauri): the same chat, cards and moves. The wallet is sealed
+with a Windows Hello key kept in the TPM chip, every move asks Windows Hello (face, fingerprint or PIN), and signing
+runs in its own process. Download
+[ihatecrypto-windows-x64-setup.exe](https://github.com/ihatecryptoai/ihatecrypto/releases/download/windows-latest/ihatecrypto-windows-x64-setup.exe)
+(the ARM build and the release notes are on
+[windows-latest](https://github.com/ihatecryptoai/ihatecrypto/releases/tag/windows-latest)). The installer isn't
+code-signed yet, so Windows asks before running it. Updates are signed and install only when you choose to. The code
+is on the [`windows`](https://github.com/ihatecryptoai/ihatecrypto/tree/windows) branch, see
+[docs/windows.md](https://github.com/ihatecryptoai/ihatecrypto/blob/windows/docs/windows.md).
 
 ## Install
 

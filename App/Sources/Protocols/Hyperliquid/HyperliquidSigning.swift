@@ -168,6 +168,51 @@ public enum HLAction {
         }
     }
 
+    /// What a trading key would open with `action` on its own, read from the action itself: an opening buy costs at most
+    /// its limit price × size (it fills at that price or better). An opening sell isn't bounded by its price (an IOC or
+    /// a crossing limit fills higher, so a sell priced near zero dumps into whoever bids), and a TWAP names no price:
+    /// those return the reason they take the person instead. Cancels, leverage, the referral code and reduce-only orders
+    /// open nothing (0). Anything else: the person.
+    public enum Opening: Equatable { case dollars(Decimal), person(String) }
+
+    public static func opening(_ action: MsgPack) -> Opening {
+        guard case .map(let pairs) = action else { return .person("an action the signer can't read") }
+        if onlyReduces(action) { return .dollars(0) }
+        switch type(action) {
+        case "updateLeverage", "setReferrer", "trailingStop": return .dollars(0)   // the guard holds a trailing stop to reduce-only
+        case "twapOrder": return .person("the trading key doesn't start TWAPs: a TWAP names no price")
+        case "order":
+            guard case .array(let orders)? = pairs.first(where: { $0.0 == "orders" })?.1, !orders.isEmpty else { return .person("an order the signer can't read") }
+            var total = Decimal()
+            for case let order in orders {
+                guard case .map(let f) = order else { return .person("an order the signer can't read") }
+                func field(_ k: String) -> MsgPack? { f.first(where: { $0.0 == k })?.1 }
+                if field("r") == .bool(true) { continue }
+                guard field("b") == .bool(true) else { return .person("the trading key doesn't open shorts or sell: a sell's price doesn't bound what it gives") }
+                guard case .string(let p)? = field("p"), case .string(let s)? = field("s"),
+                      let price = Decimal(string: p, locale: Locale(identifier: "en_US_POSIX")), let size = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")),
+                      price >= 0, size >= 0 else { return .person("an order whose price or size the signer can't read") }
+                total += price * size
+            }
+            // Past what Decimal holds (a price of 1e100 times a size of 1e100) the sum is NaN: under every limit when
+            // compared, and nothing to count. One such order beside a real one took the whole batch past the limits.
+            guard total.isFinite else { return .person("an order whose price or size the signer can't read") }
+            return .dollars(total)
+        default: return .person("an action the trading key doesn't sign on its own")
+        }
+    }
+
+    /// Every market the action names (an order's, a cancel's or a TWAP's «a», a trailing stop's «asset»), at any depth.
+    public static func markets(_ action: MsgPack) -> Set<UInt64> {
+        switch action {
+        case .map(let pairs): pairs.reduce(into: Set<UInt64>()) { out, p in
+            if ["a", "asset"].contains(p.0), case .uint(let n) = p.1 { out.insert(n) } else { out.formUnion(markets(p.1)) }
+        }
+        case .array(let items): items.reduce(into: Set<UInt64>()) { $0.formUnion(markets($1)) }
+        default: []
+        }
+    }
+
     /// A string field of the action.
     public static func text(_ action: MsgPack, _ key: String) -> String? {
         guard case .map(let pairs) = action, case .string(let s)? = pairs.first(where: { $0.0 == key })?.1 else { return nil }

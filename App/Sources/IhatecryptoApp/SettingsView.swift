@@ -22,6 +22,10 @@ struct SettingsView: View {
     @AppStorage(SettingsView.tabKey) private var tab = Tab.general
     @AppStorage(Executor.batchKey) private var batches = false
     @AppStorage(ContractCallGuard.capKey) private var contractCap = 50.0
+    /// Trading › Limits edited but not saved: the signer takes them in person (Workspace.saveRules).
+    @State private var rulesDraft: RiskPolicy?
+    @State private var rulesError: String?
+    @State private var rulesSaving = false
 
     /// Raw values also serve links from the chat and the networks menu.
     enum Tab: String, CaseIterable {
@@ -219,7 +223,10 @@ struct SettingsView: View {
 
     /// A style sets every rule at once; a number changed after it makes the policy «Custom».
     private var style: some View {
-        let current = AgentStyle.allCases.first { $0.policy == ws.policy }
+        // «Over a limit» is the user's own, not part of a style.
+        var mine = ws.policy
+        mine.overLimit = nil
+        let current = AgentStyle.allCases.first { $0.policy == mine }
         return SettingsSection(icon: "dial.medium", title: "Style",
                                line: current == nil ? "Custom: your own numbers below. A style resets them." : "Sets every rule below at once. Change any number after.") {
             HStack(spacing: 10) {
@@ -229,7 +236,12 @@ struct SettingsView: View {
     }
 
     private func styleCard(_ s: AgentStyle, selected: Bool) -> some View {
-        Button { ws.policy = s.policy } label: {
+        Button {
+            var p = s.policy
+            p.overLimit = ws.policy.overLimit
+            rulesSaving = true
+            Task { rulesError = await ws.saveRules(p); rulesDraft = nil; rulesSaving = false }
+        } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top) {
                     SettingsIcon(icon: s.icon, size: 34)
@@ -252,7 +264,7 @@ struct SettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Brand.accent : Brand.cardBorder, lineWidth: selected ? 1.5 : 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityAddTraits(selected ? [.isSelected] : [])
+        .buttonStyle(.plain).disabled(rulesSaving).accessibilityAddTraits(selected ? [.isSelected] : [])
         .help(selected ? "\(s.name) — in use" : "Use \(s.name): sets all the rules below")
     }
 
@@ -264,27 +276,61 @@ struct SettingsView: View {
     }
 
     private var limits: some View {
-        let p = ws.policy
-        return SettingsSection(icon: "shield.lefthalf.filled", title: "Limits", line: "A plan that breaks one is not executed. Crypto only.") {
+        let p = rulesDraft ?? ws.policy
+        return SettingsSection(icon: "shield.lefthalf.filled", title: "Limits", line: "What a trade may risk, and what happens to a plan over a limit. Any change asks for \(Presence.name). Crypto only.") {
             SettingsGroup {
-                SettingsRow("Risk per trade", icon: "chart.bar", info: "The most one trade may lose at its stop, as a share of your capital.") {
+                SettingsRow("Over a limit", icon: "hand.raised", info: "Block: the plan isn't executed. Ask me: before signing, the sheet asks you to tick that you accept the loss at the stop. Just warn: a warning line only.") {
+                    Picker("Over a limit", selection: Binding(get: { p.limitMode }, set: { m in updateRules { $0.overLimit = m } })) {
+                        Text("Block").tag(RiskPolicy.OverLimit.block)
+                        Text("Ask me").tag(RiskPolicy.OverLimit.ask)
+                        Text("Just warn").tag(RiskPolicy.OverLimit.warn)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize().tint(nil)
+                }
+                // Variant B (owner, 2026-11-12): the scale goes past 10% to 15, 25, 50 and «No limit».
+                SettingsRow("Risk per trade", icon: "chart.bar", info: "The most one trade may lose at its stop, as a share of your capital. «No limit» takes the limit off, and the one for all positions together with it.") {
+                    let steps = RiskPolicy.riskSteps
+                    let at = CGFloat(steps.lastIndex { $0 <= p.maxRiskPct } ?? 0) / CGFloat(steps.count - 1)
                     GeometryReader { g in
                         Capsule().fill(Color.primary.opacity(0.1))
-                            .overlay(alignment: .leading) {
-                                Capsule().fill(Brand.accent).frame(width: g.size.width * min(max(CGFloat(NSDecimalNumber(decimal: p.maxRiskPct).doubleValue / 10), 0), 1))
-                            }
+                            .overlay(alignment: .leading) { Capsule().fill(Brand.accent).frame(width: g.size.width * at) }
                     }
                     .frame(width: 70, height: 6).accessibilityHidden(true)
-                    stepper(Fmt.pct(p.maxRiskPct), "risk per trade", down: p.maxRiskPct > 0.5, up: p.maxRiskPct < 10) { $0.maxRiskPct += $1 * Self.half }
+                    ladder(p.maxRiskPct, RiskPolicy.riskSteps, "risk per trade", floor: 0) { v in updateRules { $0.maxRiskPct = v } }
                 }
                 SettingsRow("All open positions together", icon: "square.stack.3d.up", info: "Their combined loss at the stops can't go over this share of capital. It's never below the risk per trade.") {
-                    stepper(Fmt.pct(p.maxOpenRiskPct), "for all positions", down: p.maxOpenRiskPct > p.maxRiskPct, up: p.maxOpenRiskPct < 30) { $0.maxOpenRiskPct += $1 }
+                    ladder(p.maxOpenRiskPct, RiskPolicy.openRiskSteps, "for all positions", floor: p.maxRiskPct) { v in updateRules { $0.maxOpenRiskPct = v } }
                 }
                 SettingsRow("Reward / risk at least", icon: "arrow.up.right", info: "The planned profit must be at least this many times the planned loss.") {
-                    stepper(Fmt.num(p.minRewardRisk), "reward per risk", down: p.minRewardRisk > 1, up: p.minRewardRisk < 5) { $0.minRewardRisk += $1 * Self.tenth }
+                    stepper(Fmt.num(p.minRewardRisk), "reward per risk", down: p.minRewardRisk > 1, up: p.minRewardRisk < 5, rules: true) { $0.minRewardRisk += $1 * Self.tenth }
                 }
-                SettingsRow("Leverage up to", icon: "multiply", info: "Borrowed exposure makes gains and losses larger. The assistant never trades above this.") {
-                    stepper("\(Fmt.num(p.maxLeverage))×", "leverage", down: p.maxLeverage > 1, up: p.maxLeverage < 20) { $0.maxLeverage += $1 }
+                SettingsRow("Leverage up to", icon: "multiply", info: "Borrowed exposure makes gains and losses larger. The trading key never sets more: above it, every leverage change asks for \(Presence.name).") {
+                    let down = RiskPolicy.step(p.maxLeverage, in: RiskPolicy.leverageSteps, up: false)
+                    let up = RiskPolicy.step(p.maxLeverage, in: RiskPolicy.leverageSteps, up: true)
+                    stepper("\(Fmt.num(p.maxLeverage))×", "leverage", down: down != nil, up: up != nil, rules: true) { p, dir in
+                        if let to = dir > 0 ? up : down { p.maxLeverage = to }
+                    }
+                }
+                if rulesDraft != nil || rulesError != nil {
+                    HStack(spacing: 10) {
+                        if let rulesError { Text(rulesError).font(.ui(12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                        Spacer()
+                        Button("Undo") { rulesDraft = nil; rulesError = nil }.disabled(rulesSaving)
+                        if let draft = rulesDraft {
+                            Button("Save with \(Presence.short)") {
+                                rulesSaving = true
+                                Task {
+                                    var p = ws.policy
+                                    p.take(draft.tradingRules)
+                                    rulesError = await ws.saveRules(p)
+                                    if rulesError == nil { rulesDraft = nil }
+                                    rulesSaving = false
+                                }
+                            }
+                            .buttonStyle(.borderedProminent).tint(Brand.accent).disabled(rulesSaving)
+                        }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
                 }
             }
         }
@@ -295,7 +341,7 @@ struct SettingsView: View {
         return SettingsSection(icon: "book.closed", title: "By the book", line: "What «by the book» uses when you name no numbers.") {
             SettingsGroup {
                 SettingsRow("Risk", icon: "chart.bar", info: "The share of capital a trade risks at its stop when you don't say how much. Never above the risk per trade.") {
-                    stepper(Fmt.pct(p.defaultRiskPct), "default risk", down: p.defaultRiskPct > Self.quarter, up: p.defaultRiskPct < p.maxRiskPct) { $0.defaultRiskPct += $1 * Self.quarter }
+                    stepper(Fmt.pct(p.defaultRiskPct), "default risk", down: p.defaultRiskPct > Self.quarter, up: p.defaultRiskPct < min(p.maxRiskPct, 10)) { $0.defaultRiskPct += $1 * Self.quarter }
                 }
                 SettingsRow("Take-profit", icon: "flag.checkered", info: "How far the take is, as a multiple of the stop's distance: 2R takes twice what the stop would lose. Never below the reward / risk limit.") {
                     stepper("\(Fmt.num(p.defaultRewardRisk))R", "take-profit", down: p.defaultRewardRisk > p.minRewardRisk, up: p.defaultRewardRisk < 10) { $0.defaultRewardRisk += $1 * Self.half }
@@ -307,15 +353,37 @@ struct SettingsView: View {
         }
     }
 
+    /// − value + over fixed steps (RiskPolicy.riskSteps): the top one reads «No limit». `floor`: the value may not go below it.
+    private func ladder(_ value: Decimal, _ steps: [Decimal], _ what: String, floor: Decimal, set: @escaping (Decimal) -> Void) -> some View {
+        let down = RiskPolicy.step(value, in: steps, up: false).flatMap { $0 >= floor ? $0 : nil }
+        let up = RiskPolicy.step(value, in: steps, up: true)
+        return HStack(spacing: 8) {
+            step("minus", "Less \(what)", enabled: down != nil) { if let down { set(down) } }
+            Text(value >= RiskPolicy.noLimit ? "No limit" : Fmt.pct(value)).font(.ui(15, .bold)).monospacedDigit().frame(minWidth: 72)
+            step("plus", "More \(what)", enabled: up != nil) { if let up { set(up) } }
+        }
+    }
+
     private static let tenth = Decimal(string: "0.1")!, quarter = Decimal(string: "0.25")!, half = Decimal(string: "0.5")!
 
     /// − value +: `change` gets −1 or +1; the rules that depend on each other are kept in line after it.
-    private func stepper(_ value: String, _ what: String, down: Bool, up: Bool, change: @escaping (inout RiskPolicy, Decimal) -> Void) -> some View {
+    /// `rules`: a limit, edited in the draft that Save gives the signer.
+    private func stepper(_ value: String, _ what: String, down: Bool, up: Bool, rules: Bool = false,
+                         change: @escaping (inout RiskPolicy, Decimal) -> Void) -> some View {
         HStack(spacing: 8) {
-            step("minus", "Less \(what)", enabled: down) { update { change(&$0, -1) } }
+            step("minus", "Less \(what)", enabled: down) { rules ? updateRules { change(&$0, -1) } : update { change(&$0, -1) } }
             Text(value).font(.ui(15, .bold)).monospacedDigit().frame(minWidth: 58)
-            step("plus", "More \(what)", enabled: up) { update { change(&$0, 1) } }
+            step("plus", "More \(what)", enabled: up) { rules ? updateRules { change(&$0, 1) } : update { change(&$0, 1) } }
         }
+    }
+
+    /// A limit changed in the draft: in force only after Save, in person.
+    private func updateRules(_ change: (inout RiskPolicy) -> Void) {
+        var p = rulesDraft ?? ws.policy
+        change(&p)
+        p.maxOpenRiskPct = max(p.maxOpenRiskPct, p.maxRiskPct)
+        rulesError = nil
+        rulesDraft = p.tradingRules == ws.policy.tradingRules ? nil : p
     }
 
     private func update(_ change: (inout RiskPolicy) -> Void) {
@@ -350,7 +418,7 @@ struct SettingsView: View {
                     .toggleStyle(AccentSwitch())
                 }
                 SettingsRow("Local address", icon: "network") { Text("127.0.0.1:\(String(DebugAPI.port))").textSelection(.enabled) }
-                SettingsRow("Access token", icon: "key", info: "Stored at Application Support/\(Flavor.folder)/debug-token. Use it as a Bearer token with curl.") {
+                SettingsRow("Access token", icon: "key", info: "Stored at \(LocalStore.url("debug-token").path(percentEncoded: false)). Use it as a Bearer token with curl.") {
                     Text("Changes each start").foregroundStyle(.secondary)
                 }
             }
@@ -362,6 +430,7 @@ struct SettingsView: View {
         signer
         WalletManagement()
         touchID
+        LimitsSettings()
         PasscodeSettings()
         tradingKey
         addresses
@@ -430,7 +499,7 @@ struct SettingsView: View {
         SettingsSection(icon: Presence.signIcon, title: AppLock.shared.codeSigns ? "Signing" : Presence.short,
                         line: "One \(Presence.touchID ? "touch" : AppLock.shared.codeSigns ? "code" : "password") covers one move, or a few minutes.") {
             SettingsGroup {
-                SettingsRow("Stays valid for", icon: "timer", info: "One move covers that move's signatures for at most a minute and ends when it is done. With 5–30 minutes, signatures need no new \(Presence.touchID ? "touch" : "password") during that time. Each still passes the guard and second check. Locking the screen or sleep ends the session. A longer duration asks for \(Presence.name).") {
+                SettingsRow("Stays valid for", icon: "timer", info: "One move covers that move's signatures for at most a minute and ends when it is done. With 5–30 minutes, signatures need no new \(Presence.touchID ? "touch" : "password") during that time, but only to the addresses and in the coins the first one used: anything else asks again. Each still passes the guard and second check. Locking the screen or sleep ends the session. A longer duration asks for \(Presence.name).") {
                     // Drawn segments keep the brand accent instead of macOS's system blue.
                     HStack(spacing: 2) {
                         ForEach(SignerSession.choices, id: \.self) { choice in
@@ -473,7 +542,7 @@ struct SettingsView: View {
         SettingsSection(icon: "bolt", title: "Hyperliquid", line: "A trading key places orders. It cannot withdraw money.") {
             SettingsGroup {
                 SettingsRow("Trading key", icon: "key", logo: "hype", info: ws.agentActive
-                            ? "Opens positions without \(Presence.name) for 7 days after your last \(Presence.short) for it; stops and closes go on after that. It cannot withdraw money."
+                            ? "Opens positions without \(Presence.name) only as buys within your limits, for \(ws.limits.agentDays == 1 ? "1 day" : "\(ws.limits.agentDays) days") after your last \(Presence.short) for it; stops and closes go on after that. It cannot withdraw money."
                             : ws.ledgerActive ? "Without a trading key, every order asks for the Ledger's buttons. Hyperliquid accepts the key after the account has had a deposit."
                             : "Without a trading key, every order asks for \(Presence.name). Hyperliquid accepts the key after the account has had a deposit.") {
                     SettingsPill(text: ws.agentActive ? "On" : "Off", good: ws.agentActive)
@@ -650,7 +719,8 @@ enum AppLanguage: String, CaseIterable {
         else { UserDefaults.standard.set([chosen.rawValue], forKey: "AppleLanguages") }
     }
 
-    /// Quits, and opens again once this copy is gone: a second copy started while one runs exits at launch.
+    /// Quits, and opens again once this copy is gone: a second copy started while one runs exits at launch. The shell
+    /// inherits the App Sandbox, which still lets it watch this process and open the app (checked 2026-11-08).
     @MainActor static func restart() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -798,6 +868,32 @@ struct SettingsPill: View {
     }
 }
 
+/// «Disconnect» as its own red row at the bottom of an account's group: the one thing there that takes something away.
+struct DisconnectRow: View {
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.portrait.and.arrow.right").font(.system(size: 11, weight: .semibold))
+                    .frame(width: 26, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 7.3).fill(Brand.loss.opacity(0.12)))
+                Text("Disconnect").font(.ui(13, .medium))
+                Spacer(minLength: 8)
+            }
+            .foregroundStyle(Brand.loss)
+            .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+            .background(Brand.loss.opacity(hover ? 0.06 : 0))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerStyle(.link)
+        .onHover { hover = $0 }
+        .help(help)
+    }
+}
+
 struct ModelSection: View {
     @Environment(Workspace.self) private var ws
     @AppStorage("modelThinking") private var thinking = false
@@ -805,6 +901,8 @@ struct ModelSection: View {
     /// The account whose sign-in shows below the list; nil = the one the chat uses. Picking a row here never switches
     /// the chat: «Switch» does (the owner, 2026-10-20: «я просто хотел подключить другой аккаунт»).
     @State private var shownID: String?
+    /// «Custom…» picked in the model list: the field for a model id the list doesn't have.
+    @State private var customModel = false
     private var shown: String { shownID ?? ws.providerID }
     private static let ways = ["claude-code", "chatgpt", "openrouter"]
 
@@ -822,7 +920,7 @@ struct ModelSection: View {
                 }
             }
         }
-        .onChange(of: shown) { key = ""; ws.llmStatus = nil; ws.availableModels = [] }
+        .onChange(of: shown) { key = ""; customModel = false; ws.llmStatus = nil; ws.availableModels = [] }
     }
 
     /// A second model (Jev on OpenRouter) reads each command and plan again; it can stop a move, never approve one.
@@ -860,7 +958,7 @@ struct ModelSection: View {
                 other
             }
             SettingsGroup {
-                SettingsRow("\(info.name)", icon: "info.circle", info: info.note.isEmpty ? nil : info.note) {
+                header(id, info) {
                     if let unavailable = info.unavailable { Text(unavailable).foregroundStyle(Brand.accentInk).fixedSize(horizontal: false, vertical: true) }
                     else if connected, id == ws.providerID { chatsModel }
                     else {
@@ -953,14 +1051,15 @@ struct ModelSection: View {
 
     @ViewBuilder private func connection(_ id: String, _ info: ProviderInfo) -> some View {
         let provider = ws.provider(id), credential = ws.credential(id)
-        SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
+        let signIn = info.signInLabel != nil || info.existingLoginLabel != nil || info.id == "claude-code"
+        if signIn || !info.takesKey { SettingsRow("Sign-in", icon: "person.crop.circle", info: connectionText(credential, info)) {
             if let label = info.existingLoginLabel, provider.existingLogin() != nil {
                 Button(label) { ws.useExistingLogin(id) }
             }
             // Claude Code: installed from here when it's missing, signed in from a terminal once it's there.
             if info.id == "claude-code" {
                 if case .external(let path)? = provider.existingLogin() {
-                    Button("Sign in in Terminal") { try? ClaudeCodeInstaller.signIn(path) }
+                    Button("Sign in in Terminal") { Task { await ws.signInClaudeCode(path) } }
                 } else {
                     Button(ws.claudeCodeInstall ?? "Install Claude Code") { Task { await ws.installClaudeCode() } }.disabled(ws.claudeCodeInstall != nil)
                 }
@@ -968,24 +1067,90 @@ struct ModelSection: View {
             if let label = info.signInLabel {
                 Button(label) { Task { await ws.signIn(id) } }.disabled(ws.llmBusy)
             }
-            if info.signInLabel == nil, info.existingLoginLabel == nil {
-                Text(info.kind == .local ? "No key needed" : "Use an API key below").foregroundStyle(.secondary)
+            if !signIn { Text("No key needed").foregroundStyle(.secondary) }
+        } }
+        // A key: where to get it and what to press there, then the field. Once saved, the steps give way to the model.
+        if info.takesKey, credential == nil {
+            if let url = info.keyURL {
+                step(1, "Get a key at \(url.host() ?? url.absoluteString)", info.keySteps) {
+                    Button("Open", systemImage: "arrow.up.right") { NSWorkspace.shared.open(url) }
+                        .help(url.absoluteString)
+                }
+            }
+            step(info.keyURL == nil ? nil : 2, "Paste it here", "Kept in this Mac's Keychain.") {
+                SecureField("API key", text: $key).textFieldStyle(.roundedBorder).frame(maxWidth: 240)
+                    .onSubmit { save(id) }
+                Button("Save") { save(id) }.disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        if info.takesKey {
-            SettingsRow("API key", icon: "key") {
-                SecureField("API key", text: $key).textFieldStyle(.roundedBorder).frame(maxWidth: 320)
-                Button("Save") { ws.setCredential(.apiKey(key), for: id); key = "" }.disabled(key.isEmpty)
-            }
+        if credential != nil || !info.takesKey { connected(id, credential) }
+        if let status = ws.llmStatus {
+            SettingsRow(status, icon: "info.circle") { EmptyView() }.textSelection(.enabled)
         }
+    }
+
+    private func save(_ id: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        ws.setCredential(.apiKey(trimmed), for: id)
+        key = ""
+    }
+
+    /// The account's row on top: its company's logo, its name, «Private» for a sealed one, the note behind ⓘ.
+    private func header(_ id: String, _ info: ProviderInfo, @ViewBuilder control: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            if let company = ModelCompany.of(id) { ModelCompanyLogo(company: company, size: 26) } else { SettingsIcon(icon: "info.circle") }
+            Text(info.name).font(.ui(13, .semibold)).fixedSize(horizontal: false, vertical: true)
+            if ModelCompany.of(id)?.sealed == true { PrivateTag() }
+            if !info.note.isEmpty { SettingsInfo(text: info.note, label: info.name) }
+            Spacer(minLength: 8)
+            control().font(.ui(12.5))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+        .overlay(alignment: .bottom) { Brand.cardBorder.opacity(0.65).frame(height: 0.5).padding(.leading, 50) }
+    }
+
+    /// One step of connecting by key: its number where the icon goes, what to do, and how, under it.
+    private func step(_ n: Int?, _ title: String, _ line: String?, @ViewBuilder control: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            if let n {
+                Text("\(n)").font(.ui(12, .bold)).foregroundStyle(Brand.accentInk).frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.primary.opacity(0.06)))
+            } else { SettingsIcon(icon: "key") }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.ui(13))
+                if let line { Text(line).font(.ui(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: 8)
+            control().font(.ui(12.5))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 48)
+        .overlay(alignment: .bottom) { Brand.cardBorder.opacity(0.65).frame(height: 0.5).padding(.leading, 50) }
+    }
+
+    /// A connected account: which model, whether it reads the chat right, and the way out.
+    @ViewBuilder private func connected(_ id: String, _ credential: Credential?) -> some View {
+        let model = Binding(get: { ws.model(id) }, set: { ws.modelChoices[id] = $0 })
         SettingsRow("Model", icon: "sparkles") {
-            TextField("Model", text: Binding(get: { ws.model(id) }, set: { ws.modelChoices[id] = $0 }))
-                .textFieldStyle(.roundedBorder).labelsHidden().frame(maxWidth: 300)
-            Menu("List") {
-                if ws.availableModels.isEmpty { Button("Load models") { Task { await ws.loadModels(id) } } }
-                ForEach(ws.availableModels, id: \.self) { m in Button(m) { ws.modelChoices[id] = m } }
+            if customModel {
+                TextField("Model id", text: model).textFieldStyle(.roundedBorder).labelsHidden().frame(maxWidth: 280)
+                    .onSubmit { customModel = false }
+                Button("Done") { customModel = false }
+            } else {
+                // Names, not ids. The provider's whole list comes on request; an id typed by hand goes in «Custom…».
+                Menu {
+                    Picker("Model", selection: model) {
+                        ForEach(choices(id), id: \.self) { Text(LLMCatalog.displayName(model: $0)).tag($0) }
+                    }
+                    .pickerStyle(.inline).labelsHidden()
+                    Divider()
+                    if ws.availableModels.isEmpty { Button("Load the full list") { Task { await ws.loadModels(id) } } }
+                    Button("Custom…") { customModel = true }
+                } label: {
+                    Text(model.wrappedValue.isEmpty ? "Choose a model" : LLMCatalog.displayName(model: model.wrappedValue))
+                }
+                .fixedSize().help(model.wrappedValue)
             }
-            .fixedSize()
         }
         SettingsRow("Connection", icon: "antenna.radiowaves.left.and.right",
                     info: "Check asks the model \(ModelExam.questions.count) requests people send — buy, send, lend, a chart, a long, a question, DCA — and counts how many it reads right. 8 or more is good for the chat; fewer, and it will misread.") {
@@ -997,11 +1162,22 @@ struct ModelSection: View {
                 SettingsPill(text: s.short, good: s.good)
             }
             Button("Check") { Task { await ws.checkModel(id) } }.disabled(ws.llmBusy || ws.examProgress != nil || !ws.hasModel(id))
-            if credential != nil { Button("Disconnect") { ws.setCredential(nil, for: id) } }
         }
-        if let status = ws.llmStatus {
-            SettingsRow(status, icon: "info.circle") { EmptyView() }.textSelection(.enabled)
+        if let credential {
+            DisconnectRow(help: { if case .apiKey = credential { "Removes the key from this Mac's Keychain" } else { "Signs this account out of ihatecrypto" } }()) {
+                customModel = false
+                ws.setCredential(nil, for: id)
+            }
         }
+    }
+
+    /// The way's models for the list: its own, the provider's whole list once loaded, and the one in use.
+    private func choices(_ id: String) -> [String] {
+        var list: [String] = []
+        for m in (ws.liveModels[id] ?? ws.provider(id).info.models) + ws.availableModels + [ws.model(id)] where !m.isEmpty && !list.contains(m) {
+            list.append(m)
+        }
+        return list
     }
 
     private func connectionText(_ credential: Credential?, _ info: ProviderInfo) -> String {

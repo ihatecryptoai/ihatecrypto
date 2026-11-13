@@ -79,12 +79,12 @@ public struct EVMTransaction: Sendable {
     public var type: UInt8 { authorizations.isEmpty ? 2 : 4 }
 
     func fields() throws -> [RLP] {
-        guard let to = Data(hex: to), to.count == 20 else { throw WalletError("Invalid recipient address: \(self.to)") }
+        guard let to = Data(evmAddress: to) else { throw WalletError("Invalid recipient address: \(self.to)") }
         let base: [RLP] = [.uint(chainId), .uint(nonce), .uint(maxPriorityFeePerGas), .uint(maxFeePerGas), .uint(gasLimit),
                            .bytes(to), .uint(value), .bytes(data), .list([])]
         guard !authorizations.isEmpty else { return base }
         return base + [.list(try authorizations.map { a in
-            guard let address = Data(hex: a.address), address.count == 20 else { throw WalletError("Invalid authorization address: \(a.address)") }
+            guard let address = Data(evmAddress: a.address) else { throw WalletError("Invalid authorization address: \(a.address)") }
             return .list([.uint(a.chainId), .bytes(address), .uint(a.nonce), .uint(UInt64(a.signature.v - 27)),
                           .uint(bigEndian: a.signature.r), .uint(bigEndian: a.signature.s)])
         })]
@@ -141,7 +141,7 @@ public struct EVMTransaction: Sendable {
 public enum ERC20 {
     /// transfer(address,uint256)
     public static func transfer(to: String, amount: UInt64) throws -> Data {
-        guard let recipient = Data(hex: to), recipient.count == 20 else { throw WalletError("Invalid address: \(to)") }
+        guard let recipient = Data(evmAddress: to) else { throw WalletError("Invalid address: \(to)") }
         return Data([0xa9, 0x05, 0x9c, 0xbb]) + Data(count: 12) + recipient + Data(count: 24) + withUnsafeBytes(of: amount.bigEndian) { Data($0) }
     }
 
@@ -215,7 +215,7 @@ public enum Tempo {
 /// 32-byte ABI words.
 public enum ABI {
     public static func address(_ a: String) throws -> Data {
-        guard let bytes = Data(hex: a), bytes.count == 20 else { throw WalletError("Invalid address: \(a)") }
+        guard let bytes = Data(evmAddress: a) else { throw WalletError("Invalid address: \(a)") }
         return Data(count: 12) + bytes
     }
 
@@ -713,7 +713,8 @@ public enum EVMCall: Equatable, Sendable {
         // Tempo's transferWithMemo pays like transfer: the same recipient check applies.
         case "a9059cbb", "95777d59": if let t = address(0), let a = word(1) { return .transfer(to: t, amount: a) }
         case "23b872dd": if let f = address(0), let t = address(1), let a = word(2) { return .transferFrom(from: f, to: t, amount: a) }
-        case "a22cb465": if let o = address(0), let b = word(1) { return .setApprovalForAll(operator: o, approved: b.last == 1) }
+        // Any non-zero word grants: a contract that doesn't check the bool is 0 or 1 (ABI coder v1, Solady) reads 2 as yes.
+        case "a22cb465": if let o = address(0), let b = word(1) { return .setApprovalForAll(operator: o, approved: b.contains { $0 != 0 }) }
         case "d505accf", "8fcbaf0c": return .permit
         // Uniswap v3's exactInputSingle and exactOutputSingle, SwapRouter02's and the first SwapRouter's (with a deadline):
         // a tuple of plain fields, the recipient fourth.
@@ -965,7 +966,7 @@ public enum EVMCall: Equatable, Sendable {
     /// Coins sent with this call that come back to the sender, so `to` isn't paid: a wrap by the network's own WETH (the one
     /// Uniswap's v2 router uses there), or a v4 swap of the network's coin through its Universal Router whose input is exactly
     /// that value (SETTLE_ALL in the zero currency; the router keeps nothing over, TAKE_ALL pays the caller).
-    func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
+    public func returnsCoins(to: String, value: UInt64, chainId: UInt64) -> Bool {
         switch self {
         case .wrap: to.lowercased() == UniswapV2.on(chainId)?.weth
         case .v4Swap(let s): to.lowercased() == UniswapV4.on(chainId)?.router && s.currencyIn == UniswapV4.native

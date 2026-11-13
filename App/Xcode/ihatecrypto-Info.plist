@@ -4,7 +4,8 @@
      (release.sh sets SPARKLE_FEED_URL); the public key checks every update's EdDSA signature, its private half is in
      the release Mac's login Keychain (generate_keys). SUAllowsAutomaticUpdates is off: Sparkle only says a new version
      is out, and nothing downloads or installs until the user presses Install. SUShowReleaseNotes is off: the window is
-     the small one (Skip This Version, Remind Me Later, Install Update); What's new shows the notes after the update. -->
+     the small one (Skip This Version, Remind Me Later, Install Update); What's new shows the notes after the update.
+     SUEnableInstallerLauncherService: the app is sandboxed, so Sparkle's installer service puts an update in place. -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleLocalizations</key>
@@ -29,6 +30,8 @@
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 </dict>
 </plist>

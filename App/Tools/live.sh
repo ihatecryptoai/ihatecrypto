@@ -5,12 +5,13 @@
 #   Tools/live.sh "купи 0.01 SPCX за USDC"                       draws the card, presses Confirm, waits for the outcome
 #   Tools/live.sh "deposit 5 USDC to kamino" "Send anyway"     a part of a title is enough for a later button
 #   DRY=1 Tools/live.sh "…"                                    only draws the card and prints it, then cancels
+#   TAMPER=payee Tools/live.sh "…"                             the attack drill (Tamper.swift): payee|amount|relay
 # A few dollars at most: the test wallet holds a few dollars.
 emulate -L zsh
 HERE=${0:A:h} AX=${0:A:h}/../.build/axpress
 dev() { $HERE/dev.sh "$@" }
 py() { python3 -I -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); $1" }
-[[ -n $1 ]] || { sed -n '2,8p' $0 | sed 's/^# //'; exit 2 }
+[[ -n $1 ]] || { sed -n '2,9p' $0 | sed 's/^# //'; exit 2 }
 phrase=$1; shift
 buttons=("${@:-Confirm}")
 
@@ -20,9 +21,11 @@ if why=$(dev busy); then echo "Dev is in use ($why)." >&2; exit 1; fi
 # The run's own hold, so no other session relaunches Dev between its steps, given back at the end whatever happens.
 # Under a longer hold of yours (Tools/dev.sh hold with DEV_HOLDER=<who>) the run takes none and leaves yours alone:
 # it overwrote one and released it at its end.
+# A drill is disarmed however the run ends (a missing button, Ctrl-C): left armed, it would change the copy's next move.
+trap '[[ -n $TAMPER ]] && dev api POST /tamper "{\"kind\":\"off\"}" >/dev/null; [[ -n $own_hold ]] && dev release >/dev/null' EXIT
 if [[ -z $DEV_HOLDER ]]; then
   export DEV_HOLDER="live.sh-$$"
-  dev hold 15 "$DEV_HOLDER: $1" >/dev/null && trap 'dev release >/dev/null' EXIT
+  dev hold 15 "$DEV_HOLDER: $1" >/dev/null && own_hold=1
 fi
 if [[ -z $DRY && ( ! -x $AX || $HERE/axpress.swift -nt $AX ) ]]; then
   mkdir -p ${AX:h} && swiftc -O $HERE/axpress.swift -o $AX || exit 1
@@ -31,6 +34,9 @@ canvas=$(echo $state | py "print(d.get('canvasID') or '')")
 
 # A fresh test canvas, or nothing: the phrase must never land in the canvas the owner left open.
 dev api POST /reset >/dev/null || { echo "/reset failed: not sending anything" >&2; exit 1 }
+if [[ -n $TAMPER ]]; then
+  dev api POST /tamper "{\"kind\":\"$TAMPER\"}" >/dev/null || { echo "/tamper failed: not sending anything" >&2; dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null; exit 1 }
+fi
 echo "you: $phrase"
 dev api POST /send "$(python3 -I -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' $phrase)" >/dev/null
 # The card's quote comes a moment after the card.
@@ -43,6 +49,15 @@ dev state
 echo $s | py "sys.exit(0 if d['boards'].get('pending') else 1)" || { echo "No card waits for Confirm: nothing to press."; dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null; exit 1 }
 if [[ -n $DRY ]]; then dev api POST /cancel >/dev/null; dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null; exit 0; fi
 
+# A priced card's Confirm lasts 15 s, then reads «Refresh»: a press after that lands on nothing («send … privately then
+# send … privately» seemed to ignore Confirm on 2026-11-10, its quote 40 s old). Ask again and press while it's fresh.
+for i in {1..30}; do
+  q=$(TIMEOUT=10 dev api GET /state | py "print((d['boards'].get('pending') or {}).get('quoteState', ''))")
+  [[ $q == fresh* && $q != *'seconds: '[1-3]')' ]] && break
+  [[ $q == none || -z $q ]] && break
+  [[ $q == stale ]] && $AX press Refresh >/dev/null 2>&1
+  sleep 1
+done
 for b in $buttons; do
   # An exact title, or the first button whose title contains it («Send anyway» for «Send anyway · ≈ $3.10 lost»).
   # The chat's cards fade in one at a time after the reply: up to 10 s for it to show.
@@ -59,4 +74,5 @@ done
 TIMEOUT=10 dev api GET /state | py "
 for m in d['messages']: print('you:' if m['user'] else 'app:', m['text'])
 print('outcome:', d.get('outcome'))"
+[[ -n $TAMPER ]] && echo "tamper: $(TIMEOUT=10 dev api GET /tamper)"
 dev api POST /restore "{\"canvas\":\"$canvas\"}" >/dev/null

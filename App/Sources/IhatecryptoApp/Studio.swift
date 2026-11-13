@@ -1416,8 +1416,9 @@ struct StudioCanvas: View {
                 if (ws.yieldOptions ?? ws.heldAnswer?.yields) == nil, ws.allocationPreview == nil, ws.rebalancePlan == nil {
                     ForEach(ws.schedules, id: \.symbol) { ScheduleBoard(schedule: $0).blockMenu("Recurring buy · \($0.symbol)") }
                     if let dca = ws.jupiterDCAs, !dca.isEmpty { JupiterDCABoard(orders: dca).blockMenu("Jupiter DCA") }
+                    if let orders = ws.limitOrderList, !orders.isEmpty { LimitOrdersBoard(orders: orders).blockMenu("Limit orders") }
                     // Under a running board (a chain's move done, its next step coming) the saved one would draw it twice.
-                    if let board, !ws.moveRunning { SavedBoard(canvas: board).blockMenu(ws.readable(board.title), radius: nil) } else if board == nil, positions.isEmpty, ws.schedules.isEmpty, ws.jupiterDCAs?.isEmpty ?? true, ws.pendingAction == nil, !ws.moveRunning, ws.chart == nil, ws.serviceAnswer == nil, ws.ledgerConnect == nil,
+                    if let board, !ws.moveRunning { SavedBoard(canvas: board).blockMenu(ws.readable(board.title), radius: nil) } else if board == nil, positions.isEmpty, ws.schedules.isEmpty, ws.jupiterDCAs?.isEmpty ?? true, ws.limitOrderList?.isEmpty ?? true, ws.pendingAction == nil, !ws.moveRunning, ws.chart == nil, ws.serviceAnswer == nil, ws.ledgerConnect == nil,
                               (ws.canvases.first { $0.id == ws.canvasID }?.earlier ?? []).isEmpty {
                         // Never blank while something is under way: whatever path left nothing live, the canvas's last
                         // board stays until the answer or the outcome takes its place. The empty canvas is for when nothing runs.
@@ -1536,6 +1537,7 @@ struct StudioCanvas: View {
         guard hasRoute else { return board.map { $0.outcome.map { $0.ok ? "executed" : "failed" } ?? "saved canvas" } ?? "waiting for a task" }
         if ws.managesPosition { return ws.positions.contains { $0.coin == ws.intent.asset } ? "position open" : "done · position closed" }
         if nodes.contains(where: { $0.status == .blocked }) { return ws.planBlocker.map { ws.say("stopped: ", "стоп: ") + $0.short } ?? "stopped by the rules" }
+        if ws.planIsReady, ws.policy.limitMode == .ask, ws.overRiskLimit { return ws.say("over the limit · asks first", "выше лимита · спросит") }
         return ws.planIsReady ? "ready to sign" : "needs details"
     }
 
@@ -1544,6 +1546,7 @@ struct StudioCanvas: View {
         if !hasRoute, let o = board?.outcome { return o.ok ? Brand.profit : Brand.loss }
         guard hasRoute, !ws.assembling else { return .secondary }
         if nodes.contains(where: { $0.status == .blocked }) { return Brand.blockedInk }
+        if ws.planIsReady, ws.policy.limitMode == .ask, ws.overRiskLimit { return Brand.jevInk }
         return ws.planIsReady || ws.managesPosition ? Brand.profit : Brand.jevInk
     }
 }
@@ -2187,7 +2190,7 @@ extension Workspace {
             if let s = sizing {
                 let pct = equity.flatMap { $0 > 0 ? (s.lossAtStopUSD / $0 * 100).rounded(1, .plain) : nil }
                 lines.append(row("risk", Fmt.usd(s.lossAtStopUSD) + (pct.map { " · \(Fmt.num($0))%" } ?? "")))
-                lines.append(row("limit", "\(Fmt.num(policy.maxRiskPct))% a trade"))
+                lines.append(row("limit", policy.maxRiskPct >= RiskPolicy.noLimit ? "none" : "\(Fmt.num(policy.maxRiskPct))% a trade"))
                 if let profit = s.profitAtTakeUSD, s.lossAtStopUSD > 0 { lines.append(row("reward/risk", "1:\(Fmt.num((profit / s.lossAtStopUSD).rounded(1, .plain)))")) }
             }
             // A rule it breaks, in its own words, first.
@@ -3504,6 +3507,14 @@ struct ChatModelMenu: View {
     private func ways(_ c: ModelCompany) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             caption(c.name.uppercased())
+            if c.sealed {
+                VStack(alignment: .leading, spacing: 4) {
+                    PrivateTag()
+                    Text("Runs in sealed hardware: NEAR can't read your chat or balances. Checked before every message.")
+                        .font(.ui(10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10).padding(.bottom, 6)
+            }
             ForEach(c.ids.compactMap { LLMCatalog.provider(id: $0)?.info }) { way($0) }
         }
     }
@@ -3598,13 +3609,18 @@ struct ChatModelMenu: View {
 
     private func chosen(_ info: ProviderInfo) -> String { ws.modelChoices[info.id] ?? info.defaultModel }
 
-    /// Under the company: the model in use, or else how to get in.
+    /// Under the company, short enough to stay whole: its model, or else how to get in. The accent ink says which one
+    /// the chat uses and the section says «on this Mac», so neither is spelled out («in use», «· connected» got cut).
     private func summary(_ ways: [ProviderInfo], current: ProviderInfo?) -> String {
         if let current {
             let model = chosen(current)
-            return (model.isEmpty ? current.name : LLMCatalog.displayName(model: model)) + " · in use"
+            return model.isEmpty ? current.name : LLMCatalog.displayName(model: model)
         }
-        if ways.count == 1, let only = ways.first { return detail(only) }
+        if ways.count == 1, let only = ways.first {
+            guard connected(only) else { return only.takesKey && only.signInLabel == nil ? "needs an API key" : "sign-in needed" }
+            let model = chosen(only)
+            return model.isEmpty ? "pick a model" : LLMCatalog.displayName(model: model)
+        }
         return ways.filter { $0.unavailable == nil }.map { $0.kind == .subscription ? "Subscription" : "API key" }
             .joined(separator: " or ")
     }
@@ -3623,8 +3639,9 @@ struct ChatModelMenu: View {
 
     private func detail(_ info: ProviderInfo) -> String {
         let model = chosen(info)
+        if info.takesKey, info.signInLabel == nil, !connected(info) { return "needs an API key" }
         let state = info.kind == .local ? "on this Mac" : connected(info) ? "connected" : "sign-in needed"
-        let shown = info.takesKey && !connected(info) ? "any model by key" : model.isEmpty ? "" : LLMCatalog.displayName(model: model)
+        let shown = model.isEmpty ? "" : LLMCatalog.displayName(model: model)
         return [shown, state].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
@@ -3638,6 +3655,8 @@ struct ModelCompany: Identifiable {
     /// The color for a one-color logo; nil keeps the logo's own colors.
     var ink: UInt32?
     let ids: [String]
+    /// The model runs in attested hardware the provider can't read (NEAR AI Cloud): the menu and Settings say «Private».
+    var sealed = false
     var id: String { name }
     var local: Bool { LLMCatalog.provider(id: ids[0])?.info.kind == .local }
 
@@ -3648,7 +3667,7 @@ struct ModelCompany: Identifiable {
         .init(name: "xAI", logo: "llm-grok", tile: 0x000000, ink: 0xFFFFFF, ids: ["grok-subscription", "xai"]),
         .init(name: "DeepSeek", logo: "llm-deepseek", tile: 0xFFFFFF, ids: ["deepseek"]),
         // The network's own logo (Logos/near.png) is already its green square: the tile is that same green.
-        .init(name: "NEAR AI Cloud (private)", logo: "near", tile: 0x01EC97, ids: ["nearai"]),
+        .init(name: "NEAR AI", logo: "near", tile: 0x01EC97, ids: ["nearai"], sealed: true),
         .init(name: "OpenRouter", logo: "llm-openrouter", tile: 0x6566F1, ink: 0xFFFFFF, ids: ["openrouter"]),
         .init(name: "Ollama", logo: "llm-ollama", tile: 0xFFFFFF, ink: 0x000000, ids: ["ollama"]),
         .init(name: "LM Studio", logo: "llm-lmstudio", tile: 0x4338CA, ink: 0xFFFFFF, ids: ["lmstudio"]),
@@ -3707,8 +3726,13 @@ private struct CompanyRow: View {
             HStack(spacing: 10) {
                 ModelCompanyLogo(company: company)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(company.name).font(.ui(13, .semibold))
-                    Text(detail).font(.ui(10)).foregroundStyle(current ? AnyShapeStyle(Brand.accentInk) : AnyShapeStyle(.secondary)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(company.name).font(.ui(13, .semibold))
+                        if company.sealed { PrivateTag() }
+                    }
+                    // Never cut with «…»: a long model name takes a second line.
+                    Text(detail).font(.ui(10)).foregroundStyle(current ? AnyShapeStyle(Brand.accentInk) : AnyShapeStyle(.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
@@ -4400,10 +4424,11 @@ struct Receipt {
     static let networks: Set<String> = ["SOLANA", "BASE", "ARBITRUM", "ETHEREUM", "HYPERLIQUID", "POLYGON", "OPTIMISM", "BNB CHAIN", "BNB",
                                         "HYPEREVM", "ROBINHOOD", "ROBINHOOD CHAIN", "TEMPO", "NEAR"]
 
-    /// Our builder fee rides on Hyperliquid orders only (HLBuilder): a spot buy or sale, a swap on its book.
+    /// Our fee rides on Hyperliquid orders (HLBuilder): a spot buy or sale, a swap on its book; and on a limit order
+    /// through 1Click (OneClick.orderFee), the same 0.05%.
     static func ours(_ c: WalletCommand?) -> Bool {
         switch c {
-        case .hlSpotBuy?, .hlSpotSell?: true
+        case .hlSpotBuy?, .hlSpotSell?, .limitOrder?: true
         case .swapOn(let place, _, _, _)?: place == "hyperliquid"
         default: false
         }

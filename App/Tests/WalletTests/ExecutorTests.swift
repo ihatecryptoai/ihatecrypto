@@ -71,6 +71,10 @@ import WalletCore
     #expect(Executor.stopBreaksRule(long: false, entry: 120_000, size: Decimal(string: "0.01")!, stop: 121_000, current: 122_000, equity: 1000, policy: policy) == nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: nil, equity: 1000, policy: policy) == nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: 118_000, equity: nil, policy: policy) == nil)
+    // «Ask me» and «Just warn» let it through: the chat's card says the loss before Confirm.
+    var asks = policy
+    asks.overLimit = .ask
+    #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 90_000, current: 118_000, equity: 1000, policy: asks) == nil)
     // 117000 is −$31.07 with fees: 3.1% of $1000 is refused, 1.6% of $2000 is within the rule.
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 1000, policy: policy) != nil)
     #expect(Executor.stopBreaksRule(long: true, entry: 120_000, size: Decimal(string: "0.01")!, stop: 117_000, current: 118_000, equity: 2000, policy: policy) == nil)
@@ -90,6 +94,18 @@ import WalletCore
     // A third is 0.333…3: rounded down as it was, a third of 3 steps was none and a third of 0.00015 one step short.
     #expect(try Executor.partialCloseSize(position: 3, fraction: Decimal(1) / 3, szDecimals: 0, asset: "kPEPE") == 1)
     #expect(try Executor.partialCloseSize(position: btc, fraction: Decimal(1) / 3, szDecimals: 5, asset: "BTC") == Decimal(string: "0.00005")!)
+}
+
+/// Hyperliquid's $10 minimum counts for a close too: a part under it is said before anything is sent, a part over it and
+/// the whole position go.
+@Test func aPartialCloseUnderTenDollarsIsRefused() {
+    let eth = Decimal(string: "0.004")!, mark: Decimal = 2650   // $10.6 in all
+    let why = Executor.partialCloseRefusal(position: eth, fraction: Decimal(string: "0.75")!, mark: mark, szDecimals: 4, asset: "ETH")
+    #expect(why?.contains("under Hyperliquid's $10 minimum") == true)
+    #expect(why?.contains("Close it all ($10.60)") == true)
+    #expect(Executor.partialCloseRefusal(position: -eth, fraction: Decimal(string: "0.5")!, mark: mark, szDecimals: 4, asset: "ETH") != nil)   // a short too
+    #expect(Executor.partialCloseRefusal(position: eth, fraction: 1, mark: mark, szDecimals: 4, asset: "ETH") == nil)
+    #expect(Executor.partialCloseRefusal(position: 1, fraction: Decimal(string: "0.5")!, mark: mark, szDecimals: 4, asset: "ETH") == nil)
 }
 
 @Test func gasTopUpTargetIsAWholeNumberOfWei() {

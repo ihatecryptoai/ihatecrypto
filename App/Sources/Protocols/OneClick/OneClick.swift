@@ -116,8 +116,11 @@ public enum OneClick {
         public let amountInFormatted: String
         /// Present for EXACT_OUTPUT: the input without the slippage reserve.
         public let minAmountIn: String?
+        /// What arrives: the payout's network fee (`withdrawFee`) is already taken off it.
         public let amountOutFormatted: String
         public let minAmountOut: String?
+        /// The payout's network fee in the output's smallest units: a fixed sum, a percent and more of a small order.
+        public var withdrawFee: String? = nil
         public let deadline: String?
         public let timeEstimate: Int?
         /// What goes in and what comes out, in dollars as 1Click prices them: their gap is its fee and the network's.
@@ -153,7 +156,7 @@ public enum OneClick {
             depositAddress: q["depositAddress"] as? String, amountIn: amountIn,
             amountInFormatted: q["amountInFormatted"] as? String ?? amountIn, minAmountIn: q["minAmountIn"] as? String,
             amountOutFormatted: q["amountOutFormatted"] as? String ?? "?", minAmountOut: q["minAmountOut"] as? String,
-            deadline: q["deadline"] as? String, timeEstimate: (q["timeEstimate"] as? NSNumber)?.intValue,
+            withdrawFee: q["withdrawFee"] as? String, deadline: q["deadline"] as? String, timeEstimate: (q["timeEstimate"] as? NSNumber)?.intValue,
             amountInUSD: (q["amountInUsd"] as? String).flatMap { Decimal(string: $0) }, amountOutUSD: (q["amountOutUsd"] as? String).flatMap { Decimal(string: $0) }
         )
     }
@@ -238,6 +241,105 @@ public enum OneClick {
             guard (200..<300).contains(code), let j, j["status"] is String else { throw RPCRetry.Again(code == 429 || code >= 500, OneClickError(data)) }
             return Settled(j)
         }
+    }
+
+    // MARK: Limit orders (/v0/orders, checked 2026-11-11)
+
+    /// ihatecrypto's fee on a limit order: 5 basis points (0.05%, as on Hyperliquid) of what goes in, paid to the owner's
+    /// NEAR Intents account. 1Click deducts it from the input; the guard refuses an order that carries any other fee.
+    public static let orderFee = (recipient: "ihatecrypto.near", bps: 5)
+
+    /// A limit order as 1Click keeps it, flattened for the guard: `orderType`, `side`, `baseAsset`, `quoteAsset`,
+    /// `quantity`, `price`, `depositAddress`, `depositType`, `recipient`, `recipientType`, `refundTo`, `refundType`,
+    /// `confidentiality`, `fillStatus`, `payoutStatus`, `deadline`, `depositedAmount`, the swap view's `swapType` and
+    /// `amountIn` / `maxAmountIn` / `minAmountOut` / `amountOut`, `filledIn` / `filledOut` (the fills' sums: input gross, output
+    /// net of the fees but before the payout's own network fee, `estimatedWithdrawFee` in the output's units), and `appFees`
+    /// as «recipient:bps» joined by «,».
+    public struct Order: Sendable, Equatable {
+        public let id: String
+        public let fields: [String: String]
+        public subscript(_ key: String) -> String? { fields[key] }
+        /// Funded and resting, or waiting for its deposit: not filled, canceled or expired.
+        public var isOpen: Bool { ["AWAITING_DEPOSIT", "OPEN", "PARTIALLY_FILLED", "PENDING_CANCEL"].contains(fields["fillStatus"] ?? "") }
+    }
+
+    /// One order out of 1Click's JSON:API `data` object; nil when it isn't one.
+    public static func parseOrder(_ data: [String: Any]) -> Order? {
+        guard let id = data["id"] as? String, let a = data["attributes"] as? [String: Any] else { return nil }
+        var f: [String: String] = [:]
+        for key in ["orderType", "side", "baseAsset", "quoteAsset", "quantity", "price", "depositAddress", "depositMemo", "depositType",
+                    "recipient", "recipientType", "refundTo", "refundType", "confidentiality", "fillStatus", "payoutStatus",
+                    "deadline", "createdAt", "depositedAmount", "estimatedWithdrawFee"] {
+            if let v = a[key] as? String { f[key] = v }
+        }
+        if let v = a["swapView"] as? [String: Any] {
+            for key in ["swapType", "amountIn", "maxAmountIn", "minAmountOut", "amountOut"] { if let s = v[key] as? String { f[key] = s } }
+        }
+        if let final = a["isPayoutStatusFinal"] as? Bool { f["isPayoutStatusFinal"] = final ? "true" : "false" }
+        f["appFees"] = (a["appFees"] as? [[String: Any]] ?? []).map { "\($0["recipient"] as? String ?? "?"):\(($0["fee"] as? NSNumber)?.intValue ?? -1)" }
+            .joined(separator: ",")
+        let fills = a["partialFills"] as? [[String: Any]] ?? []
+        func sum(_ key: String) -> String { "\(fills.reduce(Decimal(0)) { $0 + (($1[key] as? String).flatMap { Decimal(string: $0) } ?? 0) })" }
+        f["filledIn"] = sum("amountIn")
+        f["filledOut"] = sum("amountOut")
+        return Order(id: id, fields: f)
+    }
+
+    /// A limit order 1Click rests until the price comes, its deadline, or a cancel: `quantity` of the base in its smallest
+    /// units, `price` in quote per one whole base. Always confidential (1Click takes no other: «Only confidential orders are
+    /// supported»), funded from the origin chain (`depositAddress`), paid out at `recipient`, refunded to `refundTo`, with
+    /// ihatecrypto's fee. Needs the partner key: the order belongs to it, and only it reads or cancels the order.
+    public static func createOrder(sell: Bool, base: String, quote: String, quantity: String, price: String,
+                                   refundTo: String, recipient: String, deadline: Date) async throws -> Order {
+        guard key != nil else { throw OneClickError(message: "A limit order needs a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.") }
+        let f = ISO8601DateFormatter()
+        let attributes: [String: Any] = [
+            "orderType": "LIMIT", "baseAsset": base, "quoteAsset": quote, "quantity": quantity, "side": sell ? "SELL" : "BUY", "price": price,
+            "depositType": "ORIGIN_CHAIN", "refundTo": refundTo, "refundType": "ORIGIN_CHAIN", "recipient": recipient,
+            "recipientType": "DESTINATION_CHAIN", "confidentiality": "basic", "deadline": f.string(from: deadline),
+            "appFees": [["recipient": orderFee.recipient, "fee": orderFee.bps]],
+        ]
+        let data = try await post("/orders", ["data": ["type": "orders", "attributes": attributes]])
+        guard let order = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["data"] as? [String: Any], let o = parseOrder(order) else {
+            throw OneClickError(data)
+        }
+        return o
+    }
+
+    /// An order id is opaque: anything but these is escaped, so it stays one path segment.
+    static let orderIDCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~")
+
+    /// The order as 1Click holds it now: what the guard checks before the deposit, and its fills after.
+    public static func order(_ id: String) async throws -> Order {
+        guard let path = id.addingPercentEncoding(withAllowedCharacters: orderIDCharacters), let url = URL(string: "\(base)/orders/\(path)") else {
+            throw OneClickError(message: "No such order.")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request(url))
+        guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0),
+              let d = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["data"] as? [String: Any], let o = parseOrder(d) else {
+            throw OneClickError(data)
+        }
+        return o
+    }
+
+    /// The partner key's orders whose payout isn't final yet, newest first (one page of 50: more open orders than that
+    /// is not a wallet's).
+    public static func openOrders() async throws -> [Order] {
+        guard key != nil else { throw OneClickError(message: "Limit orders need a NEAR Intents partner key: add it in Settings › General › NEAR Intents key.") }
+        let url = URL(string: "\(base)/orders?filter%5BisPayoutStatusFinal%5D=false&page%5Bsize%5D=50")!
+        let (data, response) = try await URLSession.shared.data(for: request(url))
+        guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0),
+              let list = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["data"] as? [[String: Any]] else {
+            throw OneClickError(data)
+        }
+        return list.compactMap(parseOrder)
+    }
+
+    /// Asks 1Click to cancel: matching stops, what filled is paid out, the rest comes back to the order's refund address.
+    /// Asynchronous: a last slice can still fill.
+    public static func cancelOrder(_ id: String) async throws {
+        guard let path = id.addingPercentEncoding(withAllowedCharacters: orderIDCharacters) else { throw OneClickError(message: "No such order.") }
+        _ = try await post("/orders/\(path)/cancel", [:])
     }
 
     static func post(_ path: String, _ body: [String: Any]) async throws -> Data {

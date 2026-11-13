@@ -790,7 +790,13 @@ struct BrowserView: View {
         .onAppear {
             browser.workspace = ws
             browser.attachDelegate()
-            if browser.webView.url == nil { browser.open(UserDefaults.standard.string(forKey: "openBrowser") ?? browser.address) }
+            // `-openBrowser <url>` (AppMain): the page a check opens the browser on. Never read in a release.
+            #if DEBUG
+            let page = UserDefaults.standard.string(forKey: "openBrowser") ?? browser.address
+            #else
+            let page = browser.address
+            #endif
+            if browser.webView.url == nil { browser.open(page) }
             typed = browser.address
         }
         .onChange(of: browser.address) { typed = browser.address }

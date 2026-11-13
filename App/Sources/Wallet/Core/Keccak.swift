@@ -69,14 +69,33 @@ extension Data {
     public init?(hex: String) {
         let digits = Array((hex.hasPrefix("0x") ? String(hex.dropFirst(2)) : hex).utf8)
         guard digits.count % 2 == 0 else { return nil }
+        // Digit by digit: UInt8(_:radix:) takes a sign, so «+e» read as 0x0e and «-0» as 0x00 — an address spelled
+        // that way had the same bytes as a known contract and a text no check knew (the 2026-11-10 review).
+        func digit(_ c: UInt8) -> UInt8? {
+            switch c {
+            case 48...57: c - 48    // 0–9
+            case 97...102: c - 87   // a–f
+            case 65...70: c - 55    // A–F
+            default: nil
+            }
+        }
         var bytes = [UInt8]()
         bytes.reserveCapacity(digits.count / 2)
         for i in stride(from: 0, to: digits.count, by: 2) {
-            guard let b = UInt8(String(decoding: digits[i...i + 1], as: UTF8.self), radix: 16) else { return nil }
-            bytes.append(b)
+            guard let high = digit(digits[i]), let low = digit(digits[i + 1]) else { return nil }
+            bytes.append(high << 4 | low)
         }
         self.init(bytes)
     }
 
     public var hex: String { map { String(format: "%02x", $0) }.joined() }
+
+    /// An EVM address as its 20 bytes: «0x» and 40 hex digits, nothing else. `init(hex:)` reads bare hex too, and an
+    /// address that is signed is also compared as text (the wallet's own, a router, Relay's depository): «4cd2…» would
+    /// sign for the same contract while every such comparison missed it (the 2026-11-10 review). Whatever puts an
+    /// address into something signed reads it here.
+    public init?(evmAddress a: String) {
+        guard a.hasPrefix("0x"), a.utf8.count == 42, let bytes = Data(hex: a) else { return nil }
+        self = bytes
+    }
 }

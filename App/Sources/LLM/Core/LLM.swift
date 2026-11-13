@@ -86,13 +86,18 @@ public struct ProviderInfo: Sendable, Identifiable {
     /// The current models this way in offers, checked, the recommended one first: the chat's menu and Settings pick
     /// from them. Any other id can still be typed in Settings.
     public var models: [String]
+    /// Where a key is made, and what to press there: Settings shows them as the way to connect.
+    public var keyURL: URL?
+    public var keySteps: String?
 
     public init(
         id: String, name: String, kind: ProviderKind, defaultModel: String, note: String,
         takesKey: Bool = false, signInLabel: String? = nil, existingLoginLabel: String? = nil, unavailable: String? = nil,
-        models: [String] = []
+        models: [String] = [], keyURL: String? = nil, keySteps: String? = nil
     ) {
         self.models = models
+        self.keyURL = keyURL.flatMap(URL.init(string:))
+        self.keySteps = keySteps
         self.id = id
         self.name = name
         self.kind = kind

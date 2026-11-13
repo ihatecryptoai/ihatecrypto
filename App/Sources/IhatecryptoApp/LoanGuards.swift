@@ -21,7 +21,7 @@ extension Workspace {
             let below = below ?? LoanGuard.defaultBelow
             // The loan named, or the one the wallet has: Kamino's, then Aave's on the first network with a debt.
             var guarded: LoanGuard?
-            if named == "kamino" || (named == nil && kaminoLoan?.health != nil) {
+            if named == "kamino" || (named == nil && (kaminoLoan?.health ?? kaminoMainLoan?.health) != nil) {
                 guarded = LoanGuard(loan: "kamino", below: below)
             } else if named == "aave", let network {
                 guarded = LoanGuard(loan: "aave", network: network, below: below)
@@ -54,7 +54,7 @@ extension Workspace {
             }
             loanGuards.append(g)
             withAnimation(StudioView.spring) { showAlerts = true }
-            if let read = await loanHealth(g) { guardHealth[g.id] = .some(read.health) }
+            if let reads = await loanHealth(g) { guardHealth[g.id] = .some(LoanGuard.riskiest(reads).health) }
             // One line: the guard itself is on the alerts board, with its health.
             reply(say("Guarding your \(guardName(g)) loan: under \(Fmt.num(g.below)), a repay back to \(Fmt.num(g.target)) comes to you to confirm.",
                       "Слежу за займом на \(guardName(g)): ниже \(Fmt.num(g.below)) пришлю погашение до \(Fmt.num(g.target)) на подтверждение."), note: note)
@@ -65,34 +65,46 @@ extension Workspace {
         g.loan == "aave" ? "Aave (\(WalletCommand.placeName(g.network ?? "base")))" : "Kamino"
     }
 
-    /// The loan's health and its USDC debt; `health` nil: no debt there. nil: it couldn't be read this time.
-    func loanHealth(_ g: LoanGuard) async -> (health: Decimal?, debt: Decimal)? {
+    /// The loans the guard watches, each with its health and USDC debt; `health` nil: no debt there. nil: they couldn't
+    /// be read this time. Kamino has two: Backpack's against stocks and the main market's against SOL («borrow … against
+    /// SOL then guard my loan on kamino» guarded only Backpack's while the new loan went unwatched).
+    func loanHealth(_ g: LoanGuard) async -> [LoanGuard.Read]? {
         if g.loan == "kamino" {
             guard kaminoLoanRead else { return nil }
-            guard let loan = kaminoLoan else { return (nil, 0) }
             // The token count lags the interest the health already counts (the executor's repay takes the larger too).
-            return (loan.health, max(loan.debts.first { $0.symbol == "USDC" }?.tokens ?? 0, loan.debtUSD))
+            func read(_ loan: Kamino.Loan?, _ against: String?) -> LoanGuard.Read {
+                LoanGuard.Read(against: against, health: loan?.health,
+                               debt: loan.map { max($0.debts.first { $0.symbol == "USDC" }?.tokens ?? 0, $0.debtUSD) } ?? 0)
+            }
+            return [read(kaminoLoan, nil), read(kaminoMainLoan, "SOL")]
         }
         // ponytail: one getUserAccountData a refresh per Aave guard; cache it if guards pile up.
         guard let wallet = previewWallet, let m = AaveV3.markets.first(where: { $0.chain == g.network }),
               let account = try? await executor(wallet).aaveAccount(m) else { return nil }
-        return (account.health, account.debt)
+        return [LoanGuard.Read(health: account.health, debt: account.debt)]
     }
 
     /// Runs with every refresh: a guarded loan under its line gets its repay prepared as a task due now, which waits on
     /// its own canvas for Confirm with a notification (runDueTask), like a price alert's steps.
     func checkLoanGuards() async {
         for g in loanGuards where g.owner == nil || g.owner == solanaAddress {
-            guard let read = await loanHealth(g), let i = loanGuards.firstIndex(where: { $0.id == g.id }) else { continue }
-            guardHealth[g.id] = .some(read.health)
-            guard let health = read.health, health < g.rearm else {
+            guard let reads = await loanHealth(g), let i = loanGuards.firstIndex(where: { $0.id == g.id }) else { continue }
+            let worst = LoanGuard.riskiest(reads)
+            guardHealth[g.id] = .some(worst.health)
+            guard let health = worst.health, health < g.rearm else {
                 if !loanGuards[i].armed { loanGuards[i].armed = true }
                 continue
             }
             guard loanGuards[i].armed, health < g.below else { continue }
             loanGuards[i].armed = false
             let h = Fmt.num(health, maxFraction: 2)
-            var usdc = LoanGuard.repay(debt: read.debt, health: health, target: g.target)
+            // Every loan short of the re-arm line gets its repay, each on its own market: the guard re-arms on the lowest
+            // health, so a second loan left between the line and re-arm would keep it off for good.
+            var repays = reads.compactMap { r -> (against: String?, usdc: Decimal)? in
+                guard let x = r.health, x < g.rearm else { return nil }
+                return (r.against, LoanGuard.repay(debt: r.debt, health: x, target: g.target))
+            }
+            var usdc = repays.reduce(0) { $0 + $1.usdc }
             // The USDC the place lacks comes first, from wherever it is, every leg through NEAR Intents (the owner,
             // 2026-11-03: the guard's top-up always goes through NEAR; NEAR sold through 1Click too), and the repay takes
             // what arrived (fittedToArrival). With too little anywhere, it repays what the place has and says what's missing.
@@ -108,9 +120,12 @@ extension Workspace {
                     notify(.alerts, "🛡 \(guardName(g))", say("Loan health \(h): \(missing) USDC more is needed to bring it back to \(Fmt.num(g.target)). Top up USDC.",
                                                             "Здоровье займа \(h): чтобы вернуть его к \(Fmt.num(g.target)), не хватает \(missing) USDC. Пополни USDC."))
                     guard usdc > 0 else { continue }
+                    // What's there goes to the riskiest loan.
+                    let first = repays.first { $0.against == worst.against } ?? repays[0]
+                    repays = [(first.against, min(first.usdc, usdc))]
                 }
             }
-            var task = ScheduledTask(steps: legs + [g.repayCommand(usdc)], next: Date(), every: nil,
+            var task = ScheduledTask(steps: legs + repays.map { g.repayCommand($0.usdc, against: $0.against) }, next: Date(), every: nil,
                                      because: say("\(guardName(g)) loan health \(h) is under \(Fmt.num(g.below)); liquidation is at 1",
                                                   "здоровье займа на \(guardName(g)) \(h), ниже \(Fmt.num(g.below)); ликвидация при 1"))
             task.untrusted = g.untrusted

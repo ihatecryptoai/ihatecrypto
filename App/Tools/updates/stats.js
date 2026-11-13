@@ -51,7 +51,7 @@ async function hyperliquid() {
 const LABELS = [
   ['story_1', 'Story, first step reached'], ['story_2', 'Story, second step reached'], ['story_end', 'Story, end reached'],
   ['seen_canvas', 'Saw «A canvas like Figma»'], ['seen_how', 'Saw «How it works»'], ['seen_safe', 'Saw «Why it’s safe»'],
-  ['seen_open', 'Saw «Open source»'], ['seen_ask', 'Saw the examples'], ['seen_faq', 'Saw the questions'], ['faq_open', 'Opened an answer'],
+  ['seen_private', 'Saw «Privacy»'], ['seen_open', 'Saw «Open source»'], ['seen_ask', 'Saw the examples'], ['seen_plugins', 'Saw «Plugins»'], ['seen_faq', 'Saw the questions'], ['faq_open', 'Opened an answer'],
   ['github', 'Went to GitHub'], ['claude', 'Pressed «Check with Claude»'], ['send', 'Pressed «Send to Mac»'],
   ['share_tg', 'Shared to Telegram'], ['share_wa', 'Shared to WhatsApp'], ['share_mail', 'Shared by mail'], ['share_x', 'Shared to X'],
   ['share_copy', 'Copied the link'], ['menu', 'Opened the phone menu'], ['lang', 'Picked a language'],

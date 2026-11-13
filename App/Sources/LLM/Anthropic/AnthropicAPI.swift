@@ -13,8 +13,9 @@ public struct AnthropicAPI: LLMProvider {
 
     public var info: ProviderInfo {
         ProviderInfo(id: "anthropic", name: "Anthropic API", kind: .apiKey, defaultModel: "claude-opus-5-5",
-                     note: "Key from platform.claude.com/settings/keys › Create key, scoped to a workspace: Anthropic refuses a key without one. Billed separately from a Claude subscription.",
-                     takesKey: true, models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"])
+                     note: "Billed separately from a Claude subscription. Anthropic refuses a key that isn't scoped to a workspace.",
+                     takesKey: true, models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"],
+                     keyURL: "https://platform.claude.com/settings/keys", keySteps: "Create key, pick a workspace for it, add credits in Billing.")
     }
 
     /// Anthropic's 400 for a key that isn't scoped to a workspace (it would need the anthropic-workspace-id header,

@@ -16,7 +16,59 @@ enum Signer {
     /// (SignerPrefs), not the sandbox's preferences file, which anything on the Mac could rewrite.
     static var defaults: SignerPrefs { .shared }
 
+    /// Every request runs with its recipients and coins as the Touch ID session's scope (`SeedStore.scope`).
     static func handle(_ request: SignerRequest) throws -> SignerReply {
+        guard let scope = try? moveScope(request) else { return try handleRequest(request) }
+        return try SeedStore.$scope.withValue(scope) { try handleRequest(request) }
+    }
+
+    /// What a signature moves, for binding the session: the addresses money may go to, the coins it touches (Solana mints
+    /// this wallet has a token account for in the transaction, EVM contracts, Hyperliquid markets), each tied to its
+    /// network. A site's text or typed data is a scope of its own, by what is signed: with none it was inside every
+    /// open session (the empty set is in any), so a move's Touch ID also signed whatever a site asked next, unseen
+    /// (the 2026-11-10 review). nil: a request that signs nothing of the kind (settings).
+    static func moveScope(_ request: SignerRequest) throws -> Set<String>? {
+        // Only what the signed bytes say, never the app's lists of recipients or accounts (which could name everything).
+        func keys(_ list: [String], owner: String?) -> [String] { list.map(RecipientStore.key).filter { $0 != owner.map(RecipientStore.key) } }
+        func evm(_ chainId: UInt64, to: String, value: UInt64, data: Data, owner: String) -> [String] {
+            let call = EVMCall.decode(data)
+            let token: [String] = switch call {
+            case .transfer, .approve, .increaseAllowance, .transferFrom: [to]
+            case .permit2Approve(let t, _, _, _): [t]
+            default: []
+            }
+            return keys(call.payees(to: to, value: value, chainId: chainId) + token, owner: owner) + (value > 0 ? ["native"] : [])
+        }
+        switch request {
+        case .signSolana(let wire, _, _, _, _, let sponsor):
+            // The message's own keys its instructions use: where money goes must be one of them (the guard), coins too.
+            let owner = try address("solana"), m = try SolanaMessage.parse(transaction: wire)
+            let used = Set(m.instructions.flatMap(\.accounts)).compactMap { $0 < m.staticKeys.count ? m.staticKeys[$0] : nil }
+            return Set((used + [sponsor].compactMap { $0 }).filter { $0 != owner }.map { "sol:" + $0 })
+        case .signEVMTransaction(let chainId, _, _, _, _, let to, let value, let data, _):
+            return Set(evm(chainId, to: to, value: value, data: data, owner: try address("evm")).map { "evm:\(chainId):" + $0 })
+        case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
+            let owner = try address("evm")
+            return Set(calls.flatMap { evm(chainId, to: $0.to, value: 0, data: $0.data, owner: owner) }.map { "evm:\(chainId):" + $0 })
+        case .signSafeMove(let chainId, _, let to, let value, let data, _, _):
+            return Set(evm(chainId, to: to, value: value, data: data, owner: try address("evm")).map { "evm:\(chainId):" + $0 })
+        case .signHyperliquidL1(let action, _, _):
+            // Markets only: leverage, the entry and its stop of one trade are one move.
+            return Set(HLAction.markets(action).map { "hl:\($0)" })
+        case .signHyperliquidUser(let action, _, _):
+            return Set([HLAction.text(action, "destination")?.lowercased(), HLAction.text(action, "token")].compactMap { $0 }.map { "hl:" + $0 })
+        case .signSponsoredTransfer(let chainId, _, _, let token, let to, _, _):
+            return Set(keys([token, to], owner: nil).map { "evm:\(chainId):" + $0 })
+        case .signRelayMulticallPermit(let chainId, let token, _, _, let relayer, let refundTo, _, _, _):
+            return Set(keys([token, relayer, refundTo], owner: try? address("evm")).map { "evm:\(chainId):" + $0 })
+        case .signPersonal(let text), .signSolanaMessage(let text), .signTypedData(let text): return ["text:" + Keccak.hash256(text).hex]
+        case .signNearTransfer(_, let receiver, _, _, _): return ["near:" + receiver]
+        case .signNearIntentDeposit(_, let depositAddress, _, _): return ["near:" + depositAddress]
+        default: return nil
+        }
+    }
+
+    static func handleRequest(_ request: SignerRequest) throws -> SignerReply {
         switch request {
         case .status:
             var r = SignerReply(ok: true)
@@ -32,6 +84,7 @@ enum Signer {
             r.agentAddress = AgentStore.load().flatMap { try? EVMAccount.address(privateKey: $0) }
             r.agentActive = defaults.bool(forKey: agentActiveKey) && r.agentAddress != nil
             r.sessionLength = SeedStore.sessionLength
+            r.limits = Limits.current
             r.codeSet = CodeStore.isSet
             return r
 
@@ -98,7 +151,7 @@ enum Signer {
             guard agent.lowercased() != owner.lowercased() else { throw WalletError("The agent key matches the main key.") }
             let nonce = UInt64(Date().timeIntervalSince1970 * 1000)
             // In person every time: an open Touch ID session from another move doesn't turn the key on (the 2026-10-24 review).
-            try confirmAfresh("approve a Hyperliquid trading key: orders without \(Presence.name) for 7 days; it can't withdraw money")
+            try confirmAfresh("approve a Hyperliquid trading key: buys up to $\(Limits.current.agentOrder) an order without \(Presence.name) for \(agentDaysText), it can't withdraw money")
             let (action, signature) = try withKey("evm", reason: "approve a trading key: orders without \(Presence.name); it can't withdraw money") {
                 try HLSigner.approveAgent(agent: agent, name: "ihatecrypto", nonce: nonce, privateKey: $0, mainnet: true)
             }
@@ -119,7 +172,7 @@ enum Signer {
             // So does one whose week is over (agentWeek): the app can't keep it going by turning it on again.
             if on, !defaults.bool(forKey: agentActiveKey) || !agentFresh(agentRenewedKey), AgentStore.load() != nil {
                 // A fresh prompt, not an open session's: SeedStore.confirm always asks.
-                try confirmAfresh("turn the Hyperliquid trading key on for 7 days: orders without \(Presence.name); it can't withdraw money")
+                try confirmAfresh("turn the Hyperliquid trading key on for \(agentDaysText): buys up to $\(Limits.current.agentOrder) an order without \(Presence.name), it can't withdraw money")
                 SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
                 renewAgent(agentRenewedKey)
             }
@@ -155,7 +208,18 @@ enum Signer {
                  .relayOrder: break
             default: throw WalletError("The automation wallet signs only a task's moves.")
             }
-            return try Wallets.$signing.withValue(wallet) { try handle(inner) }
+            return try Wallets.$signing.withValue(wallet) {
+                // Its dollars counted by the signer, against the person's day and week (Automation.spend).
+                let dollars = try Automation.spend(inner)
+                do {
+                    let reply = try handle(inner)
+                    if !reply.ok { Limits.refund(.automation, dollars) }
+                    return reply
+                } catch {
+                    Limits.refund(.automation, dollars)
+                    throw error
+                }
+            }
 
         case .importMnemonic(let phrase, let passphrase, let requirePresence):
             _ = try Mnemonic.validate(phrase) // a mistyped phrase fails before any prompt
@@ -240,6 +304,8 @@ enum Signer {
         case .renameWallet(let id, let label):
             let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, name.count <= 32 else { throw WalletError("A wallet's name is 1 to 32 characters.") }
+            // No line breaks or invisible characters: a name shows on Touch ID prompts beside the addresses.
+            if let problem = AddressCheck.labelProblem(name) { throw WalletError(problem) }
             var list = Wallets.all
             guard let i = list.firstIndex(where: { $0.id == id }) else { throw WalletError("No such wallet.") }
             list[i].label = name
@@ -279,10 +345,10 @@ enum Signer {
             let id = try ledgerAgentID(owner)
             guard AgentStore.load(id: id) != nil else { throw WalletError("This Ledger has no trading key yet: approve one on the Ledger first.") }
             // Back on after a lock is the user's decision, as for a wallet's own key.
+            // The first time too: that the Ledger approved this key is only the app's word (the 2026-11-08 review).
             let state = defaults.string(forKey: "agentActive-" + id)
-            if on, state == nil { renewAgent("agentRenewed-" + id) }   // just approved on the Ledger itself, in person
-            if on, state == "paused" || state == "on" && !agentFresh("agentRenewed-" + id) {
-                try SeedStore.confirm("turn the Hyperliquid trading key of your Ledger \(owner) on for 7 days")
+            if on, state == nil || state == "paused" || state == "on" && !agentFresh("agentRenewed-" + id) {
+                try SeedStore.confirm("turn the Hyperliquid trading key of your Ledger \(owner) on for \(agentDaysText): buys up to $\(Limits.current.agentOrder) an order without \(Presence.name)")
                 renewAgent("agentRenewed-" + id)
                 SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
             }
@@ -303,14 +369,22 @@ enum Signer {
             }
             guard agentFresh("agentRenewed-" + id) || HLAction.onlyReduces(action) else {
                 SeedStore.wipe(&agent)
-                throw WalletError("The Ledger's trading key opens positions for 7 days after \(Presence.name) and those are over; stops and closes still go. "
+                throw WalletError("The Ledger's trading key opens positions for \(agentDaysText) after \(Presence.name) and those are over, stops and closes still go. "
                                   + "Turn it off and on in Settings › Wallet › Hyperliquid to go on.")
             }
             defer { SeedStore.wipe(&agent) }
             let verdict = HLGuard.check(action, owner: owner, recipients: [])
             guard verdict.ok else { return refused(verdict) }
+            // Within the person's limits only: there's no key here to sign the rest in person, so the Ledger signs it.
+            let opening = HLAction.opening(action)
+            if let why = try pastLeverage(action) ?? agentTake(opening) {
+                var v = Verdict()
+                v.problems.append("The Ledger's trading key: \(why). \(ledgerDevice)")
+                return refused(v)
+            }
             var r = SignerReply(ok: true)
-            r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: true)
+            do { r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: true) }
+            catch { if case .dollars(let d) = opening { Limits.refund(.agent, d) }; throw error }
             r.checks = verdict.checks
             return r
 
@@ -335,6 +409,27 @@ enum Signer {
             SeedStore.endSession()
             var r = SignerReply(ok: true)
             r.sessionLength = seconds
+            return r
+
+        case .setLimits(var limits):
+            let was = Limits.current
+            // A sender that doesn't know the trading rules (an older app) leaves them as they are.
+            if limits.trading == nil { limits.trading = was.trading }
+            if let problem = limits.problem { throw WalletError(problem) }
+            let looser = limits.looser(than: was)
+            // The trading rules ask on any change, lowered too (the owner, 2026-11-12): only the person sets them.
+            let rules = limits.trading?.changes(from: was.trading) ?? []
+            // In person even with no wallet yet: limits set silently then would hold for every wallet added later.
+            if !looser.isEmpty || !rules.isEmpty, !holdsPublicTestWallet {
+                try SeedStore.confirm(((looser.isEmpty ? [] : ["loosen your limits:"] + looser)
+                                       + (rules.isEmpty ? [] : ["change your trading rules:"] + rules)).joined(separator: "\n"))
+                SeedStore.endSession() // a confirmation, not a move: it leaves no session for an unrelated signature
+            }
+            // Another change saved while the prompt was up: this one was asked against limits no longer in force.
+            guard Limits.current == was else { throw WalletError("The limits changed while you were asked: nothing was saved. Look at them again.") }
+            Limits.save(limits)
+            var r = SignerReply(ok: true)
+            r.limits = Limits.current
             return r
 
         case .endSession:
@@ -413,7 +508,8 @@ enum Signer {
 
         case .forget:
             guard let wallet = Wallets.active else { return SignerReply(ok: true) }
-            try confirmInPerson("remove the wallet «\(wallet.label)» from ihatecrypto")
+            // Its addresses on the prompt, not only its name: the app can rename a wallet without asking (the 2026-11-08 review).
+            try confirmInPerson("remove the wallet «\(wallet.label)» from ihatecrypto\n\(addresses(wallet))")
             remove(wallet)
             return SignerReply(ok: true)
 
@@ -466,11 +562,13 @@ enum Signer {
             let tx = EVMTransaction(chainId: chainId, nonce: nonce, maxPriorityFeePerGas: maxPriorityFee, maxFeePerGas: maxFee,
                                     gasLimit: gasLimit, to: to, value: value, data: data)
             if !EVMRPC.signable.contains(chainId) { v.problems.append("ihatecrypto doesn't sign for network \(chainId).") }
+            // «0x» and 40 hex digits only: the checks below compare `to` as text (Data(evmAddress:)).
+            if Data(evmAddress: to) == nil { v.problems.append("Not an address: \(to).") }
             if let refusal = call.refusal(sender: owner, chainId: chainId) { v.problems.append(refusal) }
             if let refusal = EVMCall.targetRefusal(to: to, data: data, sender: owner) { v.problems.append(refusal) }
             if let refusal = Batch7702.selfCall(to: to, data: data, owner: owner) { v.problems.append(refusal) }
-            let relayPayees = EVMCall.relayDepositID(to: to, data: data).map { RelayOrders.order($0).map { [$0.recipient] } } ?? []
-            if relayPayees == nil { v.problems.append(RelayOrders.unchecked) }
+            let deposit = EVMCall.relayDepositID(to: to, data: data), relayOrder = deposit.flatMap(RelayOrders.order)
+            if deposit != nil, relayOrder == nil { v.problems.append(RelayOrders.unchecked) }
             if let fee = tx.feeProblem { v.problems.append(fee) }
             // Coins (calldata or not), tokens, NFTs and spending rights go only to this wallet or an address approved in person.
             for payee in call.payees(to: to, value: value, chainId: chainId) where !approved.contains(payee.lowercased()) {
@@ -479,9 +577,9 @@ enum Signer {
             guard v.ok else { return refused(v) }
             // A contract whose call can't be read is asked about in person once, whether or not the app named it: it's
             // allowed as a call, apart from money recipients (a site's contract comes as a recipient only to be asked about).
-            let doing = call.summary(chainId: chainId, to: to, value: value) + "\nnetwork fee " + tx.feeText
+            let doing = call.summary(chainId: chainId, to: to, value: value) + RelayOrders.line(relayOrder.map { [$0] } ?? []) + "\nnetwork fee " + tx.feeText
             let target = call.unreadTarget(to: to, value: value, chainId: chainId)
-            try approve(recipients.filter { RecipientStore.key($0) != target } + (relayPayees ?? []), doing: doing)
+            try approve(recipients.filter { RecipientStore.key($0) != target } + (relayOrder.map { [$0.recipient] } ?? []), doing: doing)
             if let target { try approve([target], calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -514,13 +612,13 @@ enum Signer {
                                      gasLimit: gasLimit, to: owner, value: 0, data: Data())
             if let problem = fee.feeProblem { v.problems.append(problem) }
             let approved = Set(recipients.map { $0.lowercased() } + [owner.lowercased()])
-            var relayPayees: [String] = []
+            var relayOrders: [RelayOrder] = []
             for c in calls {
                 for payee in EVMCall.decode(c.data).payees(to: c.to, value: 0, chainId: chainId) where !approved.contains(payee.lowercased()) {
                     v.problems.append("Money or the right to spend it goes to an unapproved address \(payee).")
                 }
                 if let id = EVMCall.relayDepositID(to: c.to, data: c.data) {
-                    if let order = RelayOrders.order(id) { relayPayees.append(order.recipient) } else { v.problems.append(RelayOrders.unchecked) }
+                    if let order = RelayOrders.order(id) { relayOrders.append(order) } else { v.problems.append(RelayOrders.unchecked) }
                 }
             }
             guard v.ok else { return refused(v) }
@@ -528,12 +626,13 @@ enum Signer {
             // keeps running the batch account's code on that network afterwards (it accepts coins and tokens as before).
             let lines = calls.map { EVMCall.decode($0.data).summary(chainId: chainId, to: $0.to, value: 0) }
             let net = EVMRPC.names[chainId] ?? "network \(chainId)"
-            let doing = lines.joined(separator: "\nthen ") + "\nas one transaction: this wallet runs the audited batch account on \(net) (EIP-7702)\nnetwork fee " + fee.feeText
+            let doing = lines.joined(separator: "\nthen ") + RelayOrders.line(relayOrders)
+                + "\nas one transaction: this wallet runs the audited batch account on \(net) (EIP-7702)\nnetwork fee " + fee.feeText
             // Each unread contract is asked about once, as in a single call; one another call lets spend (an exact approve
             // for the chat's `call`) is a money recipient, and that approval covers its call too.
             let targets = calls.compactMap { EVMCall.decode($0.data).unreadTarget(to: $0.to, value: 0, chainId: chainId) }
             let payees = Set(calls.flatMap { EVMCall.decode($0.data).payees(to: $0.to, value: 0, chainId: chainId) }.map(RecipientStore.key))
-            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayPayees, doing: doing)
+            try approve(recipients.filter { !targets.contains(RecipientStore.key($0)) || payees.contains(RecipientStore.key($0)) } + relayOrders.map(\.recipient), doing: doing)
             if !targets.isEmpty { try approve(targets, calls: true, doing: doing) }
             var r = SignerReply(ok: true)
             r.signedRaw = try withKey("evm", reason: doing) {
@@ -559,22 +658,28 @@ enum Signer {
             for p in extraPrograms where programs[p] == nil { programs[p] = "program \(p.prefix(6))… (approved by you)" }
             let verdict = SolanaGuard.check(message, accounts: accounts,
                                             policy: SolanaPolicy(owner: owner, recipients: Set(recipients), programs: programs, trustLookupTables: false,
-                                                                 sponsor: sponsor),
+                                                                 sponsor: sponsor, maxSlippageBps: Limits.current.slippageBps),
                                             tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
             guard verdict.ok else { return refused(verdict) }
-            let relayPayees = try SolanaGuard.relayDepositIDs(message).map { try RelayOrders.require($0).recipient }
+            let relayOrders = try SolanaGuard.relayDepositIDs(message).map { try RelayOrders.require($0) }
             // The programs the user allowed for this one transaction are named in full: they run with the wallet's authority.
             let extra = extraPrograms.filter { SolanaGuard.knownPrograms[$0] == nil && (try? Base58.decode($0))?.count == 32 }
                 .map { "runs \($0), not on ihatecrypto's list" }
             let payer = sponsor.map { ["the network fee is paid by \($0.prefix(4))…\($0.suffix(4)), not by you"] } ?? []
-            let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n")
+            let doing = ([prompt("sign a Solana transaction", verdict)] + extra + payer).joined(separator: "\n") + RelayOrders.line(relayOrders)
             // The fee payer may get rent back from this wallet: then it's a payee like any other, allowed in person once. One that
             // gets nothing of the wallet's (a JupiterZ maker, which only swaps) isn't kept as an address money may go to.
             let payee = sponsor.flatMap { SolanaGuard.refundsSponsor(message, accounts: accounts, owner: owner, sponsor: $0) ? [$0] : nil } ?? []
-            try approve(recipients + payee + relayPayees, doing: doing)
+            try approve(recipients + payee + relayOrders.map(\.recipient), doing: doing)
             // A program not on the list runs with this wallet's authority and the signer can't read what it does: every
             // such transaction asks in person afresh, whatever session is open (the 2026-10-24 review).
             if !extra.isEmpty { try confirmAfresh(doing + "\nit can move anything in this wallet: sign only if you trust this site") }
+            // A swap a person signs gets a prompt of its own, whatever session is open: its rate is theirs to judge (the
+            // automation wallet's swaps are held to its dollars instead). Past the person's limits (slippage, a site's
+            // fee): in person afresh, even for the automation wallet.
+            if !verdict.askAfresh.isEmpty || verdict.swaps && Wallets.signing == nil {
+                try confirmAfresh(([doing] + verdict.askAfresh).joined(separator: "\n"))
+            }
             var r = SignerReply(ok: true)
             r.signedWire = try withKey("solana", reason: doing) {
                 try SolanaTransaction.sign(wire, privateKey: $0, sponsor: sponsorKey).wire
@@ -639,7 +744,7 @@ enum Signer {
             let permit = try m.permit()
             let digests = [try m.digest(), try permit.typed().parts().digest]
             var r = SignerReply(ok: true)
-            r.signatures = try withKey("evm", reason: permit.summary + "\ninto Relay's depository for this wallet") { key in
+            r.signatures = try withKey("evm", reason: permit.summary + "\ninto Relay's depository for this wallet" + RelayOrders.line([order])) { key in
                 try digests.map { try EVMSigner.sign(digest: $0, privateKey: key) }
             }
             r.checks = ["The signer read Relay's calls itself (one deposit into its depository for this wallet) and computed the nonce they bind."]
@@ -655,26 +760,41 @@ enum Signer {
             // stays protected; what opens or adds to one takes the main key in person, and that renews the week.
             var r = SignerReply(ok: true)
             let agentOn = HLSigner.isTrading(action) && defaults.bool(forKey: agentActiveKey)
-            if agentOn, agentFresh(agentRenewedKey) || HLAction.onlyReduces(action), var agent = AgentStore.load() {
-                defer { SeedStore.wipe(&agent) }
-                r.signature = try HLSigner.signL1(action, privateKey: agent, nonce: nonce, mainnet: mainnet)
+            let fresh = agentFresh(agentRenewedKey) || HLAction.onlyReduces(action)
+            // Within the person's limits (Settings): an opening buy up to its price × size, under one order's and the day's
+            // dollars. An opening sell or TWAP, or more, takes the main key in person (the 2026-11-08 review).
+            let opening = HLAction.opening(action)
+            var agent = agentOn && fresh ? AgentStore.load() : nil
+            defer { if agent != nil { SeedStore.wipe(&agent!) } }
+            // Leverage past the person's limit is set only in person, by the main key.
+            let leverage = pastLeverage(action)
+            // Taken from the day in the same step as the check, before signing; given back if the signature fails.
+            let over = agent != nil ? try leverage ?? agentTake(opening) : nil
+            if let key = agent, over == nil {
+                do { r.signature = try HLSigner.signL1(action, privateKey: key, nonce: nonce, mainnet: mainnet) }
+                catch { if case .dollars(let d) = opening { Limits.refund(.agent, d) }; throw error }
             } else {
-                let stale = agentOn && AgentStore.load() != nil
+                let keyOn = agentOn && AgentStore.load() != nil
+                let stale = keyOn && !fresh
                 let type = HLAction.type(action)
                 // A TWAP buys on for hours: started only with a trading key on, the one thing that can stop it unattended
                 // (a stop that fired, a loss grown). The app's word that one is on isn't taken: the signer's own state says.
-                if type == "twapOrder", !stale {
+                if type == "twapOrder", !keyOn {
                     var v = Verdict()
                     v.problems.append("A TWAP needs the Hyperliquid trading key on: locked or off, nothing could stop it unattended.")
                     return refused(v)
                 }
                 let what = type == "setReferrer" ? "use ihatecrypto's referral code on Hyperliquid: 4% off its fees"
                     : type == "vaultTransfer" ? "move money between your Hyperliquid account and a vault"
-                    : stale ? "sign a Hyperliquid order: the trading key's 7 days are over, and this renews them" : "sign a Hyperliquid order"
-                // Renewing the trading key's week, and a vault deposit (money locked for days), ask in person afresh.
+                    : stale ? "sign a Hyperliquid order: the trading key's \(agentDaysText) are over, and this renews them"
+                    : over.map { "sign a Hyperliquid order: \($0)" } ?? "sign a Hyperliquid order"
+                // Renewing the trading key's days, an order past its limits, and a vault deposit (money locked for days), ask
+                // in person afresh.
                 let deposit = type == "vaultTransfer" && { if case .map(let p) = action { p.contains { $0.0 == "isDeposit" && $0.1 == .bool(true) } } else { false } }()
-                if stale || deposit { try confirmAfresh(prompt(what, verdict)) }
-                r.signature = try withKey("evm", reason: prompt(what, verdict)) {
+                // Leverage past the cap names itself, and the renewal too when this prompt also renews the key's days.
+                let asked = leverage.map { "sign a Hyperliquid order: \($0)" + (stale ? ". The trading key's \(agentDaysText) are over, and this renews them" : "") } ?? what
+                if stale || over != nil || deposit || leverage != nil { try confirmAfresh(prompt(asked, verdict)) }
+                r.signature = try withKey("evm", reason: prompt(asked, verdict)) {
                     try HLSigner.signL1(action, privateKey: $0, nonce: nonce, mainnet: mainnet)
                 }
                 if stale { renewAgent(agentRenewedKey) }
@@ -702,7 +822,9 @@ enum Signer {
             }
             let digest = try HLSigner.relayNonceMappingDigest(wallet: wallet, depositor: depositor, id: id, nonce: nonce)
             var r = SignerReply(ok: true)
-            r.signature = try withKey("evm", reason: "link a Hyperliquid withdrawal to a Relay order") { try EVMSigner.sign(digest: digest, privateKey: $0) }
+            r.signature = try withKey("evm", reason: "link a Hyperliquid withdrawal to a Relay order" + RelayOrders.line([order])) {
+                try EVMSigner.sign(digest: digest, privateKey: $0)
+            }
             r.checks = ["Deposit mapping: the wallet and depositor are yours."]
             return r
 
@@ -788,6 +910,9 @@ enum Signer {
         static let lock = NSLock()
         nonisolated(unsafe) static var held: [Data: RelayOrder] = [:]
         static let unchecked = "A Relay deposit for an order the signer hasn't checked: nothing was signed."
+        /// What the orders a deposit names pay out, as lines for its prompt: the order's own words (RelayOrder.pays),
+        /// since the card's «you get» is only the app's.
+        static func line(_ orders: [RelayOrder]) -> String { orders.map { "\nRelay then pays " + $0.pays }.joined() }
         static func add(_ order: RelayOrder) {
             let now = UInt64(Date().timeIntervalSince1970)
             lock.withLock { held = held.filter { $0.value.deadline > now }; held[order.id] = order }
@@ -804,12 +929,27 @@ enum Signer {
     static var agentActiveKey: String { Wallets.scoped("agentActive") }
     static var agentRenewedKey: String { Wallets.scoped("agentRenewed") }
 
-    /// The Hyperliquid trading key opens or adds to positions for 7 days after the user's last Touch ID for it (turning it
-    /// on, an order the main key signed in person); then cancels and reduce-only orders still go without one. The signer
-    /// sees no prices, so it can't cap what an order risks: this caps how long a program that took over the app could
-    /// trade the account down unseen. Only an in-person act renews it, never the app's word.
-    static let agentWeek: TimeInterval = 7 * 86_400
-    static func agentFresh(_ key: String) -> Bool { Date().timeIntervalSince1970 - ((defaults.object(forKey: key) as? Double) ?? 0) < agentWeek }
+    /// The Hyperliquid trading key opens or adds to positions for the person's days (Settings, 2 unless set) after their
+    /// last Touch ID for it (turning it on, an order the main key signed in person); then cancels and reduce-only orders
+    /// still go without one. Within those days it opens only buys inside the person's dollars (`agentRefusal`): together
+    /// they cap how much and how long a program that took over the app could trade the account down unseen. Only an
+    /// in-person act renews it, never the app's word.
+    static var agentSpan: TimeInterval { TimeInterval(Limits.current.agentDays) * 86_400 }
+    static var agentDaysText: String { let d = Limits.current.agentDays; return d == 1 ? "1 day" : "\(d) days" }
+    static func agentFresh(_ key: String) -> Bool { Date().timeIntervalSince1970 - ((defaults.object(forKey: key) as? Double) ?? 0) < agentSpan }
+    /// Why the trading key can't sign `opening` on its own, or nil — and then its dollars are taken from the day.
+    /// An updateLeverage past the person's leverage limit (Settings › Trading agent), in words; else nil.
+    static func pastLeverage(_ action: MsgPack) -> String? { HLGuard.leverage(action, over: Limits.current.leverageCap) }
+
+    static func agentTake(_ opening: HLAction.Opening) throws -> String? {
+        switch opening {
+        case .person(let why): why
+        case .dollars(let d): d == 0 ? nil : try Limits.takeAgent(d)
+        }
+    }
+
+    /// The end of a Ledger trading key's refusal that sends the action to the device instead (the app looks for it).
+    static let ledgerDevice = SignerLedger.device
     static func renewAgent(_ key: String) { defaults.set(Date().timeIntervalSince1970, forKey: key) }
 
     /// Where a Ledger's trading key is kept: by its account, which must be an EVM address.
@@ -820,7 +960,7 @@ enum Signer {
 
     /// A wallet's addresses for a Touch ID prompt: its name is the app's to set, its addresses are not.
     static func addresses(_ w: SignerWallet) -> String {
-        [w.solana.map { "Solana \($0)" }, w.evm.map { "EVM \($0)" }].compactMap { $0 }.joined(separator: "\n")
+        [w.solana.map { "Solana \($0)" }, w.evm.map { "EVM \($0)" }, w.near.map { "NEAR \($0)" }].compactMap { $0 }.joined(separator: "\n")
     }
 
     /// The active wallet's key for one chain («solana», «evm», «near»), after Touch ID or within its session: derived
