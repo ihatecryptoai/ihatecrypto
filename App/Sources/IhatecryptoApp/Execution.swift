@@ -29,12 +29,17 @@ nonisolated struct XPCTradeSigner: TradeSigner {
     var asWallet: String?
 
     private func send(_ request: SignerRequest) async throws -> SignerReply {
+        // The card this signature belongs to goes with it: the signer refuses what goes past it (SignerCap).
+        func wrapped(_ r: SignerRequest) -> SignerRequest {
+            let held = SignerCap.current.map { SignerRequest.within(cap: $0, request: r) } ?? r
+            return asWallet.map { .asWallet(id: $0, request: held) } ?? held
+        }
         #if DEBUG_API
         let changed = Tamper.apply(request)
-        let reply = try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: changed ?? request) } ?? changed ?? request)
+        let reply = try await SignerClient().send(wrapped(changed ?? request))
         return try Tamper.judged(reply, request: request, changed: changed != nil)
         #else
-        try await SignerClient().send(asWallet.map { .asWallet(id: $0, request: request) } ?? request)
+        try await SignerClient().send(wrapped(request))
         #endif
     }
 

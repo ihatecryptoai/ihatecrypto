@@ -148,6 +148,7 @@ enum SeedStore {
     /// On a Mac without Touch ID that has a passcode, a wallet the code seals throws `CodeNeeded` instead of asking macOS:
     /// the app asks for the code, and `.enterCode` opens the session this then uses.
     static func load(reason: String, id: String, session useSession: Bool = true) throws -> Data {
+        let reason = reason + Signer.cardLine
         let (opened, byCode): (LAContext, Bool) = try lock.withLock {
             let fresh = LAContext()
             fresh.localizedReason = reason
@@ -241,6 +242,7 @@ enum SeedStore {
     /// `within`: seconds before the prompt closes by itself — for the automation wallet, which signs with no one at
     /// the Mac: a prompt left up would hold its task, and the app's watch loop with it, until someone came back.
     static func confirm(_ reason: String, within: TimeInterval? = nil) throws {
+        let reason = reason + Signer.cardLine
         let context = LAContext()
         context.localizedReason = reason
         let done = DispatchSemaphore(value: 0)

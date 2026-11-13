@@ -61,6 +61,9 @@ public struct SolanaPolicy: Sendable {
     public static let sponsorRefund: UInt64 = 5_000_000
     /// The slippage a swap may allow before it asks in person afresh (the person's limit, Settings), basis points.
     public var maxSlippageBps: Int
+    /// More mints a swap's input or output may be named by, besides `mintNames`: the card's coin at the signer, proven
+    /// like those by this wallet's own account for it (its address derives from the mint) where a lookup table holds it.
+    public var mints: [String] = []
 
     public init(owner: String, recipients: Set<String> = [], programs: [String: String] = SolanaGuard.knownPrograms,
                 maxPriorityFee: UInt64 = 5_000_000, trustLookupTables: Bool = true, sponsor: String? = nil, maxSlippageBps: Int = 300) {
@@ -459,7 +462,7 @@ public enum SolanaGuard {
                 guard own(out, mint) else { v.problems.append("The JupiterZ fill pays \(out), not your wallet."); continue }
                 // A mint a lookup table names is unread here: the wallet's own account for it says which it is (its address
                 // derives from the mint), so the prompt reads «3 USDC», not «3000000 units of lookup-table entry 21».
-                func named(_ a: String, _ m: String) -> String { mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m }
+                func named(_ a: String, _ m: String) -> String { (mintNames.keys + policy.mints).first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m }
                 v.outflows.append(.init(asset: named(source, inMint), units: le64(ix.data, 8), to: nil))
                 v.swaps = true
                 v.checks.append("JupiterZ fill: \(units(le64(ix.data, 8), named(source, inMint))) for \(units(le64(ix.data, 16), named(out, mint))) → \(out == jupiterZ ? "your wallet, as SOL" : "your account"). The balance simulation checks it.")
@@ -493,7 +496,7 @@ public enum SolanaGuard {
                 // (the signer can't read tables): «3 USDC», not «3000000 units of lookup-table entry 21».
                 func named(_ a: String?, _ m: String) -> String {
                     guard let a else { return m }
-                    return ownTokenAccount(a, owner: policy.owner, mint: m) ? m : mintNames.keys.first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m
+                    return ownTokenAccount(a, owner: policy.owner, mint: m) ? m : (mintNames.keys + policy.mints).first { ownTokenAccount(a, owner: policy.owner, mint: $0) } ?? m
                 }
                 let given = named(account(layout.source), inMint), got = named(to, mint)
                 v.checks.append("Jupiter swap: \(units(inAmount, given)) → at least \(units(least, got)), your account (slippage \(percent(slippage))"

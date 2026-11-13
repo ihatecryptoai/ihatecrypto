@@ -16,6 +16,16 @@ enum Signer {
     /// (SignerPrefs), not the sandbox's preferences file, which anything on the Mac could rewrite.
     static var defaults: SignerPrefs { .shared }
 
+    /// The card a `.within` request was held to, and its line on every prompt while it signs: the bytes fit it.
+    @TaskLocal static var card: String?
+    /// The app's words, so only one line of them: no control characters (a token's symbol comes from its contract).
+    static var cardLine: String {
+        card.map { c in
+            let words = String(c.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) && !"«»;".unicodeScalars.contains($0) }.prefix(120).map(Character.init))
+            return "\nfits the card «\(words)»: nothing more leaves, to no one else"
+        } ?? ""
+    }
+
     /// Every request runs with its recipients and coins as the Touch ID session's scope (`SeedStore.scope`).
     static func handle(_ request: SignerRequest) throws -> SignerReply {
         guard let scope = try? moveScope(request) else { return try handleRequest(request) }
@@ -198,6 +208,11 @@ enum Signer {
             try confirmInPerson("add an AUTOMATION wallet: scheduled tasks sign with it WITHOUT \(Presence.name) — keep only their budget on it")
             return try store(phrase: Mnemonic.generate(), passphrase: "", requirePresence: false, test: true, automation: true)
 
+        case .within(let cap, let inner):
+            // Refused before any prompt when the bytes go past the card.
+            if let why = try pastCard(cap, inner) { return refused(why) }
+            return try $card.withValue(cap.card) { try handle(inner) }
+
         case .asWallet(let id, let inner):
             guard let wallet = Wallets.all.first(where: { $0.id == id }), wallet.isAutomation else {
                 throw WalletError("Only the automation wallet signs for a scheduled task.")
@@ -205,11 +220,13 @@ enum Signer {
             switch inner {
             case .signSolana, .signEVMTransaction, .signEVMBatch, .signHyperliquidL1, .signHyperliquidUser, .signRelayNonceMapping,
                  .signReceiveAuthorization, .signRelayMulticallPermit, .signSponsoredTransfer, .signNearIntentDeposit, .signNearTransfer,
-                 .relayOrder: break
+                 .relayOrder, .within: break
             default: throw WalletError("The automation wallet signs only a task's moves.")
             }
             return try Wallets.$signing.withValue(wallet) {
                 // Its dollars counted by the signer, against the person's day and week (Automation.spend).
+                // Past the card: refused before its budget asks anyone.
+                if case .within(let cap, let held) = inner, let why = try pastCard(cap, held) { return refused(why) }
                 let dollars = try Automation.spend(inner)
                 do {
                     let reply = try handle(inner)
@@ -1115,6 +1132,44 @@ enum Signer {
         if let a = defaults.string(forKey: chain) { return a }
         if let missing = Wallets.active?.missing(chain) { throw WalletError(missing) }
         throw WalletError("No wallet imported.")
+    }
+
+    /// Why `request` goes past the card, read from its bytes as its own checks read them: only a transfer's or a swap's
+    /// signature, whose programs (Solana) or calls (EVM) are ones whose money the signer reads in full, so a move it
+    /// can't count (a deposit, an unread call) never passes as «fits the card». nil: it fits.
+    static func pastCard(_ cap: SignerCap, _ request: SignerRequest) throws -> String? {
+        var flows: [(asset: String, units: Decimal, to: String?)] = []
+        func evm(_ chainId: UInt64, to: String, value: UInt64, data: Data) -> String? {
+            switch EVMCall.decode(data) {
+            case .transfer: break
+            case _ where data.isEmpty: break
+            default: return "a call the card doesn't make goes with it."
+            }
+            Automation.evm(chainId, to: to, value: value, data: data) { asset, units, _, payee, _ in flows.append((asset, units, payee)) }
+            return nil
+        }
+        switch request {
+        case .signSolana(let wire, let accounts, let recipients, let tokenOwners, _, let sponsor):
+            let message = try SolanaMessage.parse(transaction: wire)
+            let called = Set(message.instructions.map { $0.programIndex < accounts.count ? accounts[$0.programIndex] : "?" })
+            if let other = called.subtracting(Automation.solanaPrograms).sorted().first { return "it calls \(other), which the card doesn't." }
+            var policy = SolanaPolicy(owner: try address("solana"), recipients: Set(recipients), trustLookupTables: false, sponsor: sponsor)
+            policy.mints = [cap.asset]
+            flows = SolanaGuard.check(message, accounts: accounts, policy: policy, tokenOwners: verifiedOwners(tokenOwners, mints: accounts))
+                .outflows.map { ($0.asset, Decimal($0.units), $0.to) }
+        case .signEVMTransaction(let chainId, _, _, _, _, let to, let value, let data, _):
+            if let why = evm(chainId, to: to, value: value, data: data) { return why }
+        case .signEVMBatch(let chainId, _, _, _, _, let calls, _):
+            for c in calls { if let why = evm(chainId, to: c.to, value: 0, data: c.data) { return why } }
+        default: return "a card's limits go only with a transfer's or a swap's signature."
+        }
+        return cap.refusal(flows)
+    }
+
+    static func refused(_ pastCard: String) -> SignerReply {
+        var v = Verdict()
+        v.problems = ["Past the card: " + pastCard]
+        return refused(v)
     }
 
     static func refused(_ verdict: Verdict) -> SignerReply {

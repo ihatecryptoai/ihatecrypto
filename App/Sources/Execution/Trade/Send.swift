@@ -4,6 +4,7 @@ import HyperliquidSigning
 import Foundation
 import IhatecryptoCore
 import RelayBridge
+import SignerAPI
 import SolanaChain
 import TxGuard
 import WalletCore
@@ -67,7 +68,8 @@ extension Executor {
     private func sendEVMUSDC(_ units: UInt64, on net: EVMNetwork, to recipient: String, label: String) async throws -> String {
         try await ensureEVM(net, usdc: units)
         let hash = try await sendEVM(net.rpc, to: net.usdc, data: try ERC20.transfer(to: recipient, units: net.raw(units)),
-                                     note: "Send \(Self.usdc(units)) USDC to \(label)", recipients: [recipient])
+                                     note: "Send \(Self.usdc(units)) USDC to \(label)", recipients: [recipient],
+                                     cap: SignerCap(asset: net.usdc, units: net.raw(units), payee: recipient, card: "\(Self.usdc(units)) USDC to \(label)"))
         return "Sent \(Self.usdc(units)) USDC to \(label) on \(net.name). \(net.explorer)/tx/\(hash)"
     }
 
@@ -174,7 +176,10 @@ extension Executor {
             .init(label: "lamports", before: Int64(solBefore), after: Int64(simulation.after[wallet.solana]?.lamports ?? 0), atLeast: -3_000_000),
         ]))
         guard verdict.ok else { throw GuardStop("The guard stopped the transfer: " + verdict.problems.joined(separator: " ")) }
-        let signed = try await signer.signSolana(unsigned, accounts: message.staticKeys, recipients: [owner], tokenOwners: owners)
+        let cap = SignerCap(asset: mint, units: units, payee: owner, card: "\(f(units)) \(symbol) to \(label)")
+        let signed = try await SignerCap.$current.withValue(cap) {
+            try await signer.signSolana(unsigned, accounts: message.staticKeys, recipients: [owner], tokenOwners: owners)
+        }
         guard signed.count == unsigned.count, signed.subdata(in: 65..<signed.count) == unsigned.subdata(in: 65..<unsigned.count) else {
             throw GuardStop("What was signed isn't what was checked.")
         }
@@ -284,7 +289,9 @@ extension Executor {
             throw ExecutionError("The simulation leaves \(Fmt.num(Decimal(left) / 1_000_000_000, maxFraction: 9)) SOL behind, so nothing was signed. Send a number instead.")
         }
         guard verdict.ok else { throw GuardStop("The guard stopped the transfer: " + verdict.problems.joined(separator: " ")) }
-        let signed = try await signer.signSolana(unsigned, accounts: message.staticKeys, recipients: [owner], tokenOwners: owners)
+        let signed = try await SignerCap.$current.withValue(SignerCap(asset: "SOL", units: lamports, payee: owner, card: "\(shown) SOL to \(label)")) {
+            try await signer.signSolana(unsigned, accounts: message.staticKeys, recipients: [owner], tokenOwners: owners)
+        }
         guard signed.count == unsigned.count, signed.subdata(in: 65..<signed.count) == unsigned.subdata(in: 65..<unsigned.count) else {
             throw GuardStop("What was signed isn't what was checked.")
         }
@@ -336,7 +343,8 @@ extension Executor {
         guard units > 0 else { throw ExecutionError("No \(symbol) on \(net.name) to send.") }
         guard units <= have else { throw ExecutionError("\(f(have)) \(symbol) on \(net.name); can't send \(f(units)).") }
         let hash = try await sendEVM(net.rpc, to: contract, data: try ERC20.transfer(to: recipient, units: units),
-                                     note: "Send \(f(units)) \(symbol) to \(label)", recipients: [recipient])
+                                     note: "Send \(f(units)) \(symbol) to \(label)", recipients: [recipient],
+                                     cap: SignerCap(asset: contract, units: units, payee: recipient, card: "\(f(units)) \(symbol) to \(label)"))
         return "Sent \(f(units)) \(symbol) to \(label) on \(net.name). \(net.explorer)/tx/\(hash)"
     }
 
@@ -395,8 +403,10 @@ extension Executor {
         }
         let note = "Send \(f(wei)) \(net.gasCoin) to \(label)"
         let nonce = try await nextNonce(rpc)
-        let raw = try await signer.signEVMTransfer(chainId: rpc.chainId, nonce: nonce, maxPriorityFee: tip, maxFee: maxFee,
-                                                   gasLimit: gasLimit, to: recipient, value: wei, recipients: [recipient])
+        let raw = try await SignerCap.$current.withValue(SignerCap(asset: "native", units: wei, payee: recipient, card: "\(f(wei)) \(net.gasCoin) to \(label)")) {
+            try await signer.signEVMTransfer(chainId: rpc.chainId, nonce: nonce, maxPriorityFee: tip, maxFee: maxFee,
+                                             gasLimit: gasLimit, to: recipient, value: wei, recipients: [recipient])
+        }
         let hash = "0x" + Keccak.hash256(raw).hex
         try journal.append(.init(chain: net.key, id: hash, kind: .signed, note: note))
         _ = try await rpc.send(raw)

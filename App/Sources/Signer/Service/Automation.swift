@@ -21,6 +21,7 @@ enum Automation {
     /// What `request` spends in dollars, already taken from the budget — after the person was asked about whatever the
     /// signer can't count or what goes past the limits. The caller gives it back if the move isn't signed.
     static func spend(_ request: SignerRequest) throws -> Decimal {
+        if case .within(_, let inner) = request { return try spend(inner) }
         var dollars = Decimal(), others: [String] = []
         func add(_ asset: String, _ units: Decimal, decimals: Int?, to: String?, name: String) {
             if let to, own(to) { return }

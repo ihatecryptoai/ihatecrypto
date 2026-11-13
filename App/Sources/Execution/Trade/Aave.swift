@@ -4,6 +4,7 @@ import Foundation
 import IhatecryptoCore
 import OneClickKit
 import RelayBridge
+import SignerAPI
 import SolanaChain
 import TxGuard
 import WalletCore
@@ -581,8 +582,9 @@ extension Executor {
     /// `batch`: these calls instead, as one EIP-7702 transaction from and to the wallet (`to` and `data` unused); the dry
     /// run sees the wallet already running Batch7702.delegate, and the gas limit adds the authorization's own.
     /// `value`: wei of the network's coin sent with the call (a wrap, a native v4 swap); never with `batch`.
+    /// `cap`: the card this call's signature is held to at the signer; a gas top-up before it isn't.
     func sendEVM(_ rpc: EVMRPC, to: String, data: Data, note: String, recipients: [String] = [], batch: [Batch7702.Call]? = nil,
-                 value: UInt64 = 0) async throws -> String {
+                 value: UInt64 = 0, cap: SignerCap? = nil) async throws -> String {
         guard let net = EVMNetwork.of(chainId: rpc.chainId) else { throw ExecutionError("ihatecrypto doesn't move money on network \(rpc.chainId). Nothing was signed.") }
         guard value == 0 || (batch == nil && net.feeToken == nil) else { throw ExecutionError("Coins go only with a single call on a network that pays its fees in them. Nothing was signed.") }
         if let token = net.feeToken, to.lowercased() != Tempo.feeManager {
@@ -620,7 +622,7 @@ extension Executor {
             }
         }
         let nonce = try await nextNonce(rpc)
-        let raw = if let batch {
+        let raw = try await SignerCap.$current.withValue(cap) { if let batch {
             try await signer.signEVMBatch(chainId: rpc.chainId, nonce: nonce, maxPriorityFee: tip, maxFee: maxFee, gasLimit: gasLimit, calls: batch,
                                           recipients: recipients)
         } else if value > 0 {
@@ -629,7 +631,7 @@ extension Executor {
         } else {
             try await signer.signEVM(chainId: rpc.chainId, nonce: nonce, maxPriorityFee: tip, maxFee: maxFee, gasLimit: gasLimit, to: to, data: data,
                                      recipients: recipients)
-        }
+        } }
         let hash = "0x" + Keccak.hash256(raw).hex
         try journal.append(.init(chain: net.key, id: hash, kind: .signed, note: note))
         _ = try await rpc.send(raw)

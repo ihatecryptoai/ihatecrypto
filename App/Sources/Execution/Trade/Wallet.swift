@@ -9,6 +9,7 @@ import JupiterSwap
 import IhatecryptoCore
 import OneClickKit
 import RelayBridge
+import SignerAPI
 import SolanaChain
 import TxGuard
 import WalletCore
@@ -350,6 +351,9 @@ extension Executor {
         let owners = [inAccount: wallet.solana, outAccount: wallet.solana]   // wSOL accounts too, for the native side
         let outBefore = nativeOut ? try await rpc.balance(wallet.solana) : try await rpc.tokenBalance(owner: wallet.solana, mint: to.mint)
         var changes: [String] = []
+        // The card: this much of `from` goes in, and only into the swap (what it gives comes back to the wallet).
+        let cap = SignerCap(asset: from.mint, units: units, payee: nil,
+                            card: "\(Fmt.num(Decimal(units) / scale, maxFraction: 8)) \(from.symbol) → \(to.symbol)")
         // The price moved more than 1% (and Jupiter's own fee, when its wallet pays) under what the card showed: not signed.
         func holdsShown(_ out: UInt64, feeBps: Decimal = 0) throws {
             guard let shown, Decimal(out) < Decimal(shown) * (1 - (100 + feeBps) / 10_000) else { return }
@@ -401,10 +405,10 @@ extension Executor {
             let outNew = maker && !nativeOut ? try await rpc.balance(outAccount) == 0 : false
             let rent: Int64 = outNew ? 2_100_000 : 0
             do {
-                changes = try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
+                changes = try await SignerCap.$current.withValue(cap) { try await signAndSend(order.wire, lastValid: order.lastValidBlockHeight, owners: owners, rules: rules,
                                                 note: "Jupiter \(from.symbol)→\(to.symbol), fee paid by \(maker ? "JupiterZ's market maker" : "Jupiter")",
                                                 lamportsAtLeast: nativeIn ? -Int64(units) - rent : nativeOut ? Int64(order.minOut) : -rent,
-                                                dryRun: dryRun, sponsor: (sponsor, order.requestId))
+                                                dryRun: dryRun, sponsor: (sponsor, order.requestId)) }
             } catch where maker && !lowSOL && ((error as? GuardStop)?.message.hasPrefix("The guard stopped") == true
                                                  || (error as? ExecutionError)?.message.hasPrefix("The simulation failed") == true) {
                 // Refused by the app's own checks before the signer was asked (the guard, or a simulation off the quote): the
@@ -447,8 +451,10 @@ extension Executor {
                     failure = ExecutionError("Jupiter's route \(tx.route) \(why), so nothing was signed.")
                 } else {
                     do {
-                        changes = try await signAndSend(tx.wire, lastValid: tx.lastValidBlockHeight, owners: owners, rules: rules, note: "Jupiter \(from.symbol)→\(to.symbol)",
-                                                        lamportsAtLeast: lamportsAtLeast, dryRun: dryRun)
+                        changes = try await SignerCap.$current.withValue(cap) {
+                            try await signAndSend(tx.wire, lastValid: tx.lastValidBlockHeight, owners: owners, rules: rules, note: "Jupiter \(from.symbol)→\(to.symbol)",
+                                                  lamportsAtLeast: lamportsAtLeast, dryRun: dryRun)
+                        }
                         break
                     } catch let e as ExecutionError where e.message.hasPrefix("The simulation failed") && e.message.contains(#"{"Custom":6001}"#) {
                         why = "would give less than its minimum (Jupiter's 6001)"

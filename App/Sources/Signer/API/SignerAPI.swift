@@ -156,6 +156,49 @@ public enum SignerRequest: Codable, Sendable {
     /// Only a money move's signature passes (no wallet changes, no site messages), with the same guard, and «our
     /// addresses» and the approved ones are that wallet's own.
     indirect case asWallet(id: String, request: SignerRequest)
+    /// `request` held to the card the person confirmed (`SignerCap`): the signer reads what leaves from the bytes and
+    /// refuses anything past the card, then signs as usual with the card on the prompt.
+    indirect case within(cap: SignerCap, request: SignerRequest)
+}
+
+/// What a card allows one signature to move: one coin, at most so much of it, to one payee (or back to the wallet, for a
+/// swap). Set by the executor from the card's numbers around the move's own signature (`current`), sent with it by the
+/// app's signer, and checked by the signer against what it reads from the bytes: a build bug, or bytes changed between
+/// the checks and the signer, stop there instead of showing only on the prompt. It doesn't stop a compromised app, which
+/// writes the card too.
+public struct SignerCap: Codable, Sendable, Equatable {
+    /// A Solana mint or «SOL», an EVM token contract or «native».
+    public let asset: String
+    /// The most of it that may leave, in its smallest units (a decimal string: EVM amounts pass 64 bits).
+    public let units: String
+    /// Where it goes; nil for a swap, whose output comes back to the wallet.
+    public let payee: String?
+    /// The card's words, for the prompt («0.05 USDC to Automation»).
+    public let card: String
+
+    public init(asset: String, units: some CustomStringConvertible, payee: String?, card: String) {
+        (self.asset, self.units, self.payee, self.card) = (asset, units.description, payee, card)
+    }
+
+    /// The card around the signature being made now; nil outside a card's move.
+    @TaskLocal public static var current: SignerCap?
+
+    /// Why what leaves (`flows`, as the signer read it: coin, smallest units, to whom — nil for what a swap gives) goes past
+    /// the card, or nil when it fits. Addresses compare as the signer keeps them (EVM case-insensitive). Nothing read
+    /// leaving doesn't fit: the card moves its coin, and a move the reader can't count isn't vouched for on the prompt.
+    public func refusal(_ flows: [(asset: String, units: Decimal, to: String?)]) -> String? {
+        func key(_ a: String) -> String { a.hasPrefix("0x") ? a.lowercased() : a }
+        guard let most = Decimal(string: units), most >= 0 else { return "The card's limit isn't a number: \(units.prefix(40))." }
+        guard !flows.isEmpty else { return "nothing of \(asset) leaves as the card «\(card)» says, so its bytes aren't the card's." }
+        for f in flows where key(f.asset) != key(asset) {
+            return "\(f.units) units of \(f.asset) leave too, and the card «\(card)» moves only \(asset)."
+        }
+        for f in flows where f.to.map(key) != payee.map(key) {
+            return "\(f.units) units go to \(f.to ?? "a swap"), and the card «\(card)» pays \(payee ?? "only a swap")."
+        }
+        let total = flows.reduce(Decimal()) { $0 + $1.units }
+        return total > most ? "\(total) units of \(asset) leave, and the card «\(card)» allows at most \(most)." : nil
+    }
 }
 
 /// One call Relay's proxy runs (Multicall3's Call3Value).
@@ -464,7 +507,8 @@ public final class SignerClient: @unchecked Sendable {
 
     private func deliver(_ request: SignerRequest) async throws -> SignerReply {
         if Self.untrusted {
-            switch request {
+            let core = if case .within(_, let inner) = request { inner } else { request }
+            switch core {
             case .status, .nearAddress, .endSession, .ledgerAgent(_, false), .addressBook: break
             case .signSolana, .signEVMTransaction, .signEVMBatch, .signHyperliquidL1, .signHyperliquidUser, .signRelayNonceMapping,
                  .signReceiveAuthorization, .signRelayMulticallPermit, .signSponsoredTransfer, .signNearIntentDeposit, .signNearTransfer,
