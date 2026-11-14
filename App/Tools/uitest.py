@@ -110,6 +110,14 @@ def check(expect, state, replies):
             why.append(f"no step of «{want}» carries its whole address for the opened details: {text((pending or {}).get(want))}")
         elif key == "pending_name" and (pending or {}).get("name") != want:
             why.append(f"the card saves «{(pending or {}).get('name')}», expected «{want}»")
+        elif key == "title_lacks" and want.lower() in text((pending or {}).get("title")):
+            why.append(f"the card's title says «{want}»: {(pending or {}).get('title')}")
+        elif key == "chain_step" and (pending or {}).get("step") != want:
+            why.append(f"the card says step «{(pending or {}).get('step')}», expected «{want}»")
+        elif key == "chain_contains" and (missing := [w for w in ([want] if isinstance(want, str) else want)
+                                                      if not any(w.lower() in f"step {c.get('step')} · {c.get('label')} · {c.get('title')}".lower()
+                                                                 for c in (pending or {}).get("chain") or [])]):
+            why.append(f"no later card of the chain says {missing}: {[(c.get('step'), c.get('title')) for c in (pending or {}).get('chain') or []]}")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):
             why.append(f"title {text((pending or {}).get('title'))}, expected «{want}»")
         elif key.startswith("command_contains") and want.lower() not in text((pending or {}).get("command")):

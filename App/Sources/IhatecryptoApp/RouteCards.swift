@@ -422,7 +422,7 @@ struct RouteCard: View {
                     .offset(y: 10 * k)
                     .opacity(look.pale ? 0.55 : 1)
                 // What the result comes to is an estimate, not a step with a state.
-                if state != .plain, kind != .result { StateChip(state: state, fill: look.fill, compact: compact).padding(compact ? 8 : 10) }
+                if state != .plain, kind != .result { StateChip(state: state, fill: look.fill, compact: compact, chainStep: step.chainStep).padding(compact ? 8 : 10) }
             }
             .frame(width: w, height: 140 * k, alignment: .topLeading)
             .clipped()
@@ -812,6 +812,8 @@ struct StateChip: View {
     let fill: RouteFill
     /// A small card's chip: the same coin and word, a size smaller (the coin alone didn't say what it meant).
     var compact = false
+    /// A chain's later step: «2 of 5», said in place of «Next».
+    var chainStep: String?
 
     var body: some View {
         let (text, ink, halo) = look
@@ -836,7 +838,7 @@ struct StateChip: View {
         case .done: ("Done", Color(hex: 0x177A52), Color(hex: 0x7EEBC0))
         case .now: ("Now", fill == .solana ? Color(hex: 0x6A4FD0) : fill.color, Color(hex: 0xB7A6FF))
         case .touch: (SignerActivity.shared.ledger != nil ? "Ledger" : Presence.signShort, .white, Color(hex: 0xFFD23F))
-        case .next: ("Next", Color(hex: 0x6A6A72), Color(hex: 0xD9D9DE))
+        case .next: (chainStep.map { "Step \($0)" } ?? "Next", Color(hex: 0x6A6A72), Color(hex: 0xD9D9DE))
         case .failed: ("Failed", Color(hex: 0xB42A20), Color(hex: 0xFFB3A8))
         case .blocked: ("Stopped", Color(hex: 0xB42A20), Color(hex: 0xFFB3A8))
         case .attention: ("Look", Color(hex: 0x8A4B00), Color(hex: 0xFFB870))

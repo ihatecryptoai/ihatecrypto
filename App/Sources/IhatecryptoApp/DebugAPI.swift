@@ -440,7 +440,7 @@ final class DebugAPI {
     /// running and its step, finished ones, and the other boards.
     private func boards(_ ws: Workspace, _ canvas: CanvasSession?) -> [String: Any] {
         func steps(_ bubbles: [ActivityBubble]) -> [[String: Any]] {
-            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines, "wholeAddress": $0.address != nil] as [String: Any] }
+            bubbles.map { ["label": $0.label, "title": ws.readable($0.title), "lines": $0.lines, "wholeAddress": $0.address != nil, "step": $0.chainStep ?? ""] as [String: Any] }
         }
         var out: [String: Any] = [:]
         switch ws.pendingAction {
@@ -448,7 +448,8 @@ final class DebugAPI {
             let route = ws.route(command)
             let drawn = route ?? ws.fallbackRoute(command)
             out["pending"] = ["kind": "wallet", "command": String(describing: command), "title": drawn.title, "footer": drawn.footer,
-                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "drawnRoute": route != nil, "confirm": true, "warning": drawn.warning ?? NSNull(),
+                              "steps": steps(drawn.steps), "chain": steps(ws.chainSteps()), "step": ws.chainProgress.map { "\($0.step) of \($0.of)" } ?? "",
+                              "drawnRoute": route != nil, "confirm": true, "warning": drawn.warning ?? NSNull(),
                               // What the swap gets as quoted now, the chat's line; nil while quoting or for a move without a price.
                               "quote": ws.swapLine(command) ?? NSNull(), "quoteState": "\(ws.quoteState(at: Date()))"] as [String: Any]
         case .position(let command, let coin)?:

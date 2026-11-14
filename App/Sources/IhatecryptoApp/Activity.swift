@@ -56,6 +56,8 @@ nonisolated struct ActivityBubble: Codable, Hashable, Sendable {
     var money: [MoneyMove]?
     /// A step that pays or saves an address: all of it, for the card and the opened step (`lines` keep its ends, for text).
     var address: String?
+    /// A later step of a chain: which one it is, «2 of 5», on its chip in place of «Next» (Workspace.chainSteps).
+    var chainStep: String?
 }
 
 extension ActivityBubble {

@@ -1364,9 +1364,9 @@ struct PendingButtons: View {
 /// A money move's route as the canvas draws it (S10). The steps are data, so the canvas keeps the route after the move
 /// and shows it as it was, with Done or Failed and the time.
 struct MoveRoute {
-    let title: String
+    var title: String
     let footer: String
-    let steps: [ActivityBubble]
+    var steps: [ActivityBubble]
     var warning: String?
 
     /// A footer counts an approve and what spends it as two transactions; with Settings › Wallet › «One transaction for
@@ -1425,7 +1425,7 @@ extension Workspace {
     /// The move's card, with what the research's E-7 and E-8 found on top of its own warning: the user decides, Confirm
     /// stays (variant B, 2026-11-05).
     func route(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
-        guard var r = drawnRoute(command, ahead: ahead) else { return nil }
+        guard var r = drawnRoute(command, ahead: ahead).map(Self.withHeld) else { return nil }
         let extra = [Self.delegationWarning(command, foreignDelegates), boughtTokenWarning(command)].compactMap { $0 }
         if !extra.isEmpty { r.warning = ([r.warning].compactMap { $0 } + extra).joined(separator: " ") }
         return r
@@ -1527,6 +1527,22 @@ extension Workspace {
         }
         }
     }
+
+    /// «all» alone never stands on a card (the owner's rule): where the route's first step found the amount held, its
+    /// title and any other step still saying «all X» say that amount too («Swap all SPCX → USDG on Robinhood» was the
+    /// title over a card that had the number). «all available» stays as the small line under it.
+    nonisolated static func withHeld(_ route: MoveRoute) -> MoveRoute {
+        guard let from = route.steps.first, saysAmount(from.title), let symbol = from.title.split(separator: " ").last else { return route }
+        var r = route
+        // The ticker as the command wrote it («all CBBTC») for the one the wallet holds («cbBTC»).
+        let bare = "all \(symbol)"
+        r.title = r.title.replacingOccurrences(of: bare, with: from.title, options: .caseInsensitive)
+        for i in r.steps.indices where r.steps[i].title.caseInsensitiveCompare(bare) == .orderedSame { r.steps[i].title = from.title }
+        return r
+    }
+
+    /// A card's title that opens with an amount («0.5 TSLA», «≈ 12 USDC»), not one that only has a digit in a ticker («USDT0», «1INCH»).
+    nonisolated static func saysAmount(_ title: String) -> Bool { title.wholeMatch(of: /(≈ )?[0-9][0-9.,]* \S.*/) != nil }
 
     /// A Backpack stock's bundled logo, else Kamino's.
     private func stockLogo(_ stock: String?) -> String {
@@ -1672,10 +1688,26 @@ extension Workspace {
         case .base, .arbitrum, .robinhood, .near, .tempo, .hyperevm: fill.rawValue
         default: EVMNetwork.all.map(\.key).first { label.hasSuffix("· " + WalletCommand.placeName($0).uppercased()) }
         }
+        // Robinhood Chain's dollar is USDG, whichever of the two the command wrote.
+        if place == "robinhood", ["USDC", "USDG"].contains(want), let x = robinhood?.usdg { return (x, "USDG") }
         if want == "USDC", let place, let x = usdc(on: place) { return (x, "USDC") }
         if want == "SOL", place == "solana", let x = solana?.sol { return (x, "SOL") }
-        let found = (holdings + (solana?.tokens ?? [])).filter { $0.symbol.uppercased() == want && (place == nil || $0.chain == place) }
-        guard let h = found.first, found.allSatisfy({ $0.chain == h.chain && $0.contract == h.contract }) else { return nil }
+        // Robinhood's stock tokens are kept apart from the other holdings: «swap all SPCX → USDG on Robinhood» found
+        // nothing held, so its cards and title said a bare «all SPCX».
+        return Self.held(want, place: place, among: Self.heldTokens(holdings + (solana?.tokens ?? []), stocks: robinhood?.stocks ?? []))
+    }
+
+    /// Everything «all X» may mean: the wallet's tokens and, with them, Robinhood's stock tokens.
+    nonisolated static func heldTokens(_ holdings: [Holding], stocks: [StockHolding]) -> [(chain: String, contract: String, amount: Decimal, symbol: String)] {
+        holdings.map { (chain: $0.chain, contract: $0.contract, amount: $0.amount, symbol: $0.symbol) }
+            + stocks.map { (chain: "robinhood", contract: $0.address, amount: $0.amount, symbol: $0.symbol) }
+    }
+
+    /// The one token called `want` among what the wallet holds, on `place` when the step names one: nil when it holds
+    /// none, or holds that ticker as two different tokens (then «all» can't be told from here).
+    nonisolated static func held(_ want: String, place: String?, among all: [(chain: String, contract: String, amount: Decimal, symbol: String)]) -> (Decimal, String)? {
+        let found = all.filter { $0.symbol.uppercased() == want.uppercased() && $0.amount > 0 && (place == nil || $0.chain == place) }
+        guard let h = found.first, found.allSatisfy({ $0.chain == h.chain && $0.contract.lowercased() == h.contract.lowercased() }) else { return nil }
         return (h.amount, h.symbol)
     }
 
@@ -1689,7 +1721,7 @@ extension Workspace {
     /// A route's title for `amount` of `label` on `place`: the number, «all» only when what's held can't be read.
     func amountOrAll(_ amount: Decimal?, _ label: String, on place: String) -> String {
         if let amount { return "\(Fmt.num(amount, maxFraction: 8)) \(label)" }
-        return heldForAll(label, fill: RouteFill(rawValue: place) ?? .check, label: "· " + WalletCommand.placeName(place).uppercased())
+        return (heldForAll(label, fill: RouteFill(rawValue: place) ?? .check, label: "· " + WalletCommand.placeName(place).uppercased()) ?? nativeHeld(label, on: place))
             .map { "\(Fmt.num($0.0, maxFraction: 8)) \($0.1)" } ?? "all \(label)"
     }
 
@@ -2122,37 +2154,84 @@ extension Workspace {
             if let to = Self.arrives(first) { arrived.insert(to) }
             count(first)
         }
-        return steps.compactMap(WalletCommand.parse).flatMap { c -> [ActivityBubble] in
+        // Which step each is: the chat says «five steps», so the cards do too. The one a confirmed chain is about to run
+        // (`given`) is the step under way; the queued ones come after it.
+        // A step that draws no card (a close, an alert) still counts: the numbers are the chat's «In steps».
+        let progress = chainProgress
+        let first = (progress?.step ?? 0) + (given == nil ? 1 : 0)
+        return steps.enumerated().flatMap { k, step -> [ActivityBubble] in
+            guard let c = WalletCommand.parse(step) else { return [] }
             defer {
                 if let to = Self.arrives(c) { arrived.insert(to) }
                 count(c)
             }
             let brought = Self.spends(c).map(arrived.contains) ?? false
-            switch c {
-            // Spread and rebalance have no route of their own: their split is planned when the money before them has landed.
-            case .allocate(let asset, let share, let amount, _, _):
-                return [ActivityBubble(kind: "step", label: "INTO · BEST RATES", title: amount.map { "\(Fmt.num($0)) \(asset)" } ?? "all free \(asset)",
-                                       lines: ["split\twhen the money lands", "max per place\t\(Fmt.pct(share ?? 50))"], status: "then", logo: "usdc", fill: .jupiter)]
-            case .rebalance(let share):
-                return [ActivityBubble(kind: "step", label: "REBALANCE · BEST RATES", title: "deposits",
-                                       lines: ["moves\twhen the money lands", "max per place\t\(Fmt.pct(share ?? 50))"], status: "then", logo: "usdc", fill: .jupiter)]
-            // A transfer to a saved address later in a chain: one card (transferRoute draws it once it waits), so a chain
-            // ending in it («move 20 from Base to Solana, then send 20 to Automation») doesn't look like a bare bridge.
-            case .sendTo(let name, let amount, let net):
-                // The same entry and network prepareTransfer will use when the step runs.
-                let entry = savedEntry(name, network: net)
-                let network = net.flatMap(AddressCheck.Network.init(rawValue:)) ?? entry?.network ?? .solana
-                let ends = entry.map { AddressCheck.ends($0.address) }
-                return [ActivityBubble(kind: "step", label: "SEND · \(network.title.uppercased())",
-                                       title: "\(Fmt.num(amount)) USDC", lines: ["to \(entry?.name ?? name)"] + (ends.map { ["\($0.start) … \($0.end)"] } ?? []),
-                                       status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check, address: entry?.address)]
-            default:
-                // Any other step without a route still shows, as its words: a chain never loses a step on the canvas.
-                return route(c, ahead: ahead)?.steps.filter { !$0.label.hasPrefix("FROM") && !$0.label.hasPrefix("APPROVE")
-                    && !(brought && ($0.label.hasPrefix("BRIDGE") || $0.label.hasPrefix("GAS"))) }.map { var s = $0; s.status = "then"; return s }
-                    ?? [ActivityBubble(kind: "step", label: "THEN", title: readable(c.summary), status: "then", logo: "usdc", fill: .check)]
-            }
+            let cards = later(c, brought: brought, ahead: ahead)
+            return cards.map { var s = $0; s.chainStep = progress.map { "\(first + k) of \($0.of)" }; return s }
         }
+    }
+
+    /// «Step 2 of 5» for the chain on this canvas: the step whose card waits or runs, among all its steps. nil outside a chain.
+    var chainProgress: (step: Int, of: Int)? {
+        let left = [taskQueue.map { ($0.canvas, $0.steps.count) }, chainAhead.map { ($0.canvas, $0.steps.count) }].compactMap { $0 }
+            .first { $0.0 == canvasID }?.1
+        guard let left, let total = chainTotal, total > left else { return nil }
+        return (total - left, total)
+    }
+
+    /// One later step of a chain as its cards (chainSteps).
+    private func later(_ c: WalletCommand, brought: Bool, ahead: [String: Decimal]) -> [ActivityBubble] {
+        switch c {
+        // Spread and rebalance have no route of their own: their split is planned when the money before them has landed.
+        case .allocate(let asset, let share, let amount, _, _):
+            return [ActivityBubble(kind: "step", label: "INTO · BEST RATES", title: amount.map { "\(Fmt.num($0)) \(asset)" } ?? "all free \(asset)",
+                                   lines: ["split\twhen the money lands", "max per place\t\(Fmt.pct(share ?? 50))"], status: "then", logo: "usdc", fill: .jupiter)]
+        case .rebalance(let share):
+            return [ActivityBubble(kind: "step", label: "REBALANCE · BEST RATES", title: "deposits",
+                                   lines: ["moves\twhen the money lands", "max per place\t\(Fmt.pct(share ?? 50))"], status: "then", logo: "usdc", fill: .jupiter)]
+        // A transfer to a saved address later in a chain: one card (transferRoute draws it once it waits), so a chain
+        // ending in it («move 20 from Base to Solana, then send 20 to Automation») doesn't look like a bare bridge.
+        case .sendTo(let name, let amount, let net):
+            // The same entry and network prepareTransfer will use when the step runs.
+            let entry = savedEntry(name, network: net)
+            let network = net.flatMap(AddressCheck.Network.init(rawValue:)) ?? entry?.network ?? .solana
+            let ends = entry.map { AddressCheck.ends($0.address) }
+            return [ActivityBubble(kind: "step", label: "SEND · \(network.title.uppercased())",
+                                   title: "\(Fmt.num(amount)) USDC", lines: ["to \(entry?.name ?? name)"] + (ends.map { ["\($0.start) … \($0.end)"] } ?? []),
+                                   status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check, address: entry?.address)]
+        default:
+            // Any other step without a route still shows, as its words: a chain never loses a step on the canvas.
+            guard let drawn = route(c, ahead: ahead)?.steps else {
+                return [ActivityBubble(kind: "step", label: "THEN", title: readable(c.summary), status: "then", logo: "usdc", fill: .check)]
+            }
+            return Self.laterCards(drawn, brought: brought)
+        }
+    }
+
+    /// A later step's cards: its route without where the money starts and its approves, marked to come after this move.
+    /// A card left naming only what comes out (a swap's «USDG») says what goes in too, from the «from» card that was
+    /// dropped: four swaps in a row read «USDG», «USDG», «USDG», «USDG», with no word of what each sells.
+    nonisolated static func laterCards(_ drawn: [ActivityBubble], brought: Bool) -> [ActivityBubble] {
+        var kept = drawn.filter { !$0.label.hasPrefix("FROM") && !$0.label.hasPrefix("APPROVE")
+            && !(brought && ($0.label.hasPrefix("BRIDGE") || $0.label.hasPrefix("GAS"))) }.map { var s = $0; s.status = "then"; return s }
+        let from = drawn.first { $0.label.hasPrefix("FROM") }
+        // Only a card that is the move itself takes the amount: a way still being compared («comparing…») isn't one.
+        let names = ["SWAP", "BUY", "SELL", "TO", "INTO"]
+        if let from, let first = kept.first, names.contains(where: first.label.hasPrefix), !saysAmount(first.title), !first.title.contains("→") {
+            kept[0].title = "\(from.title) → \(first.title)"
+            // «All» of a token later in a chain is what's there when its turn comes: the figure is today's.
+            if from.lines.first?.hasPrefix("all available") == true { kept[0].lines.insert("all available when its turn comes · today's amount", at: 0) }
+        }
+        // A last card that says only which coin lands in this wallet, on the network the money started on, folds into
+        // the first («1 USDT → USDC»): alone it was a card with a coin's name and no amount. One that lands elsewhere stays.
+        if kept.count > 1, let to = kept.last, to.label.hasPrefix("TO"), !saysAmount(to.title), to.lines.allSatisfy({ $0.hasPrefix("your wallet") }),
+           names.contains(where: kept[0].label.hasPrefix), from.map({ to.label == "TO" + $0.label.dropFirst(4) }) ?? true {
+            kept.removeLast()
+            if !kept[0].title.contains("→"), !kept[0].title.contains(to.title) { kept[0].title += " → \(to.title)" }
+        }
+        // Only the card that waits is quoted: «quoting…» on a later one never ended.
+        for i in kept.indices where kept[i].lines == ["quoting…"] { kept[i].lines = ["quoted when its turn comes"] }
+        return kept
     }
 
     /// The network a move delivers USDC to («solana» for Solana); nil for anything else.
@@ -2452,8 +2531,11 @@ extension Workspace {
         let coinIn = from.uppercased() == coin, coinOut = to.uppercased() == coin
         let quoted = swapQuote.flatMap { q in q.command == .swapOn(place, from: from, to: to, amount: amount) ? q.ways.first : nil }
         // A token amount as written: 0.0001 ETH read «0 ETH» at two places.
-        let moving = "\(amount.map { Fmt.num($0, maxFraction: 8) } ?? "all") \(label(from))"
-        var steps = [step(logo, "FROM · \(name.uppercased())", moving, coinIn ? "your \(coin) · its fees stay" : "on \(name)", fill,
+        // All of the network's own coin is its balance less the gas the executor keeps back, which the card can't
+        // know: «≈», and the line says the fees stay.
+        let held = amountOrAll(amount, label(from), on: place)
+        let moving = coinIn && amount == nil && !held.hasPrefix("all ") ? "≈ " + held : held
+        var steps = [step(logo, "FROM · \(name.uppercased())", moving, (amount == nil ? "all available · " : "") + (coinIn ? "your \(coin) · its fees stay" : "on \(name)"), fill,
                           money: moneyMove(label(from), on: place, by: amount.map { -$0 }))]
         // The way that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
         let way = quoted?.way ?? "Uniswap"
@@ -3406,7 +3488,7 @@ struct RunningBoard: View {
             let ahead = ws.chainSteps()
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    Text(run.title).font(.ui(14, .semibold))
+                    Text((ws.chainProgress.map { ws.say("Step \($0.step) of \($0.of) · ", "Шаг \($0.step) из \($0.of) · ", "Paso \($0.step) de \($0.of) · ") } ?? "") + run.title).font(.ui(14, .semibold))
                     StatusChip(text: "in progress", tint: Brand.accentInk)
                     ProgressView().controlSize(.small)
                 }
@@ -3541,7 +3623,9 @@ struct WithdrawBoard: View {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
-                        Text(route.title).font(.ui(14, .semibold)).lineLimit(2).truncationMode(.middle)
+                        // A chain says which of its steps this card is, in the title's own size: the chat says «five
+                        // steps», and the canvas showed one move with nothing to tell it was the first of them.
+                        Text((ws.chainProgress.map { "Step \($0.step) of \($0.of) · " } ?? "") + route.title).font(.ui(14, .semibold)).lineLimit(2).truncationMode(.middle)
                         StatusChip(text: "waiting for the signature", tint: Brand.profit).fixedSize()
                         Spacer(minLength: 12)
                         PendingButtons()

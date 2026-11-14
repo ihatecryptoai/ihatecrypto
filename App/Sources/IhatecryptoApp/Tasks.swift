@@ -143,6 +143,9 @@ extension Workspace {
         // One made through the debug API runs as if it came through it again: nothing in it signs or sets up a recurring buy.
         await SignerClient.$untrusted.withValue(task.untrusted == true) {
             await TaskRun.$automation.withValue(automation) {
+                // A task on the automation wallet starts as confirmed, so its length is said here (runSteps counts only
+                // a chain whose first card waits): it read whatever the last chain in the window had left.
+                if automation != nil { chainTotal = task.steps.count > 1 ? task.steps.count : nil }
                 await TaskRun.$task.withValue(automation == nil ? nil : task.id) { await runSteps(task.steps, confirmed: automation != nil) }
             }
         }
@@ -370,6 +373,9 @@ extension Workspace {
         }
         snapshotCanvas()
         saveCanvas()
+        // A chain's whole length, for «step 2 of 5»: counted where it first comes to wait, not where a step of a confirmed
+        // one waits again (a contract call's own Confirm).
+        if !confirmed, !rest.isEmpty { chainTotal = steps.count }
         taskQueue = rest.isEmpty ? nil : (canvasID, rest, Date(), arrived, false)
         // A confirmed chain is through (or stopped): the model goes on with the request it was a step of.
         if confirmed { await afterMove() }

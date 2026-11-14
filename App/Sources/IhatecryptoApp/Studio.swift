@@ -3149,7 +3149,9 @@ private struct ChatComposer: View {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(r.then, id: \.self) { step in
-                        Label(step, systemImage: "arrow.turn.down.right").font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(1)
+                        // A long step takes a second line: cut, it read «0.1 USDC → pathU…».
+                        Label(step, systemImage: "arrow.turn.down.right").font(.ui(11.5)).foregroundStyle(.secondary).lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if choice != nil, r.then.isEmpty, state == .none { Text("Either way it waits for Confirm").font(.ui(11)).foregroundStyle(.secondary).lineLimit(1) }
                     QuoteClock(state: state)
@@ -4415,9 +4417,16 @@ struct Receipt {
         self.then = then
     }
 
-    /// The task's steps after this one, as their cards name them: «REPAY · KAMINO · 0.15 USDC».
+    /// The task's steps after this one, as their cards name them: «2 of 3 · REPAY · 0.15 USDC», the step's number and
+    /// what it does on its first card's line, without the place (the card on the canvas has it: with it the line ran
+    /// to a second one for its last word). A step's other cards follow unnumbered, whole («TO · HYPERLIQUID · …»).
     @MainActor static func after(_ ws: Workspace) -> [String] {
-        ws.chainSteps().map { "\($0.label) · \(ws.readable($0.title))" }
+        var said = Set<String>()
+        return ws.chainSteps().map { card in
+            let title = ws.readable(card.title)
+            guard let step = card.chainStep, said.insert(step).inserted else { return "\(card.label) · \(title)" }
+            return "\(step) · \(card.label.components(separatedBy: " · ").first ?? card.label) · \(title)"
+        }
     }
 
     /// The networks a wallet pays from: a step «FROM · BASE» is you paying, «FROM · KAMINO LEND» is money coming back.

@@ -568,6 +568,9 @@ final class Workspace {
     /// While a confirmed chain runs, its steps after the one under way: drawn after its cards (Workspace.chainSteps).
     /// Only for the canvas; `taskQueue` is what runs.
     var chainAhead: (canvas: UUID?, steps: [String])?
+    /// How many steps the chain that waits or runs has in all, for «step 2 of 5» on its cards (chainProgress). Set when
+    /// its first card comes to wait; read only while `taskQueue` or `chainAhead` holds what's left of it.
+    var chainTotal: Int?
     /// Exit rules the app keeps for open positions (breakeven after the partial take, trailing), by coin.
     /// Sealed like the tasks (TaskSeal): the guardian moves a stop by them with the trading key, no one asked.
     var exitRules: [String: ExitRules] = TaskSeal.exitRules(forKey: Workspace.scoped("exitRules")).rules {

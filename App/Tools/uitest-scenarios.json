@@ -1742,5 +1742,26 @@
       "favorites_lack": "BRETT",
       "cards_contain": "favorites"
     }
+  },
+  {
+    "name": "a chain of three steps → the card says step 1 of 3 and its amount, never a bare «all»; each later card says its step and what it sells",
+    "send": [
+      "swap all my USDC on arbitrum for ETH on arbitrum, then sell 1 USDT on solana, then swap 0.1 USDC for pathUSD on tempo"
+    ],
+    "expect": {
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "title_lacks": "all ",
+      "title_contains": "USDC → ETH on Arbitrum",
+      "chain_step": "1 of 3",
+      "chain_contains": [
+        "step 2 of 3 · sell · jupiter · 1 usdt → usdc",
+        "step 3 of 3 · swap · tempo's exchange · 0.1 usdc → pathusd"
+      ]
+    },
+    "only_if": {
+      "balance": "arbitrumUSDC",
+      "at_least": 0.5
+    }
   }
 ]
