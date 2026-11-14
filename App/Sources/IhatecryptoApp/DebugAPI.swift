@@ -441,6 +441,7 @@ final class DebugAPI {
                 "baseAave": num(ws.base?.aave), "baseMorpho": num(ws.base?.morpho), "baseUSDC": num(ws.base?.usdc),
                 "robinhoodUSDG": num(ws.robinhood?.usdg), "arbitrumUSDC": num(ws.arbitrumUSDC),
                 "arbitrumUSDT": num(USDT0.on(42161).flatMap { ws.heldUSDC("arbitrum", $0.token) }),
+                "arbitrumETH": num((ws.holdings + ws.otherTokens).first { $0.chain == "arbitrum" && $0.native }?.amount),
             ] as [String: Any],
             "positions": ws.positions.map { "\($0.size > 0 ? "long" : "short") \($0.coin) pnl \($0.unrealizedPnl)" },
             "topUpPage": TopUpPage.shared.url?.absoluteString ?? NSNull(),
@@ -482,8 +483,9 @@ final class DebugAPI {
         case nil: break
         }
         if let run = ws.runningAction {
+            // `chain`: the steps still to come, as the canvas draws them after this board while a chain runs.
             out["running"] = ["title": run.title, "steps": steps(run.steps), "current": RunningBoard.currentStep(run.steps, run.lines),
-                              "lines": run.lines] as [String: Any]
+                              "lines": run.lines, "chain": steps(ws.chainSteps())] as [String: Any]
         }
         if let done = ws.finishedAction { out["finished"] = ["title": done.title, "ok": done.outcome.ok] as [String: Any] }
         out["earlier"] = (canvas?.earlier ?? []).map { ["title": ws.readable($0.title), "ok": $0.outcome.ok] as [String: Any] }

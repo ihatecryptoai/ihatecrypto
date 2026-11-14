@@ -1361,6 +1361,118 @@ struct PendingButtons: View {
     }
 }
 
+/// What the steps before one in a chain do to a network's dollars: `by` more of them (or fewer), `unpriced` when one
+/// of those steps brings an amount no price tells, `counted` when any of them touches them at all (a sale and a buy
+/// may come to nothing more, and the figure is an estimate all the same).
+struct DollarsAhead {
+    var by: Decimal = 0
+    var unpriced = false
+    var counted = false
+}
+
+/// What the steps of a chain do, one after another, to each network's dollars (Workspace.chainCards): a later step
+/// that moves «all» of them is drawn by the balance it will find, not today's (the owner, 2026-11-14: five sales into
+/// USDG, then «move all USDG», drawn as the USDG held before any of them).
+/// ponytail: today's prices, no fee or slippage taken off (the card says «≈», or «≥» when a token has no price); a buy
+/// or a deposit its own network can't pay takes the rest from Solana or another network, and that payer isn't taken
+/// off; a paid request, a contract call and a repay of «all» aren't counted.
+@MainActor struct ChainDollars {
+    /// What the steps counted add to a network's dollars (or take off them).
+    private(set) var ahead: [String: Decimal] = [:]
+    /// The networks where a step counted brings dollars no price tells (a sale of a token without one).
+    private(set) var unpriced = Set<String>()
+    /// What the steps counted already sold of each token: one sold twice isn't counted twice.
+    private var sold: [String: Decimal] = [:]
+    /// A network's dollars as last read.
+    let usdc: (String) -> Decimal?
+    /// What the wallet holds of a token (a ticker or a contract) on a network, with its price where one is known. `id`:
+    /// the token whichever way it was named (its contract), so one sold by ticker and then by contract is one token.
+    let held: (_ token: String, _ place: String) -> (id: String, held: Decimal, price: Decimal?)?
+    /// The network a saved address is on, for a transfer to it that names none.
+    let sendsOn: (_ name: String) -> String?
+
+    init(usdc: @escaping (String) -> Decimal?, held: @escaping (_ token: String, _ place: String) -> (id: String, held: Decimal, price: Decimal?)?,
+         sendsOn: @escaping (_ name: String) -> String? = { _ in nil }) {
+        self.usdc = usdc
+        self.held = held
+        self.sendsOn = sendsOn
+    }
+
+    /// A network's dollars as the steps counted leave them: nil when its balance isn't read.
+    func there(_ place: String) -> Decimal? { usdc(place).map { max(0, $0 + (ahead[place] ?? 0)) } }
+
+    /// `quote`: what the step's own card says it brings, for the one that waits: that figure, not an estimate beside it.
+    mutating func count(_ c: WalletCommand, quote: Decimal? = nil) {
+        let sent: Decimal?? = switch c {
+        case .bridge(_, _, let a), .cctp(_, _, let a), .intents(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
+             .arbitrumToSolana(let a), .robinhoodToSolana(let a), .withdrawToSolana(let a): a
+        default: nil
+        }
+        // A move: its amount, never more than will be there (unless a step before brings dollars no price tells), or
+        // all of it, as the steps before leave it.
+        if let sent, let from = Workspace.source(c),
+           let moved = sent.map({ a in unpriced.contains(from) ? a : min(a, there(from) ?? a) }) ?? there(from) {
+            // Circle's burn lands as its mint (the move waits for it), like a bridge's deposit.
+            let to: String? = if case .cctp(_, let to, _) = c { to } else { Workspace.arrives(c) }
+            ahead[from, default: 0] -= moved
+            if let to { ahead[to, default: 0] += moved }
+            // «All» of dollars no price tells leaves none behind and is no exact figure where it lands either.
+            if sent == nil, unpriced.remove(from) != nil, let to { unpriced.insert(to) }
+        } else if let spent = Workspace.solanaUSDC(c) {
+            ahead["solana", default: 0] -= spent
+        } else if let place = Workspace.spends(c), place != "solana", let asked = c.editableAmount {
+            // A buy or a deposit on a network. One that names where its money comes from spends there. Else the network's
+            // own dollars pay first: a deposit or a stock takes what is there and brings only the rest
+            // (Executor.ensureEVM), a token is bought there only when the network holds it all (WalletCommand.buyOn).
+            // After a sale no price tells, it is taken off whole: the «≥» stays true whoever pays.
+            let have = there(place) ?? 0
+            let (payer, spent): (String, Decimal) = switch c {
+            case .buyOn(_, _, _, let from?): (from, asked)
+            case _ where unpriced.contains(place): (place, asked)
+            case .buyOn: (place, have >= asked ? asked : 0)
+            default: (place, min(asked, have))
+            }
+            if spent > 0 { ahead[payer, default: 0] -= spent }
+        }
+        // What a sale into a network's dollar brings there, and what a swap out of it takes. Dollars out of a vault or
+        // a loan, and dollars sent away: «all» out of a vault is an amount this doesn't know, «at least» from there on.
+        switch c {
+        case .lendWithdraw("USDC", let a), .kamino(deposit: false, symbol: "USDC", amount: let a), .aave(deposit: false, amount: let a, network: _),
+             .morpho(deposit: false, amount: let a, network: _):
+            if let a { ahead["solana", default: 0] += a } else { unpriced.insert("solana") }
+        case .aaveBorrow(let a?, let place): ahead[place, default: 0] += a
+        case .aaveRepay(let a?, let place): ahead[place, default: 0] -= a
+        case .sendTo(let name, let amount, let place): ahead[place ?? sendsOn(name) ?? "solana", default: 0] -= amount
+        case .sendToken(let name, let token, let amount, let net):
+            let place = net ?? sendsOn(name) ?? "solana"
+            if Workspace.isNetworkDollar(token, on: place), let spent = amount ?? there(place) { ahead[place, default: 0] -= spent }
+        case .swapOn(let place, let from, let to, let amount):
+            if Workspace.isNetworkDollar(to, on: place) { brings(amount, of: from, on: place, to: place, quote: quote) }
+            if Workspace.isNetworkDollar(from, on: place), let spent = amount ?? there(place) { ahead[place, default: 0] -= spent }
+        case .crossSwap(let from, let place, let to, let at, let amount):
+            if Workspace.isNetworkDollar(to, on: at) { brings(amount, of: from, on: place, to: at, quote: quote) }
+            if Workspace.isNetworkDollar(from, on: place), let spent = amount ?? there(place) { ahead[place, default: 0] -= spent }
+        case .sellStock(let symbol, let amount): brings(amount, of: symbol, on: "robinhood", to: "robinhood", quote: quote)
+        // Sold on its network, the dollars stay there or come to Solana.
+        case .sellOn(let place, let token, let amount, let keep): brings(amount, of: token, on: place, to: keep ? place : "solana", quote: quote)
+        // A ticker the app hasn't looked up has no mint yet: the wallet's token of that ticker.
+        case .sell(let asset, let amount):
+            let token = asset.mint.isEmpty ? asset.symbol : asset.mint == SpotAsset.bySymbol("SOL").mint ? "SOL" : asset.mint
+            brings(amount, of: token, on: "solana", to: "solana", quote: quote)
+        default: break
+        }
+    }
+
+    /// A sale of `amount` of `token` on `place` (nil: all that's left of it) lands its dollars on `network`: at `quote`
+    /// when there is one, else at the price last read. Neither: the network's dollars are «at least» from here on.
+    private mutating func brings(_ amount: Decimal?, of token: String, on place: String, to network: String, quote: Decimal?) {
+        let h = held(token, place), key = place + ":" + (h?.id ?? token).lowercased()
+        let selling = h.map { Workspace.selling(amount, held: $0.held, sold: sold[key] ?? 0) }
+        if let selling { sold[key, default: 0] += selling }
+        if let dollars = quote ?? selling.flatMap({ s in h?.price.map { s * $0 } }) { ahead[network, default: 0] += dollars } else { unpriced.insert(network) }
+    }
+}
+
 /// A money move's route as the canvas draws it (S10). The steps are data, so the canvas keeps the route after the move
 /// and shows it as it was, with Done or Failed and the time.
 struct MoveRoute {
@@ -1424,8 +1536,9 @@ extension Workspace {
     /// `ahead`: for a step of a chain, the USDC the steps before it add to a network (or take off it), see `chainSteps`.
     /// The move's card, with what the research's E-7 and E-8 found on top of its own warning: the user decides, Confirm
     /// stays (variant B, 2026-11-05).
-    func route(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
-        guard var r = drawnRoute(command, ahead: ahead).map(Self.withHeld) else { return nil }
+    /// `unpriced`: the networks where a step before brings dollars no price tells (a sale of a token without one).
+    func route(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = []) -> MoveRoute? {
+        guard var r = drawnRoute(command, ahead: ahead, unpriced: unpriced).map(Self.withHeld) else { return nil }
         let extra = [Self.delegationWarning(command, foreignDelegates), boughtTokenWarning(command)].compactMap { $0 }
         if !extra.isEmpty { r.warning = ([r.warning].compactMap { $0 } + extra).joined(separator: " ") }
         return r
@@ -1462,17 +1575,19 @@ extension Workspace {
         return "\(asset.symbol): " + w.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }.joined(separator: " ")
     }
 
-    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:]) -> MoveRoute? {
-        switch command {
+    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = []) -> MoveRoute? {
+        // What the steps before leave of a network's dollars, for a step that moves «all» of them.
+        func left(_ place: String) -> DollarsAhead { DollarsAhead(by: ahead[place] ?? 0, unpriced: unpriced.contains(place), counted: ahead[place] != nil) }
+        return switch command {
         case .withdrawToSolana(let asked): withdrawRoute(asked)
         case .aave(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, network: net)
         case .aave(deposit: false, amount: let amount, network: let net): backRoute(from: "aave", amount: amount, network: net)
         case .morpho(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, morpho: true, network: net)
         case .morpho(deposit: false, amount: let amount, network: let net): backRoute(from: "morpho", amount: amount, network: net)
-        case .evmToSolana(let net, let amount): backRoute(from: net, amount: amount, network: net)
-        case .baseToSolana(let amount): backRoute(from: "base", amount: amount)
-        case .arbitrumToSolana(let amount): backRoute(from: "arbitrum", amount: amount)
-        case .robinhoodToSolana(let amount): backRoute(from: "robinhood", amount: amount)
+        case .evmToSolana(let net, let amount): backRoute(from: net, amount: amount, network: net, ahead: left(net))
+        case .baseToSolana(let amount): backRoute(from: "base", amount: amount, ahead: left("base"))
+        case .arbitrumToSolana(let amount): backRoute(from: "arbitrum", amount: amount, ahead: left("arbitrum"))
+        case .robinhoodToSolana(let amount): backRoute(from: "robinhood", amount: amount, ahead: left("robinhood"))
         case .solanaTo(let place, let amount?): outRoute(to: place, amount: amount)
         case .buyStock(let symbol, let usdc?): stockRoute(symbol, usdc, ahead: ahead)
         case .buyOn(let place, let token, let usdc?, let from): swapRoute(place, token, usdc: usdc, sell: nil, from: from, ahead: ahead)
@@ -1501,9 +1616,9 @@ extension Workspace {
         case .pay: payRoute(command)
         case .contractCall: callRoute(command)
         case .multisigCreate, .multisigSend: multisigRoute(command)
-        case .bridge(let from, let to, let amount): bridgeRoute(from, to, amount)
-        case .cctp(let from, let to, let amount): bridgeRoute(from, to, amount, cctp: true)
-        case .intents(let from, let to, let amount): intentsRoute(from, to, amount)
+        case .bridge(let from, let to, let amount): bridgeRoute(from, to, amount, ahead: left(from))
+        case .cctp(let from, let to, let amount): bridgeRoute(from, to, amount, cctp: true, ahead: left(from))
+        case .intents(let from, let to, let amount): intentsRoute(from, to, amount, ahead: left(from))
         case .usdt(let from, let to, let amount, let layerZero): usdtRoute(command, from, to, amount, layerZero: layerZero)
         case .aaveBorrow(let x?, let net), .aaveCollateral(let x?, let net): aaveDebtRoute(command, x, net)
         case .aaveRepay(let x, let net): aaveDebtRoute(command, x, net)
@@ -1706,9 +1821,14 @@ extension Workspace {
     /// The one token called `want` among what the wallet holds, on `place` when the step names one: nil when it holds
     /// none, or holds that ticker as two different tokens (then «all» can't be told from here).
     nonisolated static func held(_ want: String, place: String?, among all: [(chain: String, contract: String, amount: Decimal, symbol: String)]) -> (Decimal, String)? {
+        heldToken(want, place: place, among: all).map { ($0.amount, $0.symbol) }
+    }
+
+    nonisolated static func heldToken(_ want: String, place: String?, among all: [(chain: String, contract: String, amount: Decimal, symbol: String)])
+        -> (chain: String, contract: String, amount: Decimal, symbol: String)? {
         let found = all.filter { $0.symbol.uppercased() == want.uppercased() && $0.amount > 0 && (place == nil || $0.chain == place) }
         guard let h = found.first, found.allSatisfy({ $0.chain == h.chain && $0.contract.lowercased() == h.contract.lowercased() }) else { return nil }
-        return (h.amount, h.symbol)
+        return h
     }
 
     /// «Sell all USDT» with the amount held for each «all X» the wallet holds in one place only: «Sell 0.999604 USDT».
@@ -2125,51 +2245,125 @@ extension Workspace {
     /// its money starts and its approves, marked to come after this move.
     /// `of`: these steps instead of the queue (the step a confirmed chain is about to run).
     func chainSteps(of given: [String]? = nil) -> [ActivityBubble] {
-        let queued = [taskQueue.map { ($0.canvas, $0.steps) }, chainAhead.map { ($0.canvas, $0.steps) }].compactMap { $0 }
+        if given == nil, let kept = keptChainCards(chainQueue) { return kept.flatMap { $0 } }
+        return chainCards(given ?? chainQueue, queued: given == nil).flatMap { $0 }
+    }
+
+    /// The steps of this canvas's chain that wait behind its card, or behind its step under way.
+    private var chainQueue: [String] {
+        [taskQueue.map { ($0.canvas, $0.steps) }, chainAhead.map { ($0.canvas, $0.steps) }].compactMap { $0 }
             .first { $0.0 == canvasID }?.1 ?? []
-        let steps = given ?? queued
+    }
+
+    /// The cards kept at Confirm for these steps (chainKept), when they are what's left of that chain.
+    private func keptChainCards(_ steps: [String]) -> [[ActivityBubble]]? {
+        chainKept.flatMap { $0.canvas == canvasID ? Self.kept($0.cards, of: $0.steps, for: steps) : nil }
+    }
+
+    /// The cards kept for a chain's steps `all`, for the `steps` still to come: theirs when they are that chain's last
+    /// steps in its order, nil for anything else (another chain, none left).
+    nonisolated static func kept<Card>(_ cards: [Card], of all: [String], for steps: [String]) -> [Card]? {
+        guard !steps.isEmpty, cards.count == all.count, all.suffix(steps.count).elementsEqual(steps) else { return nil }
+        return Array(cards.suffix(steps.count))
+    }
+
+    /// Confirm was pressed on `now`: the cards of the steps after it stay as they are drawn at this moment (chainKept).
+    /// A step of a chain already kept changes nothing: its cards are the ones confirmed.
+    func keepChainCards(under now: WalletCommand) {
+        let steps = chainQueue
+        guard !steps.isEmpty, keptChainCards(steps) == nil else { return }
+        chainKept = (canvasID, steps, chainCards(steps, queued: true, under: now))
+    }
+
+    /// Each step's cards. `queued`: the steps wait behind the one that waits or runs (not the step about to run itself).
+    /// `under`: that step, when its card no longer waits (Confirm was just pressed).
+    private func chainCards(_ steps: [String], queued: Bool, under now: WalletCommand? = nil) -> [[ActivityBubble]] {
         guard !steps.isEmpty else { return [] }
         // Where the steps before bring money: a deposit there spends it, so its card draws no bridge from Solana
         // («Ethereum → Arbitrum, then Aave» drew a second bridge, Solana → Arbitrum, that never runs).
         var arrived = Set<String>()
-        // And how much: a buy after «move 10 from Base to Solana» is drawn paid as the executor will pay it, by the
-        // balances the moves before it leave. Drawn by the balances before the chain, its card said «Base → Robinhood»
-        // and Solana paid.
-        // ponytail: Relay's cents, and what a buy on another network takes from the one paying it, aren't taken off.
-        var ahead: [String: Decimal] = [:]
-        func count(_ c: WalletCommand) {
-            let sent: Decimal?? = switch c {
-            case .bridge(_, _, let a), .cctp(_, _, let a), .intents(_, _, let a), .evmToSolana(_, let a), .solanaTo(_, let a), .baseToSolana(let a),
-                 .arbitrumToSolana(let a), .robinhoodToSolana(let a), .withdrawToSolana(let a): a
+        // And how much: a buy after «move 10 from Base to Solana» is drawn paid as the executor will pay it, and a step
+        // that moves «all» of a network's dollars by the balance it will find, not today's (ChainDollars).
+        var dollars = ChainDollars(usdc: { self.usdc(on: $0) }, held: { self.heldAndPrice($0, on: $1) },
+                                   sendsOn: { self.savedEntry($0, network: nil)?.network.rawValue })
+        // The card that waits: a move, or a transfer to a saved address (dollars sent away from its network).
+        var pending: WalletCommand? {
+            switch pendingAction {
+            case .wallet(let c)?: c
+            case .transfer(let to, let amount)?: .sendTo(name: to.name, amount: amount, network: to.network.rawValue)
             default: nil
             }
-            if let sent, let from = Self.source(c), let moved = sent ?? usdc(on: from) {   // no amount: all of it
-                ahead[from, default: 0] -= moved
-                if let to = Self.arrives(c) { ahead[to, default: 0] += moved }
-            } else if let spent = Self.solanaUSDC(c) {
-                ahead["solana", default: 0] -= spent
-            }
         }
-        if case .wallet(let first)? = pendingAction {
+        // The step whose card waits has a quote on it: what it brings is that figure, not an estimate beside it
+        // («≈ 5.46» under a card that said the swap leaves ≈ 5.38). The quote stays the card's after Confirm.
+        if let first = now ?? pending {
             if let to = Self.arrives(first) { arrived.insert(to) }
-            count(first)
+            dollars.count(first, quote: Self.quotedAmount(quotedGets(first)))
         }
         // Which step each is: the chat says «five steps», so the cards do too. The one a confirmed chain is about to run
-        // (`given`) is the step under way; the queued ones come after it.
+        // is the step under way; the queued ones come after it.
         // A step that draws no card (a close, an alert) still counts: the numbers are the chat's «In steps».
         let progress = chainProgress
-        let first = (progress?.step ?? 0) + (given == nil ? 1 : 0)
-        return steps.enumerated().flatMap { k, step -> [ActivityBubble] in
+        let first = (progress?.step ?? 0) + (queued ? 1 : 0)
+        return steps.enumerated().map { k, step -> [ActivityBubble] in
             guard let c = WalletCommand.parse(step) else { return [] }
             defer {
                 if let to = Self.arrives(c) { arrived.insert(to) }
-                count(c)
+                dollars.count(c)
             }
             let brought = Self.spends(c).map(arrived.contains) ?? false
-            let cards = later(c, brought: brought, ahead: ahead)
+            let cards = later(c, brought: brought, ahead: dollars.ahead, unpriced: dollars.unpriced)
             return cards.map { var s = $0; s.chainStep = progress.map { "\(first + k) of \($0.of)" }; return s }
         }
     }
+
+    /// The dollar a network's balance is kept in (`usdc(on:)`): USDC, and on Robinhood Chain USDG by either name. Not
+    /// any stablecoin (isDollar): a sale into USDT adds nothing to the USDC a step after it moves, and USDG on another
+    /// network is a token of its own.
+    nonisolated static func isNetworkDollar(_ token: String, on place: String) -> Bool {
+        token.uppercased() == "USDC" || token.uppercased() == "USDG" && place == "robinhood"
+    }
+
+    /// What the wallet holds of `token` (a ticker or a contract) on `place`, with its price in dollars where one is
+    /// known: the network's own coin, else a token held there (by its contract, or the one token of that ticker:
+    /// heldToken's rule). nil: none held, or the ticker is two tokens.
+    private func heldAndPrice(_ token: String, on place: String) -> (id: String, held: Decimal, price: Decimal?)? {
+        // The network's own coin first, as heldForAll reads «all SOL»: a token that took its ticker isn't it.
+        if place == "solana", token.uppercased() == "SOL", let sol = solana?.sol { return ("SOL", sol, coinPrice("SOL")) }
+        if let coin = nativeHeld(token, on: place) { return (coin.1, coin.0, coinPrice(coin.1)) }
+        let tokens = holdings + (solana?.tokens ?? []), stocks = robinhood?.stocks ?? [], all = Self.heldTokens(tokens, stocks: stocks)
+        guard let found = all.first(where: { $0.chain == place && $0.amount > 0 && $0.contract.lowercased() == token.lowercased() })
+            ?? Self.heldToken(token, place: place, among: all) else { return nil }
+        let price = (place == "robinhood" ? stocks.first { $0.address.lowercased() == found.contract.lowercased() }?.price : nil)
+            ?? tokens.first { $0.chain == found.chain && $0.contract.lowercased() == found.contract.lowercased() }?.price
+        return (found.contract, found.amount, price)
+    }
+
+    /// What a step sells of a token: `amount`, or all that the steps before it left (nil), and never more than that.
+    nonisolated static func selling(_ amount: Decimal?, held: Decimal, sold: Decimal) -> Decimal {
+        let left = max(0, held - sold)
+        return min(amount ?? left, left)
+    }
+
+    /// A network's dollars at the turn of a later step of a chain: what's held and what the steps before bring. `mark`:
+    /// «≈ » when that is an estimate, «≥ » when a step before brings more that no price tells, nothing when no step
+    /// before changes them.
+    nonisolated static func dollarsAtTurn(held: Decimal?, ahead: DollarsAhead) -> (amount: Decimal?, mark: String) {
+        (held.map { max(0, $0 + ahead.by) }, ahead.unpriced ? "≥ " : ahead.by != 0 || ahead.counted ? "≈ " : "")
+    }
+
+    /// What a later step moves of a network's dollars, and the mark before its figure: all that will be there (nil), or
+    /// its amount, cut to what will be there and marked then. After a sale no price tells, an amount stays as asked: it
+    /// may well be covered.
+    nonisolated static func movingAtTurn(_ amount: Decimal?, held: Decimal?, ahead: DollarsAhead) -> (amount: Decimal?, mark: String) {
+        let (have, mark) = dollarsAtTurn(held: held, ahead: ahead)
+        guard let amount else { return (have, mark) }
+        let moving = ahead.unpriced ? amount : min(amount, have ?? amount)
+        return (moving, moving == amount ? "" : mark)
+    }
+
+    /// «≈ » before what lands, or the «≥ » its figure already has.
+    nonisolated static func landsMark(_ mark: String) -> String { mark == "≥ " ? mark : "≈ " }
 
     /// «Step 2 of 5» for the chain on this canvas: the step whose card waits or runs, among all its steps. nil outside a chain.
     var chainProgress: (step: Int, of: Int)? {
@@ -2180,7 +2374,7 @@ extension Workspace {
     }
 
     /// One later step of a chain as its cards (chainSteps).
-    private func later(_ c: WalletCommand, brought: Bool, ahead: [String: Decimal]) -> [ActivityBubble] {
+    private func later(_ c: WalletCommand, brought: Bool, ahead: [String: Decimal], unpriced: Set<String>) -> [ActivityBubble] {
         switch c {
         // Spread and rebalance have no route of their own: their split is planned when the money before them has landed.
         case .allocate(let asset, let share, let amount, _, _):
@@ -2201,7 +2395,7 @@ extension Workspace {
                                    status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check, address: entry?.address)]
         default:
             // Any other step without a route still shows, as its words: a chain never loses a step on the canvas.
-            guard let drawn = route(c, ahead: ahead)?.steps else {
+            guard let drawn = route(c, ahead: ahead, unpriced: unpriced)?.steps else {
                 return [ActivityBubble(kind: "step", label: "THEN", title: readable(c.summary), status: "then", logo: "usdc", fill: .check)]
             }
             return Self.laterCards(drawn, brought: brought)
@@ -3295,12 +3489,15 @@ extension Workspace {
 
     /// One EVM network → Relay → another, both our own address: no stop on Solana.
     /// `cctp`: through Circle's CCTP as asked, whatever Relay would land.
-    private func bridgeRoute(_ from: String, _ to: String, _ amount: Decimal?, cctp: Bool = false) -> MoveRoute {
+    /// `ahead`: for a step of a chain, what the steps before it add to the dollars on `from` (or take off them): «all»
+    /// is then what will be there at its turn, said with «≈».
+    private func bridgeRoute(_ from: String, _ to: String, _ amount: Decimal?, cctp: Bool = false, ahead: DollarsAhead = DollarsAhead()) -> MoveRoute {
         let a = WalletCommand.placeName(from), b = WalletCommand.placeName(to), stable = to == "robinhood" ? "USDG" : "USDC"
         let quoted = cctp ? nil : swapQuote.flatMap { $0.command == .bridge(from: from, to: to, amount) ? $0.ways : nil }
-        let have = usdc(on: from), moving = amount.map { min($0, have ?? $0) } ?? have
+        // Marked when the figure is what the steps before leave: «all» of it, or an amount they don't cover.
+        let (moving, mark) = Self.movingAtTurn(amount, held: usdc(on: from), ahead: ahead)
         func fill(_ place: String) -> RouteFill { RouteFill(rawValue: place) ?? .relay }
-        let shown = moving.map { Fmt.num($0) } ?? "all"
+        let shown = moving.map { mark + Fmt.num($0) } ?? "all"
         return MoveRoute(title: "Move \(shown) USDC · \(a) → \(b)",
                          footer: (cctp ? "Circle's CCTP: an exact approve and the burn on \(a) (one transaction where it batches); Circle mints on \(b) itself, "
                                        + "fast-transfer fee plus its gas, a minute or so. "
@@ -3312,17 +3509,18 @@ extension Workspace {
                  money: moneyMove("USDC", on: from, by: moving.map { -$0 })),
             cctp ? step("usdc", "BURN & MINT · CIRCLE'S CCTP", "\(shown) USDC", "≈ 1.3 bp + ≈ $0.08 of gas · Circle mints there", .relay)
                  : bridgeStep(quoted, title: "\(shown) USDC", fallback: ("relay", "BRIDGE · RELAY", "≈ $0.03 · a few seconds · no stop on Solana")),
-            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", bridgeLands(quoted) ?? "≈ \(shown) \(stable)", "your own address ✓", fill(to),
+            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", bridgeLands(quoted) ?? "\(Self.landsMark(mark))\(moving.map { Fmt.num($0) } ?? "all") \(stable)", "your own address ✓", fill(to),
                  money: moving.map { moneyMove(stable, on: to, by: $0, approx: true) } ?? []),
         ])
     }
 
     /// «move N USDC from A to B via NEAR Intents»: 1Click's deposit address, checked against what 1Click bound to it.
-    private func intentsRoute(_ from: String, _ to: String, _ amount: Decimal?) -> MoveRoute {
+    private func intentsRoute(_ from: String, _ to: String, _ amount: Decimal?, ahead: DollarsAhead = DollarsAhead()) -> MoveRoute {
         let a = WalletCommand.placeName(from), b = WalletCommand.placeName(to)
-        // The amount asked is the amount signed (a step before it in a chain may bring it); all of it = what's there now.
-        let moving = amount ?? usdc(on: from)
-        let shown = moving.map { Fmt.num($0) } ?? "all"
+        // The amount asked is the amount signed (a step before it in a chain may bring it); all of it = what's there
+        // at its turn: now, or with what the steps before it bring.
+        let (have, mark) = Self.dollarsAtTurn(held: usdc(on: from), ahead: ahead), moving = amount ?? have
+        let shown = moving.map { (amount == nil ? mark : "") + Fmt.num($0) } ?? "all"
         func fill(_ place: String) -> RouteFill { RouteFill(rawValue: place) ?? .relay }
         return MoveRoute(title: "Move \(shown) USDC · \(a) → \(b) · NEAR Intents",
                          footer: "NEAR Intents' 1Click: USDC goes to a deposit address its quote names, after 1Click confirms that address pays "
@@ -3331,7 +3529,7 @@ extension Workspace {
             step(ModuleNetwork(place: from)?.logo ?? "eth", "FROM · \(a.uppercased())", "\(shown) USDC", "USDC on \(a)", fill(from),
                  money: moneyMove("USDC", on: from, by: moving.map { -$0 })),
             step("near", "BRIDGE · NEAR INTENTS", "\(shown) USDC", "1Click · ≈ a minute · deposit checked first", .near),
-            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", "≈ \(shown) USDC", "your own address ✓", fill(to),
+            step(ModuleNetwork(place: to)?.logo ?? "eth", "TO · \(b.uppercased())", "\(Self.landsMark(amount == nil ? mark : ""))\(moving.map { Fmt.num($0) } ?? "all") USDC", "your own address ✓", fill(to),
                  money: moving.map { moneyMove("USDC", on: to, by: $0, approx: true) } ?? []),
         ])
     }
@@ -3426,13 +3624,15 @@ extension Workspace {
         ])
     }
 
-    private func backRoute(from place: String, amount: Decimal?, network: String = "base") -> MoveRoute {
+    /// `ahead`: for a step of a chain that moves the network's own idle dollars, what the steps before it leave of them.
+    private func backRoute(from place: String, amount: Decimal?, network: String = "base", ahead: DollarsAhead = DollarsAhead()) -> MoveRoute {
         if network != "base" {
             let name = WalletCommand.placeName(network), lending = place == "aave" || place == "morpho"
-            let what = place == "aave" ? "Aave" : "Morpho", held = lending ? nil : usdc(on: network)
+            let what = place == "aave" ? "Aave" : "Morpho"
+            let held = lending ? nil : usdc(on: network).map { max(0, $0 + ahead.by) }
             let lent = lending ? lentElsewhere(what, on: network) : 0
-            let x = lending ? amount ?? (lent > 0 ? lent : nil) : amount.map { min($0, held ?? $0) } ?? held
-            let moving = x.map { Fmt.num($0) } ?? "all"
+            let (x, mark) = lending ? (amount ?? (lent > 0 ? lent : nil), "") : Self.movingAtTurn(amount, held: usdc(on: network), ahead: ahead)
+            let moving = x.map { mark + Fmt.num($0) } ?? "all"
             let from = lending
                 ? step(place, "FROM · \(what.uppercased()) ON \(name.uppercased())", "\(moving) USDC", "with the interest", place == "aave" ? .aave : .morpho,
                        money: vaultMove(what, "USDC", was: lent, by: x.map { -$0 }))
@@ -3446,11 +3646,15 @@ extension Workspace {
                 from,
                 approve("\(moving) USDC", for: "Relay", logo: "relay", .relay),
                 step("relay", "BRIDGE · RELAY", "\(moving) USDC", "a few seconds", .relay),
-                step("sol", "TO · SOLANA", "≈ \(moving) USDC", "your own address ✓", .solana, money: x.map { moneyMove("USDC", on: "solana", by: $0, approx: true) } ?? []),
+                step("sol", "TO · SOLANA", "\(Self.landsMark(mark))\(x.map { Fmt.num($0) } ?? "all") USDC", "your own address ✓", .solana, money: x.map { moneyMove("USDC", on: "solana", by: $0, approx: true) } ?? []),
             ])
         }
-        let available = place == "aave" ? base?.aave : place == "morpho" ? base?.morpho : place == "arbitrum" ? arbitrumUSDC : place == "robinhood" ? robinhood?.usdg : base?.usdc
-        let moving = amount.map { min($0, available ?? $0) } ?? available
+        // A network's own idle dollars are what the steps before leave of them; a deposit is what it is.
+        let idle = place != "aave" && place != "morpho"
+        let free = place == "arbitrum" ? arbitrumUSDC : place == "robinhood" ? robinhood?.usdg : base?.usdc
+        let available = idle ? free.map { max(0, $0 + ahead.by) } : place == "aave" ? base?.aave : base?.morpho
+        // «≈» or «≥» before a figure the steps before make: «all» of it, or an amount they don't cover.
+        let (moving, est) = idle ? Self.movingAtTurn(amount, held: free, ahead: ahead) : (amount.map { min($0, available ?? $0) } ?? available, "")
         let chainName = place == "arbitrum" ? "Arbitrum" : place == "robinhood" ? "Robinhood Chain" : "Base"
         // What leaves: the amount moved, the place's balance now → after in the money box.
         let stable = place == "robinhood" ? "USDG" : "USDC"
@@ -3462,15 +3666,15 @@ extension Workspace {
             ? step("aave", "FROM · AAVE ON BASE", moving.map { "\(Fmt.num($0)) USDC" } ?? "—",
                    aaveAPY.map { "earning ≈ \(Fmt.num($0.rounded(2, .plain)))% until now" } ?? "with the interest", .aave, money: leaves)
             : step(place == "arbitrum" ? "arb" : place == "robinhood" ? "robinhood" : "base", "FROM · \(chainName.uppercased())",
-                   moving.map { "\(Fmt.num($0)) \(stable)" } ?? "—",
+                   moving.map { "\(est)\(Fmt.num($0)) \(stable)" } ?? "—",
                    "idle \(stable)", place == "arbitrum" ? .arbitrum : place == "robinhood" ? .robinhood : .base, money: leaves)
-        return MoveRoute(title: place == "aave" || place == "morpho" ? "\(place == "aave" ? "Aave" : "Morpho") · withdraw \(moving.map { Fmt.num($0) } ?? "all") USDC to Solana" : "\(chainName) · \(moving.map { Fmt.num($0) } ?? "all") USDC to Solana",
+        return MoveRoute(title: place == "aave" || place == "morpho" ? "\(place == "aave" ? "Aave" : "Morpho") · withdraw \(moving.map { Fmt.num($0) } ?? "all") USDC to Solana" : "\(chainName) · \(moving.map { est + Fmt.num($0) } ?? "all") USDC to Solana",
                          footer: (place == "aave" || place == "morpho" ? "Three Base transactions: withdraw from \(place == "aave" ? "Aave" : "Morpho"), an exact approve and Relay’s deposit" : "Two \(chainName) transactions: an exact approve and Relay’s deposit")
                             + " — checked field by field before signing. Press Confirm.", steps: [
             from,
-            approve(moving.map { "\(Fmt.num($0)) \(place == "robinhood" ? "USDG" : "USDC")" } ?? "all of it", for: "Relay", logo: "relay", .relay),
-            step("relay", "BRIDGE · RELAY", moving.map { "\(Fmt.num($0)) \(place == "robinhood" ? "USDG" : "USDC")" } ?? "—", "≈ $0.02 · a few seconds", .relay),
-            step("sol", "TO · SOLANA", moving.map { "≈ \(Fmt.num($0)) USDC" } ?? "—",
+            approve(moving.map { "\(est)\(Fmt.num($0)) \(stable)" } ?? "all of it", for: "Relay", logo: "relay", .relay),
+            step("relay", "BRIDGE · RELAY", moving.map { "\(est)\(Fmt.num($0)) \(stable)" } ?? "—", "≈ $0.02 · a few seconds", .relay),
+            step("sol", "TO · SOLANA", moving.map { "\(Self.landsMark(est))\(Fmt.num($0)) USDC" } ?? "—",
                  "your own address ✓", .solana, money: moving.map { moneyMove("USDC", on: "solana", by: $0, approx: true) } ?? []),
         ])
     }
@@ -3625,7 +3829,10 @@ struct WithdrawBoard: View {
                     HStack(spacing: 8) {
                         // A chain says which of its steps this card is, in the title's own size: the chat says «five
                         // steps», and the canvas showed one move with nothing to tell it was the first of them.
-                        Text((ws.chainProgress.map { "Step \($0.step) of \($0.of) · " } ?? "") + route.title).font(.ui(14, .semibold)).lineLimit(2).truncationMode(.middle)
+                        // It takes the row's width before the gap does, and wraps whole when it still doesn't fit:
+                        // two lines cut in the middle read «≈ 0.001…Arbitrum».
+                        Text((ws.chainProgress.map { "Step \($0.step) of \($0.of) · " } ?? "") + route.title).font(.ui(14, .semibold))
+                            .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                         StatusChip(text: "waiting for the signature", tint: Brand.profit).fixedSize()
                         Spacer(minLength: 12)
                         PendingButtons()

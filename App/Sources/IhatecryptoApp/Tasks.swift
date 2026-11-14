@@ -371,6 +371,8 @@ extension Workspace {
             chainAhead = nil
             runningAction = nil
         }
+        // The chain is through, or another comes to wait on this canvas: the cards kept for the one before are over.
+        if chainKept?.canvas == canvasID { chainKept = nil }
         snapshotCanvas()
         saveCanvas()
         // A chain's whole length, for «step 2 of 5»: counted where it first comes to wait, not where a step of a confirmed
@@ -439,7 +441,7 @@ extension Workspace {
            Date().timeIntervalSince(q.since) < 1800 { return }
         taskQueue = nil
         guard q.confirmed, q.canvas == canvasID, finishedAction?.outcome.ok == true, Date().timeIntervalSince(q.since) < 1800,
-              let first = q.steps.first else { return }
+              let first = q.steps.first else { chainKept = nil; return }
         // The next step's board in the same breath as the move's goes: no frame where the chain's cards are gone.
         chainAhead = (q.canvas, Array(q.steps.dropFirst()))
         showNext(first)

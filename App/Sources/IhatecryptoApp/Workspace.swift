@@ -576,6 +576,10 @@ final class Workspace {
     /// While a confirmed chain runs, its steps after the one under way: drawn after its cards (Workspace.chainSteps).
     /// Only for the canvas; `taskQueue` is what runs.
     var chainAhead: (canvas: UUID?, steps: [String])?
+    /// A confirmed chain's later steps as their cards were drawn when Confirm was pressed, a list for each step: they
+    /// stay as confirmed while the chain runs. Drawn again from balances read mid-move, a card counted the move under
+    /// way twice (the balance already held part of it), or not at all between two steps.
+    var chainKept: (canvas: UUID?, steps: [String], cards: [[ActivityBubble]])?
     /// How many steps the chain that waits or runs has in all, for «step 2 of 5» on its cards (chainProgress). Set when
     /// its first card comes to wait; read only while `taskQueue` or `chainAhead` holds what's left of it.
     var chainTotal: Int?
@@ -1495,13 +1499,16 @@ final class Workspace {
                 schedules.append(s)
             }
             firstBuyOf = nil
+            keepChainCards(under: command)
             await move(command)
         case .position(let command, let coin): await manage(command, coin: coin)
         case .orders(let commands, let coin, let next):
             for command in commands { await manage(command, coin: coin) }
             intent = next
             executed = next
-        case .transfer(let entry, let amount): await transfer(amount, to: entry)
+        case .transfer(let entry, let amount):
+            keepChainCards(under: .sendTo(name: entry.name, amount: amount, network: entry.network.rawValue))
+            await transfer(amount, to: entry)
         case .address(let entry):
             // Touch ID with the whole address on the prompt; only then is it in the book.
             let bubble = Self.saveStep(entry)

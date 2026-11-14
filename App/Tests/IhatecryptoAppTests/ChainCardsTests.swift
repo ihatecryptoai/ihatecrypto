@@ -46,6 +46,131 @@ private func step(_ label: String, _ title: String, _ lines: [String] = []) -> A
     #expect(!Workspace.saysAmount("USDT0") && !Workspace.saysAmount("1INCH → ETH") && !Workspace.saysAmount("all SPCX") && !Workspace.saysAmount("comparing…"))
 }
 
+/// A step that moves «all» of a network's dollars after sales into them is drawn by what will be there at its turn:
+/// each sale adds what it sells at today's price, «≈». A token sold twice is counted once, and one with no price turns
+/// the figure into «≥» today's balance.
+@Test func aSaleBeforeAddsToTheDollarsMovedAfter() {
+    // «sell 0.3 TSLA, then sell all TSLA» with 0.6 held sells 0.3 and then the 0.3 that's left, never 0.9.
+    #expect(Workspace.selling(Decimal(string: "0.3")!, held: Decimal(string: "0.6")!, sold: 0) == Decimal(string: "0.3"))
+    #expect(Workspace.selling(nil, held: Decimal(string: "0.6")!, sold: Decimal(string: "0.3")!) == Decimal(string: "0.3"))
+    #expect(Workspace.selling(5, held: 2, sold: 0) == 2 && Workspace.selling(nil, held: 2, sold: 3) == 0)
+
+    let bare = Workspace.dollarsAtTurn(held: 5, ahead: DollarsAhead())
+    #expect(bare.amount == 5 && bare.mark.isEmpty)
+    let more = Workspace.dollarsAtTurn(held: 5, ahead: DollarsAhead(by: Decimal(string: "17.9")!))
+    #expect(more.amount == Decimal(string: "22.9") && more.mark == "≈ ")
+    // A swap out of the dollars before it takes them off, never under zero.
+    #expect(Workspace.dollarsAtTurn(held: 5, ahead: DollarsAhead(by: -8)).amount == 0)
+    // A sale of a token no price tells: at least what's there now.
+    let unknown = Workspace.dollarsAtTurn(held: 5, ahead: DollarsAhead(by: 3, unpriced: true))
+    #expect(unknown.amount == 8 && unknown.mark == "≥ ")
+    // A balance that isn't read stays unread.
+    #expect(Workspace.dollarsAtTurn(held: nil, ahead: DollarsAhead(by: 3)).amount == nil)
+
+    // The network's dollar: USDC everywhere, USDG by either name on Robinhood Chain only.
+    #expect(Workspace.isNetworkDollar("usdc", on: "base") && Workspace.isNetworkDollar("USDG", on: "robinhood") && Workspace.isNetworkDollar("USDC", on: "robinhood"))
+    #expect(!Workspace.isNetworkDollar("USDG", on: "solana") && !Workspace.isNetworkDollar("USDT", on: "base") && !Workspace.isNetworkDollar("SPCX", on: "robinhood"))
+}
+
+/// The steps before a card, counted one after another: what each adds to a network's dollars or takes off them.
+@Test @MainActor func aChainsStepsAreCountedIntoTheDollarsAhead() {
+    let d = { (s: String) in Decimal(string: s)! }
+    // Arbitrum holds 60 USDC and 0.002 ETH at 3000, Robinhood 5 USDG, 0.6 TSLA at 400 and a token no price tells.
+    func chain(_ usdc: [String: Decimal] = ["arbitrum": 60, "base": 5, "robinhood": 5, "solana": 100]) -> ChainDollars {
+        ChainDollars(usdc: { usdc[$0] }, held: { token, place in
+            switch (token.uppercased(), place) {
+            case ("ETH", "arbitrum"): ("ETH", d("0.002"), 3000)
+            case ("TSLA", "robinhood"), ("0XT5LA", "robinhood"): ("0xT5LA", d("0.6"), 400)
+            case ("XYZ", "robinhood"): ("0xXYZ", 10, nil)
+            case ("TSLAON", "solana"): ("TsLaMint", 1, 400)
+            default: nil
+            }
+        }, sendsOn: { $0 == "Bybit" ? "arbitrum" : nil })
+    }
+    // A sale into the network's dollar adds it at today's price, and the quote of the card that waits wins over it.
+    var c = chain()
+    c.count(.swapOn("arbitrum", from: "ETH", to: "USDC", amount: nil))
+    #expect(c.ahead["arbitrum"] == 6 && c.unpriced.isEmpty)
+    c = chain()
+    c.count(.swapOn("arbitrum", from: "ETH", to: "USDC", amount: nil), quote: d("5.38"))
+    #expect(c.ahead["arbitrum"] == d("5.38"))
+    // A quote counts for a token the holdings don't show yet.
+    c = chain()
+    c.count(.sellOn("base", token: "AERO", amount: 3, keep: true), quote: 2)
+    #expect(c.ahead["base"] == 2 && c.unpriced.isEmpty)
+    // A token sold twice is counted once: 0.3, then the 0.3 that's left.
+    c = chain()
+    c.count(.sellStock(symbol: "TSLA", amount: d("0.3")))
+    c.count(.sellStock(symbol: "TSLA", amount: nil))
+    #expect(c.ahead["robinhood"] == 240)
+    // Named by its ticker and then by its contract, it is the same token.
+    c = chain()
+    c.count(.sellStock(symbol: "TSLA", amount: d("0.3")))
+    c.count(.sellStock(symbol: "0xT5LA", amount: nil))
+    #expect(c.ahead["robinhood"] == 240)
+    // What spends the dollars is taken off: a swap out of them, a buy paid there, a deposit as far as the network pays.
+    c = chain()
+    c.count(.swapOn("arbitrum", from: "USDC", to: "ETH", amount: 10))
+    c.count(.buyOn("arbitrum", token: "ARB", usdc: 20, from: "arbitrum"))
+    c.count(.aave(deposit: true, amount: 100, network: "arbitrum"))
+    #expect(c.ahead["arbitrum"] == -60 && c.there("arbitrum") == 0)
+    // A token bought with no network named is paid there only when the network holds it all; a stock takes what is there.
+    c = chain()
+    c.count(.buyOn("base", token: "AERO", usdc: 50))
+    #expect(c.ahead["base"] == nil)
+    c.count(.buyOn("base", token: "AERO", usdc: 4))
+    c.count(.buyStock(symbol: "NVDA", usdc: 100))
+    #expect(c.ahead["base"] == -4 && c.ahead["robinhood"] == -5)
+    // The owner's chain: a sale, a buy with what it brings, then «all» of what's left.
+    c = chain()
+    c.count(.sellStock(symbol: "TSLA", amount: d("0.3")))
+    c.count(.buyStock(symbol: "NVDA", usdc: 100))
+    #expect(c.there("robinhood") == 25)
+    // A Solana sale by a ticker the app hasn't looked up is priced by the wallet's token of that ticker.
+    c = chain()
+    c.count(.sell(.bySymbol("TSLAon"), amount: nil))
+    #expect(c.ahead["solana"] == 400 && c.unpriced.isEmpty)
+    // An amount moved is never more than will be there, and lands as that.
+    c = chain()
+    c.count(.bridge(from: "base", to: "arbitrum", 20))
+    #expect(c.ahead["base"] == -5 && c.ahead["arbitrum"] == 5)
+    // Dollars no price tells follow «all» of them to where it lands, and none are left behind.
+    c = chain()
+    c.count(.sellStock(symbol: "XYZ", amount: nil))
+    #expect(c.unpriced == ["robinhood"])
+    c.count(.bridge(from: "robinhood", to: "base", nil))
+    #expect(c.unpriced == ["base"] && c.ahead["base"] == 5 && c.there("robinhood") == 0)
+
+    // A burn through Circle lands as a bridge does. A loan and a vault bring dollars, a transfer takes them.
+    c = chain()
+    c.count(.cctp(from: "base", to: "arbitrum", 5))
+    c.count(.aaveBorrow(20, network: "arbitrum"))
+    c.count(.sendTo(name: "Bybit", amount: 10))
+    c.count(.lendWithdraw("USDC", 7))
+    #expect(c.ahead["base"] == -5 && c.ahead["arbitrum"] == 15 && c.ahead["solana"] == 7 && c.unpriced.isEmpty)
+    c.count(.aave(deposit: false, amount: nil, network: "base"))
+    #expect(c.unpriced == ["solana"])
+
+    // The cards kept at Confirm are shown for what's left of that chain only.
+    #expect(Workspace.kept(["b", "c"], of: ["sell", "move"], for: ["move"]) == ["c"])
+    #expect(Workspace.kept(["b", "c"], of: ["sell", "move"], for: ["sell", "move"]) == ["b", "c"])
+    #expect(Workspace.kept(["b", "c"], of: ["sell", "move"], for: []) == nil)
+    #expect(Workspace.kept(["b", "c"], of: ["sell", "move"], for: ["sell"]) == nil)
+    #expect(Workspace.kept(["b", "c"], of: ["sell", "move"], for: ["buy", "sell", "move"]) == nil)
+
+    // The figure on a later card: «all» is what will be there, an amount is cut to it and marked then.
+    let ahead = DollarsAhead(by: d("0.46"))
+    #expect(Workspace.movingAtTurn(nil, held: 5, ahead: ahead) == (d("5.46"), "≈ "))
+    #expect(Workspace.movingAtTurn(20, held: 5, ahead: ahead) == (d("5.46"), "≈ "))
+    #expect(Workspace.movingAtTurn(3, held: 5, ahead: ahead) == (3, ""))
+    // After a sale no price tells, an amount stays as asked, and «all» is «at least».
+    #expect(Workspace.movingAtTurn(20, held: 3, ahead: DollarsAhead(unpriced: true)) == (20, ""))
+    #expect(Workspace.movingAtTurn(nil, held: 3, ahead: DollarsAhead(unpriced: true)) == (3, "≥ "))
+    #expect(Workspace.landsMark("≥ ") == "≥ " && Workspace.landsMark("") == "≈ " && Workspace.landsMark("≈ ") == "≈ ")
+    // A sale and a buy that come to nothing more are an estimate all the same.
+    #expect(Workspace.dollarsAtTurn(held: 5, ahead: DollarsAhead(counted: true)).mark == "≈ ")
+}
+
 @Test func aChainsLaterCardSaysWhatItSells() {
     // A later swap keeps only its swap card: that card names what goes in too.
     let swap = Workspace.laterCards([step("FROM · ROBINHOOD", "0.5 TSLA", ["on Robinhood"]), step("APPROVE · EXACT", "0.5 TSLA"), step("SWAP · UNISWAP", "USDG")], brought: false)
