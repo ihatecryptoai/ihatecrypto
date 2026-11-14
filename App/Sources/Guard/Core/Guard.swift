@@ -141,6 +141,12 @@ public enum SolanaGuard {
         "797f12cc49f5e141": (8, true), "a1808ff5abc7c206": (8, true),             // borrow_obligation_liquidity(_v2)
         "4b5d5ddc2296dac4": (9, false), "eb34779895c51407": (9, false),           // withdraw_obligation_collateral_and_redeem_reserve_collateral(_v2)
     ]
+    /// KLend's deposits and repays by discriminator: the index of the account the money leaves (user_source_liquidity,
+    /// klend's IDL). Its amount is the u64 after the discriminator, in the coin, and u64.max repays all of the debt.
+    static let kaminoPayins: [String: (from: Int, repay: Bool)] = [
+        "81c70402de271a2e": (9, false), "d8e0bf1bcc9766af": (9, false),           // deposit_reserve_liquidity_and_obligation_collateral(_v2)
+        "91b20de14cf09348": (6, true), "74aed54cb435d290": (6, true),             // repay_obligation_liquidity(_v2)
+    ]
     /// Vault withdrawals (withdraw, sell, withdraw_from_available, redeem_in_kind): to the signer's own accounts. No deposits.
     static let kaminoVaultAllowed: Set<String> = ["b712469c946da122", "33e685a4017f83ad", "1383709baadc2239", "663abdfcc0db8c59"]
     /// Farms: unstake, withdraw_unstaked_deposits, harvest_reward (to the owner), refresh_farm, refresh_user_state, initialize_user.
@@ -344,7 +350,10 @@ public enum SolanaGuard {
                     let units = le64(ix.data, 1)
                     let known = tag == 12 ? account(1).flatMap { mintNames[$0] } : nil
                     let amount = known.map { "\(Decimal(units) / pow(10, $0.decimals)) \($0.symbol)" } ?? "\(units) units of a token"
-                    if allowed(to) { v.checks.append("\(amount) → \(name(to)).") } else { v.problems.append("\(amount) go to someone else's account \(to).") }
+                    // A Token-2022 mint can keep a fee out of every transfer, and the signer can't read the mint (no network):
+                    // the prompt says so, rather than name an amount the payee may not get in full (the 2026-11-13 review).
+                    let fee = program == SPL.token2022Program && !mine(to) ? ", less any fee the token keeps for itself (Token-2022)" : ""
+                    if allowed(to) { v.checks.append("\(amount) → \(name(to))\(fee).") } else { v.problems.append("\(amount) go to someone else's account \(to).") }
                     // The mint: named by TransferChecked, else the one this wallet's own source account is for.
                     // Counted when this wallet signs for it (its authority) or its own account pays, whatever the app claims.
                     let source = account(0)
@@ -430,6 +439,9 @@ public enum SolanaGuard {
                 // a 100 USDC order in two swaps Jupiter built 2026-10-23). The coin is account 3, proven above to be the mint
                 // of this wallet's account the money leaves.
                 let coin = account(3) ?? "?"
+                // The order swaps on at prices no one sees again: its opening asks afresh like a swap, whatever session is
+                // open (it rode one: the 2026-11-13 review).
+                if kind == jupiterDCAOpen { v.swaps = true }
                 v.checks.append(kind == jupiterDCAOpen
                     ? "Jupiter DCA order of yours: \(units(le64(ix.data, 16), coin)) → the order, \(units(le64(ix.data, 24), coin)) a swap, and what it buys is yours."
                     : "Closes your Jupiter DCA order: what's left comes back to you.")
@@ -464,6 +476,14 @@ public enum SolanaGuard {
                         .map { "\(Decimal(raw) / pow(10, $0.value.decimals)) \($0.value.symbol)" } ?? "\(raw) units"
                     v.checks.append(payout.borrow ? "Kamino lends \(what) → your account, owed back to Kamino."
                                                   : "Kamino withdrawal: up to \(what) in Kamino's shares, each worth one or more → your account.")
+                }
+                // A deposit and a repay say how much leaves, read here: they signed as «sign a Solana transaction», with no
+                // amount (the 2026-11-13 review). The coin is the one the account it leaves is this wallet's own for.
+                if program == kaminoLend, let from = kaminoPayins[kind], ix.data.count >= 16 {
+                    let raw = le64(ix.data, 8)
+                    let coin = (mintNames.keys + policy.mints).first { ownTokenAccount(account(from.from), owner: policy.owner, mint: $0) }
+                    let what = raw == .max ? "all of it" : coin.map { units(raw, $0) } ?? "\(raw) units"
+                    v.checks.append(from.repay ? "Kamino repay of \(what) → your own debt." : "Kamino deposit of \(what) → your own position.")
                 }
                 v.checks.append("Calls \(programName) on your own position: it pays only you, and a repay pays only your debt. The balance simulation checks the amount.")
             case jupiterZ:
@@ -647,6 +667,36 @@ public enum HLGuard {
         return "leverage \(n)× is above your \(cap)× limit"
     }
 
+    /// What the main key signs with an L1 `action`, for its prompt. A cancel and a leverage change name themselves: both
+    /// read «sign a Hyperliquid order», and the session that prompt opened then signed an order unasked (the 2026-11-13 review).
+    public static func name(_ action: MsgPack) -> String {
+        guard case .map(let pairs) = action else { return "sign a Hyperliquid order" }
+        let markets = HLAction.markets(action).sorted().map { "#\($0)" }.joined(separator: ", ")
+        switch HLAction.type(action) {
+        case "updateLeverage":
+            guard case .uint(let n)? = pairs.first(where: { $0.0 == "leverage" })?.1 else { return "change leverage on Hyperliquid market \(markets)" }
+            return "set leverage to \(n)× on Hyperliquid market \(markets)" + (pairs.first(where: { $0.0 == "isCross" })?.1 == .bool(true) ? ", cross margin" : "")
+        case "cancel":
+            let n = if case .array(let c)? = pairs.first(where: { $0.0 == "cancels" })?.1 { c.count } else { 0 }
+            return "cancel \(n == 1 ? "an order" : "\(n) orders") on Hyperliquid market \(markets)"
+        case "twapCancel": return "stop a TWAP on Hyperliquid market \(markets)"
+        default: return "sign a Hyperliquid order"
+        }
+    }
+
+    /// What a main-key signature of an L1 `action` binds its Touch ID session to (Signer.moveScope): its markets, by what
+    /// is done there. An order's session covers that market's later stops, cancels and leverage (the entry and its stop
+    /// are one move, and a moved stop cancels the old one after placing the new), but a cancel's or a leverage change's
+    /// covers only more of the same: neither lets an order through.
+    public static func scope(_ action: MsgPack) -> Set<String> {
+        let markets = HLAction.markets(action)
+        switch HLAction.type(action) {
+        case "cancel", "twapCancel": return Set(markets.map { "hl:\($0):cancel" })
+        case "updateLeverage": return Set(markets.map { "hl:\($0):leverage" })
+        default: return Set(markets.flatMap { ["hl:\($0)", "hl:\($0):cancel", "hl:\($0):leverage"] })
+        }
+    }
+
     /// Orders and cancels trade inside the account. Anything that moves money must go to an approved address.
     public static func check(_ action: MsgPack, owner: String, recipients: Set<String>, agent: String? = nil) -> Verdict {
         var v = Verdict()
@@ -685,6 +735,10 @@ public enum HLGuard {
             v.checks.append("Trading action inside your account; ihatecrypto's fee \(HLBuilder.rate).")
         case "cancel":
             v.checks.append("Trading action inside your account.")
+        // Neither takes a builder field today (HLAction.trailingStop, twapOrder): one that came with it would be a fee to
+        // whoever it names, on a signature the trading key gives without a prompt (the 2026-11-13 review).
+        case "trailingStop" where pairs.contains { $0.0 == "builder" }, "twapOrder" where pairs.contains { $0.0 == "builder" }:
+            v.problems.append("A trailing stop or a TWAP that names someone to take a fee is not allowed.")
         case "trailingStop":
             // The trading key signs it without a prompt: only one that can close, never open or add to, a position. The
             // exchange holds a reduce-only order to the position's own coin and size.

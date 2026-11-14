@@ -233,7 +233,10 @@ public enum TokenResearch {
                      + (m.buys24h.map { ", \($0) buys" } ?? "") + (m.sells24h.map { " and \($0) sells in 24h" } ?? "") + "."]
         let changes = [("m5", "5m"), ("h1", "1h"), ("h6", "6h"), ("h24", "24h")].compactMap { key, title in m.changes[key].map { "\(title) \(pct($0))" } }
         if !changes.isEmpty { lines.append("Price change: " + changes.joined(separator: ", ") + ".") }
-        if !m.links.isEmpty { lines.append("Links: " + m.links.map { "\($0.label) \($0.url.absoluteString)" }.joined(separator: ", ") + ".") }
+        // A link is its lister's text too, and a sentence in a path has no spaces for the injection rules to read: the
+        // site and the start of the path only, and a handful of them (the card's own buttons keep the whole link).
+        func short(_ url: URL) -> String { (url.host() ?? "") + String(url.path().prefix(40)) }
+        if !m.links.isEmpty { lines.append("Links: " + m.links.prefix(6).map { "\($0.label) \(short($0.url))" }.joined(separator: ", ") + ".") }
         return lines
     }
 

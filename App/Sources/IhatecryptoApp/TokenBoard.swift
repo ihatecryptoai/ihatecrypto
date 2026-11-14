@@ -205,7 +205,7 @@ struct TokenBoard: View {
             else if chain == "robinhood", let registry = try? await RobinhoodStocks.registry() {
                 verified = RobinhoodStocks.listed(address, symbol: symbol, chain: chain, in: registry).map { ("Robinhood's registry", $0) }
             }
-            tell()
+            await tell()
         }
         .task(id: "\(market?.pool ?? "")·\(range)") {
             guard let pool = market?.pool else { return }
@@ -215,18 +215,31 @@ struct TokenBoard: View {
             } catch {
                 self.error = error.localizedDescription
             }
-            tell()
+            await tell()
         }
     }
 
     /// What the card shows, for the chat's model: its numbers, the chart in the range picked, what the wallet holds.
-    private func tell() {
+    /// The name and the symbol are made plain here too: a favorite saved before they were kept so has them as listed.
+    private var facts: String {
         let held = holding.map { ($0.amount, $0.usd) } ?? heldToken.map { ($0.amount, $0.usd) }
-        let lines = ["\(fullName) (\(symbol)), contract \(address) on \(chainTitle)" + (verified.map { $0.ok ? ", verified by \($0.by)" : ", not verified by \($0.by)" } ?? "") + "."]
+        let lines = ["\(Holding.plain(fullName, max: 64)) (\(Holding.plain(symbol, max: 12))), contract \(address) on \(chainTitle)"
+                     + (verified.map { $0.ok ? ", verified by \($0.by)" : ", not verified by \($0.by)" } ?? "") + "."]
             + (market.map { TokenResearch.poolFacts($0) } ?? [error ?? "Its market is loading."])
             + [TokenResearch.chartFacts(points, range: range, of: "Its chart (shown now)")].compactMap { $0 }
             + (held.map { ["The wallet holds \(Fmt.num($0.0, maxFraction: 6))" + ($0.1.map { " ≈ \(Fmt.usd($0))" } ?? "") + "."] } ?? [])
-        ws.tokenCard = (TokenBoard.place(chain: chain, address: address), lines.joined(separator: " "))
+        return lines.joined(separator: " ")
+    }
+
+    /// Keeps that for the model once the guard has read it (Workspace.tokenCardText), never as it came.
+    private func tell() async {
+        var text = facts, kept = await Workspace.tokenCardText(text)
+        // The market or the chart loaded while the guard read: read again, so an older text never replaces the newer one.
+        while text != facts {
+            text = facts
+            kept = await Workspace.tokenCardText(text)
+        }
+        ws.tokenCard = (TokenBoard.place(chain: chain, address: address), kept)
     }
 
     // MARK: Parts

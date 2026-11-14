@@ -14,12 +14,18 @@
 #     team's — a new key (generate_keys) and its SUPublicEDKey in the next release. Never change both at once.
 # Team and bundle id stay N78L833HCS / app.ihatecrypto.mac, or the signer loses its Keychain items.
 # Built from the committed tree (HEAD) by Tools/build-release.sh, the same build verify-release.sh makes, so anyone can
-# check a release against the code: commit first, the script refuses uncommitted changes to Sources.
+# check a release against the code: commit first, the script refuses uncommitted or untracked files in what it uses.
 set -e
 version=$1; site=${2%/}
 [[ -n $version && ( -z $site || $site == https://* ) ]] || { echo "usage: ./release.sh <version> [<https://site/path>]"; exit 1; }
 cd "$(dirname "$0")"
-git diff --quiet HEAD -- Sources Xcode || { echo "Sources or Xcode have uncommitted changes: commit them first."; exit 1; }
+# The app is built from HEAD, but the rest is taken from the working tree: this script, the notes (their script and
+# Sources' whatsnew.json), the disk image's window (Tools/dmg) and the landing (Tools/site). So all of it must be HEAD's,
+# untracked files too, or the site and the disk image carry what no commit has (the 2026-11-13 review: only changes to
+# tracked files in Sources and Xcode were looked for). Files .gitignore names aren't seen, and Tools/site/fonts and mf
+# are copied whole: a .DS_Store there would go to the site.
+dirty=$(git status --porcelain --untracked-files=all -- Sources Xcode release.sh Tools/release-notes.py Tools/dmg Tools/site)
+[[ -z $dirty ]] || { echo "not committed, and the release would publish it or go without it: commit first."; echo "$dirty"; exit 1; }
 python3 Tools/release-notes.py "$version" > /dev/null || { echo "Sources/IhatecryptoApp/WhatsNew/whatsnew.json has no entry for $version."; exit 1; }
 # The build number counts commits, so every release is newer than the last. Opening the code (2026-10-21) took 32
 # commits out of the history: 0.6.9 was build 580 at what is now commit 548.

@@ -341,7 +341,8 @@ final class Workspace {
     /// A place opened from the rail or the portfolio: «solana», «hyperliquid», «jupiter», «aave»; «chart» the chart of a
     /// network's coin, opened from its row where a token's card opens. Another place opened there replaces that chart.
     var detail: String? { didSet { if oldValue == "chart", detail != "chart" { chart = nil } } }
-    /// What the token card in `detail` shows, written by the card as its numbers load: the chat's model reads it.
+    /// What the token card in `detail` shows, written by the card as its numbers load: the chat's model reads it, so the
+    /// guard reads it first (tokenCardText).
     @ObservationIgnored var tokenCard: (place: String, text: String)?
     /// When ihatecrypto last finished moving money itself; incoming money right after it is its own, not a top-up.
     var lastOwnMove = Date.distantPast
@@ -382,7 +383,11 @@ final class Workspace {
         didSet { LocalStore.save(costBasis, Workspace.scoped("costbasis", activeWalletID) + ".json") }
     }
     /// Tokens the user watches (TokensUI.swift), their DexScreener data and what the wallet holds of them.
-    var favoriteTokens: [FavoriteToken] = LocalStore.load("tokens.json") ?? [] {
+    /// Names made plain as they load: one saved before listings were cleaned is still its lister's sentence, and the
+    /// chat's model reads the favorites with every message.
+    var favoriteTokens: [FavoriteToken] = ((LocalStore.load("tokens.json") ?? []) as [FavoriteToken]).map {
+        FavoriteToken(chain: $0.chain, address: $0.address, name: Holding.plain($0.name, max: 64), symbol: $0.symbol, image: $0.image, added: $0.added)
+    } {
         didSet { LocalStore.save(favoriteTokens, "tokens.json") }
     }
     /// Behind setters that skip an unchanged value: a `merge` in place (TokensUI, StocksUI) otherwise redraws the
@@ -529,9 +534,12 @@ final class Workspace {
     var stopRequested = false
     /// Cancels the model call running now; nil when none runs.
     @ObservationIgnored var cancelModel: (() -> Void)?
-    var schedules: [Schedule] = (UserDefaults.standard.data(forKey: Workspace.scoped("schedules")).flatMap { try? JSONDecoder().decode([Schedule].self, from: $0) }) ?? [] {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(schedules), forKey: Workspace.scoped("schedules", activeWalletID)) }
+    /// The recurring buys, per wallet. Sealed like the tasks (TaskSeal): a due one asks to sign on the wallet that's on.
+    var schedules: [Schedule] = TaskSeal.schedules(forKey: Workspace.scoped("schedules")).schedules {
+        didSet { TaskSeal.save(try? JSONEncoder().encode(schedules), forKey: Workspace.scoped("schedules", activeWalletID)) }
     }
+    /// The recurring buys were changed outside ihatecrypto (TaskSeal) and loaded paused: said once in the chat.
+    @ObservationIgnored var schedulesTampered = TaskSeal.schedules(forKey: Workspace.scoped("schedules")).tampered
     /// The running Jupiter DCA orders as last read, drawn on the canvas once asked for («show Jupiter DCA») or after one
     /// is placed or cancelled; nil = not shown.
     var jupiterDCAs: [JupiterRecurring.Order]?
@@ -1718,10 +1726,12 @@ final class Workspace {
                 // A favorite of an address a lookup found: theirs to press, never done for them.
                 if TokenCommand.addsFavorite(canonical), ChatRouter.addressesAllowed(canonical, userText: said ?? text, known: knownContracts,
                                                                                     found: reading?.found ?? [], displays: Self.foundAllowed, markets: Set(markets.keys)) {
+                    // The card first (it reads the token's listing), then the reply it goes under: built after the reply, it
+                    // came up to a minute later, under whatever message was the last by then.
+                    let card = await favoriteCard(canonical)
                     reply(say("That address came from a lookup, not from you, so adding it to your favorites is yours to press.",
                               "Этот адрес пришёл из поиска, а не от тебя, поэтому в избранное он попадёт только по твоему нажатию."), note: model)
-                    offerCards([ChatRouter.Option(title: say("Add to favorites", "Добавить в избранное"), comment: "", command: canonical)],
-                               userText: said ?? text, found: reading?.found ?? [])
+                    offerCards([card], userText: said ?? text, found: reading?.found ?? [])
                     return
                 }
                 reply(say("I read that as “\(canonical)”, but its address is neither in your message nor among your favorites, so I won’t use it. Paste the address itself.",
@@ -2499,6 +2509,11 @@ final class Workspace {
             tasksTampered = false
             reply(say("The scheduled tasks were changed outside ihatecrypto, so every one is paused. Check them in the Schedule and switch on only the ones you made.",
                       "Задачи по расписанию изменили вне ihatecrypto, поэтому все они на паузе. Проверь их в Schedule и включи только свои."))
+        }
+        if schedulesTampered {
+            schedulesTampered = false
+            reply(say("Your recurring buys were changed outside ihatecrypto, so every one is paused. Check each one's coin and amount in the Schedule and switch on only the ones you made.",
+                      "Регулярные покупки изменили вне ihatecrypto, поэтому все они на паузе. Проверь монету и сумму каждой в Schedule и включи только свои."))
         }
         if exitRulesTampered {
             exitRulesTampered = false

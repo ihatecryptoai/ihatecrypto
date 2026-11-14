@@ -451,7 +451,12 @@ final class Browser {
             lines.append("Allow \(spender) to spend up to \(sum(a, t)) more.")
         case .transfer(let r, let a):
             let t = await token(to)
-            lines.append("Transfer \(sum(a, t)) to \(r).")
+            // A token names itself (the 2026-11-13 review): a look-alike «USDC» read the same as the real one. Its contract
+            // is named, whole, unless ihatecrypto knows it at this address on this network: its WETH, the network's own
+            // dollar (Robinhood's USDG, Tempo's USDC), or one of the five dollars (Stablecoins.byNetwork).
+            let known = t.address == UniswapV2.on(rpc.chainId)?.weth
+                || EVMNetwork.all.contains { $0.rpc.chainId == rpc.chainId && ($0.usdc.lowercased() == t.address || Stablecoins.isGenuine(t.address, on: $0.key)) }
+            lines.append("Transfer \(sum(a, t))\(known ? "" : ", the token at \(to),") to \(r).")
         case .nftTransfer(let f, let r):
             lines.append("Move NFTs of \(to) from \(f.lowercased() == from.lowercased() ? "this wallet" : f) to \(r).")
         case .delegation(let d, let on):
@@ -472,7 +477,9 @@ final class Browser {
                 if let amount = terms.amountIn, let sells = terms.sells { sold = sum(amount, await token(sells)) }
                 trade = terms.exactIn ? " of \(sold) for at least \(out)" : " of at most \(sold) for \(out)"
             }
-            lines.append("Uniswap swap\(trade) paying \(r.lowercased() == from.lowercased() ? "this wallet" : r).")
+            // Tempo's exchange pays its caller, and its swap is read as one (EVMCall.decode).
+            let tempo = to.lowercased() == Tempo.exchange
+            lines.append("\(tempo ? "Tempo exchange" : "Uniswap") swap\(trade) paying \(tempo || r.lowercased() == from.lowercased() ? "this wallet" : r).")
         case .kyberSwap(let k):
             let t = await token(k.srcToken)
             lines.append("KyberSwap swap of \(sum((try? ABI.word(k.amount)) ?? Data(count: 32), t)) paying \(k.dstReceiver.lowercased() == from.lowercased() ? "this wallet" : k.dstReceiver)\(k.feeReceivers.isEmpty ? "" : ", a fee to \(k.feeReceivers.joined(separator: ", "))").")

@@ -9,7 +9,8 @@ import Security
 /// match is loaded paused. So is a list found when the key had to be made anew: a missing key used to bless whatever was
 /// there, so deleting it let a rewritten list through (the 2026-11-13 review). The first save makes the key.
 /// The exit rules of open positions (a trailing stop's distance and best price, which the guardian acts on with the
-/// trading key) are sealed the same way; ones changed outside ihatecrypto aren't carried out.
+/// trading key) are sealed the same way; ones changed outside ihatecrypto aren't carried out. So are the recurring buys,
+/// which ask to sign on the wallet that's on when they fall due: a list changed outside ihatecrypto loads paused.
 nonisolated enum TaskSeal {
     static let service = Bundle.main.bundleIdentifier.map { $0 + ".task-seal" } ?? "app.ihatecrypto.task-seal"
 
@@ -31,11 +32,17 @@ nonisolated enum TaskSeal {
 
     static func tag(_ data: Data, _ key: SymmetricKey) -> Data { Data(HMAC<SHA256>.authenticationCode(for: data, using: key)) }
 
+    /// What a list's tag is made over. Exit rules and recurring buys: the name they are saved under and their bytes, so
+    /// one wallet's sealed list copied under another wallet's name doesn't hold there. The tasks' tags were in use
+    /// before that and cover the bytes alone: tying them to the name would pause every task once.
+    /// ponytail: an older list put back with its own tag still holds (a counter in the Keychain would stop that).
+    static func sealed(_ data: Data, _ k: String) -> Data { k.hasPrefix("tasks") ? data : Data(k.utf8) + data }
+
     /// Saves the tasks' JSON with its tag.
     static func save(_ data: Data?, forKey k: String) {
         UserDefaults.standard.set(data, forKey: k)
         guard let data, let (key, _) = key() else { UserDefaults.standard.removeObject(forKey: k + ".seal"); return }
-        UserDefaults.standard.set(tag(data, key), forKey: k + ".seal")
+        UserDefaults.standard.set(tag(sealed(data, k), key), forKey: k + ".seal")
     }
 
     /// The tasks saved under `k`; `intact` false when their tag doesn't match (or is gone) after the key existed.
@@ -46,30 +53,31 @@ nonisolated enum TaskSeal {
         // A key made just now vouches for nothing already on disk.
         if made { return (data, false) }
         guard let saved = UserDefaults.standard.data(forKey: k + ".seal") else { return (data, false) }
-        return (data, tag(data, key) == saved)
+        return (data, tag(sealed(data, k), key) == saved)
     }
 
-    /// Exit rules saved before they were sealed are taken as they are once, on the first launch that seals them, for every
-    /// wallet at once; a Keychain item says it was done. After that, rules with no seal were changed outside ihatecrypto.
+    /// Exit rules and recurring buys saved before they were sealed (every wallet's key starts with `prefix`) are taken as
+    /// they are once, on the first launch that seals them, for every wallet at once; a Keychain item (`marker`, one for
+    /// each of the two) says it was done. After that, ones with no seal were changed outside ihatecrypto.
     /// Only when the Keychain says plainly that the item isn't there, and only once it is written: a Keychain that doesn't
-    /// answer, or doesn't take the item, adopts nothing (the rules then load as changed, and are set again).
+    /// answer, or doesn't take the item, adopts nothing (they then load as changed, and are set again).
     /// ponytail: a program that can delete this app's Keychain items can ask for that once again; the Keychain is the
     /// only place here another program can't simply write. Drop the adoption a few releases after the one that first seals them.
-    static func adoptExitRules() {
-        let done: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "exit-rules-sealed"]
+    static func adopt(_ prefix: String, marker: String) {
+        let done: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: marker]
         guard SecItemCopyMatching(done as CFDictionary, nil) == errSecItemNotFound, let (key, _) = key() else { return }
         var add = done
         add[kSecValueData as String] = Data([1])
         guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return }
-        for (k, value) in UserDefaults.standard.dictionaryRepresentation() where k.hasPrefix("exitRules") && !k.hasSuffix(".seal") {
-            if let data = value as? Data { UserDefaults.standard.set(tag(data, key), forKey: k + ".seal") }
+        for (k, value) in UserDefaults.standard.dictionaryRepresentation() where k.hasPrefix(prefix) && !k.hasSuffix(".seal") {
+            if let data = value as? Data { UserDefaults.standard.set(tag(sealed(data, k), key), forKey: k + ".seal") }
         }
     }
 
     /// The exit rules under `k`: none when they were changed outside ihatecrypto (`tampered`), so the guardian moves no
     /// stop by them; the stops already on the exchange stay where they are.
     static func exitRules(forKey k: String) -> (rules: [String: ExitRules], tampered: Bool) {
-        adoptExitRules()
+        adopt("exitRules", marker: "exit-rules-bound")
         let (data, intact) = load(forKey: k)
         let rules = data.flatMap { try? JSONDecoder().decode([String: ExitRules].self, from: $0) } ?? [:]
         return intact ? (rules, false) : ([:], !rules.isEmpty)
@@ -82,5 +90,21 @@ nonisolated enum TaskSeal {
         // The prices Confirmed in them too: the Schedule doesn't show them, so one written in could pass unseen.
         if !intact { for i in tasks.indices { tasks[i].paused = true; tasks[i].prices = nil } }
         return (tasks, !intact && !tasks.isEmpty)
+    }
+
+    /// The recurring buys under `k`. They loaded from the preferences as they were, so a buy written in there asked to
+    /// sign as the user's own when it fell due (the 2026-11-13 review).
+    static func schedules(forKey k: String) -> (schedules: [Schedule], tampered: Bool) {
+        adopt("schedules", marker: "schedules-bound")
+        let (data, intact) = load(forKey: k)
+        return schedules(data, intact: intact)
+    }
+
+    /// The saved buys, every one paused when their seal didn't hold. Paused, not dropped: the Schedule shows all there is
+    /// to a buy (its coin, amount and period), so the user can tell their own and switch those on.
+    static func schedules(_ data: Data?, intact: Bool) -> (schedules: [Schedule], tampered: Bool) {
+        var buys = data.flatMap { try? JSONDecoder().decode([Schedule].self, from: $0) } ?? []
+        if !intact { for i in buys.indices { buys[i].paused = true } }
+        return (buys, !intact && !buys.isEmpty)
     }
 }

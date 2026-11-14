@@ -25,6 +25,9 @@ public struct RelayOrder: Sendable, Equatable {
         "bridge \(Self.amount(inputAmount, of: inputCurrency, on: inputChain)) from \(inputChain) through Relay: \(pays)"
     }
 
+    /// «1 USDC from arbitrum»: what the order takes, for the prompt of the deposit that names it.
+    public var takes: String { "\(Self.amount(inputAmount, of: inputCurrency, on: inputChain)) from \(inputChain)" }
+
     /// «at least 4.878026 USDC to 0x9858… on base»: what the order pays out, for the prompt of the deposit that names
     /// it. The card's «you get» is the app's word, this is the order's own, and the deposit's prompt is the one place a
     /// person sees it before the money is in Relay's depository (the 2026-11-10 review).
@@ -35,6 +38,8 @@ public struct RelayOrder: Sendable, Equatable {
     /// An amount in the order's words: dollars where the coin is the network's dollar, else its smallest units and the
     /// coin as the order writes it — an amount on the prompt, never none.
     static func amount(_ units: String, of currency: String, on chain: String) -> String {
+        // Solana's own coin, which an order names by the System program's address.
+        if chain == "solana", currency == "11111111111111111111111111111111", let sol = dollars(units, 9) { return "\(NSDecimalNumber(decimal: sol).stringValue) SOL" }
         guard let coin = dollarCoins[chain], coin.currency == currency, let n = dollars(units, coin.decimals) else {
             return "\(units) units of \(currency)"
         }
@@ -54,6 +59,19 @@ public struct RelayOrder: Sendable, Equatable {
         "optimism": (EVMRPC.optimismUSDC, 6), "polygon": (EVMRPC.polygonUSDC, 6), "bnb": (EVMRPC.bnbUSDC, 18),
         "hyperevm": (EVMRPC.hyperevmUSDC, 6), "robinhood": (EVMRPC.robinhoodUSDG, 6), "tempo": (EVMRPC.tempoUSDC, 6),
     ]
+
+    /// Why `units` of `coin` (a token's address or mint, «SOL» for Solana's own coin) aren't this order's input, or nil.
+    /// Relay's own deposits carry exactly the order's coin and amount (live quotes of 2026-11-13: four from Solana, three
+    /// by signature). More, or another coin, would sit in the depository under the order's refunds while the prompt
+    /// names only what the order pays (the 2026-11-13 review).
+    public func inputProblem(coin: String, units: Decimal) -> String? {
+        let takes = inputCurrency == "11111111111111111111111111111111" ? "SOL" : inputCurrency
+        guard coin == takes else { return "The Relay deposit is in \(coin), the order it names takes \(takes)." }
+        guard units == Decimal(string: inputAmount) else {
+            return "The Relay deposit is \(NSDecimalNumber(decimal: units).stringValue) units, the order it names takes \(inputAmount)."
+        }
+        return nil
+    }
 
     /// The least the order pays out, in dollars: nil when what it pays isn't the output network's dollar. The order
     /// names its own amounts and nothing here prices a coin, so only dollars against dollars can be compared: a task's

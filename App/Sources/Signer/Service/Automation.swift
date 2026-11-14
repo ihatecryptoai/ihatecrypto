@@ -111,6 +111,9 @@ enum Automation {
         case .approve(let s, let a), .increaseAllowance(let s, let a): add(token, units(a), decimals, s, "a right to \(units(a)) units of \(token.prefix(8))…")
         case .permit2Approve(let t, let s, let a, _): add(t.lowercased(), units(a), dollarDecimals(t), s, "a right to \(units(a)) units of \(t.prefix(8))…")
         case .cctpBurn(let r, _, let a), .oftSend(let r, _, let a, _, _): add(token, units(a), decimals, r, "\(units(a)) units sent across")
+        // An NFT needs no right given first and has no dollars to count: to anyone but the person's own wallets it's theirs
+        // to allow (it went uncounted and unasked: the 2026-11-13 review).
+        case .nftTransfer(_, let r): add(token, 0, nil, r, "NFTs of \(token)")
         default: break
         }
     }

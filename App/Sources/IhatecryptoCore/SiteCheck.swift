@@ -9,7 +9,9 @@ public enum SiteCheck {
     public enum Verdict: Equatable, Sendable { case known, lookalike(String), unknown, local }
 
     public static func check(host: String) -> Verdict {
-        let h = host.lowercased()
+        // By its labels, as `listed` reads it (the 2026-11-13 review): «jup.ag.» is jup.ag's own server and read as a fake
+        // of it, and the dot counted as a letter, so a fake two letters off a known address read as an unfamiliar site.
+        let h = host.lowercased().split(separator: ".").joined(separator: ".")
         if h.isEmpty { return .local }
         if known.contains(where: { h == $0 || h.hasSuffix("." + $0) }) { return .known }
         let base = h.split(separator: ".").suffix(2).joined(separator: ".")
@@ -28,7 +30,8 @@ public enum SiteCheck {
     static func brand(_ domain: String) -> String { String(domain.split(separator: ".").dropLast().last ?? "") }
 
     /// On MetaMask's phishing list (eth-phishing-detect): the host or any domain above it is blocked, unless the list's
-    /// allowlist names one of them («evil.github.io» is blocked by its own entry, not by github.io).
+    /// allowlist names one of them («evil.github.io» is blocked by its own entry, not by github.io). Capitals and a
+    /// trailing dot («evil.com.») change nothing: `split` drops the empty label.
     public static func listed(host: String, blocked: Set<String>, allowed: Set<String>) -> Bool {
         let parts = host.lowercased().split(separator: ".")
         let domains = (0..<max(parts.count - 1, 0)).map { parts[$0...].joined(separator: ".") }

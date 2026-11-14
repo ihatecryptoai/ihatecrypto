@@ -139,6 +139,10 @@ enum SeedStore {
 
     /// The recipients and coins of the request being signed (`Signer.moveScope`); nil: one that names none.
     @TaskLocal static var scope: Set<String>?
+    /// The request being handled (Signer.handle), and the one whose prompt opened the session (under `lock`): the app
+    /// talks over several connections, and a status request ending beside a prompt must not end that prompt's session.
+    @TaskLocal static var request: UUID?
+    nonisolated(unsafe) private static var opener: UUID?
 
     static var sessionLength: Int {
         let chosen = Signer.defaults.integer(forKey: "sessionLength")
@@ -164,7 +168,12 @@ enum SeedStore {
             // or by the passcode typed for this very request. A site's text takes only the second: after a move's
             // prompt that ended in a refusal, the text signed next would have gone unseen.
             let text = wanted.contains { $0.hasPrefix("text:") }
-            if let s = alive, s.scope.map(wanted.isSubset) ?? (s.byCode || !text) {
+            // A signature that names nothing (a Relay order's link to a Hyperliquid withdrawal, a move between the person's
+            // own Hyperliquid balances) fits no session another signature used: the empty set is inside any scope, so
+            // each of those went unasked after any Touch ID (the 2026-11-13 review).
+            // One no signature has used is its opener's alone: another request, on another connection, could reach here
+            // while the opener sat on its second prompt, and sign in it unasked.
+            if let s = alive, s.scope.map({ !wanted.isEmpty && wanted.isSubset(of: $0) }) ?? (s.byCode || !text && opener == request) {
                 if s.scope == nil { session?.scope = wanted }
                 return (s.context, s.byCode)
             }
@@ -307,7 +316,7 @@ enum SeedStore {
         if let outcome { throw WalletError("Not confirmed (\(outcome.localizedDescription)): nothing was changed.") }
         // The automation wallet's prompts (`within`) leave no session: its own signature needs none, and an open one would
         // let the main wallet's next signature go unasked (the 2026-11-08 review).
-        if within == nil { lock.withLock { session = (context, Date(), false, nil) } }
+        if within == nil { lock.withLock { session = (context, Date(), false, nil); opener = request } }
     }
 
     /// The context the last `confirm` opened, while its session lasts.
@@ -333,6 +342,16 @@ enum SeedStore {
     static func endSession() {
         lock.withLock {
             session?.context.invalidate()
+            session = nil
+        }
+    }
+
+    /// Ends a session no signature has used, at the end of the request whose prompt opened it (Signer.handle). The
+    /// passcode's stays: typed for a request, it is used by that request sent again.
+    static func endUnused() {
+        lock.withLock {
+            guard let s = session, s.scope == nil, !s.byCode, opener == request else { return }
+            s.context.invalidate()
             session = nil
         }
     }
@@ -549,7 +568,8 @@ enum CodeStore {
 enum RecipientStore {
     static let service = "app.ihatecrypto.recipients"
     /// The two lists: money recipients, and contracts whose calls the signer can't read, allowed as calls only — a call
-    /// allowed once doesn't make the contract a place money or a spending right may go (the 2026-10-22 review).
+    /// allowed doesn't make the contract a place money or a spending right may go (the 2026-10-22 review). Only the
+    /// automation wallet's calls are kept now: a person is asked about an unread call every time (Signer.approve).
     static let money = "approved", calls = "calls"
     /// Per wallet: an address approved for one wallet isn't approved for another.
     static func query(_ id: String, _ list: String = money) -> [String: Any] {
@@ -582,7 +602,7 @@ enum RecipientStore {
     }
 
     /// EVM addresses compare without case; Solana's base58 is case-sensitive.
-    static func key(_ address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
+    static func key(_ address: String) -> String { address.hasPrefix("0x") || address.hasPrefix("0X") ? address.lowercased() : address }
 
     static func delete(id: String) { for list in [money, calls] { SecItemDelete(query(id, list) as CFDictionary) } }
 }

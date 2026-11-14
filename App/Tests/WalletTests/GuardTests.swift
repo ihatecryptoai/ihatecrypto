@@ -225,6 +225,13 @@ private let policy = SolanaPolicy(owner: me, recipients: [deposit])
     #expect(m.staticKeys.contains(theirs) && !m.staticKeys.contains(classic))
     let owners = [mine: me, theirs: deposit]
     #expect(SolanaGuard.check(m, accounts: m.staticKeys, policy: policy, tokenOwners: owners).ok)
+    // A Token-2022 token may keep a fee out of a transfer: the prompt's line says the payee may get less. The classic
+    // program has no such thing.
+    let note = "less any fee the token keeps for itself"
+    #expect(SolanaGuard.check(m, accounts: m.staticKeys, policy: policy, tokenOwners: owners).checks.contains { $0.contains("→") && $0.contains(note) })
+    let plain = try SolanaMessage.parse(message: SPL.transferMessage(payer: me, to: deposit, mint: mint, amount: 1_000_000, decimals: 6, blockhash: me))
+    let plainOwners = [try SPL.associatedAccount(owner: me, mint: mint): me, classic: deposit]
+    #expect(SolanaGuard.check(plain, accounts: plain.staticKeys, policy: policy, tokenOwners: plainOwners).checks.contains { $0.contains("→") && !$0.contains(note) })
     let elsewhere = SolanaGuard.check(m, accounts: m.staticKeys, policy: SolanaPolicy(owner: me, recipients: []), tokenOwners: [mine: me])
     #expect(!elsewhere.ok)
     let (approve, accounts) = try message([me, mine, scam, program], [(3, [1, 2, 0], [4] + withUnsafeBytes(of: UInt64(5).littleEndian, Array.init))])
@@ -384,6 +391,8 @@ private let kaminoDeposit = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     }
     let real = try verdict(wire)
     #expect(real.ok, "\(real.problems)")
+    // The deposit's amount is on the prompt (a line with «→»), read from the instruction (the 2026-11-13 review).
+    #expect(real.checks.contains("Kamino deposit of 1 USDC → your own position."), "\(real.checks)")
     // Someone else's obligation (another market's, or another owner's) in its place.
     let obligation = try Base58.decode("EnxJnydiZPsyQx2ZmXdg7vfggsRLQWpogz19cP6R9SPb")
     let at = try #require(wire.range(of: obligation))
@@ -545,6 +554,8 @@ private let ondoFill = "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
     let lend = try #require(Data(base64Encoded: jupiterLendDeposit)), order = try #require(Data(base64Encoded: jupiterDCAOrder))
     #expect(try verdict(lend).checks.contains("Jupiter Lend deposit of 1 USDC: the shares → your account. The balance simulation checks the amount."))
     #expect(try verdict(order).checks.contains("Jupiter DCA order of yours: 100 USDC → the order, 50 USDC a swap, and what it buys is yours."))
+    // An order's opening asks afresh like a swap, whatever session is open; a Lend deposit doesn't (the 2026-11-13 review).
+    #expect(try verdict(order).swaps && !verdict(lend).swaps)
     // u64.max deposits the whole balance, and a mint's number counts shares: neither reads as that many USDC.
     let kind = Data([0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6]), mintKind = Data([0x33, 0x39, 0xe1, 0x2f, 0xb6, 0x92, 0x89, 0xa6])
     var all = lend, mint = lend

@@ -39,7 +39,9 @@ extension Workspace {
                 reply("DexScreener doesn’t know this token\(chain.map { " on \($0)" } ?? ""): no pool trades it, so there’s no chart.", note: note)
                 return
             }
-            reply("\(info.name) (\(info.symbol)) is on the canvas: \(info.priceUSD.map(tokenPrice) ?? "no price")"
+            // By its ticker alone: the reply stays in the chat the model reads, and a listing's name is its lister's
+            // sentence (the card shows it, and tells the model through the guard: the 2026-11-13 review).
+            reply("\(info.symbol) is on the canvas: \(info.priceUSD.map(tokenPrice) ?? "no price")"
                   + (info.change24h.map { ", \(signedPct($0)) today" } ?? "") + ".", note: note)
         case .unfavorite(let symbol):
             let before = favoriteTokens.count
@@ -68,7 +70,7 @@ extension Workspace {
             tokenInfo[token.id] = info
             await loadTokenBalances()
             let moved = info.change24h.map { ", \(signedPct($0)) today" } ?? ""
-            reply("⭐ \(token.name) (\(token.symbol)) on \(token.chainTitle) is in your favorites: \(info.priceUSD.map(tokenPrice) ?? "no price")\(moved)"
+            reply("⭐ \(token.symbol) on \(token.chainTitle) is in your favorites: \(info.priceUSD.map(tokenPrice) ?? "no price")\(moved)"
                   + (info.liquidityUSD.map { ", liquidity \(Fmt.usd(($0 / 1_000_000).rounded(1, .plain)))M" } ?? "")
                   + (chain != nil && chain != info.chain ? ". It trades on \(info.chain), not \(chain!)." : ".")
                   + " It’s a contract, not an address to send money to.", note: note)
@@ -120,8 +122,9 @@ extension Workspace {
         }
         // Safe search on: Jupiter-verified tokens only.
         guard !safeSearch || t.verified else {
-            reply(say("Safe search is on, and Jupiter hasn’t verified \(t.name) (\(t.symbol)), so ihatecrypto won’t buy it. To trade an unverified token by its mint, turn Safe search off in Settings › General.",
-                      "Включён Safe search, а Jupiter не проверял \(t.name) (\(t.symbol)), поэтому ihatecrypto его не купит. Чтобы торговать непроверенным токеном по mint-адресу, выключи Safe search в Settings › General."), note: note)
+            // By the ticker alone, as the favorites' replies: an unverified token's name is its lister's sentence.
+            reply(say("Safe search is on, and Jupiter hasn’t verified \(t.symbol), so ihatecrypto won’t buy it. To trade an unverified token by its mint, turn Safe search off in Settings › General.",
+                      "Включён Safe search, а Jupiter не проверял \(t.symbol), поэтому ihatecrypto его не купит. Чтобы торговать непроверенным токеном по mint-адресу, выключи Safe search в Settings › General."), note: note)
             return nil
         }
         // Ondo's own tokens: not the freeze, mint and thin-pool warnings, which an issuer's token always has (its market
@@ -132,7 +135,7 @@ extension Workspace {
         let warnings = ondo ? [] : TokenResearch.extensionWarnings(account, russian: modulesRussian) + t.warnings(russian: modulesRussian)
         // The card's in English, as cards are.
         tokenWarnings[mint] = ondo ? nil : TokenResearch.extensionWarnings(account) + t.warnings()
-        if !warnings.isEmpty { reply("⚠ \(t.name) (\(t.symbol)): " + warnings.joined(separator: ", ") + ".", note: note) }
+        if !warnings.isEmpty { reply("⚠ \(t.symbol): " + warnings.joined(separator: ", ") + ".", note: note) }
         return SpotAsset(symbol: t.symbol, mint: mint, decimals: t.decimals, token2022: t.token2022, ondo: ondo)
     }
 

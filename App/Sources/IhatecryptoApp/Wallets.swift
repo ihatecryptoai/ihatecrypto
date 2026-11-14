@@ -56,7 +56,10 @@ extension Workspace {
         protocolsReadAt = nil
         updatedAt = nil
         holdingsLoaded = false
-        schedules = UserDefaults.standard.data(forKey: Self.scoped("schedules", id)).flatMap { try? JSONDecoder().decode([Schedule].self, from: $0) } ?? []
+        // Through the seal, as at launch: read raw here, another wallet's rewritten list was run and sealed on the switch.
+        let buys = TaskSeal.schedules(forKey: Self.scoped("schedules", id))
+        schedules = buys.schedules
+        if buys.tampered { schedulesTampered = true }
         let loaded = TaskSeal.tasks(forKey: Self.scoped("tasks", id))
         tasks = loaded.tasks
         if loaded.tampered { tasksTampered = true }
@@ -86,7 +89,10 @@ extension Workspace {
             costBasis = [:]
         }
         lastBalance[id] = nil
-        for key in ["schedules", "tasks", "exitRules"] { UserDefaults.standard.removeObject(forKey: Self.scoped(key, id)) }
+        for key in ["schedules", "tasks", "exitRules"] {
+            UserDefaults.standard.removeObject(forKey: Self.scoped(key, id))
+            UserDefaults.standard.removeObject(forKey: Self.scoped(key, id) + ".seal")
+        }
         for file in ["equity", "pnlmarks", "costbasis"] { LocalStore.remove(Self.scoped(file, id) + ".json") }
     }
 

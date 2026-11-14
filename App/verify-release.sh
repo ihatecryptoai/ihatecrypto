@@ -5,7 +5,8 @@
 #   ./verify-release.sh 0.7.0 <.dmg|.tar.xz|.app>  a copy you have (the update archive from updates.ihatecrypto.ai, an
 #                                                  installed app)
 # Needs the tag (git fetch --tags) and the Xcode the release was built with (another Xcode in /Applications is picked
-# by itself). XcodeGen is downloaded if yours isn't the release's. Takes about 5 minutes; nothing is installed or run.
+# by itself). XcodeGen is downloaded if yours isn't the release's, and must be the file Tools/xcodegen.sha256 names.
+# Takes about 5 minutes; nothing is installed or run.
 set -e
 version=${1#v}; given=${2:+${2:A}}
 [[ -n $version ]] || { echo "usage: ./verify-release.sh <version> [<.dmg|.tar.xz|.app>]"; exit 1; }
@@ -42,15 +43,28 @@ if [[ $(xcodebuild -version | awk '/Build version/ { print $3 }') != $xcode ]]; 
   done
   [[ -n $DEVELOPER_DIR ]] || { echo "the release was built with Xcode build $xcode: install that Xcode (xcodes.app or developer.apple.com)"; exit 1; }
 fi
+# XcodeGenVersion is the checked app's own word, and what it names runs here before anything is compared. So it must be
+# a version number, and a download must be the bytes Tools/xcodegen.sha256 (this checkout's) holds for that version, or
+# nothing from it runs (the 2026-11-13 review: the text went into the URL as it came, and the zip ran unchecked).
+# An xcodegen of that version already on this Mac is used as it is: it's yours to trust, and nothing here hashes it.
 xcodegen=$(key XcodeGenVersion)
+[[ $xcodegen =~ '^[0-9]+(\.[0-9]+)+$' ]] || { echo "the app's XcodeGenVersion isn't a version number: release.sh didn't write that"; exit 1; }
 if [[ $(xcodegen --version 2> /dev/null) != "Version: $xcodegen" ]]; then
+  pin=$(awk -v v="$xcodegen" '$1 "" == v "" { print $2 }' Tools/xcodegen.sha256)
+  [[ -n $pin ]] || { echo "no checksum for XcodeGen $xcodegen: add it to Tools/xcodegen.sha256 (the file says how), then run this again"; exit 1; }
   curl -fsSL -o $root/xcodegen.zip "https://github.com/yonaskolb/XcodeGen/releases/download/$xcodegen/xcodegen.zip"
+  [[ $(shasum -a 256 $root/xcodegen.zip | cut -c1-64) == "$pin" ]] \
+    || { echo "the XcodeGen $xcodegen that came down isn't the file Tools/xcodegen.sha256 names: nothing from it was run"; exit 1; }
   ditto -x -k $root/xcodegen.zip $root/tools
   export PATH=$root/tools/xcodegen/bin:$PATH
+  [[ $(xcodegen --version 2> /dev/null) == "Version: $xcodegen" ]] || { echo "the downloaded XcodeGen doesn't answer as $xcodegen"; exit 1; }
 fi
 
-echo "· building v$version (build $(key CFBundleVersion)) with Xcode $xcode and XcodeGen $xcodegen, unsigned"
-$root/src/App/Tools/build-release.sh $version $(key CFBundleVersion) "$(key SUFeedURL)" $root/built.xcarchive --unsigned
+# The build number is the checked app's word too: digits only, so it can't bring build-release.sh arguments of its own.
+build=$(key CFBundleVersion)
+[[ $build =~ '^[0-9]+$' ]] || { echo "the app's build number isn't a number: release.sh didn't write that"; exit 1; }
+echo "· building v$version (build $build) with Xcode $xcode and XcodeGen $xcodegen, unsigned"
+$root/src/App/Tools/build-release.sh $version $build "$(key SUFeedURL)" $root/built.xcarchive --unsigned
 
 echo "· comparing"
 # Each Mach-O file loses its signature; the signatures' own files go, only where codesign and stapler put them: a bundle's

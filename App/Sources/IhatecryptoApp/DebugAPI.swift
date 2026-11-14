@@ -52,9 +52,11 @@ final class DebugAPI {
     private var token = ""
     private weak var ws: Workspace?
     /// Canvases a test made through /reset and /send: /restore deletes them, so tests leave no trace in the list.
-    /// Kept across launches: another session may relaunch the app between a test and its /restore.
-    private var testCanvases = Set((UserDefaults.standard.stringArray(forKey: "debugTestCanvases") ?? []).compactMap(UUID.init(uuidString:))) {
-        didSet { UserDefaults.standard.set(testCanvases.map(\.uuidString), forKey: "debugTestCanvases") }
+    /// Kept across launches: another session may relaunch the app between a test and its /restore. In a file beside the
+    /// token, not in the preferences (the 2026-11-13 review): any program can write those (`defaults write`), and /restore
+    /// deleted whatever canvas or task they named. A program that can write this folder has the canvases' own file.
+    private var testCanvases = DebugAPI.kept("debug-test-canvases") {
+        didSet { Self.keep(testCanvases, "debug-test-canvases") }
     }
     /// /reset opened a fresh canvas: the first /send's canvas is a test canvas.
     private var freshCanvas = false
@@ -64,13 +66,27 @@ final class DebugAPI {
     private var testFolders: Set<String> = []
     /// Scheduled tasks a test message made («every month on the 1st: …»): /reset and /restore cancel them, or they'd
     /// run for real on their day. Kept across launches, like the canvases.
-    private var testTasks = Set((UserDefaults.standard.stringArray(forKey: "debugTestTasks") ?? []).compactMap(UUID.init(uuidString:))) {
-        didSet { UserDefaults.standard.set(testTasks.map(\.uuidString), forKey: "debugTestTasks") }
+    private var testTasks = DebugAPI.kept("debug-test-tasks") {
+        didSet { Self.keep(testTasks, "debug-test-tasks") }
+    }
+
+    /// The ids in one of the two files, one a line. No file: none.
+    private static func kept(_ name: String) -> Set<UUID> {
+        Set(((try? String(contentsOf: LocalStore.url(name), encoding: .utf8)) ?? "").split(separator: "\n").compactMap { UUID(uuidString: String($0)) })
+    }
+
+    /// Written like the token: owner-only, in the copy's data folder.
+    private static func keep(_ ids: Set<UUID>, _ name: String) {
+        let file = LocalStore.url(name)
+        try? FileManager.default.removeItem(at: file)
+        FileManager.default.createFile(atPath: file.path, contents: Data(ids.map(\.uuidString).joined(separator: "\n").utf8), attributes: [.posixPermissions: 0o600])
     }
 
     func start(_ ws: Workspace) {
         guard listener == nil, let port = NWEndpoint.Port(rawValue: Self.port) else { return }
         self.ws = ws
+        // What the preferences still name from before can't be trusted: dropped, not carried over.
+        for key in ["debugTestCanvases", "debugTestTasks"] { UserDefaults.standard.removeObject(forKey: key) }
         token = (0..<24).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         let file = LocalStore.url("debug-token")
         try? FileManager.default.removeItem(at: file)

@@ -17,11 +17,14 @@ let package = Package(
         .library(name: "IhatecryptoHelperKit", targets: ["HelperAPI", "LLMClaudeCode"]),
     ],
     dependencies: [
+        // Both by revision, the version beside it: a tag can be moved upstream, and the rebuild that checks a release
+        // (verify-release.sh) would follow it (the 2026-11-13 review). Sparkle's binary comes by the checksum in its
+        // Package.swift at that revision. A new version: its tag's commit here and in Xcode/project.yml.
         // libsecp256k1 from Bitcoin Core: secp256k1 keys and recoverable ECDSA for EVM and Hyperliquid signatures.
-        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.24.0"),
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", revision: "bcd6dd8e615ce243eab7097f213c8c4b39305a2e"),  // 0.24.0
         // Updates for the copy from the site (Updater.swift). Declared here too, so `swift build` and the Xcode
         // project resolve the same packages and stop rewriting Package.resolved over each other.
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", revision: "ab7d71291238df6e0492143b120c9b696a35f603"),  // 2.10.1
     ],
     targets: [
         // Model access: one protocol in Core, one folder per way to connect, Catalog lists them all.

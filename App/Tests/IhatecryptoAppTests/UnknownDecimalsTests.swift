@@ -103,6 +103,16 @@ nonisolated final class DecimalsNode: URLProtocol {
         #expect(!r.problems.contains { $0.contains("decimals") }, "\(r.problems)")
     }
 
+    /// A token names itself: the window names the contract of one ihatecrypto doesn't know at that address, whole, so a
+    /// look-alike «USDC» doesn't read as the real one (the 2026-11-13 review).
+    @Test func aTransferNamesTheContractOfATokenIhatecryptoDoesntKnow() async throws {
+        let fake = "0x1111111111111111111111111111111111111111", payee = spender.lowercased()
+        let real = try await review(decimals: "6", data: ERC20.transfer(to: spender, amount: 5_000_000))
+        #expect(real.lines[0] == "Transfer 5 USDC to \(payee).", "\(real.lines)")
+        let alike = try await review(decimals: "6", to: fake, data: ERC20.transfer(to: spender, amount: 5_000_000))
+        #expect(alike.lines[0] == "Transfer 5 USDC, the token at \(fake), to \(payee).", "\(alike.lines)")
+    }
+
     /// The coin has no decimals() to ask: Uniswap v4's 0x0 (and KyberSwap's 0xeeee…) is ETH, 18, not a refusal.
     @Test func aSwapOfTheCoinIsntAskedForDecimals() async throws {
         let key = UniswapV4.PoolKey(currency0: UniswapV4.native, currency1: usdc, fee: 500, tickSpacing: 10, hooks: UniswapV4.native)

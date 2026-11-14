@@ -172,9 +172,21 @@ public enum InjectionGuard {
     /// with the chat), an order to move everything somewhere among them (moveAll); the classifier adds what is said in
     /// other words. Whatever is decided here, an address a lookup finds never becomes a recipient.
     public static func lookupProblem(_ text: String, source: String, classifier: (any TextClassifier)?) async -> String? {
-        let lower = text.lowercased()
-        let commands = InjectionHeuristics.findings(text).commands + InjectionHeuristics.all(InjectionHeuristics.newRole, in: lower).prefix(1)
-            + InjectionHeuristics.all(InjectionHeuristics.moveAll, in: lower).prefix(1).map { $0.trimmingCharacters(in: .punctuationCharacters.union(.whitespacesAndNewlines)) }
+        // A sentence written into a link or a hyphenated name has no spaces for the rules to read
+        // («ignore-previous-instructions.x.io», «x.io/you-are-now-…»): every word with such a separator inside it is read
+        // once more, the separators as spaces, each word a sentence of its own: a phrase must sit inside one word, and
+        // the rules' own spaces cross a bare line break («…sort=new» and, lines later, «instructions.pdf» read as «new
+        // instructions»). A word whose spaces were written as %20 counts too.
+        let joined = /[-_+\/.=&?:,~|*!;@]/
+        let links = text.split(whereSeparator: \.isWhitespace).map { String($0).removingPercentEncoding ?? String($0) }
+            .filter { $0.dropFirst().dropLast().contains(joined) || $0.contains(where: \.isWhitespace) }
+            .map { $0.replacing(joined, with: " ") }.joined(separator: " .\n")
+        var commands: [String] = []
+        for read in links.isEmpty ? [text] : [text, links] {
+            let lower = read.lowercased()
+            commands += InjectionHeuristics.findings(read).commands + InjectionHeuristics.all(InjectionHeuristics.newRole, in: lower).prefix(1)
+                + InjectionHeuristics.all(InjectionHeuristics.moveAll, in: lower).prefix(1).map { $0.trimmingCharacters(in: .punctuationCharacters.union(.whitespacesAndNewlines)) }
+        }
         if !commands.isEmpty { return "it has commands for the assistant: “\(commands.joined(separator: "”, “"))”" }
         guard let classifier, let (label, confidence) = try? await classifier.classify(text, source: source), label != "data", confidence >= threshold else { return nil }
         let percent = Int(confidence * 100)

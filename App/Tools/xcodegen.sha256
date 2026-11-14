@@ -1,0 +1,11 @@
+# The XcodeGen versions a release may be built with: the version, then the SHA-256 of its xcodegen.zip on GitHub
+# (github.com/yonaskolb/XcodeGen/releases). Tools/build-release.sh refuses a version that isn't here, and
+# verify-release.sh runs a downloaded XcodeGen only with this checksum, so a file replaced upstream can't get into the
+# rebuild that checks a release (the 2026-11-13 review).
+# What it holds: the download to the bytes we saw the day the line was added. It isn't XcodeGen's authors vouching for
+# them, and it says nothing about the xcodegen installed on the Mac that makes a release (build-release.sh).
+# A new version, before the first release built with it:
+#   curl -fsSL https://github.com/yonaskolb/XcodeGen/releases/download/<version>/xcodegen.zip | shasum -a 256
+# The same value stands as the file's digest on the release's page. Add the line and commit. Lines stay: old releases
+# are checked with them.
+2.44.1 a2e905fb68446e9bb4008cdfe2e13e3f176d0cbcca828b71770f8e53fca91b73

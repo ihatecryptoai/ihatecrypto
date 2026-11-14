@@ -152,6 +152,12 @@ private func multicall(calls: [RelayMulticallPermit.Call]? = nil, from: String =
                                          relayer: relayRelayer, refundTo: stranger, nftRecipient: relayRelayer, metadata: Data(),
                                          calls: [.init(target: relayRouter32, allowFailure: false, value: 0, callData: try depositCall())])
     #expect(elsewhere.refusal(owner: hardhat, now: now)?.contains("leftovers") == true)
+    // A pair whose dollar half can't be built is refused outright, before anyone is asked about its payee: it used to
+    // pass these checks unread and throw after that prompt.
+    let unbuilt = RelayMulticallPermit(chainId: 8453, token: EVMRPC.baseUSDC, from: hardhat, value: 1_000_000, validBefore: 1_792_716_428,
+                                       relayer: relayRelayer, refundTo: relayRelayer, nftRecipient: "not an address", metadata: Data(),
+                                       calls: [.init(target: relayRouter32, allowFailure: false, value: 0, callData: try depositCall())])
+    #expect(unbuilt.refusal(owner: hardhat, now: now)?.contains("can't be read") == true)
 }
 
 @Test func relaysV32StepIsReadInOrder() throws {

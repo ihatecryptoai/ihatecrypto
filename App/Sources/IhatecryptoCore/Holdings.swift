@@ -41,9 +41,12 @@ public struct Holding: Sendable, Identifiable, Equatable {
 
     /// A token's ticker or name as anyone deploying it wrote it, made fit for the chat's model and the screen (research
     /// E-9): no line breaks or invisible characters (AddressCheck.hidden), at most `max` characters — a «symbol» can be a
-    /// paragraph of instructions.
+    /// paragraph of instructions. A line break becomes a space: dropped, it joined the words on its two sides, and
+    /// «ignore previous⏎instructions» read as one word the local rules don't know (the 2026-11-13 review).
     public static func plain(_ text: String, max: Int = 16) -> String {
-        let s = String(String.UnicodeScalarView(text.unicodeScalars.filter { !AddressCheck.hidden($0) })).trimmingCharacters(in: .whitespaces)
+        // Scalars are cut too: one letter under thousands of combining marks is a single character, of any length.
+        let spaced = text.unicodeScalars.prefix(max * 8).map { CharacterSet.newlines.contains($0) || $0 == "\t" ? " " : $0 }
+        let s = String(String.UnicodeScalarView(spaced.filter { !AddressCheck.hidden($0) }.prefix(max * 4))).trimmingCharacters(in: .whitespaces)
         return s.count > max ? s.prefix(max - 1) + "…" : s
     }
     /// Airdropped look-alikes are unverified with no real pool behind them: they stay out of sight until the user

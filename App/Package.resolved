@@ -1,13 +1,12 @@
 {
-  "originHash" : "2ed676053d512847498159bd37953366bcf006f06c42b1fd72b040c9c4213336",
+  "originHash" : "6b43eda6c6f4e08694b2f4ceeff75641567761a3a83f39cb72be067cdb30b2e3",
   "pins" : [
     {
       "identity" : "sparkle",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sparkle-project/Sparkle",
       "state" : {
-        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603",
-        "version" : "2.10.1"
+        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603"
       }
     },
     {
@@ -15,8 +14,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/21-DOT-DEV/swift-secp256k1",
       "state" : {
-        "revision" : "bcd6dd8e615ce243eab7097f213c8c4b39305a2e",
-        "version" : "0.24.0"
+        "revision" : "bcd6dd8e615ce243eab7097f213c8c4b39305a2e"
       }
     }
   ],

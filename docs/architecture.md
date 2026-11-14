@@ -67,7 +67,8 @@ agent of a copy from before the sandbox. Keep running is an SMAppService agent: 
   published DMG file by file, code signatures taken off. The Verify release workflow runs it for every release.
 - Signer self-test on the public test phrase, from `App/`:
   `open -W --stdout /dev/stdout ".build/xcode/Build/Products/Debug/ihatecrypto Dev.app" --args -signerSelfTest YES`.
-  Launch flags work only in Debug builds. Use `open`: launched directly, the app can't reach its XPC service.
+  Launch flags that sign or drive the chat work only in Debug builds (`-openPlace` and `-settingsTab`, which only open
+  a card or a Settings tab, work in a release too). Use `open`: launched directly, the app can't reach its XPC service.
 
 ## From a message to a move
 

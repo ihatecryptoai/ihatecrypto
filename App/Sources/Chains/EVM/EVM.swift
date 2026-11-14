@@ -809,8 +809,17 @@ public enum EVMCall: Equatable, Sendable {
         case "c04a8a10": if let d = address(0), let a = word(1) { return .delegation(to: d, granted: a.contains { $0 != 0 }) }
         // Morpho Blue's setAuthorization, Compound III's allow and ERC-6909's setOperator: (address, bool).
         case "eecea000", "110496e5", "558a7297": if let d = address(0), let b = word(1) { return .delegation(to: d, granted: b.contains { $0 != 0 }) }
-        case "d0e30db0": return .wrap
-        case "2e1a7d4d": if let a = word(0) { return .unwrap(amount: a) }
+        // WETH9's deposit() and withdraw(amount), exactly as long as they are: with anything after them the call isn't
+        // read as one (the 2026-11-13 review: a tail went unseen under «unwrap»).
+        case "d0e30db0": if args.isEmpty { return .wrap }
+        case "2e1a7d4d": if args.count == 32, let a = word(0) { return .unwrap(amount: a) }
+        // Tempo's exchange: swapExactAmountIn(tokenIn, tokenOut, amountIn, minAmountOut), its four words and nothing more,
+        // pays the caller. A swap like any other: its amounts go on the prompt and it asks afresh (it was an unread call
+        // that read «swap dollars» whatever its calldata, inside any session its approval opened: the 2026-11-13 review).
+        case "f8856c0f":
+            if args.count == 128, let sells = address(0), let buys = address(1), let amountIn = word(2), let least = word(3) {
+                return .swap(recipient: Self.msgSender, terms: SwapTerms(sells: sells, buys: buys, amountIn: amountIn, amountOut: least, exactIn: true))
+            }
         case "8e0250ee", "779b432d": if let b = CCTP.readBurn(data) { return .cctpBurn(recipient: b.recipient, domain: b.domain, amount: b.amount) }
         // A send that can't be read is still a send: it's refused, not signed as some contract's call.
         case "c7c7f5b3":
@@ -884,6 +893,7 @@ public enum EVMCall: Equatable, Sendable {
             let t = token.lowercased()
             if t == UniswapV4.native { return "\(units(word, 18)) \(EVMRPC.coin(chainId))" }
             if t == UniswapV2.on(chainId)?.weth { return "\(units(word, 18)) W\(EVMRPC.coin(chainId))" }
+            if chainId == EVMRPC.tempo.chainId, let dollar = Tempo.stables.first(where: { $0.value == t })?.key { return "\(units(word, 6)) \(dollar)" }
             return EVMRPC.dollars[t].map { "\(units(word, EVMRPC.dollarDecimals(token))) \($0)" } ?? "\(units(word, 0)) units of the token \(short(token))"
         }
         func word(_ n: Decimal) -> Data { (try? ABI.word(n)) ?? Data(count: 32) }
@@ -892,21 +902,22 @@ public enum EVMCall: Equatable, Sendable {
             let sold = t.amountIn.map { amount($0, of: t.sells ?? UniswapV4.native) } ?? coins
             return (t.exactIn ? "\(sold) for at least " : "at most \(sold) for ") + amount(t.amountOut, of: t.buys)
         }
+        let venue = to.lowercased() == Tempo.exchange ? "on Tempo's exchange" : "on Uniswap \(net)"
         // Coins that go into a wrap or a native swap are its input, not a payment: said once, in the sentence.
         switch self {
         case .wrap: return "wrap \(coins) into W\(EVMRPC.coin(chainId)) \(net)"
         case .v4Swap(let s) where paid: return "swap \(coins) for at least \(amount(word(s.takeMin), of: s.takeCurrency)) on Uniswap v4 \(net), paying this wallet"
-        case .swap(_, let t?) where t.amountIn == nil: return "swap \(trade(t)) on Uniswap \(net), paying this wallet"
+        case .swap(_, let t?) where t.amountIn == nil: return "swap \(trade(t)) \(venue), paying this wallet"
         // Several swaps in one multicall, or a path past what the signer reads: said, so no amount isn't taken for none asked.
-        case .swap(_, nil): return "swap\(paid ? " \(coins)" : "") on Uniswap \(net), paying this wallet. The signer can't read its amounts"
+        case .swap(_, nil): return "swap\(paid ? " \(coins)" : "") \(venue), paying this wallet. The signer can't read its amounts"
         default: break
         }
         let what = switch self {
         case .transfer(let recipient, let a): "send \(amount(a, of: to)) to \(short(recipient)) \(net)"
         case .approve(let spender, let a): "let \(short(spender)) spend exactly \(amount(a, of: to)) \(net)"
         case .increaseAllowance(let spender, let a): "let \(short(spender)) spend \(amount(a, of: to)) more \(net)"
-        case .swap(_, let t?): "swap \(trade(t)) on Uniswap \(net), paying this wallet"
-        case .swap: "swap on Uniswap \(net), paying this wallet"
+        case .swap(_, let t?): "swap \(trade(t)) \(venue), paying this wallet"
+        case .swap: "swap \(venue), paying this wallet"
         case .v4Swap(let s): "swap \(amount(word(s.amountIn), of: s.currencyIn)) for at least \(amount(word(s.takeMin), of: s.takeCurrency)) on Uniswap v4 \(net), paying this wallet"
         case .kyberSwap(let k): "swap \(amount((try? ABI.word(k.amount)) ?? Data(count: 32), of: k.srcToken)) on KyberSwap \(net) for at least "
             + "\(amount((try? ABI.word(k.minReturn)) ?? Data(count: 32), of: k.dstToken)), paying this wallet"
@@ -925,7 +936,6 @@ public enum EVMCall: Equatable, Sendable {
         case .multisigExec(let target, let v, let d, _):
             "carry out the multisig \(short(to))'s signed move: " + EVMCall.decode(d).summary(chainId: chainId, to: target, wei: v)
         case .contract where to.lowercased() == Tempo.feeManager: "pay Tempo's fees in USDC from now on"
-        case .contract where to.lowercased() == Tempo.exchange: "swap dollars on Tempo's exchange, paying this wallet"
         default: "call the contract \(short(to)) \(net)"
         }
         return paid ? what + ", paying \(coins)" : what
@@ -1097,6 +1107,12 @@ public enum EVMCall: Equatable, Sendable {
         default: false
         }
         if byProtocol { return Self.protocolContracts(chainId: chainId).contains(target) ? nil : target }
+        // The same for a wrap and an unwrap: WETH's own only at the network's wrapped coin. At any contract they were
+        // «read», so no one was asked and the automation wallet signed them uncounted (the 2026-11-13 review).
+        switch self {
+        case .wrap, .unwrap: return target == UniswapV2.on(chainId)?.weth ? nil : target
+        default: break
+        }
         guard case .contract = self else { return nil }
         if Self.ownUnreadCallees.contains(target), !(site && Permit3009.relayProxies.contains(target)) { return nil }
         return target
@@ -1125,6 +1141,21 @@ public enum EVMCall: Equatable, Sendable {
             guard ABI.address(in: Data(data.dropFirst(4)), word: 0)?.lowercased() == sender.lowercased() else {
                 return "The Relay deposit names someone else as the depositor."
             }
+        }
+        // Tempo's fee manager and exchange and Safe's factory get calls no one is asked about (ownUnreadCallees), and the
+        // prompt says what ihatecrypto does there: so each takes only that one call (the 2026-11-13 review).
+        let args = Data(data.dropFirst(4))
+        switch to.lowercased() {
+        case Tempo.feeManager where data != (try? Tempo.setUserToken(EVMRPC.tempoUSDC)):
+            return "A call to Tempo's fee manager that doesn't set this wallet's fees to USDC. ihatecrypto only does that there."
+        case Tempo.exchange:
+            // Its own swap, by its selector: a Uniswap selector decodes as a swap too, and would be named one of Tempo's.
+            guard data.prefix(4).hex == "f8856c0f", case .swap = decode(data) else {
+                return "A call to Tempo's exchange that isn't a swap of an exact amount. ihatecrypto only swaps there."
+            }
+        case Safe.factory where data.prefix(4) != Safe.selector("createProxyWithNonce(address,bytes,uint256)") || ABI.address(in: args, word: 0)?.lowercased() != Safe.singleton:
+            return "A call to Safe's factory that doesn't make a multisig from Safe's own code. ihatecrypto only makes multisigs there."
+        default: break
         }
         return Safe.execRefusal(data, safe: to)
     }

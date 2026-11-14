@@ -414,6 +414,11 @@ func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
     #expect(SiteCheck.check(host: "xn--jp-zka.ag") != .unknown)
     #expect(SiteCheck.check(host: "station.jup.ag") == .known)
     #expect(SiteCheck.check(host: "app.hyperliquid.xyz") == .known)
+    // A trailing dot names the same server (the 2026-11-13 review): jup.ag. read as a fake of jup.ag, and with the dot a
+    // fake two letters off a known address read as an unfamiliar site.
+    #expect(SiteCheck.check(host: "jup.ag.") == .known)
+    #expect(SiteCheck.check(host: "app.hyper.liquidd.xyz") == .lookalike("app.hyperliquid.xyz"))
+    #expect(SiteCheck.check(host: "app.hyper.liquidd.xyz.") == .lookalike("app.hyperliquid.xyz"))
 }
 
 @Test func phishingListBlocksADomainAndEverythingUnderIt() {
@@ -425,6 +430,10 @@ func aLimitTakenInPartsWaitsForItsHalf(_ phrase: String) throws {
     #expect(!SiteCheck.listed(host: "jup.ag", blocked: blocked, allowed: allowed))
     #expect(!SiteCheck.listed(host: "relay.walletconnect.org", blocked: blocked.union(["walletconnect.org"]), allowed: allowed))
     #expect(!SiteCheck.listed(host: "", blocked: blocked, allowed: allowed))
+    // A trailing dot or capitals walk a host neither past the list nor past its allowlist.
+    #expect(SiteCheck.listed(host: "polymaraket.com.", blocked: blocked, allowed: allowed))
+    #expect(SiteCheck.listed(host: "APP.Polymaraket.COM.", blocked: blocked, allowed: allowed))
+    #expect(!SiteCheck.listed(host: "relay.walletconnect.org.", blocked: blocked.union(["walletconnect.org"]), allowed: allowed))
 }
 
 @Test func eachLocalPageIsItsOwnOrigin() {

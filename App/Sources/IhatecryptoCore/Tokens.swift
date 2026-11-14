@@ -21,17 +21,23 @@ public enum TokenLookup {
     public static func suspicious(_ symbol: String, contract: String, genuine: Set<String>) -> Bool {
         // A genuine contract's own symbol may be outside ASCII: USD₮0 on its own contract.
         if Stablecoins.byNetwork.values.joined().contains(where: { $0.address.lowercased() == contract.lowercased() && ([$0.symbol] + $0.also).contains(symbol) }) { return false }
+        // A ticker cut to fit ends in «…» (Holding.plain): that mark is ours, not the token's, and what stands before it
+        // is judged as the ticker.
+        let symbol = symbol.hasSuffix("…") ? symbol.dropLast().trimmingCharacters(in: .whitespaces) : symbol
         if symbol.unicodeScalars.contains(where: { !$0.isASCII }) { return true }
         let majors: Set = ["USDC", "USDT", "USDT0", "USDG", "DAI", "USDS", "USDE", "ETH", "WETH", "BTC", "WBTC", "SOL"]
         return majors.contains(symbol.uppercased()) && !genuine.contains(contract.lowercased())
     }
 
     public static func lookup(_ address: String) async throws -> [Info] {
-        let (data, _) = try await URLSession.shared.data(from: URL(string: "https://api.dexscreener.com/latest/dex/tokens/\(address)")!)
+        // A card waits on this (Workspace.favoriteCard): a few seconds, not URLSession's minute.
+        let (data, _) = try await URLSession.shared.data(for: URLRequest(url: URL(string: "https://api.dexscreener.com/latest/dex/tokens/\(address)")!, timeoutInterval: 8))
         return parse(data, address: address)
     }
 
-    /// One entry per chain, from the deepest pair where the token is the base; deepest chain first.
+    /// One entry per chain, from the deepest pair where the token is the base; deepest chain first. The name and the
+    /// symbol are whatever the token's lister wrote, so they are made plain here (Holding.plain), the name at most 64
+    /// characters and the symbol 12: no caller shows a raw one or hands it to the chat's model (the 2026-11-13 review).
     public static func parse(_ data: Data, address: String) -> [Info] {
         guard let pairs = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["pairs"] as? [[String: Any]] else { return [] }
         func dec(_ v: Any?) -> Decimal? { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber).map { $0.decimalValue } }
@@ -41,8 +47,8 @@ public enum TokenLookup {
                   let chain = p["chainId"] as? String else { continue }
             let liquidity = dec((p["liquidity"] as? [String: Any])?["usd"]) ?? 0
             guard liquidity > (best[chain]?.0 ?? -1) else { continue }
-            let info = Info(chain: chain, address: base["address"] as? String ?? address, name: base["name"] as? String ?? "?", symbol: base["symbol"] as? String ?? "?",
-                            priceUSD: dec(p["priceUsd"]), change24h: dec((p["priceChange"] as? [String: Any])?["h24"]), liquidityUSD: liquidity,
+            let info = Info(chain: chain, address: base["address"] as? String ?? address, name: Holding.plain(base["name"] as? String ?? "?", max: 64),
+                            symbol: Holding.plain(base["symbol"] as? String ?? "?", max: 12), priceUSD: dec(p["priceUsd"]), change24h: dec((p["priceChange"] as? [String: Any])?["h24"]), liquidityUSD: liquidity,
                             imageURL: ((p["info"] as? [String: Any])?["imageUrl"] as? String).flatMap(URL.init), pairURL: (p["url"] as? String).flatMap(URL.init))
             best[chain] = (liquidity, info)
         }
@@ -92,7 +98,9 @@ public enum TokenMarket {
         return parse(data, address: address, chain: chain)
     }
 
-    /// The deepest pair on `chain` where the token is the base.
+    /// The deepest pair on `chain` where the token is the base. Its words are the lister's too (the token's name and
+    /// symbol, the other coin's symbol, a link's label), made plain as TokenLookup.parse does: the card's text goes to the
+    /// chat's model with every message while the card is open.
     public static func parse(_ data: Data, address: String, chain: String) -> Info? {
         guard let pairs = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["pairs"] as? [[String: Any]] else { return nil }
         func dec(_ v: Any?) -> Decimal? { (v as? String).flatMap { Decimal(string: $0) } ?? (v as? NSNumber).map { $0.decimalValue } }
@@ -103,7 +111,7 @@ public enum TokenMarket {
         let info = p["info"] as? [String: Any]
         var links: [Info.Link] = []
         for w in info?["websites"] as? [[String: Any]] ?? [] {
-            if let url = (w["url"] as? String).flatMap(URL.init) { links.append(.init(label: w["label"] as? String ?? "Website", url: url)) }
+            if let url = (w["url"] as? String).flatMap(URL.init) { links.append(.init(label: Holding.plain(w["label"] as? String ?? "Website", max: 32), url: url)) }
         }
         for s in info?["socials"] as? [[String: Any]] ?? [] {
             let type = s["type"] as? String ?? "link"
@@ -112,8 +120,9 @@ public enum TokenMarket {
         let labels = (p["labels"] as? [String] ?? []).joined(separator: " ")
         let base = p["baseToken"] as? [String: Any]
         return Info(
-            pool: pool, name: base?["name"] as? String ?? "?", symbol: base?["symbol"] as? String ?? "?", dex: [p["dexId"] as? String ?? "?", labels].filter { !$0.isEmpty }.joined(separator: " "),
-            quote: (p["quoteToken"] as? [String: Any])?["symbol"] as? String ?? "?", priceUSD: dec(p["priceUsd"]),
+            pool: pool, name: Holding.plain(base?["name"] as? String ?? "?", max: 64), symbol: Holding.plain(base?["symbol"] as? String ?? "?", max: 12),
+            dex: [p["dexId"] as? String ?? "?", labels].filter { !$0.isEmpty }.joined(separator: " "),
+            quote: Holding.plain((p["quoteToken"] as? [String: Any])?["symbol"] as? String ?? "?", max: 12), priceUSD: dec(p["priceUsd"]),
             changes: ((p["priceChange"] as? [String: Any]) ?? [:]).compactMapValues { dec($0) },
             liquidityUSD: dec((p["liquidity"] as? [String: Any])?["usd"]), fdv: dec(p["fdv"]), marketCap: dec(p["marketCap"]),
             volume24h: dec((p["volume"] as? [String: Any])?["h24"]), buys24h: (txns?["buys"] as? NSNumber)?.intValue, sells24h: (txns?["sells"] as? NSNumber)?.intValue,
