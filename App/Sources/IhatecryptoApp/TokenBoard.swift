@@ -268,8 +268,15 @@ struct TokenBoard: View {
         }
     }
 
-    private var rangeChange: Decimal? {
-        guard let first = points.first?.close, let last = points.last?.close, first > 0 else { return market?.changes["h24"] }
+    private var rangeChange: Decimal? { Self.change(points, over: range, h24: market?.changes["h24"]) }
+
+    /// The price's change over the range picked, for the line beside its name («−3.26% · 24 h»). A thin token's history
+    /// for a day is its last trades, days apart: counted from its first point, a week's fall read as a day's. So it's
+    /// counted from the first point inside the range. None there: the listing's own figure for a day, nothing for longer.
+    nonisolated static func change(_ points: [TokenMarket.Point], over range: ChartCommand.Range, h24: Decimal?) -> Decimal? {
+        let since = (points.last?.time ?? .now).addingTimeInterval(-Double(range.span) / 1000 * 1.05)
+        let inside = points.filter { $0.time >= since }
+        guard inside.count > 1, let first = inside.first?.close, let last = inside.last?.close, first > 0 else { return range == .day ? h24 : nil }
         return (last - first) / first * 100
     }
 
@@ -290,10 +297,20 @@ struct TokenBoard: View {
         return usd - usd / (1 + change / 100)
     }
 
-    /// Wraps: a token with many socials must not spill past the card.
+    /// The contract whole, as it's checked by eye, with its Copy; then the links, which wrap: a token with many socials
+    /// must not spill past the card.
     private var links: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                AddressLines(address: address, size: 11, copy: false)
+                CopyButton(title: "Copy", text: address, help: "Copy the whole address")
+            }
+            linkRow
+        }
+    }
+
+    private var linkRow: some View {
         Flow(spacing: 14) {
-            CopyButton(title: "\(address.prefix(6))…\(address.suffix(4))", text: address, help: "Copy \(address)")
             ForEach(market?.links ?? [], id: \.url) { Link($0.label, destination: $0.url).pointerStyle(.link) }
             if let pair = market?.pairURL { Link("DexScreener", destination: pair).pointerStyle(.link) }
             if chain == "robinhood", let url = URL(string: "https://robinhoodchain.blockscout.com/token/\(address)") { Link("Explorer", destination: url).pointerStyle(.link) }
@@ -439,7 +456,7 @@ struct AssetChart: View {
                 }
             }
             .chartYScale(domain: (bottom - pad)...(top + pad))
-            .priceAxes(range)
+            .priceAxes(range, span: (points.last?.time.timeIntervalSince(points.first?.time ?? .now)) ?? 0)
             .chartOverlay { proxy in TokenChartHover(proxy: proxy, points: points, pointer: pointer, tint: tint) }
             .frame(height: height)
             // A point from the previous range or load isn't on this chart: the price above goes back to the price now.
@@ -599,13 +616,24 @@ struct AssetActions: View {
         }
     }
 
+    /// Grey with the text's own colour: the accent is kept for a card's one main action (Confirm) and for what's selected.
     private func pill(_ title: String, _ icon: String, sell: Bool, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: icon).font(.ui(12, .semibold)).foregroundStyle(sell ? Brand.loss : Brand.accentInk)
+            Label(title, systemImage: icon).font(.ui(12, .semibold)).foregroundStyle(sell ? AnyShapeStyle(Brand.loss) : AnyShapeStyle(.primary))
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Capsule().fill((sell ? Brand.loss : Brand.accent).opacity(0.1)))
+                .background(Capsule().fill(sell ? Brand.loss.opacity(0.1) : Color.primary.opacity(0.07)))
         }
         .buttonStyle(.plain).pointerStyle(.link).help(help)
+    }
+}
+
+/// The time labels under a price chart: the hour while the points cover about a day, the weekday with its hour up to
+/// four days (marks half a day apart would repeat a bare date), else the date. No span known: the hour on a day's chart.
+enum ChartAxis {
+    static func format(day: Bool, span: TimeInterval) -> Date.FormatStyle {
+        let en = Date.FormatStyle(locale: Locale(identifier: "en_US"))
+        if span <= 0 ? day : span <= 36 * 3600 { return en.hour() }
+        return span > 0 && span < 4 * 86400 ? en.weekday(.abbreviated).hour() : en.month(.abbreviated).day()
     }
 }
 
@@ -617,15 +645,15 @@ struct AssetActions: View {
 extension View {
     /// Both price charts' axes: times short enough to read whole under the chart — the hour on a day's chart, the date on a
     /// week's or a month's («Sep 29 at 1…» was cut) — and the prices on the right in the text's own colour, not faded.
-    func priceAxes(_ range: ChartCommand.Range) -> some View {
+    /// `span`: the time the points drawn cover. A thin token's «day» is its last trades, days apart: by the hour all four
+    /// labels read «12 AM».
+    func priceAxes(_ range: ChartCommand.Range, span: TimeInterval = 0) -> some View {
         chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { value in
                 AxisGridLine()
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(date, format: range == .day ? Date.FormatStyle(locale: Locale(identifier: "en_US")).hour()
-                                                         : Date.FormatStyle(locale: Locale(identifier: "en_US")).month(.abbreviated).day())
-                            .font(.ui(10)).foregroundStyle(.secondary).fixedSize()
+                        Text(date, format: ChartAxis.format(day: range == .day, span: span)).font(.ui(10)).foregroundStyle(.secondary).fixedSize()
                     }
                 }
             }

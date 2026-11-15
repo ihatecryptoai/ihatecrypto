@@ -85,3 +85,38 @@ private func card(_ name: String) throws -> (market: TokenMarket.Info, text: Str
     let info = try #require(TokenLookup.parse(try listing(String(repeating: "A", count: 300)), address: token).first)
     #expect(info.name.count == 64 && info.symbol == m.symbol)
 }
+
+/// A thin token's «day» of history is its last trades, a week of them: the change beside «24 h» is the day's.
+@Test func aTokensChangeIsCountedOverTheRangePicked() {
+    let end = Date(timeIntervalSince1970: 1_800_000_000)
+    func point(_ hoursAgo: Double, _ close: Decimal) -> TokenMarket.Point { .init(time: end.addingTimeInterval(-hoursAgo * 3600), close: close) }
+    let week = [point(144, 100), point(96, 70), point(20, 44), point(0, 40)]
+    // Two of its points are inside the day: 44 → 40, not 100 → 40.
+    #expect(TokenBoard.change(week, over: .day, h24: -3)?.rounded(2, .plain) == Decimal(string: "-9.09"))
+    #expect(TokenBoard.change(week, over: .week, h24: -3) == -60)
+    // One point inside the day, or none at all: the listing's own figure, and only for a day.
+    #expect(TokenBoard.change([point(144, 100), point(0, 40)], over: .day, h24: -3) == -3)
+    #expect(TokenBoard.change([], over: .day, h24: -3) == -3 && TokenBoard.change([], over: .week, h24: -3) == nil)
+    // A full day of candles reads from its first one.
+    #expect(TokenBoard.change([point(24, 50), point(12, 55), point(0, 60)], over: .day, h24: nil) == 20)
+}
+
+/// A day's chart of a token that trades once a day covers days: its labels are dates, not four «12 AM».
+@Test func aChartsTimeLabelsFollowWhatItCovers() {
+    let at = Date(timeIntervalSince1970: 1_799_971_200)   // 2027-01-15 00:00 UTC
+    func label(day: Bool, hours: Double, _ date: Date = at) -> String {
+        var f = ChartAxis.format(day: day, span: hours * 3600)
+        f.timeZone = TimeZone(identifier: "UTC")!
+        return date.formatted(f)
+    }
+    #expect(label(day: true, hours: 24) == label(day: true, hours: 0))
+    #expect(label(day: true, hours: 24) != label(day: true, hours: 24, at + 6 * 3600))
+    // Five days on a «day» chart: midnights a day apart read apart.
+    #expect(label(day: true, hours: 120) != label(day: true, hours: 120, at + 86400))
+    #expect(label(day: true, hours: 120) == label(day: false, hours: 0))
+    // Two days: marks half a day apart read apart too.
+    #expect(label(day: true, hours: 48) != label(day: true, hours: 48, at + 12 * 3600))
+    #expect(label(day: false, hours: 48) != label(day: false, hours: 48, at + 12 * 3600))
+    // The hour's own narrow space stands before «AM».
+    #expect(label(day: true, hours: 48) == "Fri 12\u{202F}AM" && label(day: true, hours: 120) == "Jan 15" && label(day: true, hours: 24) == "12\u{202F}AM")
+}

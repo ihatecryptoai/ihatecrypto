@@ -1389,7 +1389,8 @@ struct StudioCanvas: View {
             if chartAt == .plan, let chart = ws.chart {
                 // A trade plan of the chart's coin is drawn on its chart, its Cancel and Confirm on top (the owner's pick C).
                 PlanChartBoard(state: chart) { planHeader(nodes) }.blockMenu("Chart · \(IntentParser.pretty(chart.coin))")
-            } else if hasRoute || ws.allocationPreview != nil || (ws.pendingAction == nil && !ws.moveRunning && ws.currentScheduleKey == nil) {
+            } else if hasRoute || ws.allocationPreview != nil || (board != nil && ws.pendingAction == nil && !ws.moveRunning && ws.currentScheduleKey == nil) {
+                // Nothing planned and no board kept: no header, «Plan · waiting for a task» was an empty line between boards.
                 planHeader(nodes)
             }
             // Only this canvas's own position, or one the user tapped (a tap opens its chart), not every open one:
