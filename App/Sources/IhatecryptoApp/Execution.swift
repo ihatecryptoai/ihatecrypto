@@ -39,7 +39,7 @@ nonisolated struct XPCTradeSigner: TradeSigner {
         let reply = try await SignerClient().send(wrapped(changed ?? request))
         return try Tamper.judged(reply, request: request, changed: changed != nil)
         #else
-        try await SignerClient().send(wrapped(request))
+        return try await SignerClient().send(wrapped(request))
         #endif
     }
 
