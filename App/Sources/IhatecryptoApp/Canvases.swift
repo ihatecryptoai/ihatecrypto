@@ -1381,6 +1381,12 @@ struct DollarsAhead {
     private(set) var ahead: [String: Decimal] = [:]
     /// The networks where a step counted brings dollars no price tells (a sale of a token without one).
     private(set) var unpriced = Set<String>()
+    /// The networks where a step counted sells or sends away the network's own coin, all of it or down to under twice
+    /// the gas floor. What's left may be less than the next step there needs, and then that step brings gas with half
+    /// a dollar from Solana: a buy or a deposit there is drawn by today's balance, not as paid by the sale (`paying`).
+    private(set) var gasSold = Set<String>()
+    /// `ahead` for a buy or a deposit: without the networks in `gasSold`.
+    var paying: [String: Decimal] { ahead.filter { !gasSold.contains($0.key) } }
     /// What the steps counted already sold of each token: one sold twice isn't counted twice.
     private var sold: [String: Decimal] = [:]
     /// A network's dollars as last read.
@@ -1433,6 +1439,16 @@ struct DollarsAhead {
             default: (place, min(asked, have))
             }
             if spent > 0 { ahead[payer, default: 0] -= spent }
+        }
+        switch c {
+        case .swapOn(let place, let coin, _, let amount), .sellOn(let place, let coin, let amount, _), .crossSwap(let coin, let place, _, _, let amount),
+             .sendToken(_, let coin, let amount, let place?):
+            // «All» keeps only that sale's own fees. An amount leaves the rest: enough at twice the network's floor.
+            if let net = EVMNetwork.named(place), net.gasFloor > 0, coin.uppercased() == net.gasCoin.uppercased(),
+               amount.map({ (held(coin, place)?.held ?? 0) - $0 < Decimal(net.gasFloor) / 1_000_000_000_000_000_000 * 2 }) ?? true {
+                gasSold.insert(place)
+            }
+        default: break
         }
         // What a sale into a network's dollar brings there, and what a swap out of it takes. Dollars out of a vault or
         // a loan, and dollars sent away: «all» out of a vault is an amount this doesn't know, «at least» from there on.
@@ -1537,8 +1553,8 @@ extension Workspace {
     /// The move's card, with what the research's E-7 and E-8 found on top of its own warning: the user decides, Confirm
     /// stays (variant B, 2026-11-05).
     /// `unpriced`: the networks where a step before brings dollars no price tells (a sale of a token without one).
-    func route(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = []) -> MoveRoute? {
-        guard var r = drawnRoute(command, ahead: ahead, unpriced: unpriced).map(Self.withHeld) else { return nil }
+    func route(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = [], paying: [String: Decimal]? = nil) -> MoveRoute? {
+        guard var r = drawnRoute(command, ahead: ahead, unpriced: unpriced, paying: paying ?? ahead).map(Self.withHeld) else { return nil }
         let extra = [Self.delegationWarning(command, foreignDelegates), boughtTokenWarning(command)].compactMap { $0 }
         if !extra.isEmpty { r.warning = ([r.warning].compactMap { $0 } + extra).joined(separator: " ") }
         return r
@@ -1575,22 +1591,23 @@ extension Workspace {
         return "\(asset.symbol): " + w.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }.joined(separator: " ")
     }
 
-    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = []) -> MoveRoute? {
+    /// `paying`: `ahead` as a buy or a deposit counts it (ChainDollars.paying).
+    private func drawnRoute(_ command: WalletCommand, ahead: [String: Decimal] = [:], unpriced: Set<String> = [], paying: [String: Decimal] = [:]) -> MoveRoute? {
         // What the steps before leave of a network's dollars, for a step that moves «all» of them.
         func left(_ place: String) -> DollarsAhead { DollarsAhead(by: ahead[place] ?? 0, unpriced: unpriced.contains(place), counted: ahead[place] != nil) }
         return switch command {
         case .withdrawToSolana(let asked): withdrawRoute(asked)
-        case .aave(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, network: net)
+        case .aave(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, network: net, ahead: paying)
         case .aave(deposit: false, amount: let amount, network: let net): backRoute(from: "aave", amount: amount, network: net)
-        case .morpho(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, morpho: true, network: net)
+        case .morpho(deposit: true, amount: let amount?, network: let net): aaveRoute(amount, morpho: true, network: net, ahead: paying)
         case .morpho(deposit: false, amount: let amount, network: let net): backRoute(from: "morpho", amount: amount, network: net)
         case .evmToSolana(let net, let amount): backRoute(from: net, amount: amount, network: net, ahead: left(net))
         case .baseToSolana(let amount): backRoute(from: "base", amount: amount, ahead: left("base"))
         case .arbitrumToSolana(let amount): backRoute(from: "arbitrum", amount: amount, ahead: left("arbitrum"))
         case .robinhoodToSolana(let amount): backRoute(from: "robinhood", amount: amount, ahead: left("robinhood"))
         case .solanaTo(let place, let amount?): outRoute(to: place, amount: amount)
-        case .buyStock(let symbol, let usdc?): stockRoute(symbol, usdc, ahead: ahead)
-        case .buyOn(let place, let token, let usdc?, let from): swapRoute(place, token, usdc: usdc, sell: nil, from: from, ahead: ahead)
+        case .buyStock(let symbol, let usdc?): stockRoute(symbol, usdc, ahead: paying)
+        case .buyOn(let place, let token, let usdc?, let from): swapRoute(place, token, usdc: usdc, sell: nil, from: from, ahead: paying)
         case .sellOn(let place, let token, let amount, let keep): swapRoute(place, token, usdc: nil, sell: amount, keep: keep)
         case .swapOn(let place, let from, let to, let amount): pairRoute(place, from, to, amount)
         case .crossSwap(let a, let from, let b, let to, let amount): crossRoute(a, from, b, to, amount)
@@ -2039,9 +2056,9 @@ extension Workspace {
     }
 
     /// Aave, or Morpho's vault: the same way in on Base.
-    private func aaveRoute(_ amount: Decimal, morpho: Bool = false, network: String = "base") -> MoveRoute {
-        guard network == "base" else { return lendingRoute(amount, morpho: morpho, network: network) }
-        let onBase = base?.usdc ?? 0
+    private func aaveRoute(_ amount: Decimal, morpho: Bool = false, network: String = "base", ahead: [String: Decimal] = [:]) -> MoveRoute {
+        guard network == "base" else { return lendingRoute(amount, morpho: morpho, network: network, ahead: ahead) }
+        let (onBase, later) = dollars(on: "base", ahead)
         let short = max(0, amount - onBase)
         let needGas = (base?.eth ?? 0) < Decimal(string: "0.000005")!
         let bridging = short > 0 || needGas
@@ -2052,10 +2069,11 @@ extension Workspace {
             steps.append(step("sol", "FROM · SOLANA", solana.map { "\(Fmt.num($0.usdc)) USDC" } ?? "—",
                               "sends ≈ \(Fmt.num(sends)) USDC", .solana, money: moneyMove("USDC", on: "solana", by: -sends, approx: true)))
             steps.append(step("relay", "BRIDGE · RELAY", "\(Fmt.num(over)) USDC → Base",
-                              needGas ? "+ $0.03 of ETH for gas · ≈ 2 s" : "≈ 2 s", .relay, money: moneyMove("USDC", on: "base", by: over, approx: true)))
+                              needGas ? "+ $0.03 of ETH for gas · ≈ 2 s" : "≈ 2 s", .relay, money: later ? [] : moneyMove("USDC", on: "base", by: over, approx: true)))
             if needGas { steps.append(step("base", "GAS · COMES ALONG", "≈ $0.03 of ETH", "there’s no ETH on Base yet · it comes with the bridge", .base)) }
         } else {
-            steps.append(step("base", "ON BASE", "\(Fmt.num(onBase)) USDC", "already there, gas too", .base, money: moneyMove("USDC", on: "base", by: -amount)))
+            steps.append(step("base", "ON BASE", "\(later ? "≈ " : "")\(Fmt.num(onBase)) USDC", later ? "there by its turn, gas too" : "already there, gas too", .base,
+                              money: later ? [] : moneyMove("USDC", on: "base", by: -amount)))
         }
         steps.append(approve("\(Fmt.num(amount)) USDC", for: morpho ? "Morpho" : "Aave", logo: morpho ? "morpho" : "aave", morpho ? .morpho : .aave))
         steps.append(morpho ? step("morpho", "MORPHO · \(MorphoVault.name.uppercased())", "\(Fmt.num(amount)) USDC", apy, .morpho,
@@ -2312,7 +2330,7 @@ extension Workspace {
                 dollars.count(c)
             }
             let brought = Self.spends(c).map(arrived.contains) ?? false
-            let cards = later(c, brought: brought, ahead: dollars.ahead, unpriced: dollars.unpriced)
+            let cards = later(c, brought: brought, ahead: dollars.ahead, unpriced: dollars.unpriced, paying: dollars.paying)
             return cards.map { var s = $0; s.chainStep = progress.map { "\(first + k) of \($0.of)" }; return s }
         }
     }
@@ -2374,7 +2392,7 @@ extension Workspace {
     }
 
     /// One later step of a chain as its cards (chainSteps).
-    private func later(_ c: WalletCommand, brought: Bool, ahead: [String: Decimal], unpriced: Set<String>) -> [ActivityBubble] {
+    private func later(_ c: WalletCommand, brought: Bool, ahead: [String: Decimal], unpriced: Set<String>, paying: [String: Decimal]) -> [ActivityBubble] {
         switch c {
         // Spread and rebalance have no route of their own: their split is planned when the money before them has landed.
         case .allocate(let asset, let share, let amount, _, _):
@@ -2395,7 +2413,7 @@ extension Workspace {
                                    status: "then", logo: network.logo, fill: RouteFill(rawValue: network.rawValue) ?? .check, address: entry?.address)]
         default:
             // Any other step without a route still shows, as its words: a chain never loses a step on the canvas.
-            guard let drawn = route(c, ahead: ahead, unpriced: unpriced)?.steps else {
+            guard let drawn = route(c, ahead: ahead, unpriced: unpriced, paying: paying)?.steps else {
                 return [ActivityBubble(kind: "step", label: "THEN", title: readable(c.summary), status: "then", logo: "usdc", fill: .check)]
             }
             return Self.laterCards(drawn, brought: brought)
@@ -2462,6 +2480,17 @@ extension Workspace {
         }
     }
 
+    /// A network's dollars as a buy or a deposit will find them: today's, or for a step of a chain what the steps before
+    /// leave there (`later`: they touch them), so a sale before it pays for it and no bridge is drawn (ChainDollars).
+    /// ponytail: dollars from a sale no price tells aren't counted, such a step is drawn as short of them.
+    private func dollars(on place: String, _ ahead: [String: Decimal]) -> (there: Decimal, later: Bool) {
+        Self.dollarsThere(usdc(on: place), ahead: ahead[place])
+    }
+
+    nonisolated static func dollarsThere(_ held: Decimal?, ahead: Decimal?) -> (there: Decimal, later: Bool) {
+        (max(0, (held ?? 0) + (ahead ?? 0)), ahead != nil)
+    }
+
     private func stockRoute(_ symbolOrContract: String, _ asked: Decimal, ahead: [String: Decimal] = [:]) -> MoveRoute {
         // The three ways as quoted while the card waits (quoteStock): the best names the BUY step, the others are its line.
         let ways = swapQuote.flatMap { q in q.command == .buyStock(symbol: symbolOrContract, usdc: asked) ? q.ways : nil }
@@ -2472,15 +2501,15 @@ extension Workspace {
         let price = contract ? favorite.flatMap { tokenInfo[$0.id]?.priceUSD } : markets["xyz:\(symbolOrContract)"]?.markPx
         // USDG already on Robinhood Chain pays first (a bridge from Base leaves it there): Solana only brings what's missing,
         // and a few cents short ($1 or 2% at most) isn't worth a bridge: the buy spends what's there (Executor.buyStock).
-        let usdg = robinhood?.usdg ?? 0
+        let (usdg, later) = dollars(on: "robinhood", ahead)
         let fits = usdg > 0 && usdg < asked && asked - usdg <= max(1, asked / 50)
         let usdc = fits ? usdg : asked, bring = max(0, usdc - usdg)
         // Solana short: the USDC comes straight from the EVM network holding it, as Executor.ensureEVM does.
         let elsewhere = bring > 0 ? source(arrive: bring, target: "robinhood", ahead: ahead) : nil
         let robinhoodUSDG = { (delta: Decimal, approx: Bool) in [MoneyMove(place: "Robinhood", symbol: "USDG", was: usdg, after: max(0, usdg + delta), approx: approx)] }
         let from = bring == 0
-            ? step("robinhood", "FROM · ROBINHOOD CHAIN", "\(Fmt.num(usdc)) USDG", fits ? "what's there · the cents short aren't worth a bridge" : "already there · no bridge", .robinhood,
-                   money: robinhoodUSDG(-usdc, false))
+            ? step("robinhood", "FROM · ROBINHOOD CHAIN", "\(Fmt.num(usdc)) USDG", fits ? "what's there · the cents short aren't worth a bridge" : later ? "there by its turn · no bridge" : "already there · no bridge", .robinhood,
+                   money: robinhoodUSDG(-usdc, later))
             : elsewhere.map { e in
                 step(ModuleNetwork(place: e.net.key)?.logo ?? e.net.key, "FROM · \(e.net.name.uppercased())", "≈ \(Fmt.num(e.send)) USDC",
                      "Solana has only \(Fmt.num(solana?.usdc ?? 0)) · free there: \(Fmt.num(self.usdc(on: e.net.key) ?? 0)) USDC", RouteFill(rawValue: e.net.key) ?? .relay,
@@ -2522,16 +2551,17 @@ extension Workspace {
         let command: WalletCommand = usdc != nil ? .buyOn(place, token: token, usdc: usdc, from: from) : .sellOn(place, token: token, amount: sell, keep: keep)
         // On the network itself, as the executor decides (Executor.buyHere): its quote says so; before it lands, the balances.
         let quoted = swapQuote.flatMap { q in q.command == command ? q.ways : nil }
+        let (there, later) = dollars(on: place, ahead)
         // Solana short and the network without the USDC: it comes straight from the EVM network holding it, as Executor.buyOn
         // decides (EVMNetwork.source) — the card said «from Solana» while Base paid.
         let auto = usdc.flatMap { u in
-            from == nil && routeWays[Self.wayKey(place, token)] == nil && (self.usdc(on: place) ?? 0) < u
+            from == nil && routeWays[Self.wayKey(place, token)] == nil && there < u
                 ? source(arrive: u, target: place, ahead: ahead)?.net.key : nil
         }
         let src = (from ?? auto).flatMap { $0 == "solana" || $0 == place ? nil : $0 }
         // A source the user named is the card's, never Solana's ways: if it can't pay, the move is refused, not swapped.
         let here = keep || ((from ?? auto) != nil && (from ?? auto) != "solana") || (usdc.map { u in quoted?.first.map { $0.way.hasPrefix("here") }
-            ?? (from != "solana" && (self.usdc(on: place) ?? 0) >= u) } ?? false)
+            ?? (from != "solana" && there >= u) } ?? false)
         if here {
             let gets = quoted?.first { $0.way.hasPrefix("here") }?.gets
             // The way on the network that leaves the most (Executor.bestPair): Uniswap's until the quote says otherwise.
@@ -2545,7 +2575,8 @@ extension Workspace {
                  step("relay", "BRIDGE · RELAY", "USDC → \(name)", "a few seconds · no stop on Solana", .relay,
                       money: usdc.map { moneyMove("USDC", on: place, by: $0, approx: true) } ?? [])]
             } else if let u = usdc {
-                [step(logo, "FROM · \(name.uppercased())", "\(Fmt.num(u)) USDC", "already there · no bridge", fill, money: moneyMove("USDC", on: place, by: -u))]
+                [step(logo, "FROM · \(name.uppercased())", "\(Fmt.num(u)) USDC", later ? "there by its turn · no bridge" : "already there · no bridge", fill,
+                      money: later ? [] : moneyMove("USDC", on: place, by: -u))]
             } else {
                 [step(logo, "FROM · \(name.uppercased())", moving, usdc == nil ? "on \(name)" : "already there · no bridge", fill,
                       money: moneyMove(label, on: place, by: sell.map { -$0 }))]
@@ -3596,20 +3627,20 @@ extension Workspace {
 
     /// Aave or Morpho on a network other than Base: USDC and gas already there are used, Solana brings only what's
     /// missing (ensureEVM); the executor checks everything before signing.
-    private func lendingRoute(_ amount: Decimal, morpho: Bool, network: String) -> MoveRoute {
+    private func lendingRoute(_ amount: Decimal, morpho: Bool, network: String, ahead: [String: Decimal] = [:]) -> MoveRoute {
         let name = WalletCommand.placeName(network), coin = network == "polygon" ? "POL" : "ETH"
         let protocolName = morpho ? "Morpho" : "Aave"
-        let have = usdc(on: network) ?? 0, short = max(0, amount - have)
+        let (have, later) = dollars(on: network, ahead), short = max(0, amount - have)
         let gas = otherTokens.first { $0.chain == network && $0.native }?.amount ?? 0
         let needGas = gas < EVMNetwork.named(network).map { Decimal($0.gasFloor) / 1_000_000_000_000_000_000 } ?? 0
         let from = short > 0 || needGas
             ? [step("sol", "FROM · SOLANA", "\(Fmt.num(max(short, Decimal(string: "0.5")!))) USDC",
-                    (have > 0 ? "\(Fmt.num(have)) already on \(name) · " : "") + (solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? ""), .solana,
+                    (have > 0 ? "\(Fmt.num(have)) \(later ? "on \(name) by its turn" : "already on \(name)") · " : "") + (solana.map { "free: \(Fmt.num($0.usdc)) USDC" } ?? ""), .solana,
                     money: moneyMove("USDC", on: "solana", by: -max(short, Decimal(string: "0.5")!))),
                step("relay", "BRIDGE · RELAY", "USDC → \(name)", needGas ? "+ \(coin) for gas · ≈ 2 s" : "≈ 2 s", .relay,
-                    money: moneyMove("USDC", on: network, by: max(short, Decimal(string: "0.5")!), approx: true))]
-            : [step(ModuleNetwork(place: network)?.logo ?? "eth", "ON \(name.uppercased())", "\(Fmt.num(have)) USDC", "already there, gas too", RouteFill(rawValue: network) ?? .relay,
-                    money: moneyMove("USDC", on: network, by: -amount))]
+                    money: later ? [] : moneyMove("USDC", on: network, by: max(short, Decimal(string: "0.5")!), approx: true))]
+            : [step(ModuleNetwork(place: network)?.logo ?? "eth", "ON \(name.uppercased())", "\(later ? "≈ " : "")\(Fmt.num(have)) USDC", later ? "there by its turn, gas too" : "already there, gas too",
+                    RouteFill(rawValue: network) ?? .relay, money: later ? [] : moneyMove("USDC", on: network, by: -amount))]
         return MoveRoute(title: "\(protocolName) · \(morpho ? "deposit" : "lend") \(Fmt.num(amount)) USDC on \(name)",
                          footer: (from.count > 1 ? "What's missing on \(name) comes from Solana over Relay, with \(coin) for gas when there's none; then two" : "Two")
                             + " \(name) transactions: approve exactly \(Fmt.num(amount)) USDC, then \(morpho ? "deposit; the shares come to this wallet only" : "supply"). "

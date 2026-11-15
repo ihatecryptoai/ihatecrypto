@@ -118,6 +118,8 @@ def check(expect, state, replies):
                                                       if not any(w.lower() in f"step {c.get('step')} · {c.get('label')} · {c.get('title')}".lower()
                                                                  for c in (pending or {}).get("chain") or [])]):
             why.append(f"no later card of the chain says {missing}: {[(c.get('step'), c.get('title')) for c in (pending or {}).get('chain') or []]}")
+        elif key == "chain_lacks" and (found := [c.get("label") for c in (pending or {}).get("chain") or [] if want.lower() in text(c.get("label"))]):
+            why.append(f"a later card of the chain says «{want}»: {found}")
         elif key == "title_contains" and want.lower() not in text((pending or {}).get("title")):
             why.append(f"title {text((pending or {}).get('title'))}, expected «{want}»")
         elif key.startswith("command_contains") and want.lower() not in text((pending or {}).get("command")):
@@ -227,10 +229,14 @@ def main():
                     print(f"SKIP  {s['name']}  (needs the {cond['wallet']} wallet)")
                     continue
             elif cond and "balance" in cond:
-                have = float(start["balances"].get(cond["balance"]) or 0)
-                if ("at_least" in cond and have < cond["at_least"]) or ("below" in cond and have >= cond["below"]):
+                # `and`: a second balance the scenario needs too.
+                def held(c):
+                    return float(start["balances"].get(c["balance"]) or 0)
+                off = next((c for c in (cond, cond.get("and") or {}) if "balance" in c
+                            and (("at_least" in c and held(c) < c["at_least"]) or ("below" in c and held(c) >= c["below"]))), None)
+                if off:
                     skipped += 1
-                    print(f"SKIP  {s['name']}  ({cond['balance']} = {have})")
+                    print(f"SKIP  {s['name']}  ({off['balance']} = {held(off)})")
                     continue
             t0 = time.time()
             old = settings(s.get("defaults") or {})

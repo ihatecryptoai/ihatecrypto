@@ -1782,5 +1782,30 @@
       "balance": "arbitrumETH",
       "at_least": 0.0005
     }
+  },
+  {
+    "name": "a chain whose later buy is paid by the sale before it → its card is the buy on the network, no bridge",
+    "send": [
+      "swap 0.0015 ETH on arbitrum for USDC on arbitrum, then buy ARB for 2.5 USDC on arbitrum"
+    ],
+    "expect": {
+      "wait_quote": true,
+      "pending_kind": "wallet",
+      "drawn_route": true,
+      "chain_step": "1 of 2",
+      "chain_contains": [
+        "step 2 of 2 · buy · uniswap on arbitrum"
+      ],
+      "chain_lacks": "bridge"
+    },
+    "only_if": {
+      "balance": "arbitrumETH",
+      "at_least": 0.002,
+      "and": {
+        "balance": "arbitrumUSDC",
+        "at_least": 0.5,
+        "below": 2.5
+      }
+    }
   }
 ]

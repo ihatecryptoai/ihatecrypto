@@ -197,3 +197,33 @@ private func step(_ label: String, _ title: String, _ lines: [String] = []) -> A
     let brought = Workspace.laterCards([step("FROM · BASE", "5 USDC"), step("BRIDGE · RELAY", "5 USDC"), step("DEPOSIT · AAVE", "5 USDC")], brought: true)
     #expect(brought.map(\.label) == ["DEPOSIT · AAVE"])
 }
+
+/// A buy or a deposit later in a chain is paid by what the steps before leave on its network: a sale before it covers
+/// it and no bridge is drawn, a move out before it leaves it short (the owner's pick, 2026-11-15).
+@Test @MainActor func aLaterBuyIsPaidByWhatTheStepsBeforeLeave() {
+    var chain = ChainDollars(usdc: { ["robinhood": 0, "arbitrum": 5][$0] }, held: { token, _ in token == "TSLA" ? ("tsla", 1, 400) : nil })
+    chain.count(.sellStock(symbol: "TSLA", amount: Decimal(string: "0.3")))
+    // 0.3 TSLA at $400 bring $120: the $100 buy after it is paid there.
+    var (there, later) = Workspace.dollarsThere(0, ahead: chain.ahead["robinhood"])
+    #expect(there == 120 && later)
+    // Nothing before it touches the network: today's balance, said as today's.
+    (there, later) = Workspace.dollarsThere(5, ahead: chain.ahead["arbitrum"])
+    #expect(there == 5 && !later)
+    // A move out before it: what's left, never below nothing.
+    chain.count(.bridge(from: "arbitrum", to: "base", nil))
+    (there, later) = Workspace.dollarsThere(5, ahead: chain.ahead["arbitrum"])
+    #expect(there == 0 && later)
+    #expect(Workspace.dollarsThere(nil, ahead: -3).there == 0)
+    // A sale of the network's own coin may leave too little gas for the step after it: a buy or a deposit there isn't
+    // counted as paid by it, a «move all» still counts it.
+    var gas = ChainDollars(usdc: { ["polygon": 1, "arbitrum": 1][$0] }, held: { token, _ in token == "POL" ? ("pol", 100, 1) : token == "ARB" ? ("arb", 10, 1) : nil })
+    gas.count(.swapOn("polygon", from: "POL", to: "USDC", amount: nil))
+    gas.count(.swapOn("arbitrum", from: "ARB", to: "USDC", amount: nil))
+    #expect(gas.ahead["polygon"] == 100 && gas.paying["polygon"] == nil && gas.paying["arbitrum"] == 10)
+    // An amount that leaves gas for the step after it pays for that step. One that leaves under twice the floor (0.3 POL) doesn't.
+    for (amount, pays) in [(Decimal(50), true), (Decimal(string: "99.5")!, false)] {
+        var part = ChainDollars(usdc: { _ in 1 }, held: { token, _ in token == "POL" ? ("pol", 100, 1) : nil })
+        part.count(.swapOn("polygon", from: "POL", to: "USDC", amount: amount))
+        #expect((part.paying["polygon"] != nil) == pays, "\(amount)")
+    }
+}
