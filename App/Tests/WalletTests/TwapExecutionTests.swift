@@ -85,6 +85,33 @@ extension FakeHyperliquid {
         #expect(r.error.contains("The TWAP is stopped") && r.opened == nil)
     }
 
+    /// The market's leverage is signed only when it differs from the one set: with the main key that prompt was a second
+    /// one. Past the person's cap it's signed every time, so the signer asks for it in person.
+    @Test func leverageIsSignedOnlyWhenItDiffers() async throws {
+        URLProtocol.registerClass(FakeHL.self)
+        defer { URLProtocol.unregisterClass(FakeHL.self) }
+        let journal = Journal(url: FileManager.default.temporaryDirectory.appendingPathComponent("lev-\(UUID().uuidString).jsonl"))
+        let e = Executor(wallet: TradeWallet(solana: "", evm: "0x0"), signer: ZeroSigner(), journal: journal) { _ in }
+        let running = #"{"status":"ok","response":{"type":"twapOrder","data":{"status":{"running":{"twapId":77}}}}}"#
+        func sent(_ leverage: String?, overCap: Bool = false) async throws -> [String] {
+            FakeHL.lock.withLock {
+                FakeHL.state = .init()
+                FakeHL.state.leverage = leverage
+                FakeHL.state.entry = { s in s.position = Decimal(string: "0.0008")!; return running }
+            }
+            var p = try twapPlan()
+            p.leverageOverCap = overCap
+            _ = try await e.execute(p)
+            return FakeHL.lock.withLock { FakeHL.state.sent }
+        }
+        #expect(try await sent(#"{"type":"isolated","value":1}"#) == ["twap 120 min", "sl+tp"])
+        // Another figure, cross margin at the same one, a value that isn't a number, no answer: set as before.
+        for other in [#"{"type":"isolated","value":3}"#, #"{"type":"cross","value":1}"#, #"{"type":"isolated","value":"1"}"#, nil] {
+            #expect(try await sent(other) == ["leverage", "twap 120 min", "sl+tp"], "\(other ?? "nil")")
+        }
+        #expect(try await sent(#"{"type":"isolated","value":1}"#, overCap: true) == ["leverage", "twap 120 min", "sl+tp"])
+    }
+
     /// «cancel the TWAP» stops a running one by its id and keeps the position's stop; «close» stops it before closing.
     @Test func aRunningTwapStopsByItsId() async throws {
         URLProtocol.registerClass(FakeHL.self)

@@ -31,6 +31,8 @@ final class FakeHL: URLProtocol {
         var twaps: [[String: Any]] = []
         /// A twapCancel is answered with an error the TWAP isn't stopped by.
         var twapCancelRefused = false
+        /// activeAssetData's `leverage` for ETH as JSON (`{"type":"isolated","value":3}`); nil: the read gives nothing.
+        var leverage: String?
     }
     nonisolated(unsafe) static var state = State()
     static let lock = NSLock()
@@ -69,6 +71,7 @@ final class FakeHL: URLProtocol {
                 + #"{"tokens":[150,0],"index":107,"name":"@107"},{"tokens":[268,0],"index":166,"name":"@166"}]}"#
         case "maxBuilderFee": return "0"
         case "twapHistory": return json(state.twaps)
+        case "activeAssetData": return state.leverage.map { #"{"coin":"ETH","leverage":\#($0)}"# } ?? "null"
         case "frontendOpenOrders":
             guard main else { return "[]" }
             if state.down > 0 { state.down -= 1; return nil }

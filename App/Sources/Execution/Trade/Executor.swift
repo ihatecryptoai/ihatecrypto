@@ -310,6 +310,9 @@ public actor Executor {
         /// «Ask me»: nothing is signed until the user ticks that they accept the loss at the stop (`accepted`).
         public var mustAccept = false
         public var accepted = false
+        /// The plan's leverage is past the person's cap: it's sent before the entry even when the market has it already,
+        /// so the signer asks for it in person each time.
+        public var leverageOverCap = false
 
         /// The bridge transaction's blockhash lives about a minute; after that the preview is redone.
         public var isFresh: Bool { Date().timeIntervalSince(preparedAt) < 45 }
@@ -442,7 +445,11 @@ public actor Executor {
         if asksFee {
             steps.append("Approve ihatecrypto's fee once: \(HLBuilder.rate) of each Hyperliquid trade, on top of the exchange's own. Settings › Wallet › Hyperliquid can take it back.")
         }
-        steps.append("Leverage \(leverage)×, isolated margin.")
+        // Hyperliquid keeps a market's leverage: one set already isn't signed again, so it's no line of what will be
+        // signed (`execute` reads it again). Past the person's cap it's always sent: the signer asks in person for it.
+        let overCap = Decimal(leverage) > policy.maxLeverage
+        let leverageSet = overCap ? nil : await HyperliquidAccount.isolatedLeverage(wallet.evm, coin: market.name)
+        if leverageSet != leverage { steps.append("Leverage \(leverage)×, isolated margin.") }
         if let minutes = intent.twapMinutes {
             steps.append("TWAP on Hyperliquid: \(intent.side == .long ? "buy" : "sell") \(Fmt.num(sizing.size, maxFraction: market.szDecimals)) \(market.name) over \(TradeIntent.duration(minutes)), "
                 + "parts at the market every 30 s or more, each within 3% of the price, \(intent.twapRandomize == true ? "sizes randomized ±20%" : "equal sizes"). "
@@ -476,6 +483,7 @@ public actor Executor {
         p.asksFee = asksFee
         p.overLimit = overLimit
         p.mustAccept = policy.limitMode == .ask && !overLimit.isEmpty
+        p.leverageOverCap = overCap
         return p
     }
 
@@ -523,8 +531,13 @@ public actor Executor {
         if let t = p.dexTransfer { try await moveMargin(from: "", to: t.dex, usdc: t.usdc) }
         try await prepareFee()
 
-        let lev = try await post(Self.leverageAction(asset: p.market.index, leverage: p.leverage), label: "leverage")
-        guard case .ok = lev else { throw ExecutionError("Hyperliquid rejected leverage \(p.leverage)×: \(lev).") }
+        // Hyperliquid keeps a market's leverage: it's signed again only when it differs, so an entry the main key signs
+        // is one prompt, not two. No answer reads as «differs», and leverage past the person's cap is always sent.
+        let leverageSet = p.leverageOverCap ? nil : await HyperliquidAccount.isolatedLeverage(wallet.evm, coin: p.market.name)
+        if leverageSet != p.leverage {
+            let lev = try await post(Self.leverageAction(asset: p.market.index, leverage: p.leverage), label: "leverage")
+            guard case .ok = lev else { throw ExecutionError("Hyperliquid rejected leverage \(p.leverage)×: \(lev).") }
+        }
         report("Leverage \(p.leverage)×, isolated margin.")
 
         if let minutes = p.intent.twapMinutes { return try await runTwap(p, market: market, minutes: minutes) }
@@ -1676,6 +1689,16 @@ public enum HyperliquidAccount {
             Position(coin: r.position.coin, size: Decimal(string: r.position.szi) ?? 0, entry: Decimal(string: r.position.entryPx ?? "") ?? 0,
                      unrealizedPnl: Decimal(string: r.position.unrealizedPnl) ?? 0, liquidation: r.position.liquidationPx.flatMap { Decimal(string: $0) })
         }
+    }
+
+    /// The leverage the account has set on `coin` with isolated margin: what an entry there uses when nothing is sent
+    /// first. nil for cross margin, a coin Hyperliquid doesn't know and no answer.
+    public static func isolatedLeverage(_ user: String, coin: String) async -> Int? {
+        struct Leverage: Decodable { let type: String; let value: Int }
+        struct Row: Decodable { let leverage: Leverage }
+        guard let data = try? await info(["type": "activeAssetData", "user": user, "coin": coin]),
+              let row = try? JSONDecoder().decode(Row.self, from: data), row.leverage.type == "isolated" else { return nil }
+        return row.leverage.value
     }
 
     static func info(_ body: [String: String]) async throws -> Data {
