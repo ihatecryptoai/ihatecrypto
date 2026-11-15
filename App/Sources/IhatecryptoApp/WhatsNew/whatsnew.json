@@ -1,5 +1,36 @@
 [
   {
+    "version": "0.8.8",
+    "date": "2026-11-15",
+    "stories": [
+      {
+        "title": "A prompt covers only what it named",
+        "text": "After Touch ID, the Mac's password or the passcode, the next signatures pass without a new prompt only for the contract that prompt named. An approve and the deposit into the same pool are one prompt, another contract asks again. A swap on an EVM network asks every time, and its prompt says what leaves and the least that comes back. A call the signing process can't read asks every time too.",
+        "symbol": "lock.shield.fill",
+        "color": "34C759"
+      },
+      {
+        "title": "The signing process holds a move to its card",
+        "text": "The signing process compares the transaction with the card you confirmed: the coin, at most the card's amount, the card's payee. A transfer, a swap or a bridge that sends another coin, more than the card or to another payee is refused before any prompt.",
+        "symbol": "checkmark.shield.fill",
+        "color": "0A84FF"
+      },
+      {
+        "title": "A chain says every step and its amount",
+        "text": "A chain's card says «Step 1 of 3», and each later card says its step and what it sells. «All» is written as the amount. A later step that moves all of a network's dollars shows what will be there at its turn, «≈ 5.41 USDC», and a buy after a sale on the same network is paid by that sale, with no bridge drawn.",
+        "symbol": "list.number",
+        "color": "FF7A2F",
+        "try": "swap 1 USDC for ETH on arbitrum, then move all USDC from arbitrum to base"
+      },
+      {
+        "title": "Leverage asks by itself, and only when it changes",
+        "text": "Setting a market's leverage on Hyperliquid is its own prompt and no longer lets the order after it pass. It is sent only when it differs from the leverage the market already has, so a trade signed with the main key is still one prompt most of the time.",
+        "symbol": "multiply",
+        "color": "AF52DE"
+      }
+    ]
+  },
+  {
     "version": "0.8.7",
     "date": "2026-11-12",
     "stories": [

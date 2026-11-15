@@ -1,5 +1,21 @@
 {
  "es": {
+  "3e2aba634a5c": {
+   "title": "Una confirmación vale solo para lo que nombró",
+   "text": "Después de Touch ID, la contraseña del Mac o el código, las firmas siguientes pasan sin otra pregunta solo para el contrato que esa pregunta nombró. Un permiso y el depósito en el mismo pool son una sola confirmación, otro contrato vuelve a preguntar. Un intercambio en una red EVM pregunta cada vez, y la pregunta dice qué sale y lo mínimo que vuelve. Una llamada que el proceso de firma no puede leer también pregunta cada vez."
+  },
+  "9c8788631b65": {
+   "title": "El proceso de firma ajusta el movimiento a su tarjeta",
+   "text": "El proceso de firma compara la transacción con la tarjeta que confirmaste: la moneda, como mucho el importe de la tarjeta, el destinatario de la tarjeta. Un envío, un intercambio o un puente que manda otra moneda, más que la tarjeta o a otro destinatario se rechaza antes de cualquier pregunta."
+  },
+  "0a988d0224e9": {
+   "title": "Una cadena dice cada paso y su importe",
+   "text": "La tarjeta de una cadena dice «Step 1 of 3», y cada tarjeta siguiente dice su paso y lo que vende. «Todo» se escribe como el importe. Un paso posterior que mueve todos los dólares de una red muestra lo que habrá cuando le toque, «≈ 5.41 USDC», y una compra después de una venta en la misma red se paga con esa venta, sin dibujar un puente."
+  },
+  "5b18b2de9f4e": {
+   "title": "El apalancamiento pregunta aparte y solo cuando cambia",
+   "text": "Fijar el apalancamiento de un mercado en Hyperliquid es una pregunta propia y ya no deja pasar la orden que viene después. Se envía solo cuando difiere del que el mercado ya tiene, así que una operación firmada con la clave principal sigue siendo, casi siempre, una sola confirmación."
+  },
   "4750929b1c73": {
    "title": "Superar el límite de riesgo cuando tú lo decidas",
    "text": "En Settings › Limits está «Over a limit»: Block, como antes, Ask me o Just warn. Con Ask me, un plan que pasa tu riesgo por operación no se detiene. La ventana de firma muestra la pérdida en el stop, y Sign espera a que marques «I accept losing $40.00 at the stop on this trade». El riesgo por operación y el de todas las posiciones llegan hasta «no limit», el apalancamiento hasta 50×."
@@ -650,6 +666,22 @@
   }
  },
  "ru": {
+  "3e2aba634a5c": {
+   "title": "Подтверждение действует только на то, что в нём названо",
+   "text": "После Touch ID, пароля Mac или код-пароля следующие подписи проходят без нового вопроса только для контракта, который был назван в вопросе. Разрешение и вклад в один пул идут одним подтверждением, другой контракт спрашивает заново. Обмен в EVM-сети спрашивает каждый раз, и в вопросе написано, что уходит и сколько придёт самое меньшее. Вызов, который процесс подписи не может прочитать, тоже спрашивает каждый раз."
+  },
+  "9c8788631b65": {
+   "title": "Процесс подписи сверяет перевод с карточкой",
+   "text": "Процесс подписи сравнивает транзакцию с карточкой, которую вы подтвердили: монета, сумма не больше, чем на карточке, получатель с карточки. Перевод, обмен или мост, где уходит другая монета, больше, чем на карточке, или другому получателю, не подписывается и до вопроса не доходит."
+  },
+  "0a988d0224e9": {
+   "title": "Цепочка называет каждый шаг и его сумму",
+   "text": "На карточке цепочки написано «Step 1 of 3», а на каждой следующей — её шаг и что она продаёт. Вместо «всё» стоит сумма. Шаг, который переводит все доллары сети, показывает, сколько их будет к его очереди: «≈ 5.41 USDC». Покупка после продажи в той же сети оплачивается этой продажей, и мост не рисуется."
+  },
+  "5b18b2de9f4e": {
+   "title": "Плечо спрашивает отдельно и только когда меняется",
+   "text": "Установка плеча на Hyperliquid — отдельный вопрос, и ордер после него больше не проходит без своего. Плечо отправляется, только когда оно отличается от уже выставленного на рынке, поэтому сделка, подписанная основным ключом, чаще всего по-прежнему одно подтверждение."
+  },
   "4750929b1c73": {
    "title": "Лимит риска можно превысить, если сам решил",
    "text": "В Settings › Limits появилось «Over a limit»: Block, как раньше, Ask me или Just warn. С Ask me план с риском выше лимита на сделку не останавливается. Окно подписи показывает убыток на стопе, а Sign ждёт, пока ты поставишь галочку «I accept losing $40.00 at the stop on this trade». Риск на сделку и на все позиции вместе можно поднять до «no limit», плечо — до 50×."
